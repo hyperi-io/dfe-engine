@@ -349,6 +349,38 @@ def _no_clickhouse_bootstrap_hang(request):
         _chb.bootstrap_clickhouse = original
 
 
+@pytest.fixture(autouse=True)
+def _no_kafka_broker_calls(request):
+    """Test-session guard 3/3: no unit test reaches a real Kafka broker.
+
+    A source deploy creates that source's topics, and ``kafka.ensure_topics``
+    defaults on with ``bootstrap_servers`` defaulting to ``localhost:9092``. Any
+    test that deploys a source therefore spends the full 10s admin timeout on a
+    box with no broker - and on a box that HAS one (a developer's local Redpanda)
+    it creates that test's topics on it for real. Both are wrong for a unit test.
+
+    Patching the AdminClient constructor, rather than the setting, keeps the
+    ensure path itself under test: it still runs, and reports the broker as
+    unreachable. A test wanting the real adapter patches this name itself, and a
+    test wanting a specific outcome injects its own ``admin=``.
+    """
+    if any(request.node.get_closest_marker(m) for m in ("integration", "e2e", "live")):
+        yield
+        return
+
+    import dfe_engine.kafka.topics as _kt
+
+    def _refuse(*_args, **_kwargs):
+        raise RuntimeError("unit tests do not talk to a Kafka broker (conftest guard)")
+
+    original = _kt.AdminClient
+    _kt.AdminClient = _refuse
+    try:
+        yield
+    finally:
+        _kt.AdminClient = original
+
+
 @pytest.fixture(scope="session")
 def resources_path():
     """Path to test resources directory."""

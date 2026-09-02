@@ -65,3 +65,77 @@ class TestMissingDependencies:
         """Every requested topic is accounted for; nothing raises."""
         result = ensure_topics([TopicSpec("test_topic", 3, 1)], admin=_Unreachable())
         assert [name for name, _ in result.failed] == ["test_topic"]
+
+
+class _FakeAdmin:
+    def __init__(self, present=()):
+        self.present = set(present)
+        self.created: list[str] = []
+
+    def list_topic_names(self, *, timeout: float = 10.0) -> set[str]:
+        return set(self.present)
+
+    def create(self, name, *, partitions, replication_factor, timeout: float = 30.0) -> None:
+        self.created.append(name)
+        self.present.add(name)
+
+
+class TestRealRun:
+    """dry_run=True returns before any of the wiring below is reached, so these are
+    the only tests that prove create_topics is connected to anything."""
+
+    def _patched(self, monkeypatch, admin):
+        seen = {}
+
+        def _build_admin(*, bootstrap=None, settings=None, **_kw):
+            seen["bootstrap"] = bootstrap
+            return admin
+
+        monkeypatch.setattr("dfe_engine.kafka.topics.build_admin", _build_admin)
+        return seen
+
+    def test_the_environment_broker_is_the_one_contacted(self, monkeypatch):
+        admin = _FakeAdmin()
+        seen = self._patched(monkeypatch, admin)
+        ImperativeOperations(_env()).create_topics(
+            [{"name": "events_land", "partitions": 3, "replication_factor": 1}]
+        )
+        assert seen["bootstrap"] == "kafka:9092"
+
+    def test_the_requested_width_reaches_the_broker(self, monkeypatch):
+        recorded = {}
+
+        class _Recording(_FakeAdmin):
+            def create(self, name, *, partitions, replication_factor, timeout=30.0):
+                recorded[name] = (partitions, replication_factor)
+                super().create(name, partitions=partitions, replication_factor=replication_factor)
+
+        self._patched(monkeypatch, _Recording())
+        ImperativeOperations(_env()).create_topics(
+            [{"name": "events_land", "partitions": 6, "replication_factor": 3}]
+        )
+        assert recorded == {"events_land": (6, 3)}
+
+    def test_an_already_present_topic_counts_as_done_not_failed(self, monkeypatch):
+        """A re-run is a no-op. Before this, create over an existing topic errored."""
+        self._patched(monkeypatch, _FakeAdmin(present=["events_land"]))
+        result = ImperativeOperations(_env()).create_topics(
+            [
+                {"name": "events_land", "partitions": 3, "replication_factor": 1},
+                {"name": "events_load", "partitions": 3, "replication_factor": 1},
+            ]
+        )
+        assert sorted(result.topics_created) == ["events_land", "events_load"]
+        assert result.topics_failed == []
+
+    def test_a_missing_width_falls_back_to_the_defaults(self, monkeypatch):
+        recorded = {}
+
+        class _Recording(_FakeAdmin):
+            def create(self, name, *, partitions, replication_factor, timeout=30.0):
+                recorded[name] = (partitions, replication_factor)
+                super().create(name, partitions=partitions, replication_factor=replication_factor)
+
+        self._patched(monkeypatch, _Recording())
+        ImperativeOperations(_env()).create_topics([{"name": "bare"}])
+        assert recorded == {"bare": (3, 1)}

@@ -17,6 +17,7 @@ POST   /api/v1/sources/seed             → Seed built-in defaults
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any, NoReturn
 
@@ -611,12 +612,17 @@ async def plan_source_deploy(
     return _plan_to_response(plan)
 
 
-def _ensure_source_topics(source: Any, settings: Any) -> tuple[list[str], list[str]]:
+def _ensure_source_topics(
+    source: Any, settings: Any, version_id: str | None = None
+) -> tuple[list[str], list[str]]:
     """Create the ``_land``/``_load`` topics this source needs.
 
     Deliberately non-fatal: the schema is already live, and Kafka is absent
     entirely on the direct-gRPC receiver -> loader profile, where failing the
     deploy would be wrong. Failures are reported on the response instead.
+
+    Blocking librdkafka calls run in here, so callers on the event loop hand it to
+    a thread. ``version_id`` is the version being deployed, not the deployed one.
     """
     if not settings.kafka.ensure_topics:
         return [], []
@@ -627,6 +633,7 @@ def _ensure_source_topics(source: Any, settings: Any) -> tuple[list[str], list[s
         source,
         partitions=settings.kafka.topic_partitions,
         replication_factor=settings.kafka.topic_replication_factor,
+        version_id=version_id,
     )
     outcome = ensure_topics(specs, settings=settings)
     if outcome.failed:
@@ -783,7 +790,11 @@ async def deploy_source_schema(
     except Exception as exc:
         logger.warning(f"Tenant fence not applied after deploying '{name}': {exc}")
 
-    topics_ensured, topics_failed = _ensure_source_topics(source, settings)
+    # Off the event loop: the admin calls block for their full timeout when no
+    # broker answers, which is the norm on the Kafka-less profile.
+    topics_ensured, topics_failed = await asyncio.to_thread(
+        _ensure_source_topics, source, settings, version_id
+    )
 
     store = SourceDeploymentStore.from_settings(settings)
     deploy_result = SchemaDeployResult(
@@ -809,7 +820,19 @@ async def deploy_source_schema(
     except SourceValidationError as exc:
         _raise_save_validation_http(exc)
 
-    audit_resource_change(user.user_id, "schema", name, "deployed")
+    # Topic creation mutates the broker, so it is attributable and belongs in the
+    # audit record alongside the DDL rather than only in an unattributed log line.
+    audit_resource_change(
+        user.user_id,
+        "schema",
+        name,
+        "deployed",
+        details={
+            "version": version_id,
+            "topics_ensured": topics_ensured,
+            "topics_failed": topics_failed,
+        },
+    )
     return deploy_result
 
 

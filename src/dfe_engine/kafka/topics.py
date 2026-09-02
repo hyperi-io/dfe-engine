@@ -83,25 +83,50 @@ def admin_config(
     """Build the librdkafka admin config, sourced from settings unless overridden.
 
     The provider DERIVES protocol and mechanism via the credential contract
-    (dfe-engine#98); never hand-set the mechanism.
+    (dfe-engine#98); never hand-set the mechanism. A ``bootstrap`` pointing at a
+    broker other than the configured one inherits no credentials - pass them
+    alongside it, or the connection is made unauthenticated.
     """
     from dfe_engine.kafka import contract
     from dfe_engine.settings import get_settings
 
     ks = (settings or get_settings()).kafka
-    bootstrap = bootstrap or ks.bootstrap_servers
-    provider = provider if provider is not None else ks.provider
-    username = username if username is not None else ks.sasl_username
-    password = password if password is not None else ks.sasl_password
 
-    protocol, mechanism = (
-        contract.derive(provider) if provider else (ks.security_protocol, ks.sasl_mechanism)
-    )
+    # A credential belongs to the broker it was issued for. When the caller points
+    # somewhere other than the configured broker and brings no credentials of its
+    # own, the configured broker's password does NOT follow the address. Compare
+    # the EFFECTIVE address: an empty override falls back and is not a redirect.
+    bootstrap = bootstrap or ks.bootstrap_servers
+    redirected = bootstrap != ks.bootstrap_servers
+    unaccompanied = provider is None and username is None and password is None
+
+    if redirected and unaccompanied:
+        logger.warning(
+            f"Kafka admin: bootstrap overridden to {bootstrap}, which is not the configured "
+            "broker; connecting with no credentials rather than sending that broker's. "
+            "Pass a provider and username/password for this address to authenticate."
+        )
+        protocol, mechanism = ("PLAINTEXT", "")
+    else:
+        provider = provider if provider is not None else ks.provider
+        username = username if username is not None else ks.sasl_username
+        password = password if password is not None else ks.sasl_password
+        protocol, mechanism = (
+            contract.derive(provider) if provider else (ks.security_protocol, ks.sasl_mechanism)
+        )
 
     conf: dict[str, Any] = {"bootstrap.servers": bootstrap}
     if protocol and protocol.upper() != "PLAINTEXT":
         conf["security.protocol"] = protocol
     if mechanism:
+        # librdkafka accepts a mechanism on a non-SASL transport, warns to its own
+        # stderr, and then connects UNAUTHENTICATED - configured-looking and open.
+        # Refuse instead; ensure_topics reports it rather than deploying blind.
+        if not protocol.upper().startswith("SASL"):
+            raise contract.KafkaContractError(
+                f"sasl.mechanism={mechanism!r} needs a SASL transport, got "
+                f"security_protocol={protocol!r}; credentials would be silently dropped"
+            )
         conf["sasl.mechanisms"] = mechanism
         conf["sasl.username"] = username or ""
         conf["sasl.password"] = password or ""
@@ -154,23 +179,25 @@ def source_topic_specs(
     *,
     partitions: int,
     replication_factor: int,
+    version_id: str | None = None,
 ) -> list[TopicSpec]:
-    """The topics one source needs: always ``_land``, plus ``_load`` if it transforms."""
-    specs = [
-        TopicSpec(
-            name=source.topic_land,
-            partitions=partitions,
-            replication_factor=replication_factor,
-        )
-    ]
-    if source.topic_load:
-        specs.append(
-            TopicSpec(
-                name=source.topic_load,
-                partitions=partitions,
-                replication_factor=replication_factor,
-            )
-        )
+    """The topics one source needs: always ``_land``, plus ``_load`` if it transforms.
+
+    ``version_id`` chooses which version answers "does it transform". A deploy MUST
+    pass the version being deployed: ``Source.transform`` reads the version already
+    deployed, so a release that ADDS a transform would be judged against the old
+    one and its ``_load`` topic would never be created.
+    """
+
+    def _spec(name: str) -> TopicSpec:
+        return TopicSpec(name=name, partitions=partitions, replication_factor=replication_factor)
+
+    specs = [_spec(source.topic_land)]
+    transform = source.version(version_id).transform if version_id else source.transform
+    if transform:
+        # The _load convention lives on Source.topic_load; resolved here against
+        # the chosen version rather than whichever one happens to be deployed.
+        specs.append(_spec(f"{source.source}_load"))
     return specs
 
 
@@ -198,9 +225,16 @@ def ensure_topics(
         result.created = [spec.name for spec in specs]
         return result
 
+    from dfe_engine.kafka.contract import KafkaContractError
+
     try:
         admin = admin or build_admin(bootstrap=bootstrap, settings=settings)
         present = admin.list_topic_names()
+    except KafkaContractError as exc:
+        # A rejected credential shape is a config fault, not an unreachable broker.
+        # Reporting it as the latter sends the operator to the wrong place.
+        result.failed = [(spec.name, f"kafka config rejected: {exc}") for spec in specs]
+        return result
     except Exception as exc:
         result.failed = [(spec.name, f"broker unreachable: {exc}") for spec in specs]
         return result

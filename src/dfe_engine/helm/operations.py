@@ -105,7 +105,9 @@ class ImperativeOperations:
             dry_run: If True, log topics without creating.
 
         Returns:
-            OperationResult with created/failed lists.
+            OperationResult whose ``topics_created`` holds every topic that now
+            exists, created here or already present - a re-run is a no-op, not a
+            list of failures. Only a topic that could not be created is failed.
         """
         from dfe_engine.kafka.topics import TopicSpec, ensure_topics
 

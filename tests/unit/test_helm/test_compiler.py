@@ -221,6 +221,34 @@ class TestCompileKafkaTopics:
         assert topics[0]["partitions"] == 12
         assert topics[0]["replication_factor"] == 3
 
+    def test_a_dormant_source_gets_no_topics(self, environment):
+        """No live pipeline, so nothing produces or consumes - do not mint topics."""
+        from dfe_engine.source.models import Source, SourceMatch, SourceTransform
+
+        dormant = Source(
+            source="retired",
+            state="dormant",
+            match=SourceMatch(field="f", value="v"),
+            transform=SourceTransform(engine="vector"),
+        )
+        active = Source(source="syslog", match=SourceMatch(field="f", value="v"))
+        topics = _topic_compiler([dormant, active], environment).compile_kafka_topics()
+        assert [t["name"] for t in topics] == ["syslog_land"]
+
+    def test_several_sources_each_contribute_their_own_topics(self, environment):
+        from dfe_engine.source.models import Source, SourceMatch, SourceTransform
+
+        a = Source(
+            source="filebeat",
+            match=SourceMatch(field="f", value="v"),
+            transform=SourceTransform(engine="vector"),
+        )
+        b = Source(source="syslog", match=SourceMatch(field="f", value="v"))
+        topics = _topic_compiler([a, b], environment).compile_kafka_topics()
+        names = [t["name"] for t in topics]
+        assert names == ["filebeat_land", "filebeat_load", "syslog_land"]
+        assert len(names) == len(set(names))
+
 
 # ---------------------------------------------------------------------------
 # KEDA wiring

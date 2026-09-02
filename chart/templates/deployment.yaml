@@ -167,6 +167,25 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
+            {{- with .Values.config.kafka }}
+            {{- if .bootstrap_servers }}
+            # Kafka topic creation on source deploy
+            - name: DFE_KAFKA_BOOTSTRAP_SERVERS
+              value: {{ .bootstrap_servers | quote }}
+            - name: DFE_KAFKA_ENSURE_TOPICS
+              value: {{ .ensure_topics | quote }}
+            - name: DFE_KAFKA_TOPIC_PARTITIONS
+              value: {{ .topic_partitions | quote }}
+            - name: DFE_KAFKA_TOPIC_REPLICATION_FACTOR
+              value: {{ .topic_replication_factor | quote }}
+            {{- else }}
+            # No broker address configured, so there is nothing for the deploy hook
+            # to reach; left on it would spend the admin timeout on every source
+            # deploy before giving up. Set config.kafka.bootstrap_servers to enable.
+            - name: DFE_KAFKA_ENSURE_TOPICS
+              value: "false"
+            {{- end }}
+            {{- end }}
             {{- if .Values.config.config_dir }}
             - name: DFE_CONFIG_DIR
               value: {{ .Values.config.config_dir | quote }}
