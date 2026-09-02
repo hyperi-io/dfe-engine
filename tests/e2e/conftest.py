@@ -102,6 +102,16 @@ def require(cfg: E2EConfig, *attrs: str) -> None:
         )
 
 
+def must[T](value: T | None) -> T:
+    """Narrow a config attr that ``require`` has already gated on.
+
+    ``require`` skips the test when the attr is unset, but a type checker cannot
+    see that across the call, so every use site reads as ``str | None``.
+    """
+    assert value is not None
+    return value
+
+
 def poll_until(
     predicate: Callable[[], Any],
     *,

@@ -79,6 +79,9 @@ def _corpus_or_skip(limit: int = 5) -> list[corpus.Sample]:
 
 
 def _post(cfg: E2EConfig, bodies: list[dict]) -> None:
+    # Every caller gates on require(cfg, "receiver_url"), which skips when it is
+    # unset; assert so the type reflects that rather than staying str | None.
+    assert cfg.receiver_url is not None
     headers = {"Content-Type": "application/json"}
     if cfg.receiver_token:
         headers["Authorization"] = f"Bearer {cfg.receiver_token}"
