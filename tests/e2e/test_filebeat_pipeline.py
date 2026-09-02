@@ -15,9 +15,10 @@
       -> dfe-loader
       -> ClickHouse
 
-The transform hop is parameterised over vrl and vector, and nothing else
-changes between the two runs - which is what makes this a test of the transform
-LAYER rather than of one app.
+Both transform apps run the same bundled VRL and emit to the same topic, so a
+landed row says nothing about which one produced it. The hop is parameterised
+over the two only to NAME the app under test: DFE_E2E_TRANSFORM says which one
+is deployed, and the other parameterisation skips.
 
 Every assertion polls a real signal. The one thing deliberately NOT asserted is
 byte-equality against the upstream goldens: the bundled pipeline documents four
@@ -43,28 +44,28 @@ pytestmark = pytest.mark.live
 
 SOURCE = "filebeat"
 
-# The transform apps this runs against. Same corpus, same assertions; only the
-# instance differs, so a divergence is the transform's and not the harness's.
+# The transform apps this runs against. Exactly one is under test per run, and
+# DFE_E2E_TRANSFORM has to name it - see the skip in TestTransform.
 TRANSFORMS = ("dfe-transform-vrl", "dfe-transform-vector")
 
 # The filebeat table is built from meta/beats/filebeat.yaml, so ECS lands in
-# typed columns rather than in JSON to dig through. Each of these is derived by
-# the transform and absent from the corpus body, so one populated means the
-# event was transformed rather than passed through. No single column covers all
-# three corpus modules, hence the disjunction.
+# typed columns rather than in JSON to dig through. log_file_path is derived by
+# the transform and absent from the corpus body, so a populated one means the
+# event was transformed rather than passed through.
 #
-# `message` is excluded because the raw body carries it, and `timestamp` because
-# the loader fills it with the arrival time when nothing maps to it - rows with a
-# timestamp and a null message are exactly that, so including it would let an
-# untransformed row satisfy the assertion on its own.
-# Only the fields the bundled filebeat VRL actually sets. event.module and
-# event.dataset appear nowhere in it, so asserting on them can never pass.
-_ECS_POPULATED = " OR ".join(
-    (
-        "host_name != ''",
-        "log_file_path != ''",
-    )
-)
+# It is the only column of that table this corpus can populate. The bundled VRL
+# sets log.file.path once (filebeat.vrl:3020), first thing in the cisco_umbrella
+# branch; host.name is set later in that SAME branch (:4095) and so can never
+# match a row log_file_path does not, and event.module and event.dataset appear
+# nowhere in the file. `message` is excluded because the raw body carries it, and
+# `timestamp` because the loader fills it with the arrival time when nothing maps
+# to it - a timestamp with a null message is exactly an untransformed row.
+#
+# So a pass proves the cisco_umbrella branch ran, and says nothing about
+# cisco_ios or cisco_meraki: neither sets any column this table has, and both
+# could regress to nothing without failing this. Covering them needs the VRL to
+# stamp event.module, which the meta schema already declares a column for.
+_ECS_POPULATED = "log_file_path != ''"
 
 
 def _corpus_or_skip(limit: int = 5) -> list[corpus.Sample]:
@@ -196,11 +197,19 @@ class TestTransform:
     @pytest.mark.parametrize("service", TRANSFORMS)
     def test_ecs_fields_appear_in_the_source_table(self, e2e, ch_client, service: str) -> None:
         require(e2e, "receiver_url", "ch_host", "engine_url")
+        # A set-but-unrecognised value must not read as "not this one" - that would
+        # skip BOTH parameterisations and turn the assertion off without saying so.
+        if e2e.transform is not None and e2e.transform not in TRANSFORMS:
+            pytest.fail(
+                f"DFE_E2E_TRANSFORM is {e2e.transform!r}, which is not one of "
+                f"{', '.join(TRANSFORMS)}"
+            )
         if e2e.transform != service:
             pytest.skip(
                 f"DFE_E2E_TRANSFORM is {e2e.transform or 'unset'}, not {service}. "
-                "Both transforms consume the source topic, so a row cannot be "
-                "attributed to one of them without knowing which is deployed."
+                "Both transforms read the land topic and emit to the same load topic, "
+                "so the harness has to be TOLD which app is deployed - it cannot read "
+                "that off a row."
             )
         run = f"e2e-{uuid.uuid4().hex}"
         parsed = _Delta(ch_client, f"{e2e.ch_db}.{SOURCE}", where=_ECS_POPULATED)
@@ -212,8 +221,9 @@ class TestTransform:
             desc=f"ECS-shaped rows from {service} for {run}",
         )
         assert found > 0, (
-            f"{service} produced rows with no ECS fields - the events reached the "
-            "table untransformed, which is the pass-through failure this test exists to catch"
+            f"{service} produced no row with log_file_path set - the cisco_umbrella "
+            "events reached the table untransformed, which is the pass-through failure "
+            "this test exists to catch"
         )
 
 

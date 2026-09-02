@@ -17,6 +17,9 @@ Configure via env (typically `dfe-engine`-side of a `single`/`standard` deployme
   DFE_E2E_ENGINE_TOKEN     bearer/JWT for the engine API
   DFE_E2E_DEPLOY_REPO_URL  deploy repo (to verify engine git writes)
   DFE_E2E_DEPLOY_REPO_TOKEN / _USER  HTTPS creds for the deploy repo
+  DFE_E2E_TRANSFORM        which transform app is deployed for the source under
+                           test (dfe-transform-vrl | dfe-transform-vector)
+  DFE_E2E_VERIFY           1 to enforce TLS verification (default off)
 """
 
 from __future__ import annotations
@@ -46,9 +49,9 @@ class E2EConfig:
     deploy_repo_url: str | None
     deploy_repo_token: str | None
     deploy_repo_user: str
-    # Which transform app is deployed for the source under test. Both transforms
-    # consume the same topic under their own consumer groups, so with both
-    # deployed a row cannot be attributed to either.
+    # Which transform app is deployed for the source under test. Declared, not
+    # observed: both transforms consume the source topic under their own consumer
+    # groups and emit to the same one, so no row identifies its producer.
     transform: str | None
     # TLS verification for the HTTPS calls. Defaults to False: a deployment
     # typically fronts these with its OWN CA (cert-manager local issuer / internal
