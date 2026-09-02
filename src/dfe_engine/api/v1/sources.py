@@ -611,6 +611,32 @@ async def plan_source_deploy(
     return _plan_to_response(plan)
 
 
+def _ensure_source_topics(source: Any, settings: Any) -> tuple[list[str], list[str]]:
+    """Create the ``_land``/``_load`` topics this source needs.
+
+    Deliberately non-fatal: the schema is already live, and Kafka is absent
+    entirely on the direct-gRPC receiver -> loader profile, where failing the
+    deploy would be wrong. Failures are reported on the response instead.
+    """
+    if not settings.kafka.ensure_topics:
+        return [], []
+
+    from dfe_engine.kafka.topics import ensure_topics, source_topic_specs
+
+    specs = source_topic_specs(
+        source,
+        partitions=settings.kafka.topic_partitions,
+        replication_factor=settings.kafka.topic_replication_factor,
+    )
+    outcome = ensure_topics(specs, settings=settings)
+    if outcome.failed:
+        logger.warning(
+            f"Kafka topics not ensured for source '{source.source}': "
+            f"{', '.join(f'{n} ({e})' for n, e in outcome.failed)}"
+        )
+    return outcome.created + outcome.existing, [name for name, _ in outcome.failed]
+
+
 @router.post(
     "/{name}/deploy",
     response_model=SchemaDeployResult,
@@ -757,6 +783,8 @@ async def deploy_source_schema(
     except Exception as exc:
         logger.warning(f"Tenant fence not applied after deploying '{name}': {exc}")
 
+    topics_ensured, topics_failed = _ensure_source_topics(source, settings)
+
     store = SourceDeploymentStore.from_settings(settings)
     deploy_result = SchemaDeployResult(
         source_name=name,
@@ -767,6 +795,8 @@ async def deploy_source_schema(
         views=views,
         validation_errors=[],
         statements_applied=applied,
+        topics_ensured=topics_ensured,
+        topics_failed=topics_failed,
     )
     store.save_deploy(deploy_result, source)
     try:

@@ -73,9 +73,20 @@ class SchemaDeployResult(BaseModel):
     dry_run: bool = Field(description="True = plan only; the DDL was NOT applied")
     applied: bool = Field(description="Whether the DDL was executed against ClickHouse")
     create_table: str = Field(description="CREATE TABLE DDL")
-    views: dict[str, str] = Field(default_factory=dict, description="View name → DDL")
+    views: dict[str, str] = Field(default_factory=dict, description="View name -> DDL")
     validation_errors: list[str] = Field(default_factory=list)
     statements_applied: int = 0
+    topics_ensured: list[str] = Field(
+        default_factory=list,
+        description="Kafka topics this source needs that now exist (created or already present)",
+    )
+    topics_failed: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Kafka topics that could not be created. Never fails the deploy - the "
+            "schema is live and Kafka may not be in the path at all."
+        ),
+    )
 
 
 class VersionedSourceArtifactDocument(BaseModel):

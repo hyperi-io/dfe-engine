@@ -429,6 +429,27 @@ class KafkaSettings(BaseModel):
     sasl_username: str = Field(default="", description="SASL username")
     sasl_password: str = Field(default="", description="SASL password")
     redpanda_cloud: RedpandaCloudSettings = Field(default_factory=RedpandaCloudSettings)
+    ensure_topics: bool = Field(
+        default=True,
+        description=(
+            "Create a source's _land/_load topics when it deploys. Turn off only "
+            "where Kafka is not in the path (the direct-gRPC receiver -> loader "
+            "profile); a deploy never fails on the topic step either way."
+        ),
+    )
+    topic_partitions: int = Field(
+        default=3,
+        ge=1,
+        description="Partition count for topics DFE creates.",
+    )
+    topic_replication_factor: int = Field(
+        default=1,
+        ge=1,
+        description=(
+            "Replication factor for topics DFE creates. 1 suits a single-broker "
+            "dev cluster; raise it to match a real broker count."
+        ),
+    )
 
     @model_validator(mode="after")
     def _derive_from_provider(self) -> "KafkaSettings":

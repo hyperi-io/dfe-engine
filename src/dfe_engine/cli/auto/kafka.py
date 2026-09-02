@@ -42,9 +42,10 @@ import json
 import os
 import stat
 import tempfile
-from typing import Any
 
 import click
+
+from dfe_engine.kafka.topics import build_admin, source_topic_specs
 
 
 def _emitters():
@@ -167,131 +168,23 @@ def client_config_cmd(
 # mis-partitioned, unmanaged topics on first produce - the anti-pattern this
 # group exists to replace). dfe-engine#97.
 #
-# scalo.kafka.admin.KafkaAdmin (scalo-py) is the published admin primitive for
-# topic CONFIG changes (retention / cleanup.policy / partition increase /
-# consumer-group offset resets) but, as of the scalo pin here, does NOT expose
-# topic create/delete/list - only config-alter operations on topics that
-# already exist. `_TopicAdmin` below fills that gap directly against the same
-# underlying confluent_kafka AdminClient KafkaAdmin itself wraps, built via the
-# identical config shape (bootstrap + security.protocol + sasl.mechanisms +
-# creds, provider-derived). Collapse onto `KafkaAdmin.list_topics` /
-# `.create_topics` / `.delete_topics` once scalo grows that surface.
-
-
-def _admin_imports():
-    """Lazy-import confluent_kafka's admin client (optional dep, same
-    convention as ``_emitters()`` above and ``sampling.kafka_reader``):
-    confluent-kafka is NOT locked in ``pyproject.toml`` so a default
-    dfe-engine install still runs; `dfe kafka topics` needs it installed
-    (``uv pip install confluent-kafka``, or scalo's ``kafka`` extra).
-    """
-    try:
-        from confluent_kafka.admin import AdminClient, NewTopic
-    except ImportError as exc:  # pragma: no cover - exercised only without the optional dep
-        raise click.ClickException(
-            "dfe kafka topics needs confluent-kafka (optional dep). Install it, "
-            "e.g. `uv pip install confluent-kafka`."
-        ) from exc
-    return AdminClient, NewTopic
-
-
-def _admin_config(
-    *,
-    bootstrap: str | None,
-    provider: str | None,
-    username: str | None,
-    password: str | None,
-) -> dict[str, Any]:
-    """Build the librdkafka admin config: bootstrap + security.protocol +
-    sasl.mechanisms + creds, sourced from settings unless overridden - the
-    same shape ``client-config`` emits. The provider DERIVES protocol +
-    mechanism via the credential contract (dfe-engine#98, ``kafka.contract``);
-    never hand-set the mechanism.
-    """
-    from dfe_engine.kafka import contract
-    from dfe_engine.settings import get_settings
-
-    ks = get_settings().kafka
-    bootstrap = bootstrap or ks.bootstrap_servers
-    provider = provider if provider is not None else ks.provider
-    username = username if username is not None else ks.sasl_username
-    password = password if password is not None else ks.sasl_password
-
-    protocol, mechanism = (
-        contract.derive(provider)
-        if provider
-        else (
-            ks.security_protocol,
-            ks.sasl_mechanism,
-        )
-    )
-
-    conf: dict[str, Any] = {"bootstrap.servers": bootstrap}
-    if protocol and protocol.upper() != "PLAINTEXT":
-        conf["security.protocol"] = protocol
-    if mechanism:
-        conf["sasl.mechanisms"] = mechanism
-        conf["sasl.username"] = username or ""
-        conf["sasl.password"] = password or ""
-    return conf
-
-
-class _TopicAdmin:
-    """Thin adapter over confluent_kafka's AdminClient for topic CRUD.
-
-    See the module-level note above for why this exists rather than
-    ``scalo.kafka.admin.KafkaAdmin`` directly.
-    """
-
-    def __init__(self, config: dict[str, Any]) -> None:
-        admin_client_cls, _ = _admin_imports()
-        self._admin = admin_client_cls(config)
-
-    def list_topic_names(self, *, timeout: float = 10.0) -> set[str]:
-        metadata = self._admin.list_topics(timeout=timeout)
-        return set(metadata.topics.keys())
-
-    def create(
-        self, name: str, *, partitions: int, replication_factor: int, timeout: float = 30.0
-    ) -> None:
-        _, new_topic_cls = _admin_imports()
-        new_topic = new_topic_cls(
-            name, num_partitions=partitions, replication_factor=replication_factor
-        )
-        futures = self._admin.create_topics([new_topic], request_timeout=timeout)
-        futures[name].result()
-
-    def delete(self, name: str, *, timeout: float = 30.0) -> None:
-        futures = self._admin.delete_topics([name], request_timeout=timeout)
-        futures[name].result()
-
-
-def _build_admin_client(
-    *,
-    bootstrap: str | None = None,
-    provider: str | None = None,
-    username: str | None = None,
-    password: str | None = None,
-) -> _TopicAdmin:
-    return _TopicAdmin(
-        _admin_config(bootstrap=bootstrap, provider=provider, username=username, password=password)
-    )
+# The admin surface itself lives in `dfe_engine.kafka.topics`, shared with the
+# Helm compiler and the source deploy hook so all three create topics the same
+# way. See that module for why it wraps confluent_kafka directly rather than
+# scalo.kafka.admin.KafkaAdmin.
 
 
 def _derive_source_topics() -> list[str]:
     """Topics DFE's defined (enabled) sources need.
 
-    Every source needs ``<source>_land`` (raw receiver landing); sources with
-    a transform also need ``<source>_load`` (transformed output) - the
-    ``_land``/``_load`` convention shared with scalo-rs, computed by
-    ``Source.topic_land`` / ``Source.topic_load``
-    (``dfe_engine.source.models``). Empty when ``DFE_SOURCES_DIR`` is unset or
-    no sources are defined yet - callers fall back to requiring ``--topic``.
+    Empty when ``DFE_SOURCES_DIR`` is unset or no sources are defined yet -
+    callers fall back to requiring ``--topic``.
     """
     from dfe_engine.settings import get_settings
     from dfe_engine.source.registry import SourceRegistry
 
-    sources_dir = get_settings().source.sources_dir
+    settings = get_settings()
+    sources_dir = settings.source.sources_dir
     if not sources_dir:
         return []
 
@@ -303,9 +196,12 @@ def _derive_source_topics() -> list[str]:
 
     topics: list[str] = []
     for source in sources:
-        topics.append(source.topic_land)
-        if source.topic_load:
-            topics.append(source.topic_load)
+        for spec in source_topic_specs(
+            source,
+            partitions=settings.kafka.topic_partitions,
+            replication_factor=settings.kafka.topic_replication_factor,
+        ):
+            topics.append(spec.name)
     return topics
 
 
@@ -341,7 +237,7 @@ def topics_list_cmd(
     password: str | None,
 ) -> None:
     """List topics on the configured broker."""
-    admin = _build_admin_client(
+    admin = build_admin(
         bootstrap=bootstrap, provider=provider, username=username, password=password
     )
     names = sorted(admin.list_topic_names())
@@ -402,7 +298,7 @@ def topics_ensure_cmd(
             "--topic NAME (repeatable)."
         )
 
-    admin = _build_admin_client(
+    admin = build_admin(
         bootstrap=bootstrap, provider=provider, username=username, password=password
     )
     existing = admin.list_topic_names()
@@ -446,7 +342,7 @@ def topics_delete_cmd(
             f"Delete Kafka topic {topic!r}? This is destructive and cannot be undone.",
             abort=True,
         )
-    admin = _build_admin_client(
+    admin = build_admin(
         bootstrap=bootstrap, provider=provider, username=username, password=password
     )
     admin.delete(topic)

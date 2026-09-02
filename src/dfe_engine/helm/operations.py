@@ -107,47 +107,26 @@ class ImperativeOperations:
         Returns:
             OperationResult with created/failed lists.
         """
-        result = OperationResult()
+        from dfe_engine.kafka.topics import TopicSpec, ensure_topics
 
-        if dry_run:
-            for topic in topics:
-                logger.info(f"[dry-run] Topic: {topic['name']}")
-                result.topics_created.append(topic["name"])
-            return result
-
-        try:
-            from confluent_kafka.admin import AdminClient, NewTopic
-
-            admin = AdminClient(
-                {
-                    "bootstrap.servers": ",".join(self._env.kafka.bootstrap_servers),
-                }
+        specs = [
+            TopicSpec(
+                name=t["name"],
+                partitions=t.get("partitions", 3),
+                replication_factor=t.get("replication_factor", 1),
             )
+            for t in topics
+        ]
+        ensured = ensure_topics(
+            specs,
+            bootstrap=",".join(self._env.kafka.bootstrap_servers),
+            dry_run=dry_run,
+        )
 
-            new_topics = [
-                NewTopic(
-                    t["name"],
-                    num_partitions=t.get("partitions", 3),
-                    replication_factor=t.get("replication_factor", 1),
-                )
-                for t in topics
-            ]
-
-            futures = admin.create_topics(new_topics)
-            for topic_name, future in futures.items():
-                try:
-                    future.result()
-                    result.topics_created.append(topic_name)
-                    logger.info(f"Topic created: {topic_name}")
-                except Exception as e:
-                    result.topics_failed.append((topic_name, str(e)))
-                    logger.error(f"Topic creation failed: {topic_name} — {e}")
-
-        except ImportError:
-            for topic in topics:
-                result.topics_failed.append((topic["name"], "confluent-kafka not installed"))
-
-        return result
+        return OperationResult(
+            topics_created=ensured.created + ensured.existing,
+            topics_failed=ensured.failed,
+        )
 
     def execute_all(
         self,

@@ -7,6 +7,12 @@ from dfe_engine.helm.environment import (
 )
 from dfe_engine.helm.models import CompilationResult
 from dfe_engine.helm.operations import ImperativeOperations
+from dfe_engine.kafka.topics import TopicSpec, ensure_topics
+
+
+class _Unreachable:
+    def list_topic_names(self, *, timeout: float = 10.0) -> set[str]:
+        raise RuntimeError("connection refused")
 
 
 def _env():
@@ -55,8 +61,7 @@ class TestMissingDependencies:
         # Should either execute or fail gracefully — no exceptions
         assert len(result.ddl_executed) + len(result.ddl_failed) == 1
 
-    def test_topics_without_confluent_kafka(self):
-        ops = ImperativeOperations(_env())
-        result = ops.create_topics([{"name": "test_topic"}])
-        # Should fail gracefully if confluent_kafka not installed
-        assert len(result.topics_created) + len(result.topics_failed) == 1
+    def test_topics_against_an_unreachable_broker(self):
+        """Every requested topic is accounted for; nothing raises."""
+        result = ensure_topics([TopicSpec("test_topic", 3, 1)], admin=_Unreachable())
+        assert [name for name, _ in result.failed] == ["test_topic"]

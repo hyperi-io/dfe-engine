@@ -11,9 +11,9 @@
 scalo.kafka.admin.KafkaAdmin does not (yet) expose topic create/delete/list -
 only config-alter operations on topics that already exist (see the module
 note in ``cli/auto/kafka.py``). So instead of mocking KafkaAdmin, these tests
-patch the CLI's own ``_build_admin_client`` seam with a small in-memory fake
+patch the CLI module's ``build_admin`` binding with a small in-memory fake
 implementing the same ``list_topic_names``/``create``/``delete`` surface
-``_TopicAdmin`` provides - no live broker, no confluent-kafka install needed.
+``TopicAdmin`` provides - no live broker needed.
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ class FakeAdmin:
 @pytest.fixture
 def fake_admin(monkeypatch: pytest.MonkeyPatch) -> FakeAdmin:
     admin = FakeAdmin()
-    monkeypatch.setattr(kafka_module, "_build_admin_client", lambda **kwargs: admin)
+    monkeypatch.setattr(kafka_module, "build_admin", lambda **kwargs: admin)
     return admin
 
 
@@ -185,20 +185,11 @@ def test_delete_yes_flag_skips_confirm(fake_admin: FakeAdmin) -> None:
     assert fake_admin.deleted == ["alpha_land"]
 
 
-# --- clean error when confluent-kafka is absent (real, unmocked path) -------
-
-
-def test_clean_error_when_confluent_kafka_absent() -> None:
-    """confluent-kafka is an OPTIONAL dep (pyproject.toml); with it absent
-    (the case in this dev env), `_build_admin_client` must degrade cleanly
-    rather than surface an ImportError traceback."""
-    r = CliRunner().invoke(kafka_group, ["topics", "list"])
-    assert r.exit_code != 0
-    assert "confluent-kafka" in r.output.lower()
-
-
 def test_admin_config_derives_mechanism_from_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With nothing passed, the broker config comes from settings and the
+    provider derives the mechanism."""
     from dfe_engine import settings as settings_module
+    from dfe_engine.kafka.topics import admin_config
 
     monkeypatch.setattr(
         settings_module,
@@ -208,7 +199,7 @@ def test_admin_config_derives_mechanism_from_provider(monkeypatch: pytest.Monkey
             kafka=settings_module.KafkaSettings(provider="redpanda", bootstrap_servers="b:9093"),
         ),
     )
-    conf = kafka_module._admin_config(bootstrap=None, provider=None, username=None, password=None)
+    conf = admin_config(bootstrap=None, provider=None, username=None, password=None)
     assert conf["bootstrap.servers"] == "b:9093"
     assert conf["security.protocol"] == "SASL_SSL"
     assert conf["sasl.mechanisms"] == "SCRAM-SHA-512"
