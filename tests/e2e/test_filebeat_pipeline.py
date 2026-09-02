@@ -15,10 +15,11 @@
       -> dfe-loader
       -> ClickHouse
 
-Both transform apps run the same bundled VRL and emit to the same topic, so a
-landed row says nothing about which one produced it. The hop is parameterised
-over the two only to NAME the app under test: DFE_E2E_TRANSFORM says which one
-is deployed, and the other parameterisation skips.
+Both transform apps run the same bundled VRL, read the same land topic and emit
+to the same load topic, and a landed row names neither. So the transform hop is
+NOT parameterised over the two: that would be one experiment run twice, and with
+both apps deployed each run measures both whatever it is told. DFE_E2E_TRANSFORM
+only names the app in the failure message.
 
 Every assertion polls a real signal. The one thing deliberately NOT asserted is
 byte-equality against the upstream goldens: the bundled pipeline documents four
@@ -194,23 +195,23 @@ class TestRouting:
 class TestTransform:
     """The transform actually transformed, and the loader landed the result."""
 
-    @pytest.mark.parametrize("service", TRANSFORMS)
-    def test_ecs_fields_appear_in_the_source_table(self, e2e, ch_client, service: str) -> None:
+    def test_ecs_fields_appear_in_the_source_table(self, e2e, ch_client) -> None:
+        """The deployed transform transformed, whichever one it is.
+
+        Not parameterised over the two apps. They run the same VRL file, read the
+        same land topic and emit to the same load topic, and a row names neither,
+        so two parameterisations would be one experiment run twice - and with both
+        apps deployed each run measures both regardless of what it is told.
+        DFE_E2E_TRANSFORM only NAMES the app for the failure message.
+        """
         require(e2e, "receiver_url", "ch_host", "engine_url")
-        # A set-but-unrecognised value must not read as "not this one" - that would
-        # skip BOTH parameterisations and turn the assertion off without saying so.
         if e2e.transform is not None and e2e.transform not in TRANSFORMS:
             pytest.fail(
                 f"DFE_E2E_TRANSFORM is {e2e.transform!r}, which is not one of "
                 f"{', '.join(TRANSFORMS)}"
             )
-        if e2e.transform != service:
-            pytest.skip(
-                f"DFE_E2E_TRANSFORM is {e2e.transform or 'unset'}, not {service}. "
-                "Both transforms read the land topic and emit to the same load topic, "
-                "so the harness has to be TOLD which app is deployed - it cannot read "
-                "that off a row."
-            )
+        deployed = e2e.transform or "the deployed transform"
+
         run = f"e2e-{uuid.uuid4().hex}"
         parsed = _Delta(ch_client, f"{e2e.ch_db}.{SOURCE}", where=_ECS_POPULATED)
         _post(e2e, corpus.wrap_all(_corpus_or_skip(limit=5), run=run))
@@ -218,10 +219,10 @@ class TestTransform:
         found = poll_until(
             parsed.gained,
             timeout=240.0,
-            desc=f"ECS-shaped rows from {service} for {run}",
+            desc=f"ECS-shaped rows from {deployed} for {run}",
         )
         assert found > 0, (
-            f"{service} produced no row with log_file_path set - the cisco_umbrella "
+            f"{deployed} produced no row with log_file_path set - the cisco_umbrella "
             "events reached the table untransformed, which is the pass-through failure "
             "this test exists to catch"
         )
