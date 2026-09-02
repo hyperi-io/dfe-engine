@@ -66,6 +66,12 @@ TRANSFORMS = ("dfe-transform-vrl", "dfe-transform-vector")
 # cisco_ios or cisco_meraki: neither sets any column this table has, and both
 # could regress to nothing without failing this. Covering them needs the VRL to
 # stamp event.module, which the meta schema already declares a column for.
+#
+# source_ip is the column that SHOULD carry this - the VRL sets source.ip in 39
+# places spanning meraki, ios and umbrella. It cannot be used yet because the
+# loader rejects an IPv4 literal for an IPv6 column (dfe-loader#127), so every
+# row carrying one is dropped before it lands. Switch to it once that is fixed:
+# it covers all three modules where log_file_path covers one.
 _ECS_POPULATED = "log_file_path != ''"
 
 
