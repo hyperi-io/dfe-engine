@@ -8099,6 +8099,56 @@
         ]
       }
     },
+    "/api/v1/schemas/definitions/{schema_path}/versions/{version}": {
+      "delete": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "Delete Meta Schema Version",
+        "description": "Delete a specific meta-schema version.\n\nCore schemas are blocked by the core-resource guard (HTTP 409). The last\nremaining version cannot be deleted \u2014 delete the schema instead.",
+        "operationId": "delete_meta_schema_version_api_v1_schemas_definitions__schema_path__versions__version__delete",
+        "parameters": [
+          {
+            "name": "schema_path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Schema Path"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Version"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/schemas/definitions/{schema_path}": {
       "post": {
         "tags": [
