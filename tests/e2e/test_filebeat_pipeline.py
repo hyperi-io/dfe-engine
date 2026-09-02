@@ -57,11 +57,11 @@ TRANSFORMS = ("dfe-transform-vrl", "dfe-transform-vector")
 # the loader fills it with the arrival time when nothing maps to it - rows with a
 # timestamp and a null message are exactly that, so including it would let an
 # untransformed row satisfy the assertion on its own.
+# Only the fields the bundled filebeat VRL actually sets. event.module and
+# event.dataset appear nowhere in it, so asserting on them can never pass.
 _ECS_POPULATED = " OR ".join(
     (
         "host_name != ''",
-        "event_module != ''",
-        "event_dataset != ''",
         "log_file_path != ''",
     )
 )
@@ -196,6 +196,12 @@ class TestTransform:
     @pytest.mark.parametrize("service", TRANSFORMS)
     def test_ecs_fields_appear_in_the_source_table(self, e2e, ch_client, service: str) -> None:
         require(e2e, "receiver_url", "ch_host", "engine_url")
+        if e2e.transform != service:
+            pytest.skip(
+                f"DFE_E2E_TRANSFORM is {e2e.transform or 'unset'}, not {service}. "
+                "Both transforms consume the source topic, so a row cannot be "
+                "attributed to one of them without knowing which is deployed."
+            )
         run = f"e2e-{uuid.uuid4().hex}"
         parsed = _Delta(ch_client, f"{e2e.ch_db}.{SOURCE}", where=_ECS_POPULATED)
         _post(e2e, corpus.wrap_all(_corpus_or_skip(limit=5), run=run))

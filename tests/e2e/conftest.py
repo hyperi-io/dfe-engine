@@ -46,6 +46,10 @@ class E2EConfig:
     deploy_repo_url: str | None
     deploy_repo_token: str | None
     deploy_repo_user: str
+    # Which transform app is deployed for the source under test. Both transforms
+    # consume the same topic under their own consumer groups, so with both
+    # deployed a row cannot be attributed to either.
+    transform: str | None
     # TLS verification for the HTTPS calls. Defaults to False: a deployment
     # typically fronts these with its OWN CA (cert-manager local issuer / internal
     # PKI), and the tests assert the data/control path, not the cert chain. Set
@@ -69,6 +73,7 @@ def _cfg() -> E2EConfig:
         deploy_repo_url=os.getenv("DFE_E2E_DEPLOY_REPO_URL"),
         deploy_repo_token=os.getenv("DFE_E2E_DEPLOY_REPO_TOKEN"),
         deploy_repo_user=os.getenv("DFE_E2E_DEPLOY_REPO_USER", "dfe"),
+        transform=os.getenv("DFE_E2E_TRANSFORM"),
         verify=os.getenv("DFE_E2E_VERIFY", "") not in ("", "0", "false", "False"),
     )
 
