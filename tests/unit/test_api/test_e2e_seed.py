@@ -69,10 +69,8 @@ def test_seed_dispatches_dfe_admin_user_to_accounts(tmp_path, monkeypatch):
     from dfe_engine.api.e2e.seed import Seed
 
     monkeypatch.setenv("DFE_ENV", "test")
-    # Ambient break-glass env renames the account BOOTSTRAP seeds; it must not
-    # redirect the well-known e2e account the seeder adds alongside it.
-    monkeypatch.setenv("DFE_AUTH_LOCAL_ADMIN_NAME", "new-admin")
-    monkeypatch.setenv("DFE_AUTH_LOCAL_ADMIN_PASSWORD", "test")
+    # The seeder adds a well-known e2e account alongside the bootstrap
+    # break-glass admin; it must not rename or clobber that admin.
     accounts, groups, orgs = _stores(tmp_path)
     seeder = Seed(account_store=accounts, group_store=groups, org_registry=orgs)
 
@@ -84,7 +82,7 @@ def test_seed_dispatches_dfe_admin_user_to_accounts(tmp_path, monkeypatch):
     assert accounts.verify_password("dfe_admin", "changeme")
     assert "dfe_admin" in groups.get("dfe-admins").members
     # The bootstrap-owned break-glass account is untouched by the seed.
-    assert accounts.verify_password("new-admin", "test")
+    assert accounts.verify_password("admin", "changeme")
 
 
 def test_account_ensure_admin_joins_the_bootstrapped_group(tmp_path, monkeypatch):
@@ -175,8 +173,6 @@ def test_reset_all_recreates_break_glass_admin(tmp_path, monkeypatch):
     from dfe_engine.auth.bootstrap import admin_account_name, admin_account_password
 
     monkeypatch.setenv("DFE_ENV", "test")
-    monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_NAME", raising=False)
-    monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_PASSWORD", raising=False)
 
     accounts, groups, orgs = _stores(tmp_path)
     seeder = Seed(account_store=accounts, group_store=groups, org_registry=orgs)

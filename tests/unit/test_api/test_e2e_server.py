@@ -44,9 +44,7 @@ _ARTIFACT = "seed-artefact"
 
 @pytest.fixture(autouse=True)
 def _hermetic_break_glass(monkeypatch):
-    """Do not inherit DFE_AUTH_LOCAL_ADMIN_* from a developer .env."""
-    monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_NAME", raising=False)
-    monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_PASSWORD", raising=False)
+    """Do not inherit admin from a developer .env."""
 
 
 def _settings(
@@ -702,8 +700,6 @@ class TestBreakGlassReviewPosture:
         from dfe_engine.auth.account_durability import steady_state
 
         monkeypatch.setenv("DFE_ENV", "test")
-        monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_NAME", raising=False)
-        monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_PASSWORD", raising=False)
         seeder, gc, accounts, settings = self._seeder(tmp_path)
 
         assert seeder.seed_static("seed_setup_complete") is True
