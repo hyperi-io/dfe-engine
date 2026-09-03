@@ -1,12 +1,12 @@
 #  Project:      dfe-engine
 #  File:         tests/unit/test_auth/test_bootstrap.py
-#  Purpose:      Tests for auth store bootstrap, including DFE_AUTH_LOCAL_ADMIN_*
+#  Purpose:      Tests for auth store bootstrap (break-glass admin + named seeds)
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Auth store bootstrap seeds the break-glass account from DFE_AUTH_LOCAL_ADMIN_*."""
+"""Auth store bootstrap seeds the break-glass admin and named seed accounts."""
 
 from __future__ import annotations
 
@@ -26,15 +26,7 @@ def test_seed_admin_defaults_to_admin(tmp_path: Path, monkeypatch):
     assert account_store.verify_password("admin", "changeme")
 
 
-def test_seed_admin_uses_dfe_auth_local_operator_password(tmp_path: Path, monkeypatch):
-    account_store, *_ = bootstrap_auth(tmp_path / "auth")
-
-    assert account_store.verify_password("admin", "custom-admin-pw-that-is-plenty-long")
-    assert not account_store.verify_password("admin", "changeme")
-
-
-def test_explicit_password_beats_dfe_auth_local_admin_password(tmp_path: Path, monkeypatch):
-
+def test_explicit_password_beats_the_default(tmp_path: Path, monkeypatch):
     account_store, *_ = bootstrap_auth(tmp_path / "auth", default_admin_password="from-arg")
 
     assert account_store.verify_password("admin", "from-arg")

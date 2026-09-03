@@ -106,21 +106,6 @@ def test_break_glass_admin_does_not_count_as_the_first_user(ctx):
     assert STEP_FIRST_USER in SETUP_MACHINE.evaluate(ctx).completed_steps
 
 
-def test_custom_dfe_admin_name_is_the_break_glass_account(tmp_path):
-    accounts = AccountStore(tmp_path / "accounts")
-    accounts.create("alt-admin", "changeme", groups=["dfe-admins"])
-    ctx = SetupContext(
-        account_store=accounts,
-        org_registry=OrgRegistry(tmp_path / "orgs"),
-    )
-
-    state = SETUP_MACHINE.evaluate(ctx)
-
-    assert STEP_FIRST_USER not in state.completed_steps
-    assert STEP_ADMIN_PASSWORD in state.steps
-    assert STEP_ADMIN_PASSWORD not in state.completed_steps
-
-
 def test_disabled_account_does_not_count_as_the_first_user(ctx):
     ctx.account_store.create("alice", "a-strong-user-password")
     ctx.account_store.update("alice", enabled=False)
@@ -178,22 +163,6 @@ def test_setup_completes_once_break_glass_is_merged(ctx):
     assert state.complete is True
     assert state.current_step is None
     assert STEP_ADMIN_PASSWORD in state.completed_steps
-
-
-def test_admin_password_step_uses_env_password_as_rotation_baseline(tmp_path, monkeypatch):
-    """The wizard must detect rotation from DFE_AUTH_LOCAL_OPERATOR_PASSWORD, not only changeme."""
-    accounts = AccountStore(tmp_path / "accounts")
-    accounts.create("new-admin", "test", groups=["dfe-admins"])
-    ctx = SetupContext(
-        account_store=accounts,
-        org_registry=OrgRegistry(tmp_path / "orgs"),
-    )
-
-    assert STEP_FIRST_USER not in SETUP_MACHINE.evaluate(ctx).completed_steps
-    assert STEP_ADMIN_PASSWORD not in SETUP_MACHINE.evaluate(ctx).completed_steps
-
-    accounts.reset_password("new-admin", "a-strong-local-admin-password")
-    assert STEP_ADMIN_PASSWORD in SETUP_MACHINE.evaluate(ctx).completed_steps
 
 
 def test_only_bootstrapped_stores_contribute_steps(tmp_path):

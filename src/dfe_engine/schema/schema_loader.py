@@ -238,6 +238,12 @@ def is_shipped_schema(path: str | Path) -> bool:
     if schemas_root and resolved.is_relative_to(schemas_root.resolve()):
         return True
 
+    # The env var can point at a different tree; the installed package is
+    # still shipped even when it is not the active root.
+    packaged = _resolve_package_schemas_root()
+    if packaged and resolved.is_relative_to(packaged.resolve()):
+        return True
+
     # Check bundled profiles
     if resolved.is_relative_to(_BUNDLED_PROFILES_DIR.resolve()):
         return True
