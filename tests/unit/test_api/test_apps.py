@@ -63,6 +63,9 @@ class TestCatalogue:
 
     def test_lists_every_app_with_no_instances(self, client, app, admin_headers, tmp_path):
         _wire(app, tmp_path)
+        # dfe-transform-elastic is beta in the manifest, so only the widest gate
+        # lists every app.
+        app.state.settings.apps.show_maturity = "alpha"
         resp = client.get("/api/v1/apps", headers=admin_headers)
         assert resp.status_code == 200, resp.text
         by_service = {e["service"]: e for e in resp.json()}
@@ -74,6 +77,7 @@ class TestCatalogue:
     def test_the_routing_flag_matches_the_manifest(self, client, app, admin_headers, tmp_path):
         # Without it the UI can only find out by probing /routing for a 400.
         _wire(app, tmp_path)
+        app.state.settings.apps.show_maturity = "alpha"
         listed = client.get("/api/v1/apps", headers=admin_headers).json()
         assert {e["service"]: e["has_compiled_routing"] for e in listed} == {
             service: catalogue.descriptor(service).has_compiled_routing
@@ -99,6 +103,49 @@ class TestCatalogue:
         _deploy(client, admin_headers)
         got = client.get(BASE, headers=admin_headers).json()
         assert got["has_compiled_routing"] is catalogue.descriptor(VRL).has_compiled_routing
+
+    def test_pre_release_apps_are_withheld_by_default(self, client, app, admin_headers, tmp_path):
+        # The bundled manifest declares dfe-transform-elastic beta and the shipped
+        # gate is release, so a UI on the defaults never sees it.
+        _wire(app, tmp_path)
+        listed = client.get("/api/v1/apps", headers=admin_headers).json()
+        assert "dfe-transform-elastic" not in {e["service"] for e in listed}
+        assert {e["maturity"] for e in listed} == {"release"}
+
+    def test_every_entry_carries_its_level(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        app.state.settings.apps.show_maturity = "alpha"
+        listed = client.get("/api/v1/apps", headers=admin_headers).json()
+        assert {e["service"]: e["maturity"] for e in listed} == {
+            service: str(catalogue.descriptor(service).maturity) for service in catalogue.services()
+        }
+        assert {e["service"]: e["maturity"] for e in listed}["dfe-transform-elastic"] == "beta"
+
+    @pytest.mark.parametrize(
+        ("gate", "elastic_listed"),
+        [("release", False), ("rc", False), ("beta", True), ("alpha", True)],
+    )
+    def test_the_gate_admits_that_level_and_up(
+        self, client, app, admin_headers, tmp_path, gate, elastic_listed
+    ):
+        _wire(app, tmp_path)
+        app.state.settings.apps.show_maturity = gate
+        listed = client.get("/api/v1/apps", headers=admin_headers).json()
+        assert ("dfe-transform-elastic" in {e["service"] for e in listed}) is elastic_listed
+
+    def test_a_withheld_app_still_resolves_by_name(self, client, app, admin_headers, tmp_path):
+        # The gate is a listing decision. An instance of a beta app deployed
+        # under a wider gate must not vanish when the gate narrows.
+        _wire(app, tmp_path)
+        _define_source(client, admin_headers, "edge")
+        resp = client.post(
+            "/api/v1/apps/dfe-transform-elastic/instances",
+            json={"instance": "edge"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        got = client.get("/api/v1/apps/dfe-transform-elastic/edge", headers=admin_headers)
+        assert got.status_code == 200, got.text
 
 
 class TestLifecycle:

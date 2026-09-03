@@ -28,12 +28,14 @@ from .catalogue import (
     ArtifactKind,
     ConsumedFileSet,
     Encoding,
+    Maturity,
     Multiplicity,
     ReloadMode,
     UnknownAppError,
     descriptor,
     file_set,
     services,
+    visible_services,
 )
 from .dryrun import DryRunResult, DryRunStatus, EventOutcome, run_language
 from .files import AppFile, FileNotInSetError, InvalidContentError, InvalidFilenameError
@@ -93,6 +95,7 @@ __all__ = [
     "Link",
     "LinkNotFoundError",
     "LinkStatus",
+    "Maturity",
     "MetricsUnavailableError",
     "Multiplicity",
     "OperationalReader",
@@ -119,4 +122,5 @@ __all__ = [
     "services",
     "validate",
     "validate_language",
+    "visible_services",
 ]

@@ -196,6 +196,13 @@ class CatalogueEntry(BaseModel):
     service: str
     scale_deployed: bool
     multiplicity: str
+    maturity: catalogue.Maturity = Field(
+        description=(
+            "Where the app sits on the ladder alpha -> beta -> rc -> release. An app "
+            "below the deployment's apps.show_maturity gate is not listed at all, so "
+            "this is only ever at or above it."
+        )
+    )
     has_compiled_routing: bool = _routing_flag()
     file_sets: list[FileSetSummary]
     instances: list[str]
@@ -688,17 +695,19 @@ def _file_sets(service: str) -> list[FileSetSummary]:
 
 @router.get("", dependencies=[_DEPLOY_READ])
 async def list_apps(user: CurrentUser, request: Request) -> list[CatalogueEntry]:
-    """Every manageable app, with the instances currently deployed."""
+    """Every app at or above the deployment's maturity gate, with its instances."""
     gc = _gitcrud(request)
     deployed = instances.list_instances(gc)
+    gate = request.app.state.settings.apps.show_maturity
     entries: list[CatalogueEntry] = []
-    for service in catalogue.services():
+    for service in catalogue.visible_services(gate):
         desc = catalogue.descriptor(service)
         entries.append(
             CatalogueEntry(
                 service=service,
                 scale_deployed=desc.scale_deployed,
                 multiplicity=str(desc.multiplicity),
+                maturity=desc.maturity,
                 has_compiled_routing=desc.has_compiled_routing,
                 file_sets=_file_sets(service),
                 instances=[i.instance for i in deployed if i.service == service],

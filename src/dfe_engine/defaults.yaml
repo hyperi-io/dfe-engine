@@ -79,3 +79,10 @@ metrics:
 # per-deployment (each environment's own deploy repo instance), set per-env.
 deployment:
   image_registry: "ghcr.io/hyperi-io"
+
+# The deployed-app catalogue (apps.yaml). show_maturity is the least mature app
+# the engine lists, on the versions.yaml ladder alpha -> beta -> rc -> release:
+# "release" hides every pre-release app, "beta" adds beta and rc, "alpha" shows
+# the whole manifest. Pre-release testing opts in via DFE_APPS_SHOW_MATURITY.
+apps:
+  show_maturity: "release"

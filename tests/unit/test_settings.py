@@ -510,6 +510,34 @@ class TestGitopsMode:
         assert overrides["gitops"]["mode"] == "solo"
 
 
+class TestAppsShowMaturity:
+    def test_default_is_release(self):
+        from dfe_engine.settings import AppsSettings
+
+        assert AppsSettings().show_maturity == "release"
+
+    @pytest.mark.parametrize("level", ["release", "rc", "beta", "alpha"])
+    def test_each_rung_accepted(self, level):
+        from dfe_engine.settings import AppsSettings
+
+        assert AppsSettings(show_maturity=level).show_maturity == level
+
+    def test_off_the_ladder_rejected(self):
+        from dfe_engine.settings import AppsSettings
+
+        with pytest.raises(ValidationError):
+            AppsSettings(show_maturity="stable")
+
+    def test_env_override(self, monkeypatch):
+        from dfe_engine.settings import _get_env_overrides
+
+        monkeypatch.setenv("DFE_APPS_SHOW_MATURITY", "Beta")
+        assert _get_env_overrides()["apps"]["show_maturity"] == "beta"
+
+    def test_shipped_default_reaches_settings(self):
+        assert load_settings().apps.show_maturity == "release"
+
+
 class TestIsDevPosture:
     def test_dev_postures(self):
         from dfe_engine.settings import is_dev_posture

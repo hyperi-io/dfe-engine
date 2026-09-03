@@ -80,6 +80,23 @@ class Multiplicity(StrEnum):
     """One deployment per config, many side by side."""
 
 
+class Maturity(StrEnum):
+    """Where an app sits on the SemVer ladder ``versions.yaml`` uses for a stack.
+
+    Declared least mature first, so the definition order IS the ladder.
+    """
+
+    ALPHA = "alpha"
+    BETA = "beta"
+    RC = "rc"
+    RELEASE = "release"
+
+    def shown_at(self, gate: Maturity) -> bool:
+        """Whether an app at this level is listed when ``gate`` is the least shown."""
+        ladder = list(Maturity)
+        return ladder.index(self) >= ladder.index(gate)
+
+
 class ReloadMode(StrEnum):
     """How a written change reaches the running process."""
 
@@ -146,6 +163,9 @@ class AppDescriptor:
 
     routing_path: str = ""
     """Overlay dot-path the compiled routing is written to."""
+
+    maturity: Maturity = Maturity.RELEASE
+    """How far along the app is. A manifest that says nothing means release."""
 
     @property
     def has_compiled_routing(self) -> bool:
@@ -230,6 +250,10 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
         raise CatalogueError(
             f"{service}: unknown multiplicity {raw.get('multiplicity')!r}"
         ) from exc
+    try:
+        maturity = Maturity(str(raw.get("maturity", Maturity.RELEASE)))
+    except ValueError as exc:
+        raise CatalogueError(f"{service}: unknown maturity {raw.get('maturity')!r}") from exc
     binding = raw.get("source_binding") or {}
     if not isinstance(binding, dict):
         raise CatalogueError(f"{service}: source_binding must be a mapping")
@@ -244,6 +268,7 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
         source_binding=dict(binding),
         routing_compiler=str(routing.get("compiler", "")),
         routing_path=str(routing.get("values_path", "")),
+        maturity=maturity,
     )
 
 
@@ -354,3 +379,14 @@ def file_set(service: str, name: str) -> ConsumedFileSet:
 def services() -> list[str]:
     """Every catalogued service name, sorted."""
     return sorted(APP_CATALOGUE)
+
+
+def visible_services(gate: Maturity | str) -> list[str]:
+    """Every catalogued service at or above ``gate`` on the ladder, sorted.
+
+    Every surface that offers an app for selection lists through here, so they
+    all withhold the same apps. Resolving a service by name is not gated: an
+    instance of a withheld app that is already deployed still has to resolve.
+    """
+    least = Maturity(gate)
+    return [name for name in services() if APP_CATALOGUE[name].maturity.shown_at(least)]

@@ -87,6 +87,9 @@ Auth (local):
 E2E server (Playwright host-run helpers; refused in production):
 - DFE_E2E_SERVER -> e2e_server
 
+Apps (the deployed-app catalogue):
+- DFE_APPS_SHOW_MATURITY -> apps.show_maturity (release | rc | beta | alpha)
+
 Repository (scope-aligned small-object store; lives in the DFE database):
 - DFE_REPOSITORY_MAX_PREFS_BYTES -> repository.max_prefs_bytes
 - DFE_REPOSITORY_MAX_OBJECT_BYTES -> repository.max_object_bytes
@@ -706,6 +709,25 @@ class DeploymentSettings(BaseModel):
     )
 
 
+class AppsSettings(BaseModel):
+    """The deployed-app catalogue.
+
+    Environment variables:
+    - DFE_APPS_SHOW_MATURITY -> apps.show_maturity
+    """
+
+    show_maturity: Literal["release", "rc", "beta", "alpha"] = Field(
+        default="release",
+        description=(
+            "The least mature app the catalogue lists, on the versions.yaml ladder "
+            "alpha -> beta -> rc -> release. 'release' hides every pre-release app; "
+            "'beta' adds beta and rc; 'alpha' shows the whole manifest. Pre-release "
+            "testing opts in here. The gate is applied in the engine, so a UI cannot "
+            "show what it withholds."
+        ),
+    )
+
+
 class TransformValidationSettings(BaseModel):
     """Syntax validation for authored transform files.
 
@@ -1184,6 +1206,7 @@ class DFESettings(BaseModel):
     services: ServicesSettings = Field(default_factory=ServicesSettings)
     repository: RepositorySettings = Field(default_factory=RepositorySettings)
     deployment: DeploymentSettings = Field(default_factory=DeploymentSettings)
+    apps: AppsSettings = Field(default_factory=AppsSettings)
     transform_validation: TransformValidationSettings = Field(
         default_factory=TransformValidationSettings
     )
@@ -1281,6 +1304,7 @@ def _get_env_overrides() -> dict:
         "services": {},
         "repository": {},
         "deployment": {},
+        "apps": {},
         "helm": {},
         "auth": {},
         "hyperdx": {},
@@ -1575,6 +1599,10 @@ def _get_env_overrides() -> dict:
         overrides["deployment"]["config_dir"] = val
     if val := _get_env("DFE_DEPLOYMENT_TARGET"):
         overrides["deployment"]["target"] = val.strip().lower()
+
+    # Apps
+    if val := _get_env("DFE_APPS_SHOW_MATURITY"):
+        overrides["apps"]["show_maturity"] = val.strip().lower()
 
     # Transform validation
     if val := _get_env("DFE_TRANSFORM_VALIDATION_ENABLED"):

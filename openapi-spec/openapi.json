@@ -11575,7 +11575,7 @@
           "App Management"
         ],
         "summary": "List Apps",
-        "description": "Every manageable app, with the instances currently deployed.",
+        "description": "Every app at or above the deployment's maturity gate, with its instances.",
         "operationId": "list_apps_api_v1_apps_get",
         "responses": {
           "200": {
@@ -16675,6 +16675,10 @@
             "type": "string",
             "title": "Multiplicity"
           },
+          "maturity": {
+            "$ref": "#/components/schemas/Maturity",
+            "description": "Where the app sits on the ladder alpha -> beta -> rc -> release. An app below the deployment's apps.show_maturity gate is not listed at all, so this is only ever at or above it."
+          },
           "has_compiled_routing": {
             "type": "boolean",
             "title": "Has Compiled Routing",
@@ -16700,6 +16704,7 @@
           "service",
           "scale_deployed",
           "multiplicity",
+          "maturity",
           "has_compiled_routing",
           "file_sets",
           "instances"
@@ -20529,6 +20534,17 @@
         ],
         "title": "MatchConflictErrorResponse",
         "description": "409 when two enabled sources share the same receiver match rule."
+      },
+      "Maturity": {
+        "type": "string",
+        "enum": [
+          "alpha",
+          "beta",
+          "rc",
+          "release"
+        ],
+        "title": "Maturity",
+        "description": "Where an app sits on the SemVer ladder ``versions.yaml`` uses for a stack.\n\nDeclared least mature first, so the definition order IS the ladder."
       },
       "MetaSchema": {
         "properties": {
