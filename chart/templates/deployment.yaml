@@ -93,24 +93,12 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           env:
-            # ClickHouse connection
-            - name: DFE_CLICKHOUSE_HOST
-              value: {{ .Values.config.clickhouse.host | quote }}
-            - name: DFE_CLICKHOUSE_PORT
-              value: {{ .Values.config.clickhouse.port | quote }}
-            - name: DFE_CLICKHOUSE_USERNAME
-              value: {{ .Values.config.clickhouse.username | quote }}
-            - name: DFE_CLICKHOUSE_DATABASE
-              value: {{ .Values.config.clickhouse.database | quote }}
-            - name: DFE_CLICKHOUSE_SECURE
-              value: {{ .Values.config.clickhouse.secure | quote }}
-            - name: DFE_CLICKHOUSE_VERIFY
-              value: {{ .Values.config.clickhouse.verify | quote }}
-            - name: DFE_CLICKHOUSE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "dfe-engine.clickhouseSecretName" . }}
-                  key: {{ .Values.clickhouse.secretKeys.password }}
+            # ClickHouse connection. The SAME include the hunt-runner and the
+            # materialise Job use -- the API reads effective_data_database on
+            # nearly every route (sources, schemas, hunts, queries, repository),
+            # so an inlined copy that drops data_database silently split the API
+            # off onto a different database from the runner it coordinates with.
+            {{- include "dfe-engine.clickhouseEnv" . | nindent 12 }}
             # API server
             - name: DFE_API_HOST
               value: {{ .Values.config.api.host | quote }}
