@@ -592,3 +592,88 @@ class TestProductionPostureCannotShipWithAuthOff:
         dev = DFESettings.model_construct(env="dev", auth=AuthSettings(enabled=False))
         assert not dev.auth.enabled
         assert is_dev_posture(dev.env)
+
+
+class TestEverySettingIsRead:
+    """A field nothing reads is inert: it parses, validates, and changes nothing.
+
+    dfe-engine is configured from a mounted file, so a missing env route is not
+    the defect -- a missing READER is. The allowlist is the point: an entry
+    there is a deliberate "declared ahead of its feature", which is the fact
+    that goes missing otherwise.
+    """
+
+    # Fields with no reader today. Each needs wiring or deleting -- see #239.
+    # Remove an entry when its field gains a reader; never add one to go green.
+    KNOWN_UNREAD = {
+        ("ClickHouseResilienceSettings", "wait_initial"),
+        ("ClickHouseResilienceSettings", "wait_max"),
+        ("ClickHouseResilienceSettings", "wait_multiplier"),
+        ("ClickHouseResilienceSettings", "budget_seconds"),
+        ("ClickHouseResilienceSettings", "waking_budget_seconds"),
+        ("HuntsSettings", "num_threads"),
+        ("HuntsSettings", "jitter_seconds"),
+        ("HuntsSettings", "max_concurrent_queries"),
+        ("HuntsSettings", "resource_limit_read_rows"),
+        ("HuntsSettings", "resource_limit_read_bytes"),
+        ("HuntsSettings", "resource_limit_memory_bytes"),
+        ("HuntsSettings", "resource_limit_execution_ms"),
+        ("HuntsSettings", "alert_channels"),
+        ("HuntsSettings", "default_alert_cooldown"),
+        ("HuntsSettings", "default_max_alerts_per_run"),
+        ("HuntsSettings", "default_max_sample_events"),
+        ("QuerySettings", "yaml_dir"),
+        ("QueryViewSettings", "auto_bootstrap"),
+        ("SamplerSettings", "default_mode"),
+        ("HelmSettings", "environment_file"),
+        ("OIDCSettings", "sync_enabled"),
+        ("OIDCSettings", "sync_on_startup"),
+        ("HyperDXSettings", "api_key_env"),
+        ("DFESettings", "e2e_server"),
+    }
+
+    def test_no_new_setting_lands_without_a_reader(self):
+        import ast
+        import subprocess
+        from pathlib import Path
+
+        package = Path(__file__).resolve().parents[2] / "src" / "dfe_engine"
+        settings_py = package / "settings.py"
+        tree = ast.parse(settings_py.read_text(encoding="utf-8"))
+
+        declared: list[tuple[str, str]] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            declared.extend(
+                (node.name, stmt.target.id)
+                for stmt in node.body
+                if isinstance(stmt, ast.AnnAssign)
+                and isinstance(stmt.target, ast.Name)
+                and not stmt.target.id.startswith("_")
+            )
+
+        assert declared, "parsed no settings fields -- the parser, not the code, is wrong"
+
+        unread = set()
+        for cls, field in declared:
+            found = subprocess.run(
+                ["rg", "-l", "--glob", "!**/settings.py", rf"\b{field}\b", str(package)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if not found.stdout.strip():
+                unread.add((cls, field))
+
+        new = sorted(unread - self.KNOWN_UNREAD)
+        assert not new, (
+            f"settings fields with no reader outside settings.py: {new}. "
+            "Wire it, delete it, or add it to KNOWN_UNREAD with a reason."
+        )
+
+        fixed = sorted(self.KNOWN_UNREAD - unread)
+        assert not fixed, (
+            f"these now have readers and must leave KNOWN_UNREAD: {fixed}. "
+            "A stale allowlist hides the next one."
+        )
