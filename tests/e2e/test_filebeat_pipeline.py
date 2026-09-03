@@ -50,8 +50,15 @@ TRANSFORMS = ("dfe-transform-vrl", "dfe-transform-vector")
 # The filebeat table is built from meta/beats/filebeat.yaml, so ECS lands in
 # typed columns rather than in JSON to dig through. Each of these is derived by
 # the transform and absent from the corpus body, so one populated means the
-# event was transformed rather than passed through. No single column covers all
-# three corpus modules, hence the disjunction.
+# event was transformed rather than passed through. The disjunction is a
+# workaround, not a property of the corpus: `source_ip` alone covers all three
+# modules (104 of the 377 goldens -- umbrella 30, ios 37, meraki 37) and is
+# already set by the VRL and declared by the meta schema. It is excluded only
+# because dfe-loader#127 rejects the value. Collapse this to source_ip once
+# that lands. `event_module` and `event_dataset` are 0 across every golden --
+# Elastic does not emit them for this corpus, so stamping them to widen
+# coverage would be a departure from Elastic in a pipeline whose purpose is
+# matching it.
 #
 # `message` is excluded because the raw body carries it, and `timestamp` because
 # the loader fills it with the arrival time when nothing maps to it - rows with a
