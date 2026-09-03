@@ -45,6 +45,8 @@ def production_without_secret(monkeypatch):
     for key, value in _PRODUCTION_NO_SECRET.items():
         monkeypatch.setenv(key, value)
     monkeypatch.delenv("DFE_API_JWT_SECRET", raising=False)
+    # load_settings() re-reads cwd/.env; a developer secret must not sneak back in.
+    monkeypatch.setattr("dfe_engine.env_files.load_env_files", lambda: None)
 
 
 def test_schema_loader_survives_a_production_posture_with_no_jwt_secret(

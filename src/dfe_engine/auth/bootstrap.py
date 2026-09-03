@@ -23,7 +23,6 @@ Usage::
 from __future__ import annotations
 
 import importlib.resources
-import os
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -40,34 +39,25 @@ if TYPE_CHECKING:
     from dfe_engine.gitcrud.engine import GitCrud
     from dfe_engine.settings import SeedAccount
 
-# Default break-glass username; overridden by DFE_AUTH_LOCAL_ADMIN_NAME.
+# Default break-glass username
 _DEFAULT_ADMIN_NAME = "admin"
 # Default password that triggers a startup warning
-# Default break-glass password; overridden by DFE_AUTH_LOCAL_ADMIN_PASSWORD.
+# Default break-glass password
 _DEFAULT_PASSWORD = "changeme"
 
 
 def admin_account_name(override: str = "") -> str:
-    """Break-glass admin username: override, else ``DFE_AUTH_LOCAL_ADMIN_NAME``, else ``admin``.
-
-    The default ``admin`` is not treated as an override, so a configured
-    ``DFE_AUTH_LOCAL_ADMIN_NAME`` still wins when callers pass the default through.
-    """
+    """Break-glass admin username: override, else ``admin``."""
     if override and override != _DEFAULT_ADMIN_NAME:
         return override
-    return os.environ.get("DFE_AUTH_LOCAL_ADMIN_NAME") or _DEFAULT_ADMIN_NAME
+    return _DEFAULT_ADMIN_NAME
 
 
 def admin_account_password(override: str = "") -> str:
-    """Break-glass admin password: override, else ``DFE_AUTH_LOCAL_ADMIN_PASSWORD``, else ``changeme``.
-
-    The well-known ``changeme`` default is not treated as an override, so a
-    configured ``DFE_AUTH_LOCAL_ADMIN_PASSWORD`` still wins when callers pass the
-    default through (``defaults.yaml`` / ``settings.auth.local.admin_password``).
-    """
+    """Break-glass admin password: override, else ``changeme``."""
     if override and override != _DEFAULT_PASSWORD:
         return override
-    return os.environ.get("DFE_AUTH_LOCAL_ADMIN_PASSWORD") or _DEFAULT_PASSWORD
+    return _DEFAULT_PASSWORD
 
 
 # Default group definitions: name -> (roles, description)
@@ -102,9 +92,9 @@ def bootstrap_auth(
     Args:
         auth_dir: Root directory for auth config files.
         default_admin_password: Password for the seeded admin account. Empty
-            falls through to ``DFE_AUTH_LOCAL_ADMIN_PASSWORD``, then ``changeme``.
+            falls through to ``changeme``.
         default_admin_name: Username for the seeded admin account. Empty falls
-            through to ``DFE_AUTH_LOCAL_ADMIN_NAME``, then ``admin``.
+            through to ``admin``.
         gitcrud: When gitops is enabled, the deploy-repo engine. The live store is
             hydrated from it before the seed-if-empty check (so a persisted
             break-glass password survives a rebuild), and a freshly seeded admin is
@@ -164,7 +154,7 @@ def bootstrap_auth(
         if password == _DEFAULT_PASSWORD:
             logger.warning(
                 f"Admin account seeded with default password '{_DEFAULT_PASSWORD}'"
-                " — change in production (set DFE_AUTH_LOCAL_ADMIN_PASSWORD)"
+                " — change in production"
             )
         # Persist the freshly seeded admin so the break-glass credential is durable
         # from the first start, not only after an operator rotates it.
