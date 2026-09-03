@@ -237,6 +237,44 @@ class SchemaManager:
         yaml_dump(data, p)
 
     @staticmethod
+    def delete_version(path: str | Path, version: str) -> None:
+        """Remove a version entry from an existing schema file.
+
+        If the deleted version is ``current``, ``current`` is moved to the last
+        remaining version (insertion order). The last remaining version cannot
+        be deleted — remove the schema instead.
+
+        Raises:
+            SchemaVersionError: If the version is missing or is the last version.
+            SchemaLoadError: If the file is missing or malformed.
+        """
+        p = Path(path)
+        if not p.exists():
+            raise SchemaLoadError(f"Schema file not found: {p}")
+
+        data = yaml_load(p)
+        if not isinstance(data, dict):
+            raise SchemaLoadError(f"Schema YAML must be a mapping: {p}")
+
+        versions = data.get("versions", {})
+        if not isinstance(versions, dict):
+            raise SchemaLoadError(f"Schema versions must be a mapping: {p}")
+
+        if version not in versions:
+            available = ", ".join(sorted(versions.keys())) or "(none)"
+            raise SchemaVersionError(
+                f"Version {version!r} not found in {p}. Available: {available}"
+            )
+
+        if len(versions) == 1:
+            raise SchemaVersionError(f"Cannot delete the last remaining version {version!r} in {p}")
+
+        del versions[version]
+        if data.get("current") == version:
+            data["current"] = next(reversed(versions))
+        yaml_dump(data, p)
+
+    @staticmethod
     def validate_meta_schema_columns(meta: MetaSchema) -> None:
         """Validate every version's columns against TypeRegistry."""
         for version, ver in meta.versions.items():

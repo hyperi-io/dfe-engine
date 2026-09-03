@@ -711,6 +711,81 @@ async def add_meta_schema_version(
     return meta_schema_version_write_response(saved, path=canonical_path)
 
 
+@router.delete(
+    "/definitions/{schema_path:path}/versions/{version}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_action(scopes_dict["schema_delete"]))],
+)
+async def delete_meta_schema_version(
+    schema_path: str,
+    version: str,
+    user: CurrentUser,
+    registry: SchemaReg,
+) -> None:
+    """Delete a specific meta-schema version.
+
+    Core schemas are blocked by the core-resource guard (HTTP 409). The last
+    remaining version cannot be deleted — delete the schema instead.
+    """
+    from dfe_engine.schema.registry import (
+        SchemaNotFoundError,
+        SchemaValidationError,
+        canonical_schema_path,
+    )
+    from dfe_engine.schema.schema_loader import SchemaLoadError
+    from dfe_engine.schema.schema_manager import SchemaManager, SchemaVersionError
+
+    try:
+        canonical_path = canonical_schema_path(schema_path)
+    except SchemaValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+
+    try:
+        meta = registry.get_schema(canonical_path)
+    except SchemaNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Schema {schema_path!r} not found",
+            },
+        ) from None
+
+    if version not in meta.versions:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Version {version!r} not found for schema {canonical_path!r}",
+            },
+        )
+
+    yaml_path = registry._yaml_path(canonical_path)
+    try:
+        SchemaManager.delete_version(yaml_path, version)
+    except SchemaVersionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+    except SchemaLoadError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "schema_error", "message": str(exc)},
+        ) from exc
+
+    description = f"schema: {canonical_path} (delete version {version})"
+    registry.notify_schema_file_updated(
+        canonical_path,
+        description=description,
+        created_by=git_author(user),
+    )
+    audit_resource_change(user.user_id, "meta_schema", canonical_path, "updated")
+
+
 @router.post(
     "/definitions/{schema_path:path}",
     response_model=MetaSchema,

@@ -106,6 +106,33 @@ class TestUpdateVersionSummary:
         assert data["versions"]["1.0.0"]["type"] == "model"
 
 
+class TestDeleteVersion:
+    def test_deletes_non_current_version(self, multi_version_schema):
+        SchemaManager.delete_version(multi_version_schema, "1.0.0")
+        data = yaml_load(multi_version_schema)
+        assert "1.0.0" not in data["versions"]
+        assert "1.1.0" in data["versions"]
+        assert data["current"] == "1.1.0"
+
+    def test_repoints_current_when_deleting_current(self, multi_version_schema):
+        SchemaManager.delete_version(multi_version_schema, "1.1.0")
+        data = yaml_load(multi_version_schema)
+        assert "1.1.0" not in data["versions"]
+        assert data["current"] == "1.0.0"
+
+    def test_rejects_unknown_version(self, multi_version_schema):
+        with pytest.raises(SchemaVersionError, match="not found"):
+            SchemaManager.delete_version(multi_version_schema, "9.9.9")
+
+    def test_rejects_last_remaining_version(self, versioned_schema):
+        with pytest.raises(SchemaVersionError, match="last remaining"):
+            SchemaManager.delete_version(versioned_schema, "1.0.0")
+
+    def test_missing_file(self, tmp_path):
+        with pytest.raises(SchemaLoadError, match="not found"):
+            SchemaManager.delete_version(tmp_path / "missing.yaml", "1.0.0")
+
+
 class TestAddVersion:
     def test_add_version_to_existing(self, versioned_schema):
         new_cols = [
