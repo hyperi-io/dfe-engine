@@ -601,6 +601,14 @@ class TestEverySettingIsRead:
     the defect -- a missing READER is. The allowlist is the point: an entry
     there is a deliberate "declared ahead of its feature", which is the fact
     that goes missing otherwise.
+
+    A reader means PYTHON code. ``defaults.yaml`` deliberately does not count:
+    a default value is another declaration, and treating it as a reader hid
+    seven fields, two of them bootstrap passwords.
+
+    Known limit: any textual hit counts, so a field reached only through
+    ``getattr`` or ``model_dump`` is missed. A false negative there beats
+    failing the suite over dynamic access.
     """
 
     # Fields with no reader today. Each needs wiring or deleting -- see #239.
@@ -630,11 +638,24 @@ class TestEverySettingIsRead:
         ("OIDCSettings", "sync_on_startup"),
         ("HyperDXSettings", "api_key_env"),
         ("DFESettings", "e2e_server"),
+        # Found once the search stopped counting defaults.yaml as a reader. A
+        # default VALUE is another declaration, not a consumer, so every one of
+        # these looked wired while nothing read it.
+        ("ClickHouseSettings", "connections_min"),
+        ("HuntsSettings", "checkpoint_path"),
+        ("HuntsSettings", "cron_task_timeout"),
+        ("HuntsSettings", "log_path"),
+        ("StorageSettings", "s3_bucket"),
+        # auth.local seeds three passwords and bootstrap consumes only
+        # admin_password (api/app.py:130). DFE_AUTH_LOCAL_OPERATOR_PASSWORD and
+        # its viewer twin are routed and land nowhere -- no such account is made.
+        ("LocalAuthSettings", "operator_password"),
+        ("LocalAuthSettings", "viewer_password"),
     }
 
     def test_no_new_setting_lands_without_a_reader(self):
         import ast
-        import subprocess
+        import re
         from pathlib import Path
 
         package = Path(__file__).resolve().parents[2] / "src" / "dfe_engine"
@@ -655,16 +676,20 @@ class TestEverySettingIsRead:
 
         assert declared, "parsed no settings fields -- the parser, not the code, is wrong"
 
-        unread = set()
-        for cls, field in declared:
-            found = subprocess.run(
-                ["rg", "-l", "--glob", "!**/settings.py", rf"\b{field}\b", str(package)],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if not found.stdout.strip():
-                unread.add((cls, field))
+        # Read the package once and search in memory. Spawning a search per
+        # field also tied the check to a binary the CI image does not carry.
+        corpus = "\n".join(
+            path.read_text(encoding="utf-8", errors="replace")
+            for path in sorted(package.rglob("*.py"))
+            if path != settings_py
+        )
+        assert corpus, "read no package source -- the test setup, not the code, is wrong"
+
+        unread = {
+            (cls, field)
+            for cls, field in declared
+            if not re.search(rf"\b{re.escape(field)}\b", corpus)
+        }
 
         new = sorted(unread - self.KNOWN_UNREAD)
         assert not new, (
