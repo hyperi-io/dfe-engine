@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.5](https://github.com/hyperi-io/dfe-engine/compare/v1.19.4...v1.19.5) (2026-09-04)
+
+### Bug Fixes
+
+* **gitops:** scrub the clone's remote credentials, surface hunt write outcomes, and finish the configured admin name ([#287](https://github.com/hyperi-io/dfe-engine/issues/287)) ([5203193](https://github.com/hyperi-io/dfe-engine/commit/520319364dc92ecf5ec548455d0c339ce5de59d4)), closes [282-#286](https://github.com/hyperi-io/282-/issues/286)
+
 ## [1.19.4](https://github.com/hyperi-io/dfe-engine/compare/v1.19.3...v1.19.4) (2026-09-04)
 
 ### Bug Fixes
