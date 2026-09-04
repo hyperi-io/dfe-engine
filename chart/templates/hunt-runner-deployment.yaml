@@ -1,8 +1,10 @@
 {{- if .Values.huntRunner.enabled }}
 # The pull-based hunt runner: `dfe-hunt-runner run` on the SAME engine image, a
 # background worker (no HTTP surface) that coordinates entirely through ClickHouse.
-# KEDA owns the replica count when enabled (scale-to-zero on an empty backlog), so
-# the Deployment sets replicas only when KEDA is off. See docs/HUNT-RUNNER-SCALING.md.
+# This chart always owns the replica count -- it renders no ScaledObject, so
+# omitting `replicas` would hand the count to nothing and pin it at the k8s
+# default of 1. Backlog autoscaling is the dfe-infra chart's BETA opt-in.
+# See docs/data-plane/hunt-runner-scaling.md.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -11,9 +13,7 @@ metadata:
     {{- include "dfe-engine.labels" . | nindent 4 }}
     app.kubernetes.io/component: hunt-runner
 spec:
-  {{- if not .Values.huntRunner.keda.enabled }}
   replicas: {{ .Values.huntRunner.replicaCount }}
-  {{- end }}
   selector:
     matchLabels:
       {{- include "dfe-engine.selectorLabels" . | nindent 6 }}

@@ -161,7 +161,9 @@ _template_overrides: dict[str, dict[str, Any]] = {
     },
     "k8s": {
         "kafka": {"brokers": ["kafka-bootstrap.kafka.svc.cluster.local:9092"]},
-        "clickhouse": {"hosts": ["clickhouse.clickhouse.svc.cluster.local:9000"]},
+        # 8123, not 9000: hosts and protocol must move together, and the loader
+        # rejects the native protocol outright (dfe-loader a197f2c, #116).
+        "clickhouse": {"hosts": ["clickhouse.clickhouse.svc.cluster.local:8123"]},
         "metrics": {"address": "0.0.0.0:9090"},
         "memory": {"limit_bytes": 0},
         "logging": {"format": "json"},
