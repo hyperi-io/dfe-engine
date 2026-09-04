@@ -133,9 +133,7 @@ def test_rotation_is_measured_against_the_configured_bootstrap_password(tmp_path
     """A deployment seeded from DFE_AUTH_LOCAL_ADMIN_PASSWORD has not rotated yet."""
     accounts = AccountStore(tmp_path / "accounts")
     accounts.create("admin", "a-generated-boot-password", groups=["dfe-admins"])
-    ctx = SetupContext(
-        account_store=accounts, bootstrap_admin_password="a-generated-boot-password"
-    )
+    ctx = SetupContext(account_store=accounts, bootstrap_admin_password="a-generated-boot-password")
 
     assert STEP_ADMIN_PASSWORD not in SETUP_MACHINE.evaluate(ctx).completed_steps
 
