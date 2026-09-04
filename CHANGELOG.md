@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.1](https://github.com/hyperi-io/dfe-engine/compare/v1.19.0...v1.19.1) (2026-09-04)
+
+### Bug Fixes
+
+* **hunts:** commit hunts and rules to the deploy repo when gitops is on ([#282](https://github.com/hyperi-io/dfe-engine/issues/282)) ([cf99c67](https://github.com/hyperi-io/dfe-engine/commit/cf99c67aff060b0fe74f6b4ebde7814585189582)), closes [dfe-infra#213](https://github.com/hyperi-io/dfe-infra/issues/213) [#281](https://github.com/hyperi-io/dfe-engine/issues/281) [hyperi-io/dfe-infra#212](https://github.com/hyperi-io/dfe-infra/issues/212)
+* **tests:** stub the segment in the standing-stream tests so they stop killing xdist workers ([#281](https://github.com/hyperi-io/dfe-engine/issues/281)) ([a52727e](https://github.com/hyperi-io/dfe-engine/commit/a52727e9aba2caeb3a6dc91811d3d9ab0391a03b))
+
 ## [1.19.0](https://github.com/hyperi-io/dfe-engine/compare/v1.18.0...v1.19.0) (2026-09-04)
 
 ### Features
