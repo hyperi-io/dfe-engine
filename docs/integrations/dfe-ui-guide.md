@@ -46,18 +46,22 @@ signs you out. (In production the intent is OIDC at the edge via Envoy + the
 
 ## 4. How HyperDX "auto-integrates" (today)
 
-HyperDX is a **sibling app**, not embedded. The integration is deliberately light:
-1. **Sidebar links** - if the UI is built with `NEXT_PUBLIC_HYPERDX_URL` set, it
-   adds Search / Chart Explorer / Dashboards links that open HyperDX in a new tab.
+HyperDX is a **sibling app**, embedded rather than linked out to. The integration
+is deliberately light:
+1. **Embedded views** - when `HYPERDX_URL` is set on the dfe-ui deployment, the
+   sidebar gains `/observe/*` entries (Search, Search list, Hunt Results) that
+   iframe the chromeless dfe-hyperdx fork inside dfe-ui. The `(auth)` layout reads
+   the variable server-side at request time, so it is a deployment setting, not a
+   build-time one.
 2. **"Create rule from a HyperDX search"** - HyperDX can send the browser a
    cross-window message (`postMessage`); dfe-ui catches it, stores the search, and
    opens its rule-create screen pre-filled. The UI checks the message came from the
    configured HyperDX origin.
 
-So "auto-integration" today = **one environment variable** (`NEXT_PUBLIC_HYPERDX_URL`)
-plus a postMessage handshake. There is no shared login session yet (new tab), no
-embedded/iframe view, and the engine does NOT tell the UI where HyperDX is - the UI
-learns it from a build-time env var.
+So "auto-integration" today = **one environment variable** (`HYPERDX_URL`) plus a
+postMessage handshake. The engine does NOT tell the UI where HyperDX is - the
+deployment does. `NEXT_PUBLIC_HYPERDX_URL` is read by nothing and setting it does
+nothing.
 
 ## 5. How it deploys - and why it currently does NOT work
 
