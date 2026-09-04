@@ -351,15 +351,8 @@ def test_read_remote_file_none_without_remote(tmp_path):
 
 
 def test_is_break_glass_matches_the_admin(monkeypatch):
-    monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_NAME", raising=False)
     assert ad.is_break_glass("admin") is True
     assert ad.is_break_glass("alice") is False
-
-
-def test_is_break_glass_follows_env_admin_name(monkeypatch):
-    monkeypatch.setenv("DFE_AUTH_LOCAL_ADMIN_NAME", "root")
-    assert ad.is_break_glass("root") is True
-    assert ad.is_break_glass("admin") is False
 
 
 def test_not_git_backed_state_is_durable():

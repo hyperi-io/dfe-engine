@@ -75,7 +75,7 @@ def engine_deployment_contract() -> DeploymentContract:
         # Debian 13 trixie; pinned so the tag cannot float. The committed
         # Dockerfile's runtime FROM must match this literal (validate_dockerfile
         # substring check). Re-resolve on a bump; Renovate maintains it.
-        base_image="python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de",
+        base_image="python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea",
         entrypoint_args=["run"],
         secrets=[
             SecretGroupContract(

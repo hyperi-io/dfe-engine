@@ -110,7 +110,7 @@ def is_break_glass(username: str) -> bool:
 
     Regular users and groups live in the resolved store (document store/yaml); gitcrud is
     the exception, reserved for the emergency credential that must survive a total
-    teardown. Follows the live ``DFE_AUTH_LOCAL_ADMIN_NAME``.
+    teardown. Follows the live ``admin``.
     """
     from dfe_engine.auth.bootstrap import admin_account_name
 

@@ -155,6 +155,56 @@ class TestCoreSchemaPatchCurrent:
         finally:
             reg.close()
 
+    def test_blocks_delete_version(self, tmp_path):
+        reg = self._core_registry(tmp_path)
+        try:
+            msg = match_api_core_mutation(
+                method="DELETE",
+                path="/api/v1/schemas/definitions/common-header/minimal/versions/1.0.0",
+                role_store=None,
+                schema_registry=reg,
+            )
+            assert msg == "Core resources can't be mutated"
+        finally:
+            reg.close()
+
+    def test_allows_delete_version_on_custom_schema(self, tmp_path):
+        schemas_dir = tmp_path / "schemas"
+        path = schemas_dir / "aws" / "cloudtrail.yaml"
+        path.parent.mkdir(parents=True)
+        yaml_dump(
+            {
+                "resource_type": "custom",
+                "current": "1.1.0",
+                "versions": {
+                    "1.0.0": {
+                        "date": "2026-01-01",
+                        "type": "model",
+                        "summary": "x",
+                        "columns": [{"name": "a", "type": "string"}],
+                    },
+                    "1.1.0": {
+                        "date": "2026-02-01",
+                        "type": "addition",
+                        "summary": "y",
+                        "columns": [{"name": "a", "type": "string"}],
+                    },
+                },
+            },
+            path,
+        )
+        reg = SchemaRegistry(schemas_directory=schemas_dir, refresh_interval=0)
+        try:
+            msg = match_api_core_mutation(
+                method="DELETE",
+                path="/api/v1/schemas/definitions/aws/cloudtrail/versions/1.0.0",
+                role_store=None,
+                schema_registry=reg,
+            )
+            assert msg is None
+        finally:
+            reg.close()
+
     def test_core_schema_current_only_patch_helper(self):
         assert core_schema_current_only_patch(b'{"current": "1.1.0"}') is True
         assert core_schema_current_only_patch(b'{"current": "1.1.0", "summary": "x"}') is False
