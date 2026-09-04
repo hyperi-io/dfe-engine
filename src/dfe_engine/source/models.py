@@ -325,9 +325,12 @@ class SourceSchema(BaseModel):
 
 
 class SourceTransform(BaseModel):
-    """Transform stage configuration (vector or wasm)."""
+    """Transform stage configuration: the engine is one of the catalogue's transform apps."""
 
-    engine: str = Field(..., description="Transform engine (vector or wasm)")
+    engine: str = Field(
+        ...,
+        description="Transform engine - a catalogued transform app by engine name (e.g. vrl, vector)",
+    )
     config_file: str | None = Field(default=None, description="Path to engine-specific config")
     env: dict[str, str] = Field(default_factory=dict, description="Per-transform ENV overrides")
     files: list[str] = Field(default_factory=list, description="Enrichment files (CSV, MMDB)")
@@ -335,7 +338,13 @@ class SourceTransform(BaseModel):
     @field_validator("engine")
     @classmethod
     def _validate_engine(cls, v: str) -> str:
-        valid = {"vector", "wasm"}
+        # The catalogue (dfe-infra apps.yaml) is the only list of transform apps
+        # that exist, so the accepted engines are read from it, never written here.
+        # Imported at call time: appmgmt's package init reaches this module through
+        # helm.compiler -> source.registry, so a top-level import is a cycle.
+        from dfe_engine.appmgmt.catalogue import transform_engines
+
+        valid = transform_engines()
         if v not in valid:
             raise ValueError(f"Invalid transform engine {v!r}. Valid: {', '.join(sorted(valid))}")
         return v

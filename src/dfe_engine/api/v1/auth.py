@@ -15,13 +15,14 @@ from pydantic import BaseModel, Field
 from dfe_engine.api.deps import (
     CurrentUser,
     Settings,
+    _get_client_ip,
     create_access_token,
     get_role_config,
     require_local_account_enabled,
     resolve_live_groups_for_user,
     resolve_live_roles_for_user,
 )
-from dfe_engine.auth.audit import audit_login_denied
+from dfe_engine.auth.audit import audit_login_denied, audit_login_success
 from dfe_engine.auth.local_provider import LocalAuthProvider
 from dfe_engine.auth.models import AuthenticationError
 from dfe_engine.auth.setup_status import SetupStatus, evaluate_initial_setup
@@ -85,6 +86,10 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
         # expired tokens on ordinary requests - those are already audited in deps.py.
         audit_login_denied(body.username, "jwt", client_ip, str(exc))
         raise
+
+    # The password is exchanged for a token here, so this is the login the
+    # audit trail counts - not the per-request token check in get_current_user.
+    audit_login_success(auth_ctx.user_id, "jwt", client_ip, auth_ctx.roles)
 
     token = create_access_token(
         data={
@@ -171,13 +176,3 @@ async def get_setup_status(request: Request) -> SetupStatus:
     ``first_user`` step reports whether a real (non break-glass) user exists.
     """
     return evaluate_initial_setup(request)
-
-
-# ── Helpers ──────────────────────────────────────────────────
-
-
-def _get_client_ip(request: Request) -> str | None:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else None

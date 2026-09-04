@@ -31,8 +31,13 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
-from dfe_engine.api.deps import Settings, _get_client_ip, jwt_authority_for
-from dfe_engine.auth.audit import audit_login_denied
+from dfe_engine.api.deps import (
+    Settings,
+    _get_client_ip,
+    jwt_authority_for,
+    resolve_live_roles_for_user,
+)
+from dfe_engine.auth.audit import audit_login_denied, audit_login_success
 
 router = APIRouter(prefix="/auth/oidc", tags=["OIDC Login"])
 
@@ -179,6 +184,15 @@ async def oidc_callback(provider: str, request: Request, settings: Settings) -> 
         provider=provider,
         subject=identity.subject,
         group_count=len(identity.groups),
+    )
+
+    # The IdP code is exchanged for an engine token here, so this is the login
+    # the audit trail counts - not the per-request token check in get_current_user.
+    audit_login_success(
+        identity.subject,
+        "oidc",
+        _get_client_ip(request),
+        resolve_live_roles_for_user(request, identity.subject, fallback_groups=identity.groups),
     )
 
     payload = OidcCallbackResponse(

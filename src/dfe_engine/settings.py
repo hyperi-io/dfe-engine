@@ -192,7 +192,10 @@ class ClickHouseSettings(BaseModel):
     """ClickHouse connection settings."""
 
     host: str = Field(default="localhost")
-    port: int = Field(default=9000)
+    port: int = Field(
+        default=8123,
+        description="ClickHouse HTTP port: the client is clickhouse-connect over HTTP, so the native 9000 cannot work",
+    )
     username: str = Field(default="default")
     password: str = Field(default="")
     database: str = Field(
@@ -933,11 +936,13 @@ class AuthSettings(BaseModel):
     trust_proxy_auth_headers: bool = Field(
         default=False,
         description=(
-            "Trust X-Oidc-* identity headers (auth Path 1). Enable ONLY when a "
-            "trusted proxy (e.g. Envoy Gateway) authenticates the user and "
-            "injects these headers AND the engine is reachable only via that "
-            "proxy. Default off = fail closed: standalone/unfronted deployments "
-            "ignore these client-spoofable headers."
+            "Trust proxy-set request headers: X-Oidc-* for the identity (auth "
+            "Path 1) and X-Forwarded-For for the address recorded in the audit "
+            "trail. Enable ONLY when a trusted proxy (e.g. Envoy Gateway) "
+            "authenticates the user and injects these headers AND the engine is "
+            "reachable only via that proxy. Default off = fail closed: "
+            "standalone/unfronted deployments ignore these client-spoofable "
+            "headers and audit the socket address instead."
         ),
     )
     oidc: OIDCSettings = Field(default_factory=OIDCSettings)
