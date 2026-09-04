@@ -359,6 +359,14 @@ class TestEnvOverrides:
         settings = load_settings()
         assert settings.clickhouse.verify is False
 
+    def test_clickhouse_verify_empty_string_is_none(self, monkeypatch):
+        # The chart ships verify: "" so the code's default governs, and an empty
+        # env var must reach the same None as an unset one. Were this to resolve
+        # False instead, verification would go off with the chart unchanged.
+        monkeypatch.setenv("DFE_CLICKHOUSE_VERIFY", "")
+        settings = load_settings()
+        assert settings.clickhouse.verify is None
+
     def test_clickhouse_ca_cert_override_flows_to_config(self, monkeypatch):
         monkeypatch.setenv("DFE_CLICKHOUSE_CA_CERT", "/etc/ssl/internal-ca.pem")
         settings = load_settings()
