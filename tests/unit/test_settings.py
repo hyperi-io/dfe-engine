@@ -141,6 +141,8 @@ class TestDefaultSettings:
         settings = load_settings()
         assert isinstance(settings, DFESettings)
         assert settings.clickhouse.host == "localhost"
+        # The client is HTTP-only, so the default has to be the HTTP port.
+        assert settings.clickhouse.port == 8123
 
 
 class TestEnvOverrides:
