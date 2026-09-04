@@ -224,11 +224,10 @@ class TestHuntsRouter:
         assert resp.status_code == 403
 
     def test_trigger_nonexistent_hunt_returns_404(self, client, admin_headers):
-        """Triggering a hunt that does not exist returns 404.
+        """Queueing a run for a hunt that does not exist returns 404.
 
-        Hunts execute in the separate dfe-hunt-runner service; the API validates
-        the hunt exists, then returns 501 (ad-hoc trigger not yet wired). A missing
-        hunt short-circuits to 404 before that.
+        The hunt is validated before anything is written, so a missing hunt never
+        reaches the coordination tables.
         """
         resp = client.post(
             "/api/v1/hunts/test-hunt/run",
