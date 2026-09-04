@@ -1346,3 +1346,118 @@ class TestSchemasMetaWriteRouter:
                 assert "column" in empty_cols.text.lower()
         finally:
             _registries.clear()
+
+    def test_delete_meta_schema_version(self, tmp_path):
+        from dfe_engine.api.app import create_app
+        from dfe_engine.api.deps import _registries, create_access_token
+        from dfe_engine.settings import (
+            APISettings,
+            AuthSettings,
+            DFESettings,
+            SchemasSettings,
+            ServicesSettings,
+            SourceSettings,
+        )
+        from dfe_engine.yaml_utils import yaml_dump
+
+        schemas_root = tmp_path / "schemas"
+        (schemas_root / "aws").mkdir(parents=True)
+        yaml_dump(
+            {
+                "current": "1.1.0",
+                "versions": {
+                    "1.0.0": {
+                        "date": "2026-01-01",
+                        "type": "model",
+                        "summary": "init",
+                        "columns": [{"name": "e", "type": "string"}],
+                    },
+                    "1.1.0": {
+                        "date": "2026-02-01",
+                        "type": "addition",
+                        "summary": "extra",
+                        "columns": [
+                            {"name": "e", "type": "string"},
+                            {"name": "n", "type": "integer"},
+                        ],
+                    },
+                },
+            },
+            schemas_root / "aws" / "cloudtrail.yaml",
+        )
+        (schemas_root / "core").mkdir()
+        yaml_dump(
+            {
+                "resource_type": "core",
+                "current": "1.1.0",
+                "versions": {
+                    "1.0.0": {
+                        "date": "2026-01-01",
+                        "type": "model",
+                        "summary": "init",
+                        "columns": [{"name": "a", "type": "string"}],
+                    },
+                    "1.1.0": {
+                        "date": "2026-02-01",
+                        "type": "addition",
+                        "summary": "extra",
+                        "columns": [{"name": "a", "type": "string"}],
+                    },
+                },
+            },
+            schemas_root / "core" / "protected.yaml",
+        )
+
+        for name in ("sources", "services", "auth"):
+            (tmp_path / name).mkdir()
+
+        settings = DFESettings(
+            config_dir=str(tmp_path),
+            schemas=SchemasSettings(schemas_dir=str(schemas_root)),
+            source=SourceSettings(sources_dir=str(tmp_path / "sources")),
+            services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
+            auth=AuthSettings(enabled=True, auth_dir=str(tmp_path / "auth")),
+            api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-schemas-delver"),
+        )
+        app = create_app(settings)
+        token = create_access_token(
+            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
+            settings=settings,
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        base = "/api/v1/schemas/definitions/aws/cloudtrail"
+
+        try:
+            with TestClient(app, raise_server_exceptions=False) as tc:
+                deleted = tc.delete(f"{base}/versions/1.0.0", headers=headers)
+                assert deleted.status_code == 204
+                gone = tc.get(f"{base}/versions/columns?version=1.0.0", headers=headers)
+                assert gone.status_code == 404
+                remaining = tc.get(f"{base}/versions/columns?version=1.1.0", headers=headers)
+                assert remaining.status_code == 200
+
+                last = tc.delete(f"{base}/versions/1.1.0", headers=headers)
+                assert last.status_code == 422
+                assert last.json()["code"] == "validation_error"
+
+                missing_ver = tc.delete(f"{base}/versions/9.9.9", headers=headers)
+                assert missing_ver.status_code == 404
+                missing_schema = tc.delete(
+                    "/api/v1/schemas/definitions/aws/missing/versions/1.0.0",
+                    headers=headers,
+                )
+                assert missing_schema.status_code == 404
+
+                core_del = tc.delete(
+                    "/api/v1/schemas/definitions/core/protected/versions/1.0.0",
+                    headers=headers,
+                )
+                assert core_del.status_code == 409
+                assert core_del.json()["code"] == "conflict"
+                assert core_del.json()["message"] == "Core resources can't be mutated"
+        finally:
+            _registries.clear()
+
+    def test_delete_meta_schema_version_requires_auth(self, client):
+        resp = client.delete("/api/v1/schemas/definitions/aws/cloudtrail/versions/1.0.0")
+        assert resp.status_code == 401

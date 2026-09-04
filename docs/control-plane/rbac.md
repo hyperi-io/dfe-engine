@@ -51,7 +51,7 @@ flowchart TD
 | Path | Use case | Credential storage | Token lifetime |
 |------|----------|-------------------|----------------|
 | OIDC headers | Production (Envoy Gateway fronted) | IdP (Entra, Google, etc.) | Session cookie (Envoy managed) |
-| API key | CI/CD, Terraform, scripts | `config/auth/api-keys/*.yaml` (SHA-256 hash) | Long-lived (revoke by deleting file) |
+| API key | CI/CD, Terraform, scripts | `config/auth/api-keys/*.yaml` (SHA-256 hash) | `expires_at` if set, else long-lived (revoke by deleting file) |
 | JWT Bearer | Standalone UI, dev | Issued by `/api/v1/auth/login` | `jwt_expire_minutes` (default 30) |
 | Disabled | Dev/test | N/A | N/A |
 
@@ -168,6 +168,9 @@ prefix short     long token (shown once, stored as SHA-256 hash)
 - **Long token** (32 hex chars): SHA-256 hashed. Not bcrypt — keys are
   high-entropy random, bcrypt's slowness adds no security value
 - Full key shown **once** at creation, never retrievable again
+- **Expiry** (`expires_at`, optional ISO-8601 stored as UTC): enforced on every
+  verify, so a lapsed key stops authenticating with no sweeper running. The
+  file stays until revoked, and `list` reports `expired: true`
 - **Revocation:** Delete the key's YAML file or call the revoke API
 
 ### 1.7 API Key Verification Flow
@@ -180,10 +183,17 @@ prefix, short_token, long_token = parse_api_key(submitted_key)
 # 1. Scan for matching short_token across key files
 key_meta = find_by_short_token(short_token)
 
-# 2. SHA-256 verify (timing-safe)
-actual_hash = "sha256:" + hashlib.sha256(long_token.encode()).hexdigest()
+# 2. Hash verify, timing-safe (SHA-384; legacy sha256: keys still verify)
+actual_hash = "sha384:" + hashlib.sha384(long_token.encode()).hexdigest()
 if not hmac.compare_digest(key_meta.key_hash, actual_hash):
     raise AuthenticationError("Invalid API key")
+
+# 3. Status checks run only AFTER possession is proven, so the specific
+#    reason cannot confirm a key the caller does not already hold
+if not key_meta.enabled:
+    raise AuthenticationError("API key disabled")
+if key_meta.is_expired():
+    raise AuthenticationError("API key expired")
 ```
 
 ---
@@ -432,7 +442,7 @@ On first startup (empty `config/auth/` directory), `bootstrap_auth()` seeds:
 - `dfe-viewers` → roles: `[data_viewer]`
 - `dfe-infra` → roles: `[infra_admin]`
 
-**Account:** username from `DFE_AUTH_LOCAL_ADMIN_NAME` (default `admin`), password from `DFE_AUTH_LOCAL_ADMIN_PASSWORD` (default `changeme`), group `dfe-admins`.
+**Account:** username `admin`, password `changeme`, group `dfe-admins` - password gets reset in the app setup flow.
 
 Startup logs a warning if the default password is still in use.
 

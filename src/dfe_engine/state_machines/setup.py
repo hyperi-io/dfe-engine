@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     from dfe_engine.orgs.registry import OrgRegistry
 
 # The bootstrap-seeded break-glass admin (see auth/bootstrap.py::_seed_admin).
-# Username and password come from DFE_AUTH_LOCAL_ADMIN_NAME / _PASSWORD at
+# Username and password come from admin_account_name() / admin_account_password() at
 # evaluation time (not import time) so the wizard follows the live env.
 # It does not count as the "first user" — that step is about getting off the
 # emergency credential and onto a real identity.
@@ -288,9 +288,7 @@ def _has_break_glass_account(ctx: SetupContext) -> bool:
 def _break_glass_password_rotated(ctx: SetupContext) -> bool:
     """True once the seeded admin no longer answers to the bootstrap password.
 
-    The baseline is ``DFE_AUTH_LOCAL_ADMIN_PASSWORD`` (falling back to
-    ``changeme``). Setting the env var does not skip this step — the operator
-    still has to rotate off the value that was seeded.
+    The baseline is ``changeme``.
 
     Costs one bcrypt verify per call on an unauthenticated endpoint. There is
     no cheaper honest test — a changed ``updated_at`` also fires for an

@@ -1570,10 +1570,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Sort field (name, created_at)",
+              "description": "Sort field (name, created_at, expires_at)",
               "title": "Sort By"
             },
-            "description": "Sort field (name, created_at)"
+            "description": "Sort field (name, created_at, expires_at)"
           },
           {
             "name": "sort_order",
@@ -8080,6 +8080,56 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/schemas/definitions/{schema_path}/versions/{version}": {
+      "delete": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "Delete Meta Schema Version",
+        "description": "Delete a specific meta-schema version.\n\nCore schemas are blocked by the core-resource guard (HTTP 409). The last\nremaining version cannot be deleted \u2014 delete the schema instead.",
+        "operationId": "delete_meta_schema_version_api_v1_schemas_definitions__schema_path__versions__version__delete",
+        "parameters": [
+          {
+            "name": "schema_path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Schema Path"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Version"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -15664,6 +15714,24 @@
             "type": "string",
             "title": "Created At"
           },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At",
+            "description": "ISO-8601 UTC expiry, or null if never"
+          },
+          "expired": {
+            "type": "boolean",
+            "title": "Expired",
+            "description": "True once expires_at has passed",
+            "default": false
+          },
           "full_key": {
             "type": "string",
             "title": "Full Key",
@@ -15711,6 +15779,24 @@
           "created_at": {
             "type": "string",
             "title": "Created At"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At",
+            "description": "ISO-8601 UTC expiry, or null if never"
+          },
+          "expired": {
+            "type": "boolean",
+            "title": "Expired",
+            "description": "True once expires_at has passed",
+            "default": false
           }
         },
         "type": "object",
@@ -17255,6 +17341,18 @@
             "title": "Description",
             "description": "Optional description",
             "default": ""
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At",
+            "description": "Optional ISO-8601 expiry (UTC if no offset given); omit for a key that never expires"
           }
         },
         "type": "object",
@@ -18919,8 +19017,16 @@
             "default": 60
           },
           "global_target_table_name": {
-            "type": "string",
-            "title": "Global Target Table Name"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Global Target Table Name",
+            "description": "Results table override; the rule's query carries its own target when omitted"
           },
           "global_source_table_name": {
             "anyOf": [
@@ -19015,7 +19121,6 @@
         "type": "object",
         "required": [
           "cron",
-          "global_target_table_name",
           "customers",
           "rules",
           "name"
@@ -19051,8 +19156,16 @@
             "default": 60
           },
           "global_target_table_name": {
-            "type": "string",
-            "title": "Global Target Table Name"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Global Target Table Name",
+            "description": "Results table override; the rule's query carries its own target when omitted"
           },
           "global_source_table_name": {
             "anyOf": [
@@ -19147,7 +19260,6 @@
         "required": [
           "display_name",
           "cron",
-          "global_target_table_name",
           "customers",
           "name",
           "rules"
@@ -19332,8 +19444,16 @@
             "default": 60
           },
           "global_target_table_name": {
-            "type": "string",
-            "title": "Global Target Table Name"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Global Target Table Name",
+            "description": "Results table override; the rule's query carries its own target when omitted"
           },
           "global_source_table_name": {
             "anyOf": [
@@ -19423,7 +19543,6 @@
         "type": "object",
         "required": [
           "cron",
-          "global_target_table_name",
           "customers",
           "rules"
         ],
@@ -26550,7 +26669,7 @@
           "engine": {
             "type": "string",
             "title": "Engine",
-            "description": "Transform engine (vector or wasm)"
+            "description": "Transform engine - a catalogued transform app by engine name (e.g. vrl, vector)"
           },
           "config_file": {
             "anyOf": [
@@ -26586,7 +26705,7 @@
           "engine"
         ],
         "title": "SourceTransform",
-        "description": "Transform stage configuration (vector or wasm)."
+        "description": "Transform stage configuration: the engine is one of the catalogue's transform apps."
       },
       "SourceVersionDetail": {
         "properties": {

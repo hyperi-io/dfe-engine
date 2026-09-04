@@ -50,35 +50,30 @@ SOURCE = "filebeat"
 TRANSFORMS = ("dfe-transform-vrl", "dfe-transform-vector")
 
 # The filebeat table is built from meta/beats/filebeat.yaml, so ECS lands in
-# typed columns rather than in JSON to dig through. log_file_path is derived by
-# the transform and absent from the corpus body, so a populated one means the
-# event was transformed rather than passed through.
+# typed columns rather than in JSON to dig through. Both columns are set by the
+# VRL and absent from the corpus body, so one populated means the event was
+# transformed rather than passed through. Both are set ONLY in the umbrella
+# branch of the pipeline, so this assertion covers one of the three corpus
+# modules. `event_module` and `event_dataset` used to be here too; the VRL never
+# sets either, and neither appears in Elastic's own goldens, so they could not
+# fire.
 #
-# It is the strongest column of that table this corpus can assert on. The bundled
-# VRL sets log.file.path once (filebeat.vrl:3020), UNCONDITIONALLY at the head of
-# the cisco_umbrella branch. host.name (:4095) and user.name (:3763, :4066) are
-# populatable too, but each sits in that SAME branch behind a condition, so none
-# of them can match a row log_file_path does not; event.module and event.dataset
-# appear nowhere in the file. `message` is excluded because the raw body carries it, and
-# `timestamp` because the loader fills it with the arrival time when nothing maps
-# to it - a timestamp with a null message is exactly an untransformed row.
+# `source_ip` is the column that covers all three modules (104 of the 377
+# goldens -- umbrella 30, ios 37, meraki 37), is set by the VRL and declared by
+# the meta schema, and is excluded only because dfe-loader#127 rejects the
+# value. Once that lands, switch to it AND widen the sample: the five events
+# posted below include no meraki line that carries a source IP.
 #
-# So a pass proves the cisco_umbrella branch ran, and says nothing about
-# cisco_ios or cisco_meraki: neither sets any column this table has, and both
-# could regress to nothing without failing this.
-#
-# Stamping event.module in the VRL to widen that is the WRONG fix, measured
-# rather than assumed: 0 of the 377 Elastic goldens for this corpus carry
-# event.module or event.dataset, so emitting it would be a fifth departure from
-# Elastic in a pipeline whose point is Elastic compatibility, taken on to make a
-# test easier.
-#
-# source_ip is the column that SHOULD carry this - the VRL assigns source.ip in
-# every module branch (meraki :374, ios :2647, umbrella :5051), so it covers all
-# three where log_file_path covers one. It cannot be used yet because the loader
-# rejects an IPv4 literal for an IPv6 column (dfe-loader#127), so every row
-# carrying one is dropped before it lands. Switch to it once that is fixed.
-_ECS_POPULATED = "log_file_path != ''"
+# `message` is excluded because the raw body carries it, and `timestamp` because
+# the loader fills it with the arrival time when nothing maps to it - rows with a
+# timestamp and a null message are exactly that, so including it would let an
+# untransformed row satisfy the assertion on its own.
+_ECS_POPULATED = " OR ".join(
+    (
+        "host_name != ''",
+        "log_file_path != ''",
+    )
+)
 
 
 def _corpus_or_skip(limit: int = 5) -> list[corpus.Sample]:

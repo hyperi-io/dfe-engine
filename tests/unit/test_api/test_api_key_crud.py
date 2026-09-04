@@ -10,6 +10,12 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
+
+def _iso_in(**delta) -> str:
+    return (datetime.now(UTC) + timedelta(**delta)).isoformat()
+
 
 class TestCreateAPIKey:
     """POST /api/v1/auth/api-keys"""
@@ -63,6 +69,57 @@ class TestCreateAPIKey:
         )
         assert resp.status_code == 422
 
+    def test_create_without_expiry_never_expires(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/auth/api-keys",
+            json={"name": "no-expiry-key"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["expires_at"] is None
+        assert data["expired"] is False
+
+    def test_create_with_expiry(self, client, admin_headers):
+        expires_at = _iso_in(days=30)
+        resp = client.post(
+            "/api/v1/auth/api-keys",
+            json={"name": "expiring-key", "expires_at": expires_at},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert datetime.fromisoformat(data["expires_at"]) == datetime.fromisoformat(expires_at)
+        assert data["expired"] is False
+
+    def test_create_with_past_expiry_returns_400(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/auth/api-keys",
+            json={"name": "stale-key", "expires_at": _iso_in(days=-1)},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400
+        assert resp.json()["code"] == "validation_error"
+
+    def test_create_with_unparseable_expiry_returns_400(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/auth/api-keys",
+            json={"name": "bad-expiry-key", "expires_at": "next tuesday"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400
+        assert resp.json()["code"] == "validation_error"
+
+    def test_rejected_expiry_creates_no_key(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/api-keys",
+            json={"name": "rejected-key", "expires_at": "not-a-date"},
+            headers=admin_headers,
+        )
+        list_resp = client.get("/api/v1/auth/api-keys", headers=admin_headers)
+        names = [k["name"] for k in list_resp.json()["items"]]
+        assert "rejected-key" not in names
+
 
 class TestListAPIKeys:
     """GET /api/v1/auth/api-keys"""
@@ -83,6 +140,26 @@ class TestListAPIKeys:
         for key in data:
             assert "key_hash" not in key
             assert "full_key" not in key
+
+    def test_list_reports_expiry_state(self, client, admin_headers, app):
+        client.post(
+            "/api/v1/auth/api-keys",
+            json={"name": "lapsed-key", "expires_at": _iso_in(seconds=60)},
+            headers=admin_headers,
+        )
+        # Backdate the stored expiry — create() only accepts future values.
+        import dfe_engine.yaml_utils as yu
+
+        key_file = app.state.api_key_store._keys_dir / "lapsed-key.yaml"
+        data = yu.yaml_load(key_file)
+        data["expires_at"] = _iso_in(days=-1)
+        yu.yaml_dump(data, key_file)
+
+        resp = client.get("/api/v1/auth/api-keys", headers=admin_headers)
+        assert resp.status_code == 200
+        lapsed = next(k for k in resp.json()["items"] if k["name"] == "lapsed-key")
+        assert lapsed["expired"] is True
+        assert lapsed["expires_at"] is not None
 
     def test_list_requires_admin(self, client, viewer_headers):
         resp = client.get("/api/v1/auth/api-keys", headers=viewer_headers)
