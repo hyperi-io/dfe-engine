@@ -37,7 +37,7 @@ from dfe_engine.api.deps import (
     jwt_authority_for,
     resolve_live_roles_for_user,
 )
-from dfe_engine.auth.audit import audit_login_success
+from dfe_engine.auth.audit import audit_login_denied, audit_login_success
 
 router = APIRouter(prefix="/auth/oidc", tags=["OIDC Login"])
 
@@ -155,12 +155,15 @@ async def oidc_callback(provider: str, request: Request, settings: Settings) -> 
     except Exception as exc:
         # Bad code, failed id_token validation, nonce/state mismatch, etc.
         logger.warning("OIDC callback failed", provider=provider, error=str(exc))
+        # A refused credential is an audit event, not just an operational log line.
+        audit_login_denied("unknown", "oidc", _get_client_ip(request), str(exc))
         raise HTTPException(
             status_code=401,
             detail={"code": "unauthorized", "message": f"OIDC login failed: {exc}"},
         )
 
     if not identity.subject:
+        audit_login_denied("unknown", "oidc", _get_client_ip(request), "no_subject")
         raise HTTPException(
             status_code=401,
             detail={"code": "unauthorized", "message": "IdP id_token carried no subject"},
