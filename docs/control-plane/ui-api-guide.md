@@ -194,7 +194,7 @@ K8s/KEDA deployment config (replicas, resources, scaling).
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/hunts/status` | Engine scheduler status |
+| GET | `/hunts/status` | Hunt runner liveness (`running`, `runners`) + hunt count |
 | GET | `/hunts` | List configured hunts |
 | POST | `/hunts/{name}/run` | Trigger ad-hoc execution (202 + task_id) |
 

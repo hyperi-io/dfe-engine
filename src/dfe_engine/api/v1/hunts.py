@@ -41,7 +41,7 @@ from dfe_engine.api.deps import (
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
-from dfe_engine.hunt_runner.run_status import RunStatus, read_run_status
+from dfe_engine.hunt_runner.run_status import RunStatus, live_runner_count, read_run_status
 from dfe_engine.hunt_runner.spec_loader import interval_seconds_for
 from dfe_engine.hunt_runner.spread import next_due
 from dfe_engine.hunts.alert_hunt_link import delete_destinations_owned_by_hunt
@@ -112,7 +112,10 @@ router = APIRouter(prefix="/hunts", tags=["hunts"])
 class HuntEngineStatus(BaseModel):
     """Current state of the background hunt scheduler."""
 
-    running: bool = Field(description="Whether the scheduler thread is alive")
+    running: bool = Field(description="Whether at least one hunt runner is alive")
+    runners: int = Field(
+        default=0, description="Hunt runners that beat within their last two polls"
+    )
     hunt_count: int = Field(default=0, description="Number of loaded hunts across all schedulers")
     scheduling_mode: str = Field(default="", description="Scheduling mode (cron, adaptive)")
 
@@ -264,30 +267,6 @@ class HuntRunQueued(BaseModel):
 # ── Dependencies ────────────────────────────────────────────
 
 
-def _active_hunt_leases(request: Request) -> int:
-    """Best-effort count of hunts currently held by a runner (active CH leases).
-
-    Hunt execution runs in the separate dfe-hunt-runner service and coordinates via
-    ClickHouse (the hunt_lease table). The API surfaces liveness by counting active
-    leases; it returns 0 (never errors) when ClickHouse is unreachable or the
-    coordination table does not exist yet.
-    """
-    try:
-        from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
-        from dfe_engine.settings import get_settings
-
-        db = get_settings().clickhouse.effective_data_database
-        client = ClickHouseManager.get_instance().get_clickhouse_client()
-        rows = client.query(
-            "SELECT countIf(lu > toInt64(now())) FROM ("
-            f"SELECT hunt_id, argMax(lease_until, claimed) AS lu "
-            f"FROM `{db}`.hunt_lease GROUP BY hunt_id)"
-        ).result_rows
-        return int(rows[0][0]) if rows else 0
-    except Exception:
-        return 0
-
-
 def _data_database_client() -> tuple[Any, str]:
     """The ClickHouse client and data database the coordination tables live in."""
     from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
@@ -297,6 +276,21 @@ def _data_database_client() -> tuple[Any, str]:
         ClickHouseManager.get_instance().get_clickhouse_client(),
         get_settings().clickhouse.effective_data_database,
     )
+
+
+def _live_runners(request: Request) -> int:
+    """Best-effort count of hunt runners that have beaten within their last two polls.
+
+    Hunt execution runs in the separate dfe-hunt-runner service and coordinates via
+    ClickHouse; each runner writes a row to hunt_runner_heartbeat at the top of every
+    tick. Returns 0 (never errors) when ClickHouse is unreachable or the coordination
+    table does not exist yet.
+    """
+    try:
+        client, db = _data_database_client()
+        return live_runner_count(client, db, int(time.time()))
+    except Exception:
+        return 0
 
 
 def _run_status_for(hunt_names: list[str], now: int) -> dict[str, RunStatus]:
@@ -360,15 +354,15 @@ async def get_engine_status(
     """Report hunt scheduling status.
 
     Hunts execute in the separate dfe-hunt-runner service (pull-based, coordinated
-    via ClickHouse), not in this API process. ``running`` counts in-flight leases
-    across the whole stack, and a lease is released the moment a run commits, so on
-    a healthy stack it reads false almost always. It is NOT runner liveness: for
-    "is this hunt running", read the per-hunt ``running`` on the hunts list.
-    ``hunt_count`` is the configured-hunt count.
+    via ClickHouse), not in this API process, so ``runners`` counts the runners that
+    beat within their last two polls and ``running`` is whether any did. For "is this
+    hunt running", read the per-hunt ``running`` on the hunts list; ``hunt_count`` is
+    the configured-hunt count.
     """
-    active = _active_hunt_leases(request)
+    runners = _live_runners(request)
     return HuntEngineStatus(
-        running=active > 0,
+        running=runners > 0,
+        runners=runners,
         hunt_count=len(registry.list_hunts()),
         scheduling_mode="pull",
     )
