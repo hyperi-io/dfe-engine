@@ -26,6 +26,8 @@ import httpx
 from scalo.http import HttpClient
 from scalo.logger import logger
 
+from dfe_engine.gitops.dulwich_auth import redact_credentials
+
 if TYPE_CHECKING:
     from dfe_engine.settings import GitopsSettings
 
@@ -243,7 +245,11 @@ def build_forge(gs: GitopsSettings) -> ForgeProvider | None:
     try:
         coords = _split_repo_url(gs.repo_url)
     except ValueError as exc:
-        logger.warning("gitops repo_url not usable for a review-PR forge", error=str(exc))
+        # The message quotes repo_url back, which an operator may have configured
+        # with an embedded token.
+        logger.warning(
+            "gitops repo_url not usable for a review-PR forge", error=redact_credentials(str(exc))
+        )
         return None
 
     provider = (gs.forge_provider or _infer_provider(coords.host)).lower()

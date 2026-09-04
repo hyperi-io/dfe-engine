@@ -278,6 +278,20 @@ def _data_database_client() -> tuple[Any, str]:
     )
 
 
+def _clickhouse_unreachable(exc: BaseException) -> bool:
+    """True only when *exc* means ClickHouse could not be reached.
+
+    A CONNECTION outage, or scalo's ServiceUnavailable once the reconnect budget is
+    spent. Everything else -- a query error, a missing table, a bug in this process
+    -- is NOT a reachability problem and must not be reported as one.
+    """
+    from scalo.resilience import ServiceUnavailable
+
+    from dfe_engine.clickhouse.errors import is_connection_error
+
+    return isinstance(exc, ServiceUnavailable) or is_connection_error(exc)
+
+
 def _live_runners(request: Request) -> int:
     """Best-effort count of hunt runners that have beaten within their last two polls.
 
@@ -540,6 +554,9 @@ async def trigger_hunt(
 
     A hunt with no rate schedule is not something the runner ticks, so a queued run
     for one sits unclaimed. That is the schedule's shape, not a failure here.
+
+    503 is reserved for ClickHouse actually being unreachable; any other failure to
+    write the request is a 500, so a bug here never reads as an outage.
     """
     try:
         registry.get(name)
@@ -556,6 +573,19 @@ async def trigger_hunt(
         client, db = _data_database_client()
         ChCoordinator(client, database=db).request_run(name, fire)
     except Exception as exc:
+        if not _clickhouse_unreachable(exc):
+            # A 503 here would claim ClickHouse is down when it is not.
+            logger.exception(f"could not queue a run for hunt '{name}': {exc}")
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "code": "queue_failed",
+                    "message": (
+                        "The run could not be queued and the cause was not a ClickHouse "
+                        "connection failure; the error is in the engine log"
+                    ),
+                },
+            ) from exc
         logger.error(f"could not queue a run for hunt '{name}': {exc}")
         raise HTTPException(
             status_code=503,
