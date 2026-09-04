@@ -3,6 +3,19 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.0](https://github.com/hyperi-io/dfe-engine/compare/v1.18.0...v1.19.0) (2026-09-04)
+
+### Features
+
+* **hunts:** per-hunt run visibility and a working run-now ([#279](https://github.com/hyperi-io/dfe-engine/issues/279)) ([97da403](https://github.com/hyperi-io/dfe-engine/commit/97da403b30ea3239bc98b57d3fe84839959fbe0f)), closes [#242](https://github.com/hyperi-io/dfe-engine/issues/242) [#237](https://github.com/hyperi-io/dfe-engine/issues/237) [#238](https://github.com/hyperi-io/dfe-engine/issues/238) [#280](https://github.com/hyperi-io/dfe-engine/issues/280) [#273](https://github.com/hyperi-io/dfe-engine/issues/273)
+
+### Bug Fixes
+
+* **kafka:** create a source's topics instead of relying on broker auto-create ([#238](https://github.com/hyperi-io/dfe-engine/issues/238)) ([2a80b0a](https://github.com/hyperi-io/dfe-engine/commit/2a80b0a94e790784089be20e1821a31afc1787ec)), closes [#97](https://github.com/hyperi-io/dfe-engine/issues/97) [#97](https://github.com/hyperi-io/dfe-engine/issues/97)
+* make the chart dials reachable and stop emitting defaults the apps reject ([#242](https://github.com/hyperi-io/dfe-engine/issues/242)) ([973015d](https://github.com/hyperi-io/dfe-engine/commit/973015d850104b963db5831bda19577e2222c0a1)), closes [#116](https://github.com/hyperi-io/dfe-engine/issues/116)
+* **source:** name the common-header profile that exists, and make the filebeat E2E honest ([#237](https://github.com/hyperi-io/dfe-engine/issues/237)) ([1aaaf8e](https://github.com/hyperi-io/dfe-engine/commit/1aaaf8ebc1fc38f3ca3bd31aaa6bf8e3416aa587)), closes [dfe-loader#127](https://github.com/hyperi-io/dfe-loader/issues/127) [dfe-loader#127](https://github.com/hyperi-io/dfe-loader/issues/127) [dfe-loader#127](https://github.com/hyperi-io/dfe-loader/issues/127)
+* **tests:** find the checkout's .env from a worktree, and say when ClickHouse falls back to local docker ([#280](https://github.com/hyperi-io/dfe-engine/issues/280)) ([e9ba253](https://github.com/hyperi-io/dfe-engine/commit/e9ba253d78c569e9da473e30b54e23ef2a8acd13))
+
 ## [1.18.0](https://github.com/hyperi-io/dfe-engine/compare/v1.17.13...v1.18.0) (2026-09-04)
 
 ### Features
