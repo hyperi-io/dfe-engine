@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.3](https://github.com/hyperi-io/dfe-engine/compare/v1.19.2...v1.19.3) (2026-09-04)
+
+### Bug Fixes
+
+* **hunts:** run-now writes through the API's ClickHouse client, and gitops pushes stop logging the token ([#285](https://github.com/hyperi-io/dfe-engine/issues/285)) ([7889af7](https://github.com/hyperi-io/dfe-engine/commit/7889af72a528f39d39928eae285f0c4d7ef3e2ca))
+
 ## [1.19.2](https://github.com/hyperi-io/dfe-engine/compare/v1.19.1...v1.19.2) (2026-09-04)
 
 ### Bug Fixes
