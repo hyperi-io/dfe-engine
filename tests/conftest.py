@@ -56,6 +56,11 @@ for _otel_key, _otel_val in (
 ):
     os.environ.setdefault(_otel_key, _otel_val)
 
+# Never post to the release endpoint: create_app() wires scalo's startup version
+# check with a real api_url, and version_check.enabled is read from the
+# bare-prefix cascade (Dynaconf, so VERSION_CHECK__ENABLED). Off for the run.
+os.environ.setdefault("VERSION_CHECK__ENABLED", "false")
+
 # --------------------------------------------------------------------------
 # Declare the dev posture explicitly. `DFE_ENV` defaults to "production", and
 # under that posture `DFESettings` refuses `auth.enabled: False` -- it would hand
