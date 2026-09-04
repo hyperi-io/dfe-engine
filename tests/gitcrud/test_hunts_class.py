@@ -226,6 +226,14 @@ class TestDelete:
         with pytest.raises(RuleNotFoundError):
             rules.delete("nope")
 
+    def test_a_traversing_name_reads_as_absent_not_as_a_500(self, hunts):
+        """`{name}` is a path param nothing validates, so it reaches the store raw."""
+        assert hunts.exists("..") is False
+        with pytest.raises(HuntConfigNotFoundError):
+            hunts.get("..")
+        with pytest.raises(HuntConfigNotFoundError):
+            hunts.delete("..")
+
 
 class TestCommitMessages:
     def test_a_create_commits_a_conforming_subject_and_actor_trailer(self, hunts, crud):

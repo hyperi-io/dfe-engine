@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 
 from scalo.logger import logger
 
-from dfe_engine.gitcrud.commit_policy import CommitContext, build_message
+from dfe_engine.gitcrud.commit_policy import CommitContext, CommitPolicyError, build_message
 from dfe_engine.gitcrud.engine import ResourceNotFoundError
 from dfe_engine.gitcrud.routing import (
     ReviewRequiredError,
@@ -78,10 +78,14 @@ class DeployRepoStore:
         return self._crud.list(self._cls_name)
 
     def get(self, name: str) -> dict[str, Any] | None:
-        """The stored doc, or None when the resource is absent."""
+        """The stored doc, or None when the resource is absent.
+
+        A name gitcrud refuses cannot name a stored file either, so it reads as
+        absent and the caller's own 404 path handles it.
+        """
         try:
             return self._crud.get(self._cls_name, name)
-        except ResourceNotFoundError:
+        except (ResourceNotFoundError, CommitPolicyError):
             return None
 
     def put(self, name: str, doc: dict[str, Any], *, actor: str) -> None:
