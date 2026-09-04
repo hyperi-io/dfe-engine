@@ -37,8 +37,10 @@ import re
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+import sqlglot
 from pydantic import BaseModel, Field, model_validator
 from scalo.logger import logger
+from sqlglot.errors import ParseError
 
 from .hdx_sanitizer import HdxSanitizer, HdxSanitizeResult
 from .rule_model import Rule, RuleCreate
@@ -233,6 +235,8 @@ class RuleCreationService:
         2. Must contain FROM
         3. No DDL/DML keywords (INSERT, DROP, etc.)
         4. Balanced parentheses
+        5. Parses as one ClickHouse SELECT (EXPLAIN AST when ClickHouse is
+           configured, else sqlglot's ClickHouse dialect)
         """
         errors: list[SqlValidationError] = []
         trimmed = sql.strip()
@@ -289,7 +293,56 @@ class RuleCreationService:
                 )
             )
 
+        # The keyword checks above read like a lint; only a parse says the SQL is SQL.
+        if not errors:
+            parse_error = self._parse_error(trimmed)
+            if parse_error is not None:
+                errors.append(parse_error)
+
         return errors
+
+    def _parse_error(self, sql: str) -> SqlValidationError | None:
+        """Parse the SQL as ClickHouse and return the first syntax error, if any.
+
+        ClickHouse's own parser (``EXPLAIN AST``) is authoritative when it is
+        configured and reachable; sqlglot's ClickHouse dialect stands in otherwise.
+        """
+        if self._ch_config:
+            try:
+                from ..clickhouse.clickhouse_manager import ClickHouseManager
+
+                client = ClickHouseManager.get_instance().get_clickhouse_client()
+                client.execute(f"EXPLAIN AST {sql}")
+                return None
+            except Exception as exc:
+                detail = str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__
+                if "Syntax error" in detail:
+                    return SqlValidationError(
+                        message=f"ClickHouse could not parse this SQL: {detail}",
+                        suggestion="Fix the syntax at the position ClickHouse reports.",
+                    )
+                logger.debug(f"EXPLAIN AST unavailable, parsing with sqlglot: {detail}")
+
+        try:
+            statements = sqlglot.parse(sql, read="clickhouse")
+        except ParseError as exc:
+            first = exc.errors[0] if exc.errors else {}
+            description = str(first.get("description") or exc).strip()
+            line = first.get("line")
+            col = first.get("col")
+            position = (col - 1) if line == 1 and isinstance(col, int) else None
+            return SqlValidationError(
+                message=f"SQL does not parse as ClickHouse: {description}",
+                position=position,
+                suggestion="Fix the syntax at the reported position.",
+            )
+        statements = [s for s in statements if s is not None]
+        if len(statements) != 1:
+            return SqlValidationError(
+                message=f"Expected one SELECT statement, found {len(statements)}.",
+                suggestion="A detection rule is a single SELECT.",
+            )
+        return None
 
     def _estimate_cost(self, rule: Rule, window_minutes: int) -> CostEstimate:
         """Run EXPLAIN PLAN against ClickHouse. Best-effort, never blocks.

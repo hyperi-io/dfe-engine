@@ -109,6 +109,7 @@ dependencies = [
     #   - logreducer: sampler 'smart'/'anomaly' modes (add + SHA-pin once it hits
     #     public PyPI; until then the sampler falls back with a clean message)
     "faker>=40.36.0",
+    "sqlglot>=30.17.0",
 ]
 
 [project.urls]
