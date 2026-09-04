@@ -431,6 +431,33 @@ class KafkaSettings(BaseModel):
     sasl_username: str = Field(default="", description="SASL username")
     sasl_password: str = Field(default="", description="SASL password")
     redpanda_cloud: RedpandaCloudSettings = Field(default_factory=RedpandaCloudSettings)
+    ensure_topics: bool = Field(
+        default=True,
+        description=(
+            "Create a source's _land/_load topics when it deploys. Turn off only "
+            "where Kafka is not in the path (the direct-gRPC receiver -> loader "
+            "profile); a deploy never fails on the topic step either way."
+        ),
+    )
+    topic_partitions: int = Field(
+        default=3,
+        ge=1,
+        le=1000,
+        description=(
+            "Partition count for topics DFE creates. Capped: a mistyped value asks a "
+            "real broker for that many partitions per topic, costing file handles and "
+            "controller metadata across the cluster."
+        ),
+    )
+    topic_replication_factor: int = Field(
+        default=1,
+        ge=1,
+        le=10,
+        description=(
+            "Replication factor for topics DFE creates. 1 suits a single-broker "
+            "dev cluster; raise it to match a real broker count."
+        ),
+    )
 
     @model_validator(mode="after")
     def _derive_from_provider(self) -> "KafkaSettings":
@@ -1439,6 +1466,15 @@ def _get_env_overrides() -> dict:
         overrides["kafka"]["sasl_username"] = val
     if val := _get_env("DFE_KAFKA_SASL_PASSWORD", "KAFKA_SASL_PASSWORD"):
         overrides["kafka"]["sasl_password"] = val
+    # Topic creation on source deploy. The Kafka-less profile (receiver -> loader
+    # over direct gRPC) has no broker to reach, so it needs an env route to turn
+    # this off; without one the deploy stalls on the admin timeout every time.
+    if val := _get_env("DFE_KAFKA_ENSURE_TOPICS"):
+        overrides["kafka"]["ensure_topics"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_KAFKA_TOPIC_PARTITIONS"):
+        overrides["kafka"]["topic_partitions"] = int(val)
+    if val := _get_env("DFE_KAFKA_TOPIC_REPLICATION_FACTOR"):
+        overrides["kafka"]["topic_replication_factor"] = int(val)
 
     # Redpanda Cloud lifecycle (control-plane OAuth2 client; opt-in, WS-C
     # dfe-engine#99). DFE_REDPANDA_API_KEY/_SECRET are the pre-existing names this

@@ -105,6 +105,18 @@ config:
     autostart_rate_eps: 2
     # -- Optional determinism seed for the standing streams
     autostart_seed: ""
+  # -- Kafka. A source deploy creates that source's _land/_load topics rather than
+  # leaving them to the broker's auto-create. The whole step is gated on
+  # bootstrap_servers: empty (the default, and the Kafka-less receiver -> loader
+  # profile) turns it off, because there would be no broker to reach and every
+  # deploy would spend the admin timeout finding that out. Set it to your broker
+  # and the step turns on. SASL credentials are not exposed here yet, so this
+  # covers a broker the engine reaches without auth.
+  kafka:
+    bootstrap_servers: ""
+    ensure_topics: true
+    topic_partitions: 3
+    topic_replication_factor: 1
   # -- Root config directory — maps to DFE_CONFIG_DIR.
   # Auto-resolves sources/, services/, hunts/, etc. subdirectories.
   # Set to the mount path of your config PVC or git-synced volume.

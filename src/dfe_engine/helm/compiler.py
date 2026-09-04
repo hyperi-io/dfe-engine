@@ -325,26 +325,33 @@ class HelmValuesCompiler:
     def compile_kafka_topics(self) -> list[dict[str, Any]]:
         """Compile Kafka topic specs from ACTIVE sources only.
 
-        Each source with a ``topic_land`` produces a topic spec. Dormant
-        sources have no live pipeline, so they get no topic.
+        Each source yields ``_land``; a source with a transform also yields
+        ``_load``, because the transform writes there and the loader reads it.
+        Dormant sources have no live pipeline, so they get no topic.
+
+        Partitions and replication factor come from Kafka settings - a
+        single-broker dev cluster and a real one need different numbers, and
+        baking either in makes the topic wrong on the other.
 
         Returns:
             List of topic spec dicts with name, partitions, replication_factor.
         """
+        from dfe_engine.kafka.topics import source_topic_specs
+        from dfe_engine.settings import get_settings
+
+        ks = get_settings().kafka
         topics: list[dict[str, Any]] = []
         seen: set[str] = set()
 
         for source in self._source.get_all_sources(states=("active",)):
-            topic = source.topic_land
-            if topic and topic not in seen:
-                seen.add(topic)
-                topics.append(
-                    {
-                        "name": topic,
-                        "partitions": 3,
-                        "replication_factor": 1,
-                    }
-                )
+            for spec in source_topic_specs(
+                source,
+                partitions=ks.topic_partitions,
+                replication_factor=ks.topic_replication_factor,
+            ):
+                if spec.name and spec.name not in seen:
+                    seen.add(spec.name)
+                    topics.append(spec.to_dict())
 
         return topics
 

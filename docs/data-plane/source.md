@@ -492,11 +492,23 @@ Sources are managed as YAML files - one file per source - by
 
 | Operation | Effect |
 |-----------|--------|
-| **Create** | Validates source definition, creates Kafka topics (or marks for creation), runs schema DDL, updates receiver match rules |
+| **Create** | Validates the source definition and updates receiver match rules. No topics, no DDL - those land on deploy |
+| **Deploy** | Runs the schema DDL, then creates that source's Kafka topics for the version being deployed |
 | **Read** | Returns source config + status (topic exists, table exists, transform running) |
 | **Update** | Validates changes, applies schema migration if fields changed, updates receiver/transform config |
 | **Delete** | Removes the source definition (one attributed git commit on the gitcrud backend); table + data preserved. To pause instead, set `state: dormant` or `disabled` |
 | **List** | All sources with status overlay (healthy, degraded, disabled) |
+
+**Topics on deploy.** DFE creates `<source>_land` (and `<source>_load` when that
+version has a transform) rather than leaving them to the broker's
+`auto.create.topics.enable`, which yields mis-partitioned unmanaged topics and on
+Confluent Cloud non-Dedicated is not available at all. The topic step never fails
+a deploy: the schema is already live by then, and any topic that could not be
+created comes back in `topics_failed` on the response. Width comes from
+`DFE_KAFKA_TOPIC_PARTITIONS` / `DFE_KAFKA_TOPIC_REPLICATION_FACTOR`. On the
+Kafka-less profile (receiver -> loader over direct gRPC) set
+`DFE_KAFKA_ENSURE_TOPICS=false` - there is no broker, and leaving it on costs
+every deploy the admin timeout before it gives up.
 
 ### Validation Rules
 
