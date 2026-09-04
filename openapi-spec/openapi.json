@@ -25250,7 +25250,7 @@
             },
             "type": "object",
             "title": "Views",
-            "description": "View name \u2192 DDL"
+            "description": "View name -> DDL"
           },
           "validation_errors": {
             "items": {
@@ -25263,6 +25263,22 @@
             "type": "integer",
             "title": "Statements Applied",
             "default": 0
+          },
+          "topics_ensured": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Topics Ensured",
+            "description": "Kafka topics this source needs that now exist (created or already present)"
+          },
+          "topics_failed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Topics Failed",
+            "description": "Kafka topics that could not be created. Never fails the deploy - the schema is live and Kafka may not be in the path at all."
           }
         },
         "type": "object",

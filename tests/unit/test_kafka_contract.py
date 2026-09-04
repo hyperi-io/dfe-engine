@@ -124,3 +124,38 @@ class TestEnvWiring:
         assert overrides["kafka"]["provider"] == "redpanda"
         # ... and the derivation turns that into SCRAM at construction.
         assert KafkaSettings(**overrides["kafka"]).sasl_mechanism == "SCRAM-SHA-512"
+
+
+class TestTopicEnvWiring:
+    """The topic-creation dials bind to env. The Kafka-less profile (receiver ->
+    loader over direct gRPC) has no broker, so it must be able to turn the topic
+    step off from the deploy that configures it."""
+
+    @pytest.fixture(autouse=True)
+    def _hermetic(self, monkeypatch):
+        for key in list(os.environ):
+            if key.startswith(("DFE_", "KAFKA_")):
+                monkeypatch.delenv(key, raising=False)
+
+    def test_defaults_when_unset(self):
+        # No topic env set, so the section is pruned entirely and the model defaults stand.
+        assert "kafka" not in _get_env_overrides()
+        ks = KafkaSettings()
+        assert ks.ensure_topics is True
+        assert (ks.topic_partitions, ks.topic_replication_factor) == (3, 1)
+
+    @pytest.mark.parametrize("raw", ["false", "False", "0", "no", "anything-not-truthy"])
+    def test_ensure_topics_turns_off(self, monkeypatch, raw):
+        monkeypatch.setenv("DFE_KAFKA_ENSURE_TOPICS", raw)
+        assert KafkaSettings(**_get_env_overrides()["kafka"]).ensure_topics is False
+
+    @pytest.mark.parametrize("raw", ["true", "True", "1", "yes"])
+    def test_ensure_topics_turns_on(self, monkeypatch, raw):
+        monkeypatch.setenv("DFE_KAFKA_ENSURE_TOPICS", raw)
+        assert KafkaSettings(**_get_env_overrides()["kafka"]).ensure_topics is True
+
+    def test_partitions_and_replication_bind(self, monkeypatch):
+        monkeypatch.setenv("DFE_KAFKA_TOPIC_PARTITIONS", "6")
+        monkeypatch.setenv("DFE_KAFKA_TOPIC_REPLICATION_FACTOR", "3")
+        ks = KafkaSettings(**_get_env_overrides()["kafka"])
+        assert (ks.topic_partitions, ks.topic_replication_factor) == (6, 3)

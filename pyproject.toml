@@ -103,9 +103,12 @@ dependencies = [
     # projection (promoted from transitive to direct deps for the auto-CLI).
     "click>=8.4.2",
     "jmespath>=1.1.0",
+    # Kafka topic admin: a source deploy creates its own _land/_load topics rather
+    # than leaving them to the broker's auto-create. Ships manylinux wheels for
+    # x86_64 and aarch64, so neither image platform builds librdkafka from source.
+    "confluent-kafka>=2.15.0",
     # Optional lazy runtime integrations (NOT locked here, imported on demand so a
     # default install still runs; the code degrades with a clear error when absent):
-    #   - confluent-kafka: Kafka topic admin (helm) + sampler Kafka backend
     #   - logreducer: sampler 'smart'/'anomaly' modes (add + SHA-pin once it hits
     #     public PyPI; until then the sampler falls back with a clean message)
     "faker>=40.36.0",

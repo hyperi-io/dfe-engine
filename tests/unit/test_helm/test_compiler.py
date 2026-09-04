@@ -25,6 +25,7 @@ def _sv(service="receiver", instance="production", **kw) -> HelmServiceValues:
     )
 
 
+from dfe_engine.settings import get_settings
 from dfe_engine.yaml_utils import yaml_load
 
 # ---------------------------------------------------------------------------
@@ -168,6 +169,85 @@ class TestScrubSecrets:
     def test_scrubs_plain_values_unchanged(self):
         data = {"a": 1, "b": "hello", "c": [1, 2, 3]}
         assert _scrub_secrets(data) == data
+
+
+# ---------------------------------------------------------------------------
+# Kafka topics
+# ---------------------------------------------------------------------------
+
+
+class _SourceStub:
+    """Only ``get_all_sources`` is reached by the topic compile."""
+
+    def __init__(self, sources):
+        self._sources = sources
+
+    def get_all_sources(self, states=("active",)):
+        return [s for s in self._sources if s.state in states]
+
+
+def _topic_compiler(sources, environment):
+    return HelmValuesCompiler(None, None, _SourceStub(sources), environment)
+
+
+class TestCompileKafkaTopics:
+    def test_a_transforming_source_yields_both_land_and_load(self, environment):
+        from dfe_engine.source.models import Source, SourceMatch, SourceTransform
+
+        src = Source(
+            source="filebeat",
+            match=SourceMatch(field="f", value="v"),
+            transform=SourceTransform(engine="vector"),
+        )
+        topics = _topic_compiler([src], environment).compile_kafka_topics()
+        assert [t["name"] for t in topics] == ["filebeat_land", "filebeat_load"]
+
+    def test_a_source_without_a_transform_yields_only_land(self, environment):
+        from dfe_engine.source.models import Source, SourceMatch
+
+        src = Source(source="syslog", match=SourceMatch(field="f", value="v"))
+        topics = _topic_compiler([src], environment).compile_kafka_topics()
+        assert [t["name"] for t in topics] == ["syslog_land"]
+
+    def test_partitions_come_from_settings_not_a_constant(self, environment, monkeypatch):
+        from dfe_engine.source.models import Source, SourceMatch
+
+        settings = get_settings()
+        monkeypatch.setattr(settings.kafka, "topic_partitions", 12)
+        monkeypatch.setattr(settings.kafka, "topic_replication_factor", 3)
+
+        src = Source(source="syslog", match=SourceMatch(field="f", value="v"))
+        topics = _topic_compiler([src], environment).compile_kafka_topics()
+        assert topics[0]["partitions"] == 12
+        assert topics[0]["replication_factor"] == 3
+
+    def test_a_dormant_source_gets_no_topics(self, environment):
+        """No live pipeline, so nothing produces or consumes - do not mint topics."""
+        from dfe_engine.source.models import Source, SourceMatch, SourceTransform
+
+        dormant = Source(
+            source="retired",
+            state="dormant",
+            match=SourceMatch(field="f", value="v"),
+            transform=SourceTransform(engine="vector"),
+        )
+        active = Source(source="syslog", match=SourceMatch(field="f", value="v"))
+        topics = _topic_compiler([dormant, active], environment).compile_kafka_topics()
+        assert [t["name"] for t in topics] == ["syslog_land"]
+
+    def test_several_sources_each_contribute_their_own_topics(self, environment):
+        from dfe_engine.source.models import Source, SourceMatch, SourceTransform
+
+        a = Source(
+            source="filebeat",
+            match=SourceMatch(field="f", value="v"),
+            transform=SourceTransform(engine="vector"),
+        )
+        b = Source(source="syslog", match=SourceMatch(field="f", value="v"))
+        topics = _topic_compiler([a, b], environment).compile_kafka_topics()
+        names = [t["name"] for t in topics]
+        assert names == ["filebeat_land", "filebeat_load", "syslog_land"]
+        assert len(names) == len(set(names))
 
 
 # ---------------------------------------------------------------------------
