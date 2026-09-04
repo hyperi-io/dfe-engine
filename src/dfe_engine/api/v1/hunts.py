@@ -139,7 +139,10 @@ class _HuntConfigFields(BaseModel):
     )
     cron: str | list[str] = Field(description="Cron expression or list of expressions")
     log_buffer: int = Field(default=60, ge=1)
-    global_target_table_name: str
+    global_target_table_name: str | None = Field(
+        default=None,
+        description="Results table override; the rule's query carries its own target when omitted",
+    )
     global_source_table_name: str | None = None
     customers: list[str] = Field(min_length=1)
     customer_filters: dict[str, Any] | None = None

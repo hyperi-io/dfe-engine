@@ -125,11 +125,6 @@ spec:
               value: {{ .Values.config.auth.local.enabled | quote }}
             - name: DFE_AUTH_LOCAL_ORG_ID
               value: {{ .Values.config.auth.local.org_id | quote }}
-            - name: DFE_AUTH_LOCAL_ADMIN_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "dfe-engine.authSecretName" . }}
-                  key: {{ .Values.auth.admin.secretKeys.password }}
             - name: DFE_AUTH_LOCAL_OPERATOR_PASSWORD
               valueFrom:
                 secretKeyRef:

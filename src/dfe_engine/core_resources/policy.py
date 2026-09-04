@@ -149,13 +149,13 @@ def _schema_mutation_conflict(
     if not rest:
         return None
 
-    if rest.endswith("/versions"):
-        schema_path = unquote(rest[: -len("/versions")].strip("/"))
-        if method == "POST" and schema_registry_path_is_core(schema_path, schema_registry):
+    if rest.endswith("/versions") or "/versions/" in rest:
+        if rest.endswith("/versions"):
+            schema_path = unquote(rest[: -len("/versions")].strip("/"))
+        else:
+            schema_path = unquote(rest.split("/versions/")[0].strip("/"))
+        if schema_registry_path_is_core(schema_path, schema_registry):
             return core_resource_conflict_message()
-        return None
-
-    if "/versions/" in rest:
         return None
 
     schema_path = unquote(rest)

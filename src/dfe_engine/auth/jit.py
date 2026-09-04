@@ -14,6 +14,8 @@ import asyncio
 import re
 from datetime import UTC, datetime
 
+from scalo.logger import logger
+
 from dfe_engine.auth.accounts import Account, AccountStore
 from dfe_engine.auth.audit import (
     audit_jit_account_created,
@@ -42,6 +44,7 @@ class JitProvisioner:
         self._accounts = account_store
         self._groups = group_store
         self._hdx = hyperdx_client
+        self._invite_tasks: set[asyncio.Task] = set()
 
     @staticmethod
     def sanitise_username(user_id: str) -> str:
@@ -103,14 +106,21 @@ class JitProvisioner:
             # email-shaped users only.
             if self._hdx is not None and "@" in user_id and team.startswith("customer-"):
                 try:
-                    loop = asyncio.get_event_loop()
-                    # Store reference to prevent garbage collection of the task.
-                    _task = loop.create_task(  # noqa: RUF006
-                        self._invite_to_hdx(user_id, team)
-                    )
+                    loop = asyncio.get_running_loop()
                 except RuntimeError:
-                    # No running event loop (e.g. tests) — skip silently
-                    pass
+                    # Nothing would ever await the coroutine off a running loop, and
+                    # the invite is the user's only route to a HyperDX team.
+                    logger.warning(
+                        "JIT HyperDX invite skipped - no running event loop",
+                        user_id=user_id,
+                        team_name=team,
+                    )
+                else:
+                    # The set holds a strong reference so the loop cannot drop the
+                    # task mid-flight.
+                    task = loop.create_task(self._invite_to_hdx(user_id, team))
+                    self._invite_tasks.add(task)
+                    task.add_done_callback(self._invite_tasks.discard)
 
         return self._accounts.get(safe_name)
 
@@ -140,10 +150,23 @@ class JitProvisioner:
     # ------------------------------------------------------------------
 
     async def _invite_to_hdx(self, user_id: str, team_name: str) -> None:
-        """Fire-and-forget coroutine to invite a user to the fork's team."""
+        """Invite the user to the fork's team; a refusal or failure is logged, never raised."""
         try:
             success = await self._hdx.invite_member(user_id)
-            if success:
-                audit_jit_hdx_invited(user_id, team_name)
-        except Exception:
-            pass  # Non-fatal — already logged inside invite_member
+        except Exception as exc:
+            # The login already succeeded, so the user must not lose it over HyperDX.
+            logger.warning(
+                "JIT HyperDX invite failed",
+                user_id=user_id,
+                team_name=team_name,
+                error=str(exc),
+            )
+            return
+        if success:
+            audit_jit_hdx_invited(user_id, team_name)
+            return
+        logger.warning(
+            "JIT HyperDX invite refused - the user has no HyperDX team",
+            user_id=user_id,
+            team_name=team_name,
+        )

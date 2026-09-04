@@ -22,7 +22,6 @@ from dfe_engine.auth import AuthContext, AuthorizationError, Scope, ScopedGrant,
 from dfe_engine.auth.api_keys import APIKeyStore
 from dfe_engine.auth.audit import (
     audit_login_denied,
-    audit_login_success,
     audit_permission_denied,
 )
 from dfe_engine.auth.groups import Group, GroupStore
@@ -277,9 +276,18 @@ ClickHouseClient = Annotated[Any, Depends(get_clickhouse_client)]
 
 
 def _get_client_ip(request: Request) -> str | None:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    """Caller address for the audit trail.
+
+    X-Forwarded-For is whatever the caller typed unless a trusted proxy rewrote
+    it, so it is read only behind ``auth.trust_proxy_auth_headers`` - the same
+    gate the X-Oidc-* identity headers sit behind. Unfronted, the socket address
+    is the only address that means anything.
+    """
+    settings: DFESettings = request.app.state.settings
+    if settings.auth.trust_proxy_auth_headers:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
     return request.client.host if request.client else None
 
 
@@ -494,6 +502,9 @@ async def get_current_user(request: Request) -> AuthContext:
     When ``auth.enabled=False`` (dev/test default), returns a root AuthContext
     that bypasses authorization if no credentials are provided.
     """
+    # No auth.login.success here: this runs on every request and creates no
+    # session, so the login audit belongs to the credential exchange
+    # (POST /auth/login, GET /auth/oidc/{provider}/callback).
     settings: DFESettings = request.app.state.settings
     request_id = request.headers.get("X-Request-ID")
     client_ip = _get_client_ip(request)
@@ -514,7 +525,6 @@ async def get_current_user(request: Request) -> AuthContext:
         resolution = _resolve_group_grants(groups, group_store)
         roles, org_ids = resolution.roles, resolution.org_ids
         logger.debug("OIDC auth", user_id=oidc_subject, groups=groups, roles=roles)
-        audit_login_success(oidc_subject, "oidc", client_ip, roles)
 
         # JIT provisioning — create shadow account on first OIDC login
         jit = getattr(request.app.state, "jit_provisioner", None)
@@ -568,7 +578,6 @@ async def get_current_user(request: Request) -> AuthContext:
             groups=key_meta.groups,
             roles=roles,
         )
-        audit_login_success(f"apikey:{key_meta.name}", "api_key", client_ip, roles)
         return AuthContext(
             user_id=f"apikey:{key_meta.name}",
             roles=roles,
@@ -609,7 +618,6 @@ async def get_current_user(request: Request) -> AuthContext:
         live_groups = resolve_live_groups_for_user(request, jwt_user_id, fallback_groups=jwt_groups)
         claim_org_ids = payload.get("org_ids", [])
         org_ids = sorted(set(claim_org_ids) | set(live.org_ids)) if claim_org_ids else live.org_ids
-        audit_login_success(jwt_user_id, "jwt", client_ip, live.roles)
         return AuthContext(
             org_id=payload.get("org_id", "default"),
             user_id=jwt_user_id,
