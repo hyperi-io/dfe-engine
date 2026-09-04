@@ -6,6 +6,9 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
+import asyncio
+from unittest.mock import patch
+
 import pytest
 
 from dfe_engine.auth.accounts import AccountStore
@@ -101,6 +104,99 @@ class TestEnsureAccountHdxInvite:
         # Should not raise even with a fake (disconnected) hdx client
         account = jit.ensure_account("jane@corp.com", ["acme-viewers"], "entra")
         assert account is not None
+
+    def test_refused_invite_is_logged_and_not_audited(self, stores):
+        accounts, groups = stores
+
+        class _RefusingHdx:
+            async def invite_member(self, user_id):
+                return False
+
+        jit = JitProvisioner(
+            account_store=accounts, group_store=groups, hyperdx_client=_RefusingHdx()
+        )
+        with (
+            patch("dfe_engine.auth.jit.audit_jit_hdx_invited") as audited,
+            patch("dfe_engine.auth.jit.logger") as log,
+        ):
+            asyncio.run(jit._invite_to_hdx("jane@corp.com", "customer-acme"))
+        audited.assert_not_called()
+        log.warning.assert_called_once()
+        assert log.warning.call_args.kwargs["user_id"] == "jane@corp.com"
+
+    def test_failed_invite_is_logged_with_the_error_and_not_raised(self, stores):
+        accounts, groups = stores
+
+        class _BrokenHdx:
+            async def invite_member(self, user_id):
+                raise ConnectionError("hyperdx unreachable")
+
+        jit = JitProvisioner(
+            account_store=accounts, group_store=groups, hyperdx_client=_BrokenHdx()
+        )
+        with (
+            patch("dfe_engine.auth.jit.audit_jit_hdx_invited") as audited,
+            patch("dfe_engine.auth.jit.logger") as log,
+        ):
+            asyncio.run(jit._invite_to_hdx("jane@corp.com", "customer-acme"))
+        audited.assert_not_called()
+        log.warning.assert_called_once()
+        assert log.warning.call_args.kwargs["error"] == "hyperdx unreachable"
+
+
+class _RecordingHdx:
+    """HyperDX client stub recording the invites it was actually awaited for."""
+
+    def __init__(self) -> None:
+        self.invited: list[str] = []
+
+    async def invite_member(self, email: str) -> bool:
+        self.invited.append(email)
+        return True
+
+
+class TestHdxInviteScheduling:
+    """The invite is the org-scoped user's only route to a HyperDX team.
+
+    Scheduling it onto a loop that never runs drops it in silence, so where it
+    is scheduled matters as much as that it is (issue #262).
+    """
+
+    async def test_invite_runs_under_a_running_loop(self, stores):
+        accounts, groups = stores
+        hdx = _RecordingHdx()
+        jit = JitProvisioner(account_store=accounts, group_store=groups, hyperdx_client=hdx)
+
+        jit.ensure_account("jane@corp.com", ["acme-viewers"], "entra")
+
+        assert jit._invite_tasks, "invite was not scheduled onto the running loop"
+        await asyncio.gather(*jit._invite_tasks)
+        assert hdx.invited == ["jane@corp.com"]
+
+    def test_no_running_loop_logs_and_leaves_no_coroutine(self, stores):
+        """Off a loop the invite cannot run, so say whose it was."""
+        accounts, groups = stores
+        jit = JitProvisioner(
+            account_store=accounts,
+            group_store=groups,
+            hyperdx_client=_RecordingHdx(),
+        )
+
+        with (
+            patch.object(JitProvisioner, "_invite_to_hdx") as never_built,
+            patch("dfe_engine.auth.jit.logger") as mock_logger,
+        ):
+            account = jit.ensure_account("jane@corp.com", ["acme-viewers"], "entra")
+
+        # Not called means the coroutine was never constructed, so none is left
+        # un-awaited for the garbage collector to complain about.
+        never_built.assert_not_called()
+        assert jit._invite_tasks == set()
+        assert account is not None
+
+        warning = mock_logger.warning.call_args
+        assert warning.kwargs["user_id"] == "jane@corp.com"
+        assert warning.kwargs["team_name"] == "customer-acme"
 
 
 class TestResolveHyperdxTeam:

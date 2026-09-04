@@ -10,8 +10,6 @@
 
 from __future__ import annotations
 
-import os
-
 from dfe_engine.api.e2e.seed.base import Seed
 from dfe_engine.auth import account_durability
 
@@ -24,12 +22,12 @@ _SEED_ACTOR = "e2e-seed"
 
 
 def _break_glass_admin_name() -> str:
-    return os.environ.get("DFE_AUTH_LOCAL_ADMIN_NAME") or "admin"
+    return "admin"
 
 
 def _break_glass_admin_password() -> str:
     """Break-glass password (same fallbacks as auth bootstrap)."""
-    return os.environ.get("DFE_AUTH_LOCAL_ADMIN_PASSWORD") or _WELL_KNOWN_E2E_PASSWORD
+    return _WELL_KNOWN_E2E_PASSWORD
 
 
 class Accounts(Seed):
