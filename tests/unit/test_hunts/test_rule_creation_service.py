@@ -262,6 +262,35 @@ class TestSqlValidation:
         errors = service.validate_sql("SELECT count() FROM logs WHERE x = 1))")
         assert any("parenthesis" in e.message.lower() for e in errors)
 
+    def test_reject_garbage_that_passes_the_keyword_checks(self, service):
+        # Found on the devex VM: SELECT and FROM both present, still not SQL.
+        errors = service.validate_sql("SELECT 1SELECT 1 FROM dfe.default LIMIT 1")
+        assert errors, "a query that does not parse must not validate"
+        assert any("parse" in e.message.lower() for e in errors)
+
+    def test_reject_two_statements(self, service):
+        errors = service.validate_sql("SELECT 1 FROM logs; SELECT 2 FROM logs")
+        assert any("one SELECT" in e.message for e in errors)
+
+    def test_reject_dangling_operator(self, service):
+        errors = service.validate_sql("SELECT count() FROM logs WHERE x = ")
+        assert any("parse" in e.message.lower() for e in errors)
+
+    def test_accepts_clickhouse_specific_syntax(self, service):
+        sql = (
+            "SELECT count() FROM dfe.default PREWHERE _source = 'x' "
+            "WHERE _json.eventName = 'CreateUser' AND has(tags, 'a') "
+            "SETTINGS max_threads = 2"
+        )
+        assert service.validate_sql(sql) == []
+
+    def test_accepts_json_extract_and_final(self, service):
+        sql = (
+            "SELECT JSONExtractString(_json, 'user') AS u FROM dfe.default FINAL "
+            "WHERE _timestamp_load > now() - INTERVAL 1 HOUR GROUP BY u LIMIT 10"
+        )
+        assert service.validate_sql(sql) == []
+
     def test_sql_errors_in_result(self, service):
         """Validation errors appear in RuleCreateResult."""
         result = service.create_rule(
