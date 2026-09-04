@@ -2,6 +2,7 @@
 
 import pytest
 
+from dfe_engine.appmgmt.catalogue import transform_engines
 from dfe_engine.source.models import (
     PaginatedSourceSummaryResponse,
     SchemaColumn,
@@ -210,13 +211,20 @@ class TestSourceTransform:
         assert t.env == {}
         assert t.files == []
 
-    def test_wasm(self):
-        t = SourceTransform(engine="wasm")
-        assert t.engine == "wasm"
+    def test_vrl(self):
+        t = SourceTransform(engine="vrl")
+        assert t.engine == "vrl"
 
-    def test_invalid_engine(self):
-        with pytest.raises(ValueError, match="Invalid transform engine"):
+    def test_every_catalogued_transform_is_accepted(self):
+        engines = transform_engines()
+        assert engines
+        for engine in engines:
+            assert SourceTransform(engine=engine).engine == engine
+
+    def test_invalid_engine_names_the_catalogue(self):
+        with pytest.raises(ValueError, match="Invalid transform engine") as exc:
             SourceTransform(engine="spark")
+        assert ", ".join(sorted(transform_engines())) in str(exc.value)
 
 
 # ---------------------------------------------------------------------------

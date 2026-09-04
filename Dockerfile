@@ -60,7 +60,7 @@ RUN /app/.venv/bin/python -c \
 # `FROM <base>` by substring, so ARG-parameterising the runtime base needs a
 # scalo-py change (hyperi-io/scalo-py#4) -- tracked, not worked around by deleting
 # the drift test.
-FROM python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de AS runtime
+FROM python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea AS runtime
 
 # Static OCI labels (from contract)
 LABEL org.opencontainers.image.title="dfe-engine"
