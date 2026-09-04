@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.4](https://github.com/hyperi-io/dfe-engine/compare/v1.19.3...v1.19.4) (2026-09-04)
+
+### Bug Fixes
+
+* **setup:** measure break-glass rotation against the configured bootstrap password ([#286](https://github.com/hyperi-io/dfe-engine/issues/286)) ([7db7db0](https://github.com/hyperi-io/dfe-engine/commit/7db7db0cae23bcf91a11b1845f2f7329a993633f)), closes [#284](https://github.com/hyperi-io/dfe-engine/issues/284) [#235](https://github.com/hyperi-io/dfe-engine/issues/235)
+
 ## [1.19.3](https://github.com/hyperi-io/dfe-engine/compare/v1.19.2...v1.19.3) (2026-09-04)
 
 ### Bug Fixes
