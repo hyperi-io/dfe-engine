@@ -44,7 +44,7 @@ it can be evaluated in a unit test with hand-built stores.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
@@ -59,9 +59,8 @@ if TYPE_CHECKING:
     from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
     from dfe_engine.orgs.registry import OrgRegistry
 
-# The bootstrap-seeded break-glass admin (see auth/bootstrap.py::_seed_admin).
-# Username and password come from admin_account_name() / admin_account_password() at
-# evaluation time (not import time) so the wizard follows the live env.
+# The bootstrap-seeded break-glass admin (see auth/bootstrap.py::_seed_admin), as
+# configured in settings.auth.local, so rotation is measured against what was seeded.
 # It does not count as the "first user" — that step is about getting off the
 # emergency credential and onto a real identity.
 
@@ -89,6 +88,9 @@ class SetupContext:
     org_registry: OrgRegistry | None = None
     oidc_registry: OIDCProviderRegistry | None = None
     break_glass_git: AccountGitState | None = None
+    # The seeded break-glass credential as configured; rotation is measured against it.
+    bootstrap_admin_name: str = field(default_factory=admin_account_name)
+    bootstrap_admin_password: str = field(default_factory=admin_account_password)
 
     @classmethod
     def from_app_state(cls, state: Any) -> SetupContext:
@@ -104,16 +106,22 @@ class SetupContext:
             A context describing the live deployment.
         """
         account_store = getattr(state, "account_store", None)
+        local = getattr(getattr(getattr(state, "settings", None), "auth", None), "local", None)
+        admin_name = admin_account_name(getattr(local, "admin_name", "") or "")
         return cls(
             account_store=account_store,
             org_registry=getattr(state, "org_registry", None),
             oidc_registry=getattr(state, "oidc_provider_registry", None),
-            break_glass_git=_break_glass_git_state(state, account_store),
+            break_glass_git=_break_glass_git_state(state, account_store, admin_name),
+            bootstrap_admin_name=admin_name,
+            bootstrap_admin_password=admin_account_password(
+                getattr(local, "admin_password", "") or ""
+            ),
         )
 
 
 def _break_glass_git_state(
-    state: Any, account_store: AccountStore | None
+    state: Any, account_store: AccountStore | None, admin_name: str
 ) -> AccountGitState | None:
     """Durability of the break-glass admin password in the deploy repo, or None.
 
@@ -131,7 +139,7 @@ def _break_glass_git_state(
     return steady_state(
         getattr(state, "gitcrud", None),
         account_store,
-        admin_account_name(),
+        admin_name,
         environment=settings.env,
         mode=settings.gitops.mode,
     )
@@ -269,7 +277,7 @@ def _has_real_user(ctx: SetupContext) -> bool:
     if ctx.account_store is None:
         return False
     return any(
-        account.enabled and account.username != admin_account_name()
+        account.enabled and account.username != ctx.bootstrap_admin_name
         for account in ctx.account_store.list()
     )
 
@@ -282,13 +290,15 @@ def _has_break_glass_account(ctx: SetupContext) -> bool:
     """
     if ctx.account_store is None:
         return False
-    return ctx.account_store.get(admin_account_name()) is not None
+    return ctx.account_store.get(ctx.bootstrap_admin_name) is not None
 
 
 def _break_glass_password_rotated(ctx: SetupContext) -> bool:
     """True once the seeded admin no longer answers to the bootstrap password.
 
-    The baseline is ``changeme``.
+    The baseline is the configured ``auth.local.admin_password`` (``changeme``
+    when unset). A deployment that generated its own bootstrap password has
+    still not rotated it — the operator has to move off the seeded value.
 
     Costs one bcrypt verify per call on an unauthenticated endpoint. There is
     no cheaper honest test — a changed ``updated_at`` also fires for an
@@ -297,7 +307,9 @@ def _break_glass_password_rotated(ctx: SetupContext) -> bool:
     """
     if ctx.account_store is None:
         return False
-    return not ctx.account_store.verify_password(admin_account_name(), admin_account_password())
+    return not ctx.account_store.verify_password(
+        ctx.bootstrap_admin_name, ctx.bootstrap_admin_password
+    )
 
 
 def _break_glass_merged(ctx: SetupContext) -> bool:
