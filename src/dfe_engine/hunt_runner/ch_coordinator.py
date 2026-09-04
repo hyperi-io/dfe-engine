@@ -24,10 +24,13 @@ idempotent windowed INSERT absorbs (the same window re-inserted dedupes on the
 target). The watermark gives crash-safe incremental resume; hunt_state carries the
 too_aggressive / overrun signal for the UI.
 
-Tables (all ReplacingMergeTree, bounded to ~1 row/hunt after merge):
+Tables (all ReplacingMergeTree; the first three bounded to ~1 row/hunt after merge):
   hunt_lease     - who holds a hunt now, until when (mutual exclusion + cap input)
   hunt_watermark - last committed window end per hunt (incremental resume)
   hunt_state     - overrun_count / too_aggressive (UI signal)
+  hunt_run       - one row per FIRE: an operator's run-now request, then what that
+                   run wrote. Keyed by (hunt_id, fire), so it is the run history
+                   the API reads rather than a single current row.
 """
 
 from __future__ import annotations
@@ -221,6 +224,50 @@ class ChCoordinator:
             overrun_count=int(rows[0][0]),
             too_aggressive=bool(rows[0][1]),
         )
+
+    # ---- runs (row count + operator run-now) --------------------------
+
+    def record_run(self, hunt_id: str, fire: int, rows_written: int) -> None:
+        """Record what a completed fire wrote (replaces any request for that fire)."""
+        self._ch.insert(
+            "hunt_run",
+            [[hunt_id, fire, "completed", int(rows_written)]],
+            column_names=["hunt_id", "fire", "status", "rows_written"],
+            database=self._db,
+        )
+
+    def request_run(self, hunt_id: str, fire: int) -> None:
+        """Mark a hunt due at *fire*, for the running runner to claim on its next poll.
+
+        This is the whole of run-now: no push, no listener. The runner reads these
+        with the same never-double-run machinery it uses for a scheduled fire.
+        """
+        self._ch.insert(
+            "hunt_run",
+            [[hunt_id, fire, "requested", 0]],
+            column_names=["hunt_id", "fire", "status", "rows_written"],
+            database=self._db,
+        )
+
+    def pending_runs(self, now: int | None = None) -> dict[str, int]:
+        """Every hunt with an outstanding run-now request, as {hunt_id: fire}.
+
+        ONE query per tick rather than one per hunt: the runner asks once and looks
+        the answer up per spec. A request whose fire the watermark has passed is
+        already served, so it is filtered here rather than re-run.
+        """
+        now = self.now() if now is None else now
+        rows = self._ch.query(
+            "SELECT r.hunt_id, r.fire FROM ("
+            "SELECT hunt_id, fire FROM ("
+            "SELECT hunt_id, fire, argMax(status, updated) AS status "
+            f"FROM `{self._db}`.hunt_run GROUP BY hunt_id, fire) WHERE status = 'requested'"
+            ") r LEFT JOIN (SELECT hunt_id, argMax(watermark, updated) AS wm "
+            f"FROM `{self._db}`.hunt_watermark GROUP BY hunt_id) w USING (hunt_id) "
+            "WHERE r.fire <= {now:Int64} AND coalesce(w.wm, 0) < r.fire",
+            parameters={"now": now},
+        ).result_rows
+        return {str(row[0]): int(row[1]) for row in rows}
 
     def record_overrun(self, hunt_id: str) -> None:
         """Flag a hunt too-aggressive and bump its overrun count (UI signal).

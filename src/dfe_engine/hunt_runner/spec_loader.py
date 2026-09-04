@@ -63,6 +63,22 @@ def _resolve_schedule_value(definition: dict[str, Any], stem: str) -> str | int 
     return cron
 
 
+def interval_seconds_for(definition: dict[str, Any], stem: str = "") -> int | None:
+    """The hunt's firing interval in seconds, or None when it has no rate schedule.
+
+    Public so the API can answer "next due" from the SAME cron reading the runner
+    schedules by. A second reading of cron would drift from the one that fires.
+    """
+    value = _resolve_schedule_value(definition, stem)
+    if value is None:
+        return None
+    try:
+        interval = parse_interval(value)
+    except Exception:
+        return None
+    return interval if interval > 0 else None
+
+
 def _timestamp_field(definition: dict[str, Any]) -> str:
     """The hunt's watermark column. `checkpoint_timestamp_field` is the API's name for it."""
     for key in ("timestamp_field", "checkpoint_timestamp_field"):

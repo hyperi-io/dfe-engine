@@ -6098,7 +6098,7 @@
           "hunts"
         ],
         "summary": "Get Engine Status",
-        "description": "Report hunt scheduling status.\n\nHunts execute in the separate dfe-hunt-runner service (pull-based, coordinated\nvia ClickHouse), not in this API process. ``running`` reflects whether any\nrunner currently holds a hunt lease; ``hunt_count`` is the configured-hunt\ncount.",
+        "description": "Report hunt scheduling status.\n\nHunts execute in the separate dfe-hunt-runner service (pull-based, coordinated\nvia ClickHouse), not in this API process. ``running`` counts in-flight leases\nacross the whole stack, and a lease is released the moment a run commits, so on\na healthy stack it reads false almost always. It is NOT runner liveness: for\n\"is this hunt running\", read the per-hunt ``running`` on the hunts list.\n``hunt_count`` is the configured-hunt count.",
         "operationId": "get_engine_status_api_v1_hunts_status_get",
         "responses": {
           "200": {
@@ -6125,7 +6125,7 @@
           "hunts"
         ],
         "summary": "List Hunts",
-        "description": "List persisted hunt configurations with pagination and search.",
+        "description": "List persisted hunt configurations, each with its run state, paginated.\n\nRun state comes from ONE ClickHouse read across every listed hunt: the watermark\n(last run), the lease (running now), hunt_state (too aggressive) and hunt_run\n(rows the last run wrote). Next due is derived, not stored.",
         "operationId": "list_hunts_api_v1_hunts_get",
         "parameters": [
           {
@@ -6421,7 +6421,7 @@
           "hunts"
         ],
         "summary": "Trigger Hunt",
-        "description": "Trigger an ad-hoc hunt execution.\n\nHunts run in the separate dfe-hunt-runner service on their schedule. On-demand\nexecution from the API (enqueue a one-shot fire the runner claims) is not wired\nyet, so this returns 501 after validating the hunt exists.",
+        "description": "Queue an ad-hoc run: mark the hunt due now for the runner to claim.\n\nThe pull model is kept. Nothing is pushed at the runner and no listener is added\n-- the fire is written into the coordination state, and the runner that is\nalready running picks it up on its next poll, through the same claim that stops\na hunt double-running. 202 says it is queued, not that it has run; the response\ncarries the poll interval so the caller knows the longest wait before it starts.\n\nA hunt with no rate schedule is not something the runner ticks, so a queued run\nfor one sits unclaimed. That is the schedule's shape, not a failure here.",
         "operationId": "trigger_hunt_api_v1_hunts__name__run_post",
         "parameters": [
           {
@@ -6434,23 +6434,13 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TriggerRequest"
-              }
-            }
-          }
-        },
         "responses": {
           "202": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TriggerResponse"
+                  "$ref": "#/components/schemas/HuntRunQueued"
                 }
               }
             }
@@ -19341,6 +19331,39 @@
         "title": "HuntRuleEntry",
         "description": "Per-rule hunt configuration as stored in YAML."
       },
+      "HuntRunQueued": {
+        "properties": {
+          "hunt_name": {
+            "type": "string",
+            "title": "Hunt Name",
+            "description": "Hunt file name the run was queued for"
+          },
+          "queued": {
+            "type": "boolean",
+            "title": "Queued",
+            "description": "The run is recorded and waiting to be claimed",
+            "default": true
+          },
+          "requested_fire": {
+            "type": "integer",
+            "title": "Requested Fire",
+            "description": "Epoch seconds the run was queued at"
+          },
+          "poll_seconds": {
+            "type": "number",
+            "title": "Poll Seconds",
+            "description": "How often a runner looks for work, so the longest wait before it starts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "hunt_name",
+          "requested_fire",
+          "poll_seconds"
+        ],
+        "title": "HuntRunQueued",
+        "description": "Response from queueing an ad-hoc hunt run."
+      },
       "HuntSummary": {
         "properties": {
           "name": {
@@ -19398,6 +19421,60 @@
             "type": "string",
             "title": "Target Table",
             "default": ""
+          },
+          "last_run": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run",
+            "description": "Epoch seconds of the last window that committed; null = never run"
+          },
+          "running": {
+            "type": "boolean",
+            "title": "Running",
+            "description": "A runner holds a live lease on this hunt right now",
+            "default": false
+          },
+          "last_run_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run Rows",
+            "description": "Rows the last completed run wrote; null = no run recorded"
+          },
+          "too_aggressive": {
+            "type": "boolean",
+            "title": "Too Aggressive",
+            "description": "The hunt's schedule is tighter than it can keep up with",
+            "default": false
+          },
+          "run_requested": {
+            "type": "boolean",
+            "title": "Run Requested",
+            "description": "An ad-hoc run is queued and not yet claimed",
+            "default": false
+          },
+          "next_due": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Due",
+            "description": "Epoch seconds of the next scheduled fire; null = no rate schedule"
           }
         },
         "type": "object",
@@ -19406,7 +19483,7 @@
           "display_name"
         ],
         "title": "HuntSummary",
-        "description": "Summary of a configured hunt."
+        "description": "Summary of a configured hunt, with what the runner has done with it."
       },
       "HuntWriteRequest": {
         "properties": {
@@ -27770,42 +27847,6 @@
           "roles"
         ],
         "title": "TokenResponse"
-      },
-      "TriggerRequest": {
-        "properties": {
-          "customer": {
-            "type": "string",
-            "title": "Customer",
-            "description": "Customer/org ID to run the hunt for"
-          }
-        },
-        "type": "object",
-        "required": [
-          "customer"
-        ],
-        "title": "TriggerRequest",
-        "description": "Request to trigger an ad-hoc hunt execution."
-      },
-      "TriggerResponse": {
-        "properties": {
-          "task_id": {
-            "type": "string",
-            "title": "Task Id",
-            "description": "Task ID for polling via /tasks/{task_id}"
-          },
-          "hunt_name": {
-            "type": "string",
-            "title": "Hunt Name",
-            "description": "Display name of the triggered hunt"
-          }
-        },
-        "type": "object",
-        "required": [
-          "task_id",
-          "hunt_name"
-        ],
-        "title": "TriggerResponse",
-        "description": "Response from triggering an ad-hoc hunt."
       },
       "UpdateAccountRequest": {
         "properties": {
