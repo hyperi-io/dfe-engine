@@ -21,6 +21,7 @@ from dfe_engine.api.deps import (
     resolve_live_groups_for_user,
     resolve_live_roles_for_user,
 )
+from dfe_engine.auth.audit import audit_login_success
 from dfe_engine.auth.local_provider import LocalAuthProvider
 from dfe_engine.auth.setup_status import SetupStatus, evaluate_initial_setup
 
@@ -68,14 +69,19 @@ class PermissionsResponse(BaseModel):
 async def login(body: LoginRequest, request: Request, settings: Settings):
     """Authenticate with local credentials and receive a JWT token."""
     provider: LocalAuthProvider = request.app.state.auth_provider
+    client_ip = _get_client_ip(request)
 
     auth_ctx = provider.authenticate(
         body.username,
         body.password,
         request_id=request.headers.get("X-Request-ID"),
-        client_ip=_get_client_ip(request),
+        client_ip=client_ip,
         user_agent=request.headers.get("User-Agent"),
     )
+
+    # The password is exchanged for a token here, so this is the login the
+    # audit trail counts - not the per-request token check in get_current_user.
+    audit_login_success(auth_ctx.user_id, "jwt", client_ip, auth_ctx.roles)
 
     token = create_access_token(
         data={
