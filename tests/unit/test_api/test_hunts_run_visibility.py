@@ -12,6 +12,11 @@ configuration and has to keep rendering when the data plane is down. So the run
 fields come back empty rather than the request failing, next due is still derived
 from the cron, and queueing a run says 503 instead of pretending it worked.
 
+The 503 also has to be EARNED. It used to be raised for any exception at all,
+including the AttributeError from a client that could not insert - so a bug in this
+process reported itself as a ClickHouse outage and sent the operator to the wrong
+system. Only a connection failure is a 503 now; anything else is a 500.
+
 The reading of real coordination rows is proved in
 tests/integration/test_hunt_run_visibility.py against a live ClickHouse.
 """
@@ -21,6 +26,8 @@ from __future__ import annotations
 import time
 
 import pytest
+
+from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 
 _HUNT = {
     "name": "visible_hunt",
@@ -75,3 +82,55 @@ def test_queueing_a_run_says_so_rather_than_claiming_it_ran(client, admin_header
 def test_queueing_a_run_needs_the_execute_grant(client, viewer_headers, created_hunt):
     resp = client.post(f"/api/v1/hunts/{created_hunt}/run", headers=viewer_headers)
     assert resp.status_code == 403
+
+
+class _RefusingDriver:
+    """Driver-shaped client that refuses the connection, like a ClickHouse that is down."""
+
+    def insert(self, *args, **kwargs):
+        raise ConnectionError("[Errno 111] Connection refused")
+
+    def close(self) -> None:
+        return None
+
+
+class _BrokenDriver:
+    """Driver-shaped client with a programming fault - reachable, but the call is wrong."""
+
+    def insert(self, *args, **kwargs):
+        raise TypeError("insert() got an unexpected keyword argument 'column_names'")
+
+    def close(self) -> None:
+        return None
+
+
+@pytest.fixture
+def install_driver():
+    """Put a driver-shaped client under the engine's ClickHouse manager for one test."""
+    ClickHouseManager.reset_instance()
+    manager = ClickHouseManager.get_instance()
+
+    def _install(driver) -> None:
+        manager._client = driver
+
+    yield _install
+    ClickHouseManager.reset_instance()
+
+
+def test_a_refused_connection_is_the_only_thing_that_says_unavailable(
+    client, admin_headers, created_hunt, install_driver
+):
+    install_driver(_RefusingDriver())
+    resp = client.post(f"/api/v1/hunts/{created_hunt}/run", headers=admin_headers)
+    assert resp.status_code == 503
+    assert resp.json()["code"] == "coordination_unavailable"
+
+
+def test_a_programming_fault_is_a_500_not_an_outage_claim(
+    client, admin_headers, created_hunt, install_driver
+):
+    install_driver(_BrokenDriver())
+    resp = client.post(f"/api/v1/hunts/{created_hunt}/run", headers=admin_headers)
+    # ClickHouse answered the socket; saying it is unreachable would be a lie.
+    assert resp.status_code == 500
+    assert resp.json()["code"] == "queue_failed"

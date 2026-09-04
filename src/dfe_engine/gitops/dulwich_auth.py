@@ -5,23 +5,70 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""dulwich HTTPS-credential helpers - embed for a single op, scrub from disk.
+"""dulwich HTTPS-credential helpers - embed for a single op, keep it off disk and
+out of the logs.
 
 ``dulwich.porcelain`` clone/push/fetch take no username/password kwargs; HTTPS
-auth is carried IN THE URL. That has one security hazard: ``porcelain.clone``
-persists whatever URL it cloned from into the clone's ``.git/config`` - so a
-``https://user:token@host`` URL leaves the plaintext token on disk (a shared /
-in-cluster volume, readable by any co-located sidecar, exec shell, or snapshot).
+auth is carried IN THE URL. That has two security hazards:
+
+- ``porcelain.clone`` persists whatever URL it cloned from into the clone's
+  ``.git/config`` - so a ``https://user:token@host`` URL leaves the plaintext
+  token on disk (a shared / in-cluster volume, readable by any co-located
+  sidecar, exec shell, or snapshot);
+- every porcelain op writes the URL AS SUPPLIED to its ``errstream`` (stderr by
+  default) and into its failure messages - ``Push to <url> successful.`` puts the
+  deploy token in the container log in clear.
 
 The safe pattern (F-GITOPS-TOKEN): supply the credentialed URL EXPLICITLY on each
-op, and immediately scrub the stored remote back to the bare URL. These two
-helpers are that pattern, shared by every dulwich caller (the gitops deploy repo +
-the sigma git-repo provider) so the escaping and the scrub are written once.
+op, scrub the stored remote back to the bare URL, and route the op's output and
+errors through the redactors here. These helpers are that pattern, shared by
+every dulwich caller (the gitops deploy repo + the sigma git-repo provider) so
+the escaping, the scrub and the redaction are written once.
 """
 
 from __future__ import annotations
 
+import io
+import re
 from pathlib import Path
+
+from scalo.logger import logger
+
+# ``scheme://user:secret@host`` - the userinfo half of a URL, anywhere in a string.
+# Requires the colon, so a credential-free ``ssh://git@host`` is left alone.
+_USERINFO_RE = re.compile(r"(?<=://)[^/@\s]+:[^/@\s]*@")
+
+
+def redact_credentials(text: str) -> str:
+    """Return *text* with the ``user:secret@`` userinfo of every URL replaced.
+
+    Applied to anything derived from a credentialed remote URL before it reaches a
+    log, a stream or an exception message - dulwich embeds the URL verbatim in all
+    three.
+    """
+    return _USERINFO_RE.sub("***@", text)
+
+
+class RedactingErrStream(io.RawIOBase):
+    """Binary sink for a dulwich op's ``errstream``, redacted and logged at debug.
+
+    ``porcelain.push`` writes ``Push to <remote_location> successful.`` here, and
+    ``remote_location`` is the URL as supplied - including the basic-auth token the
+    HTTPS path has to carry. The default errstream is stderr, so that line puts the
+    deploy-repo token in the container log in clear.
+    """
+
+    def writable(self) -> bool:
+        """Always writable - this stream only ever accepts output."""
+        return True
+
+    def write(self, data, /) -> int:
+        """Redact the chunk, log it at debug, and report it fully consumed."""
+        raw = bytes(data)
+        line = redact_credentials(raw.decode("utf-8", "replace")).strip()
+        if line:
+            logger.debug(line)
+        return len(raw)
 
 
 def authed_https_url(

@@ -10,17 +10,29 @@
 
 Uses ``dulwich.porcelain`` (the same library hyperi-pylib's DirectoryConfigStore
 uses internally) so there is no shell-out to ``git``.
+
+Every remote op goes through :meth:`GitopsRepo._remote_op`: dulwich writes the
+remote URL verbatim to its ``errstream`` and into its failure messages, and on the
+HTTPS path that URL carries the deploy token (F-GITOPS-TOKEN).
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import TypeVar, cast
 
 from dulwich import porcelain
 from scalo.logger import logger
+
+from .dulwich_auth import RedactingErrStream, redact_credentials
+
+T = TypeVar("T")
+
+
+class GitopsRemoteError(RuntimeError):
+    """A remote git op failed, with any URL credentials stripped from the message."""
 
 
 @dataclass
@@ -110,7 +122,11 @@ class GitopsRepo:
         from dulwich.object_store import tree_lookup_path
         from dulwich.repo import Repo
 
-        result = porcelain.fetch(str(self._path), self._authed_url())
+        result = self._remote_op(
+            lambda errstream: porcelain.fetch(
+                str(self._path), self._authed_url(), errstream=errstream
+            )
+        )
         head = result.refs.get(b"refs/heads/" + self._branch.encode())
         if head is None:
             return None
@@ -136,6 +152,19 @@ class GitopsRepo:
             return f"{scheme}://{self._username}:{self._token}@{rest}"
         return url
 
+    def _remote_op(self, op: Callable[[RedactingErrStream], T]) -> T:
+        """Run a dulwich remote op with the URL's credentials kept out of every output.
+
+        The op's progress/status goes to a redacting stream instead of stderr, and a
+        failure is re-raised as :class:`GitopsRemoteError` with the userinfo stripped
+        -- dulwich puts the URL as supplied in both. Chained ``from None`` on purpose:
+        the original exception's own text is the thing carrying the token.
+        """
+        try:
+            return op(RedactingErrStream())
+        except Exception as exc:
+            raise GitopsRemoteError(redact_credentials(str(exc))) from None
+
     def ensure(self) -> Path:
         """Make the working tree present: clone, reuse, or init."""
         if (self._path / ".git").exists():
@@ -143,10 +172,13 @@ class GitopsRepo:
         if self._repo_url:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             logger.info("Cloning gitops deploy repo", repo_url=self._repo_url)
-            porcelain.clone(
-                self._authed_url(),
-                str(self._path),
-                branch=self._branch.encode(),
+            self._remote_op(
+                lambda errstream: porcelain.clone(
+                    self._authed_url(),
+                    str(self._path),
+                    branch=self._branch.encode(),
+                    errstream=errstream,
+                )
             )
             return self._path
         self._path.mkdir(parents=True, exist_ok=True)
@@ -217,11 +249,7 @@ class GitopsRepo:
 
         pushed = False
         if self._push and self._repo_url:
-            porcelain.push(
-                str(self._path),
-                self._authed_url(),
-                f"refs/heads/{self._branch}".encode(),
-            )
+            self._push_refspec(f"refs/heads/{self._branch}".encode())
             pushed = True
 
         logger.info(
@@ -231,6 +259,17 @@ class GitopsRepo:
             pushed=pushed,
         )
         return PublishResult(changed=True, files=written, commit_sha=sha_str, pushed=pushed)
+
+    def _push_refspec(self, refspec: bytes) -> None:
+        """Push one refspec to the configured remote, credentials never logged."""
+        self._remote_op(
+            lambda errstream: porcelain.push(
+                str(self._path),
+                self._authed_url(),
+                refspec,
+                errstream=errstream,
+            )
+        )
 
     def _route_to_branch(
         self, sha_str: str, branch: str, base_head: str, written: list[str]
@@ -252,11 +291,7 @@ class GitopsRepo:
 
         pushed = False
         if self._push and self._repo_url:
-            porcelain.push(
-                repo_path,
-                self._authed_url(),
-                side_ref + b":" + side_ref,
-            )
+            self._push_refspec(side_ref + b":" + side_ref)
             pushed = True
 
         logger.info(

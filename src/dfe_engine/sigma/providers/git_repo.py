@@ -27,7 +27,12 @@ from pathlib import Path
 
 from scalo.logger import logger
 
-from dfe_engine.gitops.dulwich_auth import authed_https_url, scrub_remote_credentials
+from dfe_engine.gitops.dulwich_auth import (
+    RedactingErrStream,
+    authed_https_url,
+    redact_credentials,
+    scrub_remote_credentials,
+)
 
 from .base import ProviderConfig, SigmaProvider, SigmaRuleDoc, modified_since, parse_sigma_yaml
 
@@ -76,7 +81,11 @@ class GitRepoProvider(SigmaProvider):
         local = self._clone_path
 
         if (local / ".git").exists():
-            result = porcelain.fetch(str(local), authed)
+            # Redacting errstream + message: dulwich echoes the credentialed URL in both.
+            try:
+                result = porcelain.fetch(str(local), authed, errstream=RedactingErrStream())
+            except Exception as exc:
+                raise RuntimeError(redact_credentials(str(exc))) from None
             sha = (result.refs or {}).get(f"refs/heads/{branch}".encode())
             if sha:
                 porcelain.reset(str(local), "hard", sha)
@@ -92,7 +101,12 @@ class GitRepoProvider(SigmaProvider):
             return
         local.parent.mkdir(parents=True, exist_ok=True)
         logger.info("sigma git provider: cloning", provider=self.name, url=url, branch=branch)
-        porcelain.clone(authed, str(local), branch=branch.encode())
+        try:
+            porcelain.clone(
+                authed, str(local), branch=branch.encode(), errstream=RedactingErrStream()
+            )
+        except Exception as exc:
+            raise RuntimeError(redact_credentials(str(exc))) from None
         # porcelain.clone persists the cloned URL (incl the username:token@ auth
         # _authed_url embedded) into the cache clone's .git/config on disk under
         # config_dir/.sigma-cache - readable by any co-located sidecar/volume

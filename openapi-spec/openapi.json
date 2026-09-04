@@ -6421,7 +6421,7 @@
           "hunts"
         ],
         "summary": "Trigger Hunt",
-        "description": "Queue an ad-hoc run: mark the hunt due now for the runner to claim.\n\nThe pull model is kept. Nothing is pushed at the runner and no listener is added\n-- the fire is written into the coordination state, and the runner that is\nalready running picks it up on its next poll, through the same claim that stops\na hunt double-running. 202 says it is queued, not that it has run; the response\ncarries the poll interval so the caller knows the longest wait before it starts.\n\nA hunt with no rate schedule is not something the runner ticks, so a queued run\nfor one sits unclaimed. That is the schedule's shape, not a failure here.",
+        "description": "Queue an ad-hoc run: mark the hunt due now for the runner to claim.\n\nThe pull model is kept. Nothing is pushed at the runner and no listener is added\n-- the fire is written into the coordination state, and the runner that is\nalready running picks it up on its next poll, through the same claim that stops\na hunt double-running. 202 says it is queued, not that it has run; the response\ncarries the poll interval so the caller knows the longest wait before it starts.\n\nA hunt with no rate schedule is not something the runner ticks, so a queued run\nfor one sits unclaimed. That is the schedule's shape, not a failure here.\n\n503 is reserved for ClickHouse actually being unreachable; any other failure to\nwrite the request is a 500, so a bug here never reads as an outage.",
         "operationId": "trigger_hunt_api_v1_hunts__name__run_post",
         "parameters": [
           {

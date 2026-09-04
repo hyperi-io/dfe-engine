@@ -55,7 +55,9 @@ class ClickHouseClientWrapper:
     - command() for DDL/DML statements (CREATE, DROP, ALTER, INSERT without data)
     - query() for SELECT statements that return data
 
-    This wrapper provides execute() that auto-routes to the appropriate method.
+    This wrapper provides execute() that auto-routes to the appropriate method, and
+    passes query()/command()/insert() straight through, so a caller written against
+    clickhouse-connect (the hunt coordinator) works on it unchanged.
 
     Every op runs through the manager's resilience layer
     (:meth:`ClickHouseManager.run_resilient`), so a transient CH outage reconnects
@@ -103,6 +105,19 @@ class ClickHouseClientWrapper:
         """Raw DDL/DML passthrough to clickhouse-connect's ``command()``."""
         kwargs["settings"] = merge_log_comment(kwargs.get("settings"))
         return self._manager.run_resilient(lambda: self._client.command(statement, *args, **kwargs))
+
+    def insert(self, table: str, *args, **kwargs):
+        """Row insert -> clickhouse-connect's ``insert(table, rows, column_names=,
+        database=)``, through the resilience layer.
+
+        This wrapper is the ONLY ClickHouse client the engine hands out, so anything
+        that WRITES rows through it needs the method here: without it a write raises
+        AttributeError, which is a programming error and not an outage. Retries are
+        safe for the callers that use it (the hunt coordination tables are
+        ReplacingMergeTree, so a re-inserted row collapses on merge).
+        """
+        kwargs["settings"] = merge_log_comment(kwargs.get("settings"))
+        return self._manager.run_resilient(lambda: self._client.insert(table, *args, **kwargs))
 
     def query_rows(self, query: str, *args, **kwargs):
         """Run a SELECT and return ``(column_names, result_rows)``.
