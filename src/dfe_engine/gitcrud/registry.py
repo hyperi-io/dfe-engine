@@ -59,10 +59,11 @@ def default_registry() -> ResourceClassRegistry:
     Typed entries sharing RBAC class prefixes. Scope here is the deploy repo:
     `helmvars` (overlays), the `governance` class (rbac + actions + policies),
     `library` (versioned artefacts an instance links its consumed files to),
-    and `sources` (the all-in-one source-definition doc under config/sources -
-    the first datamodel class to land in the deploy repo). The remaining
-    datamodel types (schemas/fieldmaps) and `hunts` (defs/rules/alert-dests)
-    arrive with the multi-repo work (option A).
+    `sources` (the all-in-one source-definition doc under config/sources - the
+    first datamodel class to land in the deploy repo), and `hunts` + `rules`
+    (what the hunt runner executes). The remaining datamodel types
+    (schemas/fieldmaps) and hunt alert-destinations arrive with the multi-repo
+    work (option A).
     """
     return ResourceClassRegistry(
         [
@@ -79,6 +80,13 @@ def default_registry() -> ResourceClassRegistry:
             # model owns its own semver version envelope (current/versions/
             # deployed_version), which is what versioned=True declares here.
             ResourceClass("sources", "config/sources", rbac_prefix="sources", versioned=True),
+            # hunt classes - the hunt definitions and the detection rules they
+            # name. The hunt runner reads both directories off a git-sync of
+            # this repo (dfe-infra#212), so they are unversioned and the stored
+            # doc is exactly what the runner parses. rbac_prefix reuses the
+            # engine's existing hunt:/rule: grants rather than minting new ones.
+            ResourceClass("hunts", "config/hunts", rbac_prefix="hunt"),
+            ResourceClass("rules", "config/rules", rbac_prefix="rule"),
             # library class - the versioned artefact library an app instance links
             # its consumed files to. Versioned because a linked artefact is only
             # useful if an earlier version can be pointed at again, and a BUNDLE

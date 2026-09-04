@@ -1,13 +1,19 @@
 """Rule Registry — CRUD for hunt detection rules (API-persisted YAML).
 
 Separate from ``hunts.rule_repo_dir`` (Jinja2 templates for scheduled hunts).
-Each rule is stored as ``{name}.yaml`` under ``hunts.rules_dir``.
+Each rule is stored as ``{name}.yaml``, in one of two interchangeable backends:
+
+- **deploy repo** (when gitops is on): the deploy repo's ``config/rules`` is the
+  SSoT and every mutation is one gitcrud commit, because that is the directory
+  the k8s hunt runner git-syncs. Pass ``deploy_repo=DeployRepoStore(...)``.
+- **DirectoryConfigStore**: ``hunts.rules_dir`` as SSoT — the shared config
+  volume the docker hunt runner reads.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from scalo.config import DirectoryConfigStore
 from scalo.logger import logger
@@ -19,6 +25,9 @@ from dfe_engine.hunts.hunt_config_registry import (
 )
 from dfe_engine.hunts.rule_model import Rule
 from dfe_engine.yaml_utils import yaml_dump
+
+if TYPE_CHECKING:
+    from dfe_engine.hunts.deploy_repo import DeployRepoStore
 
 
 def _rule_to_yaml_dict(rule: Rule) -> dict[str, Any]:
@@ -50,12 +59,36 @@ class RuleRegistry:
 
     def __init__(
         self,
-        rules_directory: str | Path,
+        rules_directory: str | Path | None = None,
         writable: bool | None = None,
         git_branch: str | None = None,
         git_push: bool = False,
         refresh_interval: int = 30,
+        *,
+        deploy_repo: DeployRepoStore | None = None,
     ) -> None:
+        """Initialise the registry.
+
+        Args:
+            rules_directory: YAML rules directory (DirectoryConfigStore backend;
+                ignored when ``deploy_repo`` is given).
+            writable: Whether writes are allowed. None = auto-detect.
+            git_branch: Git branch for writes. None = current branch.
+            git_push: Auto-push after git commits.
+            refresh_interval: Seconds between background cache refresh polls.
+            deploy_repo: Deploy-repo backend over the gitcrud ``rules`` class.
+                When provided, ``config/rules`` in the deploy repo is the SSoT
+                and every mutation is one commit the hunt runner git-syncs.
+        """
+        self._deploy = deploy_repo
+        self._store: DirectoryConfigStore | None = None
+
+        if deploy_repo is not None:
+            self._rules_directory = deploy_repo.directory
+            return
+
+        if rules_directory is None:
+            raise RuleRegistryError("rules_directory is required without a deploy repo")
         self._rules_directory = Path(rules_directory)
         self._rules_directory.mkdir(parents=True, exist_ok=True)
 
@@ -69,70 +102,84 @@ class RuleRegistry:
         self._store.start()
 
     def close(self) -> None:
-        if hasattr(self._store, "stop"):
+        if self._store is not None:
             self._store.stop()
 
-    def exists(self, name: str) -> bool:
-        return self._store.get(name) is not None
+    # -----------------------------------------------------------------
+    # Backend primitives (deploy repo vs DirectoryConfigStore)
+    #
+    # ALL backend branching lives here: the CRUD methods below call these
+    # and never test self._deploy themselves.
+    # -----------------------------------------------------------------
 
-    def name_exists(self, name: str) -> bool:
-        """True if a rule file stem is taken (exact or case-insensitive)."""
-        if self.exists(name):
-            return True
-        key = name.casefold()
-        return any(table.casefold() == key for table in self._store.list_tables())
+    def _require_store(self) -> DirectoryConfigStore:
+        """Narrow the Optional store once: the directory backend always builds one."""
+        if self._store is None:
+            raise RuleRegistryError("no DirectoryConfigStore backend (deploy repo is active)")
+        return self._store
 
-    def get(self, name: str) -> Rule:
-        config_data = self._store.get(name)
-        if config_data is None:
-            raise RuleNotFoundError(f"Rule not found: '{name}'")
-        return _rule_from_stored(name, dict(config_data))
+    def _names(self) -> list[str]:
+        """All stored rule names (file stems), which the rule compiler resolves by."""
+        if self._deploy is not None:
+            return self._deploy.names()
+        return list(self._require_store().list_tables())
 
-    def save(
-        self,
-        rule: Rule,
-        *,
-        created_by: str | None = None,
-        description: str | None = None,
-    ) -> Rule:
-        yaml_path = self._rules_directory / f"{rule.rule_id}.yaml"
-        yaml_dump(_rule_to_yaml_dict(rule), yaml_path)
+    def _get_raw(self, name: str) -> dict[str, Any] | None:
+        """Raw stored doc for a rule, or None when absent."""
+        if self._deploy is not None:
+            return self._deploy.get(name)
+        return self._require_store().get(name)
 
-        if self._store.is_git:
-            commit_msg = description or f"rule: update {rule.rule_id}"
-            if created_by:
-                commit_msg = f"{commit_msg} (by {created_by})"
-            commit_file(self._store, yaml_path, commit_msg, author=created_by)
-            if self._store._git_push:
-                self._store._git_push_remote()
+    def _put_raw(
+        self, name: str, doc: dict[str, Any], *, created_by: str | None, message: str
+    ) -> str:
+        """Write one rule doc; returns the destination label for the save log.
 
-        self._store._refresh_all()
-        logger.info(f"Saved rule '{rule.rule_id}' → {yaml_path}")
-        return rule
+        Deploy repo: ONE routed commit, and the doc is stored verbatim because the
+        runner's rule_compiler parses this exact file. Directory backend: plain YAML
+        write, git commit when the directory is a repo, then a cache refresh.
+        """
+        if self._deploy is not None:
+            self._deploy.put(name, doc, actor=created_by or "engine")
+            return "deploy repo config/rules"
 
-    def delete(self, name: str) -> None:
+        store = self._require_store()
         yaml_path = self._rules_directory / f"{name}.yaml"
+        yaml_dump(doc, yaml_path)
+        if store.is_git:
+            commit_file(store, yaml_path, message, author=created_by)
+            if store._git_push:
+                store._git_push_remote()
+        store._refresh_all()
+        return str(yaml_path)
 
+    def _delete_raw(self, name: str, *, created_by: str | None) -> bool:
+        """Remove one rule doc; False when it did not exist."""
+        if self._deploy is not None:
+            return self._deploy.delete(name, actor=created_by or "engine")
+
+        store = self._require_store()
+        yaml_path = self._rules_directory / f"{name}.yaml"
         if not yaml_path.exists():
-            raise RuleNotFoundError(f"Rule not found: '{name}'")
+            return False
 
-        if self._store.is_git and self._store._repo is not None:
+        if store.is_git and store._repo is not None:
             try:
                 from dulwich import porcelain as git
 
-                repo_root = Path(self._store._repo.path).resolve(strict=False)
+                repo_root = Path(store._repo.path).resolve(strict=False)
                 yaml_abs = yaml_path.resolve(strict=False)
                 rel_path = str(yaml_abs.relative_to(repo_root))
                 yaml_abs.unlink(missing_ok=True)
-                git.rm(self._store._repo, paths=[rel_path])
+                git.rm(store._repo, paths=[rel_path])
                 git.commit(
-                    self._store._repo,
+                    store._repo,
                     author=COMMITTER_IDENTITY.encode("utf-8"),
                     committer=COMMITTER_IDENTITY.encode("utf-8"),
                     message=f"rule: delete {name}".encode(),
                 )
-                if self._store._git_push:
-                    self._store._git_push_remote()
+                if store._git_push:
+                    store._git_push_remote()
             except ValueError:
                 logger.warning(
                     f"Rules directory is outside git repo; deleting '{name}' without git commit"
@@ -144,16 +191,60 @@ class RuleRegistry:
         else:
             yaml_path.unlink(missing_ok=True)
 
-        with self._store._lock:
-            self._store._cache.pop(name, None)
+        with store._lock:
+            store._cache.pop(name, None)
+        return True
 
+    # -----------------------------------------------------------------
+    # CRUD Operations
+    # -----------------------------------------------------------------
+
+    def exists(self, name: str) -> bool:
+        return self._get_raw(name) is not None
+
+    def name_exists(self, name: str) -> bool:
+        """True if a rule file stem is taken (exact or case-insensitive)."""
+        if self.exists(name):
+            return True
+        key = name.casefold()
+        return any(table.casefold() == key for table in self._names())
+
+    def get(self, name: str) -> Rule:
+        config_data = self._get_raw(name)
+        if config_data is None:
+            raise RuleNotFoundError(f"Rule not found: '{name}'")
+        return _rule_from_stored(name, dict(config_data))
+
+    def save(
+        self,
+        rule: Rule,
+        *,
+        created_by: str | None = None,
+        description: str | None = None,
+    ) -> Rule:
+        commit_msg = description or f"rule: update {rule.rule_id}"
+        if created_by:
+            commit_msg = f"{commit_msg} (by {created_by})"
+
+        dest = self._put_raw(
+            rule.rule_id,
+            _rule_to_yaml_dict(rule),
+            created_by=created_by,
+            message=commit_msg,
+        )
+        logger.info(f"Saved rule '{rule.rule_id}' → {dest}")
+        return rule
+
+    def delete(self, name: str, created_by: str | None = None) -> None:
+        if not self._delete_raw(name, created_by=created_by):
+            raise RuleNotFoundError(f"Rule not found: '{name}'")
         logger.info(f"Deleted rule '{name}'")
 
     def list_rules(self) -> list[dict[str, Any]]:
         """Return metadata dicts for all stored rules."""
         results: list[dict[str, Any]] = []
-        for table in self._store.list_tables():
-            config_data = self._store.get(table)
+        for table in self._names():
+            config_data = self._get_raw(table)
             if config_data is None:
                 continue
             try:

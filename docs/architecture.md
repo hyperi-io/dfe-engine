@@ -169,10 +169,13 @@ flowchart TB
   diff rather than clobbering a human or CI edit.
 - **deploy repo** - the GitOps hand-off. Engine writes compiled artifacts;
   Argo reads them. With gitops enabled it also holds the source definitions
-  SSoT (`config/sources/`, one attributed commit per mutation via gitcrud);
-  standalone deployments fall back to a plain sources directory in the
-  config repo. Provider-agnostic: GitHub / GitLab external git, or the
-  in-cluster Forgejo fallback (see [deployment/index.md](deployment/index.md)).
+  SSoT (`config/sources/`) and the hunt definitions and detection rules
+  (`config/hunts/`, `config/rules/`), one attributed commit per mutation via
+  gitcrud; standalone deployments fall back to plain directories in the config
+  repo. The hunt runner git-syncs those last two directories, so on Kubernetes
+  they are how a hunt reaches the pod that runs it. Provider-agnostic:
+  GitHub / GitLab external git, or the in-cluster Forgejo fallback (see
+  [deployment/index.md](deployment/index.md)).
 - **dfe-infra** - the pinned deployment vehicle. Never written by the engine.
 
 In small deployments the config repo and deploy repo can be one repo with

@@ -461,7 +461,7 @@ async def delete_rule(
             },
         )
     try:
-        registry.delete(name)
+        registry.delete(name, created_by=git_author(user))
     except RuleNotFoundError:
         raise HTTPException(
             status_code=404,

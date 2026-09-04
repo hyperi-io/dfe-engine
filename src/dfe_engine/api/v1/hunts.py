@@ -520,7 +520,7 @@ async def delete_hunt(
         ) from None
     if alert_registry is not None:
         delete_destinations_owned_by_hunt(alert_registry, registry, name)
-    registry.delete(name)
+    registry.delete(name, created_by=user.user_id)
     audit_resource_change(user.user_id, "hunt", name, "deleted")
 
 
