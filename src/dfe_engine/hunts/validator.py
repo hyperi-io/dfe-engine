@@ -60,8 +60,11 @@ class HuntValidator:
                 f"Invalid 'log_buffer' value: {log_buffer}. It should be a positive integer."
             )
 
+        # Optional: the rule's query carries its own target. Present means non-empty.
         global_target_table_name = hunt_data.get("global_target_table_name")
-        if not isinstance(global_target_table_name, str) or not global_target_table_name.strip():
+        if global_target_table_name is not None and (
+            not isinstance(global_target_table_name, str) or not global_target_table_name.strip()
+        ):
             raise ValueError("Invalid 'global_target_table_name'. It should be a non-empty string.")
 
         # Source model: hunts can use 'source' (resolved via SourceRegistry) OR
