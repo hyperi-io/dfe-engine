@@ -105,6 +105,44 @@ class TestEnsureAccountHdxInvite:
         account = jit.ensure_account("jane@corp.com", ["acme-viewers"], "entra")
         assert account is not None
 
+    def test_refused_invite_is_logged_and_not_audited(self, stores):
+        accounts, groups = stores
+
+        class _RefusingHdx:
+            async def invite_member(self, user_id):
+                return False
+
+        jit = JitProvisioner(
+            account_store=accounts, group_store=groups, hyperdx_client=_RefusingHdx()
+        )
+        with (
+            patch("dfe_engine.auth.jit.audit_jit_hdx_invited") as audited,
+            patch("dfe_engine.auth.jit.logger") as log,
+        ):
+            asyncio.run(jit._invite_to_hdx("jane@corp.com", "customer-acme"))
+        audited.assert_not_called()
+        log.warning.assert_called_once()
+        assert log.warning.call_args.kwargs["user_id"] == "jane@corp.com"
+
+    def test_failed_invite_is_logged_with_the_error_and_not_raised(self, stores):
+        accounts, groups = stores
+
+        class _BrokenHdx:
+            async def invite_member(self, user_id):
+                raise ConnectionError("hyperdx unreachable")
+
+        jit = JitProvisioner(
+            account_store=accounts, group_store=groups, hyperdx_client=_BrokenHdx()
+        )
+        with (
+            patch("dfe_engine.auth.jit.audit_jit_hdx_invited") as audited,
+            patch("dfe_engine.auth.jit.logger") as log,
+        ):
+            asyncio.run(jit._invite_to_hdx("jane@corp.com", "customer-acme"))
+        audited.assert_not_called()
+        log.warning.assert_called_once()
+        assert log.warning.call_args.kwargs["error"] == "hyperdx unreachable"
+
 
 class _RecordingHdx:
     """HyperDX client stub recording the invites it was actually awaited for."""

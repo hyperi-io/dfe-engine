@@ -150,10 +150,23 @@ class JitProvisioner:
     # ------------------------------------------------------------------
 
     async def _invite_to_hdx(self, user_id: str, team_name: str) -> None:
-        """Fire-and-forget coroutine to invite a user to the fork's team."""
+        """Invite the user to the fork's team; a refusal or failure is logged, never raised."""
         try:
             success = await self._hdx.invite_member(user_id)
-            if success:
-                audit_jit_hdx_invited(user_id, team_name)
-        except Exception:
-            pass  # Non-fatal — already logged inside invite_member
+        except Exception as exc:
+            # The login already succeeded, so the user must not lose it over HyperDX.
+            logger.warning(
+                "JIT HyperDX invite failed",
+                user_id=user_id,
+                team_name=team_name,
+                error=str(exc),
+            )
+            return
+        if success:
+            audit_jit_hdx_invited(user_id, team_name)
+            return
+        logger.warning(
+            "JIT HyperDX invite refused - the user has no HyperDX team",
+            user_id=user_id,
+            team_name=team_name,
+        )
