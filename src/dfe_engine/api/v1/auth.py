@@ -21,7 +21,9 @@ from dfe_engine.api.deps import (
     resolve_live_groups_for_user,
     resolve_live_roles_for_user,
 )
+from dfe_engine.auth.audit import audit_login_denied
 from dfe_engine.auth.local_provider import LocalAuthProvider
+from dfe_engine.auth.models import AuthenticationError
 from dfe_engine.auth.setup_status import SetupStatus, evaluate_initial_setup
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -68,14 +70,21 @@ class PermissionsResponse(BaseModel):
 async def login(body: LoginRequest, request: Request, settings: Settings):
     """Authenticate with local credentials and receive a JWT token."""
     provider: LocalAuthProvider = request.app.state.auth_provider
+    client_ip = _get_client_ip(request)
 
-    auth_ctx = provider.authenticate(
-        body.username,
-        body.password,
-        request_id=request.headers.get("X-Request-ID"),
-        client_ip=_get_client_ip(request),
-        user_agent=request.headers.get("User-Agent"),
-    )
+    try:
+        auth_ctx = provider.authenticate(
+            body.username,
+            body.password,
+            request_id=request.headers.get("X-Request-ID"),
+            client_ip=client_ip,
+            user_agent=request.headers.get("User-Agent"),
+        )
+    except AuthenticationError as exc:
+        # Audited here rather than in the app-wide 401 handler, which also answers
+        # expired tokens on ordinary requests - those are already audited in deps.py.
+        audit_login_denied(body.username, "jwt", client_ip, str(exc))
+        raise
 
     token = create_access_token(
         data={
