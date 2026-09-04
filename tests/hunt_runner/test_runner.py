@@ -1,15 +1,16 @@
 #  Project:      dfe-engine
 #  File:         tests/hunt_runner/test_runner.py
-#  Purpose:      Tests for hunt-runner load-spread + never-double-run decision
+#  Purpose:      Tests for hunt-runner load-spread, double-run decision, heartbeat
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""Deterministic spread + scheduling-decision tests."""
+"""Deterministic spread + scheduling-decision tests, and the tick's heartbeat."""
 
 from __future__ import annotations
 
 from dfe_engine.hunt_runner import HuntState, decide, next_due, phase_offset
+from dfe_engine.hunt_runner.runner import HuntRunner
 from dfe_engine.hunt_runner.scheduler import mark_deferred
 
 
@@ -74,3 +75,87 @@ def test_mark_deferred_flags_too_aggressive():
     assert out.too_aggressive is True
     assert out.overrun_count == 2
     assert out.status == "deferred"
+
+
+class _RecordingCoordinator:
+    """A coordinator that records call order and grants every claim."""
+
+    def __init__(self, *, heartbeat_raises: bool = False) -> None:
+        self.calls: list[str] = []
+        self.beats: list[tuple[int, float]] = []
+        self._heartbeat_raises = heartbeat_raises
+
+    def heartbeat(self, now: int, poll_seconds: float) -> None:
+        self.calls.append("heartbeat")
+        if self._heartbeat_raises:
+            raise RuntimeError("clickhouse is down")
+        self.beats.append((now, poll_seconds))
+
+    def active_count(self, now: int) -> int:
+        self.calls.append("active_count")
+        return 0
+
+    def pending_runs(self, now: int) -> dict[str, int]:
+        self.calls.append("pending_runs")
+        return {}
+
+    def get_watermark(self, hunt_id: str) -> int | None:
+        return None
+
+    def current_lease(self, hunt_id: str):
+        return None
+
+    def try_claim(self, hunt_id: str, fire: int, now: int) -> bool:
+        self.calls.append("try_claim")
+        return True
+
+    def release(self, hunt_id: str, fire: int) -> None:
+        self.calls.append("release")
+
+
+class _CountingWorker:
+    """A worker that runs nothing and only counts."""
+
+    def __init__(self) -> None:
+        self.runs = 0
+
+    def run(self, spec, fire: int) -> None:
+        self.runs += 1
+
+
+def _due_runner(coord, worker, *, poll_seconds: float = 15.0) -> tuple[HuntRunner, int]:
+    """A runner holding one hunt, plus a *now* at which that hunt is due."""
+    from dfe_engine.hunt_runner.models import HuntSpec
+
+    spec = HuntSpec(hunt_id="h", interval_seconds=600, queries=["SELECT 1"])
+    # The fire is the interval boundary plus the hunt's stable offset, so a now on
+    # that instant is due without any dependence on the real clock.
+    now = 600_000 + phase_offset("h", 600)
+    runner = HuntRunner(coord, worker, {"h": spec}, cap=8, poll_seconds=poll_seconds)
+    return runner, now
+
+
+def test_a_tick_beats_before_it_claims_anything():
+    coord = _RecordingCoordinator()
+    worker = _CountingWorker()
+    runner, now = _due_runner(coord, worker, poll_seconds=30.0)
+    assert runner.tick(now) == 1
+    assert coord.calls[0] == "heartbeat"
+    assert coord.calls.index("heartbeat") < coord.calls.index("try_claim")
+    # The beat carries the tick's own clock and the cadence the runner was built on.
+    assert coord.beats == [(now, 30.0)]
+
+
+def test_a_tick_with_nothing_due_still_beats():
+    coord = _RecordingCoordinator()
+    runner = HuntRunner(coord, _CountingWorker(), {}, cap=8, poll_seconds=15.0)
+    assert runner.tick(1000) == 0
+    assert coord.beats == [(1000, 15.0)]
+
+
+def test_a_failed_beat_does_not_cost_the_runs():
+    coord = _RecordingCoordinator(heartbeat_raises=True)
+    worker = _CountingWorker()
+    runner, now = _due_runner(coord, worker)
+    assert runner.tick(now) == 1
+    assert worker.runs == 1

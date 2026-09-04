@@ -35,6 +35,7 @@ stays agnostic (it only calls the tick and the reload callbacks it was handed).
 from __future__ import annotations
 
 import signal
+import socket
 import time
 from typing import Any
 
@@ -133,14 +134,18 @@ def run(
     """
     settings = load_settings()
     ch, db = _build_ch(settings)
-    coord = ChCoordinator(ch, database=db)
+    poll_seconds = settings.hunts.runner_poll_seconds if poll is None else poll
+    # The hostname is the pod name under k8s: stable per process, distinct per pod.
+    coord = ChCoordinator(ch, database=db, worker_id=socket.gethostname())
     coord.ensure_schema()
     worker = HuntWorker(ch, coord)
     hunt_dir = settings.hunts.hunt_dir
     sources = _spec_sources(settings, db)
 
     def _build_runner() -> HuntRunner:
-        return HuntRunner(coord, worker, load_specs(hunt_dir, **sources), cap=cap)
+        return HuntRunner(
+            coord, worker, load_specs(hunt_dir, **sources), cap=cap, poll_seconds=poll_seconds
+        )
 
     # The runner lives in a one-element cell so on_reload can swap in a runner built
     # from freshly loaded specs. The daemon loop only ever calls cell[0].tick, so it
@@ -165,7 +170,7 @@ def run(
         should_stop=lambda: stop["flag"],
         clock=time.time,
         sleep=time.sleep,
-        poll_seconds=settings.hunts.runner_poll_seconds if poll is None else poll,
+        poll_seconds=poll_seconds,
         on_reload=_reload,
         reload_every=reload_every,
     )

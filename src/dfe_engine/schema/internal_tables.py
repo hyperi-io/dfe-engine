@@ -12,10 +12,10 @@ Defined in dfe-schemas under ``tables/internal/``; this module mostly only names
 them. They hold the engine's own working state rather than user data, so their
 columns are exact ClickHouse types with no meta-schema mapping behind them.
 
-``hunt_run`` is declared here in code instead. It is the same kind of table and
-goes through the same applier and resolver, so its engine is still resolved per
-topology; it is written down here because the runner needs it now and the schema
-package moves on its own release.
+``hunt_run`` and ``hunt_runner_heartbeat`` are declared here in code instead. They
+are the same kind of table and go through the same applier and resolver, so their
+engine is still resolved per topology; they are written down here because the
+runner needs them now and the schema package moves on its own release.
 """
 
 from __future__ import annotations
@@ -80,10 +80,38 @@ def hunt_run_spec(database: str) -> TableSpec:
     )
 
 
+def hunt_runner_heartbeat_spec(database: str) -> TableSpec:
+    """One row per hunt runner: the last tick it started, and the poll it ticks on.
+
+    A lease says a hunt is executing right now, so it is absent on an idle runner and
+    cannot answer "is a runner alive". The beat is written at the top of every tick,
+    whether or not anything is due. ``poll_seconds`` rides along so liveness is judged
+    against the cadence the runner was actually started with rather than a setting the
+    reader might resolve differently.
+    """
+    return TableSpec(
+        name="hunt_runner_heartbeat",
+        columns=[
+            _ch_column("runner_id", "String", order=0),
+            _ch_column("seen", "Int64", comment="epoch seconds of the tick, the runner's clock"),
+            _ch_column("poll_seconds", "Float64", comment="seconds between this runner's ticks"),
+            _ch_column("updated", "DateTime64(3)", default="now64(3)"),
+        ],
+        config=DDLConfig(
+            db=database,
+            engine="ReplacingMergeTree(updated)",
+            ttl_columns=[],
+            projection_order_by=None,
+            index_granularity=2048,
+        ),
+    )
+
+
 def hunt_coordination_specs(database: str) -> list[TableSpec]:
     """Every hunt coordination table, in the data database."""
     return [load_table_spec(ref, database) for ref in HUNT_COORDINATION_REFS] + [
-        hunt_run_spec(database)
+        hunt_run_spec(database),
+        hunt_runner_heartbeat_spec(database),
     ]
 
 

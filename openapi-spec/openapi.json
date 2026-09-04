@@ -6098,7 +6098,7 @@
           "hunts"
         ],
         "summary": "Get Engine Status",
-        "description": "Report hunt scheduling status.\n\nHunts execute in the separate dfe-hunt-runner service (pull-based, coordinated\nvia ClickHouse), not in this API process. ``running`` counts in-flight leases\nacross the whole stack, and a lease is released the moment a run commits, so on\na healthy stack it reads false almost always. It is NOT runner liveness: for\n\"is this hunt running\", read the per-hunt ``running`` on the hunts list.\n``hunt_count`` is the configured-hunt count.",
+        "description": "Report hunt scheduling status.\n\nHunts execute in the separate dfe-hunt-runner service (pull-based, coordinated\nvia ClickHouse), not in this API process, so ``runners`` counts the runners that\nbeat within their last two polls and ``running`` is whether any did. For \"is this\nhunt running\", read the per-hunt ``running`` on the hunts list; ``hunt_count`` is\nthe configured-hunt count.",
         "operationId": "get_engine_status_api_v1_hunts_status_get",
         "responses": {
           "200": {
@@ -19262,7 +19262,13 @@
           "running": {
             "type": "boolean",
             "title": "Running",
-            "description": "Whether the scheduler thread is alive"
+            "description": "Whether at least one hunt runner is alive"
+          },
+          "runners": {
+            "type": "integer",
+            "title": "Runners",
+            "description": "Hunt runners that beat within their last two polls",
+            "default": 0
           },
           "hunt_count": {
             "type": "integer",

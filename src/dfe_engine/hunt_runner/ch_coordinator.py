@@ -31,6 +31,9 @@ Tables (all ReplacingMergeTree; the first three bounded to ~1 row/hunt after mer
   hunt_run       - one row per FIRE: an operator's run-now request, then what that
                    run wrote. Keyed by (hunt_id, fire), so it is the run history
                    the API reads rather than a single current row.
+  hunt_runner_heartbeat - one row per RUNNER: the last tick it started. A lease is
+                   held only while a hunt executes, so this is the only thing that
+                   says an idle runner is alive.
 """
 
 from __future__ import annotations
@@ -268,6 +271,17 @@ class ChCoordinator:
             parameters={"now": now},
         ).result_rows
         return {str(row[0]): int(row[1]) for row in rows}
+
+    # ---- heartbeat (runner liveness) ----------------------------------
+
+    def heartbeat(self, now: int, poll_seconds: float) -> None:
+        """Record that this runner ticked at *now*, on a *poll_seconds* cadence."""
+        self._ch.insert(
+            "hunt_runner_heartbeat",
+            [[self._worker_id, int(now), float(poll_seconds)]],
+            column_names=["runner_id", "seen", "poll_seconds"],
+            database=self._db,
+        )
 
     def record_overrun(self, hunt_id: str) -> None:
         """Flag a hunt too-aggressive and bump its overrun count (UI signal).

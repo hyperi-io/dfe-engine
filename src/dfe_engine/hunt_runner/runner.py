@@ -17,6 +17,10 @@ wrapper around this.
 An operator's run-now arrives the same way: the API writes a fire into hunt_run and
 the next tick picks it up. Nothing pushes at the runner, so a run-now needs no
 listener and behaves like any other fire once claimed.
+
+Every tick opens with a heartbeat, before the due/claim/execute work. That is what
+tells the API a runner exists: an idle runner holds no lease, so without the beat a
+healthy stack with nothing due is indistinguishable from no runner at all.
 """
 
 from __future__ import annotations
@@ -38,11 +42,14 @@ class HuntRunner:
         worker: HuntWorker,
         specs: dict[str, HuntSpec],
         cap: int = 8,
+        poll_seconds: float = 15.0,
     ) -> None:
         self._coord = coordinator
         self._worker = worker
         self._specs = specs
         self._cap = cap
+        # Beaten into the heartbeat: a reader judges this runner against its own cadence.
+        self._poll_seconds = poll_seconds
 
     def _fire_for(self, spec: HuntSpec, now: int, requested: dict[str, int]) -> int | None:
         """The fire this tick should run for the hunt, or None if there is nothing.
@@ -59,11 +66,21 @@ class HuntRunner:
                 return fire
         return requested.get(spec.hunt_id)
 
+    def _beat(self, now: int) -> None:
+        """Say this runner is alive. A failed beat costs visibility; a lost tick costs runs."""
+        try:
+            self._coord.heartbeat(now, self._poll_seconds)
+        except Exception as exc:
+            logger.warning(f"hunt runner heartbeat failed at {now}: {exc}")
+
     def tick(self, now: int) -> int:
         """One cycle: claim + run every due hunt (never double-run), up to the cap.
 
+        The heartbeat goes first so a runner with nothing due still reads as alive.
+
         Returns the number of runs executed this tick.
         """
+        self._beat(now)
         running = self._coord.active_count(now)
         # Read every outstanding run-now once per tick, not once per hunt.
         requested = self._coord.pending_runs(now)
