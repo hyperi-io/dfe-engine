@@ -56,19 +56,43 @@ class RedactingErrStream(io.RawIOBase):
     ``remote_location`` is the URL as supplied - including the basic-auth token the
     HTTPS path has to carry. The default errstream is stderr, so that line puts the
     deploy-repo token in the container log in clear.
+
+    Redaction is per LINE, not per chunk: dulwich writes progress in whatever sizes
+    the transport hands it, so a URL split across two writes would pass the regex
+    unredacted if each chunk were matched on its own.
     """
+
+    def __init__(self) -> None:
+        self._buffer = bytearray()
 
     def writable(self) -> bool:
         """Always writable - this stream only ever accepts output."""
         return True
 
     def write(self, data, /) -> int:
-        """Redact the chunk, log it at debug, and report it fully consumed."""
+        """Buffer the chunk, log every complete line redacted, report it consumed."""
         raw = bytes(data)
+        self._buffer.extend(raw)
+        while True:
+            cut = self._buffer.find(b"\n")
+            if cut < 0:
+                break
+            self._log(bytes(self._buffer[:cut]))
+            del self._buffer[: cut + 1]
+        return len(raw)
+
+    def close(self) -> None:
+        """Log whatever the last write left unterminated, then close."""
+        if self._buffer:
+            self._log(bytes(self._buffer))
+            self._buffer.clear()
+        super().close()
+
+    @staticmethod
+    def _log(raw: bytes) -> None:
         line = redact_credentials(raw.decode("utf-8", "replace")).strip()
         if line:
             logger.debug(line)
-        return len(raw)
 
 
 def authed_https_url(

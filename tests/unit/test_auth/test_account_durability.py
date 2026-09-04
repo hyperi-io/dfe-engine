@@ -355,6 +355,13 @@ def test_is_break_glass_matches_the_admin(monkeypatch):
     assert ad.is_break_glass("alice") is False
 
 
+def test_is_break_glass_follows_the_configured_admin_name():
+    # DFE_AUTH_LOCAL_ADMIN_NAME renames the break-glass account; without the name
+    # threaded through, the renamed account loses its git-durability path entirely.
+    assert ad.is_break_glass("root", "root") is True
+    assert ad.is_break_glass("admin", "root") is False
+
+
 def test_not_git_backed_state_is_durable():
     state = ad.not_git_backed_state()
     assert state.enabled is False

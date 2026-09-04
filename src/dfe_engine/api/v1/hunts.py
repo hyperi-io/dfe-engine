@@ -26,7 +26,7 @@ import re
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from jinja2 import Environment
 from pydantic import BaseModel, Field, field_validator
 from scalo.logger import logger
@@ -39,6 +39,7 @@ from dfe_engine.api.deps import (
     require_action,
 )
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
+from dfe_engine.api.review import apply_review_headers, review_audit_detail
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.hunt_runner.run_status import RunStatus, live_runner_count, read_run_status
@@ -292,7 +293,7 @@ def _clickhouse_unreachable(exc: BaseException) -> bool:
     return isinstance(exc, ServiceUnavailable) or is_connection_error(exc)
 
 
-def _live_runners(request: Request) -> int:
+def _live_runners() -> int:
     """Best-effort count of hunt runners that have beaten within their last two polls.
 
     Hunt execution runs in the separate dfe-hunt-runner service and coordinates via
@@ -361,7 +362,6 @@ def _hunt_row_to_summary(row: dict[str, Any], status: RunStatus | None, now: int
     dependencies=[Depends(require_action(scopes_dict["hunt_read"]))],
 )
 async def get_engine_status(
-    request: Request,
     user: CurrentUser,
     registry: HuntConfigReg,
 ) -> HuntEngineStatus:
@@ -373,7 +373,7 @@ async def get_engine_status(
     hunt running", read the per-hunt ``running`` on the hunts list; ``hunt_count`` is
     the configured-hunt count.
     """
-    runners = _live_runners(request)
+    runners = _live_runners()
     return HuntEngineStatus(
         running=runners > 0,
         runners=runners,
@@ -434,8 +434,13 @@ async def create_hunt(
     user: CurrentUser,
     registry: HuntConfigReg,
     settings: Settings,
+    response: Response,
 ) -> HuntDetailResponse:
-    """Create a new hunt configuration YAML."""
+    """Create a new hunt configuration YAML.
+
+    A production+team write is routed to a review branch instead of the branch the
+    runner git-syncs, and the ``X-DFE-Review-Required`` header says so.
+    """
     if registry.name_exists(body.name):
         raise HTTPException(
             status_code=409,
@@ -443,13 +448,14 @@ async def create_hunt(
         )
     config = body.to_config_dict(hunt_name=body.name)
     _validate_hunt_config(config, settings)
-    registry.save(
+    outcome = registry.save(
         body.name,
         config,
         created_by=user.user_id,
         description=f"hunt: create {body.name}",
     )
-    audit_resource_change(user.user_id, "hunt", body.name, "created")
+    apply_review_headers(response, outcome)
+    audit_resource_change(user.user_id, "hunt", body.name, "created", review_audit_detail(outcome))
     return HuntDetailResponse.from_stored_config(body.name, config)
 
 
@@ -485,8 +491,13 @@ async def update_hunt(
     user: CurrentUser,
     registry: HuntConfigReg,
     settings: Settings,
+    response: Response,
 ) -> HuntDetailResponse:
-    """Replace an existing hunt configuration."""
+    """Replace an existing hunt configuration.
+
+    A production+team write is routed to a review branch instead of the branch the
+    runner git-syncs, and the ``X-DFE-Review-Required`` header says so.
+    """
     try:
         registry.get(name)
     except HuntConfigNotFoundError:
@@ -497,13 +508,14 @@ async def update_hunt(
 
     config = body.to_config_dict(hunt_name=name)
     _validate_hunt_config(config, settings)
-    registry.save(
+    outcome = registry.save(
         name,
         config,
         created_by=user.user_id,
         description=f"hunt: update {name}",
     )
-    audit_resource_change(user.user_id, "hunt", name, "updated")
+    apply_review_headers(response, outcome)
+    audit_resource_change(user.user_id, "hunt", name, "updated", review_audit_detail(outcome))
     return HuntDetailResponse.from_stored_config(name, config)
 
 
@@ -517,8 +529,13 @@ async def delete_hunt(
     user: CurrentUser,
     registry: HuntConfigReg,
     alert_registry: OptionalAlertDestRegistry,
+    response: Response,
 ):
-    """Delete a hunt configuration."""
+    """Delete a hunt configuration.
+
+    A production+team delete is routed to a review branch, so the runner keeps
+    executing the hunt until that branch is merged; ``X-DFE-Review-Required`` says so.
+    """
     try:
         registry.get(name)
     except HuntConfigNotFoundError:
@@ -528,8 +545,9 @@ async def delete_hunt(
         ) from None
     if alert_registry is not None:
         delete_destinations_owned_by_hunt(alert_registry, registry, name)
-    registry.delete(name, created_by=user.user_id)
-    audit_resource_change(user.user_id, "hunt", name, "deleted")
+    outcome = registry.delete(name, created_by=user.user_id)
+    apply_review_headers(response, outcome)
+    audit_resource_change(user.user_id, "hunt", name, "deleted", review_audit_detail(outcome))
 
 
 @router.post(

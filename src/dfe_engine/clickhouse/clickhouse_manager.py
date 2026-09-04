@@ -110,11 +110,9 @@ class ClickHouseClientWrapper:
         """Row insert -> clickhouse-connect's ``insert(table, rows, column_names=,
         database=)``, through the resilience layer.
 
-        This wrapper is the ONLY ClickHouse client the engine hands out, so anything
-        that WRITES rows through it needs the method here: without it a write raises
-        AttributeError, which is a programming error and not an outage. Retries are
-        safe for the callers that use it (the hunt coordination tables are
-        ReplacingMergeTree, so a re-inserted row collapses on merge).
+        A retry can insert the same row twice, which is safe only where the table
+        collapses duplicates; every hunt coordination table this is used for is
+        ReplacingMergeTree.
         """
         kwargs["settings"] = merge_log_comment(kwargs.get("settings"))
         return self._manager.run_resilient(lambda: self._client.insert(table, *args, **kwargs))

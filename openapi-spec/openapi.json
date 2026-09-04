@@ -5144,7 +5144,7 @@
           "Rules"
         ],
         "summary": "Create Rule",
-        "description": "Create a new hunt rule via RuleCreationService.\n\nThe service sanitizes the SQL, applies CEL\u2192SQL transpilation,\nvalidates column references, and optionally estimates query cost.",
+        "description": "Create a new hunt rule via RuleCreationService.\n\nThe service sanitizes the SQL, applies CEL\u2192SQL transpilation,\nvalidates column references, and optionally estimates query cost.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so.",
         "operationId": "create_rule_api_v1_rules_post",
         "requestBody": {
           "required": true,
@@ -5331,7 +5331,7 @@
           "Rules"
         ],
         "summary": "Update Rule",
-        "description": "Replace a detection rule (re-runs creation pipeline, preserves created_at).",
+        "description": "Replace a detection rule (re-runs creation pipeline, preserves created_at).\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so.",
         "operationId": "update_rule_api_v1_rules__name__put",
         "parameters": [
           {
@@ -5387,7 +5387,7 @@
           "Rules"
         ],
         "summary": "Delete Rule",
-        "description": "Delete a detection rule.",
+        "description": "Delete a detection rule.\n\nA production+team delete is routed to a review branch, so the runner keeps\ncompiling the rule until that branch is merged; ``X-DFE-Review-Required`` says so.",
         "operationId": "delete_rule_api_v1_rules__name__delete",
         "parameters": [
           {
@@ -6231,7 +6231,7 @@
           "hunts"
         ],
         "summary": "Create Hunt",
-        "description": "Create a new hunt configuration YAML.",
+        "description": "Create a new hunt configuration YAML.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so.",
         "operationId": "create_hunt_api_v1_hunts_post",
         "requestBody": {
           "required": true,
@@ -6324,7 +6324,7 @@
           "hunts"
         ],
         "summary": "Update Hunt",
-        "description": "Replace an existing hunt configuration.",
+        "description": "Replace an existing hunt configuration.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so.",
         "operationId": "update_hunt_api_v1_hunts__name__put",
         "parameters": [
           {
@@ -6380,7 +6380,7 @@
           "hunts"
         ],
         "summary": "Delete Hunt",
-        "description": "Delete a hunt configuration.",
+        "description": "Delete a hunt configuration.\n\nA production+team delete is routed to a review branch, so the runner keeps\nexecuting the hunt until that branch is merged; ``X-DFE-Review-Required`` says so.",
         "operationId": "delete_hunt_api_v1_hunts__name__delete",
         "parameters": [
           {

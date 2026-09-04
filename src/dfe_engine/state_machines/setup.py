@@ -75,6 +75,16 @@ STEP_ADMIN_PASSWORD = "admin_password"
 # ── Context ──────────────────────────────────────────────────
 
 
+def _attr_path(root: Any, *names: str) -> Any:
+    """Walk an attribute chain, stopping at the first name that is absent or None."""
+    value = root
+    for name in names:
+        value = getattr(value, name, None)
+        if value is None:
+            return None
+    return value
+
+
 @dataclass(frozen=True)
 class SetupContext:
     """Everything the machine needs to evaluate a step, and nothing more.
@@ -106,7 +116,7 @@ class SetupContext:
             A context describing the live deployment.
         """
         account_store = getattr(state, "account_store", None)
-        local = getattr(getattr(getattr(state, "settings", None), "auth", None), "local", None)
+        local = _attr_path(state, "settings", "auth", "local")
         admin_name = admin_account_name(getattr(local, "admin_name", "") or "")
         return cls(
             account_store=account_store,

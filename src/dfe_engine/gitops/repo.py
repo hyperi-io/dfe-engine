@@ -26,7 +26,7 @@ from typing import TypeVar, cast
 from dulwich import porcelain
 from scalo.logger import logger
 
-from .dulwich_auth import RedactingErrStream, redact_credentials
+from .dulwich_auth import RedactingErrStream, redact_credentials, scrub_remote_credentials
 
 T = TypeVar("T")
 
@@ -127,6 +127,7 @@ class GitopsRepo:
                 str(self._path), self._authed_url(), errstream=errstream
             )
         )
+        self._scrub_remote()
         head = result.refs.get(b"refs/heads/" + self._branch.encode())
         if head is None:
             return None
@@ -143,8 +144,8 @@ class GitopsRepo:
 
         dulwich.porcelain clone/push take no username/password kwargs; HTTPS auth
         is carried in the URL. SSH URLs auth via the agent/keys (no creds here).
-        The token lands in the local clone's origin config -- the working dir is
-        in-cluster/local with restricted perms.
+        The credentialed URL is supplied per op and never left in ``.git/config``
+        -- :meth:`_scrub_remote` rewrites the stored remote back to the bare URL.
         """
         url = self._repo_url
         if self._username and url.startswith(("http://", "https://")):
@@ -160,14 +161,38 @@ class GitopsRepo:
         -- dulwich puts the URL as supplied in both. Chained ``from None`` on purpose:
         the original exception's own text is the thing carrying the token.
         """
+        stream = RedactingErrStream()
         try:
-            return op(RedactingErrStream())
+            return op(stream)
         except Exception as exc:
             raise GitopsRemoteError(redact_credentials(str(exc))) from None
+        finally:
+            # The stream redacts a line at a time, so closing it flushes whatever
+            # the op's last write left unterminated.
+            stream.close()
+
+    def _scrub_remote(self) -> None:
+        """Rewrite the stored remote back to the credential-free URL.
+
+        ``porcelain.clone`` persists the URL it cloned from, so a credentialed
+        clone leaves the deploy token in ``.git/config`` in plaintext; every push
+        and fetch re-supplies the credentials explicitly, so the stored remote
+        never needs them. Best-effort: a clone that keeps its credential is a
+        hardening miss, not a reason to fail the op.
+        """
+        if not (self._token and self._repo_url):
+            return
+        try:
+            scrub_remote_credentials(self._path, self._repo_url)
+        except Exception:
+            logger.warning("Could not scrub the gitops clone's stored credentials")
 
     def ensure(self) -> Path:
         """Make the working tree present: clone, reuse, or init."""
         if (self._path / ".git").exists():
+            # A clone that died between writing .git/config and its own scrub would
+            # otherwise leave the token on disk for the life of the working tree.
+            self._scrub_remote()
             return self._path
         if self._repo_url:
             self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -180,6 +205,7 @@ class GitopsRepo:
                     errstream=errstream,
                 )
             )
+            self._scrub_remote()
             return self._path
         self._path.mkdir(parents=True, exist_ok=True)
         porcelain.init(str(self._path))

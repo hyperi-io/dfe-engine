@@ -88,6 +88,9 @@ def hunt_runner_heartbeat_spec(database: str) -> TableSpec:
     whether or not anything is due. ``poll_seconds`` rides along so liveness is judged
     against the cadence the runner was actually started with rather than a setting the
     reader might resolve differently.
+
+    ``runner_id`` is the pod hostname, so every rollout mints keys the liveness query
+    will never count again; the TTL drops a runner's last beat a week after it stopped.
     """
     return TableSpec(
         name="hunt_runner_heartbeat",
@@ -100,7 +103,8 @@ def hunt_runner_heartbeat_spec(database: str) -> TableSpec:
         config=DDLConfig(
             db=database,
             engine="ReplacingMergeTree(updated)",
-            ttl_columns=[],
+            ttl_days=7,
+            ttl_columns=["updated"],
             projection_order_by=None,
             index_granularity=2048,
         ),

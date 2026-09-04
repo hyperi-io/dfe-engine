@@ -27,6 +27,7 @@ from dfe_engine.hunts.rule_model import Rule
 from dfe_engine.yaml_utils import yaml_dump
 
 if TYPE_CHECKING:
+    from dfe_engine.gitcrud.routing import WriteOutcome
     from dfe_engine.hunts.deploy_repo import DeployRepoStore
 
 
@@ -105,13 +106,6 @@ class RuleRegistry:
         if self._store is not None:
             self._store.stop()
 
-    # -----------------------------------------------------------------
-    # Backend primitives (deploy repo vs DirectoryConfigStore)
-    #
-    # ALL backend branching lives here: the CRUD methods below call these
-    # and never test self._deploy themselves.
-    # -----------------------------------------------------------------
-
     def _require_store(self) -> DirectoryConfigStore:
         """Narrow the Optional store once: the directory backend always builds one."""
         if self._store is None:
@@ -132,16 +126,17 @@ class RuleRegistry:
 
     def _put_raw(
         self, name: str, doc: dict[str, Any], *, created_by: str | None, message: str
-    ) -> str:
-        """Write one rule doc; returns the destination label for the save log.
+    ) -> tuple[str, WriteOutcome | None]:
+        """Write one rule doc; returns the save-log destination and the git outcome.
 
         Deploy repo: ONE routed commit, and the doc is stored verbatim because the
         runner's rule_compiler parses this exact file. Directory backend: plain YAML
-        write, git commit when the directory is a repo, then a cache refresh.
+        write, git commit when the directory is a repo, then a cache refresh, and no
+        routing outcome to report.
         """
         if self._deploy is not None:
-            self._deploy.put(name, doc, actor=created_by or "engine")
-            return "deploy repo config/rules"
+            outcome = self._deploy.put(name, doc, actor=created_by or "engine")
+            return "deploy repo config/rules", outcome
 
         store = self._require_store()
         yaml_path = self._rules_directory / f"{name}.yaml"
@@ -151,17 +146,18 @@ class RuleRegistry:
             if store._git_push:
                 store._git_push_remote()
         store._refresh_all()
-        return str(yaml_path)
+        return str(yaml_path), None
 
-    def _delete_raw(self, name: str, *, created_by: str | None) -> bool:
-        """Remove one rule doc; False when it did not exist."""
+    def _delete_raw(self, name: str, *, created_by: str | None) -> tuple[bool, WriteOutcome | None]:
+        """Remove one rule doc; False when it did not exist, plus the git outcome."""
         if self._deploy is not None:
-            return self._deploy.delete(name, actor=created_by or "engine")
+            outcome = self._deploy.delete(name, actor=created_by or "engine")
+            return outcome is not None, outcome
 
         store = self._require_store()
         yaml_path = self._rules_directory / f"{name}.yaml"
         if not yaml_path.exists():
-            return False
+            return False, None
 
         if store.is_git and store._repo is not None:
             try:
@@ -193,7 +189,7 @@ class RuleRegistry:
 
         with store._lock:
             store._cache.pop(name, None)
-        return True
+        return True, None
 
     # -----------------------------------------------------------------
     # CRUD Operations
@@ -221,24 +217,32 @@ class RuleRegistry:
         *,
         created_by: str | None = None,
         description: str | None = None,
-    ) -> Rule:
+    ) -> WriteOutcome | None:
+        """Persist one rule; returns the git routing outcome, None off gitops.
+
+        A production+team write lands on a review branch rather than the branch the
+        runner git-syncs, so the caller has to be able to say so.
+        """
         commit_msg = description or f"rule: update {rule.rule_id}"
         if created_by:
             commit_msg = f"{commit_msg} (by {created_by})"
 
-        dest = self._put_raw(
+        dest, outcome = self._put_raw(
             rule.rule_id,
             _rule_to_yaml_dict(rule),
             created_by=created_by,
             message=commit_msg,
         )
         logger.info(f"Saved rule '{rule.rule_id}' → {dest}")
-        return rule
+        return outcome
 
-    def delete(self, name: str, created_by: str | None = None) -> None:
-        if not self._delete_raw(name, created_by=created_by):
+    def delete(self, name: str, created_by: str | None = None) -> WriteOutcome | None:
+        """Remove one rule; returns the git routing outcome, None off gitops."""
+        found, outcome = self._delete_raw(name, created_by=created_by)
+        if not found:
             raise RuleNotFoundError(f"Rule not found: '{name}'")
         logger.info(f"Deleted rule '{name}'")
+        return outcome
 
     def list_rules(self) -> list[dict[str, Any]]:
         """Return metadata dicts for all stored rules."""

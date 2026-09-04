@@ -55,7 +55,7 @@ def _persist_account(
     Only the break-glass admin is git-persisted; regular users are durable in their
     own store (document store/yaml), so they never touch the deploy repo.
     """
-    if not account_durability.is_break_glass(username):
+    if not account_durability.is_break_glass(username, settings.auth.local.admin_name):
         return account_durability.not_git_backed_state()
     gc = getattr(request.app.state, "gitcrud", None)
     forge = getattr(request.app.state, "forge", None)
@@ -369,7 +369,7 @@ async def account_git_status(
             status_code=404,
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
         )
-    if not account_durability.is_break_glass(username):
+    if not account_durability.is_break_glass(username, settings.auth.local.admin_name):
         return account_durability.not_git_backed_state()
     return account_durability.remote_state(
         getattr(request.app.state, "gitcrud", None),
@@ -401,7 +401,7 @@ async def delete_account(
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
         )
     store.delete(username)
-    if account_durability.is_break_glass(username):
+    if account_durability.is_break_glass(username, settings.auth.local.admin_name):
         account_durability.remove_account(
             getattr(request.app.state, "gitcrud", None),
             getattr(request.app.state, "forge", None),
