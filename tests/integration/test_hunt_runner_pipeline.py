@@ -68,6 +68,7 @@ def test_loaded_hunt_runs_windowed_insert_and_is_attributed(ch_client, scratch_d
         f'query: "INSERT INTO `{scratch_db}`.tgt SELECT timestamp_load, msg '
         f'FROM `{scratch_db}`.src WHERE {{window}}"\n'
         f'global_target_table_name: "{scratch_db}.tgt"\n'
+        'timestamp_field: "timestamp_load"\n'
     )
     (tmp_path / "scratch_hunt.yaml").write_text(hunt_yaml)
     specs = load_specs(tmp_path)
@@ -109,17 +110,18 @@ def test_loaded_hunt_runs_windowed_insert_and_is_attributed(ch_client, scratch_d
     assert int(tagged[0][0]) >= 1
 
 
-def test_empty_query_hunt_is_a_noop_that_still_advances_watermark(ch_client, scratch_db):
-    # A hunt with no query (rule->SQL compilation is out of v1 scope) must not crash;
-    # it advances the watermark so the schedule still progresses.
+def test_a_hunt_with_no_query_fails_and_leaves_its_watermark_where_it_was(ch_client, scratch_db):
+    # A hunt whose rules compiled to nothing has not run. Advancing the watermark
+    # would move it past a window nothing scanned, and every fire would look clean.
     coord = ChCoordinator(ch_client, database=scratch_db, settle_seconds=0.0, sleep=lambda _s: None)
     coord.ensure_schema()
-    from dfe_engine.hunt_runner import HuntSpec
+    from dfe_engine.hunt_runner import EmptyHuntQuery, HuntSpec
 
-    spec = HuntSpec(hunt_id="noop", interval_seconds=60, query="")
+    spec = HuntSpec(hunt_id="noop", interval_seconds=60)
     worker = HuntWorker(ch_client, coord)
-    assert worker.run(spec, scheduled_start=500) == 500
-    assert coord.get_watermark("noop") == 500
+    with pytest.raises(EmptyHuntQuery):
+        worker.run(spec, scheduled_start=500)
+    assert coord.get_watermark("noop") is None
 
 
 def test_daemon_loop_fires_a_loaded_hunt_once_against_live_ch(ch_client, scratch_db, tmp_path):
@@ -149,6 +151,7 @@ def test_daemon_loop_fires_a_loaded_hunt_once_against_live_ch(ch_client, scratch
         'schedule:\n  mode: rate\n  interval: "2s"\n'
         f'query: "INSERT INTO `{scratch_db}`.tgt SELECT timestamp_load, msg '
         f'FROM `{scratch_db}`.src WHERE {{window}}"\n'
+        'timestamp_field: "timestamp_load"\n'
     )
     (tmp_path / "live_hunt.yaml").write_text(hunt_yaml)
     specs = load_specs(tmp_path)

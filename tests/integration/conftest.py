@@ -374,3 +374,36 @@ def ch_client(ch_params):
     import clickhouse_connect
 
     return clickhouse_connect.get_client(**ch_params)
+
+
+@pytest.fixture
+def dfe_db(ch_client):
+    """An isolated database carrying the REAL default and detection tables.
+
+    Built from the same specs the core schema applies, so a hunt writes into the
+    detection table a deployment actually has rather than a stand-in shaped to suit
+    the test.
+    """
+    import uuid
+
+    from dfe_engine.schema.applier import SchemaApplier
+    from dfe_engine.schema.ddl_writer import DDLFileWriter
+    from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
+
+    db = f"dfe_core_{uuid.uuid4().hex[:8]}"
+    resolver = EngineResolver(client=ch_client)
+    applier = SchemaApplier(ch_client, resolver)
+    applier.ensure_database(db)
+    writer = DDLFileWriter(resolver=resolver, database=db)
+    for spec in (writer.default_table_spec(), writer.detection_table_spec()):
+        applier.ensure_table(db, spec.name, spec.columns, spec.config)
+    try:
+        yield db
+    finally:
+        try:
+            # Same ON CLUSTER the applier created with, or a cluster target keeps
+            # the database on every node but the one this connection reached.
+            on_cluster = resolver.resolve(parse_engine("MergeTree"), db).on_cluster
+            ch_client.command(f"DROP DATABASE IF EXISTS `{db}`{on_cluster} SYNC")
+        except Exception:
+            pass

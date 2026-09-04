@@ -17,6 +17,8 @@ wrapper around this.
 
 from __future__ import annotations
 
+from scalo.logger import logger
+
 from .ch_coordinator import ChCoordinator
 from .models import HuntSpec
 from .spread import current_fire, due_now
@@ -63,7 +65,11 @@ class HuntRunner:
                 continue  # lost the settle-window race -> another worker has it
             try:
                 self._worker.run(spec, fire)
+                executed += 1
+            except Exception as exc:
+                # One hunt's failure must not end the tick: the others are still due,
+                # and the daemon loop above this would exit on an escaping exception.
+                logger.error(f"hunt {spec.hunt_id} failed at fire {fire}: {exc}")
             finally:
                 self._coord.release(spec.hunt_id, fire)
-            executed += 1
         return executed

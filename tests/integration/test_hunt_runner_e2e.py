@@ -63,7 +63,8 @@ def test_worker_executes_and_resumes_incrementally(ch_client, ch_db):
     spec = HuntSpec(
         hunt_id="h1",
         interval_seconds=600,
-        query=f"INSERT INTO `{ch_db}`.tgt SELECT ev FROM `{ch_db}`.src WHERE {{window}}",
+        queries=[f"INSERT INTO `{ch_db}`.tgt SELECT ev FROM `{ch_db}`.src WHERE {{window}}"],
+        timestamp_field="timestamp_load",
     )
 
     # first window [400,1000) -> a,b (not c@1200)
@@ -83,7 +84,8 @@ def test_tick_runs_due_hunt_and_frees_slot(ch_client, ch_db):
     spec = HuntSpec(
         hunt_id="h2",
         interval_seconds=600,
-        query=f"INSERT INTO `{ch_db}`.tgt SELECT ev FROM `{ch_db}`.src WHERE {{window}}",
+        queries=[f"INSERT INTO `{ch_db}`.tgt SELECT ev FROM `{ch_db}`.src WHERE {{window}}"],
+        timestamp_field="timestamp_load",
     )
     runner = HuntRunner(coord, worker, {spec.hunt_id: spec}, cap=4)
 
@@ -99,7 +101,7 @@ def test_tick_never_double_runs_a_leased_hunt(ch_client, ch_db):
     coord = _coord(ch_client, ch_db, "runner")
     coord.ensure_schema()
     worker = HuntWorker(ch_client, coord)
-    spec = HuntSpec(hunt_id="h3", interval_seconds=600, query="")  # no-op query
+    spec = HuntSpec(hunt_id="h3", interval_seconds=600)  # never reached: the lease blocks it
     runner = HuntRunner(coord, worker, {spec.hunt_id: spec}, cap=4)
 
     fire = current_fire("h3", 600, 5000)

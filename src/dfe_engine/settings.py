@@ -288,7 +288,8 @@ class HuntsSettings(BaseModel):
         default="clickhouse", description="Checkpoint storage: 'clickhouse' or 'file'"
     )
     checkpoint_timestamp_field: str = Field(
-        default="timestamp_load", description="Timestamp field for checkpointing"
+        default="_timestamp_load",
+        description="Timestamp field for checkpointing (the common header's load column)",
     )
     jitter_seconds: int = Field(
         default=15, description="Max random jitter in seconds for sub-minute stagger"

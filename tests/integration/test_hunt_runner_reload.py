@@ -22,6 +22,9 @@ rather than a claim in its name.
 Deterministic by construction: the clock is a fixed even epoch second and the
 interval is 2s, so the hunt's phase offset is 0 and its fire time IS that
 instant. No sleeping, no waiting on a real schedule.
+
+Neither hunt names a timestamp field, so the window rides the loader's default -
+the common header's ``_timestamp_load`` on the real table.
 """
 
 from __future__ import annotations
@@ -29,8 +32,6 @@ from __future__ import annotations
 import time
 import uuid
 from pathlib import Path
-
-import pytest
 
 from dfe_engine.hunt_runner import (
     ChCoordinator,
@@ -40,41 +41,7 @@ from dfe_engine.hunt_runner import (
     run_loop,
 )
 from dfe_engine.hunts.hunt_output import HuntResultSchema
-from dfe_engine.schema.applier import SchemaApplier
-from dfe_engine.schema.ddl_writer import DDLFileWriter
-from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
 from dfe_engine.yaml_utils import yaml_dump_string
-
-# The runner's window predicate is epoch-second integer arithmetic and the landing
-# table's column is DateTime64(3), so a hunt over the real schema has to convert.
-WATERMARK_FIELD = "toUnixTimestamp(_timestamp_load)"
-
-
-@pytest.fixture
-def dfe_db(ch_client):
-    """An isolated database carrying the REAL default and detection tables.
-
-    Built from the same specs the core schema applies, so the hunt writes into
-    the detection table a deployment actually has rather than a stand-in shaped
-    to suit the test.
-    """
-    db = f"dfe_reload_{uuid.uuid4().hex[:8]}"
-    resolver = EngineResolver(client=ch_client)
-    applier = SchemaApplier(ch_client, resolver)
-    applier.ensure_database(db)
-    writer = DDLFileWriter(resolver=resolver, database=db)
-    for spec in (writer.default_table_spec(), writer.detection_table_spec()):
-        applier.ensure_table(db, spec.name, spec.columns, spec.config)
-    try:
-        yield db
-    finally:
-        try:
-            # Same ON CLUSTER the applier created with, or a cluster target keeps
-            # the database on every node but the one this connection reached.
-            on_cluster = resolver.resolve(parse_engine("MergeTree"), db).on_cluster
-            ch_client.command(f"DROP DATABASE IF EXISTS `{db}`{on_cluster} SYNC")
-        except Exception:
-            pass
 
 
 def _hunt_query(*, db: str, hunt: str, marker: str, rule: str) -> str:
@@ -126,7 +93,6 @@ def test_hunt_added_after_the_loop_started_runs_without_a_restart(ch_client, dfe
                 {
                     "schedule": {"mode": "rate", "interval": "2s"},
                     "query": _hunt_query(db=dfe_db, hunt=hunt, marker=marker, rule=rule),
-                    "timestamp_field": WATERMARK_FIELD,
                     "global_target_table_name": f"{dfe_db}.detection",
                 }
             ),
@@ -198,7 +164,6 @@ def test_a_hunt_removed_while_the_loop_runs_stops_running(ch_client, dfe_db, tmp
             {
                 "schedule": {"mode": "rate", "interval": "2s"},
                 "query": _hunt_query(db=dfe_db, hunt=hunt, marker=marker, rule=hunt),
-                "timestamp_field": WATERMARK_FIELD,
             }
         ),
         encoding="utf-8",
