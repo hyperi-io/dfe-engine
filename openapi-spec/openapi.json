@@ -26669,7 +26669,7 @@
           "engine": {
             "type": "string",
             "title": "Engine",
-            "description": "Transform engine (vector or wasm)"
+            "description": "Transform engine - a catalogued transform app by engine name (e.g. vrl, vector)"
           },
           "config_file": {
             "anyOf": [
@@ -26705,7 +26705,7 @@
           "engine"
         ],
         "title": "SourceTransform",
-        "description": "Transform stage configuration (vector or wasm)."
+        "description": "Transform stage configuration: the engine is one of the catalogue's transform apps."
       },
       "SourceVersionDetail": {
         "properties": {

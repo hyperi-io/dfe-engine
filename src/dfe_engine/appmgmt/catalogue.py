@@ -354,3 +354,20 @@ def file_set(service: str, name: str) -> ConsumedFileSet:
 def services() -> list[str]:
     """Every catalogued service name, sorted."""
     return sorted(APP_CATALOGUE)
+
+
+TRANSFORM_SERVICE_PREFIX = "dfe-transform-"
+"""A transform app's service name is this prefix plus the engine a source names."""
+
+
+def transform_engines() -> set[str]:
+    """Every engine a source may name in ``transform.engine``.
+
+    A transform app is a source-bound app, so the set is the catalogue's, and an
+    engine it does not list has nothing to deploy.
+    """
+    return {
+        service.removeprefix(TRANSFORM_SERVICE_PREFIX)
+        for service, app in APP_CATALOGUE.items()
+        if app.source_bound and service.startswith(TRANSFORM_SERVICE_PREFIX)
+    }
