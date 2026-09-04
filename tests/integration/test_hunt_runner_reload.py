@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         tests/integration/test_hunt_runner_reload.py
-#  Purpose:      A hunt added while the loop runs is picked up without a restart
+#  Purpose:      The live loop: hunts reloaded without a restart, and its heartbeat
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -25,6 +25,9 @@ instant. No sleeping, no waiting on a real schedule.
 
 Neither hunt names a timestamp field, so the window rides the loader's default -
 the common header's ``_timestamp_load`` on the real table.
+
+The last test is the other thing a running loop must leave behind: a heartbeat,
+which is what the API reads for "a runner exists" when nothing is due.
 """
 
 from __future__ import annotations
@@ -40,6 +43,7 @@ from dfe_engine.hunt_runner import (
     load_specs,
     run_loop,
 )
+from dfe_engine.hunt_runner.run_status import live_runner_count
 from dfe_engine.hunts.hunt_output import HuntResultSchema
 from dfe_engine.yaml_utils import yaml_dump_string
 
@@ -202,3 +206,48 @@ def test_a_hunt_removed_while_the_loop_runs_stops_running(ch_client, dfe_db, tmp
 
     assert ticks == [1, 0]
     assert coord.get_watermark(hunt) == fixed_now  # unchanged by the second tick
+
+
+def test_an_idle_loop_still_reads_as_a_live_runner(ch_client, dfe_db, tmp_path):
+    """The heartbeat, end to end: an empty hunt dir and still one live runner.
+
+    This is the case the API used to get wrong. Nothing is due, so no lease is ever
+    taken, and lease-counting reported a healthy runner as not running. The database
+    is per-test, so the count is this loop's runner and nothing else.
+    """
+    hunts_dir = tmp_path / "hunts"
+    hunts_dir.mkdir()
+    fixed_now = int(time.time())
+    poll_seconds = 2.0
+
+    coord = ChCoordinator(
+        ch_client,
+        database=dfe_db,
+        settle_seconds=0.0,
+        sleep=lambda _s: None,
+        worker_id=f"runner-{uuid.uuid4().hex[:8]}",
+    )
+    coord.ensure_schema()
+    runner = HuntRunner(
+        coord,
+        HuntWorker(ch_client, coord),
+        load_specs(hunts_dir),
+        cap=8,
+        poll_seconds=poll_seconds,
+    )
+
+    ticks: list[int] = []
+    run_loop(
+        tick=lambda now: ticks.append(runner.tick(now)),
+        should_stop=lambda: len(ticks) >= 1,
+        clock=lambda: float(fixed_now),
+        sleep=lambda _s: None,
+        poll_seconds=0.0,
+    )
+    assert ticks == [0]  # nothing was due, which is the premise
+
+    # ensure_schema created the table alongside the rest of the coordination set.
+    assert ch_client.command(f"EXISTS TABLE `{dfe_db}`.hunt_runner_heartbeat") == 1
+    assert live_runner_count(ch_client, dfe_db, fixed_now) == 1
+    # Two polls on, the same beat is stale and the runner reads as gone.
+    assert live_runner_count(ch_client, dfe_db, fixed_now + int(2 * poll_seconds) + 1) == 0

@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         hunt_runner/run_status.py
-#  Purpose:      Per-hunt run status for the API, in one ClickHouse read
+#  Purpose:      Per-hunt run status and runner liveness for the API
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -19,6 +19,10 @@ miss with the type's default rather than NULL, so a hunt that has never run read
 as zeros, and ``last_run``/``last_fire`` of 0 is what "never" looks like. That
 matters for the row count: 0 rows written by a run that DID happen is a real and
 different answer from a hunt that has not run at all.
+
+``live_runner_count`` is the other half the page needs, and it reads a different
+table: whether a runner exists at all, from the per-runner heartbeat rather than
+from a lease that only exists while a hunt is mid-execution.
 """
 
 from __future__ import annotations
@@ -69,6 +73,27 @@ def _query(database: str) -> str:
         f"FROM `{database}`.hunt_run GROUP BY hunt_id, fire"
         ") WHERE status = 'requested' GROUP BY hunt_id) q USING (hunt_id)"
     )
+
+
+def live_runner_count(ch: Any, database: str, now: int) -> int:
+    """How many hunt runners have ticked within their own last two polls.
+
+    Two polls is the tolerance: one poll late is jitter, two is a dead runner. Each
+    runner is judged against the cadence it beat with rather than a shared setting,
+    so a runner started on a slower poll is not called dead for keeping to it.
+
+    Args:
+        ch: a ClickHouse client exposing ``query``.
+        database: the data database the coordination tables live in.
+        now: epoch seconds to judge the beats against.
+    """
+    rows = ch.query(
+        "SELECT countIf(s > {now:Int64} - 2 * p) FROM ("
+        "SELECT runner_id, argMax(seen, updated) AS s, argMax(poll_seconds, updated) AS p "
+        f"FROM `{database}`.hunt_runner_heartbeat GROUP BY runner_id)",
+        parameters={"now": now},
+    ).result_rows
+    return int(rows[0][0]) if rows else 0
 
 
 def read_run_status(ch: Any, database: str, hunt_ids: list[str], now: int) -> dict[str, RunStatus]:

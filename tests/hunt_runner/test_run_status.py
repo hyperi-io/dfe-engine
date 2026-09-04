@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         tests/hunt_runner/test_run_status.py
-#  Purpose:      The per-hunt run read model maps CH rows to what the API reports
+#  Purpose:      The run read models map CH rows to what the API reports
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -16,7 +16,7 @@ decision this code makes rather than something the query says.
 
 from __future__ import annotations
 
-from dfe_engine.hunt_runner.run_status import read_run_status
+from dfe_engine.hunt_runner.run_status import live_runner_count, read_run_status
 
 
 class _Rows:
@@ -94,3 +94,21 @@ def test_the_hunt_ids_are_passed_as_a_bound_parameter():
     read_run_status(ch, "dfe", ["a", "b"], now=1000)
     assert ch.parameters == {"ids": ["a", "b"]}
     assert "{ids:Array(String)}" in ch.sql
+
+
+def test_the_live_runner_count_is_whatever_clickhouse_counted():
+    # The freshness comparison is ClickHouse's; this side only reads the one number.
+    assert live_runner_count(_Rows([[2]]), "dfe", now=1000) == 2
+
+
+def test_no_heartbeat_rows_is_no_live_runner():
+    assert live_runner_count(_Rows([]), "dfe", now=1000) == 0
+
+
+def test_the_live_runner_clock_is_passed_as_a_bound_parameter():
+    ch = _Rows([[0]])
+    live_runner_count(ch, "dfe", now=1000)
+    assert ch.parameters == {"now": 1000}
+    assert "{now:Int64}" in ch.sql
+    # Each runner is judged against the cadence it recorded, not a shared setting.
+    assert "2 * p" in ch.sql
