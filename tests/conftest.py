@@ -74,11 +74,17 @@ os.environ.setdefault("VERSION_CHECK__ENABLED", "false")
 os.environ.setdefault("DFE_ENV", "test")
 os.environ.setdefault("DFE_AUTH_ENABLED", "false")
 
-# Load .env file if present (before any other imports that might use settings)
+# Load .env file if present (before any other imports that might use settings).
+# The lookup walks up from the repo root so a git worktree under .worktrees/
+# finds the main checkout's .env instead of silently running without one.
 try:
     from dotenv import load_dotenv
 
-    env_path = Path(__file__).parent.parent / ".env"
+    _repo_root = Path(__file__).parent.parent
+    env_path = next(
+        (p / ".env" for p in (_repo_root, *_repo_root.parents) if (p / ".env").exists()),
+        _repo_root / ".env",
+    )
     if env_path.exists():
         load_dotenv(env_path, override=True)
         logger.info(f"Loaded environment from {env_path}")

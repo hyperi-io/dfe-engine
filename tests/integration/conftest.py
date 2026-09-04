@@ -43,6 +43,7 @@ from __future__ import annotations
 import os
 import subprocess
 import time
+import warnings
 
 import pytest
 
@@ -339,6 +340,14 @@ def ch_params(request):
     clickhouse_connect = pytest.importorskip("clickhouse_connect")
     tier = _resolve_tier()
     teardown = None
+    if tier == "local":
+        # A container on the test host is the fallback nobody chose; say so.
+        warnings.warn(
+            "integration ClickHouse tier: local docker on this host (no cluster in "
+            ".env, no DFE_TEST_DOCKER_HOST)",
+            RuntimeWarning,
+            stacklevel=1,
+        )
 
     if tier == "cluster":
         params = _cluster_params()
