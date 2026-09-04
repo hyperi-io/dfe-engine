@@ -303,6 +303,22 @@ class TestEnvOverrides:
         settings = load_settings()
         assert settings.hunts.log_path == "/var/log/hunts"
 
+    def test_local_admin_name_and_password_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_AUTH_LOCAL_ADMIN_NAME", "breakglass")
+        monkeypatch.setenv("DFE_AUTH_LOCAL_ADMIN_PASSWORD", "a-configured-admin-password")
+        settings = load_settings()
+        assert settings.auth.local.admin_name == "breakglass"
+        assert settings.auth.local.admin_password == "a-configured-admin-password"
+
+    def test_local_admin_unset_falls_back_to_shipped_defaults(self, monkeypatch):
+        # Unset leaves the defaults.yaml values, so a deploy that sets neither
+        # var seeds the admin account with the published "changeme".
+        monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_NAME", raising=False)
+        monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_PASSWORD", raising=False)
+        settings = load_settings()
+        assert settings.auth.local.admin_name == "admin"
+        assert settings.auth.local.admin_password == "changeme"
+
     def test_seed_accounts_json_override(self, monkeypatch):
         monkeypatch.setenv(
             "DFE_AUTH_LOCAL_SEED_ACCOUNTS",
