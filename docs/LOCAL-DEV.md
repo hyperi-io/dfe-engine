@@ -13,7 +13,8 @@ make dev                         # -> Swagger UI at http://localhost:8003/docs
 
 `make dev` exports `DFE_CONFIG_DIR=./config` and runs `uv run dfe-engine run`.
 The console script `dfe-engine` maps to `dfe_engine.api:run_dev_server`, which
-serves the API on `DFE_API_PORT` (default 8003).
+serves the API on `DFE_API_PORT`: 8000 in code, 8003 from `.env.example`, and
+8003 is what `make dev` and the other repos' local docs assume.
 
 Two things trip people up on a fresh clone:
 
@@ -21,9 +22,12 @@ Two things trip people up on a fresh clone:
   -- there is nothing to check out. `DFE_SCHEMAS_DIR` is deliberately left unset
   by `make dev`; set it only to point the engine at your own tree. `config/` is
   a plain directory: `make dev` points `DFE_CONFIG_DIR` at `./config`, the engine
-  seeds its auth store, registries and `.secrets` into whatever that directory
-  is, and tolerates it being empty or a throwaway. It does NOT need to pre-exist
-  with content.
+  seeds its auth store and registries into whatever that directory is, and
+  tolerates it being empty or a throwaway. It does NOT need to pre-exist with
+  content. The minted signing key and per-group ClickHouse passwords go to
+  `.secrets/` in the CURRENT directory (`DFE_SECRETS_PATH`, default `./.secrets`),
+  not under `DFE_CONFIG_DIR`, so a second engine started from the same directory
+  reuses that key.
 - **You need a `.env`** for `make dev` (`cp .env.example .env`). For pure
   auth/attributes work you do not want the example's ClickHouse pointed at a real
   cluster -- set `DFE_CLICKHOUSE_BOOTSTRAP_TABLES=false` and the engine boots with
@@ -42,7 +46,6 @@ env DFE_ENV=dev \
     DFE_CLICKHOUSE_BOOTSTRAP_TABLES=false \
     DFE_API_PORT=8003 \
     DFE_CONFIG_DIR=/tmp/dfe-config \
-    DFE_SCHEMAS_DIR=./schemas \
     uv run dfe-engine run
 ```
 
@@ -58,6 +61,49 @@ env DFE_ENV=dev \
 - **Attribute request bodies are wrapped.** `PUT
   /api/v1/auth/accounts/{username}/attributes` takes `{"attributes": {...}}`, not
   the bare object, and the `GET` returns the same shape. A bare object is a 422.
+
+## A local ClickHouse
+
+The client is clickhouse-connect over HTTP, so the port is the HTTP one and a
+plain docker ClickHouse is not TLS:
+
+```sh
+env DFE_ENV=dev \
+    DFE_CLICKHOUSE_HOST=127.0.0.1 \
+    DFE_CLICKHOUSE_PORT=8123 \
+    DFE_CLICKHOUSE_SECURE=false \
+    DFE_CLICKHOUSE_PASSWORD=... \
+    DFE_CONFIG_DIR=/tmp/dfe-config \
+    uv run dfe-engine run
+```
+
+Get it wrong and the engine logs `SSL: WRONG_VERSION_NUMBER` (TLS against a
+plain port) or connection refused (the native 9000), retries for a minute, then
+serves degraded with `/readyz` answering 503 `{"clickhouse": false}` while
+`/livez` stays alive. Tenant isolation uses ClickHouse custom settings under the
+`SQL_` prefix; dfe-docker's `clickhouse/server-custom.xml` declares that prefix
+and a stock image does not.
+
+## Port collisions
+
+`dfe-engine run` binds the observability listener (`/metrics`, `/livez`,
+`/readyz`) on `0.0.0.0:9090` before the API. With the dfe-docker stack up that
+port is taken and the process dies with `fatal: [Errno 98] Address already in
+use` and no port named. The knob is scalo's, not `DFE_`-prefixed:
+
+```sh
+env METRICS_ADDR=127.0.0.1:9197 DFE_ENV=dev uv run dfe-engine run
+```
+
+## No collector running
+
+The OTLP exporters aim at `localhost:4317` and log `Transient error ... retrying`
+every few seconds while nothing listens. scalo reads a whitespace-only endpoint
+as "no endpoint", which is its off switch:
+
+```sh
+env OTEL_EXPORTER_OTLP_ENDPOINT=" " DFE_ENV=dev uv run dfe-engine run
+```
 
 ## Running against the interdependent repos
 

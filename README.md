@@ -33,11 +33,17 @@ cd dfe-engine
 uv sync   # pulls dfe-schemas, which carries the schema + DDL trees
 ```
 
-Run the API server (liveness at `/livez` on port 8000):
+Run the API server. A clone has no `.env`, so name the dev posture -- without it
+the engine refuses to start on the placeholder JWT secret. `/livez` answers on
+port 8000:
 
 ```bash
-uv run dfe-engine
+env DFE_ENV=dev uv run dfe-engine
 ```
+
+With no ClickHouse reachable it retries for a minute, then serves with `/readyz`
+reporting `clickhouse: false`. The local ClickHouse settings, the observability
+port, and the other repos are in [docs/LOCAL-DEV.md](docs/LOCAL-DEV.md).
 
 Run the unit tests (no backing services needed):
 

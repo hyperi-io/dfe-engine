@@ -192,7 +192,10 @@ class ClickHouseSettings(BaseModel):
     """ClickHouse connection settings."""
 
     host: str = Field(default="localhost")
-    port: int = Field(default=9000)
+    port: int = Field(
+        default=8123,
+        description="ClickHouse HTTP port: the client is clickhouse-connect over HTTP, so the native 9000 cannot work",
+    )
     username: str = Field(default="default")
     password: str = Field(default="")
     database: str = Field(
