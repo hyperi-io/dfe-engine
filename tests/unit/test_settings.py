@@ -602,3 +602,113 @@ class TestProductionPostureCannotShipWithAuthOff:
         dev = DFESettings.model_construct(env="dev", auth=AuthSettings(enabled=False))
         assert not dev.auth.enabled
         assert is_dev_posture(dev.env)
+
+
+class TestEverySettingIsRead:
+    """A field nothing reads is inert: it parses, validates, and changes nothing.
+
+    dfe-engine is configured from a mounted file, so a missing env route is not
+    the defect -- a missing READER is. The allowlist is the point: an entry
+    there is a deliberate "declared ahead of its feature", which is the fact
+    that goes missing otherwise.
+
+    A reader means PYTHON code. ``defaults.yaml`` deliberately does not count:
+    a default value is another declaration, and treating it as a reader hid
+    seven fields, two of them bootstrap passwords.
+
+    Known limit: any textual hit counts, so a field reached only through
+    ``getattr`` or ``model_dump`` is missed. A false negative there beats
+    failing the suite over dynamic access.
+    """
+
+    # Fields with no reader today. Each needs wiring or deleting -- see #239.
+    # Remove an entry when its field gains a reader; never add one to go green.
+    KNOWN_UNREAD = {
+        ("ClickHouseResilienceSettings", "wait_initial"),
+        ("ClickHouseResilienceSettings", "wait_max"),
+        ("ClickHouseResilienceSettings", "wait_multiplier"),
+        ("ClickHouseResilienceSettings", "budget_seconds"),
+        ("ClickHouseResilienceSettings", "waking_budget_seconds"),
+        ("HuntsSettings", "num_threads"),
+        ("HuntsSettings", "jitter_seconds"),
+        ("HuntsSettings", "max_concurrent_queries"),
+        ("HuntsSettings", "resource_limit_read_rows"),
+        ("HuntsSettings", "resource_limit_read_bytes"),
+        ("HuntsSettings", "resource_limit_memory_bytes"),
+        ("HuntsSettings", "resource_limit_execution_ms"),
+        ("HuntsSettings", "alert_channels"),
+        ("HuntsSettings", "default_alert_cooldown"),
+        ("HuntsSettings", "default_max_alerts_per_run"),
+        ("HuntsSettings", "default_max_sample_events"),
+        ("QuerySettings", "yaml_dir"),
+        ("QueryViewSettings", "auto_bootstrap"),
+        ("SamplerSettings", "default_mode"),
+        ("HelmSettings", "environment_file"),
+        ("OIDCSettings", "sync_enabled"),
+        ("OIDCSettings", "sync_on_startup"),
+        ("HyperDXSettings", "api_key_env"),
+        ("DFESettings", "e2e_server"),
+        # Found once the search stopped counting defaults.yaml as a reader. A
+        # default VALUE is another declaration, not a consumer, so every one of
+        # these looked wired while nothing read it.
+        ("ClickHouseSettings", "connections_min"),
+        ("HuntsSettings", "checkpoint_path"),
+        ("HuntsSettings", "cron_task_timeout"),
+        ("HuntsSettings", "log_path"),
+        ("StorageSettings", "s3_bucket"),
+        # auth.local seeds three passwords and bootstrap consumes only
+        # admin_password (api/app.py:130). DFE_AUTH_LOCAL_OPERATOR_PASSWORD and
+        # its viewer twin are routed and land nowhere -- no such account is made.
+        ("LocalAuthSettings", "operator_password"),
+        ("LocalAuthSettings", "viewer_password"),
+    }
+
+    def test_no_new_setting_lands_without_a_reader(self):
+        import ast
+        import re
+        from pathlib import Path
+
+        package = Path(__file__).resolve().parents[2] / "src" / "dfe_engine"
+        settings_py = package / "settings.py"
+        tree = ast.parse(settings_py.read_text(encoding="utf-8"))
+
+        declared: list[tuple[str, str]] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            declared.extend(
+                (node.name, stmt.target.id)
+                for stmt in node.body
+                if isinstance(stmt, ast.AnnAssign)
+                and isinstance(stmt.target, ast.Name)
+                and not stmt.target.id.startswith("_")
+            )
+
+        assert declared, "parsed no settings fields -- the parser, not the code, is wrong"
+
+        # Read the package once and search in memory. Spawning a search per
+        # field also tied the check to a binary the CI image does not carry.
+        corpus = "\n".join(
+            path.read_text(encoding="utf-8", errors="replace")
+            for path in sorted(package.rglob("*.py"))
+            if path != settings_py
+        )
+        assert corpus, "read no package source -- the test setup, not the code, is wrong"
+
+        unread = {
+            (cls, field)
+            for cls, field in declared
+            if not re.search(rf"\b{re.escape(field)}\b", corpus)
+        }
+
+        new = sorted(unread - self.KNOWN_UNREAD)
+        assert not new, (
+            f"settings fields with no reader outside settings.py: {new}. "
+            "Wire it, delete it, or add it to KNOWN_UNREAD with a reason."
+        )
+
+        fixed = sorted(self.KNOWN_UNREAD - unread)
+        assert not fixed, (
+            f"these now have readers and must leave KNOWN_UNREAD: {fixed}. "
+            "A stale allowlist hides the next one."
+        )
