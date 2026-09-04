@@ -67,10 +67,21 @@ class TestStartAutostart:
             await tasks[0]
 
 
-@needs_packs
 class TestRunStandingStream:
     async def test_segments_restart_until_cancelled(self):
+        # The claim is the loop: a finished segment starts another until the task
+        # is cancelled. A stub segment keeps real sockets and a real event pack
+        # out of it; the socket version crashed xdist workers under load.
+        segments = 0
+
+        async def fake_run_stream(request, *, task=None):
+            nonlocal segments
+            segments += 1
+            await asyncio.sleep(0.01)
+            return {"emitted": request.count, "sent": 0, "failed": 0}
+
         svc = service()
+        svc.run_stream = fake_run_stream  # type: ignore[method-assign]
         request = StreamRequest(
             schema_ref="meta/syslog",
             receiver_url="http://127.0.0.1:9/ingest",
@@ -80,10 +91,30 @@ class TestRunStandingStream:
         task = asyncio.get_running_loop().create_task(
             run_standing_stream(svc, request, retry_seconds=0.05)
         )
-        # Two-event segments at 200 eps finish in milliseconds - a short sleep
-        # covers several restarts.
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(0.2)
         assert not task.done()
+        assert segments >= 3, "the loop must have restarted the segment"
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    async def test_failed_segment_is_retried_not_fatal(self):
+        calls = 0
+
+        async def failing_run_stream(request, *, task=None):
+            nonlocal calls
+            calls += 1
+            raise RuntimeError("receiver refused")
+
+        svc = service()
+        svc.run_stream = failing_run_stream  # type: ignore[method-assign]
+        request = StreamRequest(schema_ref="meta/syslog", receiver_url="http://127.0.0.1:9/ingest")
+        task = asyncio.get_running_loop().create_task(
+            run_standing_stream(svc, request, retry_seconds=0.01)
+        )
+        await asyncio.sleep(0.1)
+        assert not task.done()
+        assert calls >= 3, "a failed segment must be retried"
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
