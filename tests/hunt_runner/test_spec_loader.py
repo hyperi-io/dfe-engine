@@ -139,3 +139,36 @@ def test_timestamp_field_defaults_to_timestamp_load(tmp_path: Path):
 def test_missing_directory_returns_empty_dict(tmp_path: Path):
     missing = tmp_path / "does_not_exist"
     assert load_specs(missing) == {}
+
+
+def test_a_hunt_the_api_writes_loads_with_no_query_to_run(tmp_path: Path):
+    """The API's own hunt YAML schedules and executes nothing. Pinned, not endorsed.
+
+    ``POST /api/v1/hunts`` writes ``rules`` -- rule template names -- and the loader
+    only ever reads ``query``. Nothing compiles the first into the second, so a hunt
+    created in the UI claims its lease, advances its watermark and detects nothing.
+    Built from the API's own request model so this turns red the day that is wired,
+    which is the point of pinning it here.
+    """
+    from dfe_engine.api.v1.hunts import HuntCreateRequest
+    from dfe_engine.yaml_utils import yaml_dump_string
+
+    body = HuntCreateRequest(
+        name="api_hunt",
+        cron="* * * * *",
+        rules=["some_rule"],
+        customers=["acme"],
+        global_source_table_name="dfe.default",
+        global_target_table_name="dfe.detection",
+        checkpoint_timestamp_field="_timestamp_load",
+    )
+    config = body.to_config_dict(hunt_name="api_hunt")
+    _write(tmp_path, "api_hunt", yaml_dump_string(config))
+
+    spec = load_specs(tmp_path)["api_hunt"]
+    assert spec.interval_seconds == 60  # the schedule survives
+    assert spec.query == ""  # and there is nothing to run
+    # checkpoint_timestamp_field is the API's name for it; the loader reads
+    # timestamp_field, so the operator's choice does not reach the runner either.
+    assert "checkpoint_timestamp_field" in config
+    assert spec.timestamp_field == "timestamp_load"
