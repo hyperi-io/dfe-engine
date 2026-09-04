@@ -203,12 +203,17 @@ autoscaling:
   maxReplicas: 4
   targetCPUUtilizationPercentage: 80
 
-# -- Pull-based hunt runner (dfe-hunt-runner): a KEDA-scaled background worker on the
-# SAME image, coordinating entirely through ClickHouse. ON for docker/single/scale
-# tiers, OFF for slim (see docs deployment tiers). See docs/HUNT-RUNNER-SCALING.md.
+# -- Pull-based hunt runner (dfe-hunt-runner): a background worker on the SAME
+# image, coordinating entirely through ClickHouse. ON for docker/single/scale
+# tiers, OFF for slim (see docs deployment tiers).
+#
+# ONE steady pod, always. This chart renders no ScaledObject: autoscaling on the
+# due-hunt backlog is a BETA opt-in that ships in the dfe-infra chart
+# (huntRunner.autoscaling + the dfe-keda-shim metrics-api trigger). Adding KEDA
+# dials here without a ScaledObject to read them is how they came to do nothing.
+# See docs/data-plane/hunt-runner-scaling.md.
 huntRunner:
   enabled: false
-  # -- Replicas when KEDA is OFF (KEDA owns the count when on).
   replicaCount: 1
   # -- `dfe-hunt-runner run` flags:
   poll: 15          # seconds between ticks
@@ -225,17 +230,6 @@ huntRunner:
     limits:
       cpu: "1"
       memory: 1Gi
-  # -- KEDA scale-to-zero on the deterministic-due backlog. NOTE: KEDA has NO native
-  # ClickHouse scaler, so this uses the MySQL scaler against CH's mysql_port (the
-  # query is still ClickHouse SQL). ClickHouse must have mysql_port enabled.
-  keda:
-    enabled: true
-    minReplicaCount: 0
-    maxReplicaCount: 8   # keep == cap (the runner's own global CH concurrency cap)
-    pollingInterval: 30
-    cooldownPeriod: 120
-    mysqlPort: 9004      # ClickHouse MySQL-compatible port
-    queryValue: 1        # hunts-per-worker; desiredReplicas = ceil(due / queryValue)
   # -- Argo CD PostSync hook that materialises hunt_schedule on a config change.
   materialiseHook:
     enabled: true

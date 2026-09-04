@@ -91,20 +91,29 @@ class ClickHouseConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    hosts: list[str] = Field(default_factory=lambda: ["localhost:9000"])
-    database: str = "default"
+    # http/8123, pinned to dfe-loader ClickHouseConfig::default (a197f2c, #116).
+    hosts: list[str] = Field(default_factory=lambda: ["localhost:8123"])
+    database: str = "dfe"
     username: str = "default"
     password: SecretStr = SecretStr("")
-    protocol: str = Field(default="native", description="native or http")
+    protocol: str = Field(default="http", description="http")
     tables: list[str] = []
     tls: KafkaTlsConfig | None = None
 
     @field_validator("protocol")
     @classmethod
     def validate_protocol(cls, v: str) -> str:
-        allowed = {"native", "http"}
-        if v.lower() not in allowed:
-            msg = f"Invalid protocol: {v}. Allowed: {', '.join(sorted(allowed))}"
+        # The loader rejects native at startup: its pinned ClickHouse client has
+        # no TCP row fetch, so every message stalls pending schema (#115).
+        if v.lower() == "native":
+            msg = (
+                "clickhouse.protocol 'native' cannot serve the loader's schema fetch: "
+                "the pinned clickhouse client has no TCP row fetch, so every message "
+                "stalls pending schema. Use 'http' with the HTTP port (8123-family)."
+            )
+            raise ValueError(msg)
+        if v.lower() != "http":
+            msg = f"unknown clickhouse.protocol '{v}' (expected 'http')"
             raise ValueError(msg)
         return v
 

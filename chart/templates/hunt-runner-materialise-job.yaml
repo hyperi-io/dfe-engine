@@ -1,9 +1,10 @@
 {{- if and .Values.huntRunner.enabled .Values.huntRunner.materialiseHook.enabled }}
-# Argo CD PostSync hook: materialise the `hunt_schedule` table KEDA scales on, once
-# per deploy-repo sync that changed the hunt config. A one-shot
+# Argo CD PostSync hook: materialise the `hunt_schedule` table the runners read,
+# once per deploy-repo sync that changed the hunt config. A one-shot
 # `dfe-hunt-runner materialise` - deploy-time, NOT the hot path (see
-# docs/HUNT-RUNNER-SCALING.md). It is what lets KEDA see a brand-new hunt while the
-# runner is scaled to zero (no chicken-and-egg).
+# docs/data-plane/hunt-runner-scaling.md). It is also what lets the dfe-infra
+# chart's backlog autoscaler see a brand-new hunt while the runner is scaled to
+# zero (no chicken-and-egg).
 apiVersion: batch/v1
 kind: Job
 metadata:

@@ -101,7 +101,9 @@ class ArchiveConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     destination: str = "file:///var/data/archive"
-    path_template: str = "{topic}/{year}/{month}/{day}/{hour}"
+    # No {topic}: the archiver's per-topic writers already prepend it, so a
+    # template carrying it lands every object under a doubled topic path.
+    path_template: str = "{year}/{month}/{day}/{hour}"
     file_extension: str = "jsonl"
     roll_size_bytes: int = Field(
         default=1024 * 1024 * 1024, gt=0, description="1GB final compressed file size"
@@ -139,8 +141,10 @@ class ArchiverRoutingConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    mode: str = Field(default="topic", description="topic or expression")
-    expression_fields: list[str] = []
+    # Pinned to dfe-archiver RoutingConfig::default (3d04ac4); the emitted config
+    # is a full document, so the archiver never falls back to its own default.
+    mode: str = Field(default="expression", description="topic or expression")
+    expression_fields: list[str] = Field(default_factory=lambda: ["org_id"])
     default_segment: str = "unknown"
 
     @field_validator("mode")
