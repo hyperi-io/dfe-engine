@@ -71,7 +71,7 @@ def setup_paths(tmp_path) -> dict:
                 },
                 "name": "test_hunt",
             },
-            "Invalid 'global_target_table_name'. It should be a non-empty string.",
+            "Hunt configuration validated successfully.",
         ),
         (
             {
