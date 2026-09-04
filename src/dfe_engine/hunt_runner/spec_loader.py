@@ -14,9 +14,10 @@ gotcha: 'off'/'yes'/'no' inside YAML coerce to booleans, so identity must not li
 there). v1 handles the "rate" schedule mode only; "anchored" hunts are recognised
 and skipped (a later phase adds them). One bad file never sinks the whole load.
 
-NOTE: building `query` from a hunt's `rules` (the rule->SQL compiler) is OUT OF
-SCOPE here. v1 reads a direct `query` field, which suits synthetic/test hunts and
-pre-compiled hunts. That is a deliberate v1 boundary, not an oversight.
+A hunt states what it runs one of two ways: a direct `query` (pre-compiled, one
+statement) or `rules` (rule YAML names), which is what the API writes. Rules are
+compiled here, through rule_compiler, so a hunt made in the UI runs without anyone
+hand-editing its YAML.
 """
 
 from __future__ import annotations
@@ -28,8 +29,10 @@ from scalo.logger import logger
 
 from dfe_engine.yaml_utils import yaml_load
 
+from .checkpoint import TIMESTAMP_FIELD
 from .interval import parse_interval
 from .models import HuntSpec
+from .rule_compiler import compile_hunt_queries
 
 
 def _resolve_schedule_value(definition: dict[str, Any], stem: str) -> str | int | None:
@@ -60,7 +63,21 @@ def _resolve_schedule_value(definition: dict[str, Any], stem: str) -> str | int 
     return cron
 
 
-def _build_spec(definition: dict[str, Any], stem: str) -> HuntSpec | None:
+def _timestamp_field(definition: dict[str, Any]) -> str:
+    """The hunt's watermark column. `checkpoint_timestamp_field` is the API's name for it."""
+    for key in ("timestamp_field", "checkpoint_timestamp_field"):
+        value = definition.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return TIMESTAMP_FIELD
+
+
+def _build_spec(
+    definition: dict[str, Any],
+    stem: str,
+    rules_dir: str | Path,
+    default_target: str,
+) -> HuntSpec | None:
     """Build one HuntSpec from a parsed hunt def, or None if it must be skipped.
 
     Skips (returns None) for anchored schedules and non-positive intervals; a
@@ -75,22 +92,43 @@ def _build_spec(definition: dict[str, Any], stem: str) -> HuntSpec | None:
         logger.warning(f"skipping hunt {stem}: non-positive interval {interval_seconds}")
         return None
 
+    query = str(definition.get("query", "")).strip()
+    queries = (
+        [query]
+        if query
+        else compile_hunt_queries(
+            definition, stem, rules_dir=rules_dir, default_target=default_target
+        )
+    )
+
     return HuntSpec(
         hunt_id=stem,
         interval_seconds=interval_seconds,
-        query=str(definition.get("query", "")),
+        queries=queries,
         target_table=str(definition.get("global_target_table_name", definition.get("target", ""))),
-        timestamp_field=str(definition.get("timestamp_field", "timestamp_load")),
+        timestamp_field=_timestamp_field(definition),
     )
 
 
-def load_specs(hunt_dir: str | Path) -> dict[str, HuntSpec]:
+def load_specs(
+    hunt_dir: str | Path,
+    *,
+    rules_dir: str | Path = "",
+    default_target: str = "",
+) -> dict[str, HuntSpec]:
     """Load every *.yaml hunt def in hunt_dir into HuntSpec objects keyed by hunt_id.
 
     The hunt_id is the filename STEM (identity is the filename, never an in-file id).
     A missing directory returns an empty dict (logged at debug). Each file is wrapped
     in try/except so one malformed hunt is skipped (logged) without breaking the load
     of the rest. Anchored and non-positive-interval hunts are skipped too.
+
+    Args:
+        hunt_dir: Directory of hunt YAML files (``hunts.hunt_dir``).
+        rules_dir: Directory of rule YAML files (``hunts.rules_dir``), read when a
+            hunt names `rules` instead of carrying a `query`.
+        default_target: ``db.table`` a compiled rule writes to when neither the rule
+            entry nor the hunt names one.
     """
     directory = Path(hunt_dir)
     if not directory.is_dir():
@@ -105,7 +143,7 @@ def load_specs(hunt_dir: str | Path) -> dict[str, HuntSpec]:
             if not isinstance(definition, dict):
                 logger.warning(f"skipping hunt {stem}: not a YAML mapping")
                 continue
-            spec = _build_spec(definition, stem)
+            spec = _build_spec(definition, stem, rules_dir, default_target)
             if spec is not None:
                 specs[stem] = spec
         except Exception as exc:  # one bad file must never break the whole load

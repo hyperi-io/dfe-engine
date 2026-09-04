@@ -119,21 +119,31 @@ def test_query_target_and_timestamp_fields_read(tmp_path: Path):
         'timestamp_field: "event_time"\n',
     )
     spec = load_specs(tmp_path)["detail"]
-    assert spec.query == "SELECT * FROM src WHERE ts > {window}"
+    assert spec.queries == ["SELECT * FROM src WHERE ts > {window}"]
     assert spec.target_table == "dfe_hunts.results"
     assert spec.timestamp_field == "event_time"
 
 
-def test_timestamp_field_defaults_to_timestamp_load(tmp_path: Path):
+def test_timestamp_field_defaults_to_the_common_header_load_column(tmp_path: Path):
     _write(
         tmp_path,
         "defaults",
         'schedule:\n  mode: rate\n  interval: "1m"\n',
     )
     spec = load_specs(tmp_path)["defaults"]
-    assert spec.timestamp_field == "timestamp_load"
-    assert spec.query == ""
+    assert spec.timestamp_field == "_timestamp_load"
+    assert spec.queries == []
     assert spec.target_table == ""
+
+
+def test_checkpoint_timestamp_field_is_read_as_the_watermark_column(tmp_path: Path):
+    # checkpoint_timestamp_field is the API's name for it, and it used to be ignored.
+    _write(
+        tmp_path,
+        "api_named",
+        'schedule:\n  mode: rate\n  interval: "1m"\ncheckpoint_timestamp_field: "_timestamp"\n',
+    )
+    assert load_specs(tmp_path)["api_named"].timestamp_field == "_timestamp"
 
 
 def test_missing_directory_returns_empty_dict(tmp_path: Path):
@@ -141,17 +151,32 @@ def test_missing_directory_returns_empty_dict(tmp_path: Path):
     assert load_specs(missing) == {}
 
 
-def test_a_hunt_the_api_writes_loads_with_no_query_to_run(tmp_path: Path):
-    """The API's own hunt YAML schedules and executes nothing. Pinned, not endorsed.
+def test_a_hunt_the_api_writes_loads_with_a_query_to_run(tmp_path: Path):
+    """The API's own hunt YAML loads into a spec that has SQL to execute.
 
-    ``POST /api/v1/hunts`` writes ``rules`` -- rule template names -- and the loader
-    only ever reads ``query``. Nothing compiles the first into the second, so a hunt
-    created in the UI claims its lease, advances its watermark and detects nothing.
-    Built from the API's own request model so this turns red the day that is wired,
-    which is the point of pinning it here.
+    ``POST /api/v1/hunts`` writes ``rules`` -- rule names -- and ``POST
+    /api/v1/rules`` writes the rule file each names. Both are built from the API's
+    own models here, so this fails the day the compile path stops reaching the
+    runner rather than the day someone notices detections stopped.
     """
     from dfe_engine.api.v1.hunts import HuntCreateRequest
+    from dfe_engine.hunts.rule_model import Rule
+    from dfe_engine.hunts.rule_registry import RuleRegistry
     from dfe_engine.yaml_utils import yaml_dump_string
+
+    rules_dir = tmp_path / "rules"
+    registry = RuleRegistry(rules_directory=rules_dir, writable=True, refresh_interval=0)
+    try:
+        registry.save(
+            Rule(
+                rule_id="some_rule",
+                name="Certutil Abuse",
+                severity="high",
+                where_clause="process_name = 'certutil.exe'",
+            )
+        )
+    finally:
+        registry.close()
 
     body = HuntCreateRequest(
         name="api_hunt",
@@ -163,12 +188,20 @@ def test_a_hunt_the_api_writes_loads_with_no_query_to_run(tmp_path: Path):
         checkpoint_timestamp_field="_timestamp_load",
     )
     config = body.to_config_dict(hunt_name="api_hunt")
-    _write(tmp_path, "api_hunt", yaml_dump_string(config))
+    hunts_dir = tmp_path / "hunts"
+    _write(hunts_dir, "api_hunt", yaml_dump_string(config))
 
-    spec = load_specs(tmp_path)["api_hunt"]
+    spec = load_specs(hunts_dir, rules_dir=rules_dir)["api_hunt"]
     assert spec.interval_seconds == 60  # the schedule survives
-    assert spec.query == ""  # and there is nothing to run
-    # checkpoint_timestamp_field is the API's name for it; the loader reads
-    # timestamp_field, so the operator's choice does not reach the runner either.
-    assert "checkpoint_timestamp_field" in config
-    assert spec.timestamp_field == "timestamp_load"
+    assert len(spec.queries) == 1
+    sql = spec.queries[0]
+    assert sql.startswith("INSERT INTO dfe.detection")
+    assert "FROM dfe.default" in sql
+    assert "process_name = 'certutil.exe'" in sql
+    assert "{window}" in sql  # the worker substitutes the incremental predicate
+    assert "'some_rule' AS rule_id" in sql
+    assert "'api_hunt' AS hunt_name" in sql
+    assert "'high' AS severity" in sql
+    # checkpoint_timestamp_field is the API's name for the watermark column, and it
+    # now reaches the runner rather than being dropped for the loader's default.
+    assert spec.timestamp_field == "_timestamp_load"

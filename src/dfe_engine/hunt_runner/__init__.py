@@ -27,23 +27,26 @@ from .interval import (
     parse_interval,
 )
 from .models import HuntSpec, HuntState
+from .rule_compiler import compile_hunt_queries
 from .runner import HuntRunner
 from .schedule import due_count, due_query, ensure_schedule_schema, publish_schedule
 from .scheduler import Decision, decide
 from .spec_loader import load_specs
 from .spread import next_due, phase_offset
-from .worker import HuntWorker
+from .worker import EmptyHuntQuery, HuntWorker
 
 __all__ = [
     "TIMESTAMP_FIELD",
     "ChCoordinator",
     "Decision",
+    "EmptyHuntQuery",
     "HuntRunner",
     "HuntSpec",
     "HuntState",
     "HuntStateRow",
     "HuntWorker",
     "Lease",
+    "compile_hunt_queries",
     "cron_to_interval_seconds",
     "decide",
     "due_count",

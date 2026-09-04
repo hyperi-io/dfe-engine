@@ -11,18 +11,22 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from .checkpoint import TIMESTAMP_FIELD
+
 
 class HuntSpec(BaseModel):
     """A hunt definition (gitops config). interval_seconds is derived from cron."""
 
     hunt_id: str
     interval_seconds: int
-    query: str = ""  # rule/template reference; carries its own INSERT target
+    # Every statement this hunt runs, each carrying its own INSERT target and a
+    # {window} placeholder. One per rule when the hunt was compiled from `rules`.
+    queries: list[str] = []
     # Optional target metadata. Empty by default - the query carries its own target,
     # resolved against effective_data_database by config; never hardcode 'dfe' here.
     target_table: str = ""
     # FIXED watermark field - the always-present common-header column.
-    timestamp_field: str = "timestamp_load"
+    timestamp_field: str = TIMESTAMP_FIELD
 
 
 class HuntState(BaseModel):
