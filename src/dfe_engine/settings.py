@@ -291,6 +291,14 @@ class HuntsSettings(BaseModel):
         default="_timestamp_load",
         description="Timestamp field for checkpointing (the common header's load column)",
     )
+    runner_poll_seconds: float = Field(
+        default=15.0,
+        gt=0,
+        description=(
+            "Seconds between dfe-hunt-runner ticks. The API reports it so a caller "
+            "knows how long a queued run-now waits before it is claimed."
+        ),
+    )
     jitter_seconds: int = Field(
         default=15, description="Max random jitter in seconds for sub-minute stagger"
     )

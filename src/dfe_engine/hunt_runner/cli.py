@@ -112,7 +112,9 @@ def materialise() -> None:
 
 @app.command("run")
 def run(
-    poll: float = typer.Option(15.0, help="Seconds between runner ticks."),
+    poll: float | None = typer.Option(
+        None, help="Seconds between runner ticks (default: hunts.runner_poll_seconds)."
+    ),
     cap: int = typer.Option(8, help="Global cap on concurrent hunt runs (protects ClickHouse)."),
     reload_every: int = typer.Option(
         20, help="Reload hunt specs (and rebuild the runner) every N ticks (0 = never)."
@@ -125,6 +127,9 @@ def run(
     and rebuilds the runner in place, so a hunt added/removed in git is picked up
     without a restart. A stop flag flipped by SIGTERM/SIGINT drains promptly (the
     daemon re-checks it right after each tick, before sleeping).
+
+    The poll interval defaults to the setting rather than a literal, because the API
+    quotes that setting back to whoever queues an ad-hoc run as the wait to expect.
     """
     settings = load_settings()
     ch, db = _build_ch(settings)
@@ -160,7 +165,7 @@ def run(
         should_stop=lambda: stop["flag"],
         clock=time.time,
         sleep=time.sleep,
-        poll_seconds=poll,
+        poll_seconds=settings.hunts.runner_poll_seconds if poll is None else poll,
         on_reload=_reload,
         reload_every=reload_every,
     )

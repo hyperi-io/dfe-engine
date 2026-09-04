@@ -6,24 +6,30 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Hunts router — scheduling status + hunt config CRUD.
+"""Hunts router — scheduling status + hunt config CRUD + per-hunt run state.
 
 Hunts execute in the separate dfe-hunt-runner service (pull-based, coordinated via
 ClickHouse), not in this API process. This router provides:
 - Scheduling status (runner liveness via active ClickHouse leases)
 - Hunt configuration CRUD (YAML under ``hunts.hunt_dir``)
-- Paginated hunt list with search
-- On-demand execution is not wired yet (POST /{name}/run -> 501)
+- Paginated hunt list with search, each row carrying its own run state
+- On-demand execution: queue a fire the running runner claims on its next poll
+
+Run state rides the LIST rows rather than a per-hunt endpoint. The page renders a
+table of hunts, so a per-hunt endpoint would be one request per row for something
+one query already answers for all of them.
 """
 
 from __future__ import annotations
 
 import re
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from jinja2 import Environment
 from pydantic import BaseModel, Field, field_validator
+from scalo.logger import logger
 
 from dfe_engine.api.deps import (
     CurrentUser,
@@ -35,6 +41,9 @@ from dfe_engine.api.deps import (
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.hunt_runner.run_status import RunStatus, read_run_status
+from dfe_engine.hunt_runner.spec_loader import interval_seconds_for
+from dfe_engine.hunt_runner.spread import next_due
 from dfe_engine.hunts.alert_hunt_link import delete_destinations_owned_by_hunt
 from dfe_engine.hunts.hunt_config_registry import (
     HuntConfigNotFoundError,
@@ -109,7 +118,7 @@ class HuntEngineStatus(BaseModel):
 
 
 class HuntSummary(BaseModel):
-    """Summary of a configured hunt."""
+    """Summary of a configured hunt, with what the runner has done with it."""
 
     name: str = Field(description="Hunt file name (YAML stem, unique)")
     display_name: str = Field(description="Human-readable hunt label")
@@ -119,6 +128,28 @@ class HuntSummary(BaseModel):
     rules: list[str] = Field(default_factory=list)
     source_table: str = Field(default="")
     target_table: str = Field(default="")
+    last_run: int | None = Field(
+        default=None,
+        description="Epoch seconds of the last window that committed; null = never run",
+    )
+    running: bool = Field(
+        default=False, description="A runner holds a live lease on this hunt right now"
+    )
+    last_run_rows: int | None = Field(
+        default=None,
+        description="Rows the last completed run wrote; null = no run recorded",
+    )
+    too_aggressive: bool = Field(
+        default=False,
+        description="The hunt's schedule is tighter than it can keep up with",
+    )
+    run_requested: bool = Field(
+        default=False, description="An ad-hoc run is queued and not yet claimed"
+    )
+    next_due: int | None = Field(
+        default=None,
+        description="Epoch seconds of the next scheduled fire; null = no rate schedule",
+    )
 
 
 class HuntRuleEntry(BaseModel):
@@ -219,17 +250,15 @@ class HuntCreateRequest(HuntWriteRequest):
         return v
 
 
-class TriggerRequest(BaseModel):
-    """Request to trigger an ad-hoc hunt execution."""
+class HuntRunQueued(BaseModel):
+    """Response from queueing an ad-hoc hunt run."""
 
-    customer: str = Field(description="Customer/org ID to run the hunt for")
-
-
-class TriggerResponse(BaseModel):
-    """Response from triggering an ad-hoc hunt."""
-
-    task_id: str = Field(description="Task ID for polling via /tasks/{task_id}")
-    hunt_name: str = Field(description="Display name of the triggered hunt")
+    hunt_name: str = Field(description="Hunt file name the run was queued for")
+    queued: bool = Field(default=True, description="The run is recorded and waiting to be claimed")
+    requested_fire: int = Field(description="Epoch seconds the run was queued at")
+    poll_seconds: float = Field(
+        description="How often a runner looks for work, so the longest wait before it starts"
+    )
 
 
 # ── Dependencies ────────────────────────────────────────────
@@ -259,8 +288,44 @@ def _active_hunt_leases(request: Request) -> int:
         return 0
 
 
-def _hunt_row_to_summary(row: dict[str, Any]) -> HuntSummary:
+def _data_database_client() -> tuple[Any, str]:
+    """The ClickHouse client and data database the coordination tables live in."""
+    from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+    from dfe_engine.settings import get_settings
+
+    return (
+        ClickHouseManager.get_instance().get_clickhouse_client(),
+        get_settings().clickhouse.effective_data_database,
+    )
+
+
+def _run_status_for(hunt_names: list[str], now: int) -> dict[str, RunStatus]:
+    """Per-hunt run state, or an empty map when ClickHouse cannot answer.
+
+    Best-effort on purpose: the hunt list is configuration, and it has to keep
+    rendering when the data plane is down. A row then shows no run state rather
+    than the whole page failing.
+    """
+    try:
+        client, db = _data_database_client()
+        return read_run_status(client, db, hunt_names, now)
+    except Exception as exc:
+        logger.warning(f"hunt run status unavailable: {exc}")
+        return {}
+
+
+def _next_due(row: dict[str, Any], now: int) -> int | None:
+    """The hunt's next scheduled fire, from the same cron reading the runner uses."""
+    interval = interval_seconds_for({"cron": row.get("cron")}, row["name"])
+    if interval is None:
+        return None
+    return next_due(row["name"], interval, now)
+
+
+def _hunt_row_to_summary(row: dict[str, Any], status: RunStatus | None, now: int) -> HuntSummary:
     customers = row.get("customers") or []
+    # No status = the runner has never touched this hunt, or ClickHouse is down.
+    run = status or RunStatus(hunt_id=row["name"])
     return HuntSummary(
         name=row["name"],
         display_name=row["display_name"],
@@ -270,6 +335,12 @@ def _hunt_row_to_summary(row: dict[str, Any]) -> HuntSummary:
         rules=row.get("rules", []),
         source_table=row.get("source_table", ""),
         target_table=row.get("target_table", ""),
+        last_run=run.last_run,
+        running=run.running,
+        last_run_rows=run.last_run_rows,
+        too_aggressive=run.too_aggressive,
+        run_requested=run.run_requested,
+        next_due=_next_due(row, now),
     )
 
 
@@ -289,9 +360,11 @@ async def get_engine_status(
     """Report hunt scheduling status.
 
     Hunts execute in the separate dfe-hunt-runner service (pull-based, coordinated
-    via ClickHouse), not in this API process. ``running`` reflects whether any
-    runner currently holds a hunt lease; ``hunt_count`` is the configured-hunt
-    count.
+    via ClickHouse), not in this API process. ``running`` counts in-flight leases
+    across the whole stack, and a lease is released the moment a run commits, so on
+    a healthy stack it reads false almost always. It is NOT runner liveness: for
+    "is this hunt running", read the per-hunt ``running`` on the hunts list.
+    ``hunt_count`` is the configured-hunt count.
     """
     active = _active_hunt_leases(request)
     return HuntEngineStatus(
@@ -323,7 +396,12 @@ async def list_hunts(
     ),
     sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ) -> PaginatedResponse[HuntSummary]:
-    """List persisted hunt configurations with pagination and search."""
+    """List persisted hunt configurations, each with its run state, paginated.
+
+    Run state comes from ONE ClickHouse read across every listed hunt: the watermark
+    (last run), the lease (running now), hunt_state (too aggressive) and hunt_run
+    (rows the last run wrote). Next due is derived, not stored.
+    """
     raw = registry.list_hunts()
     raw = apply_search(
         raw,
@@ -331,7 +409,9 @@ async def list_hunts(
         ["name", "display_name", "customers", "rules", "source_table", "target_table"],
     )
     raw = apply_sort(raw, sort_by, sort_order)
-    summaries = [_hunt_row_to_summary(row) for row in raw]
+    now = int(time.time())
+    status = _run_status_for([row["name"] for row in raw], now)
+    summaries = [_hunt_row_to_summary(row, status.get(row["name"]), now) for row in raw]
     return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
 
 
@@ -446,22 +526,26 @@ async def delete_hunt(
 
 @router.post(
     "/{name}/run",
-    response_model=TriggerResponse,
+    response_model=HuntRunQueued,
     status_code=202,
     dependencies=[Depends(require_action(scopes_dict["hunt_execute"]))],
 )
 async def trigger_hunt(
     name: str,
-    body: TriggerRequest,
-    request: Request,
     user: CurrentUser,
     registry: HuntConfigReg,
-) -> TriggerResponse:
-    """Trigger an ad-hoc hunt execution.
+    settings: Settings,
+) -> HuntRunQueued:
+    """Queue an ad-hoc run: mark the hunt due now for the runner to claim.
 
-    Hunts run in the separate dfe-hunt-runner service on their schedule. On-demand
-    execution from the API (enqueue a one-shot fire the runner claims) is not wired
-    yet, so this returns 501 after validating the hunt exists.
+    The pull model is kept. Nothing is pushed at the runner and no listener is added
+    -- the fire is written into the coordination state, and the runner that is
+    already running picks it up on its next poll, through the same claim that stops
+    a hunt double-running. 202 says it is queued, not that it has run; the response
+    carries the poll interval so the caller knows the longest wait before it starts.
+
+    A hunt with no rate schedule is not something the runner ticks, so a queued run
+    for one sits unclaimed. That is the schedule's shape, not a failure here.
     """
     try:
         registry.get(name)
@@ -470,13 +554,29 @@ async def trigger_hunt(
             status_code=404,
             detail={"code": "not_found", "message": f"Hunt '{name}' not found"},
         ) from None
-    raise HTTPException(
-        status_code=501,
-        detail={
-            "code": "not_implemented",
-            "message": (
-                "On-demand hunt execution runs via the dfe-hunt-runner service; "
-                "ad-hoc trigger from the API is not yet wired"
-            ),
-        },
+
+    from dfe_engine.hunt_runner.ch_coordinator import ChCoordinator
+
+    fire = int(time.time())
+    try:
+        client, db = _data_database_client()
+        ChCoordinator(client, database=db).request_run(name, fire)
+    except Exception as exc:
+        logger.error(f"could not queue a run for hunt '{name}': {exc}")
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "coordination_unavailable",
+                "message": (
+                    "The hunt coordination tables in ClickHouse are unreachable, "
+                    "so the run could not be queued"
+                ),
+            },
+        ) from exc
+
+    audit_resource_change(user.user_id, "hunt", name, "run queued")
+    return HuntRunQueued(
+        hunt_name=name,
+        requested_fire=fire,
+        poll_seconds=settings.hunts.runner_poll_seconds,
     )

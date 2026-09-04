@@ -28,6 +28,7 @@ from .interval import (
 )
 from .models import HuntSpec, HuntState
 from .rule_compiler import compile_hunt_queries
+from .run_status import RunStatus, read_run_status
 from .runner import HuntRunner
 from .schedule import due_count, due_query, ensure_schedule_schema, publish_schedule
 from .scheduler import Decision, decide
@@ -46,6 +47,7 @@ __all__ = [
     "HuntStateRow",
     "HuntWorker",
     "Lease",
+    "RunStatus",
     "compile_hunt_queries",
     "cron_to_interval_seconds",
     "decide",
@@ -60,6 +62,7 @@ __all__ = [
     "phase_offset",
     "predicate",
     "publish_schedule",
+    "read_run_status",
     "run_loop",
     "window",
 ]

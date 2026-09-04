@@ -16,6 +16,11 @@ ChCoordinator (survivable, independent of the engine).
 
 A hunt with nothing to run RAISES. Advancing the watermark past a window nothing
 scanned is a clean-looking success that detects nothing and leaves no evidence.
+
+The INSERT's row count is recorded with the fire it belongs to. ClickHouse is the
+only thing that knows how many rows a hunt wrote, and until now the worker read
+that number and threw it away, so the API could not say whether a hunt found
+anything.
 """
 
 from __future__ import annotations
@@ -35,6 +40,18 @@ WINDOW_TOKEN = "{window}"
 
 class EmptyHuntQuery(RuntimeError):
     """A hunt that compiled to no statements, so there is nothing to execute."""
+
+
+def _written_rows(result: Any) -> int:
+    """Rows an INSERT wrote, from the driver's summary. 0 when it reports none.
+
+    clickhouse-connect hands ``command`` a QuerySummary carrying ClickHouse's own
+    written_rows. It is the only place that count exists, and it was being dropped.
+    """
+    try:
+        return int(getattr(result, "written_rows", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def query_settings(hunt_id: str, workload: str = "") -> dict[str, str]:
@@ -85,11 +102,14 @@ class HuntWorker:
         start, end = window(last, scheduled_start, spec.interval_seconds)
         pred = predicate(start, end, spec.timestamp_field)
         settings = query_settings(spec.hunt_id, self._workload)
+        written = 0
         for sql in statements:
             # INSERT INTO <target> SELECT ... WHERE {window}. log_comment attributes
             # the query in system.query_log; workload (if configured) puts it in a CH
             # fair-share class.
-            self._ch.command(sql.replace(WINDOW_TOKEN, pred), settings=settings)
+            result = self._ch.command(sql.replace(WINDOW_TOKEN, pred), settings=settings)
+            written += _written_rows(result)
         # Advance ONLY after every statement committed (crash-safe resume).
         self._coord.set_watermark(spec.hunt_id, end)
+        self._coord.record_run(spec.hunt_id, scheduled_start, written)
         return end
