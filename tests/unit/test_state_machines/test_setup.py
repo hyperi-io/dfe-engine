@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -126,6 +127,41 @@ def test_admin_password_step_clears_only_after_rotation(ctx):
 
     ctx.account_store.reset_password("admin", "a-strong-local-admin-password")
     assert STEP_ADMIN_PASSWORD in SETUP_MACHINE.evaluate(ctx).completed_steps
+
+
+def test_rotation_is_measured_against_the_configured_bootstrap_password(tmp_path):
+    """A deployment seeded from DFE_AUTH_LOCAL_ADMIN_PASSWORD has not rotated yet."""
+    accounts = AccountStore(tmp_path / "accounts")
+    accounts.create("admin", "a-generated-boot-password", groups=["dfe-admins"])
+    ctx = SetupContext(account_store=accounts, bootstrap_admin_password="a-generated-boot-password")
+
+    assert STEP_ADMIN_PASSWORD not in SETUP_MACHINE.evaluate(ctx).completed_steps
+
+    accounts.reset_password("admin", "a-strong-local-admin-password")
+    assert STEP_ADMIN_PASSWORD in SETUP_MACHINE.evaluate(ctx).completed_steps
+
+
+def test_context_takes_the_bootstrap_credential_from_settings(tmp_path):
+    accounts = AccountStore(tmp_path / "accounts")
+    accounts.create("root", "a-generated-boot-password", groups=["dfe-admins"])
+    local = SimpleNamespace(admin_name="root", admin_password="a-generated-boot-password")
+    settings = SimpleNamespace(
+        auth=SimpleNamespace(local=local), env="dev", gitops=SimpleNamespace(mode="team")
+    )
+    state = SimpleNamespace(account_store=accounts, settings=settings, gitcrud=None)
+
+    ctx = SetupContext.from_app_state(state)
+
+    assert ctx.bootstrap_admin_name == "root"
+    assert STEP_ADMIN_PASSWORD in SETUP_MACHINE.evaluate(ctx).steps
+    assert STEP_ADMIN_PASSWORD not in SETUP_MACHINE.evaluate(ctx).completed_steps
+
+
+def test_context_falls_back_to_the_shipped_defaults_without_settings(tmp_path):
+    ctx = SetupContext.from_app_state(SimpleNamespace(account_store=None))
+
+    assert ctx.bootstrap_admin_name == "admin"
+    assert ctx.bootstrap_admin_password == "changeme"
 
 
 def _with_git(ctx: SetupContext, *, merged: bool) -> SetupContext:

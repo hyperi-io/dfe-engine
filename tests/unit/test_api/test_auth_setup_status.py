@@ -87,6 +87,28 @@ def test_setup_status_public_and_incomplete_on_fresh_bootstrap(tmp_path):
         _registries.clear()
 
 
+def test_setup_status_measures_rotation_against_the_configured_password(tmp_path):
+    """A deployment that generated its own bootstrap password has still not rotated it."""
+    settings = _settings(tmp_path)
+    local = LocalAuthSettings(enabled=True, admin_password="a-generated-boot-password")
+    settings = settings.model_copy(
+        update={"auth": settings.auth.model_copy(update={"local": local})}
+    )
+    app = create_app(settings=settings)
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            setup = client.get("/api/v1/auth/setup-status").json()["initial_setup"]
+            assert "admin_password" in setup["pending_steps"]
+
+            app.state.account_store.reset_password(
+                admin_account_name(), "a-strong-local-admin-password"
+            )
+            setup = client.get("/api/v1/auth/setup-status").json()["initial_setup"]
+            assert "admin_password" in setup["completed_steps"]
+    finally:
+        _registries.clear()
+
+
 def test_setup_status_reports_auth_steps_even_when_auth_is_disabled(tmp_path):
     """DFE_AUTH_ENABLED=false does not stop bootstrap seeding a live admin/changeme.
 
