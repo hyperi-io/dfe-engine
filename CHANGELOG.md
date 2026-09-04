@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.2](https://github.com/hyperi-io/dfe-engine/compare/v1.19.1...v1.19.2) (2026-09-04)
+
+### Bug Fixes
+
+* **auth:** read the break-glass admin name and password from the environment ([#284](https://github.com/hyperi-io/dfe-engine/issues/284)) ([d3d9a1f](https://github.com/hyperi-io/dfe-engine/commit/d3d9a1fccf08a16f62523647ca256cc2fa9ddfe5))
+* **hunts:** hunts status reports runner liveness from a heartbeat ([#283](https://github.com/hyperi-io/dfe-engine/issues/283)) ([3788592](https://github.com/hyperi-io/dfe-engine/commit/3788592cafb9ba39e9e31e90aa61b2ff8022c76e)), closes [#284](https://github.com/hyperi-io/dfe-engine/issues/284)
+
 ## [1.19.1](https://github.com/hyperi-io/dfe-engine/compare/v1.19.0...v1.19.1) (2026-09-04)
 
 ### Bug Fixes
