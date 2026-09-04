@@ -5,18 +5,8 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""The wrapper handed out by ``get_clickhouse_client()`` supports row inserts.
-
-``ClickHouseClientWrapper`` is the only ClickHouse client the engine hands out, and
-it used to expose query/command/execute but no ``insert``. Every writer that was
-built against clickhouse-connect - the hunt coordinator, so every run-now, lease,
-watermark and heartbeat written from the API process - therefore died on
-``AttributeError: 'ClickHouseClientWrapper' object has no attribute 'insert'``. The
-read paths hid it: they only ever call ``query``.
-
-These build the coordinator over the SAME object the API builds it over (the
-wrapper, with a recording connect-shaped client under it) and drive real coordinator
-methods, so the wiring is what is asserted, not a restatement of the wrapper.
+"""``ClickHouseClientWrapper`` is the only client the engine hands out, so a hunt
+coordinator built over it must be able to insert rows, not only query them.
 """
 
 from __future__ import annotations

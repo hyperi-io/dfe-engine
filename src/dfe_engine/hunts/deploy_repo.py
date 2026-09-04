@@ -88,27 +88,31 @@ class DeployRepoStore:
         except (ResourceNotFoundError, CommitPolicyError):
             return None
 
-    def put(self, name: str, doc: dict[str, Any], *, actor: str) -> None:
-        """Write one doc verbatim and commit it, routed by posture."""
+    def put(self, name: str, doc: dict[str, Any], *, actor: str) -> WriteOutcome:
+        """Write one doc verbatim and commit it, routed by posture.
+
+        The outcome says where the change actually landed: a production+team write
+        sits on a review branch, so a caller that reports it as applied is telling
+        the operator the runner has it when it does not.
+        """
         summary = "update" if self.get(name) is not None else "create"
         message = self._message(name, summary, actor)
 
         def _write(branch: str):
             return self._crud.put(self._cls_name, name, doc, actor, message, branch=branch)
 
-        self._route(name, summary, actor, _write)
+        return self._route(name, summary, actor, _write)
 
-    def delete(self, name: str, *, actor: str) -> bool:
-        """Remove one resource and commit it; False when it was not there."""
+    def delete(self, name: str, *, actor: str) -> WriteOutcome | None:
+        """Remove one resource and commit it; None when it was not there."""
         if self.get(name) is None:
-            return False
+            return None
         message = self._message(name, "delete", actor)
 
         def _write(branch: str):
             return self._crud.delete(self._cls_name, name, actor, message, branch=branch)
 
-        self._route(name, "delete", actor, _write)
-        return True
+        return self._route(name, "delete", actor, _write)
 
     def _message(self, name: str, summary: str, actor: str) -> str:
         return build_message(

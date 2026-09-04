@@ -99,6 +99,30 @@ def test_seed_account_skips_break_glass_admin_name(tmp_path: Path, monkeypatch):
     assert not account_store.verify_password("admin", "hijack-attempt-long")
 
 
+def test_seed_account_skips_the_configured_break_glass_name(tmp_path: Path, monkeypatch):
+    # DFE_AUTH_LOCAL_ADMIN_NAME renames the break-glass account, and the reconcile
+    # has to skip THAT name -- skipping "admin" would leave the real one clobbered.
+    seeds = [SeedAccount(username="root", password="hijack-attempt-long", groups=["dfe-viewers"])]
+
+    account_store, *_ = bootstrap_auth(
+        tmp_path / "auth", default_admin_name="root", seed_accounts=seeds
+    )
+
+    assert account_store.verify_password("root", "changeme")
+    assert not account_store.verify_password("root", "hijack-attempt-long")
+
+
+def test_a_seed_named_admin_is_created_when_the_break_glass_is_renamed(tmp_path: Path, monkeypatch):
+    # The mirror image: with the break-glass renamed, "admin" is an ordinary name.
+    seeds = [SeedAccount(username="admin", password="admin-seed-password", groups=["dfe-viewers"])]
+
+    account_store, *_ = bootstrap_auth(
+        tmp_path / "auth", default_admin_name="root", seed_accounts=seeds
+    )
+
+    assert account_store.verify_password("admin", "admin-seed-password")
+
+
 def test_seed_account_unknown_group_is_skipped_not_fatal(tmp_path: Path, monkeypatch):
     seeds = [SeedAccount(username="kay", password="kay-password-long", groups=["no-such-group"])]
 

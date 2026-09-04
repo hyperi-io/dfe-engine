@@ -13,11 +13,12 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from dfe_engine.api.deps import CurrentUser, HuntConfigReg, RuleReg, Settings, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
+from dfe_engine.api.review import apply_review_headers, review_audit_detail
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.git_identity import git_author
@@ -228,11 +229,15 @@ async def create_rule(
     user: CurrentUser,
     settings: Settings,
     registry: RuleReg,
+    response: Response,
 ):
     """Create a new hunt rule via RuleCreationService.
 
     The service sanitizes the SQL, applies CEL→SQL transpilation,
     validates column references, and optionally estimates query cost.
+
+    A production+team write is routed to a review branch instead of the branch the
+    runner git-syncs, and the ``X-DFE-Review-Required`` header says so.
     """
     from dfe_engine.hunts.rule_creation_service import (
         RuleCreateRequest as SvcRequest,
@@ -266,9 +271,11 @@ async def create_rule(
     )
 
     result = service.create_rule(svc_request, body.name)
-    registry.save(result.rule, created_by=git_author(user), description=f"rule: create {body.name}")
-
-    audit_resource_change(user.user_id, "rule", body.name, "created")
+    outcome = registry.save(
+        result.rule, created_by=git_author(user), description=f"rule: create {body.name}"
+    )
+    apply_review_headers(response, outcome)
+    audit_resource_change(user.user_id, "rule", body.name, "created", review_audit_detail(outcome))
     return _build_create_response(result, body.cost_window_minutes)
 
 
@@ -284,6 +291,7 @@ async def create_rule_from_hyperdx(
     user: CurrentUser,
     settings: Settings,
     registry: RuleReg,
+    response: Response,
 ):
     """Create a hunt rule from a HyperDX view's expanded query.
 
@@ -317,13 +325,13 @@ async def create_rule_from_hyperdx(
     )
 
     result = service.create_rule(svc_request, rule_id)
-    registry.save(
+    outcome = registry.save(
         result.rule,
         created_by=git_author(user),
         description=f"rule: create {rule_id} (from hyperdx view)",
     )
-
-    audit_resource_change(user.user_id, "rule", rule_id, "created")
+    apply_review_headers(response, outcome)
+    audit_resource_change(user.user_id, "rule", rule_id, "created", review_audit_detail(outcome))
     return RuleFromHyperdxResponse(
         id=rule_id,
         display_name=result.rule.name,
@@ -396,8 +404,13 @@ async def update_rule(
     user: CurrentUser,
     settings: Settings,
     registry: RuleReg,
+    response: Response,
 ):
-    """Replace a detection rule (re-runs creation pipeline, preserves created_at)."""
+    """Replace a detection rule (re-runs creation pipeline, preserves created_at).
+
+    A production+team write is routed to a review branch instead of the branch the
+    runner git-syncs, and the ``X-DFE-Review-Required`` header says so.
+    """
     try:
         existing = registry.get(name)
     except RuleNotFoundError:
@@ -433,8 +446,11 @@ async def update_rule(
     updated = result.rule.model_copy(
         update={"created_at": existing.created_at, "name": effective_display},
     )
-    registry.save(updated, created_by=git_author(user), description=f"rule: update {name}")
-    audit_resource_change(user.user_id, "rule", name, "updated")
+    outcome = registry.save(
+        updated, created_by=git_author(user), description=f"rule: update {name}"
+    )
+    apply_review_headers(response, outcome)
+    audit_resource_change(user.user_id, "rule", name, "updated", review_audit_detail(outcome))
     return _build_create_response(
         result.model_copy(update={"rule": updated}),
         body.cost_window_minutes,
@@ -447,9 +463,17 @@ async def update_rule(
     dependencies=[Depends(require_action(scopes_dict["rule_delete"]))],
 )
 async def delete_rule(
-    name: str, user: CurrentUser, registry: RuleReg, hunt_registry: HuntConfigReg
+    name: str,
+    user: CurrentUser,
+    registry: RuleReg,
+    hunt_registry: HuntConfigReg,
+    response: Response,
 ):
-    """Delete a detection rule."""
+    """Delete a detection rule.
+
+    A production+team delete is routed to a review branch, so the runner keeps
+    compiling the rule until that branch is merged; ``X-DFE-Review-Required`` says so.
+    """
     used_by = hunt_registry.hunt_names_referencing_rule(name)
     if used_by:
         hunts = ", ".join(sorted(used_by))
@@ -461,13 +485,14 @@ async def delete_rule(
             },
         )
     try:
-        registry.delete(name, created_by=git_author(user))
+        outcome = registry.delete(name, created_by=git_author(user))
     except RuleNotFoundError:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Rule '{name}' not found"},
         ) from None
-    audit_resource_change(user.user_id, "rule", name, "deleted")
+    apply_review_headers(response, outcome)
+    audit_resource_change(user.user_id, "rule", name, "deleted", review_audit_detail(outcome))
 
 
 # ── Helpers ──────────────────────────────────────────────────

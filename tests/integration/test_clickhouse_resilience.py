@@ -13,9 +13,15 @@ ReconnectingResilience against a live server: a real SELECT round-trips, a real
 non-transient CH error (unknown table) surfaces immediately un-retried, and a
 forced reconnect rebuilds a WORKING pooled client. No ClickHouse Cloud (billable)
 is touched - auto-wake is covered by the unit doubles.
+
+``insert`` is here for the reason it was missing in the first place: the unit tests
+drive it against a recording double, so an AttributeError on the write path can only
+be caught by a real server accepting real rows.
 """
 
 from __future__ import annotations
+
+import uuid
 
 import pytest
 from scalo.resilience import ServiceUnavailable
@@ -65,6 +71,68 @@ def test_non_transient_ch_error_surfaces_immediately(manager):
     with pytest.raises(Exception) as excinfo:
         client.query("SELECT * FROM __dfe_nonexistent_table_resilience_xyz")
     assert not isinstance(excinfo.value, ServiceUnavailable)
+
+
+@pytest.fixture
+def heartbeat_table(manager):
+    """The REAL hunt_runner_heartbeat table, in a throwaway database.
+
+    Built from ``internal_tables`` through the applier the deployment uses, so the
+    insert below writes the columns and the engine a deployment actually has -- TTL
+    clause included, which is DDL only a real server can accept or reject.
+    """
+    from dfe_engine.schema.applier import SchemaApplier
+    from dfe_engine.schema.engine_resolver import EngineResolver
+    from dfe_engine.schema.internal_tables import hunt_runner_heartbeat_spec
+
+    client = manager.get_clickhouse_client()
+    db = f"dfe_hb_{uuid.uuid4().hex[:8]}"
+    applier = SchemaApplier(client, EngineResolver(client=client))
+    applier.ensure_database(db)
+    spec = hunt_runner_heartbeat_spec(db)
+    applier.ensure_table(db, spec.name, spec.columns, spec.config)
+    try:
+        yield db, spec.name
+    finally:
+        client.command(f"DROP DATABASE IF EXISTS `{db}` SYNC")
+
+
+def test_the_wrapper_inserts_rows_a_real_clickhouse_reads_back(manager, heartbeat_table):
+    db, table = heartbeat_table
+    client = manager.get_clickhouse_client()
+    runner = f"runner-{uuid.uuid4().hex[:6]}"
+
+    client.insert(
+        table,
+        [[runner, 1_700_000_000, 5.0]],
+        column_names=["runner_id", "seen", "poll_seconds"],
+        database=db,
+    )
+
+    rows = client.query(
+        f"SELECT seen, poll_seconds FROM `{db}`.`{table}` WHERE runner_id = %(r)s",
+        parameters={"r": runner},
+    ).result_rows
+    assert rows == [(1_700_000_000, 5.0)]
+
+
+def test_a_real_runner_heartbeat_round_trips_through_the_wrapper(manager, heartbeat_table):
+    """The API's own liveness read, over rows the coordinator's writer put there."""
+    from dfe_engine.hunt_runner.run_status import live_runner_count
+
+    db, _table = heartbeat_table
+    client = manager.get_clickhouse_client()
+    now = 1_700_000_000
+    client.insert(
+        "hunt_runner_heartbeat",
+        [[f"runner-{uuid.uuid4().hex[:6]}", now, 5.0]],
+        column_names=["runner_id", "seen", "poll_seconds"],
+        database=db,
+    )
+
+    assert live_runner_count(client, db, now) == 1
+    # Two polls past its last beat, the same runner no longer counts.
+    assert live_runner_count(client, db, now + 60) == 0
 
 
 def test_reconnect_rebuilds_a_working_client(manager):

@@ -105,16 +105,18 @@ def not_git_backed_state() -> AccountGitState:
     return _FILE_SHARE_STATE
 
 
-def is_break_glass(username: str) -> bool:
+def is_break_glass(username: str, admin_name: str = "") -> bool:
     """True for the break-glass admin -- the ONLY account git-persisted by default.
 
     Regular users and groups live in the resolved store (document store/yaml); gitcrud is
     the exception, reserved for the emergency credential that must survive a total
-    teardown. Follows the live ``admin``.
+    teardown. ``admin_name`` is the configured override
+    (``settings.auth.local.admin_name``); without it the deployment's renamed
+    break-glass account loses its git-durability path.
     """
     from dfe_engine.auth.bootstrap import admin_account_name
 
-    return username == admin_account_name()
+    return username == admin_account_name(admin_name)
 
 
 # ── Helpers ──────────────────────────────────────────────────

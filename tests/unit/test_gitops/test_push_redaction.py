@@ -17,6 +17,9 @@ Real git throughout: a dulwich WSGI git server on loopback is the remote, the pu
 is a real HTTPS-shaped push with credentials in the URL, and the assertion reads
 file-descriptor-level captured output - so it sees whatever ANY layer writes to
 stderr, not just what this code chose to log.
+
+The same token must not survive on disk either: ``porcelain.clone`` persists the URL
+it cloned from into ``.git/config``, so the clone is scrubbed back to the bare URL.
 """
 
 from __future__ import annotations
@@ -43,6 +46,16 @@ class _QuietHandler(WSGIRequestHandler):
 
     def log_message(self, format: str, *args) -> None:
         return None
+
+
+@pytest.fixture
+def logged_debug(monkeypatch):
+    """Collect the debug lines the redacting stream emits, in order."""
+    from dfe_engine.gitops import dulwich_auth
+
+    lines: list[str] = []
+    monkeypatch.setattr(dulwich_auth.logger, "debug", lines.append)
+    return lines
 
 
 @pytest.fixture
@@ -97,6 +110,27 @@ def test_the_errstream_never_puts_the_token_on_stderr(capfd):
     assert "s3cr3t" not in captured.out + captured.err
 
 
+def test_a_url_split_across_two_writes_is_still_redacted(logged_debug):
+    # dulwich writes progress in whatever sizes the transport hands it, so the
+    # userinfo can straddle a chunk boundary.
+    head, tail = b"Push to http://dfe-admin:s3c", b"r3t@forge.svc/deploy.git successful.\n"
+    stream = RedactingErrStream()
+    assert stream.write(head) == len(head)
+    assert stream.write(tail) == len(tail)
+    stream.close()
+
+    assert "s3cr3t" not in "".join(logged_debug)
+    assert logged_debug == ["Push to http://***@forge.svc/deploy.git successful."]
+
+
+def test_an_unterminated_line_is_flushed_redacted_on_close(logged_debug):
+    stream = RedactingErrStream()
+    stream.write(b"Push to http://dfe-admin:s3cr3t@forge.svc/deploy.git")
+    assert logged_debug == []  # still buffered: no newline has arrived
+    stream.close()
+    assert logged_debug == ["Push to http://***@forge.svc/deploy.git"]
+
+
 def test_a_real_credentialed_push_keeps_the_token_out_of_every_stream(
     tmp_path: Path, git_http_remote, capfd
 ):
@@ -120,6 +154,52 @@ def test_a_real_credentialed_push_keeps_the_token_out_of_every_stream(
 
     captured = capfd.readouterr()
     assert _TOKEN not in captured.out + captured.err
+
+
+def test_the_clone_does_not_keep_the_token_in_git_config(tmp_path: Path, git_http_remote):
+    """porcelain.clone persists the URL it cloned from; the scrub takes the creds back out.
+
+    ``.git/config`` sits on the engine pod's config volume, so a token left there is
+    readable by any co-located sidecar, exec shell or volume snapshot.
+    """
+    url, branch = git_http_remote
+    work = tmp_path / "work"
+    repo = GitopsRepo(
+        local_path=str(work),
+        repo_url=url,
+        branch=branch,
+        push=True,
+        username=_USER,
+        token=_TOKEN,
+    )
+    repo.ensure()
+
+    config = (work / ".git" / "config").read_text(encoding="utf-8")
+    assert _TOKEN not in config
+    assert f"{_USER}:" not in config
+    assert url in config  # the bare URL is still the remote, so fetch/push resolve
+
+    # A push re-supplies the credential per op, and must not write it back either.
+    assert repo.publish({"deploy/values.yaml": "replicas: 1\n"}, message="publish me").pushed
+    after = (work / ".git" / "config").read_text(encoding="utf-8")
+    assert _TOKEN not in after
+
+
+def test_reusing_an_existing_clone_rescrubs_the_stored_credentials(tmp_path: Path, git_http_remote):
+    """A clone that died after writing .git/config would otherwise keep the token."""
+    url, branch = git_http_remote
+    work = tmp_path / "work"
+    porcelain.clone(f"http://{_USER}:{_TOKEN}@{url.removeprefix('http://')}", str(work))
+    assert _TOKEN in (work / ".git" / "config").read_text(encoding="utf-8")
+
+    GitopsRepo(
+        local_path=str(work),
+        repo_url=url,
+        branch=branch,
+        username=_USER,
+        token=_TOKEN,
+    ).ensure()
+    assert _TOKEN not in (work / ".git" / "config").read_text(encoding="utf-8")
 
 
 def test_a_failed_credentialed_push_keeps_the_token_out_of_the_error(tmp_path: Path, capfd):

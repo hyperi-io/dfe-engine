@@ -146,10 +146,13 @@ def bootstrap_auth(
     if restored:
         logger.info(f"Restored {restored} account(s) from the deploy repo")
 
+    # Resolved once: the seed and the reconcile below must skip the SAME username,
+    # or a renamed break-glass account is reconciled away by a colliding seed spec.
+    admin_name = admin_account_name(default_admin_name)
+
     # Seed admin account if the store has no accounts yet (backend-agnostic)
     if not account_store.list():
         password = admin_account_password(default_admin_password)
-        admin_name = admin_account_name(default_admin_name)
         _seed_admin(account_store, group_store, password, admin_name)
         if password == _DEFAULT_PASSWORD:
             logger.warning(
@@ -167,7 +170,7 @@ def bootstrap_auth(
     # break-glass admin above (seeded only into an empty store), a seed account's
     # password and groups are reasserted every startup, in any store backend.
     if seed_accounts:
-        _reconcile_seed_accounts(account_store, group_store, seed_accounts)
+        _reconcile_seed_accounts(account_store, group_store, seed_accounts, admin_name)
 
     return account_store, group_store, api_key_store, role_store, role_config
 
@@ -202,16 +205,16 @@ def _reconcile_seed_accounts(
     account_store: AccountStore | DocuStoreAccountStore,
     group_store: GroupStore | DocuStoreGroupStore,
     seed_accounts: list[SeedAccount],
+    admin_name: str,
 ) -> None:
     """Create or reconcile named seed accounts so config wins on every boot.
 
     For each spec: create it if absent, else reset the password when the
     configured one no longer verifies and align its groups to the config. Group
     rosters are reconciled to match exactly -- added to the config's groups,
-    removed from any other. The break-glass admin name is skipped so its
-    git-backed durability is never clobbered by a reconcile.
+    removed from any other. ``admin_name`` is the resolved break-glass username,
+    skipped so its git-backed durability is never clobbered by a reconcile.
     """
-    admin_name = admin_account_name()
     known_groups = {g.name for g in group_store.list()}
 
     for spec in seed_accounts:

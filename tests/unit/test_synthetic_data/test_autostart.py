@@ -71,13 +71,18 @@ class TestRunStandingStream:
     async def test_segments_restart_until_cancelled(self):
         # The claim is the loop: a finished segment starts another until the task
         # is cancelled. A stub segment keeps real sockets and a real event pack
-        # out of it; the socket version crashed xdist workers under load.
+        # out of it; the socket version crashed xdist workers under load. The stub
+        # signals the third segment rather than the test sleeping for it, so a
+        # loaded xdist worker cannot lose the race.
         segments = 0
+        third = asyncio.Event()
 
         async def fake_run_stream(request, *, task=None):
             nonlocal segments
             segments += 1
-            await asyncio.sleep(0.01)
+            if segments >= 3:
+                third.set()
+            await asyncio.sleep(0)  # the real segment awaits; without this the loop starves
             return {"emitted": request.count, "sent": 0, "failed": 0}
 
         svc = service()
@@ -91,7 +96,7 @@ class TestRunStandingStream:
         task = asyncio.get_running_loop().create_task(
             run_standing_stream(svc, request, retry_seconds=0.05)
         )
-        await asyncio.sleep(0.2)
+        await asyncio.wait_for(third.wait(), timeout=10)
         assert not task.done()
         assert segments >= 3, "the loop must have restarted the segment"
         task.cancel()

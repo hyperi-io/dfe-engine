@@ -164,12 +164,14 @@ class Accounts(Seed):
         routing, so a seeded deployment and an operator's password reset leave the
         repo in the same shape.
         """
-        if self._gitcrud is None or not account_durability.is_break_glass(name):
+        if self._gitcrud is None:
+            return
+        settings = self._require_settings()
+        if not account_durability.is_break_glass(name, settings.auth.local.admin_name):
             return
         account = self._account_store.get(name)
         if account is None:
             return
-        settings = self._require_settings()
         account_durability.publish_account(
             self._gitcrud,
             self._forge,
