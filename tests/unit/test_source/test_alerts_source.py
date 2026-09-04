@@ -29,10 +29,41 @@ class TestBuiltinAlertsSource:
         assert source.source == "dfe-alerts"
         assert source.display_name == "DFE Alerts"
         assert source.enabled is True
-        assert source.header.type == "time_series"
+        assert source.header.type == "timeseries"
         assert source.current == "1.0.0"
         assert source.deployed_version == "1.0.0"
         assert "1.0.0" in source.versions
+
+    def test_every_builtin_header_profile_resolves_to_a_real_file(self):
+        """A header type is a filename in dfe-schemas, and nothing normalises it.
+
+        Asserting the string round-trips is not enough: `time_series` survived
+        every such assertion for as long as it named a profile that does not
+        exist, because no test ever tried to load it.
+        """
+        from dfe_engine.schema.schema_loader import SchemaLoader
+        from dfe_engine.yaml_utils import yaml_load_string
+
+        builtins = resources.files("dfe_engine.source") / "builtin_sources"
+        seen = 0
+        for entry in builtins.iterdir():
+            if not entry.name.endswith(".yaml"):
+                continue
+            source = Source.model_validate(yaml_load_string(entry.read_text()))
+            for snap in source.versions.values():
+                if snap.header is None:
+                    continue
+                seen += 1
+                # Raises SchemaLoadError if the profile file is not there.
+                SchemaLoader.load_profile(snap.header.type, profile_version=snap.header.version)
+
+        assert seen, "no builtin source declared a header, so this proved nothing"
+
+    def test_the_default_header_profile_resolves(self):
+        from dfe_engine.schema.schema_loader import SchemaLoader
+        from dfe_engine.source.models import SourceHeader
+
+        SchemaLoader.load_profile(SourceHeader().type)
 
     def test_builtin_yaml_uses_version_tree(self):
         data = _load_builtin("dfe-alerts")

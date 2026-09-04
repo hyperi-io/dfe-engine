@@ -23,7 +23,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from tests.e2e.conftest import E2EConfig, require
+from tests.e2e.conftest import E2EConfig, must, require
 
 pytestmark = pytest.mark.live
 
@@ -35,7 +35,7 @@ def test_reconcile_materialises_tier_and_service_roles(e2e: E2EConfig, ch_client
     require(e2e, "engine_url", "engine_token", "ch_host")
 
     resp = httpx.post(
-        f"{e2e.engine_url.rstrip('/')}{_RECONCILE}",
+        f"{must(e2e.engine_url).rstrip('/')}{_RECONCILE}",
         headers={"Authorization": f"Bearer {e2e.engine_token}"},
         verify=e2e.verify,
         timeout=60.0,  # a first reconcile creates profiles/quotas/roles/policies
@@ -58,7 +58,7 @@ def test_reconcile_is_idempotent(e2e: E2EConfig) -> None:
     require(e2e, "engine_url", "engine_token")
 
     headers = {"Authorization": f"Bearer {e2e.engine_token}"}
-    url = f"{e2e.engine_url.rstrip('/')}{_RECONCILE}"
+    url = f"{must(e2e.engine_url).rstrip('/')}{_RECONCILE}"
     first = httpx.post(url, headers=headers, verify=e2e.verify, timeout=60.0)
     second = httpx.post(url, headers=headers, verify=e2e.verify, timeout=60.0)
     assert first.status_code == 200, first.text
@@ -69,7 +69,7 @@ def test_reconcile_requires_auth(e2e: E2EConfig) -> None:
     """The endpoint is gated (governance:write) - no bearer token -> 401."""
     require(e2e, "engine_url")
     resp = httpx.post(
-        f"{e2e.engine_url.rstrip('/')}{_RECONCILE}",
+        f"{must(e2e.engine_url).rstrip('/')}{_RECONCILE}",
         verify=e2e.verify,
         timeout=15.0,
     )

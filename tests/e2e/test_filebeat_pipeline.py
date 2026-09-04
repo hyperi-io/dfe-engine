@@ -15,9 +15,11 @@
       -> dfe-loader
       -> ClickHouse
 
-The transform hop is parameterised over vrl and vector, and nothing else
-changes between the two runs - which is what makes this a test of the transform
-LAYER rather than of one app.
+Both transform apps run the same bundled VRL, read the same land topic and emit
+to the same load topic, and a landed row names neither. So the transform hop is
+NOT parameterised over the two: that would be one experiment run twice, and with
+both apps deployed each run measures both whatever it is told. DFE_E2E_TRANSFORM
+only names the app in the failure message.
 
 Every assertion polls a real signal. The one thing deliberately NOT asserted is
 byte-equality against the upstream goldens: the bundled pipeline documents four
@@ -37,14 +39,14 @@ import httpx
 import pytest
 
 from tests.e2e import filebeat_corpus as corpus
-from tests.e2e.conftest import E2EConfig, poll_until, require
+from tests.e2e.conftest import E2EConfig, must, poll_until, require
 
 pytestmark = pytest.mark.live
 
 SOURCE = "filebeat"
 
-# The transform apps this runs against. Same corpus, same assertions; only the
-# instance differs, so a divergence is the transform's and not the harness's.
+# The transform apps this runs against. Exactly one is under test per run, and
+# DFE_E2E_TRANSFORM has to name it - see the skip in TestTransform.
 TRANSFORMS = ("dfe-transform-vrl", "dfe-transform-vector")
 
 # The filebeat table is built from meta/beats/filebeat.yaml, so ECS lands in
@@ -84,12 +86,14 @@ def _corpus_or_skip(limit: int = 5) -> list[corpus.Sample]:
 
 
 def _post(cfg: E2EConfig, bodies: list[dict]) -> None:
+    # Every caller gates on require(cfg, "receiver_url"), which skips when it is unset.
+    url = must(cfg.receiver_url)
     headers = {"Content-Type": "application/json"}
     if cfg.receiver_token:
         headers["Authorization"] = f"Bearer {cfg.receiver_token}"
     with httpx.Client(verify=cfg.verify, timeout=30.0) as client:
         for body in bodies:
-            response = client.post(cfg.receiver_url, json=body, headers=headers)
+            response = client.post(url, json=body, headers=headers)
             assert response.status_code < 300, f"receiver rejected the event: {response.text}"
 
 
@@ -200,21 +204,43 @@ class TestRouting:
 class TestTransform:
     """The transform actually transformed, and the loader landed the result."""
 
-    @pytest.mark.parametrize("service", TRANSFORMS)
-    def test_ecs_fields_appear_in_the_source_table(self, e2e, ch_client, service: str) -> None:
+    def test_ecs_fields_appear_in_the_source_table(self, e2e, ch_client) -> None:
+        """The deployed transform transformed, whichever one it is.
+
+        Not parameterised over the two apps. They run the same VRL file, read the
+        same land topic and emit to the same load topic, and a row names neither,
+        so two parameterisations would be one experiment run twice - and with both
+        apps deployed each run measures both regardless of what it is told.
+        DFE_E2E_TRANSFORM only NAMES the app for the failure message.
+        """
         require(e2e, "receiver_url", "ch_host", "engine_url")
+        if e2e.transform and e2e.transform not in TRANSFORMS:
+            pytest.fail(
+                f"DFE_E2E_TRANSFORM is {e2e.transform!r}, which is not one of "
+                f"{', '.join(TRANSFORMS)}"
+            )
+        deployed = e2e.transform or "the deployed transform"
+
         run = f"e2e-{uuid.uuid4().hex}"
         parsed = _Delta(ch_client, f"{e2e.ch_db}.{SOURCE}", where=_ECS_POPULATED)
         _post(e2e, corpus.wrap_all(_corpus_or_skip(limit=5), run=run))
 
+        # The pass-through failure this test exists to catch shows up as gained()
+        # staying 0, so poll_until TIMES OUT rather than returning - which is why
+        # the explanation belongs in desc and not in an assert message below.
         found = poll_until(
             parsed.gained,
             timeout=240.0,
-            desc=f"ECS-shaped rows from {service} for {run}",
+            desc=(
+                f"a row with log_file_path set from {deployed} for {run} - without one, "
+                "the cisco_umbrella events reached the table untransformed"
+            ),
         )
+        # poll_until only returns truthy, so this catches the one case it lets
+        # through: a negative delta, meaning rows LEFT the table while we polled.
         assert found > 0, (
-            f"{service} produced rows with no ECS fields - the events reached the "
-            "table untransformed, which is the pass-through failure this test exists to catch"
+            f"{e2e.ch_db}.{SOURCE} lost {-found} row(s) while polling - something else "
+            "is writing or expiring this table, so the count says nothing about the transform"
         )
 
 

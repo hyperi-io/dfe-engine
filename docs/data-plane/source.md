@@ -105,7 +105,7 @@ state: active                           # Lifecycle: active | dormant | disabled
 # as JUST this header — the common fields for the selected type + version.
 # Source-specific fields are added incrementally.
 header:
-  type: time_series                     # Schema type (time_series, metric, alert, etc.)
+  type: timeseries                      # Profile name (timeseries, minimal, passthrough)
   version: 1.0.0                        # Common header version (semver)
 
 # --- Receiver Match ---
@@ -185,7 +185,7 @@ match:
   field: tags.collector.type
   value: syslog
 header:
-  type: time_series
+  type: timeseries
   version: 1.0.0
 schema:
   ttl_days: 90
@@ -193,7 +193,7 @@ schema:
 
 No fetcher, no transform. The receiver matches and routes to `syslog_land`,
 the loader picks it up and inserts into `{db}.syslog` using the common
-time_series header schema. Fields can be added incrementally later.
+timeseries header schema. Fields can be added incrementally later.
 
 ---
 
@@ -588,8 +588,8 @@ configured once, shared across all sources. Their configs define *how*
 Source: filebeat                Source: crowdstrike_edr        Source: syslog
 ┌────────────────────┐          ┌────────────────────┐        ┌─────────────────┐
 │ match: tags...=fb  │          │ match: tags...=cs  │        │ match: tags...  │
-│ schema: time_series│          │ fetcher: oauth2    │        │ schema: time_s  │
-│ transform: vector  │          │ schema: time_series│        │ (no transform)  │
+│ schema: timeseries │          │ fetcher: oauth2    │        │ schema: timeser │
+│ transform: vector  │          │ schema: timeseries │        │ (no transform)  │
 └────────────────────┘          │ transform: vector  │        │ (no fetcher)    │
   filebeat_land ──▶ transform   └────────────────────┘        └─────────────────┘
   filebeat_load ──▶ loader        cs_edr_land ──▶ transform     syslog_land ──▶ loader

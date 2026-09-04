@@ -161,7 +161,7 @@ def make_api_settings(tmp_path: Path) -> DFESettings:
             "display_name": "Promo Source",
             "enabled": True,
             "match": {"field": "_json.tags.collector.type", "value": PROMO_SOURCE},
-            "header": {"type": "time_series", "version": "1.0.0"},
+            "header": {"type": "timeseries", "version": "1.0.0"},
             "schema_config": {"meta_schema": "meta/promo.yaml", "engine": "MergeTree"},
         },
         sources_dir / f"{PROMO_SOURCE}.yaml",
@@ -172,7 +172,7 @@ def make_api_settings(tmp_path: Path) -> DFESettings:
             "display_name": "No Meta Source",
             "enabled": True,
             "match": {"field": "_json.tags.collector.type", "value": NOMETA_SOURCE},
-            "header": {"type": "time_series", "version": "1.0.0"},
+            "header": {"type": "timeseries", "version": "1.0.0"},
             "schema_config": {"engine": "MergeTree"},
         },
         sources_dir / f"{NOMETA_SOURCE}.yaml",
@@ -183,7 +183,7 @@ def make_api_settings(tmp_path: Path) -> DFESettings:
             "display_name": "Core Schema Source",
             "enabled": True,
             "match": {"field": "_json.tags.collector.type", "value": CORE_SOURCE},
-            "header": {"type": "time_series", "version": "1.0.0"},
+            "header": {"type": "timeseries", "version": "1.0.0"},
             "schema_config": {
                 "meta_schema": "meta/core_tpl.yaml",
                 "meta_schema_version": "1.0.0",
@@ -206,7 +206,7 @@ def make_api_settings(tmp_path: Path) -> DFESettings:
                 "1.0.0": {"date_time": "2026-01-01"},
                 "2.0.0": {
                     "date_time": "2026-01-02",
-                    "header": {"type": "time_series", "version": "1.0.0"},
+                    "header": {"type": "timeseries", "version": "1.0.0"},
                     "schema": {"meta_schema": "meta/promo.yaml", "engine": "MergeTree"},
                 },
             },
@@ -553,7 +553,7 @@ class TestPromoteField:
         src = client.get(f"/api/v1/sources/{PROMO_SOURCE}", headers=admin_headers)
         cur = src.json()["current"]
         assert src.json()["versions"][cur]["schema"]["meta_schema_version"] == "1.1.0"
-        assert src.json()["versions"][cur]["header"]["type"] == "time_series"
+        assert src.json()["versions"][cur]["header"]["type"] == "timeseries"
 
     def test_committed_column_has_copy_directive(self, client: TestClient, admin_headers):
         _promote(client, admin_headers, {"json_path": "user.email", "data_type": "string"})

@@ -26173,8 +26173,8 @@
           "type": {
             "type": "string",
             "title": "Type",
-            "description": "Profile name (time_series, minimal, passthrough)",
-            "default": "time_series"
+            "description": "Profile name (timeseries, minimal, passthrough)",
+            "default": "timeseries"
           },
           "version": {
             "type": "string",

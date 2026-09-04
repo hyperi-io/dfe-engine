@@ -128,6 +128,25 @@ class TestLoadColumns:
 
 
 class TestLoadProfile:
+    @pytest.mark.parametrize(
+        "traversal",
+        [
+            "../../../../tmp/evil",
+            "common-header/../../../tmp/evil",
+            "..\\..\\tmp\\evil",
+        ],
+    )
+    def test_a_profile_ref_cannot_climb_out_of_the_profiles_directory(self, traversal):
+        """header.type is API-writable and is joined onto a directory.
+
+        Without this it reads any YAML the pod can see: the resolver used to
+        return .../common-header/../../../../tmp/evil.yaml verbatim.
+        """
+        from dfe_engine.schema.schema_loader import _resolve_profile_yaml_path
+
+        with pytest.raises(SchemaLoadError, match="must not contain"):
+            _resolve_profile_yaml_path(traversal)
+
     def test_load_timeseries(self):
         columns = SchemaLoader.load_profile("timeseries")
         names = [c.name for c in columns]

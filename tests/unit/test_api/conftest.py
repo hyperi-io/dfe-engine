@@ -194,6 +194,6 @@ def sample_source() -> dict:
         "description": "A test data source",
         "enabled": True,
         "match": {"field": "tags.collector.type", "value": "test_source"},
-        "header": {"type": "time_series", "version": "1.0.0"},
+        "header": {"type": "timeseries", "version": "1.0.0"},
         "schema_config": {"engine": "MergeTree"},
     }

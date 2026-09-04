@@ -230,9 +230,10 @@ class SchemaColumn(BaseModel):
 class SourceHeader(BaseModel):
     """Common schema header configuration."""
 
+    # Must name a file in dfe-schemas common-header/; nothing normalises it.
     type: str = Field(
-        default="time_series",
-        description="Profile name (time_series, minimal, passthrough)",
+        default="timeseries",
+        description="Profile name (timeseries, minimal, passthrough)",
     )
     version: str = Field(
         default="1.0.0",

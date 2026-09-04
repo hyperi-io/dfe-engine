@@ -127,7 +127,7 @@ class TestSchemaColumn:
 class TestSourceHeader:
     def test_defaults(self):
         h = SourceHeader()
-        assert h.type == "time_series"
+        assert h.type == "timeseries"
         assert h.version == "1.0.0"
 
     def test_custom(self):
@@ -310,7 +310,7 @@ class TestSource:
                 "display_name": "Elastic Filebeat",
                 "description": "Filebeat log collector",
                 "enabled": True,
-                "header": {"type": "time_series", "version": "1.0.0"},
+                "header": {"type": "timeseries", "version": "1.0.0"},
                 "match": {"field": "tags.collector.type", "value": "filebeat"},
                 "schema": {
                     "meta_schema": "logs_beats_filebeat",
@@ -507,7 +507,7 @@ class TestSourceYaml:
         data = {
             "source": "filebeat",
             "match": {"field": "tags.collector.type", "value": "filebeat"},
-            "header": {"type": "time_series", "version": "1.0.0"},
+            "header": {"type": "timeseries", "version": "1.0.0"},
             "schema": {"ttl_days": 90},
         }
         s = Source.model_validate(data)
@@ -704,13 +704,13 @@ class TestSourceWriteRequest:
                 "versions": {
                     "1.0.0": {
                         "date_time": "2026-01-01",
-                        "header": {"type": "time_series", "version": "1.0.0"},
+                        "header": {"type": "timeseries", "version": "1.0.0"},
                         "match": {"field": "f", "value": "v"},
                         "schema": {},
                     },
                     "2.0.0": {
                         "date_time": "2026-01-02",
-                        "header": {"type": "time_series", "version": "1.0.0"},
+                        "header": {"type": "timeseries", "version": "1.0.0"},
                         "match": {"field": "f", "value": "v"},
                         "schema": {},
                     },
@@ -742,7 +742,7 @@ class TestSourceWriteRequest:
                 "versions": {
                     "1.0.0": {
                         "date_time": "2026-01-01",
-                        "header": {"type": "time_series", "version": "1.0.0"},
+                        "header": {"type": "timeseries", "version": "1.0.0"},
                         "match": {"field": "f", "value": "v"},
                         "schema": {"ttl_days": 90, "meta_schema_version": "1.0.0"},
                     }
@@ -806,7 +806,7 @@ class TestSourceWriteRequest:
                 "versions": {
                     "1.0.0": {
                         "date_time": "2026-01-01",
-                        "header": {"type": "time_series", "version": "1.0.0"},
+                        "header": {"type": "timeseries", "version": "1.0.0"},
                         "match": {"field": "f", "value": "v"},
                         "schema": {"engine": "MergeTree"},
                     }
@@ -1086,7 +1086,7 @@ class TestSourceVersionGetResponse:
             versions=["1.0.0", "2.0.0"],
             version=SourceVersion(
                 date_time="2026-06-12",
-                header=SourceHeader(type="time_series", version="1.0.0"),
+                header=SourceHeader(type="timeseries", version="1.0.0"),
                 schema_config=SourceSchema(engine="MergeTree"),
                 match=SourceMatch(field="ingest_type", value="x"),
                 transform=SourceTransform(engine="vector"),
@@ -1126,7 +1126,7 @@ class TestSourceVersioning:
     def test_versioned_input_migrates_top_level_match_and_transform(self):
         ver_body = {
             "date_time": "2026-01-01",
-            "header": {"type": "time_series", "version": "1.0.0"},
+            "header": {"type": "timeseries", "version": "1.0.0"},
             "match": {"field": "f", "value": "v"},
             "schema": {},
         }
@@ -1157,7 +1157,7 @@ class TestSourceVersioning:
             "versions": {
                 "1.0.0": {
                     "date_time": "2026-06-10",
-                    "header": {"type": "time_series", "version": "1.0.0"},
+                    "header": {"type": "timeseries", "version": "1.0.0"},
                     "match": {"field": "f", "value": "v"},
                     "schema": {
                         "meta_schema": "meta/aws/cloudwatch_logs",
@@ -1221,7 +1221,7 @@ class TestSourceVersioning:
     def test_versioned_input_defaults_current_from_deployed_only(self):
         ver_body = {
             "date_time": "2026-01-01",
-            "header": {"type": "time_series", "version": "1.0.0"},
+            "header": {"type": "timeseries", "version": "1.0.0"},
             "match": {"field": "f", "value": "v"},
             "schema": {},
         }
@@ -1238,7 +1238,7 @@ class TestSourceVersioning:
     def test_versioned_input_without_deployed_leaves_deployed_unset(self):
         ver_body = {
             "date_time": "2026-01-01",
-            "header": {"type": "time_series", "version": "2.0.0"},
+            "header": {"type": "timeseries", "version": "2.0.0"},
             "match": {"field": "f", "value": "v"},
             "schema": {},
         }
@@ -1271,7 +1271,7 @@ class TestSourceVersioning:
     def test_current_not_in_versions(self):
         ver_body = {
             "date_time": "2026-01-01",
-            "header": {"type": "time_series", "version": "1.0.0"},
+            "header": {"type": "timeseries", "version": "1.0.0"},
             "match": {"field": "f", "value": "v"},
             "schema": {},
         }
@@ -1288,7 +1288,7 @@ class TestSourceVersioning:
     def test_deployed_version_not_in_versions(self):
         ver_body = {
             "date_time": "2026-01-01",
-            "header": {"type": "time_series", "version": "1.0.0"},
+            "header": {"type": "timeseries", "version": "1.0.0"},
             "match": {"field": "f", "value": "v"},
             "schema": {},
         }

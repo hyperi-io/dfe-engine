@@ -158,9 +158,21 @@ def _resolve_profiles_dir() -> Path:
 _COMMON_HEADER_PREFIX = "common-header/"
 
 
+def _reject_traversal(profile_name: str, normalized: str) -> None:
+    """Refuse a profile ref that could climb out of the profiles directory.
+
+    ``header.type`` is a free-form string written through the sources API and
+    joined straight onto a directory, so a ``..`` segment reads any YAML the
+    pod can see.
+    """
+    if any(part == ".." for part in normalized.split("/")):
+        raise SchemaLoadError(f"Profile {profile_name!r} must not contain '..'")
+
+
 def _profile_short_name(profile_name: str) -> str:
-    """Strip registry prefix so ``common-header/minimal`` → ``minimal``."""
+    """Strip registry prefix so ``common-header/minimal`` -> ``minimal``."""
     normalized = profile_name.replace("\\", "/").strip("/")
+    _reject_traversal(profile_name, normalized)
     if normalized.startswith(_COMMON_HEADER_PREFIX):
         return normalized[len(_COMMON_HEADER_PREFIX) :]
     return normalized
@@ -176,6 +188,9 @@ def _resolve_profile_yaml_path(
         return Path(profiles_dir) / f"{short}.yaml"
 
     normalized = profile_name.replace("\\", "/").strip("/")
+    # This branch joins the parts itself rather than going through
+    # _profile_short_name, so it needs the same guard.
+    _reject_traversal(profile_name, normalized)
     schemas_root = _resolve_schemas_root()
     if schemas_root and (normalized.startswith(_COMMON_HEADER_PREFIX) or "/" in normalized):
         parts = [p for p in normalized.split("/") if p]

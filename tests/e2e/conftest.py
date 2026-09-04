@@ -1,3 +1,10 @@
+#  Project:      dfe-engine
+#  File:         tests/e2e/conftest.py
+#  Purpose:      Shared fixtures and config for the live full-stack e2e suite
+#  Language:     Python
+#
+#  License:      BUSL-1.1
+#  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Shared fixtures for the LIVE full-stack e2e suite.
 
 These tests run against a REAL deployed DFE (receiver, ClickHouse, HyperDX,
@@ -17,6 +24,9 @@ Configure via env (typically `dfe-engine`-side of a `single`/`standard` deployme
   DFE_E2E_ENGINE_TOKEN     bearer/JWT for the engine API
   DFE_E2E_DEPLOY_REPO_URL  deploy repo (to verify engine git writes)
   DFE_E2E_DEPLOY_REPO_TOKEN / _USER  HTTPS creds for the deploy repo
+  DFE_E2E_TRANSFORM        which transform app is deployed for the source under
+                           test (dfe-transform-vrl | dfe-transform-vector)
+  DFE_E2E_VERIFY           1 to enforce TLS verification (default off)
 """
 
 from __future__ import annotations
@@ -46,6 +56,10 @@ class E2EConfig:
     deploy_repo_url: str | None
     deploy_repo_token: str | None
     deploy_repo_user: str
+    # Which transform app is deployed for the source under test. Declared, not
+    # observed: both transforms consume the source topic under their own consumer
+    # groups and emit to the same one, so no row identifies its producer.
+    transform: str | None
     # TLS verification for the HTTPS calls. Defaults to False: a deployment
     # typically fronts these with its OWN CA (cert-manager local issuer / internal
     # PKI), and the tests assert the data/control path, not the cert chain. Set
@@ -69,6 +83,7 @@ def _cfg() -> E2EConfig:
         deploy_repo_url=os.getenv("DFE_E2E_DEPLOY_REPO_URL"),
         deploy_repo_token=os.getenv("DFE_E2E_DEPLOY_REPO_TOKEN"),
         deploy_repo_user=os.getenv("DFE_E2E_DEPLOY_REPO_USER", "dfe"),
+        transform=os.getenv("DFE_E2E_TRANSFORM"),
         verify=os.getenv("DFE_E2E_VERIFY", "") not in ("", "0", "false", "False"),
     )
 
@@ -85,6 +100,20 @@ def require(cfg: E2EConfig, *attrs: str) -> None:
         pytest.skip(
             f"live e2e not configured: missing {', '.join('DFE_E2E_' + m.upper() for m in missing)}"
         )
+
+
+def must[T](value: T | None) -> T:
+    """Narrow a config attr that ``require`` has already gated on.
+
+    ``require`` skips the test when the attr is unset, but a type checker cannot
+    see that across the call, so every use site reads as ``str | None``.
+
+    The message matters: several call sites sit inside ``poll_until`` predicates,
+    which swallow every exception and retry, so a bare AssertionError would
+    surface as an empty ``(last error: )`` after the full timeout.
+    """
+    assert value is not None, "require() should have skipped this test before now"
+    return value
 
 
 def poll_until(
