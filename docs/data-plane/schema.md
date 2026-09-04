@@ -10,7 +10,7 @@ version-pinned `dfe-schemas` wheel) - the engine keeps bundled fallback copies u
 
 ## Audience
 
-This document is written for **data subject matter experts** — people who
+This document is written for **data subject matter experts** -- people who
 understand their data, their queries, and their retention requirements. You
 do NOT need to be a ClickHouse expert. The schema system handles ClickHouse
 internals (codecs, index tuning, Nullable wrapping, type widths) under the
@@ -55,11 +55,11 @@ nested properties. The type system also has no way to:
 
 ### No Schema Registry
 
-There is **no schema registry** — no CRUD service, no sync state, no
+There is **no schema registry** -- no CRUD service, no sync state, no
 intermediate store. Two sources of truth exist, and that's it:
 
-1. **Source YAML** — the meta schema definition (what the schema should be)
-2. **ClickHouse DDL** — the deployed table (what the schema actually is)
+1. **Source YAML** -- the meta schema definition (what the schema should be)
+2. **ClickHouse DDL** -- the deployed table (what the schema actually is)
 
 The engine reads the Source YAML, generates DDL, and applies it to
 ClickHouse. The loader reads the deployed table's columns and comments
@@ -71,12 +71,12 @@ Schema changes flow in one direction:
 Source YAML (intent) → engine generates DDL → ClickHouse (deployed truth)
                                                     ↑
                                         Rust K8s services read at runtime
-                                        (loader, archiver — ONLY SSoT)
+                                        (loader, archiver -- ONLY SSoT)
 ```
 
 The Rust K8s services at scale **slave from the deployed ClickHouse
 schema ONLY**. They read column types, comments, and table metadata
-from `system.columns` at runtime — never from YAML, config files, or
+from `system.columns` at runtime -- never from YAML, config files, or
 any intermediate store. This means there is **never an in-flight
 mismatch**: the engine deploys DDL, ClickHouse stores it, Rust services
 read it. No sync, no cache invalidation race, no drift.
@@ -99,8 +99,8 @@ These are data files, not schema definitions.
 | Source created | Engine generates `CREATE TABLE` from common header + source schema |
 | Schema field added | Engine generates `ALTER TABLE ADD COLUMN` |
 | Schema field modified | Engine generates `ALTER TABLE MODIFY COLUMN` (type/codec/comment) |
-| Source disabled | No DDL change — table stays, no new data |
-| Source deleted | Table preserved — manual `DROP TABLE` if needed |
+| Source disabled | No DDL change -- table stays, no new data |
+| Source deleted | Table preserved -- manual `DROP TABLE` if needed |
 
 The deployed ClickHouse table is always authoritative. If someone modifies
 the table directly (via SQL), the engine detects drift on next schema
@@ -202,11 +202,11 @@ columns:
 | `name` | Yes | Column name |
 | `type` | Yes | Primitive type (see below) |
 | `attribute` | No | List of storage attributes (e.g. `[lowcardinality]`) |
-| `use_case` | No | Query pattern hint — determines indexing (see below) |
+| `use_case` | No | Query pattern hint -- determines indexing (see below) |
 | `default` | No | DEFAULT expression |
 | `order` | No | Position in ORDER BY / PRIMARY KEY |
 | `comment` | No | Human description + loader directives |
-| `ch_override` | No | Exact ClickHouse type — bypasses primitive mapping |
+| `ch_override` | No | Exact ClickHouse type -- bypasses primitive mapping |
 
 ---
 
@@ -214,7 +214,7 @@ columns:
 
 Primitives are **human-readable type names** that map to ClickHouse types
 with sensible defaults. You don't need to know what `Int64` or `ZSTD(1)`
-means — pick the primitive that describes your data.
+means -- pick the primitive that describes your data.
 
 | Primitive | What It Is | Default ClickHouse Type |
 |-----------|-----------|------------------------|
@@ -224,7 +224,7 @@ means — pick the primitive that describes your data.
 | `float` | Decimal number (scores, latency, percentages) | `Float64` |
 | `boolean` | True/false | `Bool` |
 | `datetime` | Date and time with timezone | `DateTime64(3,'UTC')` |
-| `timestamp` | Date and time — never null (for ORDER BY / time columns) | `DateTime64(3,'UTC')` |
+| `timestamp` | Date and time -- never null (for ORDER BY / time columns) | `DateTime64(3,'UTC')` |
 | `date` | Date only (no time component) | `Date` |
 | `ip` | IP address (v4 or v6) | `IPv6` |
 | `uuid` | Unique identifier (GUID, trace ID) | `UUID` |
@@ -236,7 +236,7 @@ means — pick the primitive that describes your data.
 
 A data expert knows they have an "integer" column. They don't need to
 decide between `Int8`, `Int16`, `Int32`, `Int64`, `UInt8`, `UInt16`,
-`UInt32`, or `UInt64` — that's 8 choices that require understanding
+`UInt32`, or `UInt64` -- that's 8 choices that require understanding
 ClickHouse storage internals. The engine picks `Int64` because it covers
 the vast majority of use cases without overflow risk.
 
@@ -276,13 +276,13 @@ When a primitive isn't sufficient, specify the exact ClickHouse type via
 
 ## ClickHouse Type Registry
 
-The engine maintains a **canonical type registry** — a YAML file that maps
+The engine maintains a **canonical type registry** -- a YAML file that maps
 each primitive to its ClickHouse implementation details. This is internal
 to the engine (data SMEs don't edit it), but it's documented here for
 completeness.
 
 ```yaml
-# type_registry.yaml — maintained by the engine, NOT by users
+# type_registry.yaml -- maintained by the engine, NOT by users
 primitives:
   string:
     ch_type: String
@@ -317,7 +317,7 @@ primitives:
   timestamp:
     ch_type: "DateTime64(3,'UTC')"
     codec: "Delta, LZ4"
-    nullable: false         # Never null — used in ORDER BY
+    nullable: false         # Never null -- used in ORDER BY
 
   date:
     ch_type: Date
@@ -378,12 +378,12 @@ catalogue:
 ## Attribute Axis
 
 Attributes modify how the type is stored. Specified as a **list** in
-YAML — multiple attributes can be combined:
+YAML -- multiple attributes can be combined:
 
 | Attribute | What It Does |
 |-----------|-------------|
-| `lowcardinality` | Dictionary encoding — huge performance gain for <10K distinct values |
-| `nullable` | Allows NULL values (2x performance cost — use only when NULL ≠ empty) |
+| `lowcardinality` | Dictionary encoding -- huge performance gain for <10K distinct values |
+| `nullable` | Allows NULL values (2x performance cost -- use only when NULL != empty) |
 | `not_null` | Explicitly prevents NULL (overrides the primitive's default) |
 | `materialized` | Column computed on insert, not stored in source data |
 | `alias` | Virtual column computed at query time |
@@ -398,8 +398,8 @@ enforces valid combinations:
 | `lowcardinality` | `string`, `text`, `integer`, `float`, `date`, `ip` | Dictionary encoding only works on types with a finite value space. `json`, `geo_point` are not supported. |
 | `nullable` | all | Any type can be nullable |
 | `not_null` | all | Any type can be forced non-null |
-| `materialized` | all | Computed on insert — any type |
-| `alias` | all | Computed at query time — any type |
+| `materialized` | all | Computed on insert -- any type |
+| `alias` | all | Computed at query time -- any type |
 
 If you specify `lowcardinality` on a `json` column, the engine rejects it
 at validation time.
@@ -461,10 +461,10 @@ keep it off your ORDER BY and high-filter columns.
 
 ## Use Case Axis
 
-Use cases describe **how you query the column** — not how it's stored.
-The engine translates use cases into ClickHouse indexes and optimisations
-under the hood. You don't need to know what a `set(0)` or
-`tokenbf_v1(8192, 4, 0)` index is — just pick the use case that matches
+Use cases describe **how you query the column** -- not how it's stored.
+The engine translates use cases into ClickHouse indexes and codecs in the
+generated DDL. You don't need to know what a `set(0)` or
+`tokenbf_v1(8192, 4, 0)` index is -- just pick the use case that matches
 your query pattern.
 
 ### Use Cases
@@ -485,16 +485,16 @@ combinations:
 
 | Use Case | Valid Primitives | Why |
 |----------|-----------------|-----|
-| `dimension` | `string`, `integer`, `boolean`, `enum`, `ip`, `uuid` | Exact match — needs discrete values |
-| `fulltext` | `string`, `text` | Token search — only applies to text |
-| `text_search` | `string`, `text` | Substring matching — only applies to text |
-| `range` | `integer`, `float`, `datetime`, `timestamp`, `date`, `ip` | Range queries — needs orderable values |
+| `dimension` | `string`, `integer`, `boolean`, `enum`, `ip`, `uuid` | Exact match -- needs discrete values |
+| `fulltext` | `string`, `text` | Token search -- only applies to text |
+| `text_search` | `string`, `text` | Substring matching -- only applies to text |
+| `range` | `integer`, `float`, `datetime`, `timestamp`, `date`, `ip` | Range queries -- needs orderable values |
 | `bloom` | `string`, `uuid` | Point lookups on high-cardinality identifiers |
 
 If you specify `fulltext` on an `integer` column, the engine rejects it
 at validation time with a clear error.
 
-### What the Engine Generates (Under the Hood)
+### What the Engine Generates in the DDL
 
 You don't need to know this to use the schema system. This section is for
 engine developers and anyone curious about what happens behind the scenes.
@@ -505,8 +505,8 @@ engine developers and anyone curious about what happens behind the scenes.
 | `fulltext` | `text(tokenizer=splitByNonAlpha)` | 1 | Native text index (GA v26.2). Deterministic, no false positives, row-level filtering. 45x faster than without index. |
 | `text_search` | `text(tokenizer=ngrams(3))` | 1 | Character n-gram text index for substring matching |
 | `range` | `minmax` | 4 | Stores min/max per granule |
-| `bloom` | `bloom_filter` | 4 | Probabilistic — has false positives, no false negatives |
-| _(empty)_ | No index | — | |
+| `bloom` | `bloom_filter` | 4 | Probabilistic -- has false positives, no false negatives |
+| _(empty)_ | No index | -- | |
 
 **Note on text indexes:** The `fulltext` and `text_search` use cases now
 generate the GA text index (inverted index, v26.2+) instead of the older
@@ -518,8 +518,8 @@ bloom-filter indexes automatically.
 
 **Note on fulltext vs text_search:** Both use the text index but with
 different tokenizers. `fulltext` uses word-level tokenization
-(`splitByNonAlpha`) — good for searching whole words in log messages.
-`text_search` uses character n-grams — good for substring matching like
+(`splitByNonAlpha`) -- good for searching whole words in log messages.
+`text_search` uses character n-grams -- good for substring matching like
 partial hostnames or error codes embedded in longer strings.
 
 ---
@@ -528,8 +528,8 @@ partial hostnames or error codes embedded in longer strings.
 
 The `comment` field serves double duty:
 
-1. **Human documentation** — plain text description
-2. **Loader directives** — `@` prefixed expressions that tell dfe-loader
+1. **Human documentation** -- plain text description
+2. **Loader directives** -- `@` prefixed expressions that tell dfe-loader
    how to populate the field
 
 ### Directive Types (from dfe-loader DDL Expression Language)
@@ -538,7 +538,7 @@ The `comment` field serves double duty:
 |-----------|---------|---------|
 | `@source: field` | Copy from source data | `@source: timestamp \| now()` |
 | `@source: first(a/b/c)` | First non-null from list | `@source: first(user_id/uid/id)` |
-| `@generated: expr` | ClickHouse DEFAULT — loader omits field | `@generated: now64(3)` |
+| `@generated: expr` | ClickHouse DEFAULT -- loader omits field | `@generated: now64(3)` |
 | `@renamed: field` | Zero-copy field rename | `@renamed: logoriginal` |
 | `@captured: payload` | Raw payload sidecar | `@captured: raw_payload as JSON` |
 | `@computed: expr` | Derived/enriched value | `@computed: geoip(ip).country_code` |
@@ -546,7 +546,7 @@ The `comment` field serves double duty:
 ### Precedence
 
 When the loader resolves field mappings, column comments have **highest
-precedence** — above built-in presets and external remap files. This means
+precedence** -- above built-in presets and external remap files. This means
 the schema definition IS the authoritative field mapping.
 
 ### Comments in DDL
@@ -564,7 +564,7 @@ DDL:
 ```
 
 The loader fetches column comments from `system.columns` and uses them to
-build its per-table field mapping. No separate mapping config needed — the
+build its per-table field mapping. No separate mapping config needed -- the
 schema IS the mapping.
 
 ---
@@ -579,7 +579,25 @@ inject:
 |---------|--------|----------|
 | **timeseries** (default) | `_timestamp_load`, `_timestamp`, `_timestamp_received`, `_uuid`, `_org_id`, `_source`, `_raw`, `_json`, `_tags` | Full event ingestion (logs, alerts, audit) |
 | **minimal** | `_timestamp_load`, `_timestamp`, `_uuid`, `_org_id` | High-volume structured data (metrics, flow records) |
-| **passthrough** | `_timestamp_load`, `_uuid`, `_org_id`, `_json` | Transparent bridge — no timestamp injection |
+| **passthrough** | `_timestamp_load`, `_uuid`, `_org_id`, `_json` | Transparent bridge -- no timestamp injection |
+
+### Common Header Names Are Reserved
+
+A common header name belongs to the pipeline, not to the payload. When an
+incoming record already carries one of these names at the top level, the
+ingest side renames the payload's value to `<name>_original` and stamps its
+own value under the name itself -- the loader routes on `_source`, and two
+top-level keys of the same name make ClickHouse reject the whole record
+rather than dead-letter it. `<name>_original` is never overwritten: a record
+arriving with both the name and its `_original` (a replay, for instance)
+keeps the `_original` it came with, and the colliding value is parked under
+the next free `<name>_original_<n>` counting from 2.
+
+For a schema author this means two things. A promoted column named after a
+common header field will not receive the payload's value, and a payload field
+you want to keep must be given a different name -- or read back from
+`<name>_original`, which is a dynamic path in `_json` unless you promote it
+explicitly.
 
 ### Profile Tied to Source
 
@@ -605,7 +623,7 @@ COMMENT '@schema_source: core | @schema_version: 2 | @profile: timeseries | @pro
 ```
 
 Profile migrations (adding new common header fields) use `ALTER TABLE ADD
-COLUMN` — safe, non-destructive, and automated.
+COLUMN` -- safe, non-destructive, and automated.
 
 ---
 
@@ -662,7 +680,7 @@ The engine generates the Sigma view from source schema + the sigma view entry.
 ## Elastic Index Template Converter
 
 The existing Elastic/OpenSearch index template converter generates a
-source meta schema from a supplied Elastic template JSON. This remains —
+source meta schema from a supplied Elastic template JSON. This remains --
 but now outputs YAML in the Source schema format:
 
 ```
@@ -682,7 +700,7 @@ Source schema YAML (new format)
 Attached to a Source definition
 ```
 
-### Elastic → Primitive Type Mapping
+### Elastic -> Primitive Type Mapping
 
 | Elastic Type | Primitive | Use Case | Notes |
 |-------------|-----------|----------|-------|
@@ -702,7 +720,7 @@ Attached to a Source definition
 | `nested` | `json` | | |
 
 The converter is invoked when creating a Source from an existing Elastic
-data source — it bootstraps the schema so the user doesn't start from
+data source -- it bootstraps the schema so the user doesn't start from
 scratch.
 
 ---
@@ -744,7 +762,7 @@ parameters:
 schedule: "*/5 * * * *"                 # Cron (for hunt scheduling)
 ```
 
-Rules reference `{db}`, `{source}`, `{from}`, `{to}` — templated at
+Rules reference `{db}`, `{source}`, `{from}`, `{to}` -- templated at
 execution time. The rule's SQL runs against the source's table, so it
 has access to exactly the columns defined in the source's schema.
 
@@ -780,14 +798,14 @@ Sigma rules are converted to DFE Rules via the existing `sigma_converter`.
 The conversion produces a Rule definition with:
 
 - SQL query generated from the Sigma detection logic
-- Source determined by the Sigma `logsource` → Source mapping
+- Source determined by the Sigma `logsource` -> Source mapping
 - Sigma view used for field name compatibility
 
 ---
 
 ## Migration from v1 Type System
 
-### Type Mapping (old → new)
+### Type Mapping (old -> new)
 
 | Old Type | New Primitive | Attribute | Notes |
 |----------|--------------|-----------|-------|
@@ -800,11 +818,11 @@ The conversion produces a Rule definition with:
 | `int8` | `integer` | | ch_override: Int8 |
 | `int16` | `integer` | | ch_override: Int16 |
 | `int32` | `integer` | | ch_override: Int32 |
-| `int64` | `integer` | | Default — no override needed |
+| `int64` | `integer` | | Default -- no override needed |
 | `int128` | `integer` | | ch_override: Int128 |
 | `int256` | `integer` | | ch_override: Int256 |
 | `float32` | `float` | | ch_override: Float32 |
-| `float64` | `float` | | Default — no override needed |
+| `float64` | `float` | | Default -- no override needed |
 | `boolean` | `boolean` | | |
 | `timestamp` | `timestamp` | | |
 | `datetime` | `datetime` | | |
@@ -844,6 +862,6 @@ The conversion produces a Rule definition with:
 #     comment: ...
 ```
 
-The migration is mechanical — a script maps old compound types to new
+The migration is mechanical -- a script maps old compound types to new
 primitives (+ ch_override where the old type was narrower than the
 default), renames `index_type` to `use_case`, and converts CSV to YAML.
