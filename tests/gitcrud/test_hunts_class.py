@@ -165,7 +165,8 @@ class TestTheBytesAreUnchanged:
 
     def test_no_metadata_block_rides_on_the_stored_doc(self, hunts):
         """Unlike sources: an extra key here is a key the runner's loader parses."""
-        assert set(hunts.save("windows_hunt", dict(HUNT_CONFIG))) == set(HUNT_CONFIG)
+        hunts.save("windows_hunt", dict(HUNT_CONFIG))
+        assert set(hunts.get("windows_hunt")) == set(HUNT_CONFIG)
 
 
 class TestReadBack:
@@ -262,8 +263,10 @@ class TestWritePosture:
 
     def test_dev_posture_commits_straight_to_main(self, crud):
         registry = HuntConfigRegistry(deploy_repo=_store(crud, "hunts", environment="dev"))
-        registry.save("windows_hunt", dict(HUNT_CONFIG))
+        outcome = registry.save("windows_hunt", dict(HUNT_CONFIG))
         assert registry.exists("windows_hunt") is True
+        assert outcome is not None
+        assert outcome.review_required is False
 
     def test_production_team_routes_to_a_review_pr_and_leaves_main_alone(self, crud):
         # An empty repo has no base to branch from, so main carries a first commit.
@@ -273,13 +276,17 @@ class TestWritePosture:
             deploy_repo=_store(crud, "hunts", environment="production", mode="team", forge=forge)
         )
 
-        registry.save("windows_hunt", dict(HUNT_CONFIG), created_by="kaz")
+        outcome = registry.save("windows_hunt", dict(HUNT_CONFIG), created_by="kaz")
 
         assert len(forge.calls) == 1
         assert forge.calls[0]["base"] == "main"
         assert forge.calls[0]["head"].startswith("dfe/hunt/hunts-windows_hunt/")
         # main never got the file, so the git-sync sidecar does not serve it yet
         assert not (crud.repo_path / "config" / "hunts" / "windows_hunt.yaml").exists()
+        # ... and the caller is told, so it cannot report the hunt as created
+        assert outcome is not None
+        assert outcome.review_required is True
+        assert outcome.pr_url == "http://forge/pr/42"
 
     def test_production_team_without_a_forge_commits_to_a_branch_not_main(self, crud):
         crud.put("hunts", "seed", dict(HUNT_CONFIG), "seed")
@@ -288,7 +295,7 @@ class TestWritePosture:
             deploy_repo=_store(crud, "hunts", environment="production", mode="team")
         )
 
-        registry.save("windows_hunt", dict(HUNT_CONFIG), created_by="kaz")
+        outcome = registry.save("windows_hunt", dict(HUNT_CONFIG), created_by="kaz")
 
         assert crud.head_revision() == main_before
         assert not (crud.repo_path / "config" / "hunts" / "windows_hunt.yaml").exists()
@@ -296,6 +303,55 @@ class TestWritePosture:
             branches = [k.decode() for k in repo.refs.allkeys() if b"dfe/hunt/" in k]
         assert len(branches) == 1
         assert branches[0].startswith("refs/heads/dfe/hunt/hunts-windows_hunt/")
+        assert outcome is not None
+        assert outcome.review_required is True
+        assert branches[0] == f"refs/heads/{outcome.branch}"
+
+    def test_a_production_team_hunt_delete_reports_the_review_branch(self, crud):
+        registry = HuntConfigRegistry(
+            deploy_repo=_store(crud, "hunts", environment="dev", mode="solo")
+        )
+        registry.save("windows_hunt", dict(HUNT_CONFIG))
+
+        forge = _RecordingForge(url="http://forge/pr/7")
+        reviewed = HuntConfigRegistry(
+            deploy_repo=_store(crud, "hunts", environment="production", mode="team", forge=forge)
+        )
+        outcome = reviewed.delete("windows_hunt", created_by="kaz")
+
+        # The runner keeps executing the hunt until the branch is merged.
+        assert (crud.repo_path / "config" / "hunts" / "windows_hunt.yaml").is_file()
+        assert outcome is not None
+        assert outcome.review_required is True
+        assert outcome.pr_url == "http://forge/pr/7"
+
+    def test_a_production_team_rule_write_and_delete_report_review(self, crud):
+        direct = RuleRegistry(deploy_repo=_store(crud, "rules", environment="dev", mode="solo"))
+        direct.save(RULE)
+
+        forge = _RecordingForge(url="http://forge/pr/8")
+        reviewed = RuleRegistry(
+            deploy_repo=_store(crud, "rules", environment="production", mode="team", forge=forge)
+        )
+        # A no-op write opens no PR, so the edit has to actually change the rule.
+        saved = reviewed.save(RULE.model_copy(update={"severity": "high"}), created_by="kaz")
+        deleted = reviewed.delete("certutil", created_by="kaz")
+
+        assert saved is not None
+        assert saved.review_required is True
+        assert deleted is not None
+        assert deleted.review_required is True
+        assert (crud.repo_path / "config" / "rules" / "certutil.yaml").is_file()
+
+    def test_the_directory_backend_reports_no_routing_outcome(self, tmp_path: Path):
+        registry = HuntConfigRegistry(
+            hunts_directory=tmp_path / "hunts", writable=True, refresh_interval=0
+        )
+        try:
+            assert registry.save("windows_hunt", dict(HUNT_CONFIG)) is None
+            assert registry.delete("windows_hunt") is None
+        finally:
+            registry.close()
 
     def test_solo_posture_commits_direct_in_production(self, crud):
         registry = HuntConfigRegistry(

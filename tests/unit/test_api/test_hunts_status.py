@@ -5,16 +5,8 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""``running`` on the status endpoint means a runner beat recently, not a lease.
-
-Hunts execute in a separate service, and a lease exists only while a hunt is
-mid-execution, so a healthy idle runner used to read as not running - which is
-what the dfe-ui header badge shows. The heartbeat is what an idle runner leaves
-behind, and these pin both ends of reading it: a beat counted, and a ClickHouse
-that cannot answer degrading to "no runners" rather than a 500.
-
-The heartbeat rows themselves are written against a real ClickHouse in
-tests/integration/test_hunt_runner_reload.py.
+"""``running`` on the status endpoint counts recent heartbeats, not leases, and a
+ClickHouse that cannot answer degrades to "no runners" rather than a 500.
 """
 
 from __future__ import annotations

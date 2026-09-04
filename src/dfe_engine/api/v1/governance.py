@@ -28,6 +28,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.review import apply_review_headers
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -126,14 +127,6 @@ def _route_admin_write(
         raise HTTPException(
             status_code=409, detail={"code": "review_required", "message": str(exc)}
         ) from exc
-
-
-def _apply_review_headers(response: Response, outcome: WriteOutcome) -> None:
-    """Signal a routed-to-PR admin write on the fixed-body 201/204 responses."""
-    if outcome.review_required:
-        response.headers["X-DFE-Review-Required"] = "true"
-        if outcome.pr_url:
-            response.headers["X-DFE-PR-Url"] = outcome.pr_url
 
 
 @router.get("/actions", dependencies=[Depends(require_action(scopes_dict["governance_read"]))])
@@ -319,7 +312,7 @@ async def create_action(
         write=_write,
     )
     audit_resource_change(user.user_id, "action", body.name, "created")
-    _apply_review_headers(response, outcome)
+    apply_review_headers(response, outcome)
     return body
 
 
@@ -349,7 +342,7 @@ async def delete_action(name: str, user: CurrentUser, request: Request, response
         write=_write,
     )
     audit_resource_change(user.user_id, "action", name, "deleted")
-    _apply_review_headers(response, outcome)
+    apply_review_headers(response, outcome)
 
 
 @router.post(
@@ -376,7 +369,7 @@ async def create_policy(
         write=_write,
     )
     audit_resource_change(user.user_id, "policy", body.name, "created")
-    _apply_review_headers(response, outcome)
+    apply_review_headers(response, outcome)
     return body
 
 
@@ -407,7 +400,7 @@ async def delete_policy(name: str, user: CurrentUser, request: Request, response
         write=_write,
     )
     audit_resource_change(user.user_id, "policy", name, "deleted")
-    _apply_review_headers(response, outcome)
+    apply_review_headers(response, outcome)
 
 
 @router.post(

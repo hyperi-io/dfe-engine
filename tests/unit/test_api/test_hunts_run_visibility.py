@@ -5,20 +5,8 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""The hunts list answers "has it run" without the caller querying ClickHouse.
-
-There is no ClickHouse in this suite, which is the interesting half: the list is
-configuration and has to keep rendering when the data plane is down. So the run
-fields come back empty rather than the request failing, next due is still derived
-from the cron, and queueing a run says 503 instead of pretending it worked.
-
-The 503 also has to be EARNED. It used to be raised for any exception at all,
-including the AttributeError from a client that could not insert - so a bug in this
-process reported itself as a ClickHouse outage and sent the operator to the wrong
-system. Only a connection failure is a 503 now; anything else is a 500.
-
-The reading of real coordination rows is proved in
-tests/integration/test_hunt_run_visibility.py against a live ClickHouse.
+"""With no ClickHouse to answer, the hunts list still renders with empty run state
+and a queued run reports 503 only for a connection failure, 500 for anything else.
 """
 
 from __future__ import annotations
