@@ -3,6 +3,30 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.18.0](https://github.com/hyperi-io/dfe-engine/compare/v1.17.13...v1.18.0) (2026-09-04)
+
+### Features
+
+* add endpoint for delete schema version ([#243](https://github.com/hyperi-io/dfe-engine/issues/243)) ([ce578f5](https://github.com/hyperi-io/dfe-engine/commit/ce578f5c1014d98b579f3f1a45cac6dc497cf0e3))
+
+### Bug Fixes
+
+* **auth:** read X-Forwarded-For only behind a trusted proxy ([#268](https://github.com/hyperi-io/dfe-engine/issues/268)) ([1cb8055](https://github.com/hyperi-io/dfe-engine/commit/1cb8055c0115dd7667c02de471ecac3caf37fab3)), closes [#263](https://github.com/hyperi-io/dfe-engine/issues/263)
+* **auth:** write auth.login.denied where the credential is refused ([#267](https://github.com/hyperi-io/dfe-engine/issues/267)) ([d40e908](https://github.com/hyperi-io/dfe-engine/commit/d40e90834a37e71b913efe4148e2a11169c9d2d8)), closes [#274](https://github.com/hyperi-io/dfe-engine/issues/274) [#260](https://github.com/hyperi-io/dfe-engine/issues/260) [#264](https://github.com/hyperi-io/dfe-engine/issues/264) [#259](https://github.com/hyperi-io/dfe-engine/issues/259) [#266](https://github.com/hyperi-io/dfe-engine/issues/266) [#258](https://github.com/hyperi-io/dfe-engine/issues/258) [#268](https://github.com/hyperi-io/dfe-engine/issues/268) [#269](https://github.com/hyperi-io/dfe-engine/issues/269) [#261](https://github.com/hyperi-io/dfe-engine/issues/261)
+* **auth:** write auth.login.success on a credential exchange, not on every request ([#258](https://github.com/hyperi-io/dfe-engine/issues/258)) ([db29299](https://github.com/hyperi-io/dfe-engine/commit/db2929996320b3fd1e5b35bdec5874705dbd7151))
+* **chart:** let the code's TLS default govern instead of disabling verification ([#251](https://github.com/hyperi-io/dfe-engine/issues/251)) ([645d631](https://github.com/hyperi-io/dfe-engine/commit/645d631e87e78ba786d69a2afa9baccab29e3308))
+* **docker:** refresh the runtime base digest to the current python:3.12-slim ([#247](https://github.com/hyperi-io/dfe-engine/issues/247)) ([c28647f](https://github.com/hyperi-io/dfe-engine/commit/c28647f64d4bbd81e7b57e60af7d0080c671d950)), closes [#36](https://github.com/hyperi-io/dfe-engine/issues/36)
+* drop the stale schemas gitlink left behind when the submodule went ([#278](https://github.com/hyperi-io/dfe-engine/issues/278)) ([6ad8bc2](https://github.com/hyperi-io/dfe-engine/commit/6ad8bc2d301cceac5a24e80966b9d58a48d7a569)), closes [#267](https://github.com/hyperi-io/dfe-engine/issues/267)
+* **e2e:** probe the typed source table the way its schema allows ([dfcf75e](https://github.com/hyperi-io/dfe-engine/commit/dfcf75e9c7fe3ad0c5864a83ca40b02b0ffed748))
+* **hunts:** compile a hunt's rules into the query the runner runs ([#276](https://github.com/hyperi-io/dfe-engine/issues/276)) ([6b204ab](https://github.com/hyperi-io/dfe-engine/commit/6b204abb7acb6414a0e295ed3a596dec2948c94c)), closes [#272](https://github.com/hyperi-io/dfe-engine/issues/272)
+* **hunts:** stop requiring global_target_table_name, which nothing consumes ([#260](https://github.com/hyperi-io/dfe-engine/issues/260)) ([fd58593](https://github.com/hyperi-io/dfe-engine/commit/fd58593edbba523806e95df576697d790d1c4278))
+* **jit:** log a refused or failed HyperDX invite instead of swallowing it ([#275](https://github.com/hyperi-io/dfe-engine/issues/275)) ([0be75cb](https://github.com/hyperi-io/dfe-engine/commit/0be75cbd38d62c2f754b2cbeada2b040026b2baa))
+* **jit:** schedule the HyperDX invite on the running loop, or say it was skipped ([#269](https://github.com/hyperi-io/dfe-engine/issues/269)) ([cac3c14](https://github.com/hyperi-io/dfe-engine/commit/cac3c145e1206a461b2f6d27a61a90002c72af2e)), closes [#262](https://github.com/hyperi-io/dfe-engine/issues/262)
+* **rules:** parse rule SQL as ClickHouse instead of grepping for keywords ([#277](https://github.com/hyperi-io/dfe-engine/issues/277)) ([01112db](https://github.com/hyperi-io/dfe-engine/commit/01112db5dc4b5099c03150cd4241cfcd4018524c))
+* **services:** drop the auto_init block dfe-loader has no field for ([5dfe443](https://github.com/hyperi-io/dfe-engine/commit/5dfe443e02004022b7db73de2f98ac6ace9a8524))
+* setup flow remove admin env set ([#250](https://github.com/hyperi-io/dfe-engine/issues/250)) ([92d143a](https://github.com/hyperi-io/dfe-engine/commit/92d143a230fd4350ce9981804ea7c584a38ce237))
+* **source:** accept every catalogued transform engine instead of a literal vector/wasm list ([#264](https://github.com/hyperi-io/dfe-engine/issues/264)) ([56f4a30](https://github.com/hyperi-io/dfe-engine/commit/56f4a30e29a55f175ea3bc6351914d218df3d098))
+
 ## [1.17.13](https://github.com/hyperi-io/dfe-engine/compare/v1.17.12...v1.17.13) (2026-08-31)
 
 ### Bug Fixes
