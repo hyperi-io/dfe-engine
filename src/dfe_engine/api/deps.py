@@ -47,12 +47,16 @@ Settings = Annotated[DFESettings, Depends(get_app_settings)]
 _registries: dict[str, Any] = {}
 
 
-def bootstrap_registries(settings: DFESettings, gitcrud: Any | None = None) -> None:
+def bootstrap_registries(
+    settings: DFESettings, gitcrud: Any | None = None, forge: Any | None = None
+) -> None:
     """Initialize singleton registries on startup. Called from lifespan.
 
     ``gitcrud`` (the Governed Ops engine over the deploy repo, when gitops is
-    enabled) makes the deploy repo's ``config/sources/`` the sources SSoT;
-    without it the registry falls back to the plain sources directory.
+    enabled) makes the deploy repo the SSoT for sources (``config/sources/``),
+    hunts (``config/hunts/``) and rules (``config/rules/``); without it each
+    registry falls back to its plain YAML directory. ``forge`` opens the review
+    PR when the deployment posture refuses a direct commit.
     """
     if settings.schemas.schemas_dir:
         from dfe_engine.schema.registry import SchemaRegistry
@@ -81,17 +85,27 @@ def bootstrap_registries(settings: DFESettings, gitcrud: Any | None = None) -> N
             field_maps_directory=settings.fieldmap.fieldmaps_dir
         )
 
-    if settings.hunts.rules_dir:
+    # The hunt runner reads hunts and rules off a git-sync of the deploy repo, so
+    # with gitops on they are governed there rather than in a directory only the
+    # engine pod can see (dfe-infra#212).
+    from dfe_engine.hunts.deploy_repo import deploy_store
+
+    if gitcrud is not None or settings.hunts.rules_dir:
         from dfe_engine.hunts.rule_registry import RuleRegistry
 
-        _registries["rules"] = RuleRegistry(rules_directory=settings.hunts.rules_dir)
+        _registries["rules"] = RuleRegistry(
+            rules_directory=settings.hunts.rules_dir or None,
+            deploy_repo=deploy_store(gitcrud, "rules", settings=settings, forge=forge),
+        )
 
-    if settings.hunts.hunt_dir:
+    hunt_dir = settings.hunts.hunt_dir.split(",")[0].strip()
+    if gitcrud is not None or hunt_dir:
         from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
 
-        hunt_dir = settings.hunts.hunt_dir.split(",")[0].strip()
-        if hunt_dir:
-            _registries["hunt_configs"] = HuntConfigRegistry(hunts_directory=hunt_dir)
+        _registries["hunt_configs"] = HuntConfigRegistry(
+            hunts_directory=hunt_dir or None,
+            deploy_repo=deploy_store(gitcrud, "hunts", settings=settings, forge=forge),
+        )
 
     if settings.hunts.alert_destinations_dir:
         from dfe_engine.hunts.alert import AlertDestinationRegistry

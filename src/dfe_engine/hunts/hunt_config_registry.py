@@ -1,6 +1,13 @@
 """Hunt config registry — CRUD for scheduled hunt YAML definitions.
 
-Persists hunt configuration files under ``hunts.hunt_dir`` (first path when comma-separated).
+Two interchangeable backends behind one registry surface:
+
+- **deploy repo** (when gitops is on): the deploy repo's ``config/hunts`` is the
+  SSoT and every mutation is one gitcrud commit, because that is the directory
+  the k8s hunt runner git-syncs. Pass ``deploy_repo=DeployRepoStore(...)``.
+- **DirectoryConfigStore**: ``hunts.hunt_dir`` (first path when comma-separated)
+  as SSoT — the shared config volume the docker hunt runner reads.
+
 Each hunt is stored as ``{name}.yaml``. The ``display_name`` field inside the YAML is the
 label used by the hunt engine at runtime (legacy YAML may use ``name`` instead).
 """
@@ -9,12 +16,15 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from scalo.config import DirectoryConfigStore
 from scalo.logger import logger
 
 from dfe_engine.yaml_utils import yaml_dump
+
+if TYPE_CHECKING:
+    from dfe_engine.hunts.deploy_repo import DeployRepoStore
 
 _DISPLAY_NAME_WORD = re.compile(r"[a-zA-Z0-9]+")
 
@@ -70,12 +80,36 @@ class HuntConfigRegistry:
 
     def __init__(
         self,
-        hunts_directory: str | Path,
+        hunts_directory: str | Path | None = None,
         writable: bool | None = None,
         git_branch: str | None = None,
         git_push: bool = False,
         refresh_interval: int = 30,
+        *,
+        deploy_repo: DeployRepoStore | None = None,
     ) -> None:
+        """Initialise the registry.
+
+        Args:
+            hunts_directory: YAML hunt directory (DirectoryConfigStore backend;
+                ignored when ``deploy_repo`` is given).
+            writable: Whether writes are allowed. None = auto-detect.
+            git_branch: Git branch for writes. None = current branch.
+            git_push: Auto-push after git commits.
+            refresh_interval: Seconds between background cache refresh polls.
+            deploy_repo: Deploy-repo backend over the gitcrud ``hunts`` class.
+                When provided, ``config/hunts`` in the deploy repo is the SSoT
+                and every mutation is one commit the hunt runner git-syncs.
+        """
+        self._deploy = deploy_repo
+        self._store: DirectoryConfigStore | None = None
+
+        if deploy_repo is not None:
+            self._hunts_directory = deploy_repo.directory
+            return
+
+        if hunts_directory is None:
+            raise HuntConfigRegistryError("hunts_directory is required without a deploy repo")
         self._hunts_directory = Path(hunts_directory)
         self._hunts_directory.mkdir(parents=True, exist_ok=True)
 
@@ -89,21 +123,113 @@ class HuntConfigRegistry:
         self._store.start()
 
     def close(self) -> None:
-        if hasattr(self._store, "stop"):
+        if self._store is not None:
             self._store.stop()
 
+    # -----------------------------------------------------------------
+    # Backend primitives (deploy repo vs DirectoryConfigStore)
+    #
+    # ALL backend branching lives here: the CRUD methods below call these
+    # and never test self._deploy themselves.
+    # -----------------------------------------------------------------
+
+    def _require_store(self) -> DirectoryConfigStore:
+        """Narrow the Optional store once: the directory backend always builds one."""
+        if self._store is None:
+            raise HuntConfigRegistryError("no DirectoryConfigStore backend (deploy repo is active)")
+        return self._store
+
+    def _names(self) -> list[str]:
+        """All stored hunt names (file stems), which are the runner's hunt ids."""
+        if self._deploy is not None:
+            return self._deploy.names()
+        return list(self._require_store().list_tables())
+
+    def _get_raw(self, name: str) -> dict[str, Any] | None:
+        """Raw stored doc for a hunt, or None when absent."""
+        if self._deploy is not None:
+            return self._deploy.get(name)
+        return self._require_store().get(name)
+
+    def _put_raw(
+        self, name: str, doc: dict[str, Any], *, created_by: str | None, message: str
+    ) -> str:
+        """Write one hunt doc; returns the destination label for the save log.
+
+        Deploy repo: ONE routed commit, and the doc is stored verbatim because the
+        runner's spec_loader parses this exact file. Directory backend: plain YAML
+        write, git commit when the directory is a repo, then a cache refresh.
+        """
+        if self._deploy is not None:
+            self._deploy.put(name, doc, actor=created_by or "engine")
+            return "deploy repo config/hunts"
+
+        store = self._require_store()
+        yaml_path = self._hunts_directory / f"{name}.yaml"
+        yaml_dump(doc, yaml_path)
+        if store.is_git:
+            store._git_commit(yaml_path, message, author=created_by)
+            if store._git_push:
+                store._git_push_remote()
+        store._refresh_all()
+        return str(yaml_path)
+
+    def _delete_raw(self, name: str, *, created_by: str | None) -> bool:
+        """Remove one hunt doc; False when it did not exist."""
+        if self._deploy is not None:
+            return self._deploy.delete(name, actor=created_by or "engine")
+
+        store = self._require_store()
+        yaml_path = self._hunts_directory / f"{name}.yaml"
+        if not yaml_path.exists():
+            return False
+
+        if store.is_git and store._repo is not None:
+            try:
+                from dulwich import porcelain as git
+
+                repo_root = Path(store._repo.path).resolve(strict=False)
+                yaml_abs = yaml_path.resolve(strict=False)
+                rel_path = str(yaml_abs.relative_to(repo_root))
+                yaml_abs.unlink(missing_ok=True)
+                git.rm(store._repo, paths=[rel_path])
+                git.commit(
+                    store._repo,
+                    message=f"hunt: delete {name}".encode(),
+                )
+                if store._git_push:
+                    store._git_push_remote()
+            except ValueError:
+                logger.warning(
+                    f"Hunts directory is outside git repo; deleting '{name}' without git commit"
+                )
+                yaml_path.unlink(missing_ok=True)
+            except Exception as e:
+                logger.error(f"Git delete failed for hunt {name}: {e}")
+                yaml_path.unlink(missing_ok=True)
+        else:
+            yaml_path.unlink(missing_ok=True)
+
+        with store._lock:
+            store._cache.pop(name, None)
+        return True
+
+    # -----------------------------------------------------------------
+    # CRUD Operations
+    # -----------------------------------------------------------------
+
     def exists(self, name: str) -> bool:
-        return self._store.get(name) is not None
+        return self._get_raw(name) is not None
 
     def name_exists(self, name: str) -> bool:
         """True if a hunt file stem is taken (exact or case-insensitive)."""
         if self.exists(name):
             return True
         key = name.casefold()
-        return any(table.casefold() == key for table in self._store.list_tables())
+        return any(table.casefold() == key for table in self._names())
 
     def get(self, name: str) -> dict[str, Any]:
-        config_data = self._store.get(name)
+        config_data = self._get_raw(name)
         if config_data is None:
             raise HuntConfigNotFoundError(f"Hunt not found: '{name}'")
         return dict(config_data)
@@ -120,64 +246,25 @@ class HuntConfigRegistry:
         created_by: str | None = None,
         description: str | None = None,
     ) -> dict[str, Any]:
-        yaml_path = self._hunts_directory / f"{name}.yaml"
         payload = strip_identity_fields_from_yaml(config)
-        yaml_dump(payload, yaml_path)
+        commit_msg = description or f"hunt: update {name}"
+        if created_by:
+            commit_msg = f"{commit_msg} (by {created_by})"
 
-        if self._store.is_git:
-            commit_msg = description or f"hunt: update {name}"
-            if created_by:
-                commit_msg = f"{commit_msg} (by {created_by})"
-            self._store._git_commit(yaml_path, commit_msg, author=created_by)
-            if self._store._git_push:
-                self._store._git_push_remote()
-
-        self._store._refresh_all()
-        logger.info(f"Saved hunt config '{name}' → {yaml_path}")
+        dest = self._put_raw(name, payload, created_by=created_by, message=commit_msg)
+        logger.info(f"Saved hunt config '{name}' → {dest}")
         return payload
 
-    def delete(self, name: str) -> None:
-        yaml_path = self._hunts_directory / f"{name}.yaml"
-
-        if not yaml_path.exists():
+    def delete(self, name: str, created_by: str | None = None) -> None:
+        if not self._delete_raw(name, created_by=created_by):
             raise HuntConfigNotFoundError(f"Hunt not found: '{name}'")
-
-        if self._store.is_git and self._store._repo is not None:
-            try:
-                from dulwich import porcelain as git
-
-                repo_root = Path(self._store._repo.path).resolve(strict=False)
-                yaml_abs = yaml_path.resolve(strict=False)
-                rel_path = str(yaml_abs.relative_to(repo_root))
-                yaml_abs.unlink(missing_ok=True)
-                git.rm(self._store._repo, paths=[rel_path])
-                git.commit(
-                    self._store._repo,
-                    message=f"hunt: delete {name}".encode(),
-                )
-                if self._store._git_push:
-                    self._store._git_push_remote()
-            except ValueError:
-                logger.warning(
-                    f"Hunts directory is outside git repo; deleting '{name}' without git commit"
-                )
-                yaml_path.unlink(missing_ok=True)
-            except Exception as e:
-                logger.error(f"Git delete failed for hunt {name}: {e}")
-                yaml_path.unlink(missing_ok=True)
-        else:
-            yaml_path.unlink(missing_ok=True)
-
-        with self._store._lock:
-            self._store._cache.pop(name, None)
-
         logger.info(f"Deleted hunt config '{name}'")
 
     def list_hunts(self) -> list[dict[str, Any]]:
         """Return metadata dicts for all stored hunt configs."""
         results: list[dict[str, Any]] = []
-        for name in self._store.list_tables():
-            config_data = self._store.get(name)
+        for name in self._names():
+            config_data = self._get_raw(name)
             if config_data is None:
                 continue
             config = dict(config_data)
@@ -209,8 +296,8 @@ class HuntConfigRegistry:
     def hunt_names_referencing_destination(self, destination_name: str) -> list[str]:
         """Hunt configs whose ``alerts.destinations`` includes ``destination_name``."""
         names: list[str] = []
-        for hunt_name in self._store.list_tables():
-            config_data = self._store.get(hunt_name)
+        for hunt_name in self._names():
+            config_data = self._get_raw(hunt_name)
             if config_data is None:
                 continue
             if destination_name in alert_destination_names_from_config(config_data):
