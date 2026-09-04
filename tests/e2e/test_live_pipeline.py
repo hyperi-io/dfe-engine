@@ -22,7 +22,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from tests.e2e.conftest import E2EConfig, poll_until, require
+from tests.e2e.conftest import E2EConfig, must, poll_until, require
 
 pytestmark = pytest.mark.live
 
@@ -51,7 +51,7 @@ def test_https_ingest_lands_in_clickhouse(e2e: E2EConfig, ch_client) -> None:
     # HTTPS ingest. verify=e2e.verify (default off): the receiver may present the
     # deployment's own CA; this test asserts the data path, not the cert chain.
     resp = httpx.post(
-        f"{e2e.receiver_url.rstrip('/')}/ingest",
+        f"{must(e2e.receiver_url).rstrip('/')}/ingest",
         headers=headers,
         content=json.dumps(event),
         verify=e2e.verify,
@@ -85,7 +85,7 @@ def test_ingested_data_visible_in_hyperdx(e2e: E2EConfig, ch_client) -> None:
     if e2e.receiver_token:
         headers["Authorization"] = f"Bearer {e2e.receiver_token}"
     resp = httpx.post(
-        f"{e2e.receiver_url.rstrip('/')}/ingest",
+        f"{must(e2e.receiver_url).rstrip('/')}/ingest",
         headers=headers,
         content=json.dumps(event),
         verify=e2e.verify,
@@ -114,7 +114,7 @@ def test_ingested_data_visible_in_hyperdx(e2e: E2EConfig, ch_client) -> None:
     def _hyperdx_sees():
         # HyperDX search API: query for our marker across the default source.
         r = httpx.post(
-            f"{e2e.hyperdx_url.rstrip('/')}/api/v1/search",
+            f"{must(e2e.hyperdx_url).rstrip('/')}/api/v1/search",
             headers=hdx_headers,
             content=json.dumps({"q": marker, "limit": 1}),
             verify=e2e.verify,
@@ -135,7 +135,7 @@ def test_ingested_data_visible_in_hyperdx(e2e: E2EConfig, ch_client) -> None:
 # ---------------------------------------------------------------------------
 def _clone_deploy_repo(e2e: E2EConfig, dest: Path) -> Path:
     """Clone the deploy repo via HTTPS creds so we can assert the engine's writes."""
-    url = e2e.deploy_repo_url
+    url = must(e2e.deploy_repo_url)
     # Embed creds as <scheme>://user:token@host/... for EITHER scheme. Keying this
     # on https alone silently cloned anonymously whenever the repo was plain http
     # - an in-cluster forgejo, or any run reaching it through a port-forward - and
@@ -163,7 +163,7 @@ def _engine_headers(e2e: E2EConfig) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 def test_ui_deploys_infra_change_via_git(e2e: E2EConfig) -> None:
     require(e2e, "engine_url", "deploy_repo_url")
-    base = e2e.engine_url.rstrip("/")
+    base = must(e2e.engine_url).rstrip("/")
     headers = _engine_headers(e2e)
     svc, inst = "receiver", "production"
 
@@ -217,7 +217,7 @@ def test_ui_deploys_infra_change_via_git(e2e: E2EConfig) -> None:
 # ---------------------------------------------------------------------------
 def test_ui_deploys_schema_change_via_git(e2e: E2EConfig) -> None:
     require(e2e, "engine_url", "deploy_repo_url")
-    base = e2e.engine_url.rstrip("/")
+    base = must(e2e.engine_url).rstrip("/")
     headers = _engine_headers(e2e)
 
     # CREATE a meta-schema / source via the engine API (what the UI does).

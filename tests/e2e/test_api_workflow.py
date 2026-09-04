@@ -1,22 +1,22 @@
 #  Project:      dfe-engine
 #  File:         tests/e2e/test_api_workflow.py
-#  Purpose:      End-to-end API workflow tests (auth → CRUD → task polling)
+#  Purpose:      End-to-end API workflow tests (auth -> CRUD -> task polling)
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""E2E workflow tests — validates full user journeys through the REST API.
+"""E2E workflow tests -- validates full user journeys through the REST API.
 
 Uses TestClient (in-process HTTP) with real registries backed by tmp_path.
 No external infrastructure required (no ClickHouse, no Kafka).
 
 Covers:
-- Auth flow (login → JWT → /me → refresh)
+- Auth flow (login -> JWT -> /me -> refresh)
 - Source CRUD lifecycle
 - Service config CRUD
 - Account + group management
-- Task manager (submit → poll → complete)
+- Task manager (submit -> poll -> complete)
 - RBAC enforcement across workflows
 """
 
@@ -90,7 +90,7 @@ def e2e_client(e2e_settings: DFESettings):
 
 
 class TestAuthWorkflow:
-    """Full authentication lifecycle: login → me → refresh → RBAC."""
+    """Full authentication lifecycle: login -> me -> refresh -> RBAC."""
 
     def test_login_returns_jwt(self, e2e_client):
         resp = e2e_client.post(
@@ -140,7 +140,7 @@ class TestAuthWorkflow:
 
 
 class TestSourceCRUDWorkflow:
-    """Full source lifecycle: create → get → update → list → delete."""
+    """Full source lifecycle: create -> get -> update -> list -> delete."""
 
     def _login(self, client) -> dict[str, str]:
         resp = client.post(
@@ -159,7 +159,7 @@ class TestSourceCRUDWorkflow:
             "description": "Created by E2E test",
             "enabled": True,
             "match": {"field": "tags.collector.type", "value": "e2e-test-source"},
-            "header": {"type": "time_series", "version": "1.0.0"},
+            "header": {"type": "timeseries", "version": "1.0.0"},
             "schema_config": {"engine": "MergeTree"},
         }
         resp = e2e_client.post("/api/v1/sources", json=source, headers=headers)
@@ -203,7 +203,7 @@ class TestSourceCRUDWorkflow:
             "display_name": "Dup",
             "enabled": True,
             "match": {"field": "tags.collector.type", "value": "dup-test"},
-            "header": {"type": "time_series", "version": "1.0.0"},
+            "header": {"type": "timeseries", "version": "1.0.0"},
             "schema_config": {"engine": "MergeTree"},
         }
         e2e_client.post("/api/v1/sources", json=source, headers=headers)
@@ -260,7 +260,7 @@ class TestAccountGroupWorkflow:
 
 
 class TestTaskManagerWorkflow:
-    """Task lifecycle: pipeline build → poll → completion."""
+    """Task lifecycle: pipeline build -> poll -> completion."""
 
     def _login(self, client) -> dict[str, str]:
         resp = client.post(
@@ -327,7 +327,7 @@ class TestCrossRouterConsistency:
             "/api/v1/sources",
             "/api/v1/services",
             # /deployments, /field-maps, /alerts/destinations return 503
-            # when their registries aren't configured — that's correct behaviour
+            # when their registries aren't configured -- that's correct behaviour
         ]
 
         for endpoint in paginated_endpoints:
