@@ -276,9 +276,18 @@ ClickHouseClient = Annotated[Any, Depends(get_clickhouse_client)]
 
 
 def _get_client_ip(request: Request) -> str | None:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    """Caller address for the audit trail.
+
+    X-Forwarded-For is whatever the caller typed unless a trusted proxy rewrote
+    it, so it is read only behind ``auth.trust_proxy_auth_headers`` - the same
+    gate the X-Oidc-* identity headers sit behind. Unfronted, the socket address
+    is the only address that means anything.
+    """
+    settings: DFESettings = request.app.state.settings
+    if settings.auth.trust_proxy_auth_headers:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
     return request.client.host if request.client else None
 
 

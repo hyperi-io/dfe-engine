@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from dfe_engine.api.deps import (
     CurrentUser,
     Settings,
+    _get_client_ip,
     create_access_token,
     get_role_config,
     require_local_account_enabled,
@@ -168,13 +169,3 @@ async def get_setup_status(request: Request) -> SetupStatus:
     ``first_user`` step reports whether a real (non break-glass) user exists.
     """
     return evaluate_initial_setup(request)
-
-
-# ── Helpers ──────────────────────────────────────────────────
-
-
-def _get_client_ip(request: Request) -> str | None:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else None
