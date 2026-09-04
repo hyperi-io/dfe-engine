@@ -105,7 +105,8 @@ def test_scheduling_cadence_and_incremental_resume(ch_client, synth_db):
     spec = HuntSpec(
         hunt_id="h",
         interval_seconds=600,
-        query=f"INSERT INTO `{db}`.tgt SELECT ev FROM `{db}`.src WHERE {{window}}",
+        queries=[f"INSERT INTO `{db}`.tgt SELECT ev FROM `{db}`.src WHERE {{window}}"],
+        timestamp_field="timestamp_load",
     )
     runner = HuntRunner(coord, worker, {spec.hunt_id: spec}, cap=4)
 
@@ -155,7 +156,7 @@ def test_multi_pod_exactly_once_and_distributed(ch_params, ch_client, synth_db):
         f"h{i}": HuntSpec(
             hunt_id=f"h{i}",
             interval_seconds=600,
-            query=f"INSERT INTO `{db}`.runs (hunt_id) VALUES ('h{i}')",
+            queries=[f"INSERT INTO `{db}`.runs (hunt_id) VALUES ('h{i}')"],
         )
         for i in range(m)
     }
@@ -248,6 +249,6 @@ def test_global_cap_is_never_exceeded(ch_client, synth_db):
         assert other.try_claim(f"busy{i}", fire=1000, now=now) is True
     assert coord.active_count(now) == cap
 
-    specs = {f"n{i}": HuntSpec(hunt_id=f"n{i}", interval_seconds=1, query="") for i in range(5)}
+    specs = {f"n{i}": HuntSpec(hunt_id=f"n{i}", interval_seconds=1) for i in range(5)}
     runner = HuntRunner(coord, HuntWorker(ch_client, coord), specs, cap=cap)
     assert runner.tick(now) == 0  # at cap -> nothing runs (protects ClickHouse)

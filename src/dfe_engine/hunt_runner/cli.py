@@ -71,6 +71,16 @@ def _ch_params(settings: DFESettings) -> dict[str, Any]:
     }
 
 
+def _spec_sources(settings: DFESettings, database: str) -> dict[str, str]:
+    """The loader's rule inputs: where rule YAML lives, and the default results table.
+
+    A hunt names `rules`, so the loader has to read them to build its SQL. The
+    default target is the core detection table in the resolved data database - never
+    a hardcoded 'dfe' - used only when neither the rule entry nor the hunt names one.
+    """
+    return {"rules_dir": settings.hunts.rules_dir, "default_target": f"{database}.detection"}
+
+
 def _build_ch(settings: DFESettings) -> tuple[Any, str]:
     """Build a RAW clickhouse-connect client + resolve the data database name.
 
@@ -95,7 +105,8 @@ def materialise() -> None:
     """
     settings = load_settings()
     ch, db = _build_ch(settings)
-    live = publish_schedule(ch, db, load_specs(settings.hunts.hunt_dir))
+    specs = load_specs(settings.hunts.hunt_dir, **_spec_sources(settings, db))
+    live = publish_schedule(ch, db, specs)
     typer.echo(f"materialised {live} hunt(s) into {db}.hunt_schedule")
 
 
@@ -121,9 +132,10 @@ def run(
     coord.ensure_schema()
     worker = HuntWorker(ch, coord)
     hunt_dir = settings.hunts.hunt_dir
+    sources = _spec_sources(settings, db)
 
     def _build_runner() -> HuntRunner:
-        return HuntRunner(coord, worker, load_specs(hunt_dir), cap=cap)
+        return HuntRunner(coord, worker, load_specs(hunt_dir, **sources), cap=cap)
 
     # The runner lives in a one-element cell so on_reload can swap in a runner built
     # from freshly loaded specs. The daemon loop only ever calls cell[0].tick, so it
