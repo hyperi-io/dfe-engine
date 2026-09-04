@@ -78,7 +78,11 @@ config:
     # Empty -> falls back to `database`. Set when data lives in a separate db.
     data_database: ""
     secure: true
-    verify: false
+    # Unset follows the code default (defaults.yaml: null -> the SCALO_TLS_VERIFY
+    # escape valve, so verification is ON). The engine skips an empty value, so
+    # this renders inert rather than disabling anything. Set false only for a
+    # self-signed dev/test ClickHouse, which is the scope defaults.yaml states.
+    verify: ""
   api:
     host: "0.0.0.0"
     port: 8000
