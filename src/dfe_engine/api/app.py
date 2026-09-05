@@ -426,6 +426,17 @@ def create_app(
         https_only=not is_dev_posture(settings.env),
     )
 
+    # Added last so it is the outermost middleware: every route below it reads the
+    # scheme and client address the trusted gateway forwarded, which is what keeps
+    # the OIDC redirect_uri on the https the caller arrived on. Lives in the app,
+    # not the ASGI server, so one setting decides trust whatever serves it.
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+    app.add_middleware(
+        ProxyHeadersMiddleware,
+        trusted_hosts=settings.api.forwarded_allow_ips,
+    )
+
     # Exception handlers
     from dfe_engine.api.errors import install_exception_handlers
 
