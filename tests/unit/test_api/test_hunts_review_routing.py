@@ -175,6 +175,35 @@ class TestProductionTeamWritesReportReview:
         assert resp.headers["X-DFE-Review-Required"] == "true"
         assert (deploy_repo.repo_path / "config" / "rules" / "certutil.yaml").is_file()
 
+    def test_linking_an_alert_destination_to_a_hunt_says_review_required(
+        self, client, admin_headers, deploy_repo
+    ):
+        """The link is a hunt write, so the hunt does not alert until it merges."""
+        from dfe_engine.hunts.alert import AlertDestinationRegistry
+
+        # The shared app fixture configures no destinations dir, and the destination
+        # store itself is not the subject here -- only the hunt write the link makes.
+        _registries["alert_destinations"] = AlertDestinationRegistry()
+        _rebind(deploy_repo, environment="dev", mode="solo")
+        assert (
+            client.post(
+                "/api/v1/hunts", json={"name": "windows_hunt", **_HUNT}, headers=admin_headers
+            ).status_code
+            == 201
+        )
+
+        forge = _RecordingForge(url="http://forge/pr/46")
+        _rebind(deploy_repo, environment="production", mode="team", forge=forge)
+        resp = client.post(
+            "/api/v1/alerts/destinations",
+            json={"name": "oncall", "url": "slack://token", "hunt_name": "windows_hunt"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 201, resp.text
+        assert resp.headers["X-DFE-Review-Required"] == "true"
+        assert resp.headers["X-DFE-PR-Url"] == "http://forge/pr/46"
+
     def test_no_forge_still_reports_review_rather_than_committing_to_main(
         self, client, admin_headers, deploy_repo
     ):

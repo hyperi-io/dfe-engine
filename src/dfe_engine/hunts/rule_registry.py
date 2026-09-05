@@ -126,8 +126,8 @@ class RuleRegistry:
 
     def _put_raw(
         self, name: str, doc: dict[str, Any], *, created_by: str | None, message: str
-    ) -> tuple[str, WriteOutcome | None]:
-        """Write one rule doc; returns the save-log destination and the git outcome.
+    ) -> WriteOutcome | None:
+        """Write one rule doc and log where it landed; returns the git outcome.
 
         Deploy repo: ONE routed commit, and the doc is stored verbatim because the
         runner's rule_compiler parses this exact file. Directory backend: plain YAML
@@ -136,7 +136,8 @@ class RuleRegistry:
         """
         if self._deploy is not None:
             outcome = self._deploy.put(name, doc, actor=created_by or "engine")
-            return "deploy repo config/rules", outcome
+            logger.info(f"Saved rule '{name}' → deploy repo config/rules")
+            return outcome
 
         store = self._require_store()
         yaml_path = self._rules_directory / f"{name}.yaml"
@@ -146,7 +147,8 @@ class RuleRegistry:
             if store._git_push:
                 store._git_push_remote()
         store._refresh_all()
-        return str(yaml_path), None
+        logger.info(f"Saved rule '{name}' → {yaml_path}")
+        return None
 
     def _delete_raw(self, name: str, *, created_by: str | None) -> tuple[bool, WriteOutcome | None]:
         """Remove one rule doc; False when it did not exist, plus the git outcome."""
@@ -227,14 +229,12 @@ class RuleRegistry:
         if created_by:
             commit_msg = f"{commit_msg} (by {created_by})"
 
-        dest, outcome = self._put_raw(
+        return self._put_raw(
             rule.rule_id,
             _rule_to_yaml_dict(rule),
             created_by=created_by,
             message=commit_msg,
         )
-        logger.info(f"Saved rule '{rule.rule_id}' → {dest}")
-        return outcome
 
     def delete(self, name: str, created_by: str | None = None) -> WriteOutcome | None:
         """Remove one rule; returns the git routing outcome, None off gitops."""

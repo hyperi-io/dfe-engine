@@ -19,11 +19,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, HuntConfigReg, RuleReg, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams
+from dfe_engine.api.review import set_review_headers
 from dfe_engine.api.task_manager import TaskInfo, TaskManager, TaskStatus
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -918,6 +919,17 @@ class PropagationReportModel(BaseModel):
         description="Bindings left behind by a deselect (still firing until deleted)",
     )
     warnings: list[str] = Field(default_factory=list)
+    review_required: bool = Field(
+        default=False,
+        description="A generated rule or hunt was routed to a review branch, not to the "
+        "branch the hunt runner syncs; nothing here runs until those branches merge",
+    )
+    review_branches: list[str] = Field(
+        default_factory=list, description="Review branches the run's writes landed on"
+    )
+    pr_urls: list[str] = Field(
+        default_factory=list, description="Review PRs opened for the run's writes"
+    )
 
 
 class PropagateResponse(BaseModel):
@@ -994,6 +1006,21 @@ def _propagate_response(info: TaskInfo) -> PropagateResponse:
     return PropagateResponse(task_id=info.id, status=info.status, report=report, error=info.error)
 
 
+def _apply_report_headers(response: Response, report: PropagationReportModel | None) -> None:
+    """Carry a completed run's review state in the headers the hunt/rule writes use.
+
+    A run that fanned out over several bindings opened several PRs, so the header
+    names the first and the report body carries the rest.
+    """
+    if report is None:
+        return
+    set_review_headers(
+        response,
+        review_required=report.review_required,
+        pr_url=report.pr_urls[0] if report.pr_urls else None,
+    )
+
+
 # -- Endpoints -----------------------------------------------
 
 
@@ -1003,6 +1030,7 @@ async def propagate(
     user: CurrentUser,
     rules: RuleReg,
     hunts: HuntConfigReg,
+    response: Response,
     body: PropagateRequest | None = None,
     wait: float = Query(30.0, ge=0, le=120, description="Seconds to block for inline completion"),
 ) -> PropagateResponse:
@@ -1014,6 +1042,11 @@ async def propagate(
     or hand-edited bindings are reported ``skipped_drifted`` unless ``force``.
     Submitted to the task manager; blocks up to ``wait`` seconds for inline
     completion, else returns ``pending`` - poll via GET /sigma/propagations/{id}.
+
+    A production+team run commits each generated rule and hunt to its own review
+    branch rather than the branch the hunt runner syncs; the report carries every
+    branch and PR, and ``X-DFE-Review-Required`` says so on a run that completed
+    inline.
     """
     options = body or PropagateRequest()
     propagator = _propagator(request, rules, hunts, user.user_id)
@@ -1022,18 +1055,24 @@ async def propagate(
     audit_resource_change(user.user_id, "sigma_propagation", "selection", "propagated")
     if wait > 0:
         info = await manager.await_terminal(info.id, wait) or info
-    return _propagate_response(info)
+    result = _propagate_response(info)
+    _apply_report_headers(response, result.report)
+    return result
 
 
 @router.get("/propagations/{task_id}", response_model=PropagateResponse, dependencies=[_READ])
-async def get_propagation(task_id: str, request: Request, user: CurrentUser) -> PropagateResponse:
+async def get_propagation(
+    task_id: str, request: Request, user: CurrentUser, response: Response
+) -> PropagateResponse:
     """Poll a propagate task."""
     info = _task_manager(request).get(task_id)
     if info is None or info.kind != "sigma:propagate":
         raise HTTPException(
             404, detail={"code": "not_found", "message": "propagation task not found"}
         )
-    return _propagate_response(info)
+    result = _propagate_response(info)
+    _apply_report_headers(response, result.report)
+    return result
 
 
 @router.get("/bindings", response_model=PaginatedResponse[BindingSummary], dependencies=[_READ])
@@ -1074,13 +1113,26 @@ async def get_binding(
 
 @router.delete("/bindings/{rule_id}", status_code=204, dependencies=[_WRITE])
 async def delete_binding(
-    rule_id: str, request: Request, user: CurrentUser, rules: RuleReg, hunts: HuntConfigReg
+    rule_id: str,
+    request: Request,
+    user: CurrentUser,
+    rules: RuleReg,
+    hunts: HuntConfigReg,
+    response: Response,
 ) -> None:
-    """Delete a generated binding (removes the rule and unlinks it from its hunt)."""
+    """Delete a generated binding (removes the rule and unlinks it from its hunt).
+
+    A production+team delete is routed to a review branch, so the runner keeps
+    compiling the binding until that branch is merged; ``X-DFE-Review-Required``
+    says so.
+    """
     propagator = _propagator(request, rules, hunts, user.user_id)
-    removed = await asyncio.to_thread(propagator.delete_binding, rule_id)
-    if not removed:
+    routing = await asyncio.to_thread(propagator.delete_binding, rule_id)
+    if routing is None:
         raise HTTPException(
             404, detail={"code": "not_found", "message": f"no sigma binding '{rule_id}'"}
         )
+    set_review_headers(
+        response, review_required=routing.review_required, pr_url=routing.first_pr_url
+    )
     audit_resource_change(user.user_id, "sigma_binding", rule_id, "deleted")

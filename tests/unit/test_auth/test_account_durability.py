@@ -351,8 +351,9 @@ def test_read_remote_file_none_without_remote(tmp_path):
 
 
 def test_is_break_glass_matches_the_admin(monkeypatch):
-    assert ad.is_break_glass("admin") is True
-    assert ad.is_break_glass("alice") is False
+    # The configured name is REQUIRED: an empty string is the built-in default.
+    assert ad.is_break_glass("admin", "") is True
+    assert ad.is_break_glass("alice", "") is False
 
 
 def test_is_break_glass_follows_the_configured_admin_name():

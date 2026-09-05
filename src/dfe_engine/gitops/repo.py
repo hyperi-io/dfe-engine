@@ -139,6 +139,10 @@ class GitopsRepo:
                 return None
             return repo[blob_sha].data.decode("utf-8")
 
+    def _splices_credentials(self) -> bool:
+        """True when :meth:`_authed_url` embeds userinfo, so a clone can persist it."""
+        return bool(self._username) and self._repo_url.startswith(("http://", "https://"))
+
     def _authed_url(self) -> str:
         """Embed HTTPS credentials in the remote URL.
 
@@ -148,7 +152,7 @@ class GitopsRepo:
         -- :meth:`_scrub_remote` rewrites the stored remote back to the bare URL.
         """
         url = self._repo_url
-        if self._username and url.startswith(("http://", "https://")):
+        if self._splices_credentials():
             scheme, rest = url.split("://", 1)
             return f"{scheme}://{self._username}:{self._token}@{rest}"
         return url
@@ -179,13 +183,20 @@ class GitopsRepo:
         and fetch re-supplies the credentials explicitly, so the stored remote
         never needs them. Best-effort: a clone that keeps its credential is a
         hardening miss, not a reason to fail the op.
+
+        The guard is _authed_url's own condition: an empty token still splices
+        ``user:@host``, so gating the scrub on the token left that on disk.
         """
-        if not (self._token and self._repo_url):
+        if not self._splices_credentials():
             return
         try:
             scrub_remote_credentials(self._path, self._repo_url)
-        except Exception:
-            logger.warning("Could not scrub the gitops clone's stored credentials")
+        except Exception as exc:
+            logger.warning(
+                "Could not scrub the gitops clone's stored credentials",
+                path=str(self._path),
+                error=redact_credentials(str(exc)),
+            )
 
     def ensure(self) -> Path:
         """Make the working tree present: clone, reuse, or init."""

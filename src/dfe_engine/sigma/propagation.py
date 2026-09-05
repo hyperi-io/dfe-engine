@@ -52,6 +52,7 @@ from scalo.logger import logger
 from sigma.collection import SigmaCollection
 
 from dfe_engine.gitcrud import ResourceNotFoundError
+from dfe_engine.gitcrud.routing import ReviewRouting, WriteOutcome
 from dfe_engine.hunts.hunt_config_registry import (
     HuntConfigNotFoundError,
     HuntConfigRegistry,
@@ -221,6 +222,12 @@ class PropagationReport:
     # and they keep firing until pruned. Surfaced so the operator sees them.
     stale_bindings: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # In production+team every generated rule and hunt is committed to its own
+    # review branch, so a report listing them as created/updated without this says
+    # the hunt runner has changes it will not see until each branch is merged.
+    review_required: bool = False
+    review_branches: list[str] = field(default_factory=list)
+    pr_urls: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -233,7 +240,16 @@ class PropagationReport:
             "hunts_touched": list(self.hunts_touched),
             "stale_bindings": list(self.stale_bindings),
             "warnings": list(self.warnings),
+            "review_required": self.review_required,
+            "review_branches": list(self.review_branches),
+            "pr_urls": list(self.pr_urls),
         }
+
+    def apply_routing(self, routing: ReviewRouting) -> None:
+        """Copy a run's folded write-routing onto the report."""
+        self.review_required = routing.review_required
+        self.review_branches = list(routing.branches)
+        self.pr_urls = list(routing.pr_urls)
 
 
 # -- Propagator ----------------------------------------------
@@ -282,10 +298,11 @@ class SigmaPropagator:
 
     def _apply_binding(
         self, sigma_id: str, doc: dict[str, Any], source: str, where: str, *, force: bool
-    ) -> str:
+    ) -> tuple[str, WriteOutcome | None]:
         """Create or regenerate one (sigma rule, source) binding.
 
-        Returns the outcome: ``created`` / ``updated`` / ``skipped_drifted``.
+        Returns ``created`` / ``updated`` / ``skipped_drifted`` and the git routing
+        outcome of the write (None when nothing was written, or gitops is off).
         Honours drift: an EXISTING binding is not regenerated when the catalogue
         rule drifted OR the binding was hand-edited, unless ``force``.
         """
@@ -299,15 +316,17 @@ class SigmaPropagator:
 
         if existing is not None and not force:
             if _catalogue_drifted(doc) or binding_hand_edited(existing):
-                return "skipped_drifted"
+                return "skipped_drifted", None
 
         rule = build_binding_rule(sigma_id, doc, source, where)
         if existing is not None:
             # Preserve the original creation time so a re-propagate of an
             # unchanged rule is a true content no-op (no churn commit).
             rule = rule.model_copy(update={"created_at": existing.created_at})
-        self._rules.save(rule, created_by=self._actor, description=f"sigma: propagate {rid}")
-        return "updated" if existing is not None else "created"
+        outcome = self._rules.save(
+            rule, created_by=self._actor, description=f"sigma: propagate {rid}"
+        )
+        return ("updated" if existing is not None else "created"), outcome
 
     # -- hunt binding (Task B) --
 
@@ -319,9 +338,10 @@ class SigmaPropagator:
         cron: str,
         target_table: str,
         customers: list[str],
-    ) -> str:
+    ) -> tuple[str, WriteOutcome | None]:
         """Create or update the per-source hunt so it runs ``rule_ids``.
 
+        Returns the hunt name and the git routing outcome of the write.
         Preserves any existing rules (operator-added or pre-existing sigma
         bindings) and their per-rule YAML overrides - only ABSENT bindings are
         appended, mirroring the PUT /hunts merge contract. A brand-new hunt is
@@ -348,13 +368,13 @@ class SigmaPropagator:
             merged = _merged_rule_entries(existing.get("rules"), rule_ids)
             config["rules"] = merged
 
-        self._hunts.save(
+        outcome = self._hunts.save(
             hunt_name,
             config,
             created_by=self._actor,
             description=f"sigma: bind hunt {hunt_name}",
         )
-        return hunt_name
+        return hunt_name, outcome
 
     # -- orchestration --
 
@@ -371,6 +391,9 @@ class SigmaPropagator:
         customers = list(hunt_customers) if hunt_customers else ["default"]
         selected = self._selection.list_selected()
         report = PropagationReport(total_selected=len(selected))
+        # Each generated rule and hunt is its own routed write, so the run's review
+        # state is the fold of every one of them.
+        routing = ReviewRouting()
         # rule ids to (re)bind into each source's hunt (created/updated/still-present).
         bindings_by_source: dict[str, list[str]] = {}
 
@@ -395,10 +418,11 @@ class SigmaPropagator:
 
             for source in sources:
                 rid = binding_rule_id(sigma_id, source)
-                outcome = self._apply_binding(sigma_id, doc, source, where, force=force)
-                if outcome == "created":
+                status, outcome = self._apply_binding(sigma_id, doc, source, where, force=force)
+                routing.record(outcome)
+                if status == "created":
                     report.created.append(rid)
-                elif outcome == "updated":
+                elif status == "updated":
                     report.updated.append(rid)
                 else:  # skipped_drifted
                     report.skipped_drifted.append(
@@ -410,13 +434,14 @@ class SigmaPropagator:
 
         if create_hunts:
             for source in sorted(bindings_by_source):
-                hunt = self._bind_hunt(
+                hunt, outcome = self._bind_hunt(
                     source,
                     bindings_by_source[source],
                     cron=hunt_cron,
                     target_table=hunt_target_table,
                     customers=customers,
                 )
+                routing.record(outcome)
                 report.hunts_touched.append(hunt)
 
         # Surface bindings left behind by a deselect: an existing sigma binding
@@ -434,6 +459,7 @@ class SigmaPropagator:
                     }
                 )
 
+        report.apply_routing(routing)
         return report
 
     # -- binding queries (for the API list/get/delete) --
@@ -506,32 +532,34 @@ class SigmaPropagator:
             "drift": bool(hand_edited or catalogue_drift or orphaned or stale),
         }
 
-    def delete_binding(self, rule_id: str) -> bool:
+    def delete_binding(self, rule_id: str) -> ReviewRouting | None:
         """Delete a binding rule and unlink it from any hunt.
 
-        Returns False if the rule is absent or is not a sigma binding. A generated
-        per-source hunt that is emptied by the unlink is deleted; any other hunt is
-        left with the binding simply removed.
+        Returns None if the rule is absent or is not a sigma binding, else the
+        folded routing of the rule delete plus every hunt write the unlink caused.
+        A generated per-source hunt that is emptied by the unlink is deleted; any
+        other hunt is left with the binding removed.
         """
         try:
             rule = self._rules.get(rule_id)
         except RuleNotFoundError:
-            return False
+            return None
         if not rule.sigma_rule_id:
-            return False
+            return None
 
+        routing = ReviewRouting()
         for hunt_name in self._hunts.hunt_names_referencing_rule(rule_id):
-            self._unlink_rule_from_hunt(hunt_name, rule_id)
+            routing.record(self._unlink_rule_from_hunt(hunt_name, rule_id))
 
-        self._rules.delete(rule_id)
-        return True
+        routing.record(self._rules.delete(rule_id))
+        return routing
 
-    def _unlink_rule_from_hunt(self, hunt_name: str, rule_id: str) -> None:
+    def _unlink_rule_from_hunt(self, hunt_name: str, rule_id: str) -> WriteOutcome | None:
         """Remove ``rule_id`` from a hunt; delete the hunt if it is left empty."""
         try:
             config = self._hunts.get(hunt_name)
         except HuntConfigNotFoundError:
-            return
+            return None
         remaining = [
             entry
             for entry in _rule_entries(config.get("rules"))
@@ -539,11 +567,10 @@ class SigmaPropagator:
         ]
         if not remaining:
             # An empty hunt is invalid (min one rule); drop it entirely.
-            self._hunts.delete(hunt_name)
-            return
+            return self._hunts.delete(hunt_name)
         config = dict(config)
         config["rules"] = remaining
-        self._hunts.save(hunt_name, config, created_by=self._actor)
+        return self._hunts.save(hunt_name, config, created_by=self._actor)
 
 
 # -- hunt rule-list helpers (mirror the PUT /hunts merge contract) --
