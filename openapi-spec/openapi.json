@@ -16928,6 +16928,7 @@
           "auth_mode": {
             "type": "string",
             "title": "Auth Mode",
+            "description": "'oidc' when an enabled OIDC provider is registered, so the UI offers the SSO button; 'jwt' otherwise. Local login stays available in both.",
             "default": "jwt"
           },
           "features": {
