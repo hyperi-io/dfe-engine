@@ -19,7 +19,9 @@ from types import SimpleNamespace
 import pytest
 
 from dfe_engine.gitcrud import GitCrud, default_registry
+from dfe_engine.gitcrud.forge import PullRequest
 from dfe_engine.gitops.repo import GitopsRepo
+from dfe_engine.hunts.deploy_repo import DeployRepoStore
 from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
 from dfe_engine.hunts.rule_registry import RuleRegistry
 from dfe_engine.sigma.catalog import (
@@ -402,16 +404,110 @@ def test_delete_binding_removes_rule_and_unlinks_hunt(env):
     prop.propagate()
     rid = binding_rule_id(_ID, "windows-audit")
 
-    assert prop.delete_binding(rid) is True
+    routing = prop.delete_binding(rid)
+    assert routing is not None
+    assert routing.review_required is False  # directory backend: nothing to review
     assert env.rules.exists(rid) is False
     # the per-source hunt held only this binding -> removed when emptied
     assert sigma_hunt_name("windows-audit") not in [h["name"] for h in env.hunts.list_hunts()]
 
 
-def test_delete_binding_false_for_non_sigma_rule(env):
+def test_delete_binding_none_for_non_sigma_rule(env):
     from dfe_engine.hunts.rule_model import Rule
 
     env.rules.save(Rule(rule_id="plain", name="Plain", where_clause="x = 1"))
     prop = _propagator(env)
-    assert prop.delete_binding("plain") is False
+    assert prop.delete_binding("plain") is None
     assert env.rules.exists("plain") is True  # a hand-authored rule is not touched
+
+
+# -- Review routing (production+team) ------------------------
+
+
+class _RecordingForge:
+    """ForgeProvider seam double: one PR per review branch, numbered in order."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def open_pull_request(self, *, head, base, title, body) -> PullRequest:
+        self.calls.append({"head": head, "base": base, "title": title, "body": body})
+        number = len(self.calls)
+        return PullRequest(number=number, url=f"http://forge/pr/{number}", branch=head)
+
+
+def _rebind(env, *, environment: str, mode: str, forge=None) -> None:
+    """Point the rule + hunt registries at the deploy repo, at one write posture."""
+
+    def _store(cls_name: str) -> DeployRepoStore:
+        return DeployRepoStore(env.gc, cls_name, environment=environment, mode=mode, forge=forge)
+
+    env.rules.close()
+    env.hunts.close()
+    env.rules = RuleRegistry(deploy_repo=_store("rules"))
+    env.hunts = HuntConfigRegistry(deploy_repo=_store("hunts"))
+
+
+@pytest.fixture
+def review_env(env):
+    """The same stores, with rules + hunts written at a production+team posture.
+
+    Rebinding the two registries onto the deploy repo is what makes route_write
+    refuse main, so a propagate here lands every write on a review branch.
+    """
+    env.forge = _RecordingForge()
+    _rebind(env, environment="production", mode="team", forge=env.forge)
+    return env
+
+
+def test_propagate_says_review_required_and_names_every_branch(review_env):
+    """The report cannot read created/updated while every write sits unmerged."""
+    _add_windows_source(review_env)
+    _import_and_select(review_env, _rule_yaml(), _ID)
+    rid = binding_rule_id(_ID, "windows-audit")
+
+    report = _propagator(review_env).propagate()
+
+    assert report.created == [rid]
+    assert report.review_required is True
+    # one branch and one PR per write: the binding rule, then the per-source hunt
+    assert len(report.review_branches) == 2
+    assert report.pr_urls == ["http://forge/pr/1", "http://forge/pr/2"]
+    assert all(b.startswith("dfe/") for b in report.review_branches)
+    assert report.as_dict()["review_required"] is True
+    # main never got either file, so the hunt runner's git-sync does not serve them
+    assert not (review_env.gc.repo_path / "config" / "rules" / f"{rid}.yaml").exists()
+    assert not (
+        review_env.gc.repo_path / "config" / "hunts" / f"{sigma_hunt_name('windows-audit')}.yaml"
+    ).exists()
+
+
+def test_delete_binding_says_review_required(env):
+    """A delete the runner will keep running until the branch merges says so."""
+    _add_windows_source(env)
+    _import_and_select(env, _rule_yaml(), _ID)
+    _rebind(env, environment="dev", mode="solo")
+    _propagator(env).propagate()
+    rid = binding_rule_id(_ID, "windows-audit")
+
+    forge = _RecordingForge()
+    _rebind(env, environment="production", mode="team", forge=forge)
+    routing = _propagator(env).delete_binding(rid)
+
+    assert routing is not None
+    assert routing.review_required is True
+    assert routing.first_pr_url == routing.pr_urls[0]
+    # the rule is still on main, so the hunt runner still compiles it
+    assert (env.gc.repo_path / "config" / "rules" / f"{rid}.yaml").is_file()
+
+
+def test_a_dev_posture_propagate_reports_no_review(env):
+    """The directory-backed registries report nothing, so the report stays quiet."""
+    _add_windows_source(env)
+    _import_and_select(env, _rule_yaml(), _ID)
+
+    report = _propagator(env).propagate()
+
+    assert report.review_required is False
+    assert report.review_branches == []
+    assert report.pr_urls == []

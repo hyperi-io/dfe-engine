@@ -16,7 +16,11 @@ from __future__ import annotations
 
 from dfe_engine.api.deps import _registries
 from dfe_engine.gitcrud import GitCrud, default_registry
+from dfe_engine.gitcrud.forge import PullRequest
 from dfe_engine.gitops.repo import GitopsRepo
+from dfe_engine.hunts.deploy_repo import DeployRepoStore
+from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
+from dfe_engine.hunts.rule_registry import RuleRegistry
 
 _ID = "dddddddd-dddd-dddd-dddd-dddddddddddd"
 _BINDING = f"sigma_windows-audit_{_ID.replace('-', '')}"
@@ -198,6 +202,82 @@ def test_get_binding_404_for_missing(client, app, admin_headers, tmp_path):
     assert (
         client.get(f"/api/v1/sigma/bindings/{_BINDING}", headers=admin_headers).status_code == 404
     )
+
+
+# -- Review routing (production+team) ------------------------
+
+
+class _RecordingForge:
+    """ForgeProvider seam double: one PR per review branch, numbered in order."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def open_pull_request(self, *, head, base, title, body) -> PullRequest:
+        self.calls.append({"head": head, "base": base, "title": title, "body": body})
+        number = len(self.calls)
+        return PullRequest(number=number, url=f"http://forge/pr/{number}", branch=head)
+
+
+def _rebind(crud, *, environment: str, mode: str, forge=None) -> None:
+    """Point the app's rule + hunt registries at the deploy repo, at one posture.
+
+    Closes what it replaces: the lifespan built directory-backed registries with
+    background refresh threads, and the shutdown only closes what is in the dict.
+    """
+    replacements = {
+        "hunt_configs": HuntConfigRegistry(
+            deploy_repo=DeployRepoStore(
+                crud, "hunts", environment=environment, mode=mode, forge=forge
+            )
+        ),
+        "rules": RuleRegistry(
+            deploy_repo=DeployRepoStore(
+                crud, "rules", environment=environment, mode=mode, forge=forge
+            )
+        ),
+    }
+    for key, registry in replacements.items():
+        previous = _registries.get(key)
+        if previous is not None:
+            previous.close()
+        _registries[key] = registry
+
+
+def test_propagate_sets_the_review_header_and_reports_every_pr(
+    client, app, admin_headers, tmp_path
+):
+    """A 200 with created bindings, while every one of them sits unmerged."""
+    crud = _wire_gitcrud(app, tmp_path)
+    _add_windows_source()
+    _seed_selected(client, admin_headers, tmp_path)
+    _rebind(crud, environment="production", mode="team", forge=_RecordingForge())
+
+    resp = client.post("/api/v1/sigma/propagate", headers=admin_headers)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["X-DFE-Review-Required"] == "true"
+    assert resp.headers["X-DFE-PR-Url"] == "http://forge/pr/1"
+    report = resp.json()["report"]
+    assert report["created"] == [_BINDING]
+    assert report["review_required"] is True
+    assert report["pr_urls"] == ["http://forge/pr/1", "http://forge/pr/2"]
+    assert len(report["review_branches"]) == 2
+    # main never got the binding, so the hunt runner's git-sync does not serve it
+    assert not (crud.repo_path / "config" / "rules" / f"{_BINDING}.yaml").exists()
+
+
+def test_propagate_in_dev_carries_no_review_header(client, app, admin_headers, tmp_path):
+    crud = _wire_gitcrud(app, tmp_path)
+    _add_windows_source()
+    _seed_selected(client, admin_headers, tmp_path)
+    _rebind(crud, environment="dev", mode="team")
+
+    resp = client.post("/api/v1/sigma/propagate", headers=admin_headers)
+
+    assert resp.status_code == 200, resp.text
+    assert "X-DFE-Review-Required" not in resp.headers
+    assert resp.json()["report"]["review_required"] is False
 
 
 def test_propagate_no_selection_is_empty_report(client, app, admin_headers, tmp_path):

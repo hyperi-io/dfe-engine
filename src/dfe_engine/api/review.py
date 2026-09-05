@@ -16,7 +16,7 @@ runner never syncs.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from fastapi import Response
@@ -24,16 +24,27 @@ if TYPE_CHECKING:
     from dfe_engine.gitcrud.routing import WriteOutcome
 
 
-def apply_review_headers(response: Response, outcome: WriteOutcome | None) -> None:
-    """Mark a fixed-body 200/201/204 response whose write was routed to review."""
-    if outcome is None or not outcome.review_required:
+def set_review_headers(response: Response, *, review_required: bool, pr_url: str | None) -> None:
+    """Set the review headers from already-unpacked fields.
+
+    The header pair is the same whether it came from one write's outcome or from a
+    multi-write run folded into a ``ReviewRouting``, so both go through here.
+    """
+    if not review_required:
         return
     response.headers["X-DFE-Review-Required"] = "true"
-    if outcome.pr_url:
-        response.headers["X-DFE-PR-Url"] = outcome.pr_url
+    if pr_url:
+        response.headers["X-DFE-PR-Url"] = pr_url
 
 
-def review_audit_detail(outcome: WriteOutcome | None) -> dict | None:
+def apply_review_headers(response: Response, outcome: WriteOutcome | None) -> None:
+    """Mark a fixed-body 200/201/204 response whose write was routed to review."""
+    if outcome is None:
+        return
+    set_review_headers(response, review_required=outcome.review_required, pr_url=outcome.pr_url)
+
+
+def review_audit_detail(outcome: WriteOutcome | None) -> dict[str, Any] | None:
     """Audit detail for a governed write, naming the review branch when there is one.
 
     An audit line reading "created" against a change parked on a review branch is
@@ -41,7 +52,7 @@ def review_audit_detail(outcome: WriteOutcome | None) -> dict | None:
     """
     if outcome is None:
         return None
-    detail: dict = {"commit": outcome.commit_sha}
+    detail: dict[str, Any] = {"commit": outcome.commit_sha}
     if outcome.review_required:
         detail["review_required"] = True
         detail["branch"] = outcome.branch

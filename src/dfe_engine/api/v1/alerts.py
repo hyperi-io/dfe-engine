@@ -18,11 +18,12 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import AlertDestRegistry, CurrentUser, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
+from dfe_engine.api.review import apply_review_headers
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.hunts.alert import AlertDestination as RegistryAlertDestination
@@ -142,8 +143,13 @@ async def create_destination(
     user: CurrentUser,
     registry: AlertDestRegistry,
     hunt_registry: OptionalHuntConfigReg,
+    response: Response,
 ):
-    """Create an alert destination."""
+    """Create an alert destination.
+
+    Linking it to a hunt writes the hunt YAML, so in production+team that link is
+    routed to a review branch and ``X-DFE-Review-Required`` says so.
+    """
     if body.name in registry:
         raise HTTPException(
             status_code=409,
@@ -156,7 +162,9 @@ async def create_destination(
         _ensure_hunt_for_link(hunt_registry, body.hunt_name)
     _write_destination(registry, body, hunt_name=body.hunt_name)
     if body.hunt_name is not None and hunt_registry is not None:
-        add_destination_to_hunt(hunt_registry, body.hunt_name, body.name)
+        apply_review_headers(
+            response, add_destination_to_hunt(hunt_registry, body.hunt_name, body.name)
+        )
     audit_resource_change(user.user_id, "alert_destination", body.name, "created")
     return _destination_from_registry(registry.get(body.name))
 
@@ -190,8 +198,13 @@ async def update_destination(
     user: CurrentUser,
     registry: AlertDestRegistry,
     hunt_registry: OptionalHuntConfigReg,
+    response: Response,
 ):
-    """Update an alert destination."""
+    """Update an alert destination.
+
+    Linking it to a hunt writes the hunt YAML, so in production+team that link is
+    routed to a review branch and ``X-DFE-Review-Required`` says so.
+    """
     if name not in registry:
         raise HTTPException(
             status_code=404,
@@ -208,7 +221,7 @@ async def update_destination(
     stored_hunt_name = hunt_to_link if hunt_to_link is not None else existing.hunt_name
     _write_destination(registry, body, hunt_name=stored_hunt_name)
     if hunt_to_link is not None and hunt_registry is not None:
-        add_destination_to_hunt(hunt_registry, hunt_to_link, name)
+        apply_review_headers(response, add_destination_to_hunt(hunt_registry, hunt_to_link, name))
     audit_resource_change(user.user_id, "alert_destination", name, "updated")
     return _destination_from_registry(registry.get(name))
 
