@@ -38,6 +38,10 @@ from scalo.logger import logger
 # Requires the colon, so a credential-free ``ssh://git@host`` is left alone.
 _USERINFO_RE = re.compile(r"(?<=://)[^/@\s]+:[^/@\s]*@")
 
+# Git sideband progress rewrites one line with \r and only ends it with \n, so a
+# \n-only split buffers a whole fetch's progress into one unredacted-until-EOF blob.
+_LINE_END_RE = re.compile(rb"[\r\n]")
+
 
 def redact_credentials(text: str) -> str:
     """Return *text* with the ``user:secret@`` userinfo of every URL replaced.
@@ -59,7 +63,8 @@ class RedactingErrStream(io.RawIOBase):
 
     Redaction is per LINE, not per chunk: dulwich writes progress in whatever sizes
     the transport hands it, so a URL split across two writes would pass the regex
-    unredacted if each chunk were matched on its own.
+    unredacted if each chunk were matched on its own. A line ends at ``\\r`` or
+    ``\\n`` -- sideband progress uses the carriage return to overwrite in place.
     """
 
     def __init__(self) -> None:
@@ -74,11 +79,11 @@ class RedactingErrStream(io.RawIOBase):
         raw = bytes(data)
         self._buffer.extend(raw)
         while True:
-            cut = self._buffer.find(b"\n")
-            if cut < 0:
+            match = _LINE_END_RE.search(self._buffer)
+            if match is None:
                 break
-            self._log(bytes(self._buffer[:cut]))
-            del self._buffer[: cut + 1]
+            self._log(bytes(self._buffer[: match.start()]))
+            del self._buffer[: match.end()]
         return len(raw)
 
     def close(self) -> None:

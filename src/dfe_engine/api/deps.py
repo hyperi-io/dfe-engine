@@ -294,8 +294,14 @@ def _get_client_ip(request: Request) -> str | None:
 
     X-Forwarded-For is whatever the caller typed unless a trusted proxy rewrote
     it, so it is read only behind ``auth.trust_proxy_auth_headers`` - the same
-    gate the X-Oidc-* identity headers sit behind. Unfronted, the socket address
-    is the only address that means anything.
+    gate the X-Oidc-* identity headers sit behind.
+
+    The fallback is NOT necessarily the socket peer: ProxyHeadersMiddleware is the
+    app's outermost middleware, so where ``api.forwarded_allow_ips`` trusts the
+    gateway it has already rewritten ``scope["client"]`` from X-Forwarded-For. So
+    this returns the proxy-forwarded address behind a trusted proxy, and the socket
+    peer otherwise - which is the address the audit trail wants either way, because
+    behind a gateway the socket peer is only ever the gateway.
     """
     settings: DFESettings = request.app.state.settings
     if settings.auth.trust_proxy_auth_headers:

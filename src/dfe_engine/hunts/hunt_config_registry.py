@@ -147,8 +147,8 @@ class HuntConfigRegistry:
 
     def _put_raw(
         self, name: str, doc: dict[str, Any], *, created_by: str | None, message: str
-    ) -> tuple[str, WriteOutcome | None]:
-        """Write one hunt doc; returns the save-log destination and the git outcome.
+    ) -> WriteOutcome | None:
+        """Write one hunt doc and log where it landed; returns the git outcome.
 
         Deploy repo: ONE routed commit, and the doc is stored verbatim because the
         runner's spec_loader parses this exact file. Directory backend: plain YAML
@@ -157,7 +157,8 @@ class HuntConfigRegistry:
         """
         if self._deploy is not None:
             outcome = self._deploy.put(name, doc, actor=created_by or "engine")
-            return "deploy repo config/hunts", outcome
+            logger.info(f"Saved hunt config '{name}' → deploy repo config/hunts")
+            return outcome
 
         store = self._require_store()
         yaml_path = self._hunts_directory / f"{name}.yaml"
@@ -167,7 +168,8 @@ class HuntConfigRegistry:
             if store._git_push:
                 store._git_push_remote()
         store._refresh_all()
-        return str(yaml_path), None
+        logger.info(f"Saved hunt config '{name}' → {yaml_path}")
+        return None
 
     def _delete_raw(self, name: str, *, created_by: str | None) -> tuple[bool, WriteOutcome | None]:
         """Remove one hunt doc; False when it did not exist, plus the git outcome."""
@@ -252,9 +254,7 @@ class HuntConfigRegistry:
         if created_by:
             commit_msg = f"{commit_msg} (by {created_by})"
 
-        dest, outcome = self._put_raw(name, payload, created_by=created_by, message=commit_msg)
-        logger.info(f"Saved hunt config '{name}' → {dest}")
-        return outcome
+        return self._put_raw(name, payload, created_by=created_by, message=commit_msg)
 
     def delete(self, name: str, created_by: str | None = None) -> WriteOutcome | None:
         """Remove one hunt config; returns the git routing outcome, None off gitops."""

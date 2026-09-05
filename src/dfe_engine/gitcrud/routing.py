@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
 from scalo.logger import logger
@@ -62,6 +62,35 @@ class WriteOutcome:
     review_required: bool = False
     pr_url: str | None = None
     branch: str | None = None
+
+
+@dataclass
+class ReviewRouting:
+    """Where a MULTI-write run's changes landed, collected across its writes.
+
+    A run that writes several resources gets one outcome per write, so a caller
+    reporting the run as applied has to fold them together -- the run is
+    review-required as soon as ANY of its writes was routed off main.
+    """
+
+    review_required: bool = False
+    branches: list[str] = field(default_factory=list)
+    pr_urls: list[str] = field(default_factory=list)
+
+    def record(self, outcome: WriteOutcome | None) -> None:
+        """Fold one write's outcome in; a direct or off-gitops write adds nothing."""
+        if outcome is None or not outcome.review_required:
+            return
+        self.review_required = True
+        if outcome.branch and outcome.branch not in self.branches:
+            self.branches.append(outcome.branch)
+        if outcome.pr_url and outcome.pr_url not in self.pr_urls:
+            self.pr_urls.append(outcome.pr_url)
+
+    @property
+    def first_pr_url(self) -> str | None:
+        """The PR to send an operator to first; the rest ride on the response body."""
+        return self.pr_urls[0] if self.pr_urls else None
 
 
 def pr_branch_name(rbac_class: str, resource: str, request_id: str) -> str:

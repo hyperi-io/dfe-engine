@@ -123,6 +123,32 @@ def test_a_url_split_across_two_writes_is_still_redacted(logged_debug):
     assert logged_debug == ["Push to http://***@forge.svc/deploy.git successful."]
 
 
+def test_carriage_return_progress_is_split_and_redacted_line_by_line(logged_debug):
+    """Sideband progress overwrites in place with \\r and only ends with \\n.
+
+    Splitting on \\n alone buffered a whole fetch's progress into one blob that was
+    redacted only at EOF, so a credentialed URL inside it sat unredacted meanwhile.
+    """
+    stream = RedactingErrStream()
+    stream.write(
+        b"Fetching http://dfe-admin:s3cr3t@forge.svc/deploy.git\r"
+        b"Counting objects: 5\rCounting objects: 9, done.\n"
+    )
+
+    assert logged_debug == [
+        "Fetching http://***@forge.svc/deploy.git",
+        "Counting objects: 5",
+        "Counting objects: 9, done.",
+    ]
+
+
+def test_a_crlf_line_does_not_log_an_empty_second_line(logged_debug):
+    stream = RedactingErrStream()
+    stream.write(b"Push to http://forge.svc/deploy.git successful.\r\n")
+    stream.close()
+    assert logged_debug == ["Push to http://forge.svc/deploy.git successful."]
+
+
 def test_an_unterminated_line_is_flushed_redacted_on_close(logged_debug):
     stream = RedactingErrStream()
     stream.write(b"Push to http://dfe-admin:s3cr3t@forge.svc/deploy.git")
@@ -200,6 +226,29 @@ def test_reusing_an_existing_clone_rescrubs_the_stored_credentials(tmp_path: Pat
         token=_TOKEN,
     ).ensure()
     assert _TOKEN not in (work / ".git" / "config").read_text(encoding="utf-8")
+
+
+def test_an_empty_token_still_scrubs_the_userinfo_off_disk(tmp_path: Path, git_http_remote):
+    """The scrub guard has to match _authed_url's, which splices on the USERNAME.
+
+    A username with no token still produced ``http://dfe-admin:@host``, and gating
+    the scrub on the token instead left that userinfo in ``.git/config``.
+    """
+    url, branch = git_http_remote
+    work = tmp_path / "work"
+    porcelain.clone(f"http://{_USER}:@{url.removeprefix('http://')}", str(work))
+    assert _USER in (work / ".git" / "config").read_text(encoding="utf-8")
+
+    GitopsRepo(
+        local_path=str(work),
+        repo_url=url,
+        branch=branch,
+        username=_USER,
+        token="",
+    ).ensure()
+    config = (work / ".git" / "config").read_text(encoding="utf-8")
+    assert _USER not in config
+    assert url in config  # the bare URL is still the remote, so fetch/push resolve
 
 
 def test_a_failed_credentialed_push_keeps_the_token_out_of_the_error(tmp_path: Path, capfd):

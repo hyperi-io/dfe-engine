@@ -9,13 +9,18 @@ from dfe_engine.hunts.hunt_config_registry import (
 )
 
 if TYPE_CHECKING:
+    from dfe_engine.gitcrud.routing import WriteOutcome
     from dfe_engine.hunts.alert import AlertDestination, AlertDestinationRegistry
 
 
 def add_destination_to_hunt(
     registry: HuntConfigRegistry, hunt_name: str, destination_name: str
-) -> None:
-    """Append ``destination_name`` to the hunt's ``alerts.destinations`` list (idempotent)."""
+) -> WriteOutcome | None:
+    """Append ``destination_name`` to the hunt's ``alerts.destinations`` list (idempotent).
+
+    Returns the hunt write's git routing outcome: in production+team the link sits
+    on a review branch, so the hunt does not alert that destination until it merges.
+    """
     config = registry.get(hunt_name)
     alerts = config.get("alerts")
     if not isinstance(alerts, dict):
@@ -26,7 +31,7 @@ def add_destination_to_hunt(
         destinations.append(destination_name)
     alerts["destinations"] = destinations
     config["alerts"] = alerts
-    registry.save(hunt_name, config)
+    return registry.save(hunt_name, config)
 
 
 def require_hunt(registry: HuntConfigRegistry, hunt_name: str) -> None:

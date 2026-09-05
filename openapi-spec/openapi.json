@@ -5552,7 +5552,7 @@
           "Alerts"
         ],
         "summary": "Create Destination",
-        "description": "Create an alert destination.",
+        "description": "Create an alert destination.\n\nLinking it to a hunt writes the hunt YAML, so in production+team that link is\nrouted to a review branch and ``X-DFE-Review-Required`` says so.",
         "operationId": "create_destination_api_v1_alerts_destinations_post",
         "requestBody": {
           "required": true,
@@ -5645,7 +5645,7 @@
           "Alerts"
         ],
         "summary": "Update Destination",
-        "description": "Update an alert destination.",
+        "description": "Update an alert destination.\n\nLinking it to a hunt writes the hunt YAML, so in production+team that link is\nrouted to a review branch and ``X-DFE-Review-Required`` says so.",
         "operationId": "update_destination_api_v1_alerts_destinations__name__put",
         "parameters": [
           {
@@ -10647,7 +10647,7 @@
           "sigma"
         ],
         "summary": "Propagate",
-        "description": "Generate sigma-bound DFE rules + hunts from the current selection.\n\nFor each SELECTED sigma rule, converts its detection to a ClickHouse WHERE over\nthe matching source's ``{source}_sigma`` view and stores a DFE rule (with a\n``sigma_rule_id`` back-reference), then binds it into a per-source hunt. Drifted\nor hand-edited bindings are reported ``skipped_drifted`` unless ``force``.\nSubmitted to the task manager; blocks up to ``wait`` seconds for inline\ncompletion, else returns ``pending`` - poll via GET /sigma/propagations/{id}.",
+        "description": "Generate sigma-bound DFE rules + hunts from the current selection.\n\nFor each SELECTED sigma rule, converts its detection to a ClickHouse WHERE over\nthe matching source's ``{source}_sigma`` view and stores a DFE rule (with a\n``sigma_rule_id`` back-reference), then binds it into a per-source hunt. Drifted\nor hand-edited bindings are reported ``skipped_drifted`` unless ``force``.\nSubmitted to the task manager; blocks up to ``wait`` seconds for inline\ncompletion, else returns ``pending`` - poll via GET /sigma/propagations/{id}.\n\nA production+team run commits each generated rule and hunt to its own review\nbranch rather than the branch the hunt runner syncs; the report carries every\nbranch and PR, and ``X-DFE-Review-Required`` says so on a run that completed\ninline.",
         "operationId": "propagate_api_v1_sigma_propagate_post",
         "parameters": [
           {
@@ -10907,7 +10907,7 @@
           "sigma"
         ],
         "summary": "Delete Binding",
-        "description": "Delete a generated binding (removes the rule and unlinks it from its hunt).",
+        "description": "Delete a generated binding (removes the rule and unlinks it from its hunt).\n\nA production+team delete is routed to a review branch, so the runner keeps\ncompiling the binding until that branch is merged; ``X-DFE-Review-Required``\nsays so.",
         "operationId": "delete_binding_api_v1_sigma_bindings__rule_id__delete",
         "parameters": [
           {
@@ -23194,6 +23194,28 @@
             },
             "type": "array",
             "title": "Warnings"
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "description": "A generated rule or hunt was routed to a review branch, not to the branch the hunt runner syncs; nothing here runs until those branches merge",
+            "default": false
+          },
+          "review_branches": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Review Branches",
+            "description": "Review branches the run's writes landed on"
+          },
+          "pr_urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Pr Urls",
+            "description": "Review PRs opened for the run's writes"
           }
         },
         "type": "object",
