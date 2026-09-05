@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.6](https://github.com/hyperi-io/dfe-engine/compare/v1.19.5...v1.19.6) (2026-09-05)
+
+### Bug Fixes
+
+* **api:** trust the configured proxies for forwarded proto, and report the real auth mode ([#291](https://github.com/hyperi-io/dfe-engine/issues/291)) ([2a24070](https://github.com/hyperi-io/dfe-engine/commit/2a24070df6be1a5a304c326a93459a0430665832)), closes [#289](https://github.com/hyperi-io/dfe-engine/issues/289) [#290](https://github.com/hyperi-io/dfe-engine/issues/290)
+
 ## [1.19.5](https://github.com/hyperi-io/dfe-engine/compare/v1.19.4...v1.19.5) (2026-09-04)
 
 ### Bug Fixes
