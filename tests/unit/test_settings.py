@@ -5,7 +5,13 @@ import os
 import pytest
 from pydantic import ValidationError
 
-from dfe_engine.settings import AuthSettings, DFESettings, load_settings, reset_settings
+from dfe_engine.settings import (
+    APISettings,
+    AuthSettings,
+    DFESettings,
+    load_settings,
+    reset_settings,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -250,6 +256,14 @@ class TestEnvOverrides:
         monkeypatch.setenv("DFE_API_CORS_ORIGINS", "http://a.com,http://b.com")
         settings = load_settings()
         assert "http://a.com" in settings.api.cors_origins
+
+    def test_api_forwarded_allow_ips_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_API_FORWARDED_ALLOW_IPS", "10.42.0.0/16")
+        settings = load_settings()
+        assert settings.api.forwarded_allow_ips == "10.42.0.0/16"
+
+    def test_api_forwarded_allow_ips_defaults_to_loopback(self):
+        assert APISettings().forwarded_allow_ips == "127.0.0.1"
 
     def test_api_elastic_converter_max_upload_override(self, monkeypatch):
         monkeypatch.setenv("DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES", "1048576")

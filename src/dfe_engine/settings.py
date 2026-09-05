@@ -1102,6 +1102,7 @@ class APISettings(BaseModel):
     - DFE_API_PORT -> api.port
     - DFE_API_JWT_SECRET -> api.jwt_secret
     - DFE_API_CORS_ORIGINS -> api.cors_origins (comma-separated)
+    - DFE_API_FORWARDED_ALLOW_IPS -> api.forwarded_allow_ips (comma-separated)
     - DFE_API_JWT_EXPIRE_MINUTES -> api.jwt_expire_minutes
     - DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES -> api.elastic_converter_max_upload_bytes
     - DFE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE -> api.elastic_converter_read_chunk_size
@@ -1118,6 +1119,18 @@ class APISettings(BaseModel):
             "http://localhost:3000",
         ],
         description="CORS allowed origins",
+    )
+    forwarded_allow_ips: str = Field(
+        default="127.0.0.1",
+        description=(
+            "Comma-separated peer addresses or CIDR networks whose X-Forwarded-Proto "
+            "and X-Forwarded-For headers are believed, or '*' to believe any peer. "
+            "The scheme the engine builds OIDC redirect URIs from comes from this: "
+            "behind a TLS-terminating gateway the peer is the gateway pod, so unless "
+            "its address is listed here the request reads as http and the IdP is sent "
+            "an http callback URI. Default is the loopback-only value uvicorn ships, "
+            "which fails closed for an engine nothing fronts."
+        ),
     )
     jwt_secret: str = Field(
         default=_DEV_JWT_SECRET,
@@ -1745,6 +1758,8 @@ def _get_env_overrides() -> dict:
         overrides["api"]["session_secret"] = val
     if val := _get_env("DFE_API_CORS_ORIGINS"):
         overrides["api"]["cors_origins"] = [o.strip() for o in val.split(",") if o.strip()]
+    if val := _get_env("DFE_API_FORWARDED_ALLOW_IPS"):
+        overrides["api"]["forwarded_allow_ips"] = val.strip()
     if val := _get_env("DFE_API_JWT_EXPIRE_MINUTES"):
         overrides["api"]["jwt_expire_minutes"] = int(val)
     if val := _get_env("DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES"):

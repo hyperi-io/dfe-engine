@@ -110,6 +110,10 @@ spec:
             - name: DFE_API_CORS_ORIGINS
               value: {{ .Values.config.api.cors_origins | quote }}
             {{- end }}
+            {{- if .Values.config.api.forwarded_allow_ips }}
+            - name: DFE_API_FORWARDED_ALLOW_IPS
+              value: {{ .Values.config.api.forwarded_allow_ips | quote }}
+            {{- end }}
             - name: DFE_API_JWT_SECRET
               valueFrom:
                 secretKeyRef:

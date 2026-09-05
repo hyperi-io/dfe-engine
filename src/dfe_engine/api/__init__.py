@@ -74,12 +74,15 @@ class _DfeEngineApp:
                 # lifespan sets ready on a DIFFERENT manager and the probe reads
                 # an always-unready one.
                 app = create_app(settings=settings, health_manager=self.health())
+                # proxy_headers off here: create_app installs the same middleware
+                # keyed on api.forwarded_allow_ips, so trust is decided once.
                 server = uvicorn.Server(
                     uvicorn.Config(
                         app,
                         host=settings.api.host,
                         port=settings.api.port,
                         log_level="info",
+                        proxy_headers=False,
                     )
                 )
                 await server.serve()
