@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.7](https://github.com/hyperi-io/dfe-engine/compare/v1.19.6...v1.19.7) (2026-09-05)
+
+### Bug Fixes
+
+* **sigma:** propagation and alert links report review-required instead of claiming success ([#293](https://github.com/hyperi-io/dfe-engine/issues/293)) ([bac1cdd](https://github.com/hyperi-io/dfe-engine/commit/bac1cddad81c3eac12d82ce8284be162c0ffe59e)), closes [#287](https://github.com/hyperi-io/dfe-engine/issues/287)
+
 ## [1.19.6](https://github.com/hyperi-io/dfe-engine/compare/v1.19.5...v1.19.6) (2026-09-05)
 
 ### Bug Fixes
