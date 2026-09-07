@@ -44,9 +44,10 @@ from dfe_engine.schema.schema_ddl import TableSpec
 
 @dataclass(frozen=True)
 class CoreSchemaTargets:
-    """Where the core schema lands: the DFE database and the landing profile."""
+    """Where the core schema lands: the DFE database, landing table and profile."""
 
     database: str
+    landing_table: str = "default"
     profile: str = "timeseries"
 
     @classmethod
@@ -63,6 +64,7 @@ class CoreSchemaTargets:
         """
         return cls(
             database=ch.effective_data_database,
+            landing_table=ch.landing_table,
             profile=ch.default_table_profile,
         )
 
@@ -75,7 +77,9 @@ def core_table_specs(
     The data tables lead: an operator reading the log wants the landing table
     confirmed first, and the coordination tables are useless without it.
     """
-    writer = DDLFileWriter(resolver=resolver, database=targets.database)
+    writer = DDLFileWriter(
+        resolver=resolver, database=targets.database, landing_table=targets.landing_table
+    )
     return [
         writer.default_table_spec(profile_name=targets.profile),
         writer.detection_table_spec(profile_name=targets.profile),

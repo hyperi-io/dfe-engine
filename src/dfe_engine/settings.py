@@ -218,7 +218,7 @@ class ClickHouseSettings(BaseModel):
     )
     landing_table: str = Field(
         default="default",
-        description="Catch-all table where un-split source data lands (db.landing_table)",
+        description="Catch-all table where un-split source data lands (DFE_CLICKHOUSE_LANDING_TABLE)",
     )
     default_table_profile: str = Field(
         default="timeseries",

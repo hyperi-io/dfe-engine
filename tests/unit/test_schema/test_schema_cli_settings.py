@@ -25,7 +25,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from dfe_engine.schema.core_schema import CoreSchemaTargets
+from dfe_engine.schema.core_schema import CoreSchemaTargets, core_table_specs
 from dfe_engine.settings import (
     ClickHouseSettings,
     load_clickhouse_settings,
@@ -83,6 +83,16 @@ def test_targets_read_the_same_values_from_either_shape():
         clickhouse = ch
 
     assert CoreSchemaTargets.from_clickhouse(ch) == CoreSchemaTargets.from_settings(_Wrapper())
+
+
+def test_the_landing_table_setting_reaches_the_bootstrapped_table(monkeypatch):
+    """The bootstrap creates the table the query paths read, not a hardcoded name."""
+    monkeypatch.setenv("DFE_CLICKHOUSE_LANDING_TABLE", "parked")
+
+    targets = CoreSchemaTargets.from_clickhouse(load_clickhouse_settings())
+
+    assert targets.landing_table == "parked"
+    assert core_table_specs(targets)[0].name == "parked"
 
 
 def test_the_schema_cli_does_not_import_the_full_settings_loader():
