@@ -442,9 +442,53 @@ On first startup (empty `config/auth/` directory), `bootstrap_auth()` seeds:
 - `dfe-viewers` → roles: `[data_viewer]`
 - `dfe-infra` → roles: `[infra_admin]`
 
-**Account:** username `admin`, password `changeme`, group `dfe-admins` - password gets reset in the app setup flow.
+**Accounts:** `admin` and `breakglass`, both in `dfe-admins`. See 3.5.
 
-Startup logs a warning if the default password is still in use.
+---
+
+### 3.5 First Login: the two seeded accounts
+
+The deploy mints the credentials, the engine refuses defaults, the UI never holds
+a password.
+
+**`admin`** takes its password from `DFE_AUTH_LOCAL_ADMIN_PASSWORD`, filled by
+the deployment's own secret store, and goes through the same reconcile path as
+the named seed accounts: password and groups reasserted from config on every
+boot. A password changed only in the store is reverted at the next start.
+
+**`breakglass`** is the recovery admin, verified against a bcrypt hash committed
+at `governance/settings/auth.yaml` in the deploy repo, so it survives losing the
+engine, the UI and the secret store:
+
+```yaml
+breakglass:
+  password_hash: $2b$12$...   # minted once, never the plaintext
+  enabled: true               # false locks the account out
+```
+
+`DFE_AUTH_BREAKGLASS_PASSWORD` mints that hash on the first boot with none
+committed and is ignored afterwards. Gitops off means no hash and no break-glass
+account. Every attempt is audit-logged (`auth.breakglass.login`); with
+`enabled: false` the login returns 403 naming the setting.
+
+**No `changeme` outside dev.** The engine refuses to start on an unset or default
+admin password unless `DFE_ENV` is a dev posture -- the predicate gitops
+auto-merge gates on (`settings.is_dev_posture`), and the error names the variable
+and the fix. A dev posture running the default reports `default_credentials:
+true` on `GET /auth/setup-status` and on the `POST /auth/login` response, for the
+UI to banner and force a change.
+
+**Reading the minted password.** setup-status carries `deploy_kind` (`docker` |
+`kubernetes` | `local`, from `DFE_DEPLOYMENT_TARGET` else scalo's runtime
+detection) and, while setup is incomplete, `credential_fetch_command`: `make
+creds` for docker, `kubectl -n <ns> get secret <name> -o
+jsonpath='{.data.<key>}' | base64 -d` for kubernetes, the environment file for
+local.
+
+**Rotation.** `POST /auth/accounts/{admin}/rotate-password` writes through the
+scalo secrets seam when `DFE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH` is set, else
+returns 501 with `context.store_command`. The engine never writes the password
+into its own YAML store.
 
 ---
 

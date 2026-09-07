@@ -18,6 +18,10 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+# These apps run the production posture, which refuses to start on the shipped
+# admin password, so each injects one the way a deployment's secret store does.
+ADMIN_PASSWORD = "test-admin-pw"
+
 
 @pytest.fixture
 def discovery_client(app, client: TestClient) -> TestClient:
@@ -131,6 +135,7 @@ class TestSchemasRouter:
             APISettings,
             AuthSettings,
             DFESettings,
+            LocalAuthSettings,
             SchemasSettings,
             ServicesSettings,
             SourceSettings,
@@ -189,7 +194,11 @@ class TestSchemasRouter:
             schemas=SchemasSettings(schemas_dir=str(schemas_root)),
             source=SourceSettings(sources_dir=str(sources_dir)),
             services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
-            auth=AuthSettings(enabled=True, auth_dir=str(tmp_path / "auth")),
+            auth=AuthSettings(
+                enabled=True,
+                auth_dir=str(tmp_path / "auth"),
+                local=LocalAuthSettings(admin_password=ADMIN_PASSWORD),
+            ),
             api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-deploy"),
         )
         app = create_app(settings)
@@ -221,6 +230,7 @@ class TestSchemasRouter:
             APISettings,
             AuthSettings,
             DFESettings,
+            LocalAuthSettings,
             SchemasSettings,
             ServicesSettings,
             SourceSettings,
@@ -295,7 +305,11 @@ class TestSchemasRouter:
                 deploys_dir=str(deploys_dir),
             ),
             services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
-            auth=AuthSettings(enabled=True, auth_dir=str(tmp_path / "auth")),
+            auth=AuthSettings(
+                enabled=True,
+                auth_dir=str(tmp_path / "auth"),
+                local=LocalAuthSettings(admin_password=ADMIN_PASSWORD),
+            ),
             api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-deploy2"),
         )
         app = create_app(settings)
@@ -359,6 +373,7 @@ class TestSchemasRouter:
             APISettings,
             AuthSettings,
             DFESettings,
+            LocalAuthSettings,
             SchemasSettings,
             ServicesSettings,
             SourceSettings,
@@ -427,7 +442,11 @@ class TestSchemasRouter:
             schemas=SchemasSettings(schemas_dir=str(schemas_root)),
             source=SourceSettings(sources_dir=str(sources_dir)),
             services=ServicesSettings(config_yaml_dir=str(services_dir)),
-            auth=AuthSettings(enabled=True, auth_dir=str(auth_dir)),
+            auth=AuthSettings(
+                enabled=True,
+                auth_dir=str(auth_dir),
+                local=LocalAuthSettings(admin_password=ADMIN_PASSWORD),
+            ),
             api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-source-columns"),
         )
         app = create_app(settings)
@@ -490,6 +509,7 @@ class TestSchemasRouter:
             APISettings,
             AuthSettings,
             DFESettings,
+            LocalAuthSettings,
             SchemasSettings,
             ServicesSettings,
             SourceSettings,
@@ -558,7 +578,11 @@ class TestSchemasRouter:
             schemas=SchemasSettings(schemas_dir=str(schemas_root)),
             source=SourceSettings(sources_dir=str(sources_dir)),
             services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
-            auth=AuthSettings(enabled=True, auth_dir=str(tmp_path / "auth")),
+            auth=AuthSettings(
+                enabled=True,
+                auth_dir=str(tmp_path / "auth"),
+                local=LocalAuthSettings(admin_password=ADMIN_PASSWORD),
+            ),
             api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-plan"),
         )
         (tmp_path / "services").mkdir()
@@ -611,6 +635,7 @@ class TestSchemasMetaListRouter:
             APISettings,
             AuthSettings,
             DFESettings,
+            LocalAuthSettings,
             SchemasSettings,
             ServicesSettings,
             SourceSettings,
@@ -628,7 +653,11 @@ class TestSchemasMetaListRouter:
             schemas=SchemasSettings(schemas_dir=""),
             source=SourceSettings(sources_dir=str(sources_dir)),
             services=ServicesSettings(config_yaml_dir=str(services_dir)),
-            auth=AuthSettings(enabled=True, auth_dir=str(auth_dir)),
+            auth=AuthSettings(
+                enabled=True,
+                auth_dir=str(auth_dir),
+                local=LocalAuthSettings(admin_password=ADMIN_PASSWORD),
+            ),
             api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-schemas"),
         )
         app = create_app(settings)
@@ -658,6 +687,7 @@ class TestSchemasMetaListRouter:
             APISettings,
             AuthSettings,
             DFESettings,
+            LocalAuthSettings,
             SchemasSettings,
             ServicesSettings,
             SourceSettings,
@@ -695,7 +725,11 @@ class TestSchemasMetaListRouter:
             schemas=SchemasSettings(schemas_dir=str(schemas_root)),
             source=SourceSettings(sources_dir=str(sources_dir)),
             services=ServicesSettings(config_yaml_dir=str(services_dir)),
-            auth=AuthSettings(enabled=True, auth_dir=str(auth_dir)),
+            auth=AuthSettings(
+                enabled=True,
+                auth_dir=str(auth_dir),
+                local=LocalAuthSettings(admin_password=ADMIN_PASSWORD),
+            ),
             api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-schemas"),
         )
         app = create_app(settings)
@@ -725,6 +759,7 @@ class TestSchemasMetaListRouter:
             APISettings,
             AuthSettings,
             DFESettings,
+            LocalAuthSettings,
             SchemasSettings,
             ServicesSettings,
             SourceSettings,
@@ -768,7 +803,11 @@ class TestSchemasMetaListRouter:
             schemas=SchemasSettings(schemas_dir=str(schemas_root)),
             source=SourceSettings(sources_dir=str(sources_dir)),
             services=ServicesSettings(config_yaml_dir=str(services_dir)),
-            auth=AuthSettings(enabled=True, auth_dir=str(auth_dir)),
+            auth=AuthSettings(
+                enabled=True,
+                auth_dir=str(auth_dir),
+                local=LocalAuthSettings(admin_password=ADMIN_PASSWORD),
+            ),
             api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-schemas"),
         )
         app = create_app(settings)
@@ -819,6 +858,7 @@ class TestSchemasMetaListRouter:
             APISettings,
             AuthSettings,
             DFESettings,
+            LocalAuthSettings,
             SchemasSettings,
             ServicesSettings,
             SourceSettings,
@@ -864,7 +904,11 @@ class TestSchemasMetaListRouter:
             schemas=SchemasSettings(schemas_dir=str(schemas_root)),
             source=SourceSettings(sources_dir=str(sources_dir)),
             services=ServicesSettings(config_yaml_dir=str(services_dir)),
-            auth=AuthSettings(enabled=True, auth_dir=str(auth_dir)),
+            auth=AuthSettings(
+                enabled=True,
+                auth_dir=str(auth_dir),
+                local=LocalAuthSettings(admin_password=ADMIN_PASSWORD),
+            ),
             api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-schemas"),
         )
         app = create_app(settings)
@@ -985,6 +1029,7 @@ class TestSchemasMetaWriteRouter:
             APISettings,
             AuthSettings,
             DFESettings,
+            LocalAuthSettings,
             SchemasSettings,
             ServicesSettings,
             SourceSettings,
@@ -1004,7 +1049,11 @@ class TestSchemasMetaWriteRouter:
             schemas=SchemasSettings(schemas_dir=str(schemas_root)),
             source=SourceSettings(sources_dir=str(sources_dir)),
             services=ServicesSettings(config_yaml_dir=str(services_dir)),
-            auth=AuthSettings(enabled=True, auth_dir=str(auth_dir)),
+            auth=AuthSettings(
+                enabled=True,
+                auth_dir=str(auth_dir),
+                local=LocalAuthSettings(admin_password=ADMIN_PASSWORD),
+            ),
             api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-schemas-write"),
         )
         app = create_app(settings)
@@ -1108,6 +1157,7 @@ class TestSchemasMetaWriteRouter:
             APISettings,
             AuthSettings,
             DFESettings,
+            LocalAuthSettings,
             SchemasSettings,
             ServicesSettings,
             SourceSettings,
@@ -1123,7 +1173,11 @@ class TestSchemasMetaWriteRouter:
             schemas=SchemasSettings(schemas_dir=str(schemas_root)),
             source=SourceSettings(sources_dir=str(tmp_path / "sources")),
             services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
-            auth=AuthSettings(enabled=True, auth_dir=str(tmp_path / "auth")),
+            auth=AuthSettings(
+                enabled=True,
+                auth_dir=str(tmp_path / "auth"),
+                local=LocalAuthSettings(admin_password=ADMIN_PASSWORD),
+            ),
             api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-schemas-write"),
         )
         app = create_app(settings)
@@ -1179,6 +1233,7 @@ class TestSchemasMetaWriteRouter:
             APISettings,
             AuthSettings,
             DFESettings,
+            LocalAuthSettings,
             SchemasSettings,
             ServicesSettings,
             SourceSettings,
@@ -1194,7 +1249,11 @@ class TestSchemasMetaWriteRouter:
             schemas=SchemasSettings(schemas_dir=str(schemas_root)),
             source=SourceSettings(sources_dir=str(tmp_path / "sources")),
             services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
-            auth=AuthSettings(enabled=True, auth_dir=str(tmp_path / "auth")),
+            auth=AuthSettings(
+                enabled=True,
+                auth_dir=str(tmp_path / "auth"),
+                local=LocalAuthSettings(admin_password=ADMIN_PASSWORD),
+            ),
             api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-schemas-write"),
         )
         app = create_app(settings)
@@ -1232,6 +1291,7 @@ class TestSchemasMetaWriteRouter:
             APISettings,
             AuthSettings,
             DFESettings,
+            LocalAuthSettings,
             SchemasSettings,
             ServicesSettings,
             SourceSettings,
@@ -1272,7 +1332,11 @@ class TestSchemasMetaWriteRouter:
             schemas=SchemasSettings(schemas_dir=str(schemas_root)),
             source=SourceSettings(sources_dir=str(tmp_path / "sources")),
             services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
-            auth=AuthSettings(enabled=True, auth_dir=str(tmp_path / "auth")),
+            auth=AuthSettings(
+                enabled=True,
+                auth_dir=str(tmp_path / "auth"),
+                local=LocalAuthSettings(admin_password=ADMIN_PASSWORD),
+            ),
             api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-schemas-patch"),
         )
         app = create_app(settings)
@@ -1354,6 +1418,7 @@ class TestSchemasMetaWriteRouter:
             APISettings,
             AuthSettings,
             DFESettings,
+            LocalAuthSettings,
             SchemasSettings,
             ServicesSettings,
             SourceSettings,
@@ -1416,7 +1481,11 @@ class TestSchemasMetaWriteRouter:
             schemas=SchemasSettings(schemas_dir=str(schemas_root)),
             source=SourceSettings(sources_dir=str(tmp_path / "sources")),
             services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
-            auth=AuthSettings(enabled=True, auth_dir=str(tmp_path / "auth")),
+            auth=AuthSettings(
+                enabled=True,
+                auth_dir=str(tmp_path / "auth"),
+                local=LocalAuthSettings(admin_password=ADMIN_PASSWORD),
+            ),
             api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-schemas-delver"),
         )
         app = create_app(settings)

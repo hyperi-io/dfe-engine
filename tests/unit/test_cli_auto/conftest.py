@@ -29,9 +29,13 @@ from dfe_engine.settings import (
     AuthSettings,
     DFESettings,
     HuntsSettings,
+    LocalAuthSettings,
     ServicesSettings,
     SourceSettings,
 )
+
+# The admin password these fixtures inject, as a deployment's secret store would.
+ADMIN_PASSWORD = "test-admin-pw"
 
 
 @pytest.fixture
@@ -43,7 +47,12 @@ def api_settings(tmp_path: Path) -> DFESettings:
         source=SourceSettings(sources_dir=str(tmp_path / "sources")),
         services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
         hunts=HuntsSettings(rules_dir=str(tmp_path / "rules"), hunt_dir=str(tmp_path / "hunts")),
-        auth=AuthSettings(enabled=True, auth_dir=str(tmp_path / "auth")),
+        auth=AuthSettings(
+            enabled=True,
+            auth_dir=str(tmp_path / "auth"),
+            # Production posture refuses to start on the shipped admin password.
+            local=LocalAuthSettings(admin_password=ADMIN_PASSWORD),
+        ),
         api=APISettings(
             jwt_secret="test-secret-key-for-unit-tests-hmac32",
             jwt_expire_minutes=30,
