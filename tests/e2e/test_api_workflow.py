@@ -22,6 +22,7 @@ Covers:
 
 from __future__ import annotations
 
+import secrets
 import time
 from pathlib import Path
 
@@ -39,6 +40,10 @@ from dfe_engine.settings import (
     ServicesSettings,
     SourceSettings,
 )
+
+# Generated, then injected through settings the way a deployment's secret store
+# does -- nothing here carries a hardcoded password.
+E2E_ADMIN_PASSWORD = secrets.token_urlsafe(24)
 
 
 @pytest.fixture
@@ -75,7 +80,7 @@ ingestion_pipelines: {{}}
             enabled=True,
             auth_dir=str(auth_dir),
             # Production posture refuses to start on the shipped admin password.
-            local=LocalAuthSettings(admin_password="e2e-admin-password"),
+            local=LocalAuthSettings(admin_password=E2E_ADMIN_PASSWORD),
         ),
         api=APISettings(
             jwt_secret="e2e-test-secret-key-32-chars-long!",
@@ -90,7 +95,7 @@ def e2e_client(e2e_settings: DFESettings):
     app = create_app(settings=e2e_settings)
     with TestClient(app, raise_server_exceptions=False) as client:
         # Reset admin password to known value
-        app.state.account_store.reset_password("admin", "e2e-admin-pw")
+        app.state.account_store.reset_password("admin", E2E_ADMIN_PASSWORD)
         yield client
     _registries.clear()
 
@@ -101,7 +106,7 @@ class TestAuthWorkflow:
     def test_login_returns_jwt(self, e2e_client):
         resp = e2e_client.post(
             "/api/v1/auth/login",
-            json={"username": "admin", "password": "e2e-admin-pw"},
+            json={"username": "admin", "password": E2E_ADMIN_PASSWORD},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -112,7 +117,7 @@ class TestAuthWorkflow:
         # Login
         login = e2e_client.post(
             "/api/v1/auth/login",
-            json={"username": "admin", "password": "e2e-admin-pw"},
+            json={"username": "admin", "password": E2E_ADMIN_PASSWORD},
         )
         token = login.json()["access_token"]
 
@@ -151,7 +156,7 @@ class TestSourceCRUDWorkflow:
     def _login(self, client) -> dict[str, str]:
         resp = client.post(
             "/api/v1/auth/login",
-            json={"username": "admin", "password": "e2e-admin-pw"},
+            json={"username": "admin", "password": E2E_ADMIN_PASSWORD},
         )
         return {"Authorization": f"Bearer {resp.json()['access_token']}"}
 
@@ -223,7 +228,7 @@ class TestAccountGroupWorkflow:
     def _login(self, client) -> dict[str, str]:
         resp = client.post(
             "/api/v1/auth/login",
-            json={"username": "admin", "password": "e2e-admin-pw"},
+            json={"username": "admin", "password": E2E_ADMIN_PASSWORD},
         )
         return {"Authorization": f"Bearer {resp.json()['access_token']}"}
 
@@ -271,7 +276,7 @@ class TestTaskManagerWorkflow:
     def _login(self, client) -> dict[str, str]:
         resp = client.post(
             "/api/v1/auth/login",
-            json={"username": "admin", "password": "e2e-admin-pw"},
+            json={"username": "admin", "password": E2E_ADMIN_PASSWORD},
         )
         return {"Authorization": f"Bearer {resp.json()['access_token']}"}
 
@@ -321,7 +326,7 @@ class TestCrossRouterConsistency:
     def _login(self, client) -> dict[str, str]:
         resp = client.post(
             "/api/v1/auth/login",
-            json={"username": "admin", "password": "e2e-admin-pw"},
+            json={"username": "admin", "password": E2E_ADMIN_PASSWORD},
         )
         return {"Authorization": f"Bearer {resp.json()['access_token']}"}
 
