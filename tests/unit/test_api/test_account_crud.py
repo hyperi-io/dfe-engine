@@ -223,6 +223,59 @@ class TestResetPassword:
         assert resp.status_code == 403
 
 
+class TestRotatePassword:
+    """POST /api/v1/auth/accounts/{username}/rotate-password"""
+
+    def test_unwired_secrets_seam_returns_501_with_the_store_command(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/auth/accounts/admin/rotate-password",
+            json={"new_password": "a-newly-minted-admin-password"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 501
+        body = resp.json()
+        assert body["code"] == "secrets_seam_not_wired"
+        # The wording varies with the detected deploy kind; that it names a store
+        # operation rather than an engine one is what matters here.
+        assert body["context"]["store_command"]
+
+    def test_a_wired_seam_writes_the_password_to_the_store(self, app, client, admin_headers):
+        from dfe_engine.secrets import build_secrets
+
+        settings = app.state.settings
+        settings.auth.local.admin_password_secret_path = "auth/admin-password"
+
+        resp = client.post(
+            "/api/v1/auth/accounts/admin/rotate-password",
+            json={"new_password": "a-newly-minted-admin-password"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["secret_path"] == "auth/admin-password"
+        stored = build_secrets(settings.secrets).get("auth/admin-password")
+        assert stored == "a-newly-minted-admin-password"
+
+    def test_a_regular_account_is_not_store_backed(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/auth/accounts/viewer/rotate-password",
+            json={"new_password": "a-newly-minted-password"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 400
+        assert resp.json()["code"] == "not_store_backed"
+
+    def test_rotate_requires_admin(self, client, viewer_headers):
+        resp = client.post(
+            "/api/v1/auth/accounts/admin/rotate-password",
+            json={"new_password": "a-newly-minted-password"},
+            headers=viewer_headers,
+        )
+        assert resp.status_code == 403
+
+
 class TestDeleteAccount:
     """DELETE /api/v1/auth/accounts/{username}"""
 

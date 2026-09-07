@@ -19,11 +19,15 @@ from dfe_engine.settings import (
     ClickHouseSettings,
     DFESettings,
     HuntsSettings,
+    LocalAuthSettings,
     SchemasSettings,
     SecretsSettings,
     ServicesSettings,
     SourceSettings,
 )
+
+# The admin password these fixtures inject, as a deployment's secret store would.
+ADMIN_PASSWORD = "test-admin-pw"
 
 
 @pytest.fixture
@@ -61,6 +65,9 @@ def api_settings(tmp_path: Path) -> DFESettings:
             # Simulate the Envoy-fronted production deployment: trust the
             # X-Oidc-* identity headers (auth Path 1). Production default is off.
             trust_proxy_auth_headers=True,
+            # These fixtures run the production posture, which refuses to start on
+            # the shipped admin password -- so inject one, as a deployment does.
+            local=LocalAuthSettings(admin_password=ADMIN_PASSWORD),
         ),
         secrets=SecretsSettings(provider="file", path=str(secrets_dir)),
         api=APISettings(
@@ -99,7 +106,7 @@ def client(app, api_settings: DFESettings) -> TestClient:
         group_store = app.state.group_store
 
         # Reset admin password to test password
-        account_store.reset_password("admin", "test-admin-pw")
+        account_store.reset_password("admin", ADMIN_PASSWORD)
 
         # Create operator account (data_analyst + infra_admin)
         if account_store.get("operator") is None:

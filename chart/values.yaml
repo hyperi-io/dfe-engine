@@ -183,13 +183,33 @@ security:
   # runtime write to DFE_SECRETS_PATH fails. Off by default (deploy-specific).
   readOnlyRootFilesystem: false
 
-# -- Local auth account passwords (admin / operator / viewer)
+# -- Local auth account passwords (admin / operator / viewer).
+# The deploy MINTS the admin password; the engine reads it from this Secret,
+# reasserts it on every boot, and REFUSES TO START when it is unset or "changeme"
+# unless `env` is a dev posture (dev/development/local/test/ci). Point
+# admin.existingSecret at the Secret your ESO Password generator fills.
 auth:
   admin:
     existingSecret: ""
     secretKeys:
       password: admin-password
     password: "changeme"
+    # -- scalo.secrets path this deployment sources the admin password from.
+    # Set it and POST /auth/accounts/admin/rotate-password writes the new password
+    # through the secrets seam; empty and that endpoint returns 501 with the
+    # kubectl command to patch the Secret yourself.
+    secretPath: ""
+  # -- Break-glass recovery admin (username `breakglass`, role admin), verified
+  # against a bcrypt hash committed in the deploy repo at
+  # governance/settings/auth.yaml (breakglass.password_hash), so it survives a
+  # total loss of the engine and the UI. This password is MINTED ONCE: on the
+  # first boot with no committed hash it is hashed and committed, and ignored
+  # from then on. Leave existingSecret empty to run without a break-glass account.
+  # Turn the account off with breakglass.enabled: false in that same governance file.
+  breakglass:
+    existingSecret: ""
+    secretKeys:
+      password: breakglass-password
   operator:
     existingSecret: ""
     secretKeys:

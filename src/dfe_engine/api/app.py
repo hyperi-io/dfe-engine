@@ -136,6 +136,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
         injected_group_store = DocuStoreGroupStore(doc_store)
 
+    # Refuse to start on the shipped admin password outside a dev posture.
+    from dfe_engine.auth.bootstrap import require_admin_password
+
+    app.state.default_credentials = require_admin_password(
+        settings.auth.local.admin_password, settings.env
+    )
+
     account_store, group_store, api_key_store, role_store, role_config = bootstrap_auth(
         auth_dir,
         default_admin_password=settings.auth.local.admin_password,
@@ -144,6 +151,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         group_store=injected_group_store,
         gitcrud=gitcrud,
         seed_accounts=settings.auth.local.seed_accounts,
+        breakglass_password=settings.auth.local.breakglass_password,
     )
     app.state.account_store = account_store
     app.state.group_store = group_store

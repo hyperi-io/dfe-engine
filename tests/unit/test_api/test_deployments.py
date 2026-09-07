@@ -15,6 +15,7 @@ def app_with_deployments(tmp_path):
         DeploymentSettings,
         DFESettings,
         HuntsSettings,
+        LocalAuthSettings,
         ServicesSettings,
         SourceSettings,
     )
@@ -31,6 +32,8 @@ def app_with_deployments(tmp_path):
         auth=AuthSettings(
             enabled=True,
             auth_dir=str(tmp_path / "auth"),
+            # Production posture refuses to start on the shipped admin password.
+            local=LocalAuthSettings(admin_password="test-admin-pw"),
         ),
         api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes"),
     )

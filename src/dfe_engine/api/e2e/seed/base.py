@@ -133,6 +133,15 @@ class Seed:
             raise RuntimeError("this e2e seed needs the engine settings, which were not passed")
         return self._settings
 
+    def _set_configured_admin_password(self, password: str) -> None:
+        """Point the injected admin password at *password*, when settings are present.
+
+        The admin is reconciled from config on every boot, so a seeded password that
+        only reached the store is reverted at the next start.
+        """
+        if self._settings is not None:
+            self._settings.auth.local.admin_password = password
+
     def seed_static(self, script: str) -> bool:
         """Dispatch *script* to child seeders. Returns False when unknown."""
         if script == "seed_dfe_admin_user":
@@ -162,7 +171,7 @@ class Seed:
             # - Seed the initial user
             # ------------------------------------------------------------
 
-            # Resets admin account password (setup steps check if admin password is same as env provided/default)
+            self._set_configured_admin_password(_SETUP_ADMIN_PASSWORD)
             admin = self.accounts.seed_dfe_admin_user("admin", password=_SETUP_ADMIN_PASSWORD)
             initial_user = self.accounts.seed_initial_user()
             organisation = self.organisations.seed_organisation()
@@ -228,7 +237,9 @@ class Seed:
             # backing-service count raised by one spec is still raised for the next.
             self.apps.delete_run_state()
 
-            # Re-add the break-glass admin account
+            # Back to a fresh deployment: the local admin on the shipped default,
+            # in the store and in the config the boot reconcile reads.
+            self._set_configured_admin_password("")
             self.accounts.reset_break_glass_admin()
             logger.info("e2e seed", script=script)
             return True

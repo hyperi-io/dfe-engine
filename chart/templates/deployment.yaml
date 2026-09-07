@@ -129,6 +129,35 @@ spec:
               value: {{ .Values.config.auth.local.enabled | quote }}
             - name: DFE_AUTH_LOCAL_ORG_ID
               value: {{ .Values.config.auth.local.org_id | quote }}
+            # The minted admin password. The engine reasserts it on every boot and
+            # refuses to start on "changeme" unless env is a dev posture.
+            - name: DFE_AUTH_LOCAL_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dfe-engine.authSecretName" . }}
+                  key: {{ .Values.auth.admin.secretKeys.password }}
+            # Names the secret in the credential-fetch command the login page shows.
+            - name: DFE_AUTH_LOCAL_ADMIN_SECRET_NAME
+              value: {{ include "dfe-engine.authSecretName" . | quote }}
+            - name: DFE_AUTH_LOCAL_ADMIN_SECRET_KEY
+              value: {{ .Values.auth.admin.secretKeys.password | quote }}
+            - name: DFE_DEPLOYMENT_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            {{- if .Values.auth.breakglass.existingSecret }}
+            # First-boot break-glass password: hashed into the deploy repo once, then ignored.
+            - name: DFE_AUTH_BREAKGLASS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.breakglass.existingSecret }}
+                  key: {{ .Values.auth.breakglass.secretKeys.password }}
+            {{- end }}
+            {{- with .Values.auth.admin.secretPath }}
+            # Set = the rotate-password endpoint writes through the scalo secrets seam.
+            - name: DFE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH
+              value: {{ . | quote }}
+            {{- end }}
             - name: DFE_AUTH_LOCAL_OPERATOR_PASSWORD
               valueFrom:
                 secretKeyRef:

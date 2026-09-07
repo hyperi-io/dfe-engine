@@ -9,7 +9,7 @@ GET  /api/v1/auth/setup-status    → Initial setup required? (public, pre-login
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import (
@@ -22,7 +22,12 @@ from dfe_engine.api.deps import (
     resolve_live_groups_for_user,
     resolve_live_roles_for_user,
 )
-from dfe_engine.auth.audit import audit_login_denied, audit_login_success
+from dfe_engine.auth import breakglass
+from dfe_engine.auth.audit import (
+    audit_breakglass_login,
+    audit_login_denied,
+    audit_login_success,
+)
 from dfe_engine.auth.local_provider import LocalAuthProvider
 from dfe_engine.auth.models import AuthenticationError
 from dfe_engine.auth.setup_status import SetupStatus, evaluate_initial_setup
@@ -44,6 +49,11 @@ class TokenResponse(BaseModel):
     expires_in: int = Field(description="Token lifetime in seconds")
     user_id: str = Field(description="Authenticated user ID")
     roles: list[str] = Field(description="User roles")
+    default_credentials: bool = Field(
+        default=False,
+        description="True when this session is running on the shipped default admin "
+        "password. Only reachable in a dev posture; the UI banners and forces a change.",
+    )
 
 
 class UserResponse(BaseModel):
@@ -72,6 +82,25 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
     """Authenticate with local credentials and receive a JWT token."""
     provider: LocalAuthProvider = request.app.state.auth_provider
     client_ip = _get_client_ip(request)
+
+    # The break-glass account bypasses the IdP, so every attempt is audited and the
+    # governance switch is consulted before the password is even checked.
+    if body.username == breakglass.USERNAME:
+        gc = getattr(request.app.state, "gitcrud", None)
+        allowed = breakglass.is_enabled(gc)
+        audit_breakglass_login(client_ip, allowed, "" if allowed else "disabled")
+        if not allowed:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "breakglass_disabled",
+                    "message": (
+                        "The break-glass account is disabled in governance settings "
+                        f"({breakglass.CLASS}/{breakglass.NAME}, {breakglass.KEY_ENABLED}). "
+                        "Re-enable it there to use it."
+                    ),
+                },
+            )
 
     try:
         auth_ctx = provider.authenticate(
@@ -107,6 +136,7 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
         expires_in=settings.api.jwt_expire_minutes * 60,
         user_id=auth_ctx.user_id,
         roles=auth_ctx.roles,
+        default_credentials=getattr(request.app.state, "default_credentials", False),
     )
 
 
@@ -132,6 +162,7 @@ async def refresh_token(user: CurrentUser, request: Request, settings: Settings)
         expires_in=settings.api.jwt_expire_minutes * 60,
         user_id=user.user_id,
         roles=roles,
+        default_credentials=getattr(request.app.state, "default_credentials", False),
     )
 
 

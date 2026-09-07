@@ -27,6 +27,9 @@ from dfe_engine.state_machines.setup import (
     SetupContext,
 )
 
+# A password a deployment minted, as opposed to the shipped default.
+MINTED_ADMIN_PASSWORD = "a-minted-admin-password"
+
 
 @pytest.fixture
 def ctx(tmp_path: Path, monkeypatch) -> SetupContext:
@@ -37,6 +40,17 @@ def ctx(tmp_path: Path, monkeypatch) -> SetupContext:
         account_store=accounts,
         org_registry=OrgRegistry(tmp_path / "orgs"),
         oidc_registry=OIDCProviderRegistry(tmp_path / "oidc"),
+    )
+
+
+def _minted(ctx: SetupContext, **overrides) -> SetupContext:
+    """The same deployment, with the admin password minted rather than defaulted."""
+    return SetupContext(
+        account_store=ctx.account_store,
+        org_registry=ctx.org_registry,
+        oidc_registry=ctx.oidc_registry,
+        bootstrap_admin_password=MINTED_ADMIN_PASSWORD,
+        **overrides,
     )
 
 
@@ -52,9 +66,8 @@ def test_fresh_deployment_lands_on_the_first_required_step(ctx):
 def test_optional_oidc_never_blocks_completion(ctx):
     ctx.org_registry.create("acme")
     ctx.account_store.create("alice", "a-strong-user-password")
-    ctx.account_store.reset_password("admin", "a-strong-local-admin-password")
 
-    state = SETUP_MACHINE.evaluate(ctx)
+    state = SETUP_MACHINE.evaluate(_minted(ctx))
 
     assert state.complete is True
     assert state.current_step is None
@@ -122,31 +135,37 @@ def test_external_account_counts_as_the_first_user(ctx):
     assert STEP_FIRST_USER in SETUP_MACHINE.evaluate(ctx).completed_steps
 
 
-def test_admin_password_step_clears_only_after_rotation(ctx):
+def test_admin_password_step_clears_once_the_password_is_minted(ctx):
     assert STEP_ADMIN_PASSWORD not in SETUP_MACHINE.evaluate(ctx).completed_steps
 
-    ctx.account_store.reset_password("admin", "a-strong-local-admin-password")
-    assert STEP_ADMIN_PASSWORD in SETUP_MACHINE.evaluate(ctx).completed_steps
+    assert STEP_ADMIN_PASSWORD in SETUP_MACHINE.evaluate(_minted(ctx)).completed_steps
 
 
-def test_rotation_is_measured_against_the_configured_bootstrap_password(tmp_path):
-    """A deployment seeded from DFE_AUTH_LOCAL_ADMIN_PASSWORD has not rotated yet."""
-    accounts = AccountStore(tmp_path / "accounts")
-    accounts.create("admin", "a-generated-boot-password", groups=["dfe-admins"])
-    ctx = SetupContext(account_store=accounts, bootstrap_admin_password="a-generated-boot-password")
+def test_completion_reads_the_config_not_the_stored_hash(ctx):
+    """The admin is reconciled from config on every boot, so config is the verdict.
+
+    A password changed only in the store is reverted at the next start, so it must
+    not clear the step.
+    """
+    ctx.account_store.reset_password("admin", "a-store-only-password")
 
     assert STEP_ADMIN_PASSWORD not in SETUP_MACHINE.evaluate(ctx).completed_steps
 
-    accounts.reset_password("admin", "a-strong-local-admin-password")
-    assert STEP_ADMIN_PASSWORD in SETUP_MACHINE.evaluate(ctx).completed_steps
+
+def test_default_credentials_flag_tracks_the_step(ctx):
+    assert SETUP_MACHINE.status(ctx).default_credentials is True
+    assert SETUP_MACHINE.status(_minted(ctx)).default_credentials is False
 
 
 def test_context_takes_the_bootstrap_credential_from_settings(tmp_path):
     accounts = AccountStore(tmp_path / "accounts")
-    accounts.create("root", "a-generated-boot-password", groups=["dfe-admins"])
-    local = SimpleNamespace(admin_name="root", admin_password="a-generated-boot-password")
+    accounts.create("root", "changeme", groups=["dfe-admins"])
+    local = SimpleNamespace(admin_name="root", admin_password="")
     settings = SimpleNamespace(
-        auth=SimpleNamespace(local=local), env="dev", gitops=SimpleNamespace(mode="team")
+        auth=SimpleNamespace(local=local),
+        env="dev",
+        gitops=SimpleNamespace(mode="team"),
+        deployment=SimpleNamespace(target="docker", namespace=""),
     )
     state = SimpleNamespace(account_store=accounts, settings=settings, gitcrud=None)
 
@@ -157,6 +176,34 @@ def test_context_takes_the_bootstrap_credential_from_settings(tmp_path):
     assert STEP_ADMIN_PASSWORD not in SETUP_MACHINE.evaluate(ctx).completed_steps
 
 
+def test_context_carries_the_deploy_kind_and_fetch_command(tmp_path):
+    accounts = AccountStore(tmp_path / "accounts")
+    accounts.create("admin", "changeme", groups=["dfe-admins"])
+    local = SimpleNamespace(
+        admin_name="",
+        admin_password="",
+        admin_secret_name="dfe-engine",
+        admin_secret_key="admin-password",
+    )
+    settings = SimpleNamespace(
+        auth=SimpleNamespace(local=local),
+        env="dev",
+        gitops=SimpleNamespace(mode="team"),
+        deployment=SimpleNamespace(target="kubernetes", namespace="dfe"),
+    )
+
+    status = SETUP_MACHINE.status(
+        SetupContext.from_app_state(
+            SimpleNamespace(account_store=accounts, settings=settings, gitcrud=None)
+        )
+    )
+
+    assert status.deploy_kind == "kubernetes"
+    assert status.credential_fetch_command == (
+        "kubectl -n dfe get secret dfe-engine -o jsonpath='{.data.admin-password}' | base64 -d"
+    )
+
+
 def test_context_falls_back_to_the_shipped_defaults_without_settings(tmp_path):
     ctx = SetupContext.from_app_state(SimpleNamespace(account_store=None))
 
@@ -165,39 +212,22 @@ def test_context_falls_back_to_the_shipped_defaults_without_settings(tmp_path):
 
 
 def _with_git(ctx: SetupContext, *, merged: bool) -> SetupContext:
-    return SetupContext(
-        account_store=ctx.account_store,
-        org_registry=ctx.org_registry,
-        oidc_registry=ctx.oidc_registry,
+    return _minted(
+        ctx,
         break_glass_git=AccountGitState(
             enabled=True, auto_merge=False, committed=True, merged=merged, pending=None
         ),
     )
 
 
-def test_setup_stays_incomplete_until_break_glass_is_merged(ctx):
-    """A rotated password sitting on a review branch is not durable yet."""
+def test_an_unmerged_deploy_repo_no_longer_blocks_setup(ctx):
+    """The admin password comes from the store the deployment injects, not from git."""
     ctx.org_registry.create("acme")
     ctx.account_store.create("alice", "a-strong-user-password")
-    ctx.account_store.reset_password("admin", "a-strong-local-admin-password")
 
     state = SETUP_MACHINE.evaluate(_with_git(ctx, merged=False))
 
-    assert state.complete is False
-    assert state.current_step == STEP_ADMIN_PASSWORD
-    assert STEP_ADMIN_PASSWORD in state.pending_steps
-    assert STEP_ADMIN_PASSWORD not in state.completed_steps
-
-
-def test_setup_completes_once_break_glass_is_merged(ctx):
-    ctx.org_registry.create("acme")
-    ctx.account_store.create("alice", "a-strong-user-password")
-    ctx.account_store.reset_password("admin", "a-strong-local-admin-password")
-
-    state = SETUP_MACHINE.evaluate(_with_git(ctx, merged=True))
-
     assert state.complete is True
-    assert state.current_step is None
     assert STEP_ADMIN_PASSWORD in state.completed_steps
 
 
@@ -241,24 +271,22 @@ def test_status_never_carries_accounts(ctx):
 
 
 def test_status_withholds_registries_once_setup_is_complete(ctx):
-    ctx.org_registry.create("acme")
-    ctx.account_store.create("alice", "a-strong-user-password")
-    ctx.account_store.reset_password("admin", "a-strong-local-admin-password")
+    done = _complete(ctx)
 
-    complete = SETUP_MACHINE.status(ctx)
+    complete = SETUP_MACHINE.status(done)
     assert complete.initial_setup.complete is True
     assert complete.organisations == []
     assert complete.oidc_providers == []
 
     # ...unless the caller opts in (an authenticated admin view, say).
-    unredacted = SETUP_MACHINE.status(ctx, redact_when_complete=False)
+    unredacted = SETUP_MACHINE.status(done, redact_when_complete=False)
     assert [o.name for o in unredacted.organisations] == ["acme"]
 
 
-def _complete(ctx: SetupContext) -> None:
+def _complete(ctx: SetupContext) -> SetupContext:
     ctx.org_registry.create("acme")
     ctx.account_store.create("alice", "a-strong-user-password")
-    ctx.account_store.reset_password("admin", "a-strong-local-admin-password")
+    return _minted(ctx)
 
 
 def test_completed_setup_keeps_oidc_login_options_only(ctx):
@@ -272,9 +300,8 @@ def test_completed_setup_keeps_oidc_login_options_only(ctx):
             client_secret_env="ENTRA_SECRET",
         ),
     )
-    _complete(ctx)
 
-    status = SETUP_MACHINE.status(ctx)
+    status = SETUP_MACHINE.status(_complete(ctx))
 
     assert status.initial_setup.complete is True
     # Name and display name, and nothing else: no issuer, no env vars, no type.
@@ -287,9 +314,8 @@ def test_completed_setup_keeps_oidc_login_options_only(ctx):
 def test_completed_setup_leaves_an_unset_display_name_empty(ctx):
     """No invented label — ``name`` is right there for the UI to fall back to."""
     ctx.oidc_registry.create("entra", OIDCProvider(enabled=True, issuer="https://idp"))
-    _complete(ctx)
 
-    assert [p.model_dump() for p in SETUP_MACHINE.status(ctx).oidc_providers] == [
+    assert [p.model_dump() for p in SETUP_MACHINE.status(_complete(ctx)).oidc_providers] == [
         {"name": "entra", "display_name": ""},
     ]
 
@@ -298,9 +324,8 @@ def test_completed_setup_drops_disabled_oidc_providers(ctx):
     """A disabled provider cannot be logged in with, so it is pure inventory."""
     ctx.oidc_registry.create("entra", OIDCProvider(enabled=True, issuer="https://idp"))
     ctx.oidc_registry.create("okta", OIDCProvider(enabled=False, issuer="https://okta"))
-    _complete(ctx)
 
-    assert [p.name for p in SETUP_MACHINE.status(ctx).oidc_providers] == ["entra"]
+    assert [p.name for p in SETUP_MACHINE.status(_complete(ctx)).oidc_providers] == ["entra"]
 
 
 def test_status_surfaces_the_break_glass_git_state(ctx):

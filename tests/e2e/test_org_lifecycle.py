@@ -14,6 +14,7 @@ No external infrastructure required (no ClickHouse, no HyperDX).
 
 from __future__ import annotations
 
+import secrets
 from pathlib import Path
 
 import pytest
@@ -25,10 +26,15 @@ from dfe_engine.settings import (
     APISettings,
     AuthSettings,
     DFESettings,
+    LocalAuthSettings,
     SchemasSettings,
     ServicesSettings,
     SourceSettings,
 )
+
+# Generated, then injected through settings the way a deployment's secret store
+# does -- nothing here carries a hardcoded password.
+E2E_ADMIN_PASSWORD = secrets.token_urlsafe(24)
 
 
 @pytest.fixture
@@ -44,7 +50,12 @@ def e2e_settings(tmp_path: Path) -> DFESettings:
         source=SourceSettings(sources_dir=str(tmp_path / "sources")),
         services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
         schemas=SchemasSettings(schemas_dir=str(tmp_path / "schemas")),
-        auth=AuthSettings(enabled=True, auth_dir=str(tmp_path / "auth")),
+        auth=AuthSettings(
+            enabled=True,
+            auth_dir=str(tmp_path / "auth"),
+            # Production posture refuses to start on the shipped admin password.
+            local=LocalAuthSettings(admin_password=E2E_ADMIN_PASSWORD),
+        ),
         api=APISettings(
             jwt_secret="org-e2e-test-secret-key-32chars!",
             jwt_expire_minutes=30,
@@ -57,7 +68,7 @@ def e2e_client(e2e_settings: DFESettings):
     """TestClient with full lifespan (registries bootstrapped)."""
     app = create_app(settings=e2e_settings)
     with TestClient(app, raise_server_exceptions=False) as client:
-        app.state.account_store.reset_password("admin", "e2e-admin-pw")
+        app.state.account_store.reset_password("admin", E2E_ADMIN_PASSWORD)
         yield client
     _registries.clear()
 
@@ -68,7 +79,7 @@ class TestOrgLifecycleE2E:
     def _login(self, client: TestClient) -> dict[str, str]:
         resp = client.post(
             "/api/v1/auth/login",
-            json={"username": "admin", "password": "e2e-admin-pw"},
+            json={"username": "admin", "password": E2E_ADMIN_PASSWORD},
         )
         assert resp.status_code == 200, f"Login failed: {resp.text}"
         return {"Authorization": f"Bearer {resp.json()['access_token']}"}

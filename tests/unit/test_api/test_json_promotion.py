@@ -27,6 +27,7 @@ from dfe_engine.settings import (
     APISettings,
     AuthSettings,
     DFESettings,
+    LocalAuthSettings,
     SchemasSettings,
     ServicesSettings,
     SourceSettings,
@@ -224,7 +225,12 @@ def make_api_settings(tmp_path: Path) -> DFESettings:
         schemas=SchemasSettings(schemas_dir=str(schemas_root)),
         source=SourceSettings(sources_dir=str(sources_dir)),
         services=ServicesSettings(config_yaml_dir=str(services_dir)),
-        auth=AuthSettings(enabled=True, auth_dir=str(auth_dir)),
+        auth=AuthSettings(
+            enabled=True,
+            auth_dir=str(auth_dir),
+            # Production posture refuses to start on the shipped admin password.
+            local=LocalAuthSettings(admin_password="test-admin-pw"),
+        ),
         api=APISettings(jwt_secret="test-secret-key-for-json-promotion"),
     )
 
