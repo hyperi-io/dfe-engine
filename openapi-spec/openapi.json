@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "0.0.0"
+    "version": "1.19.8"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -23995,15 +23995,17 @@
         "properties": {
           "new_password": {
             "type": "string",
+            "minLength": 12,
             "title": "New Password",
-            "description": "New plaintext password to write to the store"
+            "description": "New plaintext password to write to the store; at least 12 characters and never the shipped default"
           }
         },
         "type": "object",
         "required": [
           "new_password"
         ],
-        "title": "RotatePasswordRequest"
+        "title": "RotatePasswordRequest",
+        "description": "A rotation the deployment can boot on.\n\nThe rotated value becomes ``DFE_AUTH_LOCAL_ADMIN_PASSWORD``, and the boot gate\nrefuses an empty or default one outside a dev posture, so an unconstrained\nrotation is a way for an admin to lock the deployment out of its own restart.\nBoth rules are the ones that gate startup, not a second opinion on them."
       },
       "RotatePasswordResponse": {
         "properties": {
@@ -25945,7 +25947,7 @@
                 "type": "null"
               }
             ],
-            "description": "Durability of the local admin account in the deploy repo: enabled/auto_merge/committed/merged, plus pending.pr_url/command/branch when a review PR or CLI merge is still outstanding."
+            "description": "Durability of the LOCAL ADMIN account in the deploy repo (the field name predates the separate breakglass recovery account): enabled/auto_merge/committed/merged, plus pending.pr_url/command/branch when a review PR or CLI merge is still outstanding."
           },
           "default_credentials": {
             "type": "boolean",
@@ -25962,7 +25964,7 @@
           "credential_fetch_command": {
             "type": "string",
             "title": "Credential Fetch Command",
-            "description": "One-line command that prints this deployment's minted admin password, for the login page to show while setup is incomplete.",
+            "description": "One-line command that prints this deployment's minted admin password, for the login page to show. Carried after setup completes too -- an operator who has lost the password needs it most then.",
             "default": ""
           }
         },

@@ -8,13 +8,15 @@
 
 """The engine half of the first-login model (dfe-engine#298).
 
-Passwords come from settings, never from a literal here -- the one exception is
-the negative case, which has to name ``changeme`` because that string is what the
-gate refuses.
+Every password here is generated at import. ``changeme`` is the one literal, and
+only where it is the subject: it is the string the gate refuses. A test that
+hardcodes a passing password reads as a credential to a secret scanner and to
+whoever copies the fixture next.
 """
 
 from __future__ import annotations
 
+import secrets
 from pathlib import Path
 
 import pytest
@@ -39,8 +41,9 @@ from dfe_engine.gitcrud.registry import default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.settings import SeedAccount
 
-MINTED_ADMIN = "a-minted-admin-password"
-MINTED_BREAKGLASS = "a-minted-breakglass-password"
+MINTED_ADMIN = secrets.token_urlsafe(16)
+MINTED_BREAKGLASS = secrets.token_urlsafe(16)
+MINTED_SEED = secrets.token_urlsafe(16)
 
 
 @pytest.fixture
@@ -79,6 +82,13 @@ class TestPostureGate:
         assert default_credentials_in_use("changeme") is True
         assert default_credentials_in_use(MINTED_ADMIN) is False
 
+    @pytest.mark.parametrize("padded", ["changeme\n", " changeme", "changeme \t", "   ", "\n"])
+    def test_the_predicate_strips_before_comparing(self, padded):
+        """A Secret, a heredoc or an .env line all deliver the default with whitespace on it."""
+        assert default_credentials_in_use(padded) is True
+        with pytest.raises(DefaultCredentialsError):
+            require_admin_password(padded, "production")
+
 
 # ── One seed path, reconciled on every boot ──────────────────
 
@@ -105,14 +115,14 @@ class TestAdminSeed:
         assert store.verify_password("admin", MINTED_ADMIN)
 
     def test_admin_and_named_seeds_share_the_one_path(self, tmp_path: Path):
-        seeds = [SeedAccount(username="kay", password="kay-password-long", groups=["dfe-viewers"])]
+        seeds = [SeedAccount(username="kay", password=MINTED_SEED, groups=["dfe-viewers"])]
 
         store, groups, *_ = bootstrap_auth(
             tmp_path / "auth", default_admin_password=MINTED_ADMIN, seed_accounts=seeds
         )
 
         assert store.verify_password("admin", MINTED_ADMIN)
-        assert store.verify_password("kay", "kay-password-long")
+        assert store.verify_password("kay", MINTED_SEED)
         assert "admin" in groups.get("dfe-admins").members
 
 

@@ -478,17 +478,24 @@ and the fix. A dev posture running the default reports `default_credentials:
 true` on `GET /auth/setup-status` and on the `POST /auth/login` response, for the
 UI to banner and force a change.
 
+**The predicate other repos copy** is `auth.bootstrap.default_credentials_in_use`:
+strip surrounding whitespace, then treat empty and `changeme` as the default. An
+exact comparison reads the `"changeme\n"` a Secret or `.env` line delivers as a
+minted password.
+
 **Reading the minted password.** setup-status carries `deploy_kind` (`docker` |
 `kubernetes` | `local`, from `DFE_DEPLOYMENT_TARGET` else scalo's runtime
-detection) and, while setup is incomplete, `credential_fetch_command`: `make
-creds` for docker, `kubectl -n <ns> get secret <name> -o
-jsonpath='{.data.<key>}' | base64 -d` for kubernetes, the environment file for
-local.
+detection) and `credential_fetch_command`: `make creds` for docker, `kubectl -n
+<ns> get secret <name> -o jsonpath='{.data.<key>}' | base64 -d` for kubernetes,
+the environment file for local. Both survive setup completion (#301) -- that is
+when an operator has lost the password.
 
 **Rotation.** `POST /auth/accounts/{admin}/rotate-password` writes through the
 scalo secrets seam when `DFE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH` is set, else
 returns 501 with `context.store_command`. The engine never writes the password
-into its own YAML store.
+into its own YAML store. The new password faces the two rules that gate startup
+-- 12 characters minimum, never the default -- so a rotation cannot lock the
+deployment out of its own next boot. Either is a 422 naming the field.
 
 ---
 

@@ -69,10 +69,10 @@ if TYPE_CHECKING:
     from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
     from dfe_engine.orgs.registry import OrgRegistry
 
-# The bootstrap-seeded break-glass admin (see auth/bootstrap.py::_seed_admin), as
+# The bootstrap-seeded LOCAL ADMIN (see auth/bootstrap.py::_seed_admin), as
 # configured in settings.auth.local, so rotation is measured against what was seeded.
-# It does not count as the "first user" — that step is about getting off the
-# emergency credential and onto a real identity.
+# It does not count as the "first user" — that step is about getting off the shared
+# admin credential and onto a real identity.
 
 # Stable step ids. These are an API contract: the UI keys its wizard screens
 # off them, so treat a rename as a breaking change.
@@ -265,10 +265,12 @@ class SetupStatus(BaseModel):
         default_factory=list,
         description="The organisation registry. Empty once setup is complete.",
     )
+    # The JSON name stays break_glass: dfe-ui reads it. It reports the local admin.
     break_glass: AccountGitState | None = Field(
         default=None,
-        description="Durability of the local admin account in the deploy "
-        "repo: enabled/auto_merge/committed/merged, plus pending.pr_url/command/"
+        description="Durability of the LOCAL ADMIN account in the deploy repo "
+        "(the field name predates the separate breakglass recovery account): "
+        "enabled/auto_merge/committed/merged, plus pending.pr_url/command/"
         "branch when a review PR or CLI merge is still outstanding.",
     )
     default_credentials: bool = Field(
@@ -285,7 +287,8 @@ class SetupStatus(BaseModel):
     credential_fetch_command: str = Field(
         default="",
         description="One-line command that prints this deployment's minted admin "
-        "password, for the login page to show while setup is incomplete.",
+        "password, for the login page to show. Carried after setup completes too "
+        "-- an operator who has lost the password needs it most then.",
     )
 
 
@@ -317,7 +320,7 @@ def _has_organisation(ctx: SetupContext) -> bool:
 
 
 def _has_real_user(ctx: SetupContext) -> bool:
-    """True once an enabled account exists that is not the break-glass admin.
+    """True once an enabled account exists that is not the local admin.
 
     Local or external (OIDC/JIT/SCIM-provisioned) both count — the step is
     about having a real identity, not about how it authenticates.
@@ -330,11 +333,13 @@ def _has_real_user(ctx: SetupContext) -> bool:
     )
 
 
-def _has_break_glass_account(ctx: SetupContext) -> bool:
-    """True when the bootstrap-seeded admin account is on disk.
+def _has_local_admin_account(ctx: SetupContext) -> bool:
+    """True when the bootstrap-seeded local admin account is on disk.
 
-    ``bootstrap_auth`` seeds it on every startup, so this is the honest test
-    of whether there is a shared emergency credential to rotate.
+    Not the ``breakglass`` recovery account, which is a separate identity with
+    its own hash in the deploy repo. ``bootstrap_auth`` seeds this one on every
+    startup, so it is the honest test of whether there is an admin password to
+    move off the default.
     """
     if ctx.account_store is None:
         return False
@@ -385,7 +390,7 @@ SETUP_STEPS: tuple[StepDefinition, ...] = (
         title="Create your first user",
         description=(
             "Add a real user — local or from your IdP — separate from the "
-            "break-glass admin account, so day-to-day work is attributable."
+            "shared admin account, so day-to-day work is attributable."
         ),
         applies=lambda ctx: ctx.account_store is not None,
         required=lambda _ctx: True,
@@ -400,7 +405,7 @@ SETUP_STEPS: tuple[StepDefinition, ...] = (
             "DFE_AUTH_LOCAL_ADMIN_PASSWORD — the engine reasserts that value on "
             "every boot, so a password set anywhere else is reverted."
         ),
-        applies=_has_break_glass_account,
+        applies=_has_local_admin_account,
         required=lambda _ctx: True,
         complete=_admin_password_step_complete,
     ),
@@ -464,6 +469,12 @@ class SetupStateMachine:
         providers drop out — they cannot be logged in with, so listing them
         would be inventory disclosure with nothing to render.
 
+        ``deploy_kind`` and ``credential_fetch_command`` survive too (#301). The
+        login page shows the fetch command to an operator who has lost the admin
+        password, which is exactly the case that arises long after setup is
+        complete. It names where the password is kept, never the password —
+        running it needs cluster or host credentials of its own.
+
         Args:
             ctx: Live deployment state.
             redact_when_complete: Reduce the registries once setup is complete.
@@ -480,6 +491,7 @@ class SetupStateMachine:
                 break_glass=ctx.break_glass_git,
                 default_credentials=default_credentials(ctx),
                 deploy_kind=ctx.deploy_kind,
+                credential_fetch_command=ctx.credential_fetch_command,
             )
 
         return SetupStatus(

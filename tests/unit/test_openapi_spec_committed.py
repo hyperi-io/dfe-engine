@@ -7,10 +7,12 @@ contract the server does not implement. The workflow triggers on CHANGES to the
 file, so a spec that is never regenerated never fires the sync either: the drift
 is silent at both ends.
 
-``info.version`` is excluded deliberately. It comes from package metadata, which
-is the release version in a built artefact and ``0.0.0`` in an editable install,
-so comparing it would fail every local run while proving nothing -- it generates
-no TypeScript.
+``info.version`` is excluded from the comparison deliberately. It comes from
+package metadata, which is the release version in a built artefact and ``0.0.0``
+in an editable install, so comparing it would fail every local run while proving
+nothing -- it generates no TypeScript. What IS asserted is that the committed
+value is not that placeholder: a generator run on a versionless machine wrote
+``0.0.0`` over ``1.8.0`` and shipped it to every consumer of the spec.
 
 Regenerate with ``uv run python openapi-spec/generate.py``.
 """
@@ -28,6 +30,9 @@ SPEC_FILE = SPEC_DIR / "openapi.json"
 E2E_SPEC_FILE = SPEC_DIR / "openapi.e2e.json"
 
 REGENERATE = "regenerate with: uv run python openapi-spec/generate.py"
+
+# What an editable install reports for a package whose version CI stamps at release.
+PLACEHOLDER_VERSIONS = {"", "dev", "0.0.0"}
 
 
 @pytest.fixture(autouse=True)
@@ -116,6 +121,17 @@ def test_committed_spec_matches_the_app_contract(committed, generated):
     shown = "\n".join(f"  {d}" for d in diffs[:15])
     more = f"\n  ... and {len(diffs) - 15} more" if len(diffs) > 15 else ""
     pytest.fail(f"openapi.json no longer matches the app -- {REGENERATE}\n{shown}{more}")
+
+
+@pytest.mark.parametrize("spec_file", [SPEC_FILE, E2E_SPEC_FILE], ids=["product", "e2e"])
+def test_committed_spec_carries_a_real_version(spec_file):
+    """dfe-ui and Prism read this number; the placeholder tells them nothing."""
+    version = json.loads(spec_file.read_text())["info"]["version"]
+
+    assert version not in PLACEHOLDER_VERSIONS, (
+        f"{spec_file.name} carries the placeholder version {version!r} -- it was "
+        f"generated on a machine with no package version. {REGENERATE}"
+    )
 
 
 def test_committed_e2e_spec_matches_its_builder():

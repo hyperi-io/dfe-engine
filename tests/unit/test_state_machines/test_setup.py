@@ -90,7 +90,7 @@ def test_steps_do_not_depend_on_the_auth_settings_toggles(ctx):
     assert not hasattr(ctx, "auth_enabled")
 
 
-def test_admin_password_step_drops_when_there_is_no_break_glass_account(tmp_path):
+def test_admin_password_step_drops_when_there_is_no_local_admin_account(tmp_path):
     no_admin = SetupContext(
         account_store=AccountStore(tmp_path / "accounts"),
         org_registry=OrgRegistry(tmp_path / "orgs"),
@@ -113,7 +113,7 @@ def test_disabled_oidc_provider_does_not_satisfy_the_step(ctx):
     assert STEP_OIDC_PROVIDER in SETUP_MACHINE.evaluate(ctx).completed_steps
 
 
-def test_break_glass_admin_does_not_count_as_the_first_user(ctx):
+def test_the_local_admin_does_not_count_as_the_first_user(ctx):
     assert STEP_FIRST_USER not in SETUP_MACHINE.evaluate(ctx).completed_steps
 
     ctx.account_store.create("alice", "a-strong-user-password")
@@ -281,6 +281,23 @@ def test_status_withholds_registries_once_setup_is_complete(ctx):
     # ...unless the caller opts in (an authenticated admin view, say).
     unredacted = SETUP_MACHINE.status(done, redact_when_complete=False)
     assert [o.name for o in unredacted.organisations] == ["acme"]
+
+
+def test_completed_setup_still_carries_the_password_hint(ctx):
+    """#301: the login page needs the fetch command most once setup is long done."""
+    command = (
+        "kubectl -n dfe get secret dfe-engine -o jsonpath='{.data.admin-password}' | base64 -d"
+    )
+    ctx.org_registry.create("acme")
+    ctx.account_store.create("alice", "a-strong-user-password")
+
+    status = SETUP_MACHINE.status(
+        _minted(ctx, deploy_kind="kubernetes", credential_fetch_command=command)
+    )
+
+    assert status.initial_setup.complete is True
+    assert status.deploy_kind == "kubernetes"
+    assert status.credential_fetch_command == command
 
 
 def _complete(ctx: SetupContext) -> SetupContext:
