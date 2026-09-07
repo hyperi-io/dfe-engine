@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 
 class TestCreateAccount:
     """POST /api/v1/auth/accounts"""
@@ -266,6 +268,31 @@ class TestRotatePassword:
 
         assert resp.status_code == 400
         assert resp.json()["code"] == "not_store_backed"
+
+    @pytest.mark.parametrize("password", ["", "short", "changeme"])
+    def test_a_password_the_engine_cannot_boot_on_is_refused(self, client, admin_headers, password):
+        """Rotating to an empty, short or default password bricks the next start."""
+        resp = client.post(
+            "/api/v1/auth/accounts/admin/rotate-password",
+            json={"new_password": password},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        body = resp.json()
+        assert body["errors"][0]["field"] == "new_password"
+        assert body["errors"][0]["message"]
+
+    def test_the_default_password_is_refused_however_it_is_padded(self, client, admin_headers):
+        """Long enough to clear the floor, still the password the boot gate refuses."""
+        resp = client.post(
+            "/api/v1/auth/accounts/admin/rotate-password",
+            json={"new_password": "   changeme    "},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert "default admin password" in resp.json()["errors"][0]["message"]
 
     def test_rotate_requires_admin(self, client, viewer_headers):
         resp = client.post(
