@@ -34,6 +34,7 @@ from dfe_engine.settings import (
     APISettings,
     AuthSettings,
     DFESettings,
+    LocalAuthSettings,
     SchemasSettings,
     ServicesSettings,
     SourceSettings,
@@ -70,7 +71,12 @@ ingestion_pipelines: {{}}
         source=SourceSettings(sources_dir=str(sources_dir)),
         services=ServicesSettings(config_yaml_dir=str(services_dir)),
         schemas=SchemasSettings(schemas_dir=str(schemas_dir)),
-        auth=AuthSettings(enabled=True, auth_dir=str(auth_dir)),
+        auth=AuthSettings(
+            enabled=True,
+            auth_dir=str(auth_dir),
+            # Production posture refuses to start on the shipped admin password.
+            local=LocalAuthSettings(admin_password="e2e-admin-password"),
+        ),
         api=APISettings(
             jwt_secret="e2e-test-secret-key-32-chars-long!",
             jwt_expire_minutes=30,

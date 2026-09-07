@@ -19,6 +19,7 @@ from dfe_engine.settings import (
     APISettings,
     AuthSettings,
     DFESettings,
+    LocalAuthSettings,
     SchemasSettings,
     ServicesSettings,
     SourceSettings,
@@ -41,6 +42,8 @@ def jit_settings(tmp_path):
             auth_dir=str(tmp_path / "auth"),
             # JIT provisioning runs off the Envoy X-Oidc header path (Path 1).
             trust_proxy_auth_headers=True,
+            # Production posture refuses to start on the shipped admin password.
+            local=LocalAuthSettings(admin_password="e2e-admin-password"),
         ),
         api=APISettings(jwt_secret="jit-test-secret-key-32-chars-lo!"),
     )
