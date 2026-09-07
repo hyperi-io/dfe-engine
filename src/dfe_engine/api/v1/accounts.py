@@ -24,7 +24,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from dfe_engine.api.deps import CurrentUser, Settings, require_action
 from dfe_engine.api.pagination import (
@@ -37,7 +37,11 @@ from dfe_engine.auth import account_durability
 from dfe_engine.auth.account_durability import AccountGitState
 from dfe_engine.auth.accounts import Account
 from dfe_engine.auth.audit import audit_account_change
-from dfe_engine.auth.bootstrap import admin_account_name
+from dfe_engine.auth.bootstrap import (
+    MIN_ADMIN_PASSWORD_LENGTH,
+    admin_account_name,
+    default_credentials_in_use,
+)
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/accounts", tags=["Accounts"])
@@ -109,7 +113,31 @@ class ResetPasswordResponse(BaseModel):
 
 
 class RotatePasswordRequest(BaseModel):
-    new_password: str = Field(description="New plaintext password to write to the store")
+    """A rotation the deployment can boot on.
+
+    The rotated value becomes ``DFE_AUTH_LOCAL_ADMIN_PASSWORD``, and the boot gate
+    refuses an empty or default one outside a dev posture, so an unconstrained
+    rotation is a way for an admin to lock the deployment out of its own restart.
+    Both rules are the ones that gate startup, not a second opinion on them.
+    """
+
+    new_password: str = Field(
+        min_length=MIN_ADMIN_PASSWORD_LENGTH,
+        description=(
+            "New plaintext password to write to the store; at least "
+            f"{MIN_ADMIN_PASSWORD_LENGTH} characters and never the shipped default"
+        ),
+    )
+
+    @field_validator("new_password")
+    @classmethod
+    def _refuse_default_credentials(cls, value: str) -> str:
+        if default_credentials_in_use(value):
+            raise ValueError(
+                "the shipped default admin password -- the engine refuses to start "
+                "on it outside a dev posture; choose another"
+            )
+        return value
 
 
 class RotatePasswordResponse(BaseModel):
@@ -329,7 +357,8 @@ async def reset_password(
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    if store.get(username) is None:
+    existing = store.get(username)
+    if existing is None:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
@@ -345,11 +374,12 @@ async def reset_password(
             },
         )
     store.reset_password(username, body.new_password)
+    # Persist the post-reset account; the fallback satisfies the type, not the flow.
     git = _persist_account(
         request,
         settings,
         username=username,
-        account=store.get(username),
+        account=store.get(username) or existing,
         summary="reset password",
         actor=user.user_id,
     )

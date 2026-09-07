@@ -53,6 +53,8 @@ if TYPE_CHECKING:
 _DEFAULT_ADMIN_NAME = "admin"
 # The shipped placeholder password. Refused outside a dev posture.
 _DEFAULT_PASSWORD = "changeme"
+# Floor for any password the operator sets through the API.
+MIN_ADMIN_PASSWORD_LENGTH = 12
 # Group the local admin belongs to.
 _ADMIN_GROUP = "dfe-admins"
 
@@ -76,8 +78,17 @@ def admin_account_password(override: str = "") -> str:
 
 
 def default_credentials_in_use(admin_password: str) -> bool:
-    """True when the deployment is running on the unset/shipped admin password."""
-    return not admin_password or admin_password == _DEFAULT_PASSWORD
+    """True when the deployment is running on the unset/shipped admin password.
+
+    THE contract for the ``changeme`` check, and the one every repo in the suite
+    copies: strip surrounding whitespace, then compare against empty and
+    ``changeme``. The strip is what the copies disagree on -- a password arriving
+    through a kubernetes Secret, a heredoc or an ``.env`` line keeps its trailing
+    newline, so an exact comparison reads ``"changeme\\n"`` as a minted password
+    while the login it guards still accepts ``changeme``.
+    """
+    candidate = admin_password.strip()
+    return not candidate or candidate == _DEFAULT_PASSWORD
 
 
 def require_admin_password(admin_password: str, environment: str) -> bool:
@@ -235,7 +246,7 @@ def _seed_roles(dest: Path) -> None:
         shutil.copy2(src, dest)
 
 
-def _seed_groups(group_store: GroupStore) -> None:
+def _seed_groups(group_store: GroupStore | DocuStoreGroupStore) -> None:
     """Create default groups."""
     for name, (roles, description) in _DEFAULT_GROUPS.items():
         group_store.create(name, roles=roles, description=description)
