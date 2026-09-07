@@ -85,6 +85,10 @@ Auth (local):
 - DFE_AUTH_LOCAL_OPERATOR_PASSWORD -> auth.local.operator_password
 - DFE_AUTH_LOCAL_VIEWER_PASSWORD -> auth.local.viewer_password
 - DFE_AUTH_LOCAL_ORG_ID -> auth.local.org_id
+- DFE_AUTH_BREAKGLASS_PASSWORD -> auth.local.breakglass_password
+- DFE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH -> auth.local.admin_password_secret_path
+- DFE_AUTH_LOCAL_ADMIN_SECRET_NAME -> auth.local.admin_secret_name
+- DFE_AUTH_LOCAL_ADMIN_SECRET_KEY -> auth.local.admin_secret_key
 
 E2E server (Playwright host-run helpers; refused in production):
 - DFE_E2E_SERVER -> e2e_server
@@ -732,9 +736,18 @@ class DeploymentSettings(BaseModel):
     Environment variables:
     - DFE_DEPLOYMENT_CONFIG_DIR -> deployment.config_dir
     - DFE_DEPLOYMENT_TARGET -> deployment.target
+    - DFE_DEPLOYMENT_NAMESPACE -> deployment.namespace
     """
 
     config_dir: str = Field(default="", description="YAML directory for deployment configurations")
+    namespace: str = Field(
+        default="",
+        description=(
+            "Kubernetes namespace this engine runs in, injected by the chart from "
+            "metadata.namespace. Names the namespace in the credential-fetch command "
+            "the login page shows. DFE_DEPLOYMENT_NAMESPACE."
+        ),
+    )
     target: Literal["kubernetes", "docker", "unknown"] = Field(
         default="unknown",
         description=(
@@ -920,6 +933,34 @@ class LocalAuthSettings(BaseModel):
             "DFE_AUTH_LOCAL_SEED_ACCOUNTS: a JSON list of "
             "{username, password, groups}. Profile-independent (same across slim/single/scale)."
         ),
+    )
+    breakglass_password: str = Field(
+        default="",
+        description=(
+            "First-boot password for the break-glass recovery admin. Hashed into the "
+            "deploy repo's governance settings when no hash is committed yet, and "
+            "ignored from then on. DFE_AUTH_BREAKGLASS_PASSWORD."
+        ),
+    )
+    admin_password_secret_path: str = Field(
+        default="",
+        description=(
+            "scalo.secrets path the deployment sources the admin password from. Set "
+            "= the rotation endpoint writes the new password through the secrets "
+            "seam; empty = rotation is a store operation and the endpoint returns "
+            "501 with the command. DFE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH."
+        ),
+    )
+    admin_secret_name: str = Field(
+        default="dfe-engine",
+        description=(
+            "Secret holding the admin password, for the credential-fetch command the "
+            "login page shows while setup is incomplete. DFE_AUTH_LOCAL_ADMIN_SECRET_NAME."
+        ),
+    )
+    admin_secret_key: str = Field(
+        default="admin-password",
+        description=("Key within admin_secret_name. DFE_AUTH_LOCAL_ADMIN_SECRET_KEY."),
     )
 
 
@@ -1640,6 +1681,8 @@ def _get_env_overrides() -> dict:
         overrides["deployment"]["config_dir"] = val
     if val := _get_env("DFE_DEPLOYMENT_TARGET"):
         overrides["deployment"]["target"] = val.strip().lower()
+    if val := _get_env("DFE_DEPLOYMENT_NAMESPACE"):
+        overrides["deployment"]["namespace"] = val
 
     # Transform validation
     if val := _get_env("DFE_TRANSFORM_VALIDATION_ENABLED"):
@@ -1676,6 +1719,14 @@ def _get_env_overrides() -> dict:
         overrides["auth"].setdefault("local", {})["viewer_password"] = val
     if val := _get_env("DFE_AUTH_LOCAL_ORG_ID"):
         overrides["auth"].setdefault("local", {})["org_id"] = val
+    if val := _get_env("DFE_AUTH_BREAKGLASS_PASSWORD"):
+        overrides["auth"].setdefault("local", {})["breakglass_password"] = val
+    if val := _get_env("DFE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH"):
+        overrides["auth"].setdefault("local", {})["admin_password_secret_path"] = val
+    if val := _get_env("DFE_AUTH_LOCAL_ADMIN_SECRET_NAME"):
+        overrides["auth"].setdefault("local", {})["admin_secret_name"] = val
+    if val := _get_env("DFE_AUTH_LOCAL_ADMIN_SECRET_KEY"):
+        overrides["auth"].setdefault("local", {})["admin_secret_key"] = val
     if val := _get_env("DFE_AUTH_LOCAL_SEED_ACCOUNTS"):
         # A JSON list of {username, password, groups}. Fail loudly on malformed
         # config: a dropped list would silently strip the shared team logins.

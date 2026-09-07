@@ -36,6 +36,8 @@ from dfe_engine.api.pagination import (
 from dfe_engine.auth import account_durability
 from dfe_engine.auth.account_durability import AccountGitState
 from dfe_engine.auth.accounts import Account
+from dfe_engine.auth.audit import audit_account_change
+from dfe_engine.auth.bootstrap import admin_account_name
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/accounts", tags=["Accounts"])
@@ -104,6 +106,17 @@ class ResetPasswordResponse(BaseModel):
     git: AccountGitState = Field(
         description="Durability state: merged straight away, or a pending PR/command."
     )
+
+
+class RotatePasswordRequest(BaseModel):
+    new_password: str = Field(description="New plaintext password to write to the store")
+
+
+class RotatePasswordResponse(BaseModel):
+    """Outcome of a rotation written through the secrets seam."""
+
+    message: str = Field(default="password rotated in the secret store")
+    secret_path: str = Field(description="scalo.secrets path the new password was written to")
 
 
 class AccountResponse(BaseModel):
@@ -341,6 +354,68 @@ async def reset_password(
         actor=user.user_id,
     )
     return ResetPasswordResponse(git=git)
+
+
+@router.post(
+    "/{username}/rotate-password",
+    status_code=200,
+    response_model=RotatePasswordResponse,
+    dependencies=[
+        Depends(require_action(scopes_dict["accounts_reset_password"])),
+    ],
+)
+async def rotate_password(
+    username: str,
+    body: RotatePasswordRequest,
+    user: CurrentUser,
+    request: Request,
+    settings: Settings,
+) -> RotatePasswordResponse:
+    """Rotate an account's password in the deployment's secret store.
+
+    The store that injects ``DFE_AUTH_LOCAL_ADMIN_PASSWORD`` is the source of that
+    password, so the engine writes the new value through the scalo secrets seam
+    and never into its own YAML -- a YAML-only change is reverted by the next boot
+    reconcile. Returns 501 with the store command when the deployment has not
+    declared a secrets path for the password.
+    """
+    from dfe_engine.auth.deployment_hints import detect_deploy_kind, rotation_store_command
+    from dfe_engine.secrets import build_secrets
+
+    local = settings.auth.local
+    if username != admin_account_name(local.admin_name):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "not_store_backed",
+                "message": (
+                    f"Only the local admin password is held in the secret store; "
+                    f"use reset-password for '{username}'"
+                ),
+            },
+        )
+    if not local.admin_password_secret_path:
+        kind = detect_deploy_kind(settings.deployment.target)
+        raise HTTPException(
+            status_code=501,
+            detail={
+                "code": "secrets_seam_not_wired",
+                "message": (
+                    "This deployment does not source the admin password from the "
+                    "secrets seam, so rotation is a store operation"
+                ),
+                "store_command": rotation_store_command(
+                    kind,
+                    namespace=settings.deployment.namespace,
+                    secret_name=local.admin_secret_name,
+                    secret_key=local.admin_secret_key,
+                ),
+            },
+        )
+
+    build_secrets(settings.secrets).put(local.admin_password_secret_path, body.new_password)
+    audit_account_change(user.user_id, username, "rotated password in the secret store")
+    return RotatePasswordResponse(secret_path=local.admin_password_secret_path)
 
 
 @router.get(

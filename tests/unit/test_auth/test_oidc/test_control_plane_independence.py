@@ -33,6 +33,7 @@ from dfe_engine.settings import (
     APISettings,
     AuthSettings,
     DFESettings,
+    LocalAuthSettings,
     ServicesSettings,
     SourceSettings,
 )
@@ -63,6 +64,8 @@ def auth_settings(tmp_path: Path) -> DFESettings:
             # These tests exercise the OIDC header path (Path 1), i.e. the
             # Envoy-fronted deployment, so trust the injected X-Oidc-* headers.
             trust_proxy_auth_headers=True,
+            # Production posture refuses to start on the shipped admin password.
+            local=LocalAuthSettings(admin_password="test-admin-pw"),
         ),
         api=APISettings(
             jwt_secret="independence-test-secret-hmac-32-bytes",

@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import secrets
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -19,10 +21,15 @@ from dfe_engine.settings import (
     APISettings,
     AuthSettings,
     DFESettings,
+    LocalAuthSettings,
     SchemasSettings,
     ServicesSettings,
     SourceSettings,
 )
+
+# Generated, then injected through settings the way a deployment's secret store
+# does -- nothing here carries a hardcoded password.
+E2E_ADMIN_PASSWORD = secrets.token_urlsafe(24)
 
 
 @pytest.fixture
@@ -41,6 +48,8 @@ def jit_settings(tmp_path):
             auth_dir=str(tmp_path / "auth"),
             # JIT provisioning runs off the Envoy X-Oidc header path (Path 1).
             trust_proxy_auth_headers=True,
+            # Production posture refuses to start on the shipped admin password.
+            local=LocalAuthSettings(admin_password=E2E_ADMIN_PASSWORD),
         ),
         api=APISettings(jwt_secret="jit-test-secret-key-32-chars-lo!"),
     )
@@ -142,10 +151,10 @@ class TestJitWorkflow:
         )
 
         # Login as admin and check accounts list
-        jit_client.app.state.account_store.reset_password("admin", "test-admin-pw")
+        jit_client.app.state.account_store.reset_password("admin", E2E_ADMIN_PASSWORD)
         login = jit_client.post(
             "/api/v1/auth/login",
-            json={"username": "admin", "password": "test-admin-pw"},
+            json={"username": "admin", "password": E2E_ADMIN_PASSWORD},
         )
         assert login.status_code == 200
         admin_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}

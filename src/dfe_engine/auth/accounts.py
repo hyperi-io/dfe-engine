@@ -122,7 +122,7 @@ class AccountStore:
         now = _now()
         account = Account(
             username=username,
-            password_hash=_hash_password(password) if password else _UNUSABLE_PASSWORD_HASH,
+            password_hash=hash_password(password) if password else _UNUSABLE_PASSWORD_HASH,
             enabled=True,
             groups=groups or [],
             created_at=now,
@@ -223,7 +223,7 @@ class AccountStore:
         account = self._read(path)
         account = account.model_copy(
             update={
-                "password_hash": _hash_password(new_password),
+                "password_hash": hash_password(new_password),
                 "updated_at": _now(),
             }
         )
@@ -360,7 +360,7 @@ class DocuStoreAccountStore:
         now = _now()
         account = Account(
             username=username,
-            password_hash=_hash_password(password) if password else _UNUSABLE_PASSWORD_HASH,
+            password_hash=hash_password(password) if password else _UNUSABLE_PASSWORD_HASH,
             enabled=True,
             groups=groups or [],
             created_at=now,
@@ -400,7 +400,7 @@ class DocuStoreAccountStore:
         if account is None:
             raise KeyError(username)
         account = account.model_copy(
-            update={"password_hash": _hash_password(new_password), "updated_at": _now()}
+            update={"password_hash": hash_password(new_password), "updated_at": _now()}
         )
         self._c.put(username, account)
 
@@ -438,7 +438,7 @@ class DocuStoreAccountStore:
 # ------------------------------------------------------------------
 
 
-def _hash_password(password: str, rounds: int = 12) -> str:
+def hash_password(password: str, rounds: int = 12) -> str:
     """Bcrypt-hash *password* and return the hash as a UTF-8 string."""
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=rounds)).decode("utf-8")
 

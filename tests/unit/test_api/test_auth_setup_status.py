@@ -15,13 +15,17 @@ from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
+from dfe_engine.auth import breakglass
 from dfe_engine.auth.bootstrap import admin_account_name
 from dfe_engine.auth.oidc.models import OIDCProvider
+from dfe_engine.gitcrud import GitCrud, default_registry
+from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.settings import (
     APISettings,
     AuthSettings,
     ClickHouseSettings,
     DFESettings,
+    GitopsSettings,
     HuntsSettings,
     LocalAuthSettings,
     SchemasSettings,
@@ -58,11 +62,26 @@ def _settings_auth_disabled(tmp_path: Path) -> DFESettings:
     return settings.model_copy(update={"auth": settings.auth.model_copy(update={"enabled": False})})
 
 
+MINTED_ADMIN = "a-minted-admin-password"
+MINTED_BREAKGLASS = "a-minted-breakglass-password"
+
+
+def _with_deploy_repo(settings: DFESettings, tmp_path: Path) -> DFESettings:
+    """Turn on gitops against a local-only deploy repo, so a break-glass hash has a home."""
+    settings.gitops = GitopsSettings(enabled=True, local_path=str(tmp_path / "deploy"), push=False)
+    return settings
+
+
+def _deploy_repo_crud(tmp_path: Path) -> GitCrud:
+    return GitCrud(GitopsRepo(local_path=str(tmp_path / "deploy"), push=False), default_registry())
+
+
 def _complete_setup(app) -> None:
-    """Satisfy every required step: org, real user, rotated break-glass password."""
+    """Satisfy every required step: org, real user, minted admin password."""
     app.state.org_registry.create("acme", display_name="Acme")
     app.state.account_store.create("alice", "a-strong-user-password", groups=["dfe-admins"])
-    app.state.account_store.reset_password(admin_account_name(), "a-strong-local-admin-password")
+    # The admin password is injected config, so moving off the default is a config change.
+    app.state.settings.auth.local.admin_password = MINTED_ADMIN
 
 
 def test_setup_status_public_and_incomplete_on_fresh_bootstrap(tmp_path):
@@ -87,24 +106,72 @@ def test_setup_status_public_and_incomplete_on_fresh_bootstrap(tmp_path):
         _registries.clear()
 
 
-def test_setup_status_measures_rotation_against_the_configured_password(tmp_path):
-    """A deployment that generated its own bootstrap password has still not rotated it."""
-    settings = _settings(tmp_path)
-    local = LocalAuthSettings(enabled=True, admin_password="a-generated-boot-password")
-    settings = settings.model_copy(
-        update={"auth": settings.auth.model_copy(update={"local": local})}
-    )
-    app = create_app(settings=settings)
+def test_setup_status_reads_the_configured_password_not_the_stored_hash(tmp_path):
+    """A store-side reset is reverted at the next boot, so it cannot clear the step."""
+    app = create_app(settings=_settings(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             setup = client.get("/api/v1/auth/setup-status").json()["initial_setup"]
             assert "admin_password" in setup["pending_steps"]
 
-            app.state.account_store.reset_password(
-                admin_account_name(), "a-strong-local-admin-password"
-            )
+            app.state.account_store.reset_password(admin_account_name(), "a-store-only-password")
+            setup = client.get("/api/v1/auth/setup-status").json()["initial_setup"]
+            assert "admin_password" in setup["pending_steps"]
+
+            app.state.settings.auth.local.admin_password = MINTED_ADMIN
             setup = client.get("/api/v1/auth/setup-status").json()["initial_setup"]
             assert "admin_password" in setup["completed_steps"]
+    finally:
+        _registries.clear()
+
+
+def test_setup_status_carries_the_deploy_kind_and_fetch_command(tmp_path):
+    """The pre-login page shows where to read the password this deployment minted."""
+    settings = _settings(tmp_path)
+    settings.deployment.target = "kubernetes"
+    settings.deployment.namespace = "dfe"
+    app = create_app(settings=settings)
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            body = client.get("/api/v1/auth/setup-status").json()
+
+            assert body["deploy_kind"] == "kubernetes"
+            assert body["credential_fetch_command"] == (
+                "kubectl -n dfe get secret dfe-engine "
+                "-o jsonpath='{.data.admin-password}' | base64 -d"
+            )
+            assert body["default_credentials"] is True
+    finally:
+        _registries.clear()
+
+
+def test_default_credentials_clears_once_the_password_is_minted(tmp_path):
+    settings = _settings(tmp_path)
+    settings.auth.local.admin_password = MINTED_ADMIN
+    app = create_app(settings=settings)
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            assert client.get("/api/v1/auth/setup-status").json()["default_credentials"] is False
+
+            token = client.post(
+                "/api/v1/auth/login", json={"username": "admin", "password": MINTED_ADMIN}
+            )
+            assert token.status_code == 200, token.text
+            assert token.json()["default_credentials"] is False
+    finally:
+        _registries.clear()
+
+
+def test_login_on_the_default_password_flags_the_session(tmp_path):
+    app = create_app(settings=_settings(tmp_path))
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            token = client.post(
+                "/api/v1/auth/login", json={"username": "admin", "password": "changeme"}
+            )
+
+            assert token.status_code == 200, token.text
+            assert token.json()["default_credentials"] is True
     finally:
         _registries.clear()
 
@@ -224,6 +291,45 @@ def test_setup_status_withholds_registries_once_complete(tmp_path):
             assert body["initial_setup"]["complete"] is True
             assert body["organisations"] == []
             assert body["oidc_providers"] == []
+    finally:
+        _registries.clear()
+
+
+def test_break_glass_logs_in_from_the_committed_hash(tmp_path):
+    """The hash in governance settings is what the recovery login verifies against."""
+    settings = _with_deploy_repo(_settings(tmp_path), tmp_path)
+    settings.auth.local.breakglass_password = MINTED_BREAKGLASS
+    app = create_app(settings=settings)
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.post(
+                "/api/v1/auth/login",
+                json={"username": breakglass.USERNAME, "password": MINTED_BREAKGLASS},
+            )
+
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["roles"] == ["admin"]
+    finally:
+        _registries.clear()
+
+
+def test_disabled_break_glass_login_is_403_with_a_reason(tmp_path):
+    settings = _with_deploy_repo(_settings(tmp_path), tmp_path)
+    settings.auth.local.breakglass_password = MINTED_BREAKGLASS
+    app = create_app(settings=settings)
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            breakglass.set_enabled(_deploy_repo_crud(tmp_path), False, "tester")
+
+            resp = client.post(
+                "/api/v1/auth/login",
+                json={"username": breakglass.USERNAME, "password": MINTED_BREAKGLASS},
+            )
+
+            assert resp.status_code == 403
+            body = resp.json()
+            assert body["code"] == "breakglass_disabled"
+            assert breakglass.KEY_ENABLED in body["message"]
     finally:
         _registries.clear()
 

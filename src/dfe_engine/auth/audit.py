@@ -70,6 +70,31 @@ def audit_login_denied(
     )
 
 
+def audit_breakglass_login(
+    client_ip: str | None,
+    allowed: bool,
+    reason: str = "",
+) -> None:
+    """Emit an audit event for every break-glass login attempt, allowed or not.
+
+    The break-glass account bypasses the IdP, so its use is always noteworthy --
+    emitted at warning even on success so it stands out in the log stream.
+
+    Args:
+        client_ip: Client IP address, or None if unavailable.
+        allowed: Whether the account was permitted to attempt authentication.
+        reason: Why it was refused, when it was.
+    """
+    logger.warning(
+        "auth.breakglass.login",
+        user_id="breakglass",
+        auth_path="jwt",
+        client_ip=client_ip,
+        allowed=allowed,
+        reason=reason,
+    )
+
+
 def audit_permission_denied(
     user_id: str,
     action: str,

@@ -16,26 +16,28 @@ Wizard order (declared in :data:`SETUP_STEPS`)::
 
     oidc_provider    optional   configure an external IdP
     organisations    required   create the first customer organisation
-    first_user       required   create a real user (NOT the break-glass admin)
-    admin_password   required   rotate the seeded break-glass admin password (and, when gitops is on, wait until that rotation has merged to deploy-repo main)
+    first_user       required   create a real user (NOT the local admin)
+    admin_password   required   move off the shipped default admin password
 
 A step applies when the thing it configures actually exists — not when a
 settings toggle says so. ``app.py`` bootstraps the account store and seeds the
-break-glass admin unconditionally, and ``POST /auth/login`` authenticates
-against it with neither ``auth.enabled`` nor ``auth.local.enabled`` consulted.
-So the seeded break-glass credential is live even in a deployment that
-believes auth is off, and the wizard has to say so.
+local admin unconditionally, and ``POST /auth/login`` authenticates against it
+with neither ``auth.enabled`` nor ``auth.local.enabled`` consulted. So the
+seeded credential is live even in a deployment that believes auth is off, and
+the wizard has to say so.
 
 ``first_user`` may be satisfied by a local account or by an OIDC identity that
 JIT-provisioned at first login — hence OIDC comes first, so an operator who
 wants IdP-only users can configure it before creating anyone.
 
-``admin_password`` is deliberately last: the break-glass credential is what
-gets you through the earlier steps, so rotating it — and, when gitops is on,
-waiting until that rotation has merged to deploy-repo main — is the closing
-act. A pending review PR is ``committed`` but not ``merged``: the live
-password works, a rebuild from origin/main would revert it, so setup stays
-open.
+``admin_password`` is deliberately last: the admin credential is what gets you
+through the earlier steps. It only ever appears outstanding in a dev posture —
+the engine refuses to start on the default password anywhere else — so the
+step exists to chase a tyre-kicker deployment off ``changeme``.
+
+The status also carries ``deploy_kind`` and ``credential_fetch_command``, which
+the pre-login page shows so an operator can read the password their deployment
+minted rather than guessing at one.
 
 The machine is pure. It reads a :class:`SetupContext` — never a Request — so
 it can be evaluated in a unit test with hand-built stores.
@@ -50,7 +52,15 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from dfe_engine.auth.account_durability import AccountGitState
-from dfe_engine.auth.bootstrap import admin_account_name, admin_account_password
+from dfe_engine.auth.bootstrap import (
+    admin_account_name,
+    admin_account_password,
+    default_credentials_in_use,
+)
+from dfe_engine.auth.deployment_hints import (
+    credential_fetch_command,
+    detect_deploy_kind,
+)
 from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.orgs.models import Org
 
@@ -98,9 +108,12 @@ class SetupContext:
     org_registry: OrgRegistry | None = None
     oidc_registry: OIDCProviderRegistry | None = None
     break_glass_git: AccountGitState | None = None
-    # The seeded break-glass credential as configured; rotation is measured against it.
+    # The configured local admin; the default password is what the wizard chases off.
     bootstrap_admin_name: str = field(default_factory=admin_account_name)
     bootstrap_admin_password: str = field(default_factory=admin_account_password)
+    # Where the operator reads the minted password, for the pre-login page.
+    deploy_kind: str = ""
+    credential_fetch_command: str = ""
 
     @classmethod
     def from_app_state(cls, state: Any) -> SetupContext:
@@ -118,6 +131,8 @@ class SetupContext:
         account_store = getattr(state, "account_store", None)
         local = _attr_path(state, "settings", "auth", "local")
         admin_name = admin_account_name(getattr(local, "admin_name", "") or "")
+        deployment = _attr_path(state, "settings", "deployment")
+        kind = detect_deploy_kind(getattr(deployment, "target", "") or "")
         return cls(
             account_store=account_store,
             org_registry=getattr(state, "org_registry", None),
@@ -126,6 +141,13 @@ class SetupContext:
             bootstrap_admin_name=admin_name,
             bootstrap_admin_password=admin_account_password(
                 getattr(local, "admin_password", "") or ""
+            ),
+            deploy_kind=kind,
+            credential_fetch_command=credential_fetch_command(
+                kind,
+                namespace=getattr(deployment, "namespace", "") or "",
+                secret_name=getattr(local, "admin_secret_name", "") or "",
+                secret_key=getattr(local, "admin_secret_key", "") or "",
             ),
         )
 
@@ -245,9 +267,25 @@ class SetupStatus(BaseModel):
     )
     break_glass: AccountGitState | None = Field(
         default=None,
-        description="Durability of the break-glass admin password in the deploy "
+        description="Durability of the local admin account in the deploy "
         "repo: enabled/auto_merge/committed/merged, plus pending.pr_url/command/"
         "branch when a review PR or CLI merge is still outstanding.",
+    )
+    default_credentials: bool = Field(
+        default=False,
+        description="True when the deployment is running on the shipped default "
+        "admin password. Only reachable in a dev posture -- the engine refuses to "
+        "start on it otherwise -- so the UI banners and forces a change.",
+    )
+    deploy_kind: str = Field(
+        default="",
+        description="docker | kubernetes | local. The deployment vehicle, injected "
+        "by the deployer where it says so and detected from the runtime otherwise.",
+    )
+    credential_fetch_command: str = Field(
+        default="",
+        description="One-line command that prints this deployment's minted admin "
+        "password, for the login page to show while setup is incomplete.",
     )
 
 
@@ -303,40 +341,20 @@ def _has_break_glass_account(ctx: SetupContext) -> bool:
     return ctx.account_store.get(ctx.bootstrap_admin_name) is not None
 
 
-def _break_glass_password_rotated(ctx: SetupContext) -> bool:
-    """True once the seeded admin no longer answers to the bootstrap password.
+def default_credentials(ctx: SetupContext) -> bool:
+    """True when the deployment is still running on the shipped admin password.
 
-    The baseline is the configured ``auth.local.admin_password`` (``changeme``
-    when unset). A deployment that generated its own bootstrap password has
-    still not rotated it — the operator has to move off the seeded value.
-
-    Costs one bcrypt verify per call on an unauthenticated endpoint. There is
-    no cheaper honest test — a changed ``updated_at`` also fires for an
-    enabled/groups edit, which would report the rotation as done while the
-    bootstrap password still worked.
+    Read from the configured password, not from a bcrypt verify: the admin is
+    reconciled from that config on every boot, so config is what the deployment
+    is actually running on. A runtime change that config does not carry is
+    reasserted at the next start.
     """
-    if ctx.account_store is None:
-        return False
-    return not ctx.account_store.verify_password(
-        ctx.bootstrap_admin_name, ctx.bootstrap_admin_password
-    )
-
-
-def _break_glass_merged(ctx: SetupContext) -> bool:
-    """True when the rotation is on deploy-repo main, or gitops is not in play.
-
-    ``break_glass_git is None`` (unit tests, stores still bootstrapping) does
-    not block. File-share / not-git-backed state already reports ``merged``.
-    """
-    git = ctx.break_glass_git
-    if git is None:
-        return True
-    return git.merged
+    return default_credentials_in_use(ctx.bootstrap_admin_password)
 
 
 def _admin_password_step_complete(ctx: SetupContext) -> bool:
-    """Rotated off the bootstrap password, and durable on main if git-backed."""
-    return _break_glass_password_rotated(ctx) and _break_glass_merged(ctx)
+    """The deployment minted its own admin password rather than shipping on the default."""
+    return not default_credentials(ctx)
 
 
 SETUP_STEPS: tuple[StepDefinition, ...] = (
@@ -375,12 +393,12 @@ SETUP_STEPS: tuple[StepDefinition, ...] = (
     ),
     StepDefinition(
         id=STEP_ADMIN_PASSWORD,
-        title="Rotate the break-glass admin password",
+        title="Move off the default admin password",
         description=(
-            "The bootstrapped admin account still uses its bootstrap password. "
-            "Change it — it is the emergency credential for this deployment. "
-            "If gitops is on, setup stays open until that rotation has merged "
-            "to the deploy-repo main (a pending review PR is not enough)."
+            "The admin account is still on the shipped default password. Mint a "
+            "password in the deployment's secret store and inject it as "
+            "DFE_AUTH_LOCAL_ADMIN_PASSWORD — the engine reasserts that value on "
+            "every boot, so a password set anywhere else is reverted."
         ),
         applies=_has_break_glass_account,
         required=lambda _ctx: True,
@@ -460,6 +478,8 @@ class SetupStateMachine:
                 initial_setup=state,
                 oidc_providers=self._enabled_oidc_login_options(ctx),
                 break_glass=ctx.break_glass_git,
+                default_credentials=default_credentials(ctx),
+                deploy_kind=ctx.deploy_kind,
             )
 
         return SetupStatus(
@@ -467,6 +487,9 @@ class SetupStateMachine:
             oidc_providers=self._oidc_providers(ctx),
             organisations=self._organisations(ctx),
             break_glass=ctx.break_glass_git,
+            default_credentials=default_credentials(ctx),
+            deploy_kind=ctx.deploy_kind,
+            credential_fetch_command=ctx.credential_fetch_command,
         )
 
     # ------------------------------------------------------------------

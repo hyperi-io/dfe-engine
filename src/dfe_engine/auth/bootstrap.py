@@ -8,8 +8,17 @@
 
 """Bootstrap auth stores for local authentication.
 
-Creates the required directory structure, seeds default groups and an
-admin account, and copies the built-in roles.yaml if missing.
+Creates the required directory structure, seeds default groups and the local
+accounts, and copies the built-in roles.yaml if missing.
+
+Two accounts are seeded from injected config, through ONE reconcile path:
+
+``admin``      the everyday local admin. Its password comes from the deployment's
+               secret store (``DFE_AUTH_LOCAL_ADMIN_PASSWORD``) and is reasserted
+               on every boot, so a teardown and rebuild restores exactly the
+               minted credential.
+``breakglass`` the recovery admin, seeded from a hash committed in the deploy
+               repo (:mod:`dfe_engine.auth.breakglass`).
 
 Usage::
 
@@ -34,30 +43,71 @@ from dfe_engine.auth.api_keys import APIKeyStore
 from dfe_engine.auth.groups import DocuStoreGroupStore, GroupStore
 from dfe_engine.auth.role_store import RoleStore
 from dfe_engine.auth.roles import RoleConfig
+from dfe_engine.settings import is_dev_posture
 
 if TYPE_CHECKING:
     from dfe_engine.gitcrud.engine import GitCrud
     from dfe_engine.settings import SeedAccount
 
-# Default break-glass username
+# Default local admin username
 _DEFAULT_ADMIN_NAME = "admin"
-# Default password that triggers a startup warning
-# Default break-glass password
+# The shipped placeholder password. Refused outside a dev posture.
 _DEFAULT_PASSWORD = "changeme"
+# Group the local admin belongs to.
+_ADMIN_GROUP = "dfe-admins"
+
+
+class DefaultCredentialsError(RuntimeError):
+    """The admin password is unset or the shipped default in a production posture."""
 
 
 def admin_account_name(override: str = "") -> str:
-    """Break-glass admin username: override, else ``admin``."""
+    """Local admin username: override, else ``admin``."""
     if override and override != _DEFAULT_ADMIN_NAME:
         return override
     return _DEFAULT_ADMIN_NAME
 
 
 def admin_account_password(override: str = "") -> str:
-    """Break-glass admin password: override, else ``changeme``."""
+    """Local admin password: override, else ``changeme``."""
     if override and override != _DEFAULT_PASSWORD:
         return override
     return _DEFAULT_PASSWORD
+
+
+def default_credentials_in_use(admin_password: str) -> bool:
+    """True when the deployment is running on the unset/shipped admin password."""
+    return not admin_password or admin_password == _DEFAULT_PASSWORD
+
+
+def require_admin_password(admin_password: str, environment: str) -> bool:
+    """Refuse to start on the default admin password outside a dev posture.
+
+    The posture predicate is the one gitops auto-merge gates on
+    (:func:`dfe_engine.settings.is_dev_posture`), so a deployment cannot be dev
+    enough to auto-merge yet production enough to be refused here, or the reverse.
+
+    Returns True when a dev posture is running on the default -- the caller
+    surfaces that as ``default_credentials`` so the UI can banner and force a
+    change.
+
+    Raises:
+        DefaultCredentialsError: production posture with no minted password.
+    """
+    if not default_credentials_in_use(admin_password):
+        return False
+    if is_dev_posture(environment):
+        logger.warning(
+            f"Local admin is running on the default password '{_DEFAULT_PASSWORD}' "
+            f"(DFE_ENV={environment}); change it before this deployment carries data"
+        )
+        return True
+    raise DefaultCredentialsError(
+        f"DFE_AUTH_LOCAL_ADMIN_PASSWORD is unset or '{_DEFAULT_PASSWORD}' but "
+        f"DFE_ENV is '{environment}': set DFE_AUTH_LOCAL_ADMIN_PASSWORD to the "
+        "password your deployment minted (dfe-docker: make init; kubernetes: the "
+        "engine Secret), or set DFE_ENV to dev/development/local/test/ci"
+    )
 
 
 # Default group definitions: name -> (roles, description)
@@ -77,6 +127,7 @@ def bootstrap_auth(
     group_store: GroupStore | DocuStoreGroupStore | None = None,
     gitcrud: GitCrud | None = None,
     seed_accounts: list[SeedAccount] | None = None,
+    breakglass_password: str = "",
 ) -> tuple[
     AccountStore | DocuStoreAccountStore,
     GroupStore | DocuStoreGroupStore,
@@ -86,21 +137,23 @@ def bootstrap_auth(
 ]:
     """Bootstrap auth stores with sensible defaults.
 
-    Creates subdirectories, seeds roles/groups/admin account if missing,
-    and returns the initialised stores.
+    Creates subdirectories, seeds roles and groups, reconciles the local accounts
+    from config, and returns the initialised stores.
 
     Args:
         auth_dir: Root directory for auth config files.
-        default_admin_password: Password for the seeded admin account. Empty
-            falls through to ``changeme``.
-        default_admin_name: Username for the seeded admin account. Empty falls
-            through to ``admin``.
+        default_admin_password: Password for the local admin. Empty falls through
+            to ``changeme``.
+        default_admin_name: Username for the local admin. Empty falls through
+            to ``admin``.
         gitcrud: When gitops is enabled, the deploy-repo engine. The live store is
-            hydrated from it before the seed-if-empty check (so a persisted
-            break-glass password survives a rebuild), and a freshly seeded admin is
-            persisted back into it.
+            hydrated from it before the reconcile, a freshly created admin is
+            persisted back into it, and the break-glass hash is read from its
+            governance settings.
         seed_accounts: Named accounts reconciled on every boot (config wins), so
             shared team logins survive a teardown+rebuild unchanged (dfe-infra #106).
+        breakglass_password: First-boot break-glass password. Minted into the
+            deploy repo as a hash when none is committed, ignored thereafter.
 
     Returns:
         Tuple of (AccountStore, GroupStore, APIKeyStore, RoleStore, RoleConfig).
@@ -139,38 +192,37 @@ def bootstrap_auth(
         _seed_groups(group_store)
         logger.info("Seeded default groups")
 
-    # Restore accounts from the durable deploy repo BEFORE the seed-if-empty check,
-    # so a rotated break-glass password survives a rebuild rather than reverting to
-    # the shipped default.
+    # Restore accounts from the durable deploy repo BEFORE the reconcile, so an
+    # account the engine persisted survives a rebuild of the live store.
     restored = account_durability.hydrate_from_deploy_repo(gitcrud, account_store)
     if restored:
         logger.info(f"Restored {restored} account(s) from the deploy repo")
 
-    # Resolved once: the seed and the reconcile below must skip the SAME username,
-    # or a renamed break-glass account is reconciled away by a colliding seed spec.
-    admin_name = admin_account_name(default_admin_name)
+    from dfe_engine.settings import SeedAccount
 
-    # Seed admin account if the store has no accounts yet (backend-agnostic)
-    if not account_store.list():
-        password = admin_account_password(default_admin_password)
-        _seed_admin(account_store, group_store, password, admin_name)
-        if password == _DEFAULT_PASSWORD:
-            logger.warning(
-                f"Admin account seeded with default password '{_DEFAULT_PASSWORD}'"
-                " — change in production"
-            )
-        # Persist the freshly seeded admin so the break-glass credential is durable
-        # from the first start, not only after an operator rotates it.
+    # One reconcile path for every config-owned account: the admin goes through the
+    # same mechanism as the named seeds, so a rebuild restores the minted credential.
+    admin_name = admin_account_name(default_admin_name)
+    specs = [
+        SeedAccount(
+            username=admin_name,
+            password=admin_account_password(default_admin_password),
+            groups=[_ADMIN_GROUP],
+        ),
+        *(s for s in (seed_accounts or []) if s.username != admin_name),
+    ]
+    created = _reconcile_seed_accounts(account_store, group_store, specs)
+
+    # Persist a freshly created admin so it is durable from the first start.
+    if admin_name in created:
         seeded = account_store.get(admin_name)
         if seeded is not None:
             account_durability.publish_seed(gitcrud, seeded)
 
-    # Reconcile named seed accounts on every boot so a teardown+rebuild restores
-    # the shared team logins unchanged (dfe-infra #106). Config wins: unlike the
-    # break-glass admin above (seeded only into an empty store), a seed account's
-    # password and groups are reasserted every startup, in any store backend.
-    if seed_accounts:
-        _reconcile_seed_accounts(account_store, group_store, seed_accounts, admin_name)
+    # The recovery admin: its hash lives in the deploy repo, not in config.
+    from dfe_engine.auth import breakglass
+
+    breakglass.seed(account_store, group_store, gitcrud, breakglass_password)
 
     return account_store, group_store, api_key_store, role_store, role_config
 
@@ -189,41 +241,22 @@ def _seed_groups(group_store: GroupStore) -> None:
         group_store.create(name, roles=roles, description=description)
 
 
-def _seed_admin(
-    account_store: AccountStore,
-    group_store: GroupStore,
-    password: str,
-    name: str,
-) -> None:
-    """Create default admin account and add to dfe-admins group."""
-    account_store.create(name, password, groups=["dfe-admins"])
-    # Also register admin as a member of the dfe-admins group
-    group_store.add_member("dfe-admins", name)
-
-
 def _reconcile_seed_accounts(
     account_store: AccountStore | DocuStoreAccountStore,
     group_store: GroupStore | DocuStoreGroupStore,
     seed_accounts: list[SeedAccount],
-    admin_name: str,
-) -> None:
-    """Create or reconcile named seed accounts so config wins on every boot.
+) -> list[str]:
+    """Create or reconcile config-owned accounts so config wins on every boot.
 
     For each spec: create it if absent, else reset the password when the
     configured one no longer verifies and align its groups to the config. Group
     rosters are reconciled to match exactly -- added to the config's groups,
-    removed from any other. ``admin_name`` is the resolved break-glass username,
-    skipped so its git-backed durability is never clobbered by a reconcile.
+    removed from any other. Returns the usernames created on this pass.
     """
     known_groups = {g.name for g in group_store.list()}
+    created: list[str] = []
 
     for spec in seed_accounts:
-        if spec.username == admin_name:
-            logger.warning(
-                f"Seed account '{spec.username}' collides with the break-glass admin; skipped"
-            )
-            continue
-
         wanted_groups = []
         for gname in spec.groups:
             if gname in known_groups:
@@ -236,6 +269,7 @@ def _reconcile_seed_accounts(
         account = account_store.get(spec.username)
         if account is None:
             account_store.create(spec.username, spec.password, groups=wanted_groups)
+            created.append(spec.username)
             logger.info(f"Seeded named account '{spec.username}'")
         else:
             if spec.password and not account_store.verify_password(spec.username, spec.password):
@@ -252,3 +286,5 @@ def _reconcile_seed_accounts(
                 group_store.add_member(group.name, spec.username)
             elif spec.username in group.members:
                 group_store.remove_member(group.name, spec.username)
+
+    return created

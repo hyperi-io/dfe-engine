@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.8.0"
+    "version": "0.0.0"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -604,6 +604,64 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ResetPasswordResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/accounts/{username}/rotate-password": {
+      "post": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Rotate Password",
+        "description": "Rotate an account's password in the deployment's secret store.\n\nThe store that injects ``DFE_AUTH_LOCAL_ADMIN_PASSWORD`` is the source of that\npassword, so the engine writes the new value through the scalo secrets seam\nand never into its own YAML -- a YAML-only change is reverted by the next boot\nreconcile. Returns 501 with the store command when the deployment has not\ndeclared a secrets path for the password.",
+        "operationId": "rotate_password_api_v1_auth_accounts__username__rotate_password_post",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Username"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RotatePasswordRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RotatePasswordResponse"
                 }
               }
             }
@@ -23933,6 +23991,40 @@
         ],
         "title": "RollbackRequest"
       },
+      "RotatePasswordRequest": {
+        "properties": {
+          "new_password": {
+            "type": "string",
+            "title": "New Password",
+            "description": "New plaintext password to write to the store"
+          }
+        },
+        "type": "object",
+        "required": [
+          "new_password"
+        ],
+        "title": "RotatePasswordRequest"
+      },
+      "RotatePasswordResponse": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "password rotated in the secret store"
+          },
+          "secret_path": {
+            "type": "string",
+            "title": "Secret Path",
+            "description": "scalo.secrets path the new password was written to"
+          }
+        },
+        "type": "object",
+        "required": [
+          "secret_path"
+        ],
+        "title": "RotatePasswordResponse",
+        "description": "Outcome of a rotation written through the secrets seam."
+      },
       "RoutingResponse": {
         "properties": {
           "compiler": {
@@ -25853,7 +25945,25 @@
                 "type": "null"
               }
             ],
-            "description": "Durability of the break-glass admin password in the deploy repo: enabled/auto_merge/committed/merged, plus pending.pr_url/command/branch when a review PR or CLI merge is still outstanding."
+            "description": "Durability of the local admin account in the deploy repo: enabled/auto_merge/committed/merged, plus pending.pr_url/command/branch when a review PR or CLI merge is still outstanding."
+          },
+          "default_credentials": {
+            "type": "boolean",
+            "title": "Default Credentials",
+            "description": "True when the deployment is running on the shipped default admin password. Only reachable in a dev posture -- the engine refuses to start on it otherwise -- so the UI banners and forces a change.",
+            "default": false
+          },
+          "deploy_kind": {
+            "type": "string",
+            "title": "Deploy Kind",
+            "description": "docker | kubernetes | local. The deployment vehicle, injected by the deployer where it says so and detected from the runtime otherwise.",
+            "default": ""
+          },
+          "credential_fetch_command": {
+            "type": "string",
+            "title": "Credential Fetch Command",
+            "description": "One-line command that prints this deployment's minted admin password, for the login page to show while setup is incomplete.",
+            "default": ""
           }
         },
         "type": "object",
@@ -27882,6 +27992,12 @@
             "type": "array",
             "title": "Roles",
             "description": "User roles"
+          },
+          "default_credentials": {
+            "type": "boolean",
+            "title": "Default Credentials",
+            "description": "True when this session is running on the shipped default admin password. Only reachable in a dev posture; the UI banners and forces a change.",
+            "default": false
           }
         },
         "type": "object",
