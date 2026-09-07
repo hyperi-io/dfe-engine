@@ -40,6 +40,7 @@ class DDLFileWriter:
         topology: str = "single",
         resolver: EngineResolver | None = None,
         database: str = "{db}",
+        landing_table: str = "default",
     ) -> None:
         """Initialise the writer.
 
@@ -59,11 +60,15 @@ class DDLFileWriter:
                      to read the database's engine, and "{db}" matches no database,
                      so a Replicated/Shared target would be misread as a plain one
                      and wrongly get ON CLUSTER (it replicates on its own).
+            landing_table: Name of the catch-all landing table. A LIVE caller must
+                     pass the resolved ``clickhouse.landing_table`` setting, so the
+                     table this writer emits is the one the query paths read.
         """
         self._registry = registry or TypeRegistry.default()
         self._ddl_gen = DDLGenerator(self._registry, resolver=resolver)
         self._topology = topology
         self._database = database
+        self._landing_table = landing_table
 
     @staticmethod
     def _profile_version(profile_name: str) -> str:
@@ -152,7 +157,7 @@ class DDLFileWriter:
     ) -> TableSpec:
         """Describe the default ingestion table (profile columns only)."""
         return self._profile_table_spec(
-            table_name="default",
+            table_name=self._landing_table,
             profile_name=profile_name,
             profile_version=profile_version,
             description="Default ingestion table (profile columns only)",
@@ -271,16 +276,17 @@ class DDLFileWriter:
         """Generate all DDL files as a dict of {relative_path: sql_content}."""
         files: dict[str, Any] = {}
 
-        files["default"] = {}
+        landing = self._landing_table
+        files[landing] = {}
         files["profiles"] = {}
         for profile_name in _PROFILES:
-            files["default"][profile_name] = {}
+            files[landing][profile_name] = {}
             files["profiles"][profile_name] = {}
             profile_path = _resolve_profiles_dir() / f"{profile_name}.yaml"
             profile_versions = SchemaLoader.load_version_metadata(profile_path)["versions"].keys()
             for profile_version in profile_versions:
-                files["default"][profile_name][profile_version] = {}
-                files["default"][profile_name][profile_version]["default.sql"] = (
+                files[landing][profile_name][profile_version] = {}
+                files[landing][profile_name][profile_version][f"{landing}.sql"] = (
                     self.generate_default_table(
                         profile_name=profile_name, profile_version=profile_version
                     )

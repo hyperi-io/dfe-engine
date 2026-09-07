@@ -189,6 +189,14 @@ class TestTargetDatabase:
         assert "CREATE TABLE IF NOT EXISTS `dfe`.`default`" in ddl
         assert "`{db}`.`default`" not in ddl
 
+    def test_landing_table_name_reaches_the_ddl(self):
+        # The name is env-driven (DFE_CLICKHOUSE_LANDING_TABLE); a live caller
+        # passes the resolved setting, so the table this emits is the one the
+        # query paths read.
+        ddl = DDLFileWriter(database="dfe", landing_table="parked").generate_default_table()
+        assert "CREATE TABLE IF NOT EXISTS `dfe`.`parked`" in ddl
+        assert "`dfe`.`default`" not in ddl
+
     def test_real_database_reaches_detection_ddl(self):
         ddl = DDLFileWriter(database="dfe_hunts").generate_detection_table()
         assert "CREATE TABLE IF NOT EXISTS `dfe_hunts`.`detection`" in ddl
