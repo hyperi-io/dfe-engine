@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.8](https://github.com/hyperi-io/dfe-engine/compare/v1.19.7...v1.19.8) (2026-09-07)
+
+### Bug Fixes
+
+* **auth:** seed admin and break-glass from the store and refuse changeme outside dev ([462d175](https://github.com/hyperi-io/dfe-engine/commit/462d175288d0a937accf0d2de9eab4761b61d053)), closes [#233](https://github.com/hyperi-io/dfe-engine/issues/233) [#77](https://github.com/hyperi-io/dfe-engine/issues/77) [#206](https://github.com/hyperi-io/dfe-engine/issues/206)
+* carry the landing table setting through to the DDL ([#299](https://github.com/hyperi-io/dfe-engine/issues/299)) ([2d5c595](https://github.com/hyperi-io/dfe-engine/commit/2d5c5953e99e604749c2d597f5b4fb048e587da5)), closes [#297](https://github.com/hyperi-io/dfe-engine/issues/297)
+
 ## [1.19.7](https://github.com/hyperi-io/dfe-engine/compare/v1.19.6...v1.19.7) (2026-09-05)
 
 ### Bug Fixes
