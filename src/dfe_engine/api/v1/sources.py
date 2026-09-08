@@ -13,6 +13,13 @@ PATCH  /api/v1/sources/{name}           → Enable or disable source
 DELETE /api/v1/sources/{name}           → Delete source
 POST   /api/v1/sources/bulk             → Bulk enable/disable/delete
 POST   /api/v1/sources/seed             → Seed built-in defaults
+POST   /api/v1/sources/reconcile-apps   → Bring the derived app state into step with the sources
+
+Every write that changes what the apps must do -- a deploy, a state change, a
+delete, an edit -- ends by reconciling the deploy repo: the receiver and loader
+routing blocks are recompiled, and a fetcher-based source gains or loses its
+fetcher instance. The reconcile never fails the source write; its outcome is
+reported, and ``reconcile-apps`` retries it.
 """
 
 from __future__ import annotations
@@ -21,13 +28,15 @@ import asyncio
 from datetime import UTC, datetime
 from typing import Any, NoReturn
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from scalo.logger import logger
 
 from dfe_engine.api.deps import ClickHouseClient, CurrentUser, Settings, SourceReg, require_action
 from dfe_engine.api.errors import MatchConflictErrorResponse, SourceCreateConflictResponse
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
+from dfe_engine.api.v1.apps import commit_overlay, remove_overlay
+from dfe_engine.appmgmt import derived
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.git_identity import git_author
@@ -97,16 +106,67 @@ class SourceResponse(BaseModel):
         description="Version deployed to runtime (null until first deploy)",
     )
     versions: list[str] = Field(..., description="All version ids on the source")
+    apps_synced: list[str] = Field(
+        default_factory=list,
+        description="Deploy-repo writes made so the apps follow this change (service/instance: action)",
+    )
+    apps_sync_error: str | None = Field(
+        default=None,
+        description="Why the apps could not be brought into step; reconcile-apps retries it",
+    )
 
 
-def _source_response(source: Source, *, message: str) -> SourceResponse:
+class AppsReconcileResponse(BaseModel):
+    """What the reconcile wrote into the deploy repo."""
+
+    changes: list[str] = Field(
+        default_factory=list, description="Overlay writes made (service/instance: action)"
+    )
+
+
+def _source_response(
+    source: Source,
+    *,
+    message: str,
+    apps: tuple[list[str], str | None] = ([], None),
+) -> SourceResponse:
+    synced, error = apps
     return SourceResponse(
         source=source.source,
         message=message,
         current=source.current,
         deployed_version=source.deployed_version,
         versions=sorted(source.versions.keys()),
+        apps_synced=synced,
+        apps_sync_error=error,
     )
+
+
+def _reconcile_apps(request: Request, user: Any, registry: Any) -> tuple[list[str], str | None]:
+    """Apply what the sources imply about the deployed apps. Never raises.
+
+    Returns the writes made and, when the reconcile could not run or complete,
+    why. A deployment without a deploy repo has nothing to reconcile.
+    """
+    gc = getattr(request.app.state, "gitcrud", None)
+    if gc is None:
+        return [], None
+    done: list[str] = []
+    try:
+        for change in derived.plan(gc, registry, request.app.state.settings):
+            if change.action == "remove":
+                remove_overlay(request, user, change.app)
+            else:
+                commit_overlay(request, user, change.app, change.doc or {}, summary=change.summary)
+            done.append(change.describe())
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, str) else exc.detail.get("message", "")
+        logger.warning(f"apps not reconciled with the sources: {detail}")
+        return done, str(detail)
+    except Exception as exc:
+        logger.warning(f"apps not reconciled with the sources: {exc}")
+        return done, str(exc)
+    return done, None
 
 
 class SourceEnabledPatchRequest(BaseModel):
@@ -300,6 +360,7 @@ async def create_source(
     body: SourceWriteRequest,
     user: CurrentUser,
     registry: SourceReg,
+    request: Request,
 ):
     """Create a new source from a flat source definition (initial version ``1.0.0``).
 
@@ -331,7 +392,9 @@ async def create_source(
     except SourceValidationError as e:
         _raise_save_validation_http(e)
     audit_resource_change(user.user_id, "source", source.source, "created")
-    return _source_response(source, message="created")
+    return _source_response(
+        source, message="created", apps=_reconcile_apps(request, user, registry)
+    )
 
 
 @router.get(
@@ -657,6 +720,7 @@ async def deploy_source_schema(
     user: CurrentUser,
     registry: SourceReg,
     settings: Settings,
+    request: Request,
     version: str | None = Query(
         None, description="Source version id (defaults to deployed_version)"
     ),
@@ -824,6 +888,14 @@ async def deploy_source_schema(
     except SourceValidationError as exc:
         _raise_save_validation_http(exc)
 
+    # The receiver's rule for this source, the loader's table map and (for a
+    # fetcher-based source) the fetcher instance are what make the deploy live.
+    apps_synced, apps_error = _reconcile_apps(request, user, registry)
+    deploy_result = deploy_result.model_copy(
+        update={"apps_synced": apps_synced, "apps_sync_error": apps_error}
+    )
+    store.save_deploy(deploy_result, source)
+
     # Topic creation mutates the broker, so it is attributable and belongs in the
     # audit record alongside the DDL rather than only in an unattributed log line.
     audit_resource_change(
@@ -835,6 +907,7 @@ async def deploy_source_schema(
             "version": version_id,
             "topics_ensured": topics_ensured,
             "topics_failed": topics_failed,
+            "apps_synced": apps_synced,
         },
     )
     return deploy_result
@@ -877,6 +950,7 @@ async def update_source(
     body: SourceWriteRequest,
     user: CurrentUser,
     registry: SourceReg,
+    request: Request,
 ):
     """Update a source from a flat revision body.
 
@@ -913,7 +987,9 @@ async def update_source(
     except SourceValidationError as e:
         _raise_save_validation_http(e)
     audit_resource_change(user.user_id, "source", source.source, "updated")
-    return _source_response(source, message="updated")
+    return _source_response(
+        source, message="updated", apps=_reconcile_apps(request, user, registry)
+    )
 
 
 @router.patch(
@@ -932,6 +1008,7 @@ async def patch_source_enabled(
     body: SourceEnabledPatchRequest,
     user: CurrentUser,
     registry: SourceReg,
+    request: Request,
 ):
     """Set a source's lifecycle state without changing versioned configuration.
 
@@ -965,7 +1042,7 @@ async def patch_source_enabled(
         _raise_save_validation_http(e)
 
     audit_resource_change(user.user_id, "source", saved.source, target)
-    return _source_response(saved, message=target)
+    return _source_response(saved, message=target, apps=_reconcile_apps(request, user, registry))
 
 
 @router.delete(
@@ -973,8 +1050,8 @@ async def patch_source_enabled(
     status_code=204,
     dependencies=[Depends(require_action(scopes_dict["source_delete"]))],
 )
-async def delete_source(name: str, user: CurrentUser, registry: SourceReg):
-    """Delete a source by name."""
+async def delete_source(name: str, user: CurrentUser, registry: SourceReg, request: Request):
+    """Delete a source by name. Its fetcher instance and receiver rule go with it."""
     if not registry.source_exists(name):
         raise HTTPException(
             status_code=404,
@@ -985,6 +1062,7 @@ async def delete_source(name: str, user: CurrentUser, registry: SourceReg):
         )
     registry.delete_source(name, created_by=git_author(user))
     audit_resource_change(user.user_id, "source", name, "deleted")
+    _reconcile_apps(request, user, registry)
 
 
 @router.post(
@@ -996,6 +1074,7 @@ async def bulk_action(
     body: BulkActionRequest,
     user: CurrentUser,
     registry: SourceReg,
+    request: Request,
 ):
     """Perform a bulk action (enable, disable, dormant, delete) on multiple sources."""
     action_to_state = {"enable": "active", "disable": "disabled", "dormant": "dormant"}
@@ -1028,7 +1107,35 @@ async def bulk_action(
     result = BulkActionResponse(action=body.action, succeeded=succeeded, failed=failed)
     if succeeded:
         audit_resource_change(user.user_id, "source", ",".join(succeeded), body.action)
+        _reconcile_apps(request, user, registry)
     return result
+
+
+@router.post(
+    "/reconcile-apps",
+    response_model=AppsReconcileResponse,
+    dependencies=[Depends(require_action(scopes_dict["source_write"]))],
+)
+async def reconcile_apps(user: CurrentUser, registry: SourceReg, request: Request):
+    """Bring the deploy repo's derived app state into step with the sources.
+
+    Recompiles every stack-scoped routing block (receiver, loader) and deploys,
+    syncs or removes the instances of every instance-scoped app (a fetcher per
+    active fetcher-based source). Every source write does this on its own; this
+    route is the retry when one reported ``apps_sync_error``.
+    """
+    if getattr(request.app.state, "gitcrud", None) is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "not_configured", "message": "gitops is not enabled"},
+        )
+    changes, error = _reconcile_apps(request, user, registry)
+    if error:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "reconcile_failed", "message": error, "changes": changes},
+        )
+    return AppsReconcileResponse(changes=changes)
 
 
 @router.post(
@@ -1169,6 +1276,7 @@ def _to_summary(raw: dict[str, Any]) -> SourceSummaryObject:
         header_type=raw.get("header_type"),
         has_transform=bool(raw.get("has_transform")),
         has_fetcher=bool(raw.get("has_fetcher")),
+        origin=raw.get("origin", "receiver"),
         views=list(raw.get("views") or []),
     )
 

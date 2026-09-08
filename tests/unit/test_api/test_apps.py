@@ -46,6 +46,18 @@ def _define_source(client, headers, name: str):
     )
 
 
+def _define_fetcher_source(client, headers, name: str):
+    """Define a fetcher-based source: a fetcher instance is named for one."""
+    return client.post(
+        "/api/v1/sources",
+        json={
+            "source": name,
+            "fetcher": {"source_type": "crates_io", "config": {"crates": ["dfe-fetcher"]}},
+        },
+        headers=headers,
+    )
+
+
 def _deploy(client, headers, instance: str = "edge", values: dict | None = None):
     _define_source(client, headers, instance)
     return client.post(
@@ -493,23 +505,78 @@ class TestAdversarialRegressions:
     def test_a_per_config_app_accepts_a_second_instance(self, client, app, admin_headers, tmp_path):
         gc = _wire(app, tmp_path)
         for instance in ("alpha", "beta"):
-            resp = client.post(
-                "/api/v1/apps/dfe-fetcher/instances",
-                json={"instance": instance},
-                headers=admin_headers,
-            )
-            assert resp.status_code == 200, resp.text
+            assert _deploy(client, admin_headers, instance).status_code == 200
 
         # The component is the only thing keeping the two deployments' Kubernetes
         # object names apart, because dfe-common.fullname carries no instance.
-        alpha = gc.get("helmvars", "dfe-fetcher-alpha-values")
-        beta = gc.get("helmvars", "dfe-fetcher-beta-values")
-        assert alpha["component"] == "fetcher-alpha"
-        assert beta["component"] == "fetcher-beta"
+        alpha = gc.get("helmvars", f"{VRL}-alpha-values")
+        beta = gc.get("helmvars", f"{VRL}-beta-values")
+        assert alpha["component"] == "transform-vrl-alpha"
+        assert beta["component"] == "transform-vrl-beta"
 
         listed = client.get("/api/v1/apps", headers=admin_headers).json()
         by_service = {e["service"]: e for e in listed}
-        assert by_service["dfe-fetcher"]["instances"] == ["alpha", "beta"]
+        assert by_service[VRL]["instances"] == ["alpha", "beta"]
+
+    def test_a_fetcher_instance_carries_its_deployed_source_stanza(
+        self, client, app, admin_headers, tmp_path
+    ):
+        from dfe_engine.api.deps import _registries
+
+        gc = _wire(app, tmp_path)
+        assert _define_fetcher_source(client, admin_headers, "alpha").status_code == 201
+        _registries["source"].set_deployed_version("alpha", "1.0.0")
+
+        resp = client.post(
+            "/api/v1/apps/dfe-fetcher/instances",
+            json={"instance": "alpha"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        alpha = gc.get("helmvars", "dfe-fetcher-alpha-values")
+        assert alpha["component"] == "fetcher-alpha"
+        assert alpha["config"]["instance_id"] == "alpha"
+        assert alpha["config"]["sources"]["crates_io"] == {
+            "enabled": True,
+            "topic": "alpha",
+            "crates": ["dfe-fetcher"],
+        }
+        listed = client.get("/api/v1/apps", headers=admin_headers).json()
+        by_service = {e["service"]: e for e in listed}
+        assert by_service["dfe-fetcher"]["instances"] == ["alpha"]
+        assert by_service["dfe-fetcher"]["routing_scope"] == "instance"
+        assert "crates_io" in by_service["dfe-fetcher"]["source_types"]
+
+    def test_a_fetcher_instance_for_an_undeployed_source_is_refused(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # The reconcile would remove it on the next source write anyway.
+        _wire(app, tmp_path)
+        assert _define_fetcher_source(client, admin_headers, "alpha").status_code == 201
+        resp = client.post(
+            "/api/v1/apps/dfe-fetcher/instances",
+            json={"instance": "alpha"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "source_not_live"
+
+    def test_a_fetcher_instance_for_a_receiver_source_is_refused(
+        self, client, app, admin_headers, tmp_path
+    ):
+        from dfe_engine.api.deps import _registries
+
+        _wire(app, tmp_path)
+        _define_source(client, admin_headers, "pushed")
+        _registries["source"].set_deployed_version("pushed", "1.0.0")
+        resp = client.post(
+            "/api/v1/apps/dfe-fetcher/instances",
+            json={"instance": "pushed"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "routing_not_applicable"
 
     def test_a_scale_pool_overlay_leaves_the_component_alone(
         self, client, app, admin_headers, tmp_path

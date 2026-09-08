@@ -186,17 +186,19 @@ class Seed:
         if script == "seed_source_with_transform":
             # ------------------------------------------------------------
             # Everything the Sources/<source> page renders, in one call
-            # - The source definition, with the match rule and a fetcher
-            # - Its bound transform and fetcher instances, and a program
-            # - The receiver and loader pools, with routing compiled from it
+            # - A receiver-based source with its match rule, and a fetcher-based one
+            # - The transform bound to the first, the fetcher bound to the second
+            # - The receiver and loader pools, with routing compiled from both
             # ------------------------------------------------------------
             source = self.sources.seed_source()
+            fetched = self.sources.seed_fetcher_source()
             source_apps = self.apps.seed_source_apps()
             pools = self.apps.seed_pools()
             logger.info(
                 "e2e seed",
                 script=script,
                 source=source,
+                fetched=fetched,
                 source_apps=source_apps,
                 pools=pools,
             )
@@ -205,6 +207,7 @@ class Seed:
             # The link needs a file set to resolve into, so the instance that
             # consumes the artefact is seeded before the artefact itself.
             source = self.sources.seed_source()
+            self.sources.seed_fetcher_source()
             source_apps = self.apps.seed_source_apps()
             artefact = self.artefacts.seed_library_artefact()
             logger.info(

@@ -18,7 +18,11 @@ product API unchanged.
 from __future__ import annotations
 
 from dfe_engine.api.e2e.seed.base import Seed
-from dfe_engine.api.e2e.seed.sources import SEED_ACTOR, SEED_SOURCE_NAME
+from dfe_engine.api.e2e.seed.sources import (
+    SEED_ACTOR,
+    SEED_FETCHER_SOURCE_NAME,
+    SEED_SOURCE_NAME,
+)
 from dfe_engine.appmgmt import catalogue, files, instances, routing, scaling
 from dfe_engine.gitcrud.engine import set_path
 
@@ -64,15 +68,36 @@ _MEMORY_LIMIT = "1Gi"
 class Apps(Seed):
     """Deploy app instances, their consumed files, their routing and their dials."""
 
-    def seed_source_apps(self, source: str = SEED_SOURCE_NAME) -> bool:
-        """Deploy the transform and fetcher bound to *source*, with a program to edit.
+    def seed_source_apps(
+        self, source: str = SEED_SOURCE_NAME, fetched: str = SEED_FETCHER_SOURCE_NAME
+    ) -> bool:
+        """Deploy the transform bound to *source*, with a program to edit, and the
+        fetcher instance bound to *fetched*.
 
         Returns True when anything was written, False when it was all already there.
         """
         changed = self._ensure_instance(TRANSFORM_SERVICE, source)
         changed |= self._ensure_transform_program(source)
-        changed |= self._ensure_instance(FETCHER_SERVICE, source)
+        changed |= self._ensure_fetcher_instance(fetched)
         return changed
+
+    def _ensure_fetcher_instance(self, source: str) -> bool:
+        """Deploy the fetcher instance for *source* with its stanza compiled in."""
+        gc = self._require_gitcrud()
+        app = instances.instance_of(FETCHER_SERVICE, source)
+        doc = instances.read_overlay(gc, app) if instances.exists(gc, app) else None
+        fresh = doc is None
+        doc = doc or instances.initial_overlay(app)
+        synced = routing.sync(
+            app.descriptor,
+            doc,
+            self._require_source_registry(),
+            self._require_settings(),
+            instance=source,
+        )
+        if not (fresh or synced):
+            return False
+        return self._put(app, doc, "deploy instance" if fresh else "sync routing")
 
     def seed_pools(self) -> bool:
         """Deploy the single-instance pools and compile their routing from the sources.

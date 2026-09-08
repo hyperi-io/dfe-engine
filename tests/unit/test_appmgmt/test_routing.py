@@ -155,3 +155,105 @@ class TestCompiled:
         app = replace(catalogue.descriptor(RECEIVER), routing_compiler="nonexistent")
         with pytest.raises(routing.UnknownRoutingCompilerError):
             routing.compile_for(app, source_registry, settings)
+
+
+FETCHER = "dfe-fetcher"
+
+
+@pytest.fixture
+def fetched_registry():
+    return _Registry(
+        [
+            Source.model_validate(
+                {
+                    "source": "okta-audit",
+                    "state": "active",
+                    "fetcher": {
+                        "source_type": "okta",
+                        "config": {
+                            "tenant_url": "https://example.okta.com",
+                            "credential_secret": "vault:secret/okta:token",
+                            "services": [{"name": "system_log"}],
+                        },
+                    },
+                }
+            ),
+            Source.model_validate(
+                {
+                    "source": "filebeat",
+                    "state": "active",
+                    "match": {"field": "_source", "operator": "equals", "value": "filebeat"},
+                }
+            ),
+        ]
+    )
+
+
+class TestInstanceScope:
+    def test_the_fetcher_is_instance_scoped(self):
+        app = catalogue.descriptor(FETCHER)
+        assert app.routing_is_per_instance is True
+        assert app.routing_path == "config.sources"
+        assert catalogue.descriptor(RECEIVER).routing_is_per_instance is False
+
+    def test_the_block_is_the_bound_source_stanza(self, fetched_registry, settings):
+        compiled = routing.compile_for(
+            catalogue.descriptor(FETCHER), fetched_registry, settings, instance="okta-audit"
+        )
+        assert compiled == {
+            "okta": {
+                "enabled": True,
+                "topic": "okta-audit",
+                "tenant_url": "https://example.okta.com",
+                "credential_secret": "vault:secret/okta:token",
+                "services": [{"name": "system_log"}],
+            }
+        }
+
+    def test_a_receiver_source_has_no_fetcher_block(self, fetched_registry, settings):
+        with pytest.raises(routing.RoutingNotApplicableError, match="receiver-based"):
+            routing.compile_for(
+                catalogue.descriptor(FETCHER), fetched_registry, settings, instance="filebeat"
+            )
+
+    def test_an_unknown_source_has_no_fetcher_block(self, fetched_registry, settings):
+        with pytest.raises(routing.RoutingNotApplicableError, match="no source"):
+            routing.compile_for(
+                catalogue.descriptor(FETCHER), fetched_registry, settings, instance="nonesuch"
+            )
+
+    def test_a_stack_scoped_app_ignores_the_instance(self, fetched_registry, settings):
+        app = catalogue.descriptor(RECEIVER)
+        assert routing.compile_for(
+            app, fetched_registry, settings, instance="okta-audit"
+        ) == routing.compile_for(app, fetched_registry, settings)
+
+    def test_sync_writes_the_stanza_into_the_instance_overlay(self, fetched_registry, settings):
+        app = instances.instance_of(FETCHER, "okta-audit")
+        doc = instances.initial_overlay(app)
+        assert routing.sync(app.descriptor, doc, fetched_registry, settings, instance="okta-audit")
+        assert doc["config"]["sources"]["okta"]["topic"] == "okta-audit"
+        assert doc["config"]["instance_id"] == "okta-audit"
+
+    def test_instances_needing_sync_skips_an_instance_with_no_source(
+        self, fetched_registry, settings
+    ):
+        orphan = instances.instance_of(FETCHER, "gone")
+        live = instances.instance_of(FETCHER, "okta-audit")
+        found = routing.instances_needing_sync(
+            [(orphan, instances.initial_overlay(orphan)), (live, instances.initial_overlay(live))],
+            fetched_registry,
+            settings,
+        )
+        assert [app.instance for app, _ in found] == ["okta-audit"]
+
+    def test_the_receiver_carries_the_fetcher_rule(self, fetched_registry, settings):
+        compiled = routing.compile_for(catalogue.descriptor(RECEIVER), fetched_registry, settings)
+        by_source = {r["source"]: r for r in compiled["source_rules"]}
+        assert by_source["okta-audit"] == {
+            "field": "_source",
+            "mode": "key_value_set",
+            "match_value": "okta-audit",
+            "source": "okta-audit",
+        }
+        assert by_source["filebeat"]["mode"] == "key_value_set"

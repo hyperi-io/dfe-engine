@@ -182,6 +182,18 @@ def _etag_field() -> Any:
     )
 
 
+def _scope_field() -> Any:
+    """A fresh field descriptor, since a FieldInfo belongs to one model."""
+    return Field(
+        default="stack",
+        description=(
+            "stack: the routing compiles from every source into one deployment; "
+            "instance: it compiles from the one source the instance is named for, "
+            "and the engine deploys and removes such instances with their sources"
+        ),
+    )
+
+
 class AppSummary(BaseModel):
     service: str
     instance: str
@@ -189,6 +201,7 @@ class AppSummary(BaseModel):
     scale_deployed: bool
     multiplicity: str
     has_compiled_routing: bool = _routing_flag()
+    routing_scope: str = _scope_field()
     file_sets: list[FileSetSummary]
 
 
@@ -197,6 +210,14 @@ class CatalogueEntry(BaseModel):
     scale_deployed: bool
     multiplicity: str
     has_compiled_routing: bool = _routing_flag()
+    routing_scope: str = _scope_field()
+    source_types: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The source families a source-bound instance of this app can poll; a "
+            "fetcher-based source's fetcher.source_type must be one of them"
+        ),
+    )
     file_sets: list[FileSetSummary]
     instances: list[str]
 
@@ -607,7 +628,7 @@ def _enforce(request: Request, user: Any, name: str, doc: dict) -> bool:
     return protected
 
 
-def _commit(
+def commit_overlay(
     request: Request,
     user: Any,
     app: AppInstance,
@@ -700,6 +721,8 @@ async def list_apps(user: CurrentUser, request: Request) -> list[CatalogueEntry]
                 scale_deployed=desc.scale_deployed,
                 multiplicity=str(desc.multiplicity),
                 has_compiled_routing=desc.has_compiled_routing,
+                routing_scope=str(desc.routing_scope),
+                source_types=list(desc.source_types),
                 file_sets=_file_sets(service),
                 instances=[i.instance for i in deployed if i.service == service],
             )
@@ -738,8 +761,26 @@ async def create_instance(
         doc = instances.initial_overlay(app, body.values)
     except ValueError as exc:
         raise HTTPException(400, detail={"code": "invalid_values", "message": str(exc)}) from exc
+    # An instance-routed app is derived state: it exists for an active, deployed
+    # source and carries that source's compiled block from the first commit.
+    if app.descriptor.routing_is_per_instance:
+        registry = get_source_registry()
+        source = registry.get_source(app.instance)
+        if source.state != "active" or not source.deployed_version:
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "source_not_live",
+                    "message": (
+                        f"{service} instances follow their source: {app.instance!r} must be "
+                        "active and deployed, and the source deploy creates the instance"
+                    ),
+                },
+            )
+        found = _routing_status(request, app, doc, registry)
+        set_path(doc, app.descriptor.routing_path, found.compiled)
     protected = _enforce(request, user, app.overlay_name, doc)
-    return _commit(
+    return commit_overlay(
         request,
         user,
         app,
@@ -763,6 +804,7 @@ async def get_app(service: str, instance: str, user: CurrentUser, request: Reque
         scale_deployed=desc.scale_deployed,
         multiplicity=str(desc.multiplicity),
         has_compiled_routing=desc.has_compiled_routing,
+        routing_scope=str(desc.routing_scope),
         file_sets=_file_sets(service),
     )
 
@@ -783,7 +825,20 @@ async def delete_instance(
             404,
             detail={"code": "not_deployed", "message": f"{service}/{instance} is not deployed"},
         )
+    return remove_overlay(request, user, app, if_match=if_match)
+
+
+def remove_overlay(
+    request: Request,
+    user: Any,
+    app: AppInstance,
+    *,
+    if_match: str | None = None,
+) -> WriteResult:
+    """Delete the whole overlay through the governed routing path."""
+    gc = _gitcrud(request)
     settings = request.app.state.settings
+    service, instance = app.service, app.instance
     name = app.overlay_name
     scope, subject_summary = _fit_subject(app, "undeploy")
     message = build_message(
@@ -913,7 +968,7 @@ async def set_scaling(
     for path, value in changes.items():
         set_path(doc, path, value)
     protected = _enforce(request, user, app.overlay_name, doc)
-    return _commit(
+    return commit_overlay(
         request,
         user,
         app,
@@ -1059,7 +1114,7 @@ async def link_app_file(
     if not changed:
         return LinkResult(changed=False, reload=str(fs.reload), link=link)
     protected = _enforce(request, user, app.overlay_name, doc)
-    result = _commit(
+    result = commit_overlay(
         request,
         user,
         app,
@@ -1105,7 +1160,7 @@ async def relink_app_files(
     if not moved:
         return RelinkResult(changed=False, reload=str(fs.reload))
     protected = _enforce(request, user, app.overlay_name, doc)
-    result = _commit(
+    result = commit_overlay(
         request,
         user,
         app,
@@ -1166,7 +1221,7 @@ async def copy_app_files(
         return CopyFilesResult(changed=False, reload=str(fs.reload), copied=[], skipped=skipped)
 
     protected = _enforce(request, user, target_app.overlay_name, target_doc)
-    result = _commit(
+    result = commit_overlay(
         request,
         user,
         target_app,
@@ -1254,7 +1309,7 @@ async def write_app_file(
     if not changed:
         return WriteResult(changed=False, reload=str(fs.reload), validation=reported)
     protected = _enforce(request, user, app.overlay_name, doc)
-    result = _commit(
+    result = commit_overlay(
         request,
         user,
         app,
@@ -1297,7 +1352,7 @@ async def delete_app_file(
     except links.LinkNotFoundError:
         pass
     protected = _enforce(request, user, app.overlay_name, doc)
-    result = _commit(
+    result = commit_overlay(
         request,
         user,
         app,
@@ -1327,7 +1382,18 @@ def _routing_app(service: str, instance: str) -> AppInstance:
 
 def _routing_status(request: Request, app: AppInstance, doc: dict, source_registry: Any):
     try:
-        return routing.status(app.descriptor, doc, source_registry, request.app.state.settings)
+        return routing.status(
+            app.descriptor,
+            doc,
+            source_registry,
+            request.app.state.settings,
+            instance=app.instance,
+        )
+    except routing.RoutingNotApplicableError as exc:
+        raise HTTPException(
+            409,
+            detail={"code": "routing_not_applicable", "message": str(exc)},
+        ) from exc
     except routing.UnknownRoutingCompilerError as exc:
         raise HTTPException(
             500,
@@ -1388,7 +1454,7 @@ async def sync_app_routing(
         return WriteResult(changed=False)
     set_path(doc, app.descriptor.routing_path, found.compiled)
     protected = _enforce(request, user, app.overlay_name, doc)
-    return _commit(
+    return commit_overlay(
         request,
         user,
         app,
