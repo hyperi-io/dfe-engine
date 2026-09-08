@@ -209,6 +209,33 @@ def test_context_falls_back_to_the_shipped_defaults_without_settings(tmp_path):
 
     assert ctx.bootstrap_admin_name == "admin"
     assert ctx.bootstrap_admin_password == "changeme"
+    assert ctx.default_ttl_days == 90
+
+
+def test_context_reads_the_default_ttl_from_settings(tmp_path):
+    settings = SimpleNamespace(
+        auth=SimpleNamespace(local=SimpleNamespace(admin_name="", admin_password="")),
+        env="dev",
+        gitops=SimpleNamespace(mode="team"),
+        deployment=SimpleNamespace(target="docker", namespace=""),
+        clickhouse=SimpleNamespace(default_ttl_days=45),
+    )
+
+    ctx = SetupContext.from_app_state(SimpleNamespace(account_store=None, settings=settings))
+
+    assert ctx.default_ttl_days == 45
+
+
+def test_status_carries_the_default_ttl_from_the_context(ctx):
+    assert SETUP_MACHINE.status(ctx).default_ttl_days == 90
+    assert SETUP_MACHINE.status(_minted(ctx, default_ttl_days=30)).default_ttl_days == 30
+
+    # It survives completion: the console needs it long after the wizard is done.
+    ctx.org_registry.create("acme")
+    ctx.account_store.create("alice", "a-strong-user-password")
+    done = SETUP_MACHINE.status(_minted(ctx, default_ttl_days=0))
+    assert done.initial_setup.complete is True
+    assert done.default_ttl_days == 0
 
 
 def _with_git(ctx: SetupContext, *, merged: bool) -> SetupContext:

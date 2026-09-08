@@ -30,6 +30,9 @@ class SettingsSummary(BaseModel):
     clickhouse_host: str
     clickhouse_database: str
     clickhouse_data_database: str
+    clickhouse_default_ttl_days: int = Field(
+        description="Retention in days a time-series table gets when it declares none; 0 = none."
+    )
     sources_dir: str
     services_config_dir: str
     hunt_dir: str
@@ -65,6 +68,7 @@ async def get_settings(user: CurrentUser, settings: Settings):
         clickhouse_host=settings.clickhouse.host,
         clickhouse_database=settings.clickhouse.database,
         clickhouse_data_database=settings.clickhouse.effective_data_database,
+        clickhouse_default_ttl_days=settings.clickhouse.default_ttl_days,
         sources_dir=settings.source.sources_dir,
         services_config_dir=settings.services.config_yaml_dir,
         hunt_dir=settings.hunts.hunt_dir,

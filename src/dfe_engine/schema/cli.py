@@ -105,6 +105,7 @@ def _emit(report: ApplyReport, targets: CoreSchemaTargets, *, as_json: bool) -> 
                             "table": change.table,
                             "action": change.action,
                             "columns_added": list(change.columns_added),
+                            "ttl": change.ttl,
                             "engine": change.engine,
                             "on_cluster": change.on_cluster.strip(),
                         }

@@ -522,6 +522,17 @@ different tokenizers. `fulltext` uses word-level tokenization
 `text_search` uses character n-grams -- good for substring matching like
 partial hostnames or error codes embedded in longer strings.
 
+**Retention (TTL):** every time-series table gets a TTL, 90 days unless the
+deployment sets `DFE_CLICKHOUSE_DEFAULT_TTL_DAYS` (`clickhouse.default_ttl_days`,
+0 = no default). Precedence is the source's `schema.ttl_days`, then the table's
+own dfe-schemas definition, then the deployment default. State tables (the
+detection checkpoint, the engine's internal and hunt-coordination tables) keep
+whatever their definition declares and never take the default. The schema
+apply reconciles TTL as well as columns, so a table that already exists follows
+a changed default on the next apply (`ALTER TABLE ... MODIFY TTL`), and an
+undeclared TTL never removes a live one. Shortening a TTL expires the rows
+older than the new value.
+
 ---
 
 ## Comment Axis: Loader Directives

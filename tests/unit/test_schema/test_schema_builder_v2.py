@@ -239,6 +239,32 @@ class TestBuild:
         result = builder.build(source)
         assert "INTERVAL 365 DAY" in result.create_table_ddl
 
+    def test_build_ttl_deployment_default(self, registry, schemas_dir):
+        # A source that sets no ttl_days inherits the deployment default.
+        builder = SchemaBuilderV2(
+            registry=registry, schemas_base_dir=schemas_dir, default_ttl_days=90
+        )
+        source = _make_source(meta_schema="meta.yaml", ttl_days=None)
+        result = builder.build(source)
+        assert "INTERVAL 90 DAY" in result.create_table_ddl
+
+    def test_build_ttl_source_wins_over_deployment_default(self, registry, schemas_dir):
+        builder = SchemaBuilderV2(
+            registry=registry, schemas_base_dir=schemas_dir, default_ttl_days=90
+        )
+        source = _make_source(meta_schema="meta.yaml", ttl_days=365)
+        result = builder.build(source)
+        assert "INTERVAL 365 DAY" in result.create_table_ddl
+        assert "INTERVAL 90 DAY" not in result.create_table_ddl
+
+    def test_build_ttl_default_zero_emits_no_ttl(self, registry, schemas_dir):
+        builder = SchemaBuilderV2(
+            registry=registry, schemas_base_dir=schemas_dir, default_ttl_days=0
+        )
+        source = _make_source(meta_schema="meta.yaml", ttl_days=None)
+        result = builder.build(source)
+        assert "TTL" not in result.create_table_ddl
+
     def test_build_profile_metadata_in_comment(self, registry, schemas_dir):
         builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
         source = _make_source(meta_schema="meta.yaml")

@@ -26,17 +26,21 @@ connection happened to land on.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 from scalo.logger import logger
 
 from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
-from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
+from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerationError, DDLGenerator, quote_ident
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.source.type_registry import TypeRegistry
 
 Action = Literal["created", "altered", "unchanged"]
+
+# system.tables.engine_full renders a day TTL as toIntervalDay(N) or INTERVAL N DAY.
+_TTL_DAYS_RE = re.compile(r"toIntervalDay\((\d+)\)|INTERVAL\s+(\d+)\s+DAY\b")
 
 
 class SchemaApplyError(Exception):
@@ -58,6 +62,8 @@ class TableChange:
     columns_added: tuple[str, ...] = ()
     engine: str = ""
     on_cluster: str = ""
+    # The TTL move in days, "none -> 90" or "30 -> 90"; empty when it did not change.
+    ttl: str = ""
 
     def describe(self) -> str:
         """One line, in the past tense, for the apply log."""
@@ -66,8 +72,13 @@ class TableChange:
         if self.action == "created":
             return f"created {target} ENGINE = {self.engine} ({cluster})"
         if self.action == "altered":
-            cols = ", ".join(self.columns_added)
-            return f"altered {target}: added {len(self.columns_added)} column(s) [{cols}]"
+            parts = []
+            if self.columns_added:
+                cols = ", ".join(self.columns_added)
+                parts.append(f"added {len(self.columns_added)} column(s) [{cols}]")
+            if self.ttl:
+                parts.append(f"TTL {self.ttl} days")
+            return f"altered {target}: {', '.join(parts)}"
         return f"unchanged {target}"
 
 
@@ -153,7 +164,11 @@ class SchemaApplier:
         *,
         create_ddl: str | None = None,
     ) -> TableChange:
-        """Create *table*, or add whatever columns it is missing.
+        """Create *table*, or add whatever columns it is missing and reconcile its TTL.
+
+        A declared ``config.ttl_days`` that differs from the live TTL is applied
+        with ``MODIFY TTL``; an undeclared one leaves the live TTL alone, so an
+        apply never removes retention.
 
         Args:
             database: Target database. Must be the REAL name -- the resolver
@@ -190,33 +205,66 @@ class SchemaApplier:
 
         existing = self._table_columns(database, table)
         missing = [col for col in columns if col.name not in existing]
-        if not missing:
-            return self._record(
-                TableChange(
-                    database=database,
-                    table=table,
-                    action="unchanged",
-                    engine=resolved.clause,
-                    on_cluster=resolved.on_cluster,
-                )
-            )
-
         for col in missing:
             self._run(self._ddl_gen.generate_alter_add_column(table, col, cfg))
             index_stmt = self._ddl_gen.generate_alter_add_index(table, col, cfg)
             if index_stmt:
                 self._run(index_stmt)
 
+        # After the column adds: the TTL column may be one of them.
+        on_cluster = f" ON CLUSTER {cfg.cluster}" if cfg.cluster else resolved.on_cluster
+        ttl = self._reconcile_ttl(database, table, columns, cfg, on_cluster)
+
         return self._record(
             TableChange(
                 database=database,
                 table=table,
-                action="altered",
+                action="altered" if missing or ttl else "unchanged",
                 columns_added=tuple(col.name for col in missing),
                 engine=resolved.clause,
                 on_cluster=resolved.on_cluster,
+                ttl=ttl,
             )
         )
+
+    def _reconcile_ttl(
+        self,
+        database: str,
+        table: str,
+        columns: list[SchemaColumn],
+        cfg: DDLConfig,
+        on_cluster: str,
+    ) -> str:
+        """Bring the live TTL to ``cfg.ttl_days``. Returns the move, or "" for none.
+
+        Never removes a TTL: an undeclared ``ttl_days`` leaves the table alone.
+        A declared TTL over a column the table lacks is logged and skipped rather
+        than failing the apply, since the columns are the gate's real job.
+        """
+        wanted = cfg.ttl_days
+        if wanted is None:
+            return ""
+        live = self._table_ttl_days(database, table)
+        if live == wanted:
+            return ""
+        try:
+            clause = DDLGenerator._ttl_clause(cfg, columns)
+        except (DDLGenerationError, ValueError) as exc:
+            logger.warning(f"{database}.{table}: TTL not reconciled: {exc}")
+            return ""
+        if clause is None:
+            return ""
+        move = f"{'none' if live is None else live} -> {wanted}"
+        if live is not None and wanted < live:
+            logger.warning(
+                f"{database}.{table}: TTL shortened {move} days; rows older than "
+                f"{wanted} days will expire"
+            )
+        else:
+            logger.info(f"{database}.{table}: TTL {move} days")
+        target = f"{quote_ident(database, what='database')}.{quote_ident(table, what='table name')}"
+        self._run(f"ALTER TABLE {target}{on_cluster} MODIFY {clause}")
+        return move
 
     # ── materialised views ──────────────────────────────────────────
 
@@ -277,6 +325,22 @@ class SchemaApplier:
             {"db": database, "tbl": table},
         )
         return {str(row[0]) for row in rows}
+
+    def _table_ttl_days(self, database: str, table: str) -> int | None:
+        """The live TTL in days, or None when the table has no day-based TTL."""
+        rows = self._select(
+            "SELECT engine_full FROM system.tables WHERE database = {db:String} "
+            "AND name = {tbl:String}",
+            {"db": database, "tbl": table},
+        )
+        engine_full = str(rows[0][0]) if rows and rows[0][0] is not None else ""
+        _, sep, ttl_clause = engine_full.partition(" TTL ")
+        if not sep:
+            return None
+        match = _TTL_DAYS_RE.search(ttl_clause)
+        if match is None:
+            return None
+        return int(match.group(1) or match.group(2))
 
     def _select(self, sql: str, parameters: dict[str, Any]) -> list:
         """Read server state. A read failure RAISES rather than reporting absence.

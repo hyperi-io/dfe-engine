@@ -25856,6 +25856,11 @@
             "type": "string",
             "title": "Clickhouse Data Database"
           },
+          "clickhouse_default_ttl_days": {
+            "type": "integer",
+            "title": "Clickhouse Default Ttl Days",
+            "description": "Retention in days a time-series table gets when it declares none; 0 = none."
+          },
           "sources_dir": {
             "type": "string",
             "title": "Sources Dir"
@@ -25897,6 +25902,7 @@
           "clickhouse_host",
           "clickhouse_database",
           "clickhouse_data_database",
+          "clickhouse_default_ttl_days",
           "sources_dir",
           "services_config_dir",
           "hunt_dir",
@@ -25966,11 +25972,17 @@
             "title": "Credential Fetch Command",
             "description": "One-line command that prints this deployment's minted admin password, for the login page to show. Carried after setup completes too -- an operator who has lost the password needs it most then.",
             "default": ""
+          },
+          "default_ttl_days": {
+            "type": "integer",
+            "title": "Default Ttl Days",
+            "description": "Retention in days a source gets when it sets none; 0 = none."
           }
         },
         "type": "object",
         "required": [
-          "initial_setup"
+          "initial_setup",
+          "default_ttl_days"
         ],
         "title": "SetupStatus",
         "description": "Pre-login setup snapshot: the wizard state plus what is configured.\n\nAccounts are deliberately absent. Whether a real user exists is reported\nthrough the ``first_user`` step; the account list itself is never served\nto an unauthenticated caller."
