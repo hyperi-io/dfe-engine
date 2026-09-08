@@ -114,7 +114,7 @@ class SetupContext:
     # Where the operator reads the minted password, for the pre-login page.
     deploy_kind: str = ""
     credential_fetch_command: str = ""
-    # Retention a source gets when it sets none; 0 = none.
+    # Effective retention a source gets when it sets none (override else env); 0 = none.
     default_ttl_days: int = 90
 
     @classmethod
@@ -135,7 +135,13 @@ class SetupContext:
         admin_name = admin_account_name(getattr(local, "admin_name", "") or "")
         deployment = _attr_path(state, "settings", "deployment")
         kind = detect_deploy_kind(getattr(deployment, "target", "") or "")
-        clickhouse = _attr_path(state, "settings", "clickhouse")
+        default_ttl_days = 90
+        if _attr_path(state, "settings", "clickhouse") is not None:
+            from dfe_engine.gitcrud.retention import effective_default_ttl_days
+
+            default_ttl_days = effective_default_ttl_days(
+                state.settings, getattr(state, "gitcrud", None)
+            )
         return cls(
             account_store=account_store,
             org_registry=getattr(state, "org_registry", None),
@@ -152,7 +158,7 @@ class SetupContext:
                 secret_name=getattr(local, "admin_secret_name", "") or "",
                 secret_key=getattr(local, "admin_secret_key", "") or "",
             ),
-            default_ttl_days=int(getattr(clickhouse, "default_ttl_days", 90) or 0),
+            default_ttl_days=default_ttl_days,
         )
 
 

@@ -1,17 +1,38 @@
-"""System router — version, settings summary.
+"""System router — version, settings summary, default retention.
 
 GET /api/v1/system/version     → Version info
 GET /api/v1/system/settings    → Redacted settings summary
+GET /api/v1/system/retention   → Effective default TTL and where it comes from
+PUT /api/v1/system/retention   → Store the console override, reconcile the tables
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from collections.abc import Callable
+from typing import Annotated, Any, Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
-from dfe_engine.api.deps import CurrentUser, Settings, require_action
+from dfe_engine.api.deps import (
+    CurrentUser,
+    Settings,
+    SourceReg,
+    get_clickhouse_client,
+    require_action,
+)
+from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.gitcrud import GitCrud
+from dfe_engine.gitcrud.retention import (
+    RetentionState,
+    deployment_days,
+    resolve_state,
+    set_stored,
+)
+from dfe_engine.schema.applier import log_report
+from dfe_engine.schema.retention import reconcile_default_ttl
 
 router = APIRouter(prefix="/system", tags=["System"])
 
@@ -77,6 +98,154 @@ async def get_settings(user: CurrentUser, settings: Settings):
         api_host=settings.api.host,
         api_port=settings.api.port,
         api_cors_origins=settings.api.cors_origins,
+    )
+
+
+# ── Default retention ────────────────────────────────────────
+
+
+class RetentionStatus(BaseModel):
+    """The deployment default TTL: the override, the env value, and which one wins."""
+
+    stored: int | None = Field(
+        description="The console override committed in the deploy repo; null when none."
+    )
+    effective: int = Field(
+        description="Retention in days a time-series table gets when it declares none; 0 = none."
+    )
+    origin: Literal["override", "deployment"] = Field(
+        description="override when the stored value wins, deployment when the env default does."
+    )
+    deployment_default: int = Field(
+        description="clickhouse.default_ttl_days as deployed (DFE_CLICKHOUSE_DEFAULT_TTL_DAYS)."
+    )
+
+
+class RetentionRequest(BaseModel):
+    default_ttl_days: int | None = Field(
+        ge=0, description="Override in days; 0 = no default TTL; null clears the override."
+    )
+
+
+class RetentionReconcileSummary(BaseModel):
+    """What the reconcile that follows a PUT did to the live tables."""
+
+    summary: str = Field(description="One line: databases created, tables created/altered/current.")
+    tables_altered: list[str] = Field(
+        description="database.table for every table whose TTL or columns changed."
+    )
+    sources_reconciled: int = Field(description="Deployed sources whose table was reconciled.")
+    sources_skipped: int = Field(
+        description="Deployed sources left to their next deploy (table absent or build failed)."
+    )
+
+
+class RetentionUpdateResponse(RetentionStatus):
+    reconcile: RetentionReconcileSummary
+
+
+def _gitcrud(request: Request) -> GitCrud:
+    gc = getattr(request.app.state, "gitcrud", None)
+    if gc is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "not_configured", "message": "gitops is not enabled"},
+        )
+    return gc
+
+
+def get_clickhouse_connector(settings: Settings) -> Callable[[], Any]:
+    """Deferred client, so the override is committed before ClickHouse is touched.
+
+    Tests override THIS dependency to inject a fake client.
+    """
+    return lambda: get_clickhouse_client(settings)
+
+
+ClickHouseConnector = Annotated[Callable[[], Any], Depends(get_clickhouse_connector)]
+
+
+def _retention_status(state: RetentionState, settings: Any) -> dict[str, Any]:
+    return {
+        "stored": state.stored,
+        "effective": state.effective,
+        "origin": state.origin,
+        "deployment_default": deployment_days(settings),
+    }
+
+
+@router.get(
+    "/retention",
+    response_model=RetentionStatus,
+    dependencies=[Depends(require_action(scopes_dict["system_read"]))],
+)
+async def get_retention(user: CurrentUser, request: Request, settings: Settings) -> RetentionStatus:
+    """Effective default TTL and where it comes from. Answers without gitops too."""
+    gc = getattr(request.app.state, "gitcrud", None)
+    if gc is None:
+        state = RetentionState(
+            stored=None, effective=deployment_days(settings), origin="deployment"
+        )
+    else:
+        state = resolve_state(gc, settings)
+    return RetentionStatus(**_retention_status(state, settings))
+
+
+@router.put(
+    "/retention",
+    response_model=RetentionUpdateResponse,
+    dependencies=[Depends(require_action(scopes_dict["system_write"]))],
+)
+async def put_retention(
+    body: RetentionRequest,
+    user: CurrentUser,
+    request: Request,
+    settings: Settings,
+    sources: SourceReg,
+    connect: ClickHouseConnector,
+) -> RetentionUpdateResponse:
+    """Store the override in the deploy repo, then reconcile every table that follows it.
+
+    The core tables and every deployed source's table are brought to the new
+    effective default in this request. A ClickHouse failure returns 502 with the
+    override ALREADY committed: the next schema apply or source deploy picks it up.
+    """
+    gc = _gitcrud(request)
+    set_stored(gc, body.default_ttl_days, user.user_id)
+    audit_resource_change(
+        user.user_id, "system", "retention", "updated", {"default_ttl_days": body.default_ttl_days}
+    )
+    state = resolve_state(gc, settings)
+    logger.info(
+        "default TTL set via API", actor=user.user_id, days=state.effective, origin=state.origin
+    )
+    try:
+        outcome = reconcile_default_ttl(
+            connect(), settings=settings, sources=sources.get_all_sources(), days=state.effective
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "reconcile_failed",
+                "message": f"override stored; ClickHouse reconcile failed: {exc}",
+            },
+        ) from exc
+    log_report(outcome.report, prefix="retention")
+    if outcome.sources_skipped:
+        logger.warning(
+            "default TTL: sources left to their next deploy", count=outcome.sources_skipped
+        )
+    return RetentionUpdateResponse(
+        **_retention_status(state, settings),
+        reconcile=RetentionReconcileSummary(
+            summary=outcome.report.summary(),
+            tables_altered=[
+                f"{t.database}.{t.table}" for t in outcome.report.tables if t.action == "altered"
+            ],
+            sources_reconciled=outcome.sources_reconciled,
+            sources_skipped=outcome.sources_skipped,
+        ),
     )
 
 

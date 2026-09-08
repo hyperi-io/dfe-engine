@@ -155,6 +155,10 @@ class SchemaApplier:
 
     # ── tables ──────────────────────────────────────────────────────
 
+    def table_exists(self, database: str, table: str) -> bool:
+        """Whether *table* exists in *database*, read from ``system.tables``."""
+        return self._table_exists(database, table)
+
     def ensure_table(
         self,
         database: str,

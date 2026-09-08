@@ -5975,6 +5975,78 @@
         ]
       }
     },
+    "/api/v1/system/retention": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Get Retention",
+        "description": "Effective default TTL and where it comes from. Answers without gitops too.",
+        "operationId": "get_retention_api_v1_system_retention_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetentionStatus"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Put Retention",
+        "description": "Store the override in the deploy repo, then reconcile every table that follows it.\n\nThe core tables and every deployed source's table are brought to the new\neffective default in this request. A ClickHouse failure returns 502 with the\noverride ALREADY committed: the next schema apply or source deploy picks it up.",
+        "operationId": "put_retention_api_v1_system_retention_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetentionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetentionUpdateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/system/clickhouse-cloud": {
       "get": {
         "tags": [
@@ -23922,6 +23994,155 @@
           "buckets"
         ],
         "title": "ResourceSeriesResponse"
+      },
+      "RetentionReconcileSummary": {
+        "properties": {
+          "summary": {
+            "type": "string",
+            "title": "Summary",
+            "description": "One line: databases created, tables created/altered/current."
+          },
+          "tables_altered": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tables Altered",
+            "description": "database.table for every table whose TTL or columns changed."
+          },
+          "sources_reconciled": {
+            "type": "integer",
+            "title": "Sources Reconciled",
+            "description": "Deployed sources whose table was reconciled."
+          },
+          "sources_skipped": {
+            "type": "integer",
+            "title": "Sources Skipped",
+            "description": "Deployed sources left to their next deploy (table absent or build failed)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "summary",
+          "tables_altered",
+          "sources_reconciled",
+          "sources_skipped"
+        ],
+        "title": "RetentionReconcileSummary",
+        "description": "What the reconcile that follows a PUT did to the live tables."
+      },
+      "RetentionRequest": {
+        "properties": {
+          "default_ttl_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Ttl Days",
+            "description": "Override in days; 0 = no default TTL; null clears the override."
+          }
+        },
+        "type": "object",
+        "required": [
+          "default_ttl_days"
+        ],
+        "title": "RetentionRequest"
+      },
+      "RetentionStatus": {
+        "properties": {
+          "stored": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stored",
+            "description": "The console override committed in the deploy repo; null when none."
+          },
+          "effective": {
+            "type": "integer",
+            "title": "Effective",
+            "description": "Retention in days a time-series table gets when it declares none; 0 = none."
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "override",
+              "deployment"
+            ],
+            "title": "Origin",
+            "description": "override when the stored value wins, deployment when the env default does."
+          },
+          "deployment_default": {
+            "type": "integer",
+            "title": "Deployment Default",
+            "description": "clickhouse.default_ttl_days as deployed (DFE_CLICKHOUSE_DEFAULT_TTL_DAYS)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "stored",
+          "effective",
+          "origin",
+          "deployment_default"
+        ],
+        "title": "RetentionStatus",
+        "description": "The deployment default TTL: the override, the env value, and which one wins."
+      },
+      "RetentionUpdateResponse": {
+        "properties": {
+          "stored": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stored",
+            "description": "The console override committed in the deploy repo; null when none."
+          },
+          "effective": {
+            "type": "integer",
+            "title": "Effective",
+            "description": "Retention in days a time-series table gets when it declares none; 0 = none."
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "override",
+              "deployment"
+            ],
+            "title": "Origin",
+            "description": "override when the stored value wins, deployment when the env default does."
+          },
+          "deployment_default": {
+            "type": "integer",
+            "title": "Deployment Default",
+            "description": "clickhouse.default_ttl_days as deployed (DFE_CLICKHOUSE_DEFAULT_TTL_DAYS)."
+          },
+          "reconcile": {
+            "$ref": "#/components/schemas/RetentionReconcileSummary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stored",
+          "effective",
+          "origin",
+          "deployment_default",
+          "reconcile"
+        ],
+        "title": "RetentionUpdateResponse"
       },
       "ReviewRequest": {
         "properties": {

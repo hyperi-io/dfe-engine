@@ -167,6 +167,7 @@ source_scopes = {
 
 system_scopes = {
     "system_read": "system:read",
+    "system_write": "system:write",
 }
 
 tasks_scopes = {

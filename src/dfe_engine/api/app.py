@@ -97,7 +97,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     from dfe_engine.clickhouse.bootstrap import bootstrap_clickhouse
 
-    bootstrap_clickhouse(settings=settings)
+    bootstrap_clickhouse(settings=settings, gitcrud=gitcrud)
 
     # Bootstrap auth stores
     from dfe_engine.auth.bootstrap import bootstrap_auth
