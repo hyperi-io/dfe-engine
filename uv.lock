@@ -6,10 +6,10 @@ resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'emscripten'",
     "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version < '3.13' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
-    "python_full_version < '3.13' and sys_platform == 'emscripten'",
     "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten'",
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
@@ -793,7 +793,7 @@ requires-dist = [
     { name = "confluent-kafka", specifier = ">=2.15.0" },
     { name = "croniter", specifier = ">=6.2.2" },
     { name = "cryptography", specifier = ">=50.0.0" },
-    { name = "dfe-schemas", specifier = ">=0.2.0" },
+    { name = "dfe-schemas", specifier = ">=0.2.1" },
     { name = "diskcache", specifier = ">=5.6.3" },
     { name = "dulwich", specifier = ">=1.2.7" },
     { name = "faker", specifier = ">=40.36.0" },
@@ -849,11 +849,11 @@ dev = [
 
 [[package]]
 name = "dfe-schemas"
-version = "0.2.0"
+version = "0.2.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/42/cd/65efe0061977737a3c8cba7d311b79385e1536884fadd9178d69730ea9f5/dfe_schemas-0.2.0.tar.gz", hash = "sha256:67ca75ac8a068f3d41e704608aed8e5675b3d11b82e4ace8b1fa8aa43c90bfd9", size = 30461, upload-time = "2026-08-31T06:08:54.739Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/df/f9/784ba6e5f4ed664074813c65bb759bbc7db5b4c9f8cc86c2406a8075524a/dfe_schemas-0.2.1.tar.gz", hash = "sha256:1816397d7de60460ace9b8c61000a56d58897190c7d20fd384e99618caf0a731", size = 30497, upload-time = "2026-09-08T08:51:27.984Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2e/d6/7bd897d6f438f769e505f22f030db929843a54c0815ff88fb2a8e0d36551/dfe_schemas-0.2.0-py3-none-any.whl", hash = "sha256:ba8578a7fdbf05a884e8acc78edf6afb37c72f952253d5371803d4424eb21b89", size = 55092, upload-time = "2026-08-31T06:08:53.693Z" },
+    { url = "https://files.pythonhosted.org/packages/d7/d7/d158b8ca2373275caceb2ddc77c39bc5edc426509b5281d762fc5895875e/dfe_schemas-0.2.1-py3-none-any.whl", hash = "sha256:e4e233028a4a1ea113c0dc8392c9e7c166cff256f988114e9a8a0028fcddd745", size = 55093, upload-time = "2026-09-08T08:51:26.957Z" },
 ]
 
 [[package]]
