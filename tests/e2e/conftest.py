@@ -27,6 +27,13 @@ Configure via env (typically `dfe-engine`-side of a `single`/`standard` deployme
   DFE_E2E_TRANSFORM        which transform app is deployed for the source under
                            test (dfe-transform-vrl | dfe-transform-vector)
   DFE_E2E_VERIFY           1 to enforce TLS verification (default off)
+
+OIDC fixture logins are separate, because they name a shared test identity the
+whole suite reuses rather than one deployment's endpoint:
+  DFE_OIDC_FIXTURE_USER      default dfe-test@dfe-oidc.test
+  DFE_OIDC_FIXTURE_PASSWORD  no default; pre-shared into .env
+  DFE_OIDC_<PROVIDER>_FIXTURE_USER / _PASSWORD  per-provider override, <PROVIDER>
+                             uppercased as /api/v1/auth/setup-status names it
 """
 
 from __future__ import annotations
@@ -114,6 +121,55 @@ def must[T](value: T | None) -> T:
     """
     assert value is not None, "require() should have skipped this test before now"
     return value
+
+
+# The shared throwaway identity every provider's fixture account carries.
+OIDC_FIXTURE_DEFAULT_USER = "dfe-test@dfe-oidc.test"
+
+
+@dataclass(frozen=True)
+class OIDCFixtureLogin:
+    user: str
+    password: str
+
+
+def oidc_fixture_user(provider: str) -> str:
+    """Resolve the fixture username: per-provider override, generic, then default."""
+    return (
+        os.getenv(f"DFE_OIDC_{provider.upper()}_FIXTURE_USER")
+        or os.getenv("DFE_OIDC_FIXTURE_USER")
+        or OIDC_FIXTURE_DEFAULT_USER
+    )
+
+
+def oidc_fixture_password(provider: str) -> str | None:
+    """Resolve the fixture password: per-provider override, generic, then unset."""
+    return (
+        os.getenv(f"DFE_OIDC_{provider.upper()}_FIXTURE_PASSWORD")
+        or os.getenv("DFE_OIDC_FIXTURE_PASSWORD")
+        or None
+    )
+
+
+@pytest.fixture(scope="session")
+def oidc_fixture_login() -> Callable[[str], OIDCFixtureLogin]:
+    """Fixture login for a provider, SKIPPING when no password resolves.
+
+    Skip rather than fail: the password is pre-shared into a tester's `.env` and
+    never committed, so an unconfigured provider means the run cannot exercise
+    that IdP - not that the deployment is broken.
+    """
+
+    def _login(provider: str) -> OIDCFixtureLogin:
+        password = oidc_fixture_password(provider)
+        if not password:
+            pytest.skip(
+                f"no OIDC fixture password for {provider}: set "
+                f"DFE_OIDC_{provider.upper()}_FIXTURE_PASSWORD or DFE_OIDC_FIXTURE_PASSWORD"
+            )
+        return OIDCFixtureLogin(user=oidc_fixture_user(provider), password=password)
+
+    return _login
 
 
 def poll_until(
