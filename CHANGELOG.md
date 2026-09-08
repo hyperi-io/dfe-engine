@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.10](https://github.com/hyperi-io/dfe-engine/compare/v1.19.9...v1.19.10) (2026-09-08)
+
+### Bug Fixes
+
+* **schema:** deployment default ttl for every time-series table ([8a82383](https://github.com/hyperi-io/dfe-engine/commit/8a82383b3fbed96669b3fda0e382457dec8c54f3)), closes [#308](https://github.com/hyperi-io/dfe-engine/issues/308)
+
 ## [1.19.9](https://github.com/hyperi-io/dfe-engine/compare/v1.19.8...v1.19.9) (2026-09-08)
 
 ### Bug Fixes
