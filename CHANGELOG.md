@@ -3,6 +3,15 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.9](https://github.com/hyperi-io/dfe-engine/compare/v1.19.8...v1.19.9) (2026-09-08)
+
+### Bug Fixes
+
+* **auth:** guard the spec version, the admin rotation and the changeme predicate ([45b1c33](https://github.com/hyperi-io/dfe-engine/commit/45b1c33002c76cb85fd635b70548b636f10fd517)), closes [#301](https://github.com/hyperi-io/dfe-engine/issues/301)
+* **oidc:** hand the browser back to the console after an idp login ([6d87957](https://github.com/hyperi-io/dfe-engine/commit/6d87957885e62d8af8e5c1416f4457c8cc39de16)), closes [#245](https://github.com/hyperi-io/dfe-engine/issues/245)
+* rename the landing table default to main ([#303](https://github.com/hyperi-io/dfe-engine/issues/303)) ([4f7ac4c](https://github.com/hyperi-io/dfe-engine/commit/4f7ac4c9cdbaf85fa879b3fef99bd2e5f5ef2e5e))
+* resolve the oidc fixture login from env in the e2e conftest ([824ed28](https://github.com/hyperi-io/dfe-engine/commit/824ed287a92daf44c506498b4bd24761c5267758))
+
 ## [1.19.8](https://github.com/hyperi-io/dfe-engine/compare/v1.19.7...v1.19.8) (2026-09-07)
 
 ### Bug Fixes
