@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.11](https://github.com/hyperi-io/dfe-engine/compare/v1.19.10...v1.19.11) (2026-09-08)
+
+### Bug Fixes
+
+* **deps:** dfe-schemas 0.2.1, the time-series tables take the deployment retention ([d3bc46f](https://github.com/hyperi-io/dfe-engine/commit/d3bc46f0b56ed9cbd6838cd7be3d451c3ea6d677))
+
 ## [1.19.10](https://github.com/hyperi-io/dfe-engine/compare/v1.19.9...v1.19.10) (2026-09-08)
 
 ### Bug Fixes
