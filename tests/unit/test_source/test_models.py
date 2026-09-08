@@ -236,16 +236,84 @@ class TestSourceFetcher:
     def test_minimal(self):
         f = SourceFetcher(source_type="crowdstrike")
         assert f.source_type == "crowdstrike"
-        assert f.poll_interval_secs == 300
+        assert f.topic == "own"
+        assert f.config == {}
+        assert f.landing_label("edr") == "edr"
 
-    def test_with_auth(self):
+    def test_default_topic_lands_on_the_platform_default(self):
+        f = SourceFetcher(source_type="okta", topic="default")
+        assert f.landing_label("okta-audit") == "default"
+
+    def test_unknown_source_type_is_refused(self):
+        # The manifest lists the families the fetcher ships; anything else has
+        # no stanza the fetcher would read.
+        with pytest.raises(ValueError, match="Unknown fetcher source_type"):
+            SourceFetcher(source_type="http_json")
+
+    def test_engine_owned_keys_are_refused(self):
+        with pytest.raises(ValueError, match="may not set"):
+            SourceFetcher(source_type="okta", config={"enabled": True, "topic": "x"})
+
+    @pytest.mark.parametrize(
+        "config",
+        [
+            {"token": "abc"},
+            {"connections": [{"id": "a", "client_secret": "x"}]},
+            {"credential_secret": "not-a-reference"},
+            {"backends": [{"account_key": "literal"}]},
+        ],
+    )
+    def test_a_literal_credential_is_refused(self, config):
+        # The source YAML is committed to git, so credentials travel as references.
+        with pytest.raises(ValueError, match="literal credential"):
+            SourceFetcher(source_type="okta", config=config)
+
+    def test_credential_references_and_paths_are_accepted(self):
         f = SourceFetcher(
-            source_type="m365",
-            base_url="https://graph.microsoft.com",
-            auth={"type": "oauth2", "token_url": "https://login.microsoft.com/token"},
+            source_type="google_workspace",
+            config={
+                "credential_secret": "vault:secret/dfe/gw:sa_key",
+                "service_account_key": "/etc/workspace/sa-key.json",
+                "admin_email": "env:GW_ADMIN",
+            },
         )
-        assert f.auth is not None
-        assert f.auth.type == "oauth2"
+        assert f.config["credential_secret"].startswith("vault:")
+
+
+class TestSourceOrigin:
+    def test_a_source_needs_exactly_one_origin(self):
+        with pytest.raises(ValueError, match="exactly one"):
+            Source.model_validate({"source": "x"})
+        with pytest.raises(ValueError, match="exactly one"):
+            Source.model_validate(
+                {
+                    "source": "x",
+                    "match": {"field": "f", "value": "v"},
+                    "fetcher": {"source_type": "okta"},
+                }
+            )
+
+    def test_a_match_rule_makes_a_receiver_source(self):
+        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))
+        assert s.origin == "receiver"
+        assert s.fetcher is None
+        assert s.landing_label() == "syslog"
+        assert s.model_dump(mode="json")["origin"] == "receiver"
+
+    def test_a_fetcher_makes_a_fetcher_source(self):
+        s = Source.model_validate(
+            {"source": "okta-audit", "fetcher": {"source_type": "okta", "topic": "default"}}
+        )
+        assert s.origin == "fetcher"
+        assert s.match is None
+        assert s.landing_label() == "default"
+        assert "match" not in s.to_yaml_dict()["versions"]["1.0.0"]
+
+    def test_the_write_body_needs_exactly_one_origin(self):
+        with pytest.raises(ValueError, match="exactly one"):
+            SourceWriteRequest(source="x")
+        body = SourceWriteRequest(source="x", fetcher=SourceFetcher(source_type="pypi"))
+        assert body.to_version_snapshot().origin == "fetcher"
 
 
 # ---------------------------------------------------------------------------
@@ -1168,11 +1236,6 @@ class TestSourceVersioning:
                         {"standard": "ecs", "field_map": "ecs/no_transform"},
                         {"standard": "sigma", "field_map": "sigma/no_transform"},
                     ],
-                    "fetcher": {
-                        "source_type": "aws.cloudtrail",
-                        "base_url": "https://{service}.{region}.amazonaws.com",
-                        "poll_interval_secs": 10,
-                    },
                 }
             },
         }
@@ -1181,8 +1244,7 @@ class TestSourceVersioning:
         assert out["deployed_version"] == "1.0.0"
         assert out["versions"]["1.0.0"]["date_time"] == "2026-06-10"
         assert out["versions"]["1.0.0"]["schema"]["meta_schema"] == "meta/aws/cloudwatch_logs"
-        assert s.fetcher is not None
-        assert s.fetcher.poll_interval_secs == 10
+        assert s.fetcher is None
 
     def test_legacy_flat_input_normalizes_to_versions(self):
         s = Source.model_validate(
@@ -1208,13 +1270,14 @@ class TestSourceVersioning:
         s = Source.model_validate(
             {
                 "source": "pull-src",
-                "match": {"field": "f", "value": "v"},
-                "fetcher": {"source_type": "m365"},
+                "fetcher": {"source_type": "m365", "config": {"services": [{"name": "alerts"}]}},
                 "views": [{"standard": "sigma", "taxonomy": "windows"}],
             }
         )
         ver = s.versions["1.0.0"]
         assert ver.fetcher is not None
+        assert ver.fetcher.config == {"services": [{"name": "alerts"}]}
+        assert ver.origin == "fetcher"
         assert ver.view_for("sigma") is not None
         assert ver.view_for("sigma").taxonomy == "windows"
 

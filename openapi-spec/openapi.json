@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.19.8"
+    "version": "1.19.10"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -3619,7 +3619,7 @@
           "Sources"
         ],
         "summary": "Delete Source",
-        "description": "Delete a source by name.",
+        "description": "Delete a source by name. Its fetcher instance and receiver rule go with it.",
         "operationId": "delete_source_api_v1_sources__name__delete",
         "parameters": [
           {
@@ -3689,6 +3689,33 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sources/reconcile-apps": {
+      "post": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Reconcile Apps",
+        "description": "Bring the deploy repo's derived app state into step with the sources.\n\nRecompiles every stack-scoped routing block (receiver, loader) and deploys,\nsyncs or removes the instances of every instance-scoped app (a fetcher per\nactive fetcher-based source). Every source write does this on its own; this\nroute is the retry when one reported ``apps_sync_error``.",
+        "operationId": "reconcile_apps_api_v1_sources_reconcile_apps_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppsReconcileResponse"
                 }
               }
             }
@@ -16228,6 +16255,12 @@
             "title": "Has Compiled Routing",
             "description": "Whether this app's routing is compiled from the source definitions. False means the /routing routes answer 400 for every instance of it."
           },
+          "routing_scope": {
+            "type": "string",
+            "title": "Routing Scope",
+            "description": "stack: the routing compiles from every source into one deployment; instance: it compiles from the one source the instance is named for, and the engine deploys and removes such instances with their sources",
+            "default": "stack"
+          },
           "file_sets": {
             "items": {
               "$ref": "#/components/schemas/FileSetSummary"
@@ -16247,6 +16280,21 @@
           "file_sets"
         ],
         "title": "AppSummary"
+      },
+      "AppsReconcileResponse": {
+        "properties": {
+          "changes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Changes",
+            "description": "Overlay writes made (service/instance: action)"
+          }
+        },
+        "type": "object",
+        "title": "AppsReconcileResponse",
+        "description": "What the reconcile wrote into the deploy repo."
       },
       "ArtifactModel": {
         "properties": {
@@ -16820,6 +16868,20 @@
             "type": "boolean",
             "title": "Has Compiled Routing",
             "description": "Whether this app's routing is compiled from the source definitions. False means the /routing routes answer 400 for every instance of it."
+          },
+          "routing_scope": {
+            "type": "string",
+            "title": "Routing Scope",
+            "description": "stack: the routing compiles from every source into one deployment; instance: it compiles from the one source the instance is named for, and the engine deploys and removes such instances with their sources",
+            "default": "stack"
+          },
+          "source_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Source Types",
+            "description": "The source families a source-bound instance of this app can poll; a fetcher-based source's fetcher.source_type must be one of them"
           },
           "file_sets": {
             "items": {
@@ -18287,69 +18349,6 @@
         ],
         "title": "ErrorResponse",
         "description": "Unified error response.\n\nAll API errors return this shape. The UI can always parse:\n- ``code`` for programmatic branching\n- ``message`` for a human-readable summary\n- ``errors`` for field-level validation details (422 only)\n- ``context`` for optional structured data on specific errors (e.g. conflicts)"
-      },
-      "FetcherAuth": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "title": "Type",
-            "description": "Auth type (oauth2, api_key, basic)"
-          },
-          "token_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Token Url",
-            "description": "OAuth2 token URL"
-          },
-          "client_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Client Id",
-            "description": "OAuth2 client ID"
-          },
-          "client_secret": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Client Secret",
-            "description": "OAuth2 client secret"
-          },
-          "api_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Key",
-            "description": "API key"
-          }
-        },
-        "type": "object",
-        "required": [
-          "type"
-        ],
-        "title": "FetcherAuth",
-        "description": "Fetcher authentication configuration."
       },
       "FieldError": {
         "properties": {
@@ -25721,6 +25720,26 @@
             "type": "array",
             "title": "Topics Failed",
             "description": "Kafka topics that could not be created. Never fails the deploy - the schema is live and Kafka may not be in the path at all."
+          },
+          "apps_synced": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Apps Synced",
+            "description": "Deploy-repo writes this deploy made so the apps follow the sources: the receiver and loader routing, and a fetcher instance for a fetcher-based source (service/instance: action)"
+          },
+          "apps_sync_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apps Sync Error",
+            "description": "Why the apps could not be brought into step. Never fails the deploy - the schema is live; POST /api/v1/sources/reconcile-apps retries it."
           }
         },
         "type": "object",
@@ -26563,6 +26582,16 @@
             ],
             "description": "Transform config on the deployed version (serialized for API compat).",
             "readOnly": true
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "receiver",
+              "fetcher"
+            ],
+            "title": "Origin",
+            "description": "How the deployed version's data enters: receiver match or a fetcher.",
+            "readOnly": true
           }
         },
         "type": "object",
@@ -26570,7 +26599,8 @@
           "source",
           "enabled",
           "match",
-          "transform"
+          "transform",
+          "origin"
         ],
         "title": "SourceDetailResponse",
         "description": "Full source definition with per-version build/plan/deploy status."
@@ -26617,36 +26647,23 @@
           "source_type": {
             "type": "string",
             "title": "Source Type",
-            "description": "Fetcher type (crowdstrike, m365, etc.)"
+            "description": "A dfe-fetcher source family (aws, okta, crates_io, ...); the deployed app manifest lists the accepted values"
           },
-          "base_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+          "topic": {
+            "type": "string",
+            "enum": [
+              "own",
+              "default"
             ],
-            "title": "Base Url",
-            "description": "API base URL"
+            "title": "Topic",
+            "description": "own: records land on this source's topic and table; default: they land on the platform default table",
+            "default": "own"
           },
-          "auth": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/FetcherAuth"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Authentication config"
-          },
-          "poll_interval_secs": {
-            "type": "integer",
-            "title": "Poll Interval Secs",
-            "description": "Polling interval in seconds",
-            "default": 300
+          "config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config",
+            "description": "The fetcher's per-type stanza (services, connections, interval_secs, filter, credential references, ...). Credentials must be env: or vault: references"
           }
         },
         "type": "object",
@@ -26654,7 +26671,7 @@
           "source_type"
         ],
         "title": "SourceFetcher",
-        "description": "Fetcher configuration for SaaS API pull sources."
+        "description": "Fetcher-based origin: one dfe-fetcher deployment, named for the source.\n\n``config`` is the fetcher's own per-type stanza, carried verbatim into the\ndeployed instance under ``config.sources.<source_type>``. The engine owns\n``enabled`` and ``topic`` on that stanza: ``topic`` selects whether records\nland on the source's own topic (and table) or on the platform default."
       },
       "SourceHeader": {
         "properties": {
@@ -26870,6 +26887,26 @@
             "type": "array",
             "title": "Versions",
             "description": "All version ids on the source"
+          },
+          "apps_synced": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Apps Synced",
+            "description": "Deploy-repo writes made so the apps follow this change (service/instance: action)"
+          },
+          "apps_sync_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apps Sync Error",
+            "description": "Why the apps could not be brought into step; reconcile-apps retries it"
           }
         },
         "type": "object",
@@ -27134,6 +27171,16 @@
             "description": "Whether a fetcher is configured",
             "default": false
           },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "receiver",
+              "fetcher"
+            ],
+            "title": "Origin",
+            "description": "How data enters: receiver match or a fetcher",
+            "default": "receiver"
+          },
           "views": {
             "items": {
               "type": "string"
@@ -27244,8 +27291,15 @@
             "description": "SaaS API fetcher (optional)"
           },
           "match": {
-            "$ref": "#/components/schemas/SourceMatch",
-            "description": "Receiver match rule (required)"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceMatch"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Receiver match rule (receiver-based sources)"
           },
           "transform": {
             "anyOf": [
@@ -27283,8 +27337,7 @@
         },
         "type": "object",
         "required": [
-          "date_time",
-          "match"
+          "date_time"
         ],
         "title": "SourceVersionDetail",
         "description": "Source version snapshot plus persisted build/deploy payloads."
@@ -27524,8 +27577,15 @@
             "description": "Tri-state lifecycle (active | dormant | disabled); overrides ``enabled``"
           },
           "match": {
-            "$ref": "#/components/schemas/SourceMatch",
-            "description": "Receiver match rule (required)"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceMatch"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Receiver match rule; required unless ``fetcher`` is set"
           },
           "header": {
             "anyOf": [
@@ -27569,7 +27629,7 @@
                 "type": "null"
               }
             ],
-            "description": "SaaS API fetcher (optional)"
+            "description": "Fetcher-based origin; required unless ``match`` is set"
           },
           "views": {
             "anyOf": [
@@ -27588,9 +27648,6 @@
           }
         },
         "type": "object",
-        "required": [
-          "match"
-        ],
         "title": "SourceWriteRequest",
         "description": "Flat source definition for create/update API (no version tree)."
       },

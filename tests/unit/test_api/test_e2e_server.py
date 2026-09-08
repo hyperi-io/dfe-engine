@@ -39,6 +39,7 @@ _SOURCES = "/api/v1/sources"
 
 _VRL = "dfe-transform-vrl"
 _SOURCE = "seedsource"
+_FETCHED = "seedfetch"
 _ARTIFACT = "seed-artefact"
 
 
@@ -271,11 +272,20 @@ class TestSeedSourceWithTransform:
         assert source["source"] == _SOURCE
         version = source["versions"][source["current"]]
         assert version["match"]["value"] == _SOURCE
-        # The fetcher half of the page, which the source model carries itself.
-        assert version["fetcher"]["source_type"] == "http_json"
+        assert version["fetcher"] is None
+        assert source["origin"] == "receiver"
+
+        # The fetcher-based sibling carries the stanza its instance was compiled from.
+        fetched = _get(appmgmt_client, f"{_SOURCES}/{_FETCHED}", headers)
+        assert fetched["origin"] == "fetcher"
+        assert fetched["deployed_version"] == "1.0.0"
+        assert fetched["versions"]["1.0.0"]["fetcher"]["source_type"] == "crates_io"
 
         assert _instances(appmgmt_client, headers, _VRL) == [_SOURCE]
-        assert _instances(appmgmt_client, headers, "dfe-fetcher") == [_SOURCE]
+        assert _instances(appmgmt_client, headers, "dfe-fetcher") == [_FETCHED]
+        stanza = _get(appmgmt_client, f"{_APPS}/dfe-fetcher/{_FETCHED}/routing", headers)
+        assert stanza["drift"] is False
+        assert stanza["deployed"]["crates_io"]["topic"] == _FETCHED
 
         summary = _get(appmgmt_client, f"{_APPS}/{_VRL}/{_SOURCE}", headers)
         assert summary["telemetry_name"] == f"{_VRL}-{_SOURCE}"
@@ -300,7 +310,11 @@ class TestSeedSourceWithTransform:
 
         found = _get(appmgmt_client, f"{_APPS}/dfe-receiver/default/routing", headers)
         assert (found["drift"], found["absent"]) == (False, False)
-        assert [rule["source"] for rule in found["deployed"]["source_rules"]] == [_SOURCE]
+        # The fetcher-based source is routed on the _source label its fetcher stamps.
+        assert [rule["source"] for rule in found["deployed"]["source_rules"]] == [
+            _FETCHED,
+            _SOURCE,
+        ]
 
     def test_the_loader_routing_is_synced_too(self, appmgmt_client):
         _seed(appmgmt_client, "seed_source_with_transform")
@@ -315,8 +329,9 @@ class TestSeedSourceWithTransform:
         headers = _admin(appmgmt_client)
 
         listed = _get(appmgmt_client, _SOURCES, headers)
-        assert [s["name"] for s in listed["items"]] == [_SOURCE]
+        assert [s["name"] for s in listed["items"]] == [_FETCHED, _SOURCE]
         assert _instances(appmgmt_client, headers, _VRL) == [_SOURCE]
+        assert _instances(appmgmt_client, headers, "dfe-fetcher") == [_FETCHED]
         files = _get(appmgmt_client, f"{_APPS}/{_VRL}/{_SOURCE}/files/transforms", headers)
         assert [f["name"] for f in files] == [f"{_SOURCE}.vrl"]
 

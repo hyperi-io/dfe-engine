@@ -80,6 +80,16 @@ class Multiplicity(StrEnum):
     """One deployment per config, many side by side."""
 
 
+class RoutingScope(StrEnum):
+    """What a compiled routing block is derived from."""
+
+    STACK = "stack"
+    """Every source: one block for the whole stack, on a single-deployment app."""
+
+    INSTANCE = "instance"
+    """The one source the instance is bound to; the engine deploys such instances."""
+
+
 class ReloadMode(StrEnum):
     """How a written change reaches the running process."""
 
@@ -146,6 +156,21 @@ class AppDescriptor:
 
     routing_path: str = ""
     """Overlay dot-path the compiled routing is written to."""
+
+    routing_scope: RoutingScope = RoutingScope.STACK
+    """Whether the block compiles from every source or from the bound one."""
+
+    source_types: tuple[str, ...] = ()
+    """The source families a source-bound instance of this app can poll."""
+
+    @property
+    def routing_is_per_instance(self) -> bool:
+        """Whether each instance's routing comes from its own source.
+
+        Such instances are derived state: the engine deploys one per active
+        source of the matching origin and removes it when the source goes.
+        """
+        return self.has_compiled_routing and self.routing_scope is RoutingScope.INSTANCE
 
     @property
     def has_compiled_routing(self) -> bool:
@@ -236,6 +261,15 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
     routing = raw.get("routing") or {}
     if not isinstance(routing, dict):
         raise CatalogueError(f"{service}: routing must be a mapping")
+    try:
+        scope = RoutingScope(str(routing.get("scope", RoutingScope.STACK)))
+    except ValueError as exc:
+        raise CatalogueError(f"{service}: unknown routing scope {routing.get('scope')!r}") from exc
+    if scope is RoutingScope.INSTANCE and multiplicity is not Multiplicity.PER_CONFIG:
+        raise CatalogueError(f"{service}: instance-scoped routing needs multiplicity per_config")
+    types = raw.get("source_types") or []
+    if not isinstance(types, list):
+        raise CatalogueError(f"{service}: source_types must be a list")
     return AppDescriptor(
         service=service,
         scale_deployed=bool(raw.get("scale_deployed", True)),
@@ -244,6 +278,8 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
         source_binding=dict(binding),
         routing_compiler=str(routing.get("compiler", "")),
         routing_path=str(routing.get("values_path", "")),
+        routing_scope=scope,
+        source_types=tuple(str(t) for t in types),
     )
 
 
@@ -358,6 +394,20 @@ def services() -> list[str]:
 
 TRANSFORM_SERVICE_PREFIX = "dfe-transform-"
 """A transform app's service name is this prefix plus the engine a source names."""
+
+
+def source_types() -> set[str]:
+    """Every source family a fetcher-based source may name in ``fetcher.source_type``.
+
+    Declared per app in the manifest, so a fetcher that ships a new family is a
+    manifest edit rather than an engine release.
+    """
+    return {t for app in APP_CATALOGUE.values() for t in app.source_types}
+
+
+def instance_routed_apps() -> list[AppDescriptor]:
+    """The apps whose instances the engine derives one-per-source from the routing."""
+    return [app for app in APP_CATALOGUE.values() if app.routing_is_per_instance]
 
 
 def transform_engines() -> set[str]:

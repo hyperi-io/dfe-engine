@@ -24,7 +24,11 @@ from dfe_engine.services.models.receiver import (
     ReceiverRoutingConfig,
     SourceRule,
 )
+from dfe_engine.source.models import DEFAULT_LANDING_LABEL
 from dfe_engine.source.registry import SourceRegistry
+
+# The top-level field dfe-fetcher stamps with the source's landing label.
+FETCHER_LABEL_FIELD = "_source"
 
 # SourceMatch.operator -> receiver SourceRule.mode. The receiver's hot-path
 # router has exactly three modes; the other four engine operators (not_equals,
@@ -67,8 +71,14 @@ def compile_receiver_routing(
     - ``equals`` -> ``key_value_set`` (match_value=value, source=_source name)
     - ``exists`` -> ``key_present``  (source=_source name)
 
-    Sources without a ``match`` config are skipped — they won't be
-    directly matched by the receiver (e.g. fetcher-based SaaS sources).
+    A fetcher-based source has no match rule of its own: its fetcher stamps
+    ``_source`` with the source's landing label on every record, so the rule
+    compiled for it is ``_source == <label>`` (key_value_set). One landing on
+    the platform default table needs no rule, because the receiver's
+    ``default_source`` already sends an unmatched record there. An explicit
+    per-source rule rather than ``key_value_use`` on ``_source``: the receiver
+    takes untrusted input, and a use-the-value rule would let any sender pick
+    any topic.
     ``source_to_topic`` is emitted only where a source's landing topic
     deviates from ``{_source}{topic_suffix}`` (none do today - the Source
     model derives ``topic_land`` by that same rule).
@@ -84,6 +94,16 @@ def compile_receiver_routing(
 
     for source in registry.get_all_sources(states=("active",)):
         if not source.match:
+            label = source.landing_label()
+            if source.fetcher is not None and label != DEFAULT_LANDING_LABEL:
+                rules.append(
+                    SourceRule(
+                        field=FETCHER_LABEL_FIELD,
+                        mode="key_value_set",
+                        match_value=label,
+                        source=label,
+                    )
+                )
             continue
 
         mode = _OPERATOR_TO_MODE.get(source.match.operator)

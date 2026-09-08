@@ -278,6 +278,49 @@ def registry(sources):
     return FakeSourceRegistry(sources)
 
 
+def _fetched_source(name: str, *, topic: str = "own", state: str = "active") -> Source:
+    return Source.model_validate(
+        {
+            "source": name,
+            "state": state,
+            "fetcher": {"source_type": "okta", "topic": topic, "config": {}},
+        }
+    )
+
+
+class TestFetcherSourcesInReceiverRouting:
+    """The fetcher stamps ``_source`` with the landing label; the receiver keys on it."""
+
+    def test_an_own_topic_source_gets_an_explicit_rule(self):
+        config = compile_receiver_routing(FakeSourceRegistry([_fetched_source("okta-audit")]))
+        assert [r.model_dump() for r in config.source_rules] == [
+            {
+                "field": "_source",
+                "mode": "key_value_set",
+                "match_value": "okta-audit",
+                "source": "okta-audit",
+            }
+        ]
+
+    def test_a_default_topic_source_needs_no_rule(self):
+        # default_source already sends an unmatched record to the default topic.
+        config = compile_receiver_routing(
+            FakeSourceRegistry([_fetched_source("okta-audit", topic="default")])
+        )
+        assert config.source_rules == []
+
+    @pytest.mark.parametrize("state", ["dormant", "disabled"])
+    def test_a_source_that_is_not_active_gets_no_rule(self, state):
+        config = compile_receiver_routing(
+            FakeSourceRegistry([_fetched_source("okta-audit", state=state)])
+        )
+        assert config.source_rules == []
+
+    def test_the_loader_maps_a_fetched_source_to_its_table(self):
+        config = compile_loader_routing(FakeSourceRegistry([_fetched_source("okta-audit")]))
+        assert config.source_to_table == {"okta-audit": "okta-audit"}
+
+
 # ---------------------------------------------------------------------------
 # Tests: SourceRule model (receiver serde contract)
 # ---------------------------------------------------------------------------

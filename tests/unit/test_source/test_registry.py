@@ -303,15 +303,6 @@ class TestRoundTrip:
                     "env": {"CS_API_KEY": "secret"},
                     "files": ["/data/enrichment/geo.mmdb"],
                 },
-                "fetcher": {
-                    "source_type": "crowdstrike",
-                    "base_url": "https://api.crowdstrike.com",
-                    "auth": {
-                        "type": "oauth2",
-                        "token_url": "https://api.crowdstrike.com/oauth2/token",
-                    },
-                    "poll_interval_secs": 60,
-                },
                 "views": [
                     {
                         "standard": "sigma",
@@ -340,10 +331,34 @@ class TestRoundTrip:
         assert loaded.schema_config.engine == source.schema_config.engine
         assert loaded.transform.engine == source.transform.engine
         assert loaded.transform.config_file == source.transform.config_file
-        assert loaded.fetcher.source_type == source.fetcher.source_type
-        assert loaded.fetcher.auth.type == source.fetcher.auth.type
+        assert loaded.fetcher is None
         assert loaded.view_for("sigma").taxonomy == source.view_for("sigma").taxonomy
         assert loaded.view_for("sigma").custom_mappings == source.view_for("sigma").custom_mappings
+
+    def test_save_load_fetcher_source(self, registry: SourceRegistry):
+        source = Source.model_validate(
+            {
+                "source": "crowdstrike-edr",
+                "fetcher": {
+                    "source_type": "crowdstrike",
+                    "topic": "own",
+                    "config": {
+                        "credential_secret": "vault:secret/crowdstrike:client_secret",
+                        "services": [{"name": "alerts"}],
+                        "interval_secs": 60,
+                    },
+                },
+            }
+        )
+
+        registry.save_source(source)
+        loaded = registry.get_source("crowdstrike-edr")
+
+        assert loaded.origin == "fetcher"
+        assert loaded.match is None
+        assert loaded.fetcher.source_type == "crowdstrike"
+        assert loaded.fetcher.config == source.fetcher.config
+        assert registry.list_sources()[0]["origin"] == "fetcher"
 
     def test_update_draft_drops_stale_source_build(self, registry: SourceRegistry, tmp_path):
         store = SourceDeploymentStore(

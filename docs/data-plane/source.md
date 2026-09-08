@@ -53,9 +53,9 @@ A Source **contains** all source-scoped components:
 
 | Component | Required | Purpose |
 |-----------|----------|---------|
-| **identity** | Yes | `_source` label, display name, match rule |
+| **identity** | Yes | `_source` label, display name |
+| **origin** | Yes | Exactly one of a receiver `match` rule or a `fetcher` |
 | **schema** | Yes | ClickHouse table definition (starts as common header only). See [SCHEMA.md](schema.md) |
-| **fetcher** | No | SaaS API pull (CrowdStrike, M365, Okta, etc.) |
 | **transform** | No | Enrichment/normalisation stage (vector or wasm) |
 | **rules** | No | SQL detection queries against this source's table |
 | **views** | No | Naming-standard views (sigma, ecs, cim, ocsf) with per-source field overrides |
@@ -71,15 +71,13 @@ Global (configure once)         Source (one per data stream)
 │ loader              │         │   ├── match rule            │
 │ archiver            │         │   ├── schema (mandatory)    │
 └─────────────────────┘         │   ├── transform (optional)  │
-                                │   ├── fetcher (optional)    │
                                 │   ├── rules (optional)      │
                                 │   └── views (optional)      │
                                 ├─────────────────────────────┤
-                                │ source: crowdstrike_edr     │
-                                │   ├── match rule            │
+                                │ source: crowdstrike-edr     │
+                                │   ├── fetcher (no match)    │
                                 │   ├── schema (mandatory)    │
                                 │   ├── transform (optional)  │
-                                │   ├── fetcher (mandatory)   │
                                 │   └── rules (optional)      │
                                 ├─────────────────────────────┤
                                 │ source: syslog              │
@@ -108,9 +106,9 @@ header:
   type: timeseries                      # Profile name (timeseries, minimal, passthrough)
   version: 1.0.0                        # Common header version (semver)
 
-# --- Receiver Match ---
-# How the receiver identifies this source from incoming data.
-# The receiver evaluates match rules and sets _source in the JSON payload.
+# --- Origin: receiver match OR fetcher (exactly one) ---
+# A receiver-based source is identified by the always-present receiver pool:
+# the receiver evaluates match rules and sets _source in the JSON payload.
 match:
   field: tags.collector.type            # JSON field to inspect
   operator: equals                      # equals (default) | exists - the receiver-evaluable set
@@ -119,20 +117,22 @@ match:
   # but the receiver's hot-path router cannot evaluate them (a documented
   # receiver gap) - saves reject them for any non-disabled source.
 
+# A fetcher-based source has no match rule. The engine deploys one dfe-fetcher
+# instance named for the source, with this stanza compiled into it, when the
+# source is active and deployed, and removes it when the source is not.
+# fetcher:
+#   source_type: okta                   # A family the deployed fetcher ships (apps.yaml source_types)
+#   topic: own                          # own: this source's topic and table | default: the platform default table
+#   config:                             # The fetcher's own per-type stanza, verbatim
+#     tenant_url: https://example.okta.com
+#     credential_secret: vault:secret/dfe/okta:token   # credentials are env:/vault: references, never literals
+#     services:
+#       - name: system_log
+#     interval_secs: 300
+
 # --- Topics (derived, not configured) ---
 # topic_land: filebeat_land             # Auto: {_source}_land
 # topic_load: filebeat_load             # Auto: {_source}_load (only if transform exists)
-
-# --- Fetcher (optional) ---
-# Only for SaaS API sources that need active polling.
-# Push-based sources (filebeat, syslog, etc.) do not have a fetcher.
-# fetcher:
-#   source_type: crowdstrike
-#   base_url: https://api.crowdstrike.com
-#   auth:
-#     type: oauth2
-#     token_url: https://api.crowdstrike.com/oauth2/token
-#   poll_interval_secs: 300
 
 # --- Transform (optional) ---
 # If present, data flows: _land → transform → _load
@@ -228,6 +228,14 @@ stateDiagram-v2
 Materialisation derives from the declared state alone (gitops-declarative):
 CREATE on active, LEAVE on dormant, guarded RECLAIM on disabled. Creates are
 idempotent and a dormant source's table is never dropped.
+
+The deployed apps follow the same declaration. Every source write ends by
+reconciling the deploy repo: the receiver's rules and the loader's table map
+are recompiled from the active sources, and a fetcher-based source has a
+fetcher instance named for it while it is active and deployed, and none
+otherwise. The write reports what it changed (`apps_synced`); a failed
+reconcile never fails the write, and `POST /api/v1/sources/reconcile-apps`
+retries it.
 
 `enabled` remains as a compat accessor: `enabled == (state == active)`. It is
 serialised on API responses, and writes accept either field - `state` wins

@@ -31,7 +31,6 @@ from dfe_engine.source.expression import (
     list_directive_types,
 )
 from dfe_engine.source.models import (
-    FetcherAuth,
     SchemaColumn,
     Source,
     SourceFetcher,
@@ -73,7 +72,6 @@ __all__ = [
     "TypeRegistryError",
     "UnknownPrimitiveError",
     # Models
-    "FetcherAuth",
     "SchemaColumn",
     "Source",
     "SourceFetcher",
