@@ -10,7 +10,13 @@
 
 GET /api/v1/auth/oidc/{provider}/login     -> 302 to the IdP authorize endpoint
 GET /api/v1/auth/oidc/{provider}/login?redirect=false -> JSON {authorization_url}
+GET /api/v1/auth/oidc/{provider}/login?return_to=<url> -> callback hands the browser back there
 GET /api/v1/auth/oidc/{provider}/callback  -> exchange code, RE-MINT engine token
+
+A browser client (the console) passes ``return_to`` on login; the callback then
+303s to it with the engine token in the URL fragment, which never leaves the
+browser. ``return_to`` must be a relative path or an origin the API already
+trusts for CORS, so a crafted login link cannot send the token elsewhere.
 
 The engine is the RP and the SINGLE token issuer: on callback it validates the
 IdP id_token (via Authlib), extracts sub/email/groups, then mints its OWN ES384
@@ -25,6 +31,7 @@ or disabled providers return 404.
 from __future__ import annotations
 
 from typing import Literal
+from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -43,6 +50,37 @@ router = APIRouter(prefix="/auth/oidc", tags=["OIDC Login"])
 
 # Name of the cookie carrying the re-minted engine token to a browser client.
 _TOKEN_COOKIE = "dfe_token"
+
+# Session key holding the validated return_to between login and callback.
+_RETURN_TO_SESSION_KEY = "oidc_return_to"
+
+
+def _origin(url: str) -> str:
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}".lower()
+
+
+def validate_return_to(return_to: str, request_origin: str, trusted_origins: list[str]) -> str:
+    """Accept a relative path or an absolute URL on a trusted origin; raise 400 otherwise.
+
+    A relative path must start with a single ``/`` (``//host`` is scheme-relative
+    and would leave the origin). An absolute URL must be http(s) on the API's own
+    origin or on one of the configured CORS origins, which already name the
+    browser clients allowed to talk to this API.
+    """
+    if return_to.startswith("/") and not return_to.startswith("//"):
+        return return_to
+    parts = urlsplit(return_to)
+    allowed = {request_origin.lower(), *(o.lower() for o in trusted_origins)}
+    if parts.scheme in ("http", "https") and parts.netloc and _origin(return_to) in allowed:
+        return return_to
+    raise HTTPException(
+        status_code=400,
+        detail={
+            "code": "invalid_return_to",
+            "message": "return_to must be a relative path or a URL on a CORS-allowed origin",
+        },
+    )
 
 
 class OidcLoginResponse(BaseModel):
@@ -124,14 +162,28 @@ def _rp_or_404(request: Request, provider: str):
 async def oidc_login(
     provider: str,
     request: Request,
+    settings: Settings,
     redirect: bool = Query(
         True,
         description="When false, return JSON with authorization_url for SPA clients "
         "(use credentials: include, then window.location.assign the URL).",
     ),
+    return_to: str | None = Query(
+        None,
+        description="Where the callback sends the browser after login, with the engine "
+        "token in the URL fragment (#access_token=...&token_type=bearer&provider=...). "
+        "A relative path, or an absolute URL on this API's origin or a CORS-allowed "
+        "origin. Omit to have the callback answer with JSON instead.",
+    ),
 ) -> RedirectResponse | OidcLoginResponse:
     """Begin OIDC auth-code flow: 302 to the IdP, or JSON authorize URL for SPAs."""
     rp = _rp_or_404(request, provider)
+    if return_to:
+        request.session[_RETURN_TO_SESSION_KEY] = validate_return_to(
+            return_to, _origin(str(request.base_url)), settings.api.cors_origins
+        )
+    else:
+        request.session.pop(_RETURN_TO_SESSION_KEY, None)
     # Callback URL is built from this request's base URL so it works behind any
     # ingress without a hardcoded host. Must match a redirect URI the IdP allows.
     redirect_uri = str(request.url_for("oidc_callback", provider=provider))
@@ -145,10 +197,19 @@ async def oidc_login(
     "/{provider}/callback",
     name="oidc_callback",
     response_model=OidcCallbackResponse,
+    responses={
+        303: {
+            "description": "Login started with return_to: redirect there with the engine "
+            "token in the URL fragment."
+        }
+    },
 )
-async def oidc_callback(provider: str, request: Request, settings: Settings) -> JSONResponse:
+async def oidc_callback(
+    provider: str, request: Request, settings: Settings
+) -> JSONResponse | RedirectResponse:
     """Complete the OIDC flow and re-mint the engine token (single issuer)."""
     rp = _rp_or_404(request, provider)
+    return_to = request.session.pop(_RETURN_TO_SESSION_KEY, None)
 
     try:
         identity = await rp.handle_callback(provider, request)
@@ -201,7 +262,13 @@ async def oidc_callback(provider: str, request: Request, settings: Settings) -> 
         email=identity.email,
         groups=identity.groups,
     )
-    response = JSONResponse(payload.model_dump())
+    response: JSONResponse | RedirectResponse
+    if return_to:
+        # The fragment never reaches a server or a log line; the console reads it once.
+        fragment = urlencode({"access_token": token, "token_type": "bearer", "provider": provider})
+        response = RedirectResponse(f"{return_to}#{fragment}", status_code=303)
+    else:
+        response = JSONResponse(payload.model_dump())
     response.set_cookie(
         _TOKEN_COOKIE,
         token,

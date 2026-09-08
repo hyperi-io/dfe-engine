@@ -241,6 +241,9 @@ class _FakeOidcRp:
         assert redirect_uri.endswith("/api/v1/auth/oidc/stub/callback")
         return "https://idp.example/authorize?state=test"
 
+    async def handle_callback(self, provider: str, request) -> NormalizedIdentity:
+        return NormalizedIdentity(subject="stub-user", email="stub@example.test", groups=["g1"])
+
 
 def test_login_redirect_mode_302(client, app):
     app.state.oidc_rp = _FakeOidcRp()
@@ -312,3 +315,91 @@ def test_login_still_404s_for_a_provider_that_was_never_configured(client):
     """The reload path must not turn an unknown provider into anything but a 404."""
     resp = client.get("/api/v1/auth/oidc/never-configured/login", follow_redirects=False)
     assert resp.status_code == 404
+
+
+# ── return_to: the console hand-back ─────────────────────────────
+
+
+def test_validate_return_to_accepts_relative_and_trusted_origins():
+    from dfe_engine.api.v1.oidc_login import validate_return_to
+
+    origin = "https://dfe.example"
+    cors = ["http://localhost:3000"]
+    assert validate_return_to("/login/oidc?callbackUrl=%2Fsources", origin, cors) == (
+        "/login/oidc?callbackUrl=%2Fsources"
+    )
+    assert validate_return_to("https://dfe.example/login/oidc", origin, cors) == (
+        "https://dfe.example/login/oidc"
+    )
+    assert validate_return_to("HTTP://LOCALHOST:3000/login/oidc", origin, cors) == (
+        "HTTP://LOCALHOST:3000/login/oidc"
+    )
+
+
+def test_validate_return_to_rejects_other_origins():
+    import pytest
+    from fastapi import HTTPException
+
+    from dfe_engine.api.v1.oidc_login import validate_return_to
+
+    origin = "https://dfe.example"
+    for bad in (
+        "//evil.example/steal",
+        "https://evil.example/steal",
+        "javascript:alert(1)",
+        "http://localhost:3001/login/oidc",
+        "https://dfe.example.evil/login",
+    ):
+        with pytest.raises(HTTPException) as excinfo:
+            validate_return_to(bad, origin, ["http://localhost:3000"])
+        assert excinfo.value.status_code == 400
+
+
+def test_login_rejects_untrusted_return_to(client, app):
+    app.state.oidc_rp = _FakeOidcRp()
+    resp = client.get(
+        "/api/v1/auth/oidc/stub/login",
+        params={"redirect": "false", "return_to": "https://evil.example/"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "invalid_return_to"
+
+
+def test_callback_hands_back_to_return_to_with_token_in_fragment(client, app):
+    """login?return_to=... then callback -> 303 to return_to#access_token=..."""
+    app.state.oidc_rp = _FakeOidcRp()
+    # The session cookie is Secure outside dev posture, so the round trip runs over https.
+    login = client.get(
+        "https://testserver/api/v1/auth/oidc/stub/login",
+        params={"redirect": "false", "return_to": "/login/oidc?callbackUrl=%2Fsources"},
+    )
+    assert login.status_code == 200
+    assert "session" in login.cookies
+
+    resp = client.get("https://testserver/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+    assert resp.status_code == 303
+    location = resp.headers["location"]
+    path, _, fragment = location.partition("#")
+    assert path == "/login/oidc?callbackUrl=%2Fsources"
+    from urllib.parse import parse_qs
+
+    parsed = parse_qs(fragment)
+    assert parsed["token_type"] == ["bearer"]
+    assert parsed["provider"] == ["stub"]
+    claims = pyjwt.decode(parsed["access_token"][0], options={"verify_signature": False})
+    assert claims["sub"] == "stub-user"
+    assert claims["groups"] == ["g1"]
+    # The hand-back is one-shot: the next callback without a login answers JSON.
+    again = client.get("https://testserver/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+    assert again.status_code == 200
+    assert again.json()["subject"] == "stub-user"
+
+
+def test_callback_without_return_to_answers_json(client, app):
+    app.state.oidc_rp = _FakeOidcRp()
+    resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["subject"] == "stub-user"
+    assert body["token_type"] == "bearer"
+    assert body["access_token"]
