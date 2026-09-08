@@ -105,6 +105,7 @@ def _emit(report: ApplyReport, targets: CoreSchemaTargets, *, as_json: bool) -> 
                             "table": change.table,
                             "action": change.action,
                             "columns_added": list(change.columns_added),
+                            "ttl": change.ttl,
                             "engine": change.engine,
                             "on_cluster": change.on_cluster.strip(),
                         }
@@ -138,6 +139,7 @@ def apply(
 ) -> None:
     """Create or reconcile every core table, and say what changed."""
     ch = load_clickhouse_settings()
+    # Env default only: the console override lives in gitops, which this job has no access to.
     targets = CoreSchemaTargets.from_clickhouse(ch)
     try:
         client = _connect(ch, wait)
@@ -166,6 +168,7 @@ def check(
 ) -> None:
     """Report schema drift without changing anything. Exits 2 when it finds any."""
     ch = load_clickhouse_settings()
+    # Env default only, as in apply: a console override reads as TTL drift here.
     targets = CoreSchemaTargets.from_clickhouse(ch)
     try:
         client = _connect(ch, wait)

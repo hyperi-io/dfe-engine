@@ -15,7 +15,7 @@ Usage:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from scalo.logger import logger
 
@@ -154,6 +154,18 @@ class TableSpec:
     name: str
     columns: list[SchemaColumn]
     config: DDLConfig
+
+
+def with_default_ttl(spec: TableSpec, days: int | None) -> TableSpec:
+    """*spec* with the deployment default retention, unless it declares its own.
+
+    A declared ``ttl_days`` always wins; ``days`` of 0 or None leaves the spec
+    as it is. The config is copied, never mutated in place.
+    """
+    # A table with no ttl_columns cannot carry a TTL, and a default over none fails the CREATE.
+    if not days or spec.config.ttl_days is not None or not spec.config.ttl_columns:
+        return spec
+    return replace(spec, config=replace(spec.config, ttl_days=days))
 
 
 # ── Index templates ─────────────────────────────────────────────────

@@ -20,9 +20,13 @@ Disable with ``DFE_CLICKHOUSE_BOOTSTRAP_TABLES=false``.
 
 from __future__ import annotations
 
+from dataclasses import replace
+from typing import TYPE_CHECKING
+
 from scalo.logger import logger
 
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+from dfe_engine.gitcrud.retention import effective_default_ttl_days
 from dfe_engine.schema.applier import log_report
 from dfe_engine.schema.core_schema import (
     CoreSchemaTargets,
@@ -31,14 +35,21 @@ from dfe_engine.schema.core_schema import (
 )
 from dfe_engine.settings import DFESettings, get_clickhouse_config
 
+if TYPE_CHECKING:
+    from dfe_engine.gitcrud import GitCrud
 
-def bootstrap_clickhouse(*, settings: DFESettings) -> None:
+
+def bootstrap_clickhouse(*, settings: DFESettings, gitcrud: GitCrud | None = None) -> None:
     """Create or reconcile the core tables if the deployment asks for it."""
     if not (settings.clickhouse.bootstrap_tables):
         logger.info("ClickHouse table bootstrap disabled; skipping")
         return
 
-    targets = CoreSchemaTargets.from_settings(settings)
+    # The console override in the deploy repo wins over the env default.
+    targets = replace(
+        CoreSchemaTargets.from_settings(settings),
+        default_ttl_days=effective_default_ttl_days(settings, gitcrud) or None,
+    )
 
     try:
         manager = ClickHouseManager.get_instance(get_clickhouse_config(settings=settings))

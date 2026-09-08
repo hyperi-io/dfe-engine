@@ -169,6 +169,13 @@ schema:
                                         # Topology (Replicated/Shared/Cloud) resolves at DDL time
 ```
 
+`ttl_days` is optional. A source that leaves it unset gets the deployment
+default (`DFE_CLICKHOUSE_DEFAULT_TTL_DAYS`, 90 days shipped, 0 = none); a
+value here wins over that default and over the table's dfe-schemas
+definition. The next schema apply moves an existing table onto a changed
+value with `ALTER TABLE ... MODIFY TTL`, and shortening it expires the rows
+older than the new value.
+
 The legacy 2.1 keys `sigma`, `mapping_standards`, and `field_mappings` were
 removed in 2.2 - writes carrying them are rejected with a "removed in 2.2"
 error. Declare naming-standard views via the `views` list instead.

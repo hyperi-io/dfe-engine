@@ -29,6 +29,8 @@ ClickHouse:
 - DFE_CLICKHOUSE_VERIFY (legacy: CLICKHOUSE_VERIFY) -> clickhouse.verify (true/false)
 - DFE_CLICKHOUSE_CONNECTIONS_MIN -> clickhouse.connections_min
 - DFE_CLICKHOUSE_CONNECTIONS_MAX -> clickhouse.connections_max
+- DFE_CLICKHOUSE_TOPOLOGY -> clickhouse.topology
+- DFE_CLICKHOUSE_DEFAULT_TTL_DAYS -> clickhouse.default_ttl_days (0 = no default TTL)
 
 ClickHouse Cloud (control plane; opt-in, billable):
 - DFE_CLICKHOUSE_CLOUD_API_KEY_ID -> clickhouse.cloud.api_key_id
@@ -260,6 +262,9 @@ class ClickHouseSettings(BaseModel):
     # variant the engine registry permits; may be parameterised
     # (e.g. "ReplacingMergeTree(version)").
     default_engine: str = Field(default="MergeTree")
+    # Retention every time-series table gets unless dfe-schemas or a source
+    # declares its own; 0 disables the default.
+    default_ttl_days: int = Field(default=90, ge=0)
     cloud: ClickHouseCloudSettings = Field(default_factory=ClickHouseCloudSettings)
     resilience: ClickHouseResilienceSettings = Field(default_factory=ClickHouseResilienceSettings)
 
@@ -1428,6 +1433,8 @@ def _get_env_overrides() -> dict:
         overrides["clickhouse"]["connections_max"] = int(val)
     if val := _get_env("DFE_CLICKHOUSE_TOPOLOGY"):
         overrides["clickhouse"]["topology"] = val
+    if val := _get_env("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS"):
+        overrides["clickhouse"]["default_ttl_days"] = int(val)
 
     # ClickHouse Cloud lifecycle (control-plane mgmt API; opt-in, billable).
     ch_cloud: dict = {}

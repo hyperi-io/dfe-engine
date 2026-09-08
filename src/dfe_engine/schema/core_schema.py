@@ -39,7 +39,7 @@ from dfe_engine.schema.ddl_writer import DDLFileWriter
 from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
 from dfe_engine.schema.internal_tables import hunt_coordination_specs, internal_specs
 from dfe_engine.schema.otel_tables import TRACE_ID_TS_VIEW, otel_specs, trace_id_ts_view_ddl
-from dfe_engine.schema.schema_ddl import TableSpec
+from dfe_engine.schema.schema_ddl import TableSpec, with_default_ttl
 
 
 @dataclass(frozen=True)
@@ -49,6 +49,8 @@ class CoreSchemaTargets:
     database: str
     landing_table: str = "main"
     profile: str = "timeseries"
+    # Retention for a time-series table that declares none; None = no default.
+    default_ttl_days: int | None = None
 
     @classmethod
     def from_settings(cls, settings: Any) -> CoreSchemaTargets:
@@ -66,6 +68,7 @@ class CoreSchemaTargets:
             database=ch.effective_data_database,
             landing_table=ch.landing_table,
             profile=ch.default_table_profile,
+            default_ttl_days=ch.default_ttl_days or None,
         )
 
 
@@ -80,13 +83,15 @@ def core_table_specs(
     writer = DDLFileWriter(
         resolver=resolver, database=targets.database, landing_table=targets.landing_table
     )
+    ttl = targets.default_ttl_days
+    # The checkpoint, internal and coordination tables are state, not time series.
     return [
-        writer.default_table_spec(profile_name=targets.profile),
-        writer.detection_table_spec(profile_name=targets.profile),
+        with_default_ttl(writer.default_table_spec(profile_name=targets.profile), ttl),
+        with_default_ttl(writer.detection_table_spec(profile_name=targets.profile), ttl),
         writer.detection_checkpoint_table_spec(),
         *internal_specs(targets.database),
         *hunt_coordination_specs(targets.database),
-        *otel_specs(targets.database),
+        *(with_default_ttl(spec, ttl) for spec in otel_specs(targets.database)),
     ]
 
 

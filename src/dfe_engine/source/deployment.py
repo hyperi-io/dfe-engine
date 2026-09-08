@@ -589,9 +589,14 @@ def run_source_build(
     version_id: str,
     schemas_base_dir: str | Path | None,
 ) -> SchemaBuildResult:
+    from dfe_engine.settings import get_settings
+
+    ch = get_settings().clickhouse
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=schemas_base_dir or None,
+        default_engine=ch.default_engine,
+        default_ttl_days=ch.default_ttl_days,
     )
     return builder.build_for_source_version(source, source_version=version_id)
 
