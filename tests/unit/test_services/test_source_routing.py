@@ -438,7 +438,7 @@ class TestCompileLoaderRouting:
         config = compile_loader_routing(registry)
         assert config.table_fields == ["_source"]
         assert config.default_db == "dfe"
-        assert config.default_table == "default"
+        assert config.default_table == "main"
 
     def test_source_to_table_populated(self, registry):
         config = compile_loader_routing(registry)

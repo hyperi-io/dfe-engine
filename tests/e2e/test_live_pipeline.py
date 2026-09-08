@@ -28,7 +28,7 @@ pytestmark = pytest.mark.live
 
 
 # ---------------------------------------------------------------------------
-# 1. HTTPS -> ClickHouse default table
+# 1. HTTPS -> ClickHouse landing table
 # ---------------------------------------------------------------------------
 def test_https_ingest_lands_in_clickhouse(e2e: E2EConfig, ch_client) -> None:
     require(e2e, "receiver_url", "ch_host")
@@ -37,9 +37,9 @@ def test_https_ingest_lands_in_clickhouse(e2e: E2EConfig, ch_client) -> None:
     #
     # NO `_source` ON THE EVENT, deliberately. The receiver's shipped routing rule
     # is `_source` / key_value_use: an event carrying `_source: x` is routed to
-    # topic `x_land` and lands in table `dfe.x`, not `dfe.default`. Setting it here
+    # topic `x_land` and lands in table `dfe.x`, not `dfe.main`. Setting it here
     # sent the event to a per-source table that does not exist, so the loader
-    # DLQ'd it on schema_pending_timeout while this test polled `dfe.default` and
+    # DLQ'd it on schema_pending_timeout while this test polled `dfe.main` and
     # timed out - looking like a broken data path when the path was working.
     marker = f"e2e-{uuid.uuid4().hex}"
     event = {"message": marker, "severity": "info"}
@@ -59,16 +59,16 @@ def test_https_ingest_lands_in_clickhouse(e2e: E2EConfig, ch_client) -> None:
     )
     assert resp.status_code in (200, 201, 202), f"ingest failed: {resp.status_code} {resp.text}"
 
-    # The row should appear in dfe.default. Poll the real signal (row present),
+    # The row should appear in dfe.main. Poll the real signal (row present),
     # timeout is only the stuck-dependency backstop.
     def _row():
         rows = ch_client.query(
-            "SELECT _source, _raw FROM default WHERE _raw LIKE %(m)s LIMIT 1",
+            "SELECT _source, _raw FROM main WHERE _raw LIKE %(m)s LIMIT 1",
             parameters={"m": f"%{marker}%"},
         ).result_rows
         return rows[0] if rows else None
 
-    row = poll_until(_row, timeout=90, interval=3, desc=f"event {marker} in dfe.default")
+    row = poll_until(_row, timeout=90, interval=3, desc=f"event {marker} in dfe.main")
     assert marker in row[1]
 
 
@@ -98,7 +98,7 @@ def test_ingested_data_visible_in_hyperdx(e2e: E2EConfig, ch_client) -> None:
     poll_until(
         lambda: (
             ch_client.query(
-                "SELECT 1 FROM default WHERE _raw LIKE %(m)s LIMIT 1",
+                "SELECT 1 FROM main WHERE _raw LIKE %(m)s LIMIT 1",
                 parameters={"m": f"%{marker}%"},
             ).result_rows
         ),
