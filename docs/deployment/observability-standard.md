@@ -25,7 +25,7 @@ is the single switch:
 | Mode | Path | Lands in |
 |---|---|---|
 | `hyperdx-direct` (default) | collector -> HyperDX ingest | HyperDX otel CH db (`default.otel_logs`/`otel_traces`/`otel_metrics_*`) |
-| `receiver` | collector -> **dfe-receiver** (OTLP) -> kafka -> **dfe-loader** | `dfe.default` (telemetry rides the normal data pipeline) |
+| `receiver` | collector -> **dfe-receiver** (OTLP) -> kafka -> **dfe-loader** | `dfe.main` (telemetry rides the normal data pipeline) |
 | `receiver` + `hyperdx-ingest` | collector -> dfe-receiver (OTLP) -> kafka -> **dfe-loader routes the otel category** | otel CH db (`otel_logs`...) - ingested via DFE, landed in the otel tables so HyperDX still queries it |
 | `external` / `prometheus` | collector -> customer OTLP / Prometheus | customer backend |
 
@@ -36,7 +36,7 @@ FACT-CHECKED against the code (2026-06-30):
 - **dfe-loader is the landing/routing app** - `routing` module with
   category->table mapping ("no table mapping for category"), `parse_db_table`
   (`client_http.rs:192`) lands an arbitrary `db.table`. So the **loader** is the
-  app that routes otel-category data to the otel db vs `dfe.default` - it owns the
+  app that routes otel-category data to the otel db vs `dfe.main` - it owns the
   `hyperdx-ingest` landing decision. (No otel-category routing rule exists yet;
   that is the work for `hyperdx-ingest` mode.)
 

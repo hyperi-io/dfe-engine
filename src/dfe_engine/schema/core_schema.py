@@ -47,7 +47,7 @@ class CoreSchemaTargets:
     """Where the core schema lands: the DFE database, landing table and profile."""
 
     database: str
-    landing_table: str = "default"
+    landing_table: str = "main"
     profile: str = "timeseries"
 
     @classmethod

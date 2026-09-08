@@ -40,7 +40,7 @@ class DDLFileWriter:
         topology: str = "single",
         resolver: EngineResolver | None = None,
         database: str = "{db}",
-        landing_table: str = "default",
+        landing_table: str = "main",
     ) -> None:
         """Initialise the writer.
 

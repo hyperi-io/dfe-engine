@@ -17,7 +17,7 @@ ClickHouse objects -- the two-axis RBAC model end to end. It needs
 
 1. **HTTPS -> ClickHouse** (`test_https_ingest_lands_in_clickhouse`)
    POST a uniquely-tagged event to the receiver over HTTPS; assert it lands in
-   the `dfe.default` ClickHouse table.
+   the `dfe.main` ClickHouse table.
 2. **-> HyperDX** (`test_ingested_data_visible_in_hyperdx`)
    Ingest, confirm it is in CH, then confirm HyperDX's search API returns it
    (proves the HyperDX -> CH datasource wiring).

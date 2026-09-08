@@ -173,7 +173,7 @@ class LoaderRoutingConfig(BaseModel):
     db_fields: list[str] = []
     table_fields: list[str] = Field(default_factory=lambda: ["_source"])
     default_db: str = "dfe"
-    default_table: str = "default"
+    default_table: str = "main"
     org_id_field: str | None = "org_id"
     org_routes: list[dict[str, Any]] = Field(
         default_factory=list,
