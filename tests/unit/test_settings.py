@@ -237,6 +237,21 @@ class TestEnvOverrides:
         settings = load_settings()
         assert settings.clickhouse.connections_max == 20
 
+    def test_clickhouse_default_ttl_days_override_parses_to_int(self, monkeypatch):
+        monkeypatch.setenv("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS", "30")
+        settings = load_settings()
+        assert settings.clickhouse.default_ttl_days == 30
+
+    def test_clickhouse_default_ttl_days_ships_at_ninety(self, monkeypatch):
+        monkeypatch.delenv("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS", raising=False)
+        settings = load_settings()
+        assert settings.clickhouse.default_ttl_days == 90
+
+    def test_clickhouse_default_ttl_days_refuses_a_negative(self, monkeypatch):
+        monkeypatch.setenv("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS", "-1")
+        with pytest.raises(ValidationError):
+            load_settings()
+
     def test_api_host_override(self, monkeypatch):
         monkeypatch.setenv("DFE_API_HOST", "127.0.0.1")
         settings = load_settings()

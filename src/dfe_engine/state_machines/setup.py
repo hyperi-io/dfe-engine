@@ -114,6 +114,8 @@ class SetupContext:
     # Where the operator reads the minted password, for the pre-login page.
     deploy_kind: str = ""
     credential_fetch_command: str = ""
+    # Effective retention a source gets when it sets none (override else env); 0 = none.
+    default_ttl_days: int = 90
 
     @classmethod
     def from_app_state(cls, state: Any) -> SetupContext:
@@ -133,6 +135,13 @@ class SetupContext:
         admin_name = admin_account_name(getattr(local, "admin_name", "") or "")
         deployment = _attr_path(state, "settings", "deployment")
         kind = detect_deploy_kind(getattr(deployment, "target", "") or "")
+        default_ttl_days = 90
+        if _attr_path(state, "settings", "clickhouse") is not None:
+            from dfe_engine.gitcrud.retention import effective_default_ttl_days
+
+            default_ttl_days = effective_default_ttl_days(
+                state.settings, getattr(state, "gitcrud", None)
+            )
         return cls(
             account_store=account_store,
             org_registry=getattr(state, "org_registry", None),
@@ -149,6 +158,7 @@ class SetupContext:
                 secret_name=getattr(local, "admin_secret_name", "") or "",
                 secret_key=getattr(local, "admin_secret_key", "") or "",
             ),
+            default_ttl_days=default_ttl_days,
         )
 
 
@@ -289,6 +299,9 @@ class SetupStatus(BaseModel):
         description="One-line command that prints this deployment's minted admin "
         "password, for the login page to show. Carried after setup completes too "
         "-- an operator who has lost the password needs it most then.",
+    )
+    default_ttl_days: int = Field(
+        description="Retention in days a source gets when it sets none; 0 = none.",
     )
 
 
@@ -492,6 +505,7 @@ class SetupStateMachine:
                 default_credentials=default_credentials(ctx),
                 deploy_kind=ctx.deploy_kind,
                 credential_fetch_command=ctx.credential_fetch_command,
+                default_ttl_days=ctx.default_ttl_days,
             )
 
         return SetupStatus(
@@ -502,6 +516,7 @@ class SetupStateMachine:
             default_credentials=default_credentials(ctx),
             deploy_kind=ctx.deploy_kind,
             credential_fetch_command=ctx.credential_fetch_command,
+            default_ttl_days=ctx.default_ttl_days,
         )
 
     # ------------------------------------------------------------------

@@ -73,6 +73,7 @@ class SchemaBuilderV2:
         use_legacy_indexes: bool = False,
         field_map_registry: FieldMapRegistry | None = None,
         default_engine: str = "MergeTree",
+        default_ttl_days: int | None = None,
     ) -> None:
         """Initialize the schema builder.
 
@@ -93,12 +94,17 @@ class SchemaBuilderV2:
                                 (``settings.clickhouse.default_engine``) so an
                                 operator can make e.g. ReplacingMergeTree the default;
                                 falls back to plain MergeTree.
+            default_ttl_days: Retention for a source whose schema leaves ``ttl_days``
+                                unset. Pass the deployment value
+                                (``settings.clickhouse.default_ttl_days``); None or 0
+                                emits no TTL clause for such a source.
         """
         self._registry = registry or TypeRegistry.default()
         self._schemas_base_dir = Path(schemas_base_dir) if schemas_base_dir else None
         self._ddl_gen = DDLGenerator(self._registry, use_legacy_indexes=use_legacy_indexes)
         self._field_map_registry = field_map_registry
         self._default_engine = default_engine or "MergeTree"
+        self._default_ttl_days = default_ttl_days or None
 
     # ── Main entry points ───────────────────────────────────────────
 
@@ -354,10 +360,12 @@ class SchemaBuilderV2:
         """Build DDLConfig from a source version snapshot."""
         schema_cfg = snap.effective_schema()
         header = snap.effective_header()
-        # Empty engine = inherit the deployment default; a per-source pin wins.
+        # Empty engine or unset ttl_days = inherit the deployment default; a per-source pin wins.
         return DDLConfig(
             engine=schema_cfg.engine or self._default_engine,
-            ttl_days=schema_cfg.ttl_days,
+            ttl_days=schema_cfg.ttl_days
+            if schema_cfg.ttl_days is not None
+            else self._default_ttl_days,
             profile_name=header.type if header else None,
             profile_version=header.version if header else None,
         )

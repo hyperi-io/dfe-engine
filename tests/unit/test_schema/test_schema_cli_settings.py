@@ -22,6 +22,11 @@ rejects, and the full model still rejects it.
 
 from __future__ import annotations
 
+import shutil
+from dataclasses import replace
+from pathlib import Path
+
+import dfe_schemas
 import pytest
 from pydantic import ValidationError
 
@@ -93,6 +98,63 @@ def test_the_landing_table_setting_reaches_the_bootstrapped_table(monkeypatch):
 
     assert targets.landing_table == "parked"
     assert core_table_specs(targets)[0].name == "parked"
+
+
+def test_the_default_ttl_env_reaches_the_targets(monkeypatch):
+    monkeypatch.setenv("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS", "30")
+    assert CoreSchemaTargets.from_clickhouse(load_clickhouse_settings()).default_ttl_days == 30
+
+    # 0 switches the default off rather than declaring a zero-day TTL.
+    monkeypatch.setenv("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS", "0")
+    assert CoreSchemaTargets.from_clickhouse(load_clickhouse_settings()).default_ttl_days is None
+
+
+def _schemas_tree_without_time_series_ttl(root: Path) -> Path:
+    """A copy of the installed dfe-schemas tree with the core and OTel ttl_days removed."""
+    tree = root / "schemas"
+    shutil.copytree(Path(dfe_schemas.__file__).parent / "data", tree)
+    for subdir in ("core", "otel"):
+        for path in (tree / "tables" / subdir).glob("*.yaml"):
+            lines = path.read_text(encoding="utf-8").splitlines()
+            kept = [line for line in lines if not line.strip().startswith("ttl_days:")]
+            path.write_text("\n".join(kept) + "\n", encoding="utf-8", newline="\n")
+    return tree
+
+
+def test_the_default_ttl_reaches_the_time_series_tables_that_declare_none(tmp_path, monkeypatch):
+    """The landing, detection and OTel tables inherit it; the state tables never do."""
+    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(_schemas_tree_without_time_series_ttl(tmp_path)))
+    monkeypatch.setenv("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS", "45")
+
+    targets = CoreSchemaTargets.from_clickhouse(load_clickhouse_settings())
+    specs = {spec.name: spec for spec in core_table_specs(targets)}
+    otel = {name: spec for name, spec in specs.items() if name.startswith("otel_")}
+
+    assert targets.default_ttl_days == 45
+    assert specs[targets.landing_table].config.ttl_days == 45
+    assert specs["detection"].config.ttl_days == 45
+    assert otel
+    assert {spec.config.ttl_days for spec in otel.values()} == {45}
+    assert specs["detection_checkpoint"].config.ttl_days is None
+
+    # Internal and coordination tables are state: the default never touches them.
+    without = {
+        spec.name: spec for spec in core_table_specs(replace(targets, default_ttl_days=None))
+    }
+    state = set(specs) - set(otel) - {targets.landing_table, "detection", "detection_checkpoint"}
+    assert state
+    assert all(specs[name].config.ttl_days == without[name].config.ttl_days for name in state)
+
+
+def test_a_declared_ttl_wins_over_the_deployment_default(monkeypatch):
+    """dfe-schemas declares 30 days on the shipped tables, and that declaration is kept."""
+    monkeypatch.setenv("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS", "45")
+
+    targets = CoreSchemaTargets.from_clickhouse(load_clickhouse_settings())
+    specs = {spec.name: spec for spec in core_table_specs(targets)}
+
+    assert specs[targets.landing_table].config.ttl_days == 30
+    assert specs["otel_logs"].config.ttl_days == 30
 
 
 def test_the_schema_cli_does_not_import_the_full_settings_loader():

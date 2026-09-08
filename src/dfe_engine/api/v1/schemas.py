@@ -1101,6 +1101,7 @@ async def get_schema_columns(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
         default_engine=settings.clickhouse.default_engine,
+        default_ttl_days=settings.clickhouse.default_ttl_days,
     )
     try:
         columns = builder.load_columns_for_source_version(source, source_version=version_id)
@@ -1178,6 +1179,7 @@ async def build_schema(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
         default_engine=settings.clickhouse.default_engine,
+        default_ttl_days=settings.clickhouse.default_ttl_days,
     )
     try:
         result = builder.build_for_source_version(source, source_version=version_id)

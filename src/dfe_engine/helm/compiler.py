@@ -307,9 +307,15 @@ class HelmValuesCompiler:
         statements: list[str] = []
         try:
             from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
+            from dfe_engine.settings import get_settings
             from dfe_engine.source.type_registry import TypeRegistry
 
-            builder = SchemaBuilderV2(registry=TypeRegistry())
+            ch = get_settings().clickhouse
+            builder = SchemaBuilderV2(
+                registry=TypeRegistry(),
+                default_engine=ch.default_engine,
+                default_ttl_days=ch.default_ttl_days,
+            )
             for source in self._source.get_all_sources(states=("active", "dormant")):
                 try:
                     result = builder.build(source)

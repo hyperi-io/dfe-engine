@@ -441,6 +441,7 @@ async def get_source_schema_columns(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
         default_engine=settings.clickhouse.default_engine,
+        default_ttl_days=settings.clickhouse.default_ttl_days,
     )
     try:
         columns = builder.load_columns_for_source_version(source, source_version=version_id)
@@ -592,6 +593,8 @@ async def plan_source_deploy(
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
+        default_engine=settings.clickhouse.default_engine,
+        default_ttl_days=settings.clickhouse.default_ttl_days,
     )
     db = settings.clickhouse.effective_data_database
     statements, table_exists = deploy_statements_for_build(
@@ -704,6 +707,7 @@ async def deploy_source_schema(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
         default_engine=settings.clickhouse.default_engine,
+        default_ttl_days=settings.clickhouse.default_ttl_days,
     )
     try:
         result = builder.build_for_source_version(source, source_version=version_id)
