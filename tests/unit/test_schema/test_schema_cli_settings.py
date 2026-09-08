@@ -109,21 +109,8 @@ def test_the_default_ttl_env_reaches_the_targets(monkeypatch):
     assert CoreSchemaTargets.from_clickhouse(load_clickhouse_settings()).default_ttl_days is None
 
 
-def _schemas_tree_without_time_series_ttl(root: Path) -> Path:
-    """A copy of the installed dfe-schemas tree with the core and OTel ttl_days removed."""
-    tree = root / "schemas"
-    shutil.copytree(Path(dfe_schemas.__file__).parent / "data", tree)
-    for subdir in ("core", "otel"):
-        for path in (tree / "tables" / subdir).glob("*.yaml"):
-            lines = path.read_text(encoding="utf-8").splitlines()
-            kept = [line for line in lines if not line.strip().startswith("ttl_days:")]
-            path.write_text("\n".join(kept) + "\n", encoding="utf-8", newline="\n")
-    return tree
-
-
-def test_the_default_ttl_reaches_the_time_series_tables_that_declare_none(tmp_path, monkeypatch):
-    """The landing, detection and OTel tables inherit it; the state tables never do."""
-    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(_schemas_tree_without_time_series_ttl(tmp_path)))
+def test_the_default_ttl_reaches_the_time_series_tables_that_declare_none(monkeypatch):
+    """The shipped landing, detection and OTel tables inherit it; the state tables never do."""
     monkeypatch.setenv("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS", "45")
 
     targets = CoreSchemaTargets.from_clickhouse(load_clickhouse_settings())
@@ -135,19 +122,34 @@ def test_the_default_ttl_reaches_the_time_series_tables_that_declare_none(tmp_pa
     assert specs["detection"].config.ttl_days == 45
     assert otel
     assert {spec.config.ttl_days for spec in otel.values()} == {45}
-    assert specs["detection_checkpoint"].config.ttl_days is None
 
     # Internal and coordination tables are state: the default never touches them.
     without = {
         spec.name: spec for spec in core_table_specs(replace(targets, default_ttl_days=None))
     }
-    state = set(specs) - set(otel) - {targets.landing_table, "detection", "detection_checkpoint"}
+    state = set(specs) - set(otel) - {targets.landing_table, "detection"}
     assert state
     assert all(specs[name].config.ttl_days == without[name].config.ttl_days for name in state)
+    assert specs["detection_checkpoint"].config.ttl_days == 30
 
 
-def test_a_declared_ttl_wins_over_the_deployment_default(monkeypatch):
-    """dfe-schemas declares 30 days on the shipped tables, and that declaration is kept."""
+def _schemas_tree_with_declared_ttl(root: Path) -> Path:
+    """A copy of the installed dfe-schemas tree that declares ttl_days on two time-series tables."""
+    tree = root / "schemas"
+    shutil.copytree(Path(dfe_schemas.__file__).parent / "data", tree)
+    for relative in ("core/default.yaml", "otel/logs.yaml"):
+        path = tree / "tables" / relative
+        lines = path.read_text(encoding="utf-8").splitlines()
+        anchor = next(i for i, line in enumerate(lines) if line.strip().startswith("ttl_columns:"))
+        indent = " " * (len(lines[anchor]) - len(lines[anchor].lstrip()))
+        lines.insert(anchor, f"{indent}ttl_days: 30")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    return tree
+
+
+def test_a_declared_ttl_wins_over_the_deployment_default(tmp_path, monkeypatch):
+    """A table that declares ttl_days keeps it, whatever the deployment default says."""
+    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(_schemas_tree_with_declared_ttl(tmp_path)))
     monkeypatch.setenv("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS", "45")
 
     targets = CoreSchemaTargets.from_clickhouse(load_clickhouse_settings())
@@ -155,6 +157,9 @@ def test_a_declared_ttl_wins_over_the_deployment_default(monkeypatch):
 
     assert specs[targets.landing_table].config.ttl_days == 30
     assert specs["otel_logs"].config.ttl_days == 30
+    # The tables left alone still inherit, so the fixture proved a difference.
+    assert specs["detection"].config.ttl_days == 45
+    assert specs["otel_traces"].config.ttl_days == 45
 
 
 def test_the_schema_cli_does_not_import_the_full_settings_loader():

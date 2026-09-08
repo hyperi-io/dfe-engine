@@ -39,7 +39,7 @@ dependencies = [
     # the `schemas` git submodule. schema_loader resolves them through
     # importlib.resources; the Dockerfile bakes its seed from the installed
     # wheel. Floor is the first hyperi-ci-cut release; uv.lock pins the hash.
-    "dfe-schemas>=0.2.0",
+    "dfe-schemas>=0.2.1",
     # Data processing
     "pandas>=3.0.3",
     "numpy>=2.5.0",
