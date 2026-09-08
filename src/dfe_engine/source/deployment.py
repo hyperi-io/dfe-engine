@@ -87,6 +87,21 @@ class SchemaDeployResult(BaseModel):
             "schema is live and Kafka may not be in the path at all."
         ),
     )
+    apps_synced: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Deploy-repo writes this deploy made so the apps follow the sources: the "
+            "receiver and loader routing, and a fetcher instance for a fetcher-based "
+            "source (service/instance: action)"
+        ),
+    )
+    apps_sync_error: str | None = Field(
+        default=None,
+        description=(
+            "Why the apps could not be brought into step. Never fails the deploy - "
+            "the schema is live; POST /api/v1/sources/reconcile-apps retries it."
+        ),
+    )
 
 
 class VersionedSourceArtifactDocument(BaseModel):

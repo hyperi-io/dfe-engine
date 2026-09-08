@@ -351,23 +351,134 @@ class SourceTransform(BaseModel):
         return v
 
 
-class FetcherAuth(BaseModel):
-    """Fetcher authentication configuration."""
+SourceOrigin = Literal["receiver", "fetcher"]
+"""How a source's data enters the platform.
 
-    type: str = Field(..., description="Auth type (oauth2, api_key, basic)")
-    token_url: str | None = Field(default=None, description="OAuth2 token URL")
-    client_id: str | None = Field(default=None, description="OAuth2 client ID")
-    client_secret: str | None = Field(default=None, description="OAuth2 client secret")
-    api_key: str | None = Field(default=None, description="API key")
+``receiver``: the always-present receiver pool identifies it by ``match``.
+``fetcher``: one dfe-fetcher deployment, named for the source, polls it in.
+"""
+
+FetcherTopic = Literal["own", "default"]
+
+DEFAULT_LANDING_LABEL = "default"
+"""The ``_source`` label of the platform's default landing table."""
+
+# Keys the engine sets on the compiled fetcher stanza; a source may not carry them.
+_FETCHER_ENGINE_KEYS = frozenset({"enabled", "topic"})
+
+# The source YAML is committed to git, so a value under any of these must be an
+# ``env:`` or ``vault:`` reference the fetcher resolves at runtime.
+_CREDENTIAL_KEYS = frozenset(
+    {
+        "api_key",
+        "access_key_id",
+        "secret_access_key",
+        "account_key",
+        "integration_key",
+        "secret_key",
+        "private_key",
+        "client_secret",
+        "token",
+    }
+)
+_CREDENTIAL_FRAGMENTS = ("secret", "token", "password")
+_CREDENTIAL_REFERENCE_PREFIXES = ("env:", "vault:")
+
+
+def _is_credential_key(key: str) -> bool:
+    lowered = key.lower()
+    return lowered in _CREDENTIAL_KEYS or any(f in lowered for f in _CREDENTIAL_FRAGMENTS)
+
+
+def _find_plaintext_credential(value: Any, path: str = "") -> str | None:
+    """The dot-path of the first credential-shaped key holding a literal, else None."""
+    if isinstance(value, dict):
+        for key, inner in value.items():
+            here = f"{path}.{key}" if path else str(key)
+            if (
+                _is_credential_key(str(key))
+                and isinstance(inner, str)
+                and not inner.startswith(_CREDENTIAL_REFERENCE_PREFIXES)
+            ):
+                return here
+            found = _find_plaintext_credential(inner, here)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for index, inner in enumerate(value):
+            found = _find_plaintext_credential(inner, f"{path}[{index}]")
+            if found:
+                return found
+    return None
 
 
 class SourceFetcher(BaseModel):
-    """Fetcher configuration for SaaS API pull sources."""
+    """Fetcher-based origin: one dfe-fetcher deployment, named for the source.
 
-    source_type: str = Field(..., description="Fetcher type (crowdstrike, m365, etc.)")
-    base_url: str | None = Field(default=None, description="API base URL")
-    auth: FetcherAuth | None = Field(default=None, description="Authentication config")
-    poll_interval_secs: int = Field(default=300, description="Polling interval in seconds")
+    ``config`` is the fetcher's own per-type stanza, carried verbatim into the
+    deployed instance under ``config.sources.<source_type>``. The engine owns
+    ``enabled`` and ``topic`` on that stanza: ``topic`` selects whether records
+    land on the source's own topic (and table) or on the platform default.
+    """
+
+    source_type: str = Field(
+        ...,
+        description=(
+            "A dfe-fetcher source family (aws, okta, crates_io, ...); the deployed app "
+            "manifest lists the accepted values"
+        ),
+    )
+    topic: FetcherTopic = Field(
+        default="own",
+        description=(
+            "own: records land on this source's topic and table; default: they land "
+            "on the platform default table"
+        ),
+    )
+    config: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "The fetcher's per-type stanza (services, connections, interval_secs, "
+            "filter, credential references, ...). Credentials must be env: or vault: "
+            "references"
+        ),
+    )
+
+    @field_validator("source_type")
+    @classmethod
+    def _validate_source_type(cls, v: str) -> str:
+        # The manifest (dfe-infra apps.yaml) lists the fetcher's source families;
+        # a manifest that declares none leaves the value unchecked. Imported at call
+        # time: appmgmt reaches this module through helm.compiler -> source.registry.
+        from dfe_engine.appmgmt.catalogue import source_types
+
+        valid = source_types()
+        if valid and v not in valid:
+            raise ValueError(
+                f"Unknown fetcher source_type {v!r}. Valid: {', '.join(sorted(valid))}"
+            )
+        return v
+
+    @field_validator("config")
+    @classmethod
+    def _validate_config(cls, v: dict[str, Any]) -> dict[str, Any]:
+        owned = _FETCHER_ENGINE_KEYS.intersection(v)
+        if owned:
+            raise ValueError(
+                f"fetcher.config may not set {', '.join(sorted(owned))}: the engine derives "
+                "them from the source"
+            )
+        plaintext = _find_plaintext_credential(v)
+        if plaintext:
+            raise ValueError(
+                f"fetcher.config.{plaintext} holds a literal credential; the source is "
+                "committed to git, so use an env: or vault: reference"
+            )
+        return v
+
+    def landing_label(self, source_name: str) -> str:
+        """The ``_source`` label and topic stem this source's records carry."""
+        return source_name if self.topic == "own" else DEFAULT_LANDING_LABEL
 
 
 class SourceView(BaseModel):
@@ -469,10 +580,25 @@ class SourceVersion(BaseModel):
             seen.add(view.standard)
         return v
 
-    match: SourceMatch = Field(..., description="Receiver match rule (required)")
+    match: SourceMatch | None = Field(
+        default=None, description="Receiver match rule (receiver-based sources)"
+    )
     transform: SourceTransform | None = Field(
         default=None, description="Transform stage (optional)"
     )
+
+    @model_validator(mode="after")
+    def _exactly_one_origin(self) -> SourceVersion:
+        if (self.match is None) == (self.fetcher is None):
+            raise ValueError(
+                "a source is receiver-based (match) or fetcher-based (fetcher): set exactly one"
+            )
+        return self
+
+    @property
+    def origin(self) -> SourceOrigin:
+        """Which way this version's data enters the platform."""
+        return "fetcher" if self.fetcher is not None else "receiver"
 
     def effective_header(self) -> SourceHeader:
         """Header for runtime/DDL resolution, defaulting the profile when unauthored."""
@@ -559,7 +685,10 @@ class SourceWriteRequest(BaseModel):
         default=None,
         description="Tri-state lifecycle (active | dormant | disabled); overrides ``enabled``",
     )
-    match: SourceMatch = Field(..., description="Receiver match rule (required)")
+    match: SourceMatch | None = Field(
+        default=None,
+        description="Receiver match rule; required unless ``fetcher`` is set",
+    )
     header: SourceHeader | None = Field(
         default=None,
         description="Common schema header configuration for this revision",
@@ -572,11 +701,21 @@ class SourceWriteRequest(BaseModel):
     transform: SourceTransform | None = Field(
         default=None, description="Transform stage (optional, top-level)"
     )
-    fetcher: SourceFetcher | None = Field(default=None, description="SaaS API fetcher (optional)")
+    fetcher: SourceFetcher | None = Field(
+        default=None, description="Fetcher-based origin; required unless ``match`` is set"
+    )
     views: list[SourceView] | None = Field(
         default=None,
         description="Naming-standard views for this revision (sigma, ecs, cim, ocsf)",
     )
+
+    @model_validator(mode="after")
+    def _exactly_one_origin(self) -> SourceWriteRequest:
+        if (self.match is None) == (self.fetcher is None):
+            raise ValueError(
+                "a source is receiver-based (match) or fetcher-based (fetcher): set exactly one"
+            )
+        return self
 
     @model_validator(mode="before")
     @classmethod
@@ -918,6 +1057,19 @@ class Source(BaseModel):
         """Transform config on the deployed version (serialized for API compat)."""
         return self.version().transform
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def origin(self) -> SourceOrigin:
+        """How the deployed version's data enters: receiver match or a fetcher."""
+        return self.version().origin
+
+    def landing_label(self) -> str:
+        """The ``_source`` label this source's records carry when they land."""
+        fetcher = self.fetcher
+        if fetcher is None:
+            return self.source
+        return fetcher.landing_label(self.source)
+
     # -----------------------------------------------------------------
     # Derived properties
     # -----------------------------------------------------------------
@@ -1014,6 +1166,9 @@ class SourceSummaryObject(BaseModel):
         default=False, description="Whether a transform stage is configured"
     )
     has_fetcher: bool = Field(default=False, description="Whether a fetcher is configured")
+    origin: SourceOrigin = Field(
+        default="receiver", description="How data enters: receiver match or a fetcher"
+    )
     views: list[str] = Field(
         default_factory=list,
         description="Naming-standard views on the deployed version (standard names)",
