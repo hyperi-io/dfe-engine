@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.15](https://github.com/hyperi-io/dfe-engine/compare/v1.19.14...v1.19.15) (2026-09-09)
+
+### Bug Fixes
+
+* mesh listener addressing, and vrl and vector carry direct ([3b79346](https://github.com/hyperi-io/dfe-engine/commit/3b793469ea9121adf0416b1873acf0ff9bf1e9a6))
+
 ## [1.19.14](https://github.com/hyperi-io/dfe-engine/compare/v1.19.13...v1.19.14) (2026-09-09)
 
 ### Bug Fixes
