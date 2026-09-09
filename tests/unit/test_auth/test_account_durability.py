@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 from dulwich import porcelain
+from dulwich.repo import Repo
 
 from dfe_engine.auth import account_durability as ad
 from dfe_engine.auth.accounts import Account, AccountStore
@@ -48,6 +49,11 @@ def _account(username: str = "admin", password_hash: str = _HASH_A) -> Account:
 
 def _doc(account: Account) -> dict:
     return account.model_dump(exclude={"username"})
+
+
+def _publish_seed(gc: GitCrud | None, account: Account) -> None:
+    """The boot-time direct commit, as bootstrap_auth makes it."""
+    ad.publish_direct(gc, account, summary="seed account")
 
 
 class _FakeForge:
@@ -148,7 +154,7 @@ def test_prod_team_opens_pr_and_is_pending(tmp_path):
     gc = _gc(tmp_path)
     forge = _FakeForge()
     # A base commit must exist before a review branch can fork off it.
-    ad.publish_seed(gc, _account(password_hash=_HASH_A))
+    _publish_seed(gc, _account(password_hash=_HASH_A))
 
     outcome = ad.publish_account(
         gc,
@@ -175,7 +181,7 @@ def test_prod_team_opens_pr_and_is_pending(tmp_path):
 
 def test_prod_team_no_forge_falls_back_to_cli(tmp_path):
     gc = _gc(tmp_path)
-    ad.publish_seed(gc, _account(password_hash=_HASH_A))  # base commit
+    _publish_seed(gc, _account(password_hash=_HASH_A))  # base commit
 
     outcome = ad.publish_account(
         gc,
@@ -207,7 +213,7 @@ def test_steady_state_merged_when_git_matches_live(tmp_path):
     gc = _gc(tmp_path)
     store = AccountStore(tmp_path / "accounts")
     store.put(_account(password_hash=_HASH_A))
-    ad.publish_seed(gc, _account(password_hash=_HASH_A))
+    _publish_seed(gc, _account(password_hash=_HASH_A))
 
     state = ad.steady_state(gc, store, "admin", environment=DEV, mode="solo")
     assert state.enabled is True
@@ -217,7 +223,7 @@ def test_steady_state_merged_when_git_matches_live(tmp_path):
 def test_steady_state_unmerged_when_live_hash_ahead(tmp_path):
     gc = _gc(tmp_path)
     store = AccountStore(tmp_path / "accounts")
-    ad.publish_seed(gc, _account(password_hash=_HASH_A))  # deploy repo has A
+    _publish_seed(gc, _account(password_hash=_HASH_A))  # deploy repo has A
     store.put(_account(password_hash=_HASH_B))  # live store rotated to B
 
     state = ad.steady_state(gc, store, "admin", environment=DEV, mode="solo")
@@ -237,8 +243,8 @@ def test_steady_state_unmerged_when_not_yet_persisted(tmp_path):
 
 def test_hydrate_restores_accounts_from_deploy_repo(tmp_path):
     gc = _gc(tmp_path)
-    ad.publish_seed(gc, _account(username="admin", password_hash=_HASH_A))
-    ad.publish_seed(gc, _account(username="kaz", password_hash=_HASH_B))
+    _publish_seed(gc, _account(username="admin", password_hash=_HASH_A))
+    _publish_seed(gc, _account(username="kaz", password_hash=_HASH_B))
 
     fresh = AccountStore(tmp_path / "fresh-accounts")  # empty, as after a rebuild
     assert fresh.list() == []
@@ -254,14 +260,24 @@ def test_hydrate_is_a_noop_when_gitops_disabled(tmp_path):
     assert ad.hydrate_from_deploy_repo(None, fresh) == 0
 
 
-def test_publish_seed_persists_the_account(tmp_path):
+def test_publish_direct_persists_the_account(tmp_path):
     gc = _gc(tmp_path)
-    ad.publish_seed(gc, _account(password_hash=_HASH_A))
+    _publish_seed(gc, _account(password_hash=_HASH_A))
     assert gc.get(ad.ACCOUNTS_CLASS, "admin")["password_hash"] == _HASH_A
 
 
-def test_publish_seed_noop_when_disabled():
-    ad.publish_seed(None, _account())  # must not raise
+def test_publish_direct_noop_when_disabled():
+    _publish_seed(None, _account())  # must not raise
+
+
+def test_publish_direct_carries_the_summary_and_actor_into_the_commit(tmp_path):
+    gc = _gc(tmp_path)
+    ad.publish_direct(gc, _account(), summary="retire the bootstrap admin", actor="kaz")
+    repo = Repo(str(tmp_path / "deploy"))
+    message = repo[repo.head()].message.decode("utf-8")
+    repo.close()
+    assert "retire the bootstrap admin" in message
+    assert "kaz" in message
 
 
 # ── Delete ───────────────────────────────────────────────────
@@ -269,7 +285,7 @@ def test_publish_seed_noop_when_disabled():
 
 def test_remove_account_deletes_from_deploy_repo(tmp_path):
     gc = _gc(tmp_path)
-    ad.publish_seed(gc, _account(password_hash=_HASH_A))
+    _publish_seed(gc, _account(password_hash=_HASH_A))
     assert gc.get(ad.ACCOUNTS_CLASS, "admin")["password_hash"] == _HASH_A
 
     outcome = ad.remove_account(
@@ -308,7 +324,7 @@ def test_remote_state_uses_working_tree_when_no_remote(tmp_path):
     gc = _gc(tmp_path)  # local-init repo, no remote -> the working tree is the truth
     store = AccountStore(tmp_path / "accounts")
     store.put(_account(password_hash=_HASH_A))
-    ad.publish_seed(gc, _account(password_hash=_HASH_A))
+    _publish_seed(gc, _account(password_hash=_HASH_A))
     assert ad.remote_state(gc, store, "admin", environment=DEV, mode="solo").merged is True
     store.put(_account(password_hash=_HASH_B))
     assert ad.remote_state(gc, store, "admin", environment=DEV, mode="solo").merged is False
@@ -318,7 +334,7 @@ def test_remote_state_flips_merged_when_remote_catches_up(tmp_path):
     # A remote deploy repo with the admin persisted at hash A.
     remote = GitopsRepo(local_path=str(tmp_path / "remote"), repo_url="", push=False)
     remote_gc = GitCrud(remote)
-    ad.publish_seed(remote_gc, _account(password_hash=_HASH_A))
+    _publish_seed(remote_gc, _account(password_hash=_HASH_A))
     branch = porcelain.active_branch(str(remote.path)).decode()
 
     # The engine clones that remote.
@@ -336,7 +352,7 @@ def test_remote_state_flips_merged_when_remote_catches_up(tmp_path):
     assert pending.merged is False  # just not merged to remote main yet
 
     # The operator merges the PR: remote main advances to B.
-    ad.publish_seed(remote_gc, _account(password_hash=_HASH_B))
+    _publish_seed(remote_gc, _account(password_hash=_HASH_B))
     confirmed = ad.remote_state(engine_gc, store, "admin", environment=PROD, mode="team")
     assert confirmed.merged is True
 

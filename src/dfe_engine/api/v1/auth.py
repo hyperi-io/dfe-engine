@@ -1,10 +1,11 @@
 """Auth router — login, token refresh, user info, permissions.
 
-POST /api/v1/auth/login           → JWT token (LocalAuthProvider)
-POST /api/v1/auth/refresh         → Refreshed JWT token
-GET  /api/v1/auth/me              → Current user info
-GET  /api/v1/auth/permissions     → Resolved permissions for current user's roles
-GET  /api/v1/auth/setup-status    → Initial setup required? (public, pre-login)
+POST /api/v1/auth/login             → JWT token (LocalAuthProvider)
+POST /api/v1/auth/refresh           → Refreshed JWT token
+GET  /api/v1/auth/me                → Current user info
+GET  /api/v1/auth/permissions       → Resolved permissions for current user's roles
+GET  /api/v1/auth/setup-status      → Initial setup required? (public, pre-login)
+POST /api/v1/auth/setup/retire-admin → Retire the bootstrap admin (admin, or itself)
 """
 
 from __future__ import annotations
@@ -16,20 +17,24 @@ from dfe_engine.api.deps import (
     CurrentUser,
     Settings,
     _get_client_ip,
+    check_action,
     create_access_token,
     get_role_config,
     require_local_account_enabled,
     resolve_live_groups_for_user,
     resolve_live_roles_for_user,
 )
-from dfe_engine.auth import breakglass
+from dfe_engine.auth import account_durability, admin_retirement, breakglass
 from dfe_engine.auth.audit import (
+    audit_account_change,
     audit_breakglass_login,
     audit_login_denied,
     audit_login_success,
 )
+from dfe_engine.auth.bootstrap import admin_account_name
 from dfe_engine.auth.local_provider import LocalAuthProvider
 from dfe_engine.auth.models import AuthenticationError
+from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.setup_status import SetupStatus, evaluate_initial_setup
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -206,4 +211,66 @@ async def get_setup_status(request: Request) -> SetupStatus:
     IdPs to offer and what to call them. Accounts are never returned; the
     ``first_user`` step reports whether a real (non break-glass) user exists.
     """
+    return evaluate_initial_setup(request)
+
+
+@router.post("/setup/retire-admin", response_model=SetupStatus)
+async def retire_bootstrap_admin(
+    user: CurrentUser,
+    request: Request,
+    settings: Settings,
+) -> SetupStatus:
+    """Retire the bootstrap admin: disable it and record the fact in the deploy repo.
+
+    The deployment mints the admin password and the engine reasserts it on every
+    boot, so until it is retired the plaintext in the Secret or ``.env`` is a
+    working admin credential for anyone with cluster or host access. Retiring
+    ends the reseed: the account stays disabled, the password may be deleted, and
+    ``breakglass`` is the recovery path.
+
+    Refused unless the deployment already has an enabled admin-role account of its
+    own -- ``retire_admin_available`` on the setup status is the same predicate, so
+    the wizard only offers what this accepts. Returns the setup status, which now
+    reports ``admin_retired``. Reversal is not an API: remove ``admin_retired``
+    from ``governance/settings/auth.yaml`` in the deploy repo and restart.
+    """
+    from dfe_engine.state_machines.setup import (
+        SETUP_MACHINE,
+        SetupContext,
+        retire_admin_available,
+    )
+
+    admin_name = admin_account_name(settings.auth.local.admin_name)
+    # The account may always retire itself; anyone else needs the admin role.
+    if user.user_id != admin_name:
+        check_action(request, user, scopes_dict["account_write"])
+
+    ctx = SetupContext.from_app_state(request.app.state)
+    if ctx.admin_retired:
+        return evaluate_initial_setup(request)
+    state = SETUP_MACHINE.evaluate(ctx)
+    if not retire_admin_available(ctx, state.complete):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "retire_admin_unavailable",
+                "message": (
+                    "Retiring the bootstrap admin needs a completed setup, a deploy "
+                    "repo to record the fact in, and an enabled admin-role account "
+                    f"other than '{admin_name}' and '{breakglass.USERNAME}'"
+                ),
+            },
+        )
+
+    gc = request.app.state.gitcrud
+    # The fact first: an account disabled without it is reseeded at the next boot.
+    admin_retirement.set_retired(gc, user.user_id)
+    store = request.app.state.account_store
+    account = store.get(admin_name)
+    if account is not None and account.enabled:
+        account = store.update(admin_name, enabled=False)
+        account_durability.publish_direct(
+            gc, account, summary="retire the bootstrap admin", actor=user.user_id
+        )
+    audit_account_change(user.user_id, admin_name, "retired the bootstrap admin")
     return evaluate_initial_setup(request)

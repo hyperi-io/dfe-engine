@@ -38,6 +38,11 @@ The status also carries ``deploy_kind`` and ``credential_fetch_command``, which
 the pre-login page shows so an operator can read the password their deployment
 minted rather than guessing at one.
 
+``admin_retired`` and ``retire_admin_available`` close that loop: once the
+deployment has an admin of its own, the operator retires the bootstrap admin
+(:mod:`dfe_engine.auth.admin_retirement`) and deletes the minted password from
+the Secret or ``.env``.
+
 The machine is pure. It reads a :class:`SetupContext` — never a Request — so
 it can be evaluated in a unit test with hand-built stores.
 """
@@ -50,6 +55,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from dfe_engine.auth import admin_retirement
 from dfe_engine.auth.account_durability import AccountGitState
 from dfe_engine.auth.bootstrap import (
     admin_account_name,
@@ -66,6 +72,7 @@ from dfe_engine.orgs.models import Org
 
 if TYPE_CHECKING:
     from dfe_engine.auth.accounts import AccountStore
+    from dfe_engine.auth.groups import GroupStore
     from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
     from dfe_engine.orgs.registry import OrgRegistry
 
@@ -103,6 +110,7 @@ class SetupContext:
     """
 
     account_store: AccountStore | None = None
+    group_store: GroupStore | None = None
     org_registry: OrgRegistry | None = None
     oidc_registry: OIDCProviderRegistry | None = None
     break_glass_git: AccountGitState | None = None
@@ -114,6 +122,10 @@ class SetupContext:
     credential_fetch_command: str = ""
     # Effective retention a source gets when it sets none (override else env); 0 = none.
     default_ttl_days: int = 90
+    # The deploy repo says the bootstrap admin is retired: not seeded, stays disabled.
+    admin_retired: bool = False
+    # A deploy repo is configured, so a retirement has somewhere durable to be recorded.
+    gitops_enabled: bool = False
 
     @classmethod
     def from_app_state(cls, state: Any) -> SetupContext:
@@ -142,6 +154,7 @@ class SetupContext:
             )
         return cls(
             account_store=account_store,
+            group_store=getattr(state, "group_store", None),
             org_registry=getattr(state, "org_registry", None),
             oidc_registry=getattr(state, "oidc_provider_registry", None),
             break_glass_git=_break_glass_git_state(state, account_store, admin_name),
@@ -157,6 +170,8 @@ class SetupContext:
                 secret_key=getattr(local, "admin_secret_key", "") or "",
             ),
             default_ttl_days=default_ttl_days,
+            admin_retired=admin_retirement.is_retired(getattr(state, "gitcrud", None)),
+            gitops_enabled=getattr(state, "gitcrud", None) is not None,
         )
 
 
@@ -301,6 +316,24 @@ class SetupStatus(BaseModel):
     default_ttl_days: int = Field(
         description="Retention in days a source gets when it sets none; 0 = none.",
     )
+    admin_username: str = Field(
+        default="",
+        description="The bootstrap admin's account name, which the deployment may "
+        "rename. The console names it in the retire prompt and marks it retired in "
+        "the account list, so it cannot guess at 'admin'.",
+    )
+    admin_retired: bool = Field(
+        default=False,
+        description="True when the bootstrap admin has been retired: the deploy repo "
+        "carries the fact, the account is disabled and never reseeded, and the minted "
+        "password may be deleted from the Secret or .env.",
+    )
+    retire_admin_available: bool = Field(
+        default=False,
+        description="True when retiring the bootstrap admin would be accepted now: "
+        "setup is complete, an enabled admin-role account other than the seeded pair "
+        "exists, and the admin is not retired yet. The wizard enables its button on it.",
+    )
 
 
 # ── Step definitions ─────────────────────────────────────────
@@ -400,6 +433,24 @@ SETUP_STEPS: tuple[StepDefinition, ...] = (
 # ── The machine ──────────────────────────────────────────────
 
 
+def retire_admin_available(ctx: SetupContext, setup_complete: bool) -> bool:
+    """Whether retiring the bootstrap admin would be accepted right now.
+
+    ONE predicate for the wizard's hint and the endpoint's refusal, so the UI
+    cannot offer a button the API answers with a 409. Retirement needs somewhere
+    durable to record the fact, so a deployment without a deploy repo never
+    qualifies.
+    """
+    return (
+        setup_complete
+        and ctx.gitops_enabled
+        and not ctx.admin_retired
+        and admin_retirement.another_admin_exists(
+            ctx.account_store, ctx.group_store, ctx.bootstrap_admin_name
+        )
+    )
+
+
 class SetupStateMachine:
     """Evaluates :data:`SETUP_STEPS` against a live deployment."""
 
@@ -469,18 +520,7 @@ class SetupStateMachine:
             The snapshot the ``/auth/setup-status`` endpoint returns.
         """
         state = self.evaluate(ctx)
-        if redact_when_complete and state.complete:
-            return SetupStatus(
-                initial_setup=state,
-                oidc_providers=self._enabled_oidc_login_options(ctx),
-                break_glass=ctx.break_glass_git,
-                default_credentials=default_credentials(ctx),
-                deploy_kind=ctx.deploy_kind,
-                credential_fetch_command=ctx.credential_fetch_command,
-                default_ttl_days=ctx.default_ttl_days,
-            )
-
-        return SetupStatus(
+        status = SetupStatus(
             initial_setup=state,
             oidc_providers=self._oidc_providers(ctx),
             organisations=self._organisations(ctx),
@@ -489,6 +529,19 @@ class SetupStateMachine:
             deploy_kind=ctx.deploy_kind,
             credential_fetch_command=ctx.credential_fetch_command,
             default_ttl_days=ctx.default_ttl_days,
+            admin_username=ctx.bootstrap_admin_name,
+            admin_retired=ctx.admin_retired,
+            retire_admin_available=retire_admin_available(ctx, state.complete),
+        )
+        if not (redact_when_complete and state.complete):
+            return status
+        # One construction, then the registries are cut back: a second full one
+        # drifts, and a field added to only one of them is a silent contract gap.
+        return status.model_copy(
+            update={
+                "oidc_providers": self._enabled_oidc_login_options(ctx),
+                "organisations": [],
+            }
         )
 
     # ------------------------------------------------------------------

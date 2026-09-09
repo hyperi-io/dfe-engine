@@ -135,11 +135,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
         injected_group_store = DocuStoreGroupStore(doc_store)
 
-    # Refuse to start on the shipped admin password outside a dev posture.
+    # Refuse to start on the shipped admin password outside a dev posture, unless
+    # the operator has retired the admin -- then an absent password is the point.
+    from dfe_engine.auth import admin_retirement
     from dfe_engine.auth.bootstrap import require_admin_password
 
     app.state.default_credentials = require_admin_password(
-        settings.auth.local.admin_password, settings.env
+        settings.auth.local.admin_password,
+        settings.env,
+        retired=admin_retirement.is_retired(gitcrud),
     )
 
     account_store, group_store, api_key_store, role_store, role_config = bootstrap_auth(
