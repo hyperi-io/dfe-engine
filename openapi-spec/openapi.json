@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.19.10"
+    "version": "1.19.12"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -5975,7 +5975,7 @@
           "System"
         ],
         "summary": "Get Version",
-        "description": "Get engine version info.",
+        "description": "What this deployment runs.\n\nAuthenticated but ungated on purpose: the console footer is on every page, and\nthe body carries versions only. Without a deploy repo the stack is unknown and\nthe engine's own version is the whole answer.",
         "operationId": "get_version_api_v1_system_version_get",
         "responses": {
           "200": {
@@ -28890,10 +28890,43 @@
       },
       "VersionResponse": {
         "properties": {
-          "version": {
+          "stack": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stack",
+            "description": "Certified stack version pinned in the deploy repo; null when there is none."
+          },
+          "engine": {
             "type": "string",
-            "title": "Version",
-            "description": "Package version"
+            "title": "Engine",
+            "description": "dfe-engine package version"
+          },
+          "ui": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ui",
+            "description": "dfe-ui version when the deploy repo pins one off the certified stack."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "deploy-repo",
+              "engine"
+            ],
+            "title": "Source",
+            "description": "deploy-repo when the stack version was read from pins.yaml, else engine."
           },
           "python_version": {
             "type": "string",
@@ -28903,10 +28936,14 @@
         },
         "type": "object",
         "required": [
-          "version",
+          "stack",
+          "engine",
+          "ui",
+          "source",
           "python_version"
         ],
-        "title": "VersionResponse"
+        "title": "VersionResponse",
+        "description": "What this deployment runs: the certified stack, and the parts of it."
       },
       "VersionSummary": {
         "properties": {

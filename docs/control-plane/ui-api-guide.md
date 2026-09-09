@@ -283,7 +283,7 @@ es.addEventListener('complete', (e) => {
 | GET | `/service-surfaces` | Schema-less service discovery |
 | POST | `/transforms/compile` | Compile VRL/CEL transform |
 | POST | `/transforms/test` | Test transform against sample data |
-| GET | `/system/version` | API version |
+| GET | `/system/version` | Stack, engine and ui versions (the console footer) |
 | GET | `/system/settings` | Current settings |
 
 ## Governed Ops (curated actions - the operator dials)

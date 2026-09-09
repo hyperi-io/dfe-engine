@@ -21,6 +21,7 @@ from fastapi.openapi.utils import get_openapi
 from scalo.health import HealthManager, create_health_router
 from scalo.logger import logger
 
+from dfe_engine import __version__
 from dfe_engine.settings import DFESettings, e2e_routes_enabled, is_dev_posture, load_settings
 
 
@@ -43,8 +44,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         from scalo.version_check import check_on_startup
         from scalo.version_check.checker import VersionCheckConfig
-
-        from dfe_engine import __version__
 
         check_on_startup(
             product="dfe-engine",
@@ -393,7 +392,7 @@ def create_app(
     app = FastAPI(
         title="DFE Engine API",
         description="Data Fusion Engine — configuration, scheduling, and query API",
-        version=_get_version(),
+        version=__version__,
         lifespan=lifespan,
         docs_url=None if e2e_docs else "/docs",
         redoc_url="/redoc",
@@ -528,13 +527,3 @@ def create_app(
         install_e2e_swagger(app)
 
     return app
-
-
-def _get_version() -> str:
-    """Get package version, fallback to 'dev'."""
-    try:
-        from importlib.metadata import version
-
-        return version("dfe-engine")
-    except Exception:
-        return "dev"

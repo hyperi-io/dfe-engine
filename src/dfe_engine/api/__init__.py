@@ -39,13 +39,9 @@ class _DfeEngineApp:
             env_prefix = "DFE_API"
 
             def version_info(self) -> VersionInfo:
-                try:
-                    from importlib.metadata import version
+                from dfe_engine import __version__
 
-                    v = version("dfe-engine")
-                except Exception:
-                    v = "dev"
-                return VersionInfo(self.name, v)
+                return VersionInfo(self.name, __version__)
 
             def deployment_contract(self):
                 from dfe_engine.deployment_contract import engine_deployment_contract

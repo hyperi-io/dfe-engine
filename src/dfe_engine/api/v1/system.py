@@ -1,6 +1,6 @@
 """System router — version, settings summary, default retention.
 
-GET /api/v1/system/version     → Version info
+GET /api/v1/system/version     → What this deployment runs: stack, engine, ui
 GET /api/v1/system/settings    → Redacted settings summary
 GET /api/v1/system/retention   → Effective default TTL and where it comes from
 PUT /api/v1/system/retention   → Store the console override, reconcile the tables
@@ -8,6 +8,7 @@ PUT /api/v1/system/retention   → Store the console override, reconcile the tab
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 from typing import Annotated, Any, Literal
 
@@ -15,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
+from dfe_engine import __version__
 from dfe_engine.api.deps import (
     CurrentUser,
     Settings,
@@ -31,17 +33,48 @@ from dfe_engine.gitcrud.retention import (
     resolve_state,
     set_stored,
 )
+from dfe_engine.gitops.pins import UI_COMPONENT, component_overrides, load_pins, stack_version
 from dfe_engine.schema.applier import log_report
 from dfe_engine.schema.retention import reconcile_default_ttl
 
 router = APIRouter(prefix="/system", tags=["System"])
 
 
+# ── Deploy-repo access ───────────────────────────────────────
+
+
+def _optional_gitcrud(request: Request) -> GitCrud | None:
+    """The deploy repo, or None when gitops is disabled. For readers with a default."""
+    return getattr(request.app.state, "gitcrud", None)
+
+
+def _gitcrud(request: Request) -> GitCrud:
+    """The deploy repo, or 503. For writers, which have nowhere else to commit."""
+    gc = _optional_gitcrud(request)
+    if gc is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "not_configured", "message": "gitops is not enabled"},
+        )
+    return gc
+
+
 # ── Response models ──────────────────────────────────────────
 
 
 class VersionResponse(BaseModel):
-    version: str = Field(description="Package version")
+    """What this deployment runs: the certified stack, and the parts of it."""
+
+    stack: str | None = Field(
+        description="Certified stack version pinned in the deploy repo; null when there is none."
+    )
+    engine: str = Field(description="dfe-engine package version")
+    ui: str | None = Field(
+        description="dfe-ui version when the deploy repo pins one off the certified stack."
+    )
+    source: Literal["deploy-repo", "engine"] = Field(
+        description="deploy-repo when the stack version was read from pins.yaml, else engine."
+    )
     python_version: str = Field(description="Python interpreter version")
 
 
@@ -68,12 +101,21 @@ class SettingsSummary(BaseModel):
 
 
 @router.get("/version", response_model=VersionResponse)
-async def get_version(user: CurrentUser):
-    """Get engine version info."""
-    import sys
+async def get_version(user: CurrentUser, request: Request) -> VersionResponse:
+    """What this deployment runs.
 
+    Authenticated but ungated on purpose: the console footer is on every page, and
+    the body carries versions only. Without a deploy repo the stack is unknown and
+    the engine's own version is the whole answer.
+    """
+    gc = _optional_gitcrud(request)
+    pins = load_pins(gc.repo_path) if gc is not None else {}
+    stack = stack_version(pins)
     return VersionResponse(
-        version=_get_version(),
+        stack=stack,
+        engine=__version__,
+        ui=component_overrides(pins).get(UI_COMPONENT),
+        source="deploy-repo" if stack else "engine",
         python_version=sys.version.split()[0],
     )
 
@@ -144,16 +186,6 @@ class RetentionUpdateResponse(RetentionStatus):
     reconcile: RetentionReconcileSummary
 
 
-def _gitcrud(request: Request) -> GitCrud:
-    gc = getattr(request.app.state, "gitcrud", None)
-    if gc is None:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "not_configured", "message": "gitops is not enabled"},
-        )
-    return gc
-
-
 def get_clickhouse_connector(settings: Settings) -> Callable[[], Any]:
     """Deferred client, so the override is committed before ClickHouse is touched.
 
@@ -181,7 +213,7 @@ def _retention_status(state: RetentionState, settings: Any) -> dict[str, Any]:
 )
 async def get_retention(user: CurrentUser, request: Request, settings: Settings) -> RetentionStatus:
     """Effective default TTL and where it comes from. Answers without gitops too."""
-    gc = getattr(request.app.state, "gitcrud", None)
+    gc = _optional_gitcrud(request)
     if gc is None:
         state = RetentionState(
             stored=None, effective=deployment_days(settings), origin="deployment"
@@ -343,15 +375,3 @@ def clickhouse_cloud_stop(user: CurrentUser, settings: Settings):
     return CloudServiceStateResponse(
         configured=True, id=st.id, name=st.name, state=st.state, is_running=st.is_running
     )
-
-
-# ── Helpers ──────────────────────────────────────────────────
-
-
-def _get_version() -> str:
-    try:
-        from importlib.metadata import version
-
-        return version("dfe-engine")
-    except Exception:
-        return "dev"
