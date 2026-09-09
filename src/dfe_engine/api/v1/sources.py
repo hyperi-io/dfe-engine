@@ -39,7 +39,13 @@ from dfe_engine.api.deps import ClickHouseClient, CurrentUser, Settings, SourceR
 from dfe_engine.api.errors import MatchConflictErrorResponse, SourceCreateConflictResponse
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.api.v1.apps import commit_overlay, remove_overlay
-from dfe_engine.appmgmt import derived
+from dfe_engine.appmgmt import (
+    LOADER_COMPILER,
+    MetricsUnavailableError,
+    OperationalReader,
+    derived,
+    instances,
+)
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.git_identity import git_author
@@ -177,6 +183,48 @@ def _reconcile_apps(request: Request, user: Any, registry: Any) -> tuple[list[st
         logger.warning(f"apps not reconciled with the sources: {exc}")
         return done, str(exc)
     return done, None
+
+
+def _resolve_source_or_main(name: str, registry: Any) -> Source:
+    """One source, or the synthesised main flow, or 404.
+
+    ``main`` is a real source in every deployment that has authored one and a
+    synthesised one everywhere else, so a console asking about the main flow gets
+    the same answer either way.
+    """
+    try:
+        return registry.get_source(name)
+    except SourceNotFoundError:
+        if name != DEFAULT_LANDING_LABEL:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "not_found", "message": f"Source {name!r} not found"},
+            ) from None
+        return _synthesised_main_source()
+
+
+def _landing_table(source: Source, settings: Any) -> tuple[str, bool]:
+    """The table this source's records land in, and whether that is the shared default.
+
+    The loader keys on the ``_source`` label the producer stamped, which is what
+    ``landing_label()`` reports - so a fetcher pushing to the main topic lands in
+    the platform's landing table rather than in a table of its own name.
+    """
+    if source.landing_label() == DEFAULT_LANDING_LABEL:
+        return settings.clickhouse.landing_table, True
+    return source.table_name, False
+
+
+def _deployed_loaders(request: Request) -> list[str]:
+    """The OTel service names of the deployed instances that count records per table.
+
+    Read from the manifest's routing compiler rather than from an app name, so an
+    org that renames or replaces the loading stage is measured just the same.
+    """
+    gc = getattr(request.app.state, "gitcrud", None)
+    if gc is None:
+        return []
+    return [i.telemetry_name for i in instances.instances_routed_by(gc, LOADER_COMPILER)]
 
 
 class SourceEnabledPatchRequest(BaseModel):
@@ -430,6 +478,37 @@ def _flow_response(flow: SourceFlow) -> SourceFlowResponse:
         ),
         outputs=FlowOutputsModel(loader=flow.outputs.loader, archive=flow.outputs.archive),
         table=flow.table,
+    )
+
+
+class SourceSignalsResponse(BaseModel):
+    """What this source's records are actually doing, beside its definition.
+
+    A reading is null when the window holds nothing to compute it from, and the
+    console hides a null rather than showing a zero: an absent series means "not
+    measurable here", which is a different statement from "no records".
+    """
+
+    source: str
+    table: str = Field(description="The ClickHouse table these records land in.")
+    landed_in_default: bool = Field(
+        description=(
+            "True when that table is the platform's default landing table, which "
+            "every unmatched record shares. The loader counts records per TABLE, "
+            "so the rate below then covers the whole table rather than this source "
+            "alone."
+        )
+    )
+    window_seconds: int = Field(description="How far back the readings look.")
+    records_per_min: float | None = Field(
+        description="Records a minute across the window; null when no series answers."
+    )
+    last_seen: str | None = Field(
+        description=(
+            "UTC ISO-8601 timestamp of the last increase in the window; null when "
+            "the counter never moved. A flat counter keeps reporting after traffic "
+            "stops, so a present series is not itself an arrival."
+        )
     )
 
 
@@ -1214,15 +1293,7 @@ async def get_source_flow(name: str, user: CurrentUser, registry: SourceReg, set
     deployment, and one resolver is what keeps the drawing and the deployed
     config the same answer.
     """
-    try:
-        source = registry.get_source(name)
-    except SourceNotFoundError:
-        if name != DEFAULT_LANDING_LABEL:
-            raise HTTPException(
-                status_code=404,
-                detail={"code": "not_found", "message": f"Source {name!r} not found"},
-            ) from None
-        source = _synthesised_main_source()
+    source = _resolve_source_or_main(name, registry)
     try:
         return _flow_response(resolve_flow(source, settings))
     except FlowError as exc:
@@ -1230,6 +1301,52 @@ async def get_source_flow(name: str, user: CurrentUser, registry: SourceReg, set
             status_code=422,
             detail={"code": "flow_error", "message": str(exc)},
         ) from exc
+
+
+@router.get(
+    "/{name}/signals",
+    response_model=SourceSignalsResponse,
+    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
+)
+async def get_source_signals(
+    name: str,
+    user: CurrentUser,
+    request: Request,
+    registry: SourceReg,
+    settings: Settings,
+    client: ClickHouseClient,
+) -> SourceSignalsResponse:
+    """Whether this source's records are arriving, and how fast.
+
+    Reads the loader's per-table counter out of the otel tables over a bounded
+    five-minute window, so the console can put a number beside a source without
+    the operator opening HyperDX. It answers 200 with nulls where the series is
+    absent: a source that was only just defined has nothing to report, and that
+    is not an error.
+    """
+    source = _resolve_source_or_main(name, registry)
+    table, in_default = _landing_table(source, settings)
+    loaders = _deployed_loaders(request)
+    try:
+        signals = OperationalReader(
+            client, settings.clickhouse.effective_data_database
+        ).source_signals(table, loaders)
+    except MetricsUnavailableError as exc:
+        raise HTTPException(
+            status_code=503, detail={"code": "metrics_unavailable", "message": str(exc)}
+        ) from exc
+    return SourceSignalsResponse(
+        source=source.source,
+        table=table,
+        landed_in_default=in_default,
+        window_seconds=signals.window_seconds,
+        records_per_min=signals.records_per_min,
+        last_seen=(
+            datetime.fromtimestamp(signals.last_seen_epoch, tz=UTC).isoformat()
+            if signals.last_seen_epoch is not None
+            else None
+        ),
+    )
 
 
 @router.put(

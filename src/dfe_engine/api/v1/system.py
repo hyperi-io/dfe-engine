@@ -1,5 +1,6 @@
-"""System router — version, settings summary, default retention.
+"""System router — deployment facts, settings summary, default retention.
 
+GET /api/v1/system/deployment  → What this deployment IS: profile, transports, mesh, versions
 GET /api/v1/system/version     → What this deployment runs: stack, engine, ui
 GET /api/v1/system/settings    → Redacted settings summary
 GET /api/v1/system/retention   → Effective default TTL and where it comes from
@@ -81,6 +82,57 @@ class VersionResponse(BaseModel):
     python_version: str = Field(description="Python interpreter version")
 
 
+class TransportFacts(BaseModel):
+    """What this deployment can carry a source's records on, between its stages."""
+
+    default: str = Field(description="Transport a source that names none takes here.")
+    available: list[str] = Field(
+        description=(
+            "Every transport a source may name here. Direct is always in the list; "
+            "bus is there only where this deployment runs one."
+        )
+    )
+
+
+class MeshFacts(BaseModel):
+    """Whether this deployment's stage pools sit behind balancing listeners."""
+
+    enabled: bool = Field(description="True where a listener fronts each stage pool.")
+    namespace: str = Field(
+        description="Namespace holding those listeners; empty when the pools are dialled directly."
+    )
+
+
+class DeploymentResponse(BaseModel):
+    """What this deployment IS, so a console never has to guess at it."""
+
+    profile: str = Field(
+        description=(
+            "The tier this deployment was stood up as (DFE_PROFILE). Empty means "
+            "the deployer named none, and every optional app is then reported as "
+            "offered rather than hidden."
+        )
+    )
+    transports: TransportFacts
+    mesh: MeshFacts
+    stack: str | None = Field(
+        description="Certified stack version this deployment runs; null when nothing states one."
+    )
+    engine: str = Field(description="dfe-engine package version")
+    ui: str | None = Field(
+        description=(
+            "dfe-ui version, from the deploy repo's pins where they name one, else "
+            "the version the chart was rendered with. Null when neither states one."
+        )
+    )
+    source: Literal["deploy-repo", "deployment", "engine"] = Field(
+        description=(
+            "deploy-repo when the stack version came from pins.yaml, deployment when it "
+            "came from what deployed this pod, else engine."
+        )
+    )
+
+
 class SettingsSummary(BaseModel):
     """Redacted settings — no secrets."""
 
@@ -103,12 +155,12 @@ class SettingsSummary(BaseModel):
 # ── Endpoints ────────────────────────────────────────────────
 
 
-@router.get("/version", response_model=VersionResponse)
-async def get_version(user: CurrentUser, request: Request, settings: Settings) -> VersionResponse:
-    """What this deployment runs.
+def deployment_facts(request: Request, settings: Any) -> DeploymentResponse:
+    """Everything this deployment can state about itself, read once.
 
-    Authenticated but ungated on purpose: the console footer is on every page, and
-    the body carries versions only.
+    Both /system/deployment and /system/version answer from here, so the versions
+    the console footer shows and the versions its deployment card shows cannot
+    disagree.
 
     The pins win where there are any: they are what the operator chose. A deploy
     with no pins base still knows what stood it up, because the chart passes that
@@ -119,11 +171,51 @@ async def get_version(user: CurrentUser, request: Request, settings: Settings) -
     pins = load_pins(gc.repo_path) if gc is not None else {}
     pinned = stack_version(pins)
     stack = pinned or settings.stack_version or None
-    return VersionResponse(
+    transport = settings.transport
+    return DeploymentResponse(
+        profile=settings.deployment.profile,
+        transports=TransportFacts(
+            default=transport.default,
+            available=sorted(transport.available()),
+        ),
+        mesh=MeshFacts(
+            enabled=transport.mesh_enabled,
+            namespace=transport.mesh_namespace,
+        ),
         stack=stack,
         engine=__version__,
-        ui=component_overrides(pins).get(UI_COMPONENT),
+        ui=component_overrides(pins).get(UI_COMPONENT) or settings.ui_version or None,
         source="deploy-repo" if pinned else ("deployment" if stack else "engine"),
+    )
+
+
+@router.get("/deployment", response_model=DeploymentResponse)
+async def get_deployment(
+    user: CurrentUser, request: Request, settings: Settings
+) -> DeploymentResponse:
+    """What this deployment IS: its profile, what it can carry records on, and its versions.
+
+    Authenticated but ungated, for the same reason /version is: every console pane
+    that must not guess reads this, and the body carries deployment shape and
+    versions only. Without it the console has to assume the widest deployment and
+    offer a transport or an app this tier does not run.
+    """
+    return deployment_facts(request, settings)
+
+
+@router.get("/version", response_model=VersionResponse)
+async def get_version(user: CurrentUser, request: Request, settings: Settings) -> VersionResponse:
+    """What this deployment runs.
+
+    Authenticated but ungated on purpose: the console footer is on every page, and
+    the body carries versions only.
+    """
+    facts = deployment_facts(request, settings)
+    return VersionResponse(
+        stack=facts.stack,
+        engine=facts.engine,
+        ui=facts.ui,
+        source=facts.source,
         python_version=sys.version.split()[0],
     )
 

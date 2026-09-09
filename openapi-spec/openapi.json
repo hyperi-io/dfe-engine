@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.19.18"
+    "version": "1.19.19"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -3901,6 +3901,54 @@
         ]
       }
     },
+    "/api/v1/sources/{name}/signals": {
+      "get": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Get Source Signals",
+        "description": "Whether this source's records are arriving, and how fast.\n\nReads the loader's per-table counter out of the otel tables over a bounded\nfive-minute window, so the console can put a number beside a source without\nthe operator opening HyperDX. It answers 200 with nulls where the series is\nabsent: a source that was only just defined has nothing to report, and that\nis not an error.",
+        "operationId": "get_source_signals_api_v1_sources__name__signals_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceSignalsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/sources/bulk": {
       "post": {
         "tags": [
@@ -6216,13 +6264,40 @@
         ]
       }
     },
+    "/api/v1/system/deployment": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Get Deployment",
+        "description": "What this deployment IS: its profile, what it can carry records on, and its versions.\n\nAuthenticated but ungated, for the same reason /version is: every console pane\nthat must not guess reads this, and the body carries deployment shape and\nversions only. Without it the console has to assume the widest deployment and\noffer a transport or an app this tier does not run.",
+        "operationId": "get_deployment_api_v1_system_deployment_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/system/version": {
       "get": {
         "tags": [
           "System"
         ],
         "summary": "Get Version",
-        "description": "What this deployment runs.\n\nAuthenticated but ungated on purpose: the console footer is on every page, and\nthe body carries versions only.\n\nThe pins win where there are any: they are what the operator chose. A deploy\nwith no pins base still knows what stood it up, because the chart passes that\nin, so the footer shows a stack version rather than nothing. With neither, the\nengine's own version is the whole answer.",
+        "description": "What this deployment runs.\n\nAuthenticated but ungated on purpose: the console footer is on every page, and\nthe body carries versions only.",
         "operationId": "get_version_api_v1_system_version_get",
         "responses": {
           "200": {
@@ -11999,11 +12074,11 @@
             "required": false,
             "schema": {
               "type": "string",
-              "description": "Deployment profile to judge each app's offer against, so the rule stays in one place rather than being re-derived by every caller. Omit it and every app is reported as offered.",
+              "description": "Deployment profile to judge each app's offer against, so the rule stays in one place rather than being re-derived by every caller. Omit it and this deployment's own profile is used; omit it where the deployment states none and every app is reported as offered.",
               "default": "",
               "title": "Profile"
             },
-            "description": "Deployment profile to judge each app's offer against, so the rule stays in one place rather than being re-derived by every caller. Omit it and every app is reported as offered."
+            "description": "Deployment profile to judge each app's offer against, so the rule stays in one place rather than being re-derived by every caller. Omit it and this deployment's own profile is used; omit it where the deployment states none and every app is reported as offered."
           }
         ],
         "responses": {
@@ -18441,6 +18516,72 @@
         ],
         "title": "DeploymentHistoryEntry"
       },
+      "DeploymentResponse": {
+        "properties": {
+          "profile": {
+            "type": "string",
+            "title": "Profile",
+            "description": "The tier this deployment was stood up as (DFE_PROFILE). Empty means the deployer named none, and every optional app is then reported as offered rather than hidden."
+          },
+          "transports": {
+            "$ref": "#/components/schemas/TransportFacts"
+          },
+          "mesh": {
+            "$ref": "#/components/schemas/MeshFacts"
+          },
+          "stack": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stack",
+            "description": "Certified stack version this deployment runs; null when nothing states one."
+          },
+          "engine": {
+            "type": "string",
+            "title": "Engine",
+            "description": "dfe-engine package version"
+          },
+          "ui": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ui",
+            "description": "dfe-ui version, from the deploy repo's pins where they name one, else the version the chart was rendered with. Null when neither states one."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "deploy-repo",
+              "deployment",
+              "engine"
+            ],
+            "title": "Source",
+            "description": "deploy-repo when the stack version came from pins.yaml, deployment when it came from what deployed this pod, else engine."
+          }
+        },
+        "type": "object",
+        "required": [
+          "profile",
+          "transports",
+          "mesh",
+          "stack",
+          "engine",
+          "ui",
+          "source"
+        ],
+        "title": "DeploymentResponse",
+        "description": "What this deployment IS, so a console never has to guess at it."
+      },
       "DeploymentSummary": {
         "properties": {
           "service": {
@@ -21333,6 +21474,27 @@
         ],
         "title": "MatchConflictErrorResponse",
         "description": "409 when two enabled sources share the same receiver match rule."
+      },
+      "MeshFacts": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "True where a listener fronts each stage pool."
+          },
+          "namespace": {
+            "type": "string",
+            "title": "Namespace",
+            "description": "Namespace holding those listeners; empty when the pools are dialled directly."
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "namespace"
+        ],
+        "title": "MeshFacts",
+        "description": "Whether this deployment's stage pools sit behind balancing listeners."
       },
       "MetaSchema": {
         "properties": {
@@ -27796,6 +27958,64 @@
         "title": "SourceSchemaColumnsResponse",
         "description": "Composed source columns plus meta-schema ``resource_type``."
       },
+      "SourceSignalsResponse": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "table": {
+            "type": "string",
+            "title": "Table",
+            "description": "The ClickHouse table these records land in."
+          },
+          "landed_in_default": {
+            "type": "boolean",
+            "title": "Landed In Default",
+            "description": "True when that table is the platform's default landing table, which every unmatched record shares. The loader counts records per TABLE, so the rate below then covers the whole table rather than this source alone."
+          },
+          "window_seconds": {
+            "type": "integer",
+            "title": "Window Seconds",
+            "description": "How far back the readings look."
+          },
+          "records_per_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Records Per Min",
+            "description": "Records a minute across the window; null when no series answers."
+          },
+          "last_seen": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen",
+            "description": "UTC ISO-8601 timestamp of the last increase in the window; null when the counter never moved. A flat counter keeps reporting after traffic stops, so a present series is not itself an arrival."
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "table",
+          "landed_in_default",
+          "window_seconds",
+          "records_per_min",
+          "last_seen"
+        ],
+        "title": "SourceSignalsResponse",
+        "description": "What this source's records are actually doing, beside its definition.\n\nA reading is null when the window holds nothing to compute it from, and the\nconsole hides a null rather than showing a zero: an absent series means \"not\nmeasurable here\", which is a different statement from \"no records\"."
+      },
       "SourceSummaryObject": {
         "properties": {
           "name": {
@@ -29105,6 +29325,30 @@
           "roles"
         ],
         "title": "TokenResponse"
+      },
+      "TransportFacts": {
+        "properties": {
+          "default": {
+            "type": "string",
+            "title": "Default",
+            "description": "Transport a source that names none takes here."
+          },
+          "available": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Available",
+            "description": "Every transport a source may name here. Direct is always in the list; bus is there only where this deployment runs one."
+          }
+        },
+        "type": "object",
+        "required": [
+          "default",
+          "available"
+        ],
+        "title": "TransportFacts",
+        "description": "What this deployment can carry a source's records on, between its stages."
       },
       "UpdateAccountRequest": {
         "properties": {

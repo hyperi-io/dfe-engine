@@ -286,9 +286,14 @@ def _transform(
 
 Compiler = Callable[[AppDescriptor, SourceRegistry, Any, str | None], dict[str, Any]]
 
+# Named because a caller outside the compile path needs it: the loader is the
+# only stage that counts a record against a table, so per-source throughput is
+# read off the instances THIS compiler routes.
+LOADER_COMPILER = "loader"
+
 _COMPILERS: dict[str, Compiler] = {
     "receiver": _receiver,
-    "loader": _loader,
+    LOADER_COMPILER: _loader,
     "fetcher": _fetcher,
     "transform": _transform,
 }

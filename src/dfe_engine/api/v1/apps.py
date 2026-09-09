@@ -56,6 +56,7 @@ from pydantic import BaseModel, Field
 from dfe_engine.api.deps import (
     ClickHouseClient,
     CurrentUser,
+    Settings,
     SourceReg,
     get_source_registry,
     require_action,
@@ -765,18 +766,23 @@ def _file_sets(service: str) -> list[FileSetSummary]:
 async def list_apps(
     user: CurrentUser,
     request: Request,
+    settings: Settings,
     profile: str = Query(
         default="",
         description=(
             "Deployment profile to judge each app's offer against, so the rule stays "
             "in one place rather than being re-derived by every caller. Omit it and "
-            "every app is reported as offered."
+            "this deployment's own profile is used; omit it where the deployment "
+            "states none and every app is reported as offered."
         ),
     ),
 ) -> list[CatalogueEntry]:
     """Every manageable app, with the instances currently deployed."""
     gc = _gitcrud(request)
     deployed = instances.list_instances(gc)
+    # A caller that names no profile means "this one", and the engine is told what
+    # this one is -- so the answer stops defaulting to every app being offered.
+    judged_against = profile or settings.deployment.profile
     entries: list[CatalogueEntry] = []
     for service in catalogue.services():
         desc = catalogue.descriptor(service)
@@ -790,7 +796,7 @@ async def list_apps(
                 optional=desc.optional,
                 profiles=sorted(desc.profiles),
                 default_in=None if desc.default_in is None else sorted(desc.default_in),
-                offered=desc.offered_in(profile),
+                offered=desc.offered_in(judged_against),
                 source_types=list(desc.source_types),
                 file_sets=_file_sets(service),
                 instances=[i.instance for i in deployed if i.service == service],

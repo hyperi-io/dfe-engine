@@ -191,6 +191,28 @@ class TestOptionalApps:
         assert not offered("?profile=slim")
         assert offered("")
 
+    def test_a_caller_naming_no_profile_gets_this_deployments_own(
+        self, client, app, admin_headers, tmp_path, optional_archiver
+    ):
+        # Otherwise the console lists an app this tier does not run, purely because
+        # it did not know which tier it was looking at.
+        _wire(app, tmp_path)
+        app.state.settings.deployment.profile = "slim"
+
+        listed = client.get("/api/v1/apps", headers=admin_headers).json()
+
+        assert not next(e for e in listed if e["service"] == "dfe-archiver")["offered"]
+
+    def test_a_named_profile_still_wins_over_the_deployments_own(
+        self, client, app, admin_headers, tmp_path, optional_archiver
+    ):
+        _wire(app, tmp_path)
+        app.state.settings.deployment.profile = "slim"
+
+        listed = client.get("/api/v1/apps?profile=scale", headers=admin_headers).json()
+
+        assert next(e for e in listed if e["service"] == "dfe-archiver")["offered"]
+
     def test_the_instance_summary_carries_them_too(
         self, client, app, admin_headers, tmp_path, optional_archiver
     ):

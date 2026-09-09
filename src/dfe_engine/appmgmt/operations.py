@@ -20,7 +20,9 @@ per call, and an honest error when the database cannot answer.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -125,6 +127,21 @@ class AppMetrics:
     rates: dict[str, float] = field(default_factory=dict)
 
 
+@dataclass(frozen=True, slots=True)
+class SourceSignals:
+    """What one source's records are doing, as the loader counts them.
+
+    Either reading is None when the window holds nothing to compute it from -
+    an absent series, a single sample, or a counter that only went backwards
+    because a pod restarted mid-window.
+    """
+
+    table: str
+    window_seconds: int
+    records_per_min: float | None = None
+    last_seen_epoch: float | None = None
+
+
 class OperationalReader:
     """Answers per-instance state and metrics from the otel tables."""
 
@@ -210,6 +227,29 @@ class OperationalReader:
             for bucket, name, lo, hi, mean, p95, samples in rows
         ]
 
+    def source_signals(self, table: str, loaders: Sequence[str]) -> SourceSignals:
+        """Throughput and last arrival for the table one source's records land in.
+
+        Scoped to the deployed loader instances rather than to a hardcoded app
+        name, and to one table: the counter is per TABLE, so a source sharing the
+        platform's default landing table gets that table's whole rate. The caller
+        reports which of the two it asked for.
+        """
+        safe_table = self._safe_identifier(table)
+        services = [self._safe_identifier(name) for name in loaders]
+        if not services:
+            # Nothing is deployed to count records against a table, so there is no
+            # series to be absent OR present - the honest answer is neither.
+            return SourceSignals(table=table, window_seconds=self._window)
+        rows = self._run("source_landing_counter", {"services": services, "table": safe_table})
+        points = [(_epoch(ts) or 0.0, float(total)) for ts, total in rows]
+        return SourceSignals(
+            table=table,
+            window_seconds=self._window,
+            records_per_min=_rate_per_minute(points),
+            last_seen_epoch=_last_increase(points),
+        )
+
     def _gauges(self, service: str) -> dict[str, float]:
         rows = self._run("latest_gauges", {"service": service, "names": list(GAUGE_METRICS)})
         return {str(name): float(value) for name, value in rows}
@@ -217,6 +257,30 @@ class OperationalReader:
     def _rates(self, service: str) -> dict[str, float]:
         rows = self._run("counter_rates", {"service": service, "names": list(COUNTER_METRICS)})
         return {str(name): float(value) for name, value in rows}
+
+
+def _rate_per_minute(points: Sequence[tuple[float, float]]) -> float | None:
+    """Records a minute across the window, from the first and last fleet totals.
+
+    A negative delta means a pod restarted and reset its counter, which would
+    otherwise report as negative throughput; the window has to roll past the
+    restart before the number means anything again.
+    """
+    if len(points) < 2:
+        return None
+    elapsed = points[-1][0] - points[0][0]
+    delta = points[-1][1] - points[0][1]
+    if elapsed <= 0 or delta < 0:
+        return None
+    return delta / elapsed * 60.0
+
+
+def _last_increase(points: Sequence[tuple[float, float]]) -> float | None:
+    """When the counter last moved - a flat counter keeps reporting after traffic stops."""
+    for (_, previous), (timestamp, total) in reversed(list(pairwise(points))):
+        if total > previous:
+            return timestamp
+    return None
 
 
 def _epoch(value: Any) -> float | None:
