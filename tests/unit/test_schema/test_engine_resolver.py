@@ -77,6 +77,17 @@ class TestResolveClause:
         assert r.on_cluster == ""
 
 
+class TestBuilderCarriesTheResolver:
+    def test_builder_ddl_follows_an_injected_resolver(self):
+        from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
+
+        columns = [SchemaColumn(name="_timestamp", type="timestamp")]
+        replicated = SchemaBuilderV2(resolver=EngineResolver(override="replicated"))
+        assert "ENGINE = ReplicatedMergeTree" in replicated.build_ddl_only(columns, "t")
+        plain = SchemaBuilderV2()
+        assert "ENGINE = MergeTree()" in plain.build_ddl_only(columns, "t")
+
+
 # ── cascade (no client) ─────────────────────────────────────────────
 
 
