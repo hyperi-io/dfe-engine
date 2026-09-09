@@ -9,6 +9,7 @@ from typing import Any, TypeVar
 from pydantic import BaseModel, Field, model_validator
 from scalo.logger import logger
 
+from dfe_engine.schema.engine_resolver import EngineResolver
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2, SchemaBuildResult
 from dfe_engine.services.schema.json_promotion_service import clickhouse_table_exists
 from dfe_engine.source.models import Source
@@ -603,6 +604,7 @@ def run_source_build(
     *,
     version_id: str,
     schemas_base_dir: str | Path | None,
+    resolver: EngineResolver | None = None,
 ) -> SchemaBuildResult:
     from dfe_engine.settings import get_settings
 
@@ -612,6 +614,7 @@ def run_source_build(
         schemas_base_dir=schemas_base_dir or None,
         default_engine=ch.default_engine,
         default_ttl_days=ch.default_ttl_days,
+        resolver=resolver,
     )
     return builder.build_for_source_version(source, source_version=version_id)
 
@@ -623,14 +626,21 @@ def ensure_build_artifact(
     version_id: str,
     schemas_base_dir: str | Path | None,
     refresh: bool = False,
+    resolver: EngineResolver | None = None,
 ) -> tuple[SchemaBuildResult, SourceBuildArtifact]:
-    """Load build from source-builds or run build and persist."""
+    """Load build from source-builds or run build and persist.
+
+    ``resolver`` is the live server's engine resolver when the build is bound for
+    that server; the persisted artefact then carries the cluster form of the DDL.
+    """
     if not refresh:
         existing = store.load_build(source.source, version_id)
         if existing is not None:
             return build_from_artifact(existing), existing
 
-    result = run_source_build(source, version_id=version_id, schemas_base_dir=schemas_base_dir)
+    result = run_source_build(
+        source, version_id=version_id, schemas_base_dir=schemas_base_dir, resolver=resolver
+    )
     artifact = artifact_from_build(result, version=version_id)
     store.save_build(artifact, source)
     return result, artifact

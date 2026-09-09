@@ -64,6 +64,7 @@ def reconcile_default_ttl(
         schemas_base_dir=schemas_dir,
         default_engine=settings.clickhouse.default_engine,
         default_ttl_days=days,
+        resolver=resolver,
     )
     for source in sources:
         doc = store.load_deploy_document(source.source)
@@ -77,7 +78,7 @@ def reconcile_default_ttl(
             continue
         try:
             result, _artifact = ensure_build_artifact(
-                store, source, version_id=version, schemas_base_dir=schemas_dir
+                store, source, version_id=version, schemas_base_dir=schemas_dir, resolver=resolver
             )
             cfg = builder.build_ddl_config_for_version(source, version)
         except SchemaBuildError as exc:
