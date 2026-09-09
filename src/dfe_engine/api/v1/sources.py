@@ -5,6 +5,7 @@ POST   /api/v1/sources                  -> Create source
 GET    /api/v1/sources/catalogue        -> The sources a deployed transform already handles
 POST   /api/v1/sources/from-catalogue/{entry} -> Create a source from a catalogue entry
 GET    /api/v1/sources/{name}           -> Get source details ('default' always answers)
+GET    /api/v1/sources/{name}/flow      -> The stages its records travel, resolved
 GET    /api/v1/sources/{name}/versions/{version}  -> Get one version snapshot
 GET    /api/v1/sources/{name}/columns   -> Composed schema columns for a version
 POST   /api/v1/sources/{name}/build     -> Build DDL from a version snapshot
@@ -55,6 +56,7 @@ from dfe_engine.source.deployment import (
     plan_from_build,
     previous_deployed_version_ids,
 )
+from dfe_engine.source.flow import FlowError, SourceFlow, resolve_flow
 from dfe_engine.source.models import (
     DEFAULT_LANDING_LABEL,
     SOURCE_LABEL_FIELD,
@@ -352,6 +354,82 @@ class SourceDetailResponse(Source):
     versions: dict[str, SourceVersionDetail] = Field(
         default_factory=dict,
         description="Version id -> configuration snapshot and pipeline artifacts",
+    )
+
+
+class FlowTransformModel(BaseModel):
+    """The transform stage, when the source has one."""
+
+    app: str = Field(description="Catalogued app running it, e.g. dfe-transform-vrl")
+    instance: str = Field(description="Its deployed name, e.g. dfe-transform-vrl-auth")
+    variant: str | None = Field(
+        default=None,
+        description="The compiled-in program it runs, where the app offers a catalogue of them",
+    )
+    endpoint: str | None = Field(
+        default=None, description="Direct: the address records reach it on. Null on the bus."
+    )
+    topics: list[str] | None = Field(
+        default=None, description="Bus: the landing and transformed topics. Null on direct."
+    )
+
+
+class FlowOutputsModel(BaseModel):
+    """Where the records end up."""
+
+    loader: str = Field(
+        description="The topic the loader consumes, or the endpoint it is pushed to"
+    )
+    archive: bool = Field(
+        description="Whether the archiver also keeps the raw record off the landing topic"
+    )
+
+
+class SourceFlowResponse(BaseModel):
+    """One source's whole path, as the resolver reports it.
+
+    The wire shape of ``dfe_engine.source.flow.SourceFlow``, and the only copy of
+    it: everything here is built by ``_flow_response`` from that dataclass, so a
+    stage the resolver gains is a field added in one place.
+    """
+
+    source: str
+    transport: str = Field(
+        description="bus: a broker holds records between stages; direct: no store"
+    )
+    carrier: str = Field(
+        description="What carries it here - the bus provider, or the direct protocol"
+    )
+    origin: str = Field(description="receiver or fetcher")
+    input: str = Field(
+        description="The receiver match that selects the records, or the fetcher instance polling them"
+    )
+    transform: FlowTransformModel | None = None
+    outputs: FlowOutputsModel
+    table: str
+
+
+def _flow_response(flow: SourceFlow) -> SourceFlowResponse:
+    """The resolver's answer on the wire."""
+    return SourceFlowResponse(
+        source=flow.source,
+        transport=flow.transport,
+        carrier=flow.carrier,
+        origin=flow.origin,
+        input=flow.input,
+        transform=(
+            FlowTransformModel(
+                app=flow.transform.app,
+                instance=flow.transform.instance,
+                variant=flow.transform.variant,
+                endpoint=flow.transform.endpoint,
+                topics=list(flow.transform.topics) if flow.transform.topics else None,
+            )
+            if flow.transform
+            else None
+        ),
+        outputs=FlowOutputsModel(loader=flow.outputs.loader, archive=flow.outputs.archive),
+        table=flow.table,
     )
 
 
@@ -1112,6 +1190,46 @@ async def get_source(name: str, user: CurrentUser, registry: SourceReg):
             ) from None
     store = SourceDeploymentStore.from_settings(get_settings())
     return _to_source_detail_response(source, store)
+
+
+@router.get(
+    "/{name}/flow",
+    response_model=SourceFlowResponse,
+    responses={
+        422: {
+            "description": (
+                "The source's stages cannot be run as declared - the message names "
+                "which stage refused and why"
+            )
+        },
+    },
+    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
+)
+async def get_source_flow(name: str, user: CurrentUser, registry: SourceReg, settings: Settings):
+    """The stages this source's records travel, resolved against this deployment.
+
+    The console draws the flow from this rather than from the source's fields,
+    for the same reason the compilers write from it: the topics, the endpoints
+    and the instance running each stage follow from the source plus the
+    deployment, and one resolver is what keeps the drawing and the deployed
+    config the same answer.
+    """
+    try:
+        source = registry.get_source(name)
+    except SourceNotFoundError:
+        if name != DEFAULT_LANDING_LABEL:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "not_found", "message": f"Source {name!r} not found"},
+            ) from None
+        source = _synthesised_default_source()
+    try:
+        return _flow_response(resolve_flow(source, settings))
+    except FlowError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "flow_error", "message": str(exc)},
+        ) from exc
 
 
 @router.put(

@@ -125,6 +125,25 @@ class TestShippedManifest:
         # the pool's own name is baked into the pattern.
         assert catalogue.MESH_HOST_PATTERN == "{instance}-mesh.{mesh_namespace}.svc.cluster.local"
 
+    def test_the_edge_door_carries_no_records(self):
+        # It is what an appliance dials before it posts to the receiver, so no
+        # source may ever name it, which is a different statement from the bus.
+        assert catalogue.descriptor("culvert").transports == frozenset()
+
+    def test_where_each_app_may_be_deployed_comes_off_the_manifest(self):
+        restricted = {
+            name: sorted(app.profiles)
+            for name, app in catalogue.APP_CATALOGUE.items()
+            if app.profiles
+        }
+
+        assert restricted == {"culvert": ["scale", "scale-mesh"]}
+
+    def test_no_shipped_app_is_optional_until_the_manifest_names_default_in(self):
+        # Optional is derived from default_in, which no app declares yet, so
+        # every catalogued app is deployed wherever it may be.
+        assert [name for name, app in catalogue.APP_CATALOGUE.items() if app.optional] == []
+
     def test_only_elastic_selects_a_compiled_in_program_by_name(self):
         variants = {
             name: app.variant_path
@@ -188,10 +207,83 @@ class TestManifestParsing:
 
         assert apps["dfe-thing"].transports == frozenset()
         assert not apps["dfe-thing"].carries("bus")
+        assert not apps["dfe-thing"].carries("direct")
 
     def test_a_transport_value_that_is_not_a_list_is_refused(self, tmp_path):
-        with pytest.raises(CatalogueError, match="must be a list"):
+        with pytest.raises(CatalogueError, match="transports must be a list"):
             load_catalogue(self._manifest(tmp_path, {"transports": "bus"}))
+
+    def test_an_app_naming_neither_key_is_in_every_profile_by_default(self, tmp_path):
+        apps = load_catalogue(self._manifest(tmp_path, {"multiplicity": "single"}))
+        app = apps["dfe-thing"]
+
+        assert app.profiles == frozenset()
+        assert app.default_in is None
+        assert app.optional is False
+        assert app.offered_in("scale")
+
+    def test_an_app_may_be_deployed_only_in_the_profiles_it_names(self, tmp_path):
+        apps = load_catalogue(
+            self._manifest(
+                tmp_path, {"multiplicity": "single", "profiles": ["scale", "scale-mesh"]}
+            )
+        )
+        app = apps["dfe-thing"]
+
+        assert app.profiles == frozenset({"scale", "scale-mesh"})
+        assert app.offered_in("scale")
+        assert not app.offered_in("slim")
+        # Nothing says otherwise, so it is deployed wherever it may be.
+        assert app.optional is False
+
+    def test_an_empty_default_in_is_what_makes_an_app_optional(self, tmp_path):
+        apps = load_catalogue(
+            self._manifest(
+                tmp_path,
+                {
+                    "multiplicity": "single",
+                    "profiles": ["scale", "scale-mesh"],
+                    "default_in": [],
+                },
+            )
+        )
+        app = apps["dfe-thing"]
+
+        assert app.default_in == frozenset()
+        assert app.optional is True
+        assert app.offered_in("scale-mesh")
+        assert not app.offered_in("slim")
+
+    def test_an_app_can_be_deployable_further_than_it_is_deployed(self, tmp_path):
+        apps = load_catalogue(
+            self._manifest(
+                tmp_path,
+                {"profiles": ["single", "scale", "scale-mesh"], "default_in": ["scale"]},
+            )
+        )
+        app = apps["dfe-thing"]
+
+        assert app.optional is False
+        assert app.default_in == frozenset({"scale"})
+        assert app.offered_in("single")
+
+    def test_a_caller_that_names_no_profile_is_offered_everything(self, tmp_path):
+        # Nothing tells the engine which profile deployed it, so hiding an app on a
+        # blank answer would hide it in every deployment.
+        apps = load_catalogue(self._manifest(tmp_path, {"profiles": ["scale"], "default_in": []}))
+
+        assert apps["dfe-thing"].offered_in("")
+
+    def test_an_empty_profile_list_is_refused(self, tmp_path):
+        # Written and left empty says "deployable nowhere"; the absent key already
+        # says "everywhere", so the empty list can only be a mistake. default_in is
+        # the key where an empty list means something.
+        with pytest.raises(CatalogueError, match="profiles must be a non-empty list"):
+            load_catalogue(self._manifest(tmp_path, {"profiles": []}))
+
+    def test_profile_keys_that_are_not_lists_are_refused(self, tmp_path):
+        with pytest.raises(CatalogueError, match="default_in must be a list"):
+            load_catalogue(self._manifest(tmp_path, {"default_in": "scale"}))
 
     def test_the_manifest_owns_the_port_a_stage_is_sent_to(self, tmp_path):
         apps = load_catalogue(

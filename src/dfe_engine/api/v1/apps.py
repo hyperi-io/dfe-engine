@@ -50,7 +50,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import (
@@ -194,6 +194,42 @@ def _scope_field() -> Any:
     )
 
 
+def _optional_flag() -> Any:
+    """A fresh field descriptor, since a FieldInfo belongs to one model."""
+    return Field(
+        default=False,
+        description=(
+            "Whether a deployment runs without this app. Derived from default_in "
+            "being empty, so it cannot disagree with it: an app nothing deploys by "
+            "default is the one an operator turns on."
+        ),
+    )
+
+
+def _profiles_field() -> Any:
+    """A fresh field descriptor, since a FieldInfo belongs to one model."""
+    return Field(
+        default_factory=list,
+        description=(
+            "The deployment profiles this app may be deployed in; empty means every "
+            "profile. An offer to list, not a gate: the deploy repo decides what "
+            "is actually deployed."
+        ),
+    )
+
+
+def _default_in_field() -> Any:
+    """A fresh field descriptor, since a FieldInfo belongs to one model."""
+    return Field(
+        default=None,
+        description=(
+            "The profiles a deployment runs this app in without being asked. Null "
+            "means the same as profiles; an empty list means nothing deploys it, "
+            "which is what optional reports."
+        ),
+    )
+
+
 class AppSummary(BaseModel):
     service: str
     instance: str
@@ -202,6 +238,9 @@ class AppSummary(BaseModel):
     multiplicity: str
     has_compiled_routing: bool = _routing_flag()
     routing_scope: str = _scope_field()
+    optional: bool = _optional_flag()
+    profiles: list[str] = _profiles_field()
+    default_in: list[str] | None = _default_in_field()
     file_sets: list[FileSetSummary]
 
 
@@ -211,6 +250,18 @@ class CatalogueEntry(BaseModel):
     multiplicity: str
     has_compiled_routing: bool = _routing_flag()
     routing_scope: str = _scope_field()
+    optional: bool = _optional_flag()
+    profiles: list[str] = _profiles_field()
+    default_in: list[str] | None = _default_in_field()
+    offered: bool = Field(
+        default=True,
+        description=(
+            "Whether this app is offered in the profile the caller asked about. True "
+            "for every app when the caller named no profile, so a console that does "
+            "not know the deployment's profile lists everything rather than hiding "
+            "what it cannot rule out."
+        ),
+    )
     source_types: list[str] = Field(
         default_factory=list,
         description=(
@@ -715,7 +766,18 @@ def _file_sets(service: str) -> list[FileSetSummary]:
 
 
 @router.get("", dependencies=[_DEPLOY_READ])
-async def list_apps(user: CurrentUser, request: Request) -> list[CatalogueEntry]:
+async def list_apps(
+    user: CurrentUser,
+    request: Request,
+    profile: str = Query(
+        default="",
+        description=(
+            "Deployment profile to judge each app's offer against, so the rule stays "
+            "in one place rather than being re-derived by every caller. Omit it and "
+            "every app is reported as offered."
+        ),
+    ),
+) -> list[CatalogueEntry]:
     """Every manageable app, with the instances currently deployed."""
     gc = _gitcrud(request)
     deployed = instances.list_instances(gc)
@@ -729,6 +791,10 @@ async def list_apps(user: CurrentUser, request: Request) -> list[CatalogueEntry]
                 multiplicity=str(desc.multiplicity),
                 has_compiled_routing=desc.has_compiled_routing,
                 routing_scope=str(desc.routing_scope),
+                optional=desc.optional,
+                profiles=sorted(desc.profiles),
+                default_in=None if desc.default_in is None else sorted(desc.default_in),
+                offered=desc.offered_in(profile),
                 source_types=list(desc.source_types),
                 file_sets=_file_sets(service),
                 instances=[i.instance for i in deployed if i.service == service],
@@ -812,6 +878,9 @@ async def get_app(service: str, instance: str, user: CurrentUser, request: Reque
         multiplicity=str(desc.multiplicity),
         has_compiled_routing=desc.has_compiled_routing,
         routing_scope=str(desc.routing_scope),
+        optional=desc.optional,
+        profiles=sorted(desc.profiles),
+        default_in=None if desc.default_in is None else sorted(desc.default_in),
         file_sets=_file_sets(service),
     )
 

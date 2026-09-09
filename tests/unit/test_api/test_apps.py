@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from dfe_engine.appmgmt import catalogue
@@ -130,6 +132,80 @@ class TestCatalogue:
         _deploy(client, admin_headers)
         got = client.get(BASE, headers=admin_headers).json()
         assert got["has_compiled_routing"] is catalogue.descriptor(VRL).has_compiled_routing
+
+
+class TestOptionalApps:
+    """An app a deployment may run without, and the profiles it is offered in."""
+
+    @pytest.fixture
+    def optional_archiver(self, monkeypatch):
+        """The archiver, made optional, so the shipped manifest stays the assertion."""
+        replaced = replace(
+            catalogue.descriptor("dfe-archiver"),
+            profiles=frozenset({"scale", "scale-mesh"}),
+            default_in=frozenset(),
+        )
+        monkeypatch.setitem(catalogue.APP_CATALOGUE, "dfe-archiver", replaced)
+
+    def test_a_core_app_is_deployed_wherever_it_may_be(self, client, app, admin_headers, tmp_path):
+        # The core data path is what a DFE is, so nothing in it waits to be enabled.
+        _wire(app, tmp_path)
+
+        entry = next(
+            e
+            for e in client.get("/api/v1/apps?profile=slim", headers=admin_headers).json()
+            if e["service"] == "dfe-loader"
+        )
+
+        assert entry["optional"] is False
+        assert entry["default_in"] is None
+        assert entry["offered"] is True
+
+    def test_an_optional_app_reports_where_it_may_be_deployed_and_that_nothing_deploys_it(
+        self, client, app, admin_headers, tmp_path, optional_archiver
+    ):
+        _wire(app, tmp_path)
+
+        entry = next(
+            e
+            for e in client.get("/api/v1/apps", headers=admin_headers).json()
+            if e["service"] == "dfe-archiver"
+        )
+
+        assert entry["optional"] is True
+        assert entry["profiles"] == ["scale", "scale-mesh"]
+        assert entry["default_in"] == []
+
+    def test_the_offer_is_judged_against_the_profile_the_caller_names(
+        self, client, app, admin_headers, tmp_path, optional_archiver
+    ):
+        # The rule lives with the manifest, so the console renders an answer rather
+        # than re-deriving one from the profile list.
+        _wire(app, tmp_path)
+
+        def offered(query: str) -> bool:
+            listed = client.get(f"/api/v1/apps{query}", headers=admin_headers).json()
+            return next(e for e in listed if e["service"] == "dfe-archiver")["offered"]
+
+        assert offered("?profile=scale")
+        assert not offered("?profile=slim")
+        assert offered("")
+
+    def test_the_instance_summary_carries_them_too(
+        self, client, app, admin_headers, tmp_path, optional_archiver
+    ):
+        _wire(app, tmp_path)
+        client.post(
+            "/api/v1/apps/dfe-archiver/instances",
+            json={"instance": "default"},
+            headers=admin_headers,
+        )
+
+        got = client.get("/api/v1/apps/dfe-archiver/default", headers=admin_headers).json()
+
+        assert got["optional"] is True
+        assert got["profiles"] == ["scale", "scale-mesh"]
+        assert got["default_in"] == []
 
 
 class TestLifecycle:
