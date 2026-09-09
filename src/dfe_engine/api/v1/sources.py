@@ -869,6 +869,7 @@ async def plan_source_deploy(
     ),
 ) -> SourcePlanResponse:
     """Dry-run ClickHouse deploy: DDL statements and validation errors (not persisted)."""
+    from dfe_engine.schema.engine_resolver import EngineResolver
     from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
     from dfe_engine.source.type_registry import TypeRegistry
 
@@ -885,6 +886,9 @@ async def plan_source_deploy(
 
     settings = get_settings()
     store = SourceDeploymentStore.from_settings(settings)
+    # The plan shows the DDL the deploy would apply, so it senses the engine and
+    # ON CLUSTER from the same server.
+    resolver = EngineResolver(client=ch_client, topology_setting=settings.clickhouse.topology)
     try:
         result, _artifact = ensure_build_artifact(
             store,
@@ -892,6 +896,7 @@ async def plan_source_deploy(
             version_id=version_id,
             schemas_base_dir=settings.schemas.schemas_dir or None,
             refresh=True,
+            resolver=resolver,
         )
     except SchemaBuildError as exc:
         raise HTTPException(
@@ -904,6 +909,7 @@ async def plan_source_deploy(
         schemas_base_dir=settings.schemas.schemas_dir or None,
         default_engine=settings.clickhouse.default_engine,
         default_ttl_days=settings.clickhouse.default_ttl_days,
+        resolver=resolver,
     )
     db = settings.clickhouse.effective_data_database
     statements, table_exists = deploy_statements_for_build(
@@ -1017,11 +1023,33 @@ async def deploy_source_schema(
             },
         )
 
+    # A deploy reaches ClickHouse before the build: the table engine and ON CLUSTER
+    # are sensed from the live server, so the DDL lands on every replica of a
+    # cluster. A dry run stays CH-free and renders the deployment's topology.
+    ch = None
+    resolver = None
+    if not dry_run:
+        from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+        from dfe_engine.schema.engine_resolver import EngineResolver
+        from dfe_engine.settings import get_clickhouse_config
+
+        try:
+            ch = ClickHouseManager.get_instance(
+                get_clickhouse_config(settings)
+            ).get_clickhouse_client()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "clickhouse_unavailable", "message": str(exc)},
+            ) from exc
+        resolver = EngineResolver(client=ch, topology_setting=settings.clickhouse.topology)
+
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
         default_engine=settings.clickhouse.default_engine,
         default_ttl_days=settings.clickhouse.default_ttl_days,
+        resolver=resolver,
     )
     try:
         result = builder.build_for_source_version(source, source_version=version_id)
@@ -1062,18 +1090,6 @@ async def deploy_source_schema(
                 "errors": validation_errors,
             },
         )
-
-    # Only reach for ClickHouse when actually deploying (keeps plan CH-free).
-    from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
-    from dfe_engine.settings import get_clickhouse_config
-
-    try:
-        ch = ClickHouseManager.get_instance(get_clickhouse_config(settings)).get_clickhouse_client()
-    except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "clickhouse_unavailable", "message": str(exc)},
-        ) from exc
 
     db = settings.clickhouse.effective_data_database
     statements, _table_exists = deploy_statements_for_build(

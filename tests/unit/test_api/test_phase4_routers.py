@@ -286,6 +286,9 @@ class TestSchemasRouter:
         (tmp_path / "auth").mkdir()
 
         mock_ch = MagicMock()
+        # The server answers every sensing query with the shard and replica macros
+        # of a cluster, so the deploy has to render the Replicated ON CLUSTER form.
+        mock_ch.query.return_value.result_rows = [("shard",), ("replica",)]
         mock_manager = MagicMock()
         mock_manager.get_clickhouse_client.return_value = mock_ch
         monkeypatch.setattr(
@@ -327,6 +330,11 @@ class TestSchemasRouter:
                 resp = tc.post("/api/v1/sources/dep-src/deploy", headers=headers)
                 assert resp.status_code == 200, resp.text
                 assert resp.json()["applied"] is True
+                create = resp.json()["create_table"]
+                assert "ON CLUSTER shard" in create, create
+                assert "ENGINE = ReplicatedMergeTree" in create, create
+                executed = [call.args[0] for call in mock_ch.execute.call_args_list]
+                assert any("ON CLUSTER shard" in stmt for stmt in executed), executed
 
                 detail = tc.get("/api/v1/sources/dep-src", headers=headers)
                 assert detail.status_code == 200

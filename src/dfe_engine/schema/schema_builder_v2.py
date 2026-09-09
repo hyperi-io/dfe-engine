@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from scalo.logger import logger
 
+from dfe_engine.schema.engine_resolver import EngineResolver
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
 from dfe_engine.schema.schema_loader import SchemaLoader, SchemaLoadError, resolve_schema_yaml_path
 from dfe_engine.source.models import SchemaColumn, Source, SourceVersion, SourceView
@@ -74,6 +75,7 @@ class SchemaBuilderV2:
         field_map_registry: FieldMapRegistry | None = None,
         default_engine: str = "MergeTree",
         default_ttl_days: int | None = None,
+        resolver: EngineResolver | None = None,
     ) -> None:
         """Initialize the schema builder.
 
@@ -98,10 +100,18 @@ class SchemaBuilderV2:
                                 unset. Pass the deployment value
                                 (``settings.clickhouse.default_ttl_days``); None or 0
                                 emits no TTL clause for such a source.
+            resolver: Engine resolver for the table engine and ``ON CLUSTER``. A
+                                path that applies DDL to a live server passes one
+                                built with that server's client, so a multi-node
+                                cluster gets a Replicated table on every replica;
+                                without one the DDL follows the deployment's
+                                ``clickhouse.topology`` alone.
         """
         self._registry = registry or TypeRegistry.default()
         self._schemas_base_dir = Path(schemas_base_dir) if schemas_base_dir else None
-        self._ddl_gen = DDLGenerator(self._registry, use_legacy_indexes=use_legacy_indexes)
+        self._ddl_gen = DDLGenerator(
+            self._registry, use_legacy_indexes=use_legacy_indexes, resolver=resolver
+        )
         self._field_map_registry = field_map_registry
         self._default_engine = default_engine or "MergeTree"
         self._default_ttl_days = default_ttl_days or None
