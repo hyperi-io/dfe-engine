@@ -1,0 +1,19 @@
+# Project:   dfe-engine
+# File:      tests/e2e/flows/fixtures/fetcher-plain/expect.yaml
+# Purpose:   What the fetcher-plain shape must produce on either transport
+# Language:  YAML
+#
+# License:   BUSL-1.1
+# Copyright: (c) 2026 HYPERI PTY LIMITED
+
+description: A fetcher instance appears for the source and its first fetch lands in the source table.
+origin: fetcher
+
+expect:
+  - source: flowfetch
+    table: flowfetch
+    topic: flowfetch_land
+    load_topic: null
+    marker: null
+    # A fetcher never passes through the receiver, so no destination names it.
+    destination: null

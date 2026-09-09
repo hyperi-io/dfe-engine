@@ -34,7 +34,9 @@ SEED_FETCHER_SOURCE_NAME = "seedfetch"
 SEED_ACTOR = "e2e-seed"
 """Commit attribution for every deploy-repo write a seeder makes."""
 
-_MATCH_FIELD = "_json.tags.collector.type"
+# A bare dotted path: the receiver splits the field on '.' and walks the raw
+# payload, so a '_json.' prefix is read as a first segment that no record has.
+_MATCH_FIELD = "tags.collector.type"
 # A public-registry family: it needs no credentials, so the stanza is inert data.
 _FETCHER_TYPE = "crates_io"
 _FETCHER_CONFIG = {"crates": ["dfe-fetcher"], "interval_secs": 3600}

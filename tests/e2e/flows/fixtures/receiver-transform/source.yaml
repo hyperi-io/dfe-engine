@@ -1,0 +1,24 @@
+# Project:   dfe-engine
+# File:      tests/e2e/flows/fixtures/receiver-transform/source.yaml
+# Purpose:   Receiver origin with a VRL transform in the path
+# Language:  YAML
+#
+# License:   BUSL-1.1
+# Copyright: (c) 2026 HYPERI PTY LIMITED
+
+sources:
+  - source: flowvrl
+    display_name: Flow e2e - receiver with a VRL transform
+    description: Receiver origin, one transform instance, marker field added by the program.
+    match:
+      field: flow_case
+      operator: equals
+      value: flowvrl
+    transform:
+      engine: vrl
+    header:
+      type: common-header/timeseries
+      version: 1.0.1
+    schema:
+      meta_schema: meta/syslog
+      meta_schema_version: 1.0.0

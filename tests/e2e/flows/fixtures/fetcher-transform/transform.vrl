@@ -1,0 +1,3 @@
+# The marker field: nothing else in the flow sets it, so a row carrying it can
+# only have passed through this program.
+.flow_transformed = "yes"

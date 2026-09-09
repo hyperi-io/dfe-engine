@@ -35,11 +35,10 @@ from __future__ import annotations
 
 import uuid
 
-import httpx
 import pytest
 
 from tests.e2e import filebeat_corpus as corpus
-from tests.e2e.conftest import E2EConfig, must, poll_until, require
+from tests.e2e.conftest import count_rows, poll_until, post_events, require
 
 pytestmark = pytest.mark.live
 
@@ -85,60 +84,6 @@ def _corpus_or_skip(limit: int = 5) -> list[corpus.Sample]:
     return found
 
 
-def _post(cfg: E2EConfig, bodies: list[dict]) -> None:
-    # Every caller gates on require(cfg, "receiver_url"), which skips when it is unset.
-    url = must(cfg.receiver_url)
-    headers = {"Content-Type": "application/json"}
-    if cfg.receiver_token:
-        headers["Authorization"] = f"Bearer {cfg.receiver_token}"
-    with httpx.Client(verify=cfg.verify, timeout=30.0) as client:
-        for body in bodies:
-            response = client.post(url, json=body, headers=headers)
-            assert response.status_code < 300, f"receiver rejected the event: {response.text}"
-
-
-# ClickHouse says one of these when the table or database is simply not there
-# yet, which is the only absence a poll should read as "no rows".
-_NOT_THERE_YET = ("UNKNOWN_TABLE", "UNKNOWN_DATABASE", "does not exist", "doesn't exist")
-
-
-def _rows(ch_client, sql: str, run: str) -> int:
-    """A counting query's answer, or 0 while its table does not exist yet.
-
-    Only a missing table or database answers 0. Every other error is raised: a
-    query that cannot run - an unknown column, a function the column's type will
-    not take - otherwise reads as an empty table forever, and a test that can
-    only report zero proves nothing.
-    """
-    try:
-        params = {"m": f"%{run}%"} if run else None
-        result = ch_client.query(sql, parameters=params)
-    except Exception as exc:
-        if any(marker in str(exc) for marker in _NOT_THERE_YET):
-            return 0
-        raise
-    return int(result.result_rows[0][0]) if result.result_rows else 0
-
-
-def _count(ch_client, table: str, run: str) -> int:
-    """Rows this run put in a PASSTHROUGH table.
-
-    Matched on ``_raw``, the String (and text-indexed) copy of the payload.
-    ``_json`` holds the same bytes but as the ClickHouse JSON type, which LIKE
-    and the JSON* string functions both refuse.
-
-    Only the common-header tables carry ``_raw``. A typed source table does not
-    - see ``_Delta``.
-    """
-    return _rows(ch_client, f"SELECT count() FROM {table} WHERE _raw LIKE %(m)s", run)
-
-
-def _total(ch_client, table: str, where: str = "") -> int:
-    """Every row in a table, optionally narrowed."""
-    clause = f" WHERE {where}" if where else ""
-    return _rows(ch_client, f"SELECT count() FROM {table}{clause}", "")
-
-
 class _Delta:
     """How many rows a table gained while this ran.
 
@@ -160,10 +105,10 @@ class _Delta:
         self._client = ch_client
         self._table = table
         self._where = where
-        self.before = _total(ch_client, table, where)
+        self.before = count_rows(ch_client, table, where=where)
 
     def gained(self) -> int:
-        return _total(self._client, self._table, self._where) - self.before
+        return count_rows(self._client, self._table, where=self._where) - self.before
 
 
 class TestRouting:
@@ -173,7 +118,7 @@ class TestRouting:
         require(e2e, "receiver_url", "ch_host")
         run = f"e2e-{uuid.uuid4().hex}"
         source_table = _Delta(ch_client, f"{e2e.ch_db}.{SOURCE}")
-        _post(e2e, corpus.wrap_all(_corpus_or_skip(limit=2), run=run))
+        post_events(e2e, corpus.wrap_all(_corpus_or_skip(limit=2), run=run))
 
         landed = poll_until(
             source_table.gained,
@@ -191,10 +136,10 @@ class TestRouting:
         body = corpus.wrap(sample, run=run)
         body.pop("_source")
         source_table = _Delta(ch_client, f"{e2e.ch_db}.{SOURCE}")
-        _post(e2e, [body])
+        post_events(e2e, [body])
 
         poll_until(
-            lambda: _count(ch_client, f"{e2e.ch_db}.default", run),
+            lambda: count_rows(ch_client, f"{e2e.ch_db}.default", marker=run),
             timeout=180.0,
             desc=f"rows in {e2e.ch_db}.default for {run}",
         )
@@ -223,7 +168,7 @@ class TestTransform:
 
         run = f"e2e-{uuid.uuid4().hex}"
         parsed = _Delta(ch_client, f"{e2e.ch_db}.{SOURCE}", where=_ECS_POPULATED)
-        _post(e2e, corpus.wrap_all(_corpus_or_skip(limit=5), run=run))
+        post_events(e2e, corpus.wrap_all(_corpus_or_skip(limit=5), run=run))
 
         # The pass-through failure this test exists to catch shows up as gained()
         # staying 0, so poll_until TIMES OUT rather than returning - which is why
@@ -251,14 +196,14 @@ class TestCommonHeaderLowerBound:
         require(e2e, "receiver_url", "ch_host")
         run = f"e2e-{uuid.uuid4().hex}"
         unknown = f"harness{uuid.uuid4().hex[:8]}"
-        _post(e2e, corpus.wrap_all(_corpus_or_skip(limit=1), source=unknown, run=run))
+        post_events(e2e, corpus.wrap_all(_corpus_or_skip(limit=1), source=unknown, run=run))
 
         # No per-source schema exists for this name, so the common header is what
         # carries it. Landing anywhere at all is the assertion.
         landed = poll_until(
             lambda: (
-                _count(ch_client, f"{e2e.ch_db}.{unknown}", run)
-                or _count(ch_client, f"{e2e.ch_db}.default", run)
+                count_rows(ch_client, f"{e2e.ch_db}.{unknown}", marker=run)
+                or count_rows(ch_client, f"{e2e.ch_db}.default", marker=run)
             ),
             timeout=180.0,
             desc=f"rows for the unschema'd source {unknown}",

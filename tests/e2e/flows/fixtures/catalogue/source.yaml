@@ -1,0 +1,11 @@
+# Project:   dfe-engine
+# File:      tests/e2e/flows/fixtures/catalogue/source.yaml
+# Purpose:   A source compiled from a mounted source catalogue, not typed
+# Language:  YAML
+#
+# License:   BUSL-1.1
+# Copyright: (c) 2026 HYPERI PTY LIMITED
+
+# The entry IS the definition, so nothing is written here: the suite asks
+# GET /api/v1/sources/catalogue what the deployment offers and creates one.
+sources: []

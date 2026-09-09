@@ -247,7 +247,7 @@ def compile_receiver_destinations(registry: SourceRegistry, settings: Any) -> De
     return DestinationsConfig(
         default=default,
         rules=rules,
-        **{name: {"grpc": endpoint} for name, endpoint in sorted(endpoints.items())},
+        **{name: {"grpc": {"endpoint": endpoint}} for name, endpoint in sorted(endpoints.items())},
     )
 
 

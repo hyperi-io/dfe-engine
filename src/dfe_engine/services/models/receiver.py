@@ -219,11 +219,16 @@ class DestinationsConfig(BaseModel):
     """Destination selection, plus the endpoint of every destination it names.
 
     ``kafka`` and ``loader`` are the receiver's built-in destinations. Any other
-    name is a NAMED endpoint sitting beside these keys as ``<name>: {grpc: uri}``,
-    which is why extras are allowed here: a rule sends a matched record to a
-    transform instance by name. The names the engine compiles are ``loader`` and
-    ``dfe-transform-*`` instances, so none of them can collide with ``default``
-    or ``rules``.
+    name is a NAMED endpoint sitting beside these keys as
+    ``<name>: {grpc: {endpoint: uri}}``, which is why extras are allowed here: a
+    rule sends a matched record to a transform instance by name. The names the
+    engine compiles are ``loader`` and ``dfe-transform-*`` instances, so none of
+    them can collide with ``default`` or ``rules``.
+
+    The nesting is the receiver's own ``DestinationSpec`` (``src/config/mod.rs``):
+    one transport block per destination, ``grpc: {endpoint}`` or ``kafka: {topic}``.
+    A bare ``grpc: <uri>`` is what the receiver read before v1.15.30 and it now
+    refuses the whole config file, so the pod cannot start.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -235,8 +240,12 @@ class DestinationsConfig(BaseModel):
     def validate_destinations(self) -> DestinationsConfig:
         named = self.__pydantic_extra__ or {}
         for name, entry in named.items():
-            if not isinstance(entry, dict) or not entry.get("grpc"):
-                msg = f"Named destination {name!r} must be a mapping carrying a 'grpc' endpoint"
+            grpc = entry.get("grpc") if isinstance(entry, dict) else None
+            if not isinstance(grpc, dict) or not grpc.get("endpoint"):
+                msg = (
+                    f"Named destination {name!r} must be a mapping carrying "
+                    f"grpc.endpoint; the receiver refuses a bare grpc string"
+                )
                 raise ValueError(msg)
         # A destination the receiver cannot resolve silently drops every record
         # the rule matched, so nothing may name one that is neither built in nor

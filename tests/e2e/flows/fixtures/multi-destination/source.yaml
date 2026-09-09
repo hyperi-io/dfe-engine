@@ -1,0 +1,35 @@
+# Project:   dfe-engine
+# File:      tests/e2e/flows/fixtures/multi-destination/source.yaml
+# Purpose:   Two sources, two rules - each record reaches only its own table
+# Language:  YAML
+#
+# License:   BUSL-1.1
+# Copyright: (c) 2026 HYPERI PTY LIMITED
+
+# A dotted field on purpose: the receiver splits the match field on '.' and walks
+# the raw payload, so a nested path has to work without a column prefix.
+sources:
+  - source: flowmultia
+    display_name: Flow e2e - multi-destination, first source
+    match:
+      field: data_stream.dataset
+      operator: equals
+      value: flowmultia
+    header:
+      type: common-header/timeseries
+      version: 1.0.1
+    schema:
+      meta_schema: meta/syslog
+      meta_schema_version: 1.0.0
+  - source: flowmultib
+    display_name: Flow e2e - multi-destination, second source
+    match:
+      field: data_stream.dataset
+      operator: equals
+      value: flowmultib
+    header:
+      type: common-header/timeseries
+      version: 1.0.1
+    schema:
+      meta_schema: meta/syslog
+      meta_schema_version: 1.0.0

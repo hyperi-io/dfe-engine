@@ -1,0 +1,23 @@
+# Project:   dfe-engine
+# File:      tests/e2e/flows/fixtures/receiver-plain/source.yaml
+# Purpose:   Receiver origin, no transform - the shortest flow there is
+# Language:  YAML
+#
+# License:   BUSL-1.1
+# Copyright: (c) 2026 HYPERI PTY LIMITED
+
+# Each entry is the POST /api/v1/sources body verbatim; the suite adds transport.
+sources:
+  - source: flowplain
+    display_name: Flow e2e - receiver, no transform
+    description: Receiver origin, no transform, records land in the source table.
+    match:
+      field: flow_case
+      operator: equals
+      value: flowplain
+    header:
+      type: common-header/timeseries
+      version: 1.0.1
+    schema:
+      meta_schema: meta/syslog
+      meta_schema_version: 1.0.0

@@ -6,12 +6,37 @@ suite. Marked `@pytest.mark.live` and EXCLUDED from the default run
 `DFE_E2E_*` env vars point at a deployment. No mocks -- every step hits a real
 endpoint.
 
-Three files. `test_live_pipeline.py` proves the deployment works at all;
-`test_filebeat_pipeline.py` proves the transform layer works on real data; and
-`test_governed_ops_live.py` drives `POST /api/v1/governance/ch-rbac/reconcile`
-and asserts the seeded quota-tier and service roles actually materialise as
-ClickHouse objects -- the two-axis RBAC model end to end. It needs
-`DFE_E2E_ENGINE_URL`/`_TOKEN`, plus the `_CH_*` vars for its CH assertions.
+Three files and a directory. `test_live_pipeline.py` proves the deployment works
+at all; `test_filebeat_pipeline.py` proves the transform layer works on real
+data; `test_governed_ops_live.py` drives
+`POST /api/v1/governance/ch-rbac/reconcile` and asserts the seeded quota-tier and
+service roles actually materialise as ClickHouse objects -- the two-axis RBAC
+model end to end. It needs `DFE_E2E_ENGINE_URL`/`_TOKEN`, plus the `_CH_*` vars
+for its CH assertions. `flows/` is the flow suite, below.
+
+## flows/ -- every source shape, on both transports
+
+`flows/fixtures/<shape>/` is the one fixture set: `source.yaml` (the create
+bodies verbatim), `payload.ndjson` (`{marker}` is substituted per run) and
+`expect.yaml` (the table, the topic on the bus, the transform's marker field, the
+receiver destination on direct). A new shape is a directory, not a test.
+`flows/test_flows.py` is parametrised over shapes x transports; `flows/shapes.py`
+parses and validates the fixtures and holds the transport rule.
+
+`DFE_E2E_TRANSPORT` says which data path to prove: `kafka`, `grpc`, or `both`.
+`both` runs each shape twice and FAILS on a deployment that cannot carry one of
+them -- a slim deploy is direct-only, so `both` there is a failure by design and
+the run belongs on `scale` or `scale-mesh`.
+
+Every skip has to be one a fixture declared: `flows/conftest.py` fails the whole
+run on any other, because a suite that reports green with half its cases skipped
+has proved nothing. A declared skip carries the `EXPECTED-SKIP:` marker and says
+what is missing -- the archived shape on direct (dfe-archiver carries the bus
+only) and the catalogue shape where no catalogue is mounted.
+
+Both lanes run this same suite from a checkout of this repo:
+`dfe-ops acceptance --suite flows` for Kubernetes, `make test-flows` in
+dfe-docker for a compose stack. Neither carries a copy of the fixtures.
 
 ## test_live_pipeline.py -- the 4 critical tests
 

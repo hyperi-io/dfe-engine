@@ -1,0 +1,20 @@
+# Project:   dfe-engine
+# File:      tests/e2e/flows/fixtures/fetcher-transform/expect.yaml
+# Purpose:   What the fetcher-transform shape must produce on either transport
+# Language:  YAML
+#
+# License:   BUSL-1.1
+# Copyright: (c) 2026 HYPERI PTY LIMITED
+
+description: A fetched record carries the transform's marker field by the time it lands.
+origin: fetcher
+
+transform_file: transform.vrl
+
+expect:
+  - source: flowfetchvrl
+    table: flowfetchvrl
+    topic: flowfetchvrl_land
+    load_topic: flowfetchvrl_load
+    marker: flow_transformed
+    destination: null
