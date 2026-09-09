@@ -253,6 +253,14 @@ class AppDescriptor:
     scale: nothing deploys it, and an operator turns it on.
     """
 
+    idle_when: tuple[str, ...] = ()
+    """The config dot-paths whose emptiness means this app has no work.
+
+    Reported, never evaluated: the apps carry the same predicate in their own
+    ``work_state``, and this is the declaration a console reads to say why one
+    of them is sitting idle. Empty means the app always has work.
+    """
+
     hot_reload: bool = False
     """Whether the app can apply a config change in place; reported, never acted on.
 
@@ -440,6 +448,7 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
         transports=_transports_from(service, raw.get("transports")),
         profiles=_profiles_from(service, "profiles", raw.get("profiles")),
         default_in=_default_in_from(service, raw.get("default_in")),
+        idle_when=_idle_when_from(service, raw.get("idle_when")),
         hot_reload=bool(raw.get("hot_reload", False)),
         endpoints=_endpoints_from(service, raw.get("endpoints")),
         variant_path=str(raw.get("variant_path", "")),
@@ -578,6 +587,19 @@ def _default_in_from(service: str, raw: object) -> frozenset[str] | None:
     if raw is None:
         return None
     return _profile_names(service, "default_in", raw)
+
+
+def _idle_when_from(service: str, raw: object) -> tuple[str, ...]:
+    """The config dot-paths whose emptiness means the app has no work.
+
+    Read and reported only - the apps evaluate the same predicate themselves, so
+    the engine never resolves these paths against an overlay.
+    """
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise CatalogueError(f"{service}: idle_when must be a list of config dot-paths")
+    return tuple(str(p) for p in raw)
 
 
 def _endpoints_from(service: str, raw: object) -> dict[str, AppEndpoint]:

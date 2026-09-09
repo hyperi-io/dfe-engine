@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.19.15"
+    "version": "1.19.17"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -16533,6 +16533,14 @@
             ],
             "title": "Default In",
             "description": "The profiles a deployment runs this app in without being asked. Null means the same as profiles; an empty list means nothing deploys it, which is what optional reports."
+          },
+          "idle_when": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Idle When",
+            "description": "The app's own config dot-paths whose emptiness means it has no work, so an instance that is Ready and doing nothing can be reported as unconfigured rather than broken. Declared by the app, evaluated by the app: the engine reports these and never resolves them."
           },
           "file_sets": {
             "items": {

@@ -230,6 +230,19 @@ def _default_in_field() -> Any:
     )
 
 
+def _idle_when_field() -> Any:
+    """A fresh field descriptor, since a FieldInfo belongs to one model."""
+    return Field(
+        default_factory=list,
+        description=(
+            "The app's own config dot-paths whose emptiness means it has no work, "
+            "so an instance that is Ready and doing nothing can be reported as "
+            "unconfigured rather than broken. Declared by the app, evaluated by the "
+            "app: the engine reports these and never resolves them."
+        ),
+    )
+
+
 class AppSummary(BaseModel):
     service: str
     instance: str
@@ -241,6 +254,7 @@ class AppSummary(BaseModel):
     optional: bool = _optional_flag()
     profiles: list[str] = _profiles_field()
     default_in: list[str] | None = _default_in_field()
+    idle_when: list[str] = _idle_when_field()
     file_sets: list[FileSetSummary]
 
 
@@ -881,6 +895,7 @@ async def get_app(service: str, instance: str, user: CurrentUser, request: Reque
         optional=desc.optional,
         profiles=sorted(desc.profiles),
         default_in=None if desc.default_in is None else sorted(desc.default_in),
+        idle_when=list(desc.idle_when),
         file_sets=_file_sets(service),
     )
 
