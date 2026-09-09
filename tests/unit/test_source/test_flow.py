@@ -116,6 +116,13 @@ class TestDirectTransport:
         assert flow.input == "dfe-fetcher-okta"
         assert flow.outputs.loader == "http://dfe-loader:6000"
 
+    def test_archive_is_allowed_on_direct_since_the_archiver_declares_it(self):
+        # The sender fans the record out to the archiver's Push listener beside
+        # the loader, so a brokerless deployment can still keep the raw record.
+        flow = resolve_flow(_source(transport="direct", archive=True), _settings(default="direct"))
+
+        assert flow.outputs.archive is True
+
 
 class TestMesh:
     """Where a deployment balances its pools behind listeners, every address moves."""
@@ -186,9 +193,18 @@ class TestRefusals:
         with pytest.raises(FlowError, match="offers direct"):
             resolve_flow(_source(transport="bus"), _settings(default="direct", bus_present=False))
 
-    def test_archive_on_direct(self):
+    def test_archive_on_a_transport_the_archiver_does_not_carry(self):
+        # The refusal follows the manifest, so an archiver that gives up its
+        # listener refuses direct again with no engine change.
+        bus_only = dict(catalogue.APP_CATALOGUE)
+        bus_only["dfe-archiver"] = replace(
+            catalogue.descriptor("dfe-archiver"), transports=frozenset({"bus"})
+        )
+
         with pytest.raises(FlowError, match="archive needs the bus transport"):
-            resolve_flow(_source(transport="direct", archive=True), _settings(default="direct"))
+            resolve_flow(
+                _source(transport="direct", archive=True), _settings(default="direct"), bus_only
+            )
 
     def test_transform_that_does_not_carry_the_transport(self):
         with pytest.raises(FlowError, match="dfe-transform-elastic carries only bus"):

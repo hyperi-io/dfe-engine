@@ -29,6 +29,7 @@ class TestShippedManifest:
         assert carries_direct == {
             "dfe-receiver",
             "dfe-loader",
+            "dfe-archiver",
             "dfe-fetcher",
             "dfe-transform-vrl",
             "dfe-transform-vector",
@@ -49,8 +50,13 @@ class TestShippedManifest:
             "dfe-transform-elastic": False,
         }
 
-    def test_the_archiver_reads_the_landing_topic_so_it_is_bus_only(self):
-        assert catalogue.descriptor("dfe-archiver").transports == frozenset({"bus"})
+    def test_the_archiver_takes_the_record_on_either_transport(self):
+        # On the bus it reads the landing topics; on direct the sender fans the
+        # record out to its Push listener beside the loader.
+        archiver = catalogue.descriptor("dfe-archiver")
+
+        assert archiver.transports == frozenset({"bus", "direct"})
+        assert archiver.endpoints[catalogue.PUSH_ENDPOINT].port == 6000
 
     def test_elastic_is_bus_only_until_its_listener_ships(self):
         assert catalogue.descriptor("dfe-transform-elastic").transports == frozenset({"bus"})
@@ -69,6 +75,9 @@ class TestShippedManifest:
             "dfe-transform-vector": True,
             "dfe-transform-elastic": True,
             "culvert": False,
+            "dfe-engine": False,
+            "dfe-ui": False,
+            "hyperdx": False,
         }
 
     def test_vector_reloads_its_transform_files_in_place(self):
@@ -95,13 +104,18 @@ class TestShippedManifest:
             if catalogue.PUSH_ENDPOINT in app.endpoints
         }
 
-        assert listening == {"dfe-loader", "dfe-transform-vrl", "dfe-transform-vector"}
+        assert listening == {
+            "dfe-loader",
+            "dfe-archiver",
+            "dfe-transform-vrl",
+            "dfe-transform-vector",
+        }
 
     def test_every_app_a_flow_can_send_to_on_direct_declares_its_listener(self):
         # A direct destination is built from this entry, so an app declaring the
         # transport without one refuses every source that names it. The receiver
         # and the fetcher carry direct only as senders, so nothing addresses them.
-        destinations = {"dfe-loader"} | {
+        destinations = {"dfe-loader", "dfe-archiver"} | {
             name
             for name in catalogue.APP_CATALOGUE
             if name.startswith(catalogue.TRANSFORM_SERVICE_PREFIX)
@@ -139,10 +153,63 @@ class TestShippedManifest:
 
         assert restricted == {"culvert": ["scale", "scale-mesh"]}
 
-    def test_no_shipped_app_is_optional_until_the_manifest_names_default_in(self):
-        # Optional is derived from default_in, which no app declares yet, so
-        # every catalogued app is deployed wherever it may be.
-        assert [name for name, app in catalogue.APP_CATALOGUE.items() if app.optional] == []
+    def test_the_apps_nothing_deploys_by_default_are_the_per_source_ones_and_the_door(self):
+        # An instance of a per-source app arrives with its source, and the edge
+        # door is dialled by an appliance fleet a deployment may not have, so
+        # neither is seeded by a profile.
+        optional = {name for name, app in catalogue.APP_CATALOGUE.items() if app.optional}
+
+        assert optional == {
+            "dfe-fetcher",
+            "dfe-transform-vrl",
+            "dfe-transform-vector",
+            "dfe-transform-elastic",
+            "culvert",
+        }
+
+    def test_the_stack_wide_apps_are_deployed_wherever_they_may_be(self):
+        # The core data path plus the two consoles: a DFE without them is not one,
+        # so none of them waits for an operator to turn it on.
+        always = {name for name, app in catalogue.APP_CATALOGUE.items() if not app.optional}
+
+        assert always == {
+            "dfe-receiver",
+            "dfe-loader",
+            "dfe-archiver",
+            "dfe-engine",
+            "dfe-ui",
+            "hyperdx",
+        }
+
+    def test_no_app_is_deployed_by_default_somewhere_it_may_not_be_deployed(self):
+        # default_in is a subset of the offer, so a profile cannot seed an app the
+        # same manifest says may not run there. Empty profiles means every profile.
+        overreaching = {
+            name: sorted(app.default_in - app.profiles)
+            for name, app in catalogue.APP_CATALOGUE.items()
+            if app.profiles and app.default_in and app.default_in - app.profiles
+        }
+
+        assert overreaching == {}
+
+    def test_the_manifest_declares_what_unconfigured_looks_like_per_app(self):
+        # Read and reported, never evaluated: the apps carry the same predicate.
+        declared = {
+            name: app.idle_when for name, app in catalogue.APP_CATALOGUE.items() if app.idle_when
+        }
+
+        assert declared == {
+            "dfe-archiver": (
+                "config.archive.destination",
+                "config.kafka.topics",
+                "config.kafka.topic_include",
+            ),
+            "dfe-fetcher": (
+                "config.sources",
+                "config.extractors.containers",
+                "config.ingest.enabled",
+            ),
+        }
 
     def test_only_elastic_selects_a_compiled_in_program_by_name(self):
         variants = {
@@ -284,6 +351,25 @@ class TestManifestParsing:
     def test_profile_keys_that_are_not_lists_are_refused(self, tmp_path):
         with pytest.raises(CatalogueError, match="default_in must be a list"):
             load_catalogue(self._manifest(tmp_path, {"default_in": "scale"}))
+
+    def test_an_app_naming_no_idle_condition_always_has_work(self, tmp_path):
+        apps = load_catalogue(self._manifest(tmp_path, {"multiplicity": "single"}))
+
+        assert apps["dfe-thing"].idle_when == ()
+
+    def test_the_idle_paths_are_read_in_the_order_the_manifest_gives_them(self, tmp_path):
+        # The order is the app's own, so it is kept rather than sorted into one
+        # the app's work_state does not share.
+        path = self._manifest(tmp_path, {"idle_when": ["config.sources", "config.ingest.enabled"]})
+
+        assert load_catalogue(path)["dfe-thing"].idle_when == (
+            "config.sources",
+            "config.ingest.enabled",
+        )
+
+    def test_an_idle_when_that_is_not_a_list_is_refused(self, tmp_path):
+        with pytest.raises(CatalogueError, match="idle_when must be a list"):
+            load_catalogue(self._manifest(tmp_path, {"idle_when": "config.sources"}))
 
     def test_the_manifest_owns_the_port_a_stage_is_sent_to(self, tmp_path):
         apps = load_catalogue(
