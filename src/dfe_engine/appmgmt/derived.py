@@ -22,6 +22,9 @@ never be authored by hand:
 ``plan`` reads the deploy repo and the sources and lists the overlay writes that
 bring the two into step. It never writes: the API applies each change through
 the governed write path so review routing and audit stay where they are.
+``reconcile`` applies the plan as the engine itself, at startup: a fresh deploy
+seeds every default app with no routing at all, and until the main flow is
+compiled in, a receiver with no destination refuses to start.
 """
 
 from __future__ import annotations
@@ -30,12 +33,15 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from dfe_engine.gitcrud import GitCrud
+from dfe_engine.gitcrud.commit_policy import CommitContext, build_message
 from dfe_engine.source.registry import SourceRegistry
 
 from . import catalogue, instances, routing
 from .instances import AppInstance
 
 DerivedAction = Literal["deploy", "sync", "remove"]
+
+ENGINE_ACTOR = "dfe-engine"
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,3 +109,28 @@ def plan(gc: GitCrud, registry: SourceRegistry, settings: Any) -> list[DerivedCh
                 changes.append(DerivedChange(app, "remove", None))
 
     return changes
+
+
+def reconcile(
+    gc: GitCrud, registry: SourceRegistry, settings: Any, actor: str = ENGINE_ACTOR
+) -> list[str]:
+    """Apply the plan straight to the tracked branch and report each write.
+
+    Derived state is never hand-authored, so it takes no review: this is the
+    same commit shape the API makes, signed by the engine rather than a user.
+    """
+    done: list[str] = []
+    for change in plan(gc, registry, settings):
+        scope, summary = instances.fit_subject(change.app, change.summary)
+        message = build_message(
+            CommitContext(
+                ctype="cfg", scope=scope, summary=summary, actor=actor, role="helmvars:write"
+            )
+        )
+        name = change.app.overlay_name
+        if change.action == "remove":
+            gc.delete(instances.HELMVARS_CLASS, name, actor, message=message)
+        else:
+            gc.put(instances.HELMVARS_CLASS, name, change.doc or {}, actor, message=message)
+        done.append(change.describe())
+    return done

@@ -87,7 +87,6 @@ from dfe_engine.auth.engine import authorize
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.gitcrud import ConcurrencyConflictError, GitCrud
 from dfe_engine.gitcrud.commit_policy import (
-    SUBJECT_MAX,
     CommitContext,
     CommitPolicyError,
     build_message,
@@ -648,23 +647,6 @@ def _overlay(gc: GitCrud, app: AppInstance) -> dict:
         ) from None
 
 
-def _fit_subject(app: AppInstance, summary: str) -> tuple[str, str]:
-    """Trim the commit scope and summary so the rendered subject fits the policy cap.
-
-    The commit standard caps a subject at 50 characters, and a service plus a legal
-    40-character instance name overruns that on its own. The scope drops to the bare
-    instance before anything is truncated, because the service is already in the
-    file path the commit touches.
-    """
-    budget = SUBJECT_MAX - len("cfg(): ")
-    summary = summary[:budget]
-    for candidate in (f"{app.service}/{app.instance}", app.instance):
-        if len(candidate) + len(summary) <= budget:
-            return candidate, summary
-    scope = app.instance[: max(1, budget - 1)]
-    return scope, summary[: max(1, budget - len(scope))]
-
-
 def _enforce(request: Request, user: Any, name: str, doc: dict) -> bool:
     """Gate every leaf the finished document carries, and report whether any is protected.
 
@@ -714,7 +696,7 @@ def commit_overlay(
     gc = _gitcrud(request)
     settings = request.app.state.settings
     name = app.overlay_name
-    scope, subject_summary = _fit_subject(app, summary)
+    scope, subject_summary = instances.fit_subject(app, summary)
     message = build_message(
         CommitContext(
             ctype="cfg",
@@ -931,7 +913,7 @@ def remove_overlay(
     settings = request.app.state.settings
     service, instance = app.service, app.instance
     name = app.overlay_name
-    scope, subject_summary = _fit_subject(app, "undeploy")
+    scope, subject_summary = instances.fit_subject(app, "undeploy")
     message = build_message(
         CommitContext(
             ctype="cfg",

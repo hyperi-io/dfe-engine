@@ -98,6 +98,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     bootstrap_clickhouse(settings=settings, gitcrud=gitcrud)
 
+    # The deploy repo's derived app state follows the sources, and a fresh deploy
+    # seeds its apps with none: compile it in now, or the receiver has no
+    # destination until somebody writes a source.
+    from dfe_engine.api.deps import get_source_registry_optional
+
+    source_registry = get_source_registry_optional()
+    if gitcrud is not None and source_registry is not None:
+        from dfe_engine.appmgmt import derived
+
+        try:
+            for line in derived.reconcile(gitcrud, source_registry, settings):
+                logger.info("Reconciled app overlay with the sources", change=line)
+        except Exception as exc:  # the apps are still reconciled on the next source write
+            logger.warning("apps not reconciled with the sources at startup", error=str(exc))
+
     # Bootstrap auth stores
     from dfe_engine.auth.bootstrap import bootstrap_auth
     from dfe_engine.auth.local_provider import LocalAuthProvider
