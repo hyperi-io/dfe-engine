@@ -16,7 +16,7 @@ Wizard order (declared in :data:`SETUP_STEPS`)::
 
     oidc_provider    optional   configure an external IdP
     organisations    required   create the first customer organisation
-    first_user       required   create a real user (NOT the local admin)
+    first_user       required   create a real user (NOT a seeded credential)
     admin_password   required   move off the shipped default admin password
 
 A step applies when the thing it configures actually exists — not when a
@@ -57,6 +57,7 @@ from dfe_engine.auth.bootstrap import (
     admin_account_password,
     default_credentials_in_use,
 )
+from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
 from dfe_engine.auth.deployment_hints import (
     credential_fetch_command,
     detect_deploy_kind,
@@ -333,16 +334,21 @@ def _has_organisation(ctx: SetupContext) -> bool:
 
 
 def _has_real_user(ctx: SetupContext) -> bool:
-    """True once an enabled account exists that is not the local admin.
+    """True once an enabled account exists that is neither seeded credential.
 
     Local or external (OIDC/JIT/SCIM-provisioned) both count — the step is
     about having a real identity, not about how it authenticates.
+
+    Neither the local admin nor ``breakglass`` clears it. Both are seeded by
+    ``bootstrap_auth`` rather than created by an operator, and break-glass is a
+    shared recovery credential, so a deployment holding only those two has
+    nobody to attribute day-to-day work to.
     """
     if ctx.account_store is None:
         return False
+    seeded = {ctx.bootstrap_admin_name, BREAKGLASS_USERNAME}
     return any(
-        account.enabled and account.username != ctx.bootstrap_admin_name
-        for account in ctx.account_store.list()
+        account.enabled and account.username not in seeded for account in ctx.account_store.list()
     )
 
 
