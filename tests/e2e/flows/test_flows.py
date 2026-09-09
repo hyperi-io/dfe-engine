@@ -255,11 +255,15 @@ def _wait_until_routed(e2e, ch_client, shape: shapes.FlowShape, expectation) -> 
     The probe rows are the WAIT: before the receiver has rolled onto the new
     routing they land in default, which is why the payload the case asserts on is
     only sent once this returns.
+
+    One marker for every probe, so a row posted on an earlier pass satisfies a
+    later count. A marker per pass would only ever see its own row if the whole
+    trip finished between the post and the query, which it does not have to.
     """
     table = f"{e2e.ch_db}.{expectation.table}"
+    probe = _marker()
 
     def routed() -> int:
-        probe = _marker()
         post_events(e2e, _bodies(shape, probe))
         return count_rows(ch_client, table, marker=probe)
 
