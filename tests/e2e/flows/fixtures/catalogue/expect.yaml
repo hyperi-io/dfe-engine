@@ -14,6 +14,12 @@ origin: catalogue
 catalogue:
   intake: receiver
 
+# The only app shipping a catalogue is dfe-transform-elastic (apps.yaml
+# catalogue:), and it carries the bus alone, so every entry compiles onto a
+# transform a direct source cannot name.
+expected_skip:
+  direct: the mounted catalogue belongs to dfe-transform-elastic, which carries the bus alone until its gRPC listener ships (dfe-transform-elastic#19)
+
 expect:
   - source: "{entry}"
     table: "{entry}"

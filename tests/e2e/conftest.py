@@ -213,12 +213,21 @@ def poll_until(
     )
 
 
+# A source write recompiles the receiver's ConfigMap and the deployment rolls on the
+# new checksum, so how long a post gives the replacement to come back.
+INGEST_RETRY_WINDOW = 180.0
+
+
 def post_events(cfg: E2EConfig, bodies: list[dict]) -> None:
     """POST each body to the deployment's ingest endpoint.
 
     Shared because both live suites send the same way, and a second copy would be
     a second place for the token header or the TLS posture to drift. Callers gate
     on ``require(cfg, "receiver_url")`` first.
+
+    A connection dropped mid-roll is retried until ``INGEST_RETRY_WINDOW`` runs
+    out, because rolling on a routing change is the behaviour under test. A
+    rejection the receiver answers with still fails on the spot.
     """
     import httpx
 
@@ -226,10 +235,21 @@ def post_events(cfg: E2EConfig, bodies: list[dict]) -> None:
     headers = {"Content-Type": "application/json"}
     if cfg.receiver_token:
         headers["Authorization"] = f"Bearer {cfg.receiver_token}"
-    with httpx.Client(verify=cfg.verify, timeout=30.0) as client:
-        for body in bodies:
-            response = client.post(url, json=body, headers=headers)
+    for body in bodies:
+        deadline = time.monotonic() + INGEST_RETRY_WINDOW
+        while True:
+            try:
+                with httpx.Client(verify=cfg.verify, timeout=30.0) as client:
+                    response = client.post(url, json=body, headers=headers)
+            except httpx.TransportError as exc:
+                if time.monotonic() >= deadline:
+                    raise AssertionError(
+                        f"the receiver never answered within {INGEST_RETRY_WINDOW}s: {exc}"
+                    ) from exc
+                time.sleep(2.0)
+                continue
             assert response.status_code < 300, f"receiver rejected the event: {response.text}"
+            break
 
 
 # ClickHouse says one of these when the table or database is simply not there
@@ -237,8 +257,15 @@ def post_events(cfg: E2EConfig, bodies: list[dict]) -> None:
 NOT_THERE_YET = ("UNKNOWN_TABLE", "UNKNOWN_DATABASE", "does not exist", "doesn't exist")
 
 
-def count_rows(ch_client, table: str, *, where: str = "", marker: str | None = None) -> int:
-    """Rows in *table*, narrowed by a WHERE and/or this run's marker.
+def count_rows(
+    ch_client,
+    table: str,
+    *,
+    where: str = "",
+    marker: str | None = None,
+    contains: str | None = None,
+) -> int:
+    """Rows in *table*, narrowed by a WHERE, this run's marker and/or a substring.
 
     Answers 0 only while the table or database does not exist yet. Every other
     error is raised: a query that cannot run - an unknown column, a function the
@@ -249,11 +276,24 @@ def count_rows(ch_client, table: str, *, where: str = "", marker: str | None = N
     holds the same bytes as the ClickHouse JSON type, which LIKE refuses, and a
     typed source table carries neither - such a table is counted with a delta
     instead.
+
+    ``contains`` is a second ``_raw`` substring, bound the same way. A caller that
+    wrote the LIKE into *where* by hand would put a bare ``%`` into the SQL, which
+    clickhouse-connect then reads as its own parameter placeholder.
     """
-    clauses = [c for c in (where, "_raw LIKE %(m)s" if marker else "") if c]
+    clauses = [
+        c
+        for c in (where, "_raw LIKE %(m)s" if marker else "", "_raw LIKE %(c)s" if contains else "")
+        if c
+    ]
+    parameters: dict[str, str] = {}
+    if marker:
+        parameters["m"] = f"%{marker}%"
+    if contains:
+        parameters["c"] = f"%{contains}%"
     sql = f"SELECT count() FROM {table}" + (f" WHERE {' AND '.join(clauses)}" if clauses else "")
     try:
-        result = ch_client.query(sql, parameters={"m": f"%{marker}%"} if marker else None)
+        result = ch_client.query(sql, parameters=parameters or None)
     except Exception as exc:
         if any(text in str(exc) for text in NOT_THERE_YET):
             return 0
