@@ -40,6 +40,11 @@ is deliberately no default port: a missing entry means no listener, which is a
 different thing from a listener on the usual number.
 """
 
+# The only two names ``mesh.host_pattern`` may substitute - the deployment's name
+# for a pool, and where its listener lives - checked when the manifest loads.
+MESH_INSTANCE = "instance"
+MESH_NAMESPACE = "mesh_namespace"
+
 # dfe-infra chart key paths. Uniform across every chart because they all call the
 # same KEDA library template - see helm/library/dfe-common/templates/_keda.tpl.
 REPLICA_COUNT_PATH = "replicaCount"
@@ -462,6 +467,29 @@ def load_catalogue(path: Path | str | None = None) -> dict[str, AppDescriptor]:
     return {name: _descriptor_from(name, raw or {}) for name, raw in apps.items()}
 
 
+def load_mesh(path: Path | str | None = None) -> str:
+    """The address SHAPE a sender uses where the stage pools sit behind a listener.
+
+    Declared once for the whole manifest rather than per endpoint: the charts
+    render one listener alias per pool from the same rule, so a copy under each
+    app would be a second thing to keep in step. Empty when the manifest declares
+    none, which is every deployment whose senders dial the pools' own Services.
+    """
+    mesh = _read_manifest(path).get("mesh") or {}
+    if not isinstance(mesh, dict):
+        raise CatalogueError("app manifest 'mesh' must be a mapping")
+    pattern = str(mesh.get("host_pattern") or "")
+    if pattern:
+        try:
+            pattern.format(**{MESH_INSTANCE: "", MESH_NAMESPACE: ""})
+        except (KeyError, IndexError) as exc:
+            raise CatalogueError(
+                f"mesh.host_pattern may name only {{{MESH_INSTANCE}}} and "
+                f"{{{MESH_NAMESPACE}}}: {exc}"
+            ) from exc
+    return pattern
+
+
 def load_kinds(path: Path | str | None = None) -> dict[str, ArtifactKind]:
     """Read the artefact kinds the versioned library accepts.
 
@@ -479,13 +507,17 @@ APP_CATALOGUE: dict[str, AppDescriptor] = load_catalogue()
 
 ARTIFACT_KINDS: dict[str, ArtifactKind] = load_kinds()
 
+MESH_HOST_PATTERN: str = load_mesh()
+
 
 def reload_catalogue(path: Path | str | None = None) -> dict[str, AppDescriptor]:
     """Re-read the manifest in place, so a remounted file takes effect."""
+    global MESH_HOST_PATTERN
     APP_CATALOGUE.clear()
     APP_CATALOGUE.update(load_catalogue(path))
     ARTIFACT_KINDS.clear()
     ARTIFACT_KINDS.update(load_kinds(path))
+    MESH_HOST_PATTERN = load_mesh(path)
     return APP_CATALOGUE
 
 
@@ -550,18 +582,47 @@ def _push(app: AppDescriptor) -> AppEndpoint:
     return endpoint
 
 
-def push_endpoint(app: AppDescriptor, instance: str) -> str:
+def _deployed_name(app: AppDescriptor, instance: str) -> str:
+    """The name this app's own chart renders the deployment under.
+
+    A stack-wide app is named for itself; a per-config app for its instance.
+    """
+    return instance_name(app, instance) if app.component_is_per_instance else app.service
+
+
+def _mesh_host(app: AppDescriptor, instance: str, namespace: str) -> str:
+    """The listener alias a sender dials to reach this deployment's pool.
+
+    Built from the deployment's own name and never from an endpoint's ``service``
+    override: the alias is rendered beside the pool by its own chart, off the
+    same name.
+    """
+    if not MESH_HOST_PATTERN:
+        raise CatalogueError(
+            "this deployment balances its pools behind listeners, but the app manifest "
+            "declares no mesh.host_pattern to address them by"
+        )
+    return MESH_HOST_PATTERN.format(
+        **{MESH_INSTANCE: _deployed_name(app, instance), MESH_NAMESPACE: namespace}
+    )
+
+
+def push_endpoint(app: AppDescriptor, instance: str, mesh_namespace: str = "") -> str:
     """Where a direct-transport stage sends records for this app's *instance*.
 
     A stack-wide app answers on its own Service; a per-config app answers on the
     instance's. Both the port and any Service-name override are the manifest's,
     so a chart that moves its listener is a manifest edit.
+
+    Given a namespace, the pool sits behind a listener there and the sender dials
+    that alias on the same port instead: a Service balances per connection and
+    gRPC holds one, so every record would otherwise go to the pod the first
+    connection landed on.
     """
     endpoint = _push(app)
-    host = endpoint.service or (
-        instance_name(app, instance) if app.component_is_per_instance else app.service
-    )
-    return f"http://{host}:{endpoint.port}"
+    if mesh_namespace:
+        return f"http://{_mesh_host(app, instance, mesh_namespace)}:{endpoint.port}"
+    return f"http://{endpoint.service or _deployed_name(app, instance)}:{endpoint.port}"
 
 
 def push_listen(app: AppDescriptor) -> str:

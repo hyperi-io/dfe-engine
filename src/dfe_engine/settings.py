@@ -70,6 +70,8 @@ Kafka:
 Transport (what carries a source's records between its stages):
 - DFE_TRANSPORT_DEFAULT -> transport.default (bus | direct)
 - DFE_TRANSPORT_BUS_PRESENT -> transport.bus_present (true/false)
+- DFE_MESH_ENABLED -> transport.mesh_enabled (true/false)
+- DFE_MESH_NAMESPACE -> transport.mesh_namespace (where the pool listeners live)
 
 Redpanda Cloud lifecycle (control plane; opt-in, WS-C dfe-engine#99):
 - DFE_REDPANDA_API_KEY -> kafka.redpanda_cloud.client_id (OAuth2 client id)
@@ -436,9 +438,16 @@ class TransportSettings(BaseModel):
     provider joins behind the same ``bus`` value without touching a source.
     ``bus_present`` follows the profile - the brokerless profiles run direct.
 
+    The mesh pair is the same kind of fact one level down: on direct a stage is a
+    pool of pods, and a deployment either dials the pool's Service or puts a
+    balancing listener in front of it. The engine compiles a sender's destination,
+    so it has to address the pool the way the charts front it.
+
     Environment variables:
     - DFE_TRANSPORT_DEFAULT -> transport.default
     - DFE_TRANSPORT_BUS_PRESENT -> transport.bus_present
+    - DFE_MESH_ENABLED -> transport.mesh_enabled
+    - DFE_MESH_NAMESPACE -> transport.mesh_namespace
     """
 
     default: SourceTransport = Field(
@@ -456,6 +465,14 @@ class TransportSettings(BaseModel):
     direct_protocol: str = Field(
         default="grpc",
         description="Which protocol carries the ``direct`` transport",
+    )
+    mesh_enabled: bool = Field(
+        default=False,
+        description="Whether this deployment's stage pools sit behind balancing listeners",
+    )
+    mesh_namespace: str = Field(
+        default="",
+        description="Namespace holding those listeners; the address shape is the app manifest's",
     )
 
     def available(self) -> set[str]:
@@ -475,6 +492,17 @@ class TransportSettings(BaseModel):
                 f"transport.default is {self.default!r} but this deployment offers "
                 f"{', '.join(sorted(self.available()))}: set DFE_TRANSPORT_DEFAULT=direct, "
                 "or DFE_TRANSPORT_BUS_PRESENT=true"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _mesh_needs_a_namespace(self) -> "TransportSettings":
+        # The address is the manifest's shape plus this namespace, so an unset one
+        # compiles every sender a destination with a hole where the host goes.
+        if self.mesh_enabled and not self.mesh_namespace:
+            raise ValueError(
+                "transport.mesh_enabled is on but no namespace holds the listeners: set "
+                "DFE_MESH_NAMESPACE, or DFE_MESH_ENABLED=false to dial the pools directly"
             )
         return self
 
@@ -1624,6 +1652,12 @@ def _get_env_overrides() -> dict:
         overrides["transport"]["default"] = val
     if val := _get_env("DFE_TRANSPORT_BUS_PRESENT"):
         overrides["transport"]["bus_present"] = val.lower() in ("true", "1", "yes")
+    # How the direct transport addresses a stage: the pool's own Service, or the
+    # balancing listener a profile put in front of it. Both come from the chart.
+    if val := _get_env("DFE_MESH_ENABLED"):
+        overrides["transport"]["mesh_enabled"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_MESH_NAMESPACE"):
+        overrides["transport"]["mesh_namespace"] = val
 
     # Redpanda Cloud lifecycle (control-plane OAuth2 client; opt-in, WS-C
     # dfe-engine#99). DFE_REDPANDA_API_KEY/_SECRET are the pre-existing names this

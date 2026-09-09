@@ -39,19 +39,12 @@ def _fetched(name: str = "okta", **fields) -> Source:
     return Source.model_validate(data)
 
 
-def _with_listener(service: str) -> dict:
-    """The catalogue as it is once *service* ships its Push listener.
-
-    Declaring the transport and the endpoint is the WHOLE of what a transform
-    gains one, so the direct form is exercised through a manifest edit.
-    """
-    apps = dict(catalogue.APP_CATALOGUE)
-    apps[service] = replace(
-        apps[service],
-        transports=frozenset({"bus", "direct"}),
-        endpoints={catalogue.PUSH_ENDPOINT: catalogue.AppEndpoint(port=6000)},
-    )
-    return apps
+BUS_ONLY_ENGINES = sorted(
+    engine
+    for engine in catalogue.transform_engines()
+    if not catalogue.descriptor(catalogue.transform_service(engine)).carries("direct")
+)
+"""The transforms still waiting on a Push listener, read off the shipped manifest."""
 
 
 class TestBusTransport:
@@ -106,14 +99,13 @@ class TestDirectTransport:
 
     def test_transform_answers_on_its_own_instance_service(self):
         flow = resolve_flow(
-            _source(transport="direct", transform={"engine": "vector"}),
+            _source(transport="direct", transform={"engine": "vrl"}),
             _settings(default="direct"),
-            _with_listener("dfe-transform-vector"),
         )
 
         assert flow.transform is not None
-        assert flow.transform.instance == "dfe-transform-vector-auth"
-        assert flow.transform.endpoint == "http://dfe-transform-vector-auth:6000"
+        assert flow.transform.instance == "dfe-transform-vrl-auth"
+        assert flow.transform.endpoint == "http://dfe-transform-vrl-auth:6000"
         assert flow.transform.topics is None
         assert flow.outputs.loader == "http://dfe-loader:6000"
 
@@ -123,6 +115,55 @@ class TestDirectTransport:
         assert flow.origin == "fetcher"
         assert flow.input == "dfe-fetcher-okta"
         assert flow.outputs.loader == "http://dfe-loader:6000"
+
+
+class TestMesh:
+    """Where a deployment balances its pools behind listeners, every address moves."""
+
+    NAMESPACE = "envoy-gateway-system"
+
+    def _mesh(self) -> DFESettings:
+        return _settings(default="direct", mesh_enabled=True, mesh_namespace=self.NAMESPACE)
+
+    def test_the_loader_is_addressed_at_its_listener_alias(self):
+        flow = resolve_flow(_source(), self._mesh())
+
+        assert flow.outputs.loader == (
+            f"http://dfe-loader-mesh.{self.NAMESPACE}.svc.cluster.local:6000"
+        )
+
+    def test_a_transform_pool_is_addressed_at_its_own_alias(self):
+        flow = resolve_flow(_source(transform={"engine": "vrl"}), self._mesh())
+
+        assert flow.transform is not None
+        assert flow.transform.endpoint == (
+            f"http://dfe-transform-vrl-auth-mesh.{self.NAMESPACE}.svc.cluster.local:6000"
+        )
+        assert flow.outputs.loader == (
+            f"http://dfe-loader-mesh.{self.NAMESPACE}.svc.cluster.local:6000"
+        )
+
+    def test_a_namespace_alone_changes_no_address(self):
+        # The namespace reaches the engine on every profile; the switch is what
+        # decides whether a sender uses it.
+        flow = resolve_flow(
+            _source(transform={"engine": "vrl"}),
+            _settings(default="direct", mesh_namespace=self.NAMESPACE),
+        )
+
+        assert flow.transform is not None
+        assert flow.transform.endpoint == "http://dfe-transform-vrl-auth:6000"
+        assert flow.outputs.loader == "http://dfe-loader:6000"
+
+    def test_the_bus_is_unaffected(self):
+        flow = resolve_flow(
+            _source(transform={"engine": "vrl"}),
+            _settings(default="bus", mesh_enabled=True, mesh_namespace=self.NAMESPACE),
+        )
+
+        assert flow.transform is not None
+        assert flow.transform.topics == ("auth_land", "auth_load")
+        assert flow.outputs.loader == "auth_load"
 
 
 class TestDeploymentDefault:
@@ -156,10 +197,10 @@ class TestRefusals:
                 _settings(default="direct"),
             )
 
-    @pytest.mark.parametrize("engine", sorted(catalogue.transform_engines()))
-    def test_every_shipped_transform_refuses_direct_today(self, engine):
-        # None of them ships a Push listener, so a direct source is transformless
-        # until one does - and that is a manifest edit, not a code change.
+    @pytest.mark.parametrize("engine", BUS_ONLY_ENGINES)
+    def test_a_transform_without_a_listener_refuses_direct(self, engine):
+        # Shipping the listener and declaring it is the whole change; nothing
+        # here names an app.
         with pytest.raises(FlowError, match="carries only bus"):
             resolve_flow(
                 _source(transport="direct", transform={"engine": engine}),
@@ -193,11 +234,10 @@ class TestRefusals:
                         "source": "auth",
                         "match": {"field": "_json.app", "operator": "exists"},
                         "transport": "direct",
-                        "transform": {"engine": "vector"},
+                        "transform": {"engine": "vrl"},
                     }
                 ),
                 _settings(default="direct"),
-                _with_listener("dfe-transform-vector"),
             )
 
     def test_the_same_match_is_fine_without_a_transform(self):

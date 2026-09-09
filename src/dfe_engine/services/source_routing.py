@@ -245,7 +245,7 @@ def compile_receiver_destinations(registry: SourceRegistry, settings: Any) -> De
         )
 
     if default == LOADER_DESTINATION:
-        endpoints.setdefault(LOADER_DESTINATION, loader_endpoint())
+        endpoints.setdefault(LOADER_DESTINATION, loader_endpoint(settings))
     return DestinationsConfig(
         default=default,
         rules=rules,

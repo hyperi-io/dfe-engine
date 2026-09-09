@@ -26,17 +26,28 @@ class TestShippedManifest:
             name for name, app in catalogue.APP_CATALOGUE.items() if app.carries("direct")
         }
 
-        assert carries_direct == {"dfe-receiver", "dfe-loader", "dfe-fetcher"}
+        assert carries_direct == {
+            "dfe-receiver",
+            "dfe-loader",
+            "dfe-fetcher",
+            "dfe-transform-vrl",
+            "dfe-transform-vector",
+        }
 
-    def test_no_transform_carries_direct_until_one_ships_a_listener(self):
-        transforms = {
-            name: app
+    def test_vrl_and_vector_are_the_transforms_that_carry_direct(self):
+        # Each runs a Push listener beside its bus consumer; elastic carries
+        # the bus alone until its listener ships, which is a manifest edit.
+        carriers = {
+            name: app.carries("direct")
             for name, app in catalogue.APP_CATALOGUE.items()
             if name.startswith(catalogue.TRANSFORM_SERVICE_PREFIX)
         }
 
-        assert transforms
-        assert not any(app.carries("direct") for app in transforms.values())
+        assert carriers == {
+            "dfe-transform-vrl": True,
+            "dfe-transform-vector": True,
+            "dfe-transform-elastic": False,
+        }
 
     def test_the_archiver_reads_the_landing_topic_so_it_is_bus_only(self):
         assert catalogue.descriptor("dfe-archiver").transports == frozenset({"bus"})
@@ -74,7 +85,7 @@ class TestShippedManifest:
         assert vrl.hot_reload is False
         assert {f.name: f.reload for f in vrl.files}["transforms"] == catalogue.ReloadMode.ROLL
 
-    def test_only_the_loader_answers_on_a_push_listener_today(self):
+    def test_the_apps_that_answer_on_a_push_listener_declare_it(self):
         # An app declares the endpoint when it ships the listener, so this set IS
         # the answer to "what can a direct source be sent to".
         listening = {
@@ -83,12 +94,35 @@ class TestShippedManifest:
             if catalogue.PUSH_ENDPOINT in app.endpoints
         }
 
-        assert listening == {"dfe-loader"}
+        assert listening == {"dfe-loader", "dfe-transform-vrl", "dfe-transform-vector"}
+
+    def test_every_app_a_flow_can_send_to_on_direct_declares_its_listener(self):
+        # A direct destination is built from this entry, so an app declaring the
+        # transport without one refuses every source that names it. The receiver
+        # and the fetcher carry direct only as senders, so nothing addresses them.
+        destinations = {"dfe-loader"} | {
+            name
+            for name in catalogue.APP_CATALOGUE
+            if name.startswith(catalogue.TRANSFORM_SERVICE_PREFIX)
+        }
+        undeliverable = sorted(
+            name
+            for name in destinations
+            if catalogue.APP_CATALOGUE[name].carries("direct")
+            and catalogue.PUSH_ENDPOINT not in catalogue.APP_CATALOGUE[name].endpoints
+        )
+
+        assert not undeliverable
 
     def test_the_loader_endpoint_is_the_one_the_charts_render(self):
         assert catalogue.push_endpoint(catalogue.descriptor("dfe-loader"), "") == (
             "http://dfe-loader:6000"
         )
+
+    def test_the_manifest_declares_how_a_pool_behind_a_listener_is_addressed(self):
+        # Both names are substituted, so neither the deployment's namespace nor
+        # the pool's own name is baked into the pattern.
+        assert catalogue.MESH_HOST_PATTERN == "{instance}-mesh.{mesh_namespace}.svc.cluster.local"
 
     def test_only_elastic_selects_a_compiled_in_program_by_name(self):
         variants = {
@@ -101,9 +135,9 @@ class TestShippedManifest:
 
 
 class TestManifestParsing:
-    def _manifest(self, tmp_path, app: dict):
+    def _manifest(self, tmp_path, app: dict, **top):
         path = tmp_path / "apps.yaml"
-        yaml_dump({"apps": {"dfe-thing": app}}, path)
+        yaml_dump({"apps": {"dfe-thing": app}, **top}, path)
         return path
 
     def test_an_app_that_declares_no_transport_is_bus_only(self, tmp_path):
@@ -177,6 +211,23 @@ class TestManifestParsing:
         with pytest.raises(CatalogueError, match="non-empty mapping"):
             load_catalogue(path)
 
+    def test_a_manifest_with_no_mesh_block_addresses_nothing_that_way(self, tmp_path):
+        assert catalogue.load_mesh(self._manifest(tmp_path, {})) == ""
+
+    def test_a_host_pattern_naming_anything_else_is_refused_at_load(self, tmp_path):
+        # It renders an address a sender dials, so a name nothing substitutes
+        # would fail at the send rather than here.
+        path = self._manifest(tmp_path, {}, mesh={"host_pattern": "{pool}.{cluster}"})
+
+        with pytest.raises(CatalogueError, match="may name only"):
+            catalogue.load_mesh(path)
+
+    def test_a_mesh_that_is_not_a_mapping_is_refused(self, tmp_path):
+        path = self._manifest(tmp_path, {}, mesh="{instance}-mesh")
+
+        with pytest.raises(CatalogueError, match="'mesh' must be a mapping"):
+            catalogue.load_mesh(path)
+
 
 class TestNaming:
     def test_an_instance_is_named_for_its_app_and_its_source(self):
@@ -191,15 +242,46 @@ class TestNaming:
         assert catalogue.push_endpoint(loader, "auth") == "http://dfe-loader:6000"
 
     def test_a_per_source_app_answers_on_its_instance_service(self):
-        from dataclasses import replace
-
-        vrl = replace(
-            catalogue.descriptor("dfe-transform-vrl"),
-            endpoints={catalogue.PUSH_ENDPOINT: catalogue.AppEndpoint(port=6000)},
-        )
+        vrl = catalogue.descriptor("dfe-transform-vrl")
 
         assert catalogue.push_endpoint(vrl, "auth") == "http://dfe-transform-vrl-auth:6000"
 
     def test_transform_service_is_the_inverse_of_the_engine_name(self):
         for engine in catalogue.transform_engines():
             assert catalogue.transform_service(engine) in catalogue.APP_CATALOGUE
+
+
+class TestMeshAddressing:
+    """A deployment whose pools sit behind listeners, addressed by the same rule."""
+
+    NAMESPACE = "envoy-gateway-system"
+
+    def test_a_stack_wide_pool_is_dialled_at_its_listener_alias(self):
+        loader = catalogue.descriptor("dfe-loader")
+
+        assert catalogue.push_endpoint(loader, "", self.NAMESPACE) == (
+            f"http://dfe-loader-mesh.{self.NAMESPACE}.svc.cluster.local:6000"
+        )
+
+    def test_a_per_source_pool_carries_its_source_into_the_alias(self):
+        vrl = catalogue.descriptor("dfe-transform-vrl")
+
+        assert catalogue.push_endpoint(vrl, "auth", self.NAMESPACE) == (
+            f"http://dfe-transform-vrl-auth-mesh.{self.NAMESPACE}.svc.cluster.local:6000"
+        )
+
+    def test_the_port_is_the_declared_one_either_way(self):
+        # The alias publishes the pool's own push port, so only the host moves.
+        vrl = catalogue.descriptor("dfe-transform-vrl")
+
+        assert catalogue.push_endpoint(vrl, "auth").endswith(":6000")
+        assert catalogue.push_endpoint(vrl, "auth", self.NAMESPACE).endswith(":6000")
+
+    def test_a_pod_binds_its_own_port_whatever_fronts_it(self):
+        assert catalogue.push_listen(catalogue.descriptor("dfe-transform-vrl")) == "0.0.0.0:6000"
+
+    def test_a_manifest_with_no_pattern_refuses_to_invent_an_address(self, monkeypatch):
+        monkeypatch.setattr(catalogue, "MESH_HOST_PATTERN", "")
+
+        with pytest.raises(CatalogueError, match=r"no mesh\.host_pattern"):
+            catalogue.push_endpoint(catalogue.descriptor("dfe-loader"), "", self.NAMESPACE)
