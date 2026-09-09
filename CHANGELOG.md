@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.21](https://github.com/hyperi-io/dfe-engine/compare/v1.19.20...v1.19.21) (2026-09-09)
+
+### Bug Fixes
+
+* **auth:** retire the bootstrap admin once a real admin exists ([02903c0](https://github.com/hyperi-io/dfe-engine/commit/02903c001da5bdea86040a242a71f39e8bb434e0))
+
 ## [1.19.20](https://github.com/hyperi-io/dfe-engine/compare/v1.19.19...v1.19.20) (2026-09-09)
 
 ### Bug Fixes
