@@ -17,7 +17,6 @@ Wizard order (declared in :data:`SETUP_STEPS`)::
     oidc_provider    optional   configure an external IdP
     organisations    required   create the first customer organisation
     first_user       required   create a real user (NOT a seeded credential)
-    admin_password   required   move off the shipped default admin password
 
 A step applies when the thing it configures actually exists — not when a
 settings toggle says so. ``app.py`` bootstraps the account store and seeds the
@@ -30,10 +29,10 @@ the wizard has to say so.
 JIT-provisioned at first login — hence OIDC comes first, so an operator who
 wants IdP-only users can configure it before creating anyone.
 
-``admin_password`` is deliberately last: the admin credential is what gets you
-through the earlier steps. It only ever appears outstanding in a dev posture —
-the engine refuses to start on the default password anywhere else — so the
-step exists to chase a tyre-kicker deployment off ``changeme``.
+The admin password is not a wizard step: every deployment mints one at deploy
+time and the engine refuses to start on the shipped default outside a dev
+posture. ``default_credentials`` reports the dev deployment that is still on it,
+for the UI to banner.
 
 The status also carries ``deploy_kind`` and ``credential_fetch_command``, which
 the pre-login page shows so an operator can read the password their deployment
@@ -70,17 +69,15 @@ if TYPE_CHECKING:
     from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
     from dfe_engine.orgs.registry import OrgRegistry
 
-# The bootstrap-seeded LOCAL ADMIN (see auth/bootstrap.py::_seed_admin), as
-# configured in settings.auth.local, so rotation is measured against what was seeded.
-# It does not count as the "first user" — that step is about getting off the shared
-# admin credential and onto a real identity.
+# The bootstrap-seeded LOCAL ADMIN (see auth/bootstrap.py::_seed_admin) does not
+# count as the "first user" — that step is about getting off the shared admin
+# credential and onto a real identity.
 
 # Stable step ids. These are an API contract: the UI keys its wizard screens
 # off them, so treat a rename as a breaking change.
 STEP_OIDC_PROVIDER = "oidc_provider"
 STEP_ORGANISATIONS = "organisations"
 STEP_FIRST_USER = "first_user"
-STEP_ADMIN_PASSWORD = "admin_password"
 
 
 # ── Context ──────────────────────────────────────────────────
@@ -109,7 +106,7 @@ class SetupContext:
     org_registry: OrgRegistry | None = None
     oidc_registry: OIDCProviderRegistry | None = None
     break_glass_git: AccountGitState | None = None
-    # The configured local admin; the default password is what the wizard chases off.
+    # The configured local admin; its password is what ``default_credentials`` grades.
     bootstrap_admin_name: str = field(default_factory=admin_account_name)
     bootstrap_admin_password: str = field(default_factory=admin_account_password)
     # Where the operator reads the minted password, for the pre-login page.
@@ -352,19 +349,6 @@ def _has_real_user(ctx: SetupContext) -> bool:
     )
 
 
-def _has_local_admin_account(ctx: SetupContext) -> bool:
-    """True when the bootstrap-seeded local admin account is on disk.
-
-    Not the ``breakglass`` recovery account, which is a separate identity with
-    its own hash in the deploy repo. ``bootstrap_auth`` seeds this one on every
-    startup, so it is the honest test of whether there is an admin password to
-    move off the default.
-    """
-    if ctx.account_store is None:
-        return False
-    return ctx.account_store.get(ctx.bootstrap_admin_name) is not None
-
-
 def default_credentials(ctx: SetupContext) -> bool:
     """True when the deployment is still running on the shipped admin password.
 
@@ -374,11 +358,6 @@ def default_credentials(ctx: SetupContext) -> bool:
     reasserted at the next start.
     """
     return default_credentials_in_use(ctx.bootstrap_admin_password)
-
-
-def _admin_password_step_complete(ctx: SetupContext) -> bool:
-    """The deployment minted its own admin password rather than shipping on the default."""
-    return not default_credentials(ctx)
 
 
 SETUP_STEPS: tuple[StepDefinition, ...] = (
@@ -414,19 +393,6 @@ SETUP_STEPS: tuple[StepDefinition, ...] = (
         applies=lambda ctx: ctx.account_store is not None,
         required=lambda _ctx: True,
         complete=_has_real_user,
-    ),
-    StepDefinition(
-        id=STEP_ADMIN_PASSWORD,
-        title="Move off the default admin password",
-        description=(
-            "The admin account is still on the shipped default password. Mint a "
-            "password in the deployment's secret store and inject it as "
-            "DFE_AUTH_LOCAL_ADMIN_PASSWORD — the engine reasserts that value on "
-            "every boot, so a password set anywhere else is reverted."
-        ),
-        applies=_has_local_admin_account,
-        required=lambda _ctx: True,
-        complete=_admin_password_step_complete,
     ),
 )
 

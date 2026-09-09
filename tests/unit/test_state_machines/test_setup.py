@@ -21,7 +21,6 @@ from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.orgs.registry import OrgRegistry
 from dfe_engine.state_machines.setup import (
     SETUP_MACHINE,
-    STEP_ADMIN_PASSWORD,
     STEP_FIRST_USER,
     STEP_OIDC_PROVIDER,
     STEP_ORGANISATIONS,
@@ -60,7 +59,7 @@ def test_fresh_deployment_lands_on_the_first_required_step(ctx):
 
     assert state.complete is False
     assert state.current_step == STEP_ORGANISATIONS
-    assert state.pending_steps == [STEP_ORGANISATIONS, STEP_FIRST_USER, STEP_ADMIN_PASSWORD]
+    assert state.pending_steps == [STEP_ORGANISATIONS, STEP_FIRST_USER]
     assert state.completed_steps == []
 
 
@@ -81,26 +80,25 @@ def test_steps_do_not_depend_on_the_auth_settings_toggles(ctx):
 
     ``bootstrap_auth`` seeds it unconditionally and ``POST /auth/login`` never
     consults auth.enabled / auth.local.enabled, so gating these steps on those
-    toggles would hide a live default credential. The context does not carry
-    them at all — this test pins that.
+    toggles would hide a live credential. The context does not carry them at
+    all — this test pins that.
     """
     state = SETUP_MACHINE.evaluate(ctx)
 
     assert STEP_FIRST_USER in state.steps
-    assert STEP_ADMIN_PASSWORD in state.steps
     assert not hasattr(ctx, "auth_enabled")
 
 
-def test_admin_password_step_drops_when_there_is_no_local_admin_account(tmp_path):
-    no_admin = SetupContext(
-        account_store=AccountStore(tmp_path / "accounts"),
-        org_registry=OrgRegistry(tmp_path / "orgs"),
-    )
+def test_the_wizard_has_no_admin_password_step(ctx):
+    """Every deployment mints the admin password, so the wizard never asks for one.
 
-    state = SETUP_MACHINE.evaluate(no_admin)
+    A dev deployment still on the shipped default is reported by
+    ``default_credentials``, not by an outstanding step.
+    """
+    state = SETUP_MACHINE.evaluate(ctx)
 
-    assert STEP_ADMIN_PASSWORD not in state.steps
-    assert STEP_FIRST_USER in state.steps
+    assert state.steps == [STEP_OIDC_PROVIDER, STEP_ORGANISATIONS, STEP_FIRST_USER]
+    assert SETUP_MACHINE.status(ctx).default_credentials is True
 
 
 def test_disabled_oidc_provider_does_not_satisfy_the_step(ctx):
@@ -151,24 +149,18 @@ def test_external_account_counts_as_the_first_user(ctx):
     assert STEP_FIRST_USER in SETUP_MACHINE.evaluate(ctx).completed_steps
 
 
-def test_admin_password_step_clears_once_the_password_is_minted(ctx):
-    assert STEP_ADMIN_PASSWORD not in SETUP_MACHINE.evaluate(ctx).completed_steps
-
-    assert STEP_ADMIN_PASSWORD in SETUP_MACHINE.evaluate(_minted(ctx)).completed_steps
-
-
-def test_completion_reads_the_config_not_the_stored_hash(ctx):
+def test_default_credentials_reads_the_config_not_the_stored_hash(ctx):
     """The admin is reconciled from config on every boot, so config is the verdict.
 
     A password changed only in the store is reverted at the next start, so it must
-    not clear the step.
+    not clear the flag.
     """
     ctx.account_store.reset_password("admin", "a-store-only-password")
 
-    assert STEP_ADMIN_PASSWORD not in SETUP_MACHINE.evaluate(ctx).completed_steps
+    assert SETUP_MACHINE.status(ctx).default_credentials is True
 
 
-def test_default_credentials_flag_tracks_the_step(ctx):
+def test_default_credentials_clears_once_the_password_is_minted(ctx):
     assert SETUP_MACHINE.status(ctx).default_credentials is True
     assert SETUP_MACHINE.status(_minted(ctx)).default_credentials is False
 
@@ -188,8 +180,7 @@ def test_context_takes_the_bootstrap_credential_from_settings(tmp_path):
     ctx = SetupContext.from_app_state(state)
 
     assert ctx.bootstrap_admin_name == "root"
-    assert STEP_ADMIN_PASSWORD in SETUP_MACHINE.evaluate(ctx).steps
-    assert STEP_ADMIN_PASSWORD not in SETUP_MACHINE.evaluate(ctx).completed_steps
+    assert SETUP_MACHINE.status(ctx).default_credentials is True
 
 
 def test_context_carries_the_deploy_kind_and_fetch_command(tmp_path):
@@ -293,7 +284,7 @@ def test_an_unmerged_deploy_repo_no_longer_blocks_setup(ctx):
     state = SETUP_MACHINE.evaluate(_with_git(ctx, merged=False))
 
     assert state.complete is True
-    assert STEP_ADMIN_PASSWORD in state.completed_steps
+    assert state.completed_steps == [STEP_ORGANISATIONS, STEP_FIRST_USER]
 
 
 def test_only_bootstrapped_stores_contribute_steps(tmp_path):
