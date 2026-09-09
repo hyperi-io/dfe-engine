@@ -23,6 +23,7 @@ import re
 from dataclasses import dataclass
 
 from dfe_engine.gitcrud import GitCrud
+from dfe_engine.gitcrud.commit_policy import SUBJECT_MAX
 from dfe_engine.gitcrud.engine import ResourceNotFoundError, set_path
 from dfe_engine.gitcrud.log import LogEntry, read_log
 
@@ -95,6 +96,23 @@ def instance_of(service: str, instance: str) -> AppInstance:
     descriptor(service)
     validate_instance(instance)
     return AppInstance(service=service, instance=instance)
+
+
+def fit_subject(app: AppInstance, summary: str) -> tuple[str, str]:
+    """Trim the commit scope and summary so the rendered subject fits the policy cap.
+
+    The commit standard caps a subject at 50 characters, and a service plus a legal
+    40-character instance name overruns that on its own. The scope drops to the bare
+    instance before anything is truncated, because the service is already in the
+    file path the commit touches.
+    """
+    budget = SUBJECT_MAX - len("cfg(): ")
+    summary = summary[:budget]
+    for candidate in (f"{app.service}/{app.instance}", app.instance):
+        if len(candidate) + len(summary) <= budget:
+            return candidate, summary
+    scope = app.instance[: max(1, budget - 1)]
+    return scope, summary[: max(1, budget - len(scope))]
 
 
 def parse_overlay_name(name: str) -> AppInstance | None:

@@ -70,6 +70,34 @@ def _apply(crud, changes):
             _put(crud, change.app, change.doc)
 
 
+class TestReconcile:
+    def test_a_fresh_deploy_gets_its_routing_compiled_in(self, crud, direct_settings):
+        for service in (RECEIVER, LOADER):
+            app = instances.instance_of(service, "default")
+            _put(crud, app, instances.initial_overlay(app))
+
+        done = derived.reconcile(crud, _Registry([]), direct_settings)
+
+        assert set(done) == {
+            f"{RECEIVER}/default: sync routing",
+            f"{LOADER}/default: sync routing",
+        }
+        receiver = instances.instance_of(RECEIVER, "default")
+        doc = instances.read_overlay(crud, receiver)
+        assert get_path(doc, "config.routing.default_source") == "main"
+        default = get_path(doc, "config.destinations.default")
+        assert get_path(doc, f"config.destinations.{default}.grpc.endpoint")
+        assert instances.history(crud, receiver)[0].actor == derived.ENGINE_ACTOR
+
+    def test_a_reconciled_repo_is_left_alone(self, crud, settings):
+        app = instances.instance_of(RECEIVER, "default")
+        _put(crud, app, instances.initial_overlay(app))
+        registry = _Registry([_receiver_source()])
+        derived.reconcile(crud, registry, settings)
+
+        assert derived.reconcile(crud, registry, settings) == []
+
+
 class TestStackRouting:
     def test_a_deployed_receiver_with_no_routing_is_synced(self, crud, settings):
         app = instances.instance_of(RECEIVER, "main")
