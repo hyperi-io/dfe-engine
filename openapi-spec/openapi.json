@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.19.18"
+    "version": "1.19.19"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -27451,7 +27451,7 @@
           "field": {
             "type": "string",
             "title": "Field",
-            "description": "Field to match on. Prefix with '_json.' to match a path inside the JSON column (e.g. '_json._source_fetcher'); a bare name matches a real top-level column (e.g. '_org_id')."
+            "description": "Field to match on: a dotted path into the record as it arrives (e.g. 'tags.collector.type', or a bare '_source'). The receiver matches the JSON payload, not a ClickHouse column, so a '_json.' prefix would be read as a first segment no record has."
           },
           "operator": {
             "type": "string",
