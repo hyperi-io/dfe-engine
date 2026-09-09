@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.22](https://github.com/hyperi-io/dfe-engine/compare/v1.19.21...v1.19.22) (2026-09-09)
+
+### Bug Fixes
+
+* **appmgmt:** the engine compiles the apps' routing at startup ([6bbeef6](https://github.com/hyperi-io/dfe-engine/commit/6bbeef6cc7c984191503c214c57a9826631e627c))
+
 ## [1.19.21](https://github.com/hyperi-io/dfe-engine/compare/v1.19.20...v1.19.21) (2026-09-09)
 
 ### Bug Fixes
