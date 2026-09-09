@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.14](https://github.com/hyperi-io/dfe-engine/compare/v1.19.13...v1.19.14) (2026-09-09)
+
+### Bug Fixes
+
+* **appmgmt:** compilers emit per transport; named routing blocks; manifest endpoints ([2866f5e](https://github.com/hyperi-io/dfe-engine/commit/2866f5ee2f256e0befc0f6d7e5c67583b558086c))
+
 ## [1.19.13](https://github.com/hyperi-io/dfe-engine/compare/v1.19.12...v1.19.13) (2026-09-09)
 
 ### Bug Fixes
