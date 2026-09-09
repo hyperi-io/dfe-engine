@@ -488,8 +488,9 @@ def _transports_from(service: str, raw: object) -> frozenset[str]:
     """
     if raw is None:
         return frozenset({"bus"})
-    if not isinstance(raw, list) or not raw:
-        raise CatalogueError(f"{service}: transports must be a non-empty list")
+    # An empty list is an app that carries no records at all, such as the VPN.
+    if not isinstance(raw, list):
+        raise CatalogueError(f"{service}: transports must be a list")
     declared = {str(t) for t in raw}
     unknown = declared - TRANSPORTS
     if unknown:

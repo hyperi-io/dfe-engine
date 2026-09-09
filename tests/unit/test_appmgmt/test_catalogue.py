@@ -68,6 +68,7 @@ class TestShippedManifest:
             "dfe-transform-vrl": False,
             "dfe-transform-vector": True,
             "dfe-transform-elastic": True,
+            "culvert": False,
         }
 
     def test_vector_reloads_its_transform_files_in_place(self):
@@ -182,9 +183,15 @@ class TestManifestParsing:
         with pytest.raises(CatalogueError, match="unknown transport"):
             load_catalogue(path)
 
-    def test_an_empty_transport_list_is_refused(self, tmp_path):
-        with pytest.raises(CatalogueError, match="non-empty list"):
-            load_catalogue(self._manifest(tmp_path, {"transports": []}))
+    def test_an_empty_transport_list_is_an_app_that_carries_no_records(self, tmp_path):
+        apps = load_catalogue(self._manifest(tmp_path, {"transports": []}))
+
+        assert apps["dfe-thing"].transports == frozenset()
+        assert not apps["dfe-thing"].carries("bus")
+
+    def test_a_transport_value_that_is_not_a_list_is_refused(self, tmp_path):
+        with pytest.raises(CatalogueError, match="must be a list"):
+            load_catalogue(self._manifest(tmp_path, {"transports": "bus"}))
 
     def test_the_manifest_owns_the_port_a_stage_is_sent_to(self, tmp_path):
         apps = load_catalogue(
