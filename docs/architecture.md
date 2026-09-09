@@ -258,6 +258,7 @@ ReplacingMergeTree state table, fail-open.
 | Ingress / OIDC | Envoy Gateway (k8s) / oauth2-proxy (docker) | native OIDC at the edge |
 | Expression language | CEL (Python + Rust), DFE subset | one standard, tiered for performance |
 | Field mapping | YAML, two-tier (default + source) | human-editable, git-tracked, UI-editable |
+| Stage transport | one per source, `bus` or `direct`, default from the profile | a flow is never mixed; the bus provider (Kafka) is a deployment fact, so a second provider joins without a model change |
 
 ## The docs tree
 

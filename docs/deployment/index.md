@@ -12,6 +12,7 @@ the network model. The system map is [../architecture.md](../architecture.md).
 | Doc | Covers |
 |---|---|
 | [backing-services.md](backing-services.md) | per-backend swap-seam matrix |
+| [transports.md](transports.md) | profile x transport, the Kafka provider swap, the scale-mesh Envoy balancer and receiver buffers |
 | [keda-scaling.md](keda-scaling.md) | CPU-default + opt-in ScalingPressure via dfe-keda-shim |
 | [managed-kafka-lifecycle.md](managed-kafka-lifecycle.md) | managed-Kafka cost + delete-to-empty lifecycle |
 | [observability-standard.md](observability-standard.md) | one OTel destination, modes, log schema |
@@ -91,19 +92,22 @@ each its own config). KEDA scaling is folded into each app chart - see
 
 ## Deployment tiers
 
-Four tiers, smallest to largest. The first is Docker; the rest are Kubernetes
-profiles selected by the cluster secret's `dfe.hyperi.io/profile`.
+Five tiers, smallest to largest. The first is Docker; the rest are Kubernetes
+profiles selected by the cluster secret's `dfe.hyperi.io/profile`. Transport
+and the balancer per tier: [transports.md](transports.md).
 
 | Tier | Platform | Transport | Kafka | Sizing | Shape |
 |------|----------|-----------|-------|--------|-------|
-| **dfe-docker** | Docker Compose (NOT k8s) | gRPC | no | minimal | SME / single-host; anything smaller than `slim` |
+| **dfe-docker** | Docker Compose (NOT k8s) | per compose profile: `slim` is gRPC, `single` is Kafka | per profile | minimal | SME / single-host; anything smaller than `slim` |
 | **slim** | k8s | gRPC (receiver->loader direct) | **no** | minimum-viable + safety | bare-minimum k8s; smallest |
 | **single** | k8s | Kafka | **yes** (single broker) | reliability | one node of everything, with Kafka |
 | **scale** | k8s | Kafka | **yes** (multi-broker cluster) | reliability | everything clustered (ReplicatedMergeTree + dedicated Keeper) |
+| **scale-mesh** | k8s | gRPC, Envoy listener per stage pool | **no** | reliability | scale's replicas and ClickHouse cluster with no broker; the receiver buffers instead |
 
-A tier sets defaults; a deployer overrides any single dial.
+A tier sets defaults; a deployer overrides any single dial. `scale-mesh`
+composes as `scale` below with Kafka and Kafbat off.
 
-### Default composition per tier
+## Default composition per k8s tier
 
 `on` = deployed and enabled; `opt` = shipped but off by default, enable via
 the overlay; `off` = not deployed.
@@ -139,12 +143,13 @@ the overlay; `off` = not deployed.
 - **[4]** dfe-docker is Compose, not k8s - no Argo/operators layer; the
   container brings its own minimal wiring.
 
-Why `dfe-hunt-runner` is OFF for slim specifically: slim is the bare-minimum
-k8s tier - just the ingest path (receiver -> loader -> ClickHouse) plus the
-engine, UI, and HyperDX. Scheduled detection is real recurring ClickHouse
-load, so it is opt-in there and on-by-default everywhere else. It stays
-trivially enable-able (flip the overlay dial) because the runner is already
-deployed-capable on every tier.
+## Why the tiers compose that way
+
+`dfe-hunt-runner` is OFF for slim because slim is the bare-minimum k8s tier -
+the ingest path (receiver -> loader -> ClickHouse) plus the engine, UI, and
+HyperDX. Scheduled detection is real recurring ClickHouse load, so it is
+opt-in there and on-by-default everywhere else. Enabling it is one overlay
+dial because the runner is deployed-capable on every tier.
 
 **HyperDX is ALWAYS present, in EVERY tier - never optional.** Two purposes,
 which is why DFE ships an extended fork: (1) a separate self-monitoring
@@ -159,13 +164,11 @@ Implementation: tier behaviour lives in `argocd/values/profile-<tier>.yaml`
 so slim's omission of archiver/fetcher/transforms is a deploy-repo
 composition, not a chart change.
 
-> **Kafka on tier `single`:** resolved (was the 2026-06-29 design flag) via
-> the non-operator path - `kafka.mode: single` renders a single-broker KRaft
-> StatefulSet (dfe-infra `kafka-single.yaml`, SCRAM-512 at format time), so
-> the Strimzi operator stays scale-only. Live validation of the single-broker
-> path is still pending. (Also: the old `standard` profile was renamed -
-> clusters annotated `profile=standard` must move to `slim` (gRPC) or
-> `single` (kafka).)
+Kafka on tier `single` takes the non-operator path: `kafka.mode: single`
+renders a single-broker KRaft StatefulSet (dfe-infra `kafka-single.yaml`,
+SCRAM-512 at format time), so the Strimzi operator stays scale-only. A cluster
+still annotated with the retired `standard` profile must move to `slim` (gRPC)
+or `single` (Kafka).
 
 ## Deploy-repo providers (provider-agnostic seam)
 
@@ -210,12 +213,15 @@ cluster-secret annotations). Full swap matrix:
   other range is accepted at initial deploy; CIDRs are immutable once the
   cluster is started. Canal IP-masquerades pod egress to the node IP, so the
   customer needs no NAT or route change.
-- **CGNAT `100.64.0.0/10` is reserved SOLELY for the future hyperi-vpn
-  add-on**, never for DFE pod/service ranges.
+- **CGNAT `100.64.0.0/10` is reserved SOLELY for edge-VPN clients**, never
+  for DFE pod/service ranges. The opt-in edge-fleet VPN (culvert) carves its
+  tunnel subnets out of it.
 - **Receiver exposure is a values-driven seam.** `receiver.exposure:
-  internal | public`. Public renders a second LoadBalancer Service (deployer
-  supplies serviceType, annotations, loadBalancerSourceRanges) in a public
-  subnet as the only public surface - a single-homed airlock, NOT
-  dual-homing. The receiver then talks to internal Kafka (ClusterIP,
-  private); isolation is by NetworkPolicy. The deployer applies whatever
-  ingress-path controls they prefer.
+  internal | public | vpn`. Public renders a second LoadBalancer Service
+  (deployer supplies serviceType, annotations, loadBalancerSourceRanges) in a
+  public subnet as the only public surface - a single-homed airlock, NOT
+  dual-homing. Vpn keeps the receiver on a ClusterIP with no public address
+  and admits the tunnel pods instead, for a fleet that dials in. The receiver
+  then talks to internal Kafka (ClusterIP, private); isolation is by
+  NetworkPolicy. The deployer applies whatever ingress-path controls they
+  prefer.

@@ -1,0 +1,137 @@
+<!--
+  Project:   dfe-engine
+  File:      docs/data-plane/source-flow.md
+  Purpose:   The source flow - INPUT, optional TRANSFORM, OUTPUT - on the bus or direct
+  License:   BUSL-1.1
+  Copyright: (c) 2026 HYPERI PTY LIMITED
+-->
+
+# The source flow - one definition, two transports
+
+A source names where its records come in, whether they are transformed, and where they land. Everything else - topics, routing rules, endpoints, the instances that run the stages - is compiled from that definition by the engine and deployed through gitops. A record's path is predictable from the source alone, and a hand edit to a compiled artefact is drift the engine reports and re-syncs.
+
+## The flow in one diagram
+
+Two transports carry the same three stages. The bus (Kafka on the `single` and `scale` profiles) holds records between stages, so a stage can be down and nothing is lost. Direct gRPC (`slim`, `scale-mesh`) stores nothing between stages, so the receiver's and the fetcher's own buffers are the only slack.
+
+```mermaid
+flowchart LR
+  subgraph INPUT
+    R[receiver pool]
+    F[fetcher<br/>one per source]
+  end
+  subgraph BUS[bus form]
+    TL[(source_land)]
+    TO[(source_load)]
+  end
+  subgraph TRANSFORM
+    T[transform instance<br/>one per source, optional]
+  end
+  subgraph OUTPUT
+    L[loader pool]
+    A[archiver]
+  end
+  R --> TL
+  F --> TL
+  TL --> T --> TO
+  TO --> L
+  TL -.->|no transform| L
+  TL --> A
+  L --> CH[(ClickHouse<br/>source table, else default)]
+```
+
+```mermaid
+flowchart LR
+  subgraph INPUT
+    R[receiver pool]
+    F[fetcher<br/>one per source]
+  end
+  subgraph TRANSFORM
+    T[transform instance<br/>scalo Push listener]
+  end
+  subgraph OUTPUT
+    L[loader pool<br/>scalo Push listener]
+  end
+  R -->|matched destination| T
+  F -->|output endpoint| T
+  T -->|sink endpoint| L
+  R -.->|no transform| L
+  F -.->|no transform| L
+  L --> CH[(ClickHouse<br/>source table, else default)]
+```
+
+The archiver reads the landing topic, so it keeps the RAW record as it arrived, before any transform, and archive is a bus-form option: a direct source that asks for it is refused at save.
+
+The second diagram is the shape a transform takes once it declares `direct`. dfe-transform-vrl and dfe-transform-vector declare it; dfe-transform-elastic does not yet, so a direct source that names it is refused at save. Shipping the listener and adding the `transports` entry is the whole change.
+
+## Two transports, one per source
+
+A source declares `transport: bus` or `transport: direct`. Left unset, it takes the deployment's default, which follows the profile's `kafka.mode`: `disabled` means direct, anything else means bus. A source that names a transport the deployment lacks is refused at save. Separately, a flow is never mixed: every stage of one source runs on the same transport.
+
+| Profile | Default transport | Between stages | Balancing between pools |
+|---|---|---|---|
+| dfe-docker slim | direct | gRPC | one replica of each |
+| dfe-docker single | bus | Kafka topics on one broker | one replica of each |
+| slim | direct | gRPC | one replica; the KEDA ceiling of two would pin senders to pods |
+| single | bus | Kafka topics on one broker | consumer groups |
+| scale | bus | Kafka topics on a broker cluster | consumer groups |
+| scale-mesh | direct | gRPC | a listener per stage pool, see [../deployment/transports.md](../deployment/transports.md) |
+
+The source records bus-versus-direct only. Which bus (Kafka today) and which direct protocol (gRPC) are deployment facts, so a second bus provider joins behind the same `transport: bus` value without a change to the source model.
+
+## Naming is generated, never typed
+
+| Thing | Name | Source |
+|---|---|---|
+| landing topic | `<source>_land` | apps.yaml `source_binding` |
+| transformed topic | `<source>_load` | apps.yaml `source_binding` |
+| app instance (per-source apps only) | `dfe-<component>-<source>`, for example `dfe-transform-vrl-auth` | the app's chart `component`; stack-wide apps such as the receiver carry no suffix |
+| Service and port per app | manifest `endpoints` | apps.yaml |
+| unmatched records | source `default`, table `default` | the default flow |
+
+The engine sets `<source>_load` only when the source has a transform, and the loader's topic discovery suppresses `_land` whenever a `_load` topic for the same source exists. So a `_load` topic left on the broker after a transform is removed starves the source until the topic is deleted; the engine deletes it on the same reconcile. Deployers never type a topic or an endpoint into an app's values file.
+
+## What the engine compiles
+
+| Source field | Compiles into |
+|---|---|
+| `match` (field, operator, value) | the receiver `routing.source_rules` entry; on direct also a `destinations.rules` entry sending the match to the source's transform instance, else to the loader |
+| `fetcher` (source_type, config, topic, routes) | one fetcher instance overlay; on direct its `output` endpoint, and one `output.routes` entry per data-match route |
+| `transform` (engine, variant, config) | one transform instance overlay: `_land` in and `_load` out on the bus; a Push listener in and the loader's endpoint out on direct |
+| landing label | loader routing, source to table |
+| `archive: true` | the archiver's topic list |
+
+Every compiled block lands in the deploy repo under `values/`, Argo CD applies it, and a hand edit to any of them is reported as drift and re-synced on the next source write. The receiver's destinations are a named set: every transform instance and the loader are destinations, and a rule sends a matched record to one by name. The fetcher carries the same shape as `output.routes` over its default destination, and the transform sinks use the same gRPC sender, so there is one sink implementation in scalo for all three.
+
+## How a change reaches a pod
+
+```mermaid
+sequenceDiagram
+  participant U as user or API
+  participant E as engine
+  participant G as deploy repo
+  participant A as Argo CD
+  participant S as API server
+  participant P as app pod
+  U->>E: PUT source
+  E->>E: compile every derived config
+  E->>G: commit
+  Note over G,A: webhook when configured, else the poll interval
+  A->>S: apply the ConfigMap and the Deployment
+  Note over S,P: the pod template carries the ConfigMap checksum
+  S->>P: rolling update, maxUnavailable 0, no downtime
+```
+
+Without a webhook Argo polls every 300 s with up to 60 s jitter, so a routing change takes 5 to 9 minutes to reach a pod; with the Forgejo-to-Argo webhook it takes seconds plus the kubelet's ConfigMap sync of about a minute.
+
+Every app rolls on every config change, so nothing depends on which app can reload which key: the apps that also apply a change in place (the receiver's routing, Vector's transform files) gain nothing extra from it, and apps.yaml records `hot_reload` only as a fact for the console.
+
+## The default flow
+
+With no sources defined, every record the receiver accepts is stamped `_source: default`, lands in the `default` table, and can be searched. The `default` source is a normal source whose match rule is `operator: always`: it has the deployment's transport, may carry a transform, and may be archived on the bus form. It is read and written at `/api/v1/sources/default` like any other source and the console gives it a card of its own; nothing about it is special code.
+
+## Adding a transform
+
+A transform is an apps.yaml entry with a `source_binding` and its `transports`, a chart that exposes the transport dial and the Push Service, and optionally a source catalogue the engine offers through the API. No engine release is involved. dfe-transform-vrl and dfe-transform-vector run a Push listener beside their bus consumer and list both transports, so a direct source may name either; dfe-transform-elastic lists the bus alone until its listener ships, and a direct source that names it is refused at save with that reason. dfe-transform-elastic is also the worked example for the catalogue: its `sources.yaml` is the catalogue and `source.name` selects the compiled-in transform.
+
+A catalogue is declared in apps.yaml under the app that ships it - the filename, the key its entries sit under, and how an entry names the program it selects - and reaches a deployment as that app's release asset, mounted where `DFE_SOURCE_CATALOGUE_FILE` points. The engine lists it at `GET /api/v1/sources/catalogue` and `POST /api/v1/sources/from-catalogue/{entry}` compiles one entry into an ordinary source: the entry says how its data can arrive, and the intake chosen becomes the receiver match rule or the fetcher stanza. A deployment that mounts no catalogue offers none, and the transform still takes a hand-written source.
