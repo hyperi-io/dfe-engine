@@ -3,6 +3,14 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.18](https://github.com/hyperi-io/dfe-engine/compare/v1.19.17...v1.19.18) (2026-09-09)
+
+### Bug Fixes
+
+* **setup:** break-glass is not the first user ([41286f2](https://github.com/hyperi-io/dfe-engine/commit/41286f2624195eac8ffc142d11194a5bab77b25f))
+* **setup:** the wizard has no password-reset step ([37f4047](https://github.com/hyperi-io/dfe-engine/commit/37f4047a2710cf52e1a724232c49ba34c19dc4e0))
+* the manifest carries the composition axes and the archiver takes either transport ([105344d](https://github.com/hyperi-io/dfe-engine/commit/105344d4f4a7a05cd14de726619452e00a88e254))
+
 ## [1.19.17](https://github.com/hyperi-io/dfe-engine/compare/v1.19.16...v1.19.17) (2026-09-09)
 
 ### Bug Fixes
