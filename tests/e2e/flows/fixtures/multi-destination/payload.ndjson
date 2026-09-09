@@ -1,0 +1,2 @@
+{"data_stream": {"dataset": "flowmultia"}, "message": "flow e2e {marker} a", "host": {"name": "flow-e2e"}}
+{"data_stream": {"dataset": "flowmultib"}, "message": "flow e2e {marker} b", "host": {"name": "flow-e2e"}}

@@ -1,0 +1,23 @@
+# Project:   dfe-engine
+# File:      tests/e2e/flows/fixtures/archived/source.yaml
+# Purpose:   A source that keeps the raw record as it arrived
+# Language:  YAML
+#
+# License:   BUSL-1.1
+# Copyright: (c) 2026 HYPERI PTY LIMITED
+
+sources:
+  - source: flowarchive
+    display_name: Flow e2e - archived source
+    description: The archiver reads the landing topic, so this needs the bus.
+    match:
+      field: flow_case
+      operator: equals
+      value: flowarchive
+    archive: true
+    header:
+      type: common-header/timeseries
+      version: 1.0.1
+    schema:
+      meta_schema: meta/syslog
+      meta_schema_version: 1.0.0

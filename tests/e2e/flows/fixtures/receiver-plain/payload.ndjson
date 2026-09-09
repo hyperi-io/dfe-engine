@@ -1,0 +1,2 @@
+{"flow_case": "flowplain", "message": "flow e2e {marker}", "host": {"name": "flow-e2e"}}
+{"flow_case": "flowplain", "message": "flow e2e {marker} second", "host": {"name": "flow-e2e"}}
