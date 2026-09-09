@@ -15,6 +15,7 @@ import pytest
 
 from dfe_engine.auth.account_durability import AccountGitState
 from dfe_engine.auth.accounts import AccountStore
+from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
 from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.orgs.registry import OrgRegistry
@@ -114,6 +115,21 @@ def test_disabled_oidc_provider_does_not_satisfy_the_step(ctx):
 
 
 def test_the_local_admin_does_not_count_as_the_first_user(ctx):
+    assert STEP_FIRST_USER not in SETUP_MACHINE.evaluate(ctx).completed_steps
+
+    ctx.account_store.create("alice", "a-strong-user-password")
+    assert STEP_FIRST_USER in SETUP_MACHINE.evaluate(ctx).completed_steps
+
+
+def test_the_break_glass_account_does_not_count_as_the_first_user(ctx):
+    """A gitops deployment seeds break-glass, and that must not complete the step.
+
+    It is a shared recovery credential reconciled from the deploy repo, not an
+    operator-created identity, so a deployment holding only admin and it still
+    has nobody to attribute work to.
+    """
+    ctx.account_store.create(BREAKGLASS_USERNAME, "a-recovery-password", groups=["dfe-admins"])
+
     assert STEP_FIRST_USER not in SETUP_MACHINE.evaluate(ctx).completed_steps
 
     ctx.account_store.create("alice", "a-strong-user-password")
