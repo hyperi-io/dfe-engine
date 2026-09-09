@@ -213,12 +213,15 @@ cluster-secret annotations). Full swap matrix:
   other range is accepted at initial deploy; CIDRs are immutable once the
   cluster is started. Canal IP-masquerades pod egress to the node IP, so the
   customer needs no NAT or route change.
-- **CGNAT `100.64.0.0/10` is reserved SOLELY for the future hyperi-vpn
-  add-on**, never for DFE pod/service ranges.
+- **CGNAT `100.64.0.0/10` is reserved SOLELY for edge-VPN clients**, never
+  for DFE pod/service ranges. The opt-in edge-fleet VPN (culvert) carves its
+  tunnel subnets out of it.
 - **Receiver exposure is a values-driven seam.** `receiver.exposure:
-  internal | public`. Public renders a second LoadBalancer Service (deployer
-  supplies serviceType, annotations, loadBalancerSourceRanges) in a public
-  subnet as the only public surface - a single-homed airlock, NOT
-  dual-homing. The receiver then talks to internal Kafka (ClusterIP,
-  private); isolation is by NetworkPolicy. The deployer applies whatever
-  ingress-path controls they prefer.
+  internal | public | vpn`. Public renders a second LoadBalancer Service
+  (deployer supplies serviceType, annotations, loadBalancerSourceRanges) in a
+  public subnet as the only public surface - a single-homed airlock, NOT
+  dual-homing. Vpn keeps the receiver on a ClusterIP with no public address
+  and admits the tunnel pods instead, for a fleet that dials in. The receiver
+  then talks to internal Kafka (ClusterIP, private); isolation is by
+  NetworkPolicy. The deployer applies whatever ingress-path controls they
+  prefer.
