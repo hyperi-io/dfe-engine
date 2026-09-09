@@ -6,16 +6,11 @@
 # License:   BUSL-1.1
 # Copyright: (c) 2026 HYPERI PTY LIMITED
 
-description: An archived source lands normally and the archiver keeps the record off the landing topic.
+description: An archived source lands normally and the archiver keeps a copy of the raw record.
 origin: receiver
 
-# dfe-archiver reads the landing topic and lists only the bus transport, so a
-# direct source asking to be archived is refused at save. The suite asserts the
-# refusal; the landing half of the case cannot run there.
-refused:
-  direct: archive
-expected_skip:
-  direct: dfe-archiver carries the bus transport only, so an archived direct source is refused at save until it grows a Push listener (WS-I/WS-T)
+# dfe-archiver carries both transports (apps.yaml transports: [bus, direct]), so
+# the shape runs on either and neither is refused.
 
 expect:
   - source: flowarchive
@@ -23,4 +18,6 @@ expect:
     topic: flowarchive_land
     load_topic: null
     marker: null
+    # One name because compile_receiver_destinations emits one per rule; the
+    # fan-out to the archiver beside the loader is not compiled yet.
     destination: loader

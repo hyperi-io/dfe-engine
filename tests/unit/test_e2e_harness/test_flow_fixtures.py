@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from dfe_engine.appmgmt import catalogue
 from tests.e2e.flows import shapes
 from tests.e2e.flows.conftest import undeclared_skips
 
@@ -167,12 +168,23 @@ class TestTheTransportRule:
         with pytest.raises(ValueError, match="expected"):
             shapes.transports_for("rabbit")
 
-    def test_the_archived_shape_cannot_run_direct(self) -> None:
+    def test_the_archived_shape_runs_wherever_the_archiver_does(self) -> None:
+        # What an app carries is apps.yaml data, so the fixture follows the manifest
+        # rather than carrying its own opinion of the archiver's transports.
+        archiver = catalogue.APP_CATALOGUE["dfe-archiver"]
         archived = next(s for s in shapes.load_shapes() if s.name == "archived")
-        assert archived.skip_reason("bus") is None
-        assert archived.skip_reason("direct").startswith(shapes.EXPECTED_SKIP)
-        assert archived.refusal("direct") == "archive"
-        assert archived.refusal("bus") is None
+        for transport in shapes.transports_for("both"):
+            carried = archiver.carries(transport)
+            assert (archived.skip_reason(transport) is None) is carried
+            assert (archived.refusal(transport) is None) is carried
+
+    def test_the_catalogue_shape_runs_wherever_the_app_shipping_it_does(self) -> None:
+        # Every entry compiles onto the transform of the app that ships the
+        # catalogue, so the shape can only run where that app can.
+        shipper = catalogue.APP_CATALOGUE["dfe-transform-elastic"]
+        entry = next(s for s in shapes.load_shapes() if s.name == "catalogue")
+        for transport in shapes.transports_for("both"):
+            assert (entry.skip_reason(transport) is None) is shipper.carries(transport)
 
 
 class TestTheSkipPolicy:

@@ -9,7 +9,7 @@
 sources:
   - source: flowarchive
     display_name: Flow e2e - archived source
-    description: The archiver reads the landing topic, so this needs the bus.
+    description: Receiver origin with archive on, so the raw record is kept as well as loaded.
     match:
       field: flow_case
       operator: equals

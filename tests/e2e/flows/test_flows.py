@@ -38,8 +38,6 @@ from tests.e2e.conftest import count_rows, poll_until, post_events, require
 from tests.e2e.flows import shapes
 from tests.e2e.flows.conftest import EngineAPI
 
-pytestmark = pytest.mark.live
-
 # Argo polls the deploy repo every 300 s with up to 60 s of jitter, and the pod
 # then rolls on the new ConfigMap checksum, so a routing change is minutes away.
 ROUTING_DEADLINE = 900.0
@@ -50,6 +48,16 @@ LANDING_DEADLINE = 240.0
 # the pod becoming ready.
 FETCH_DEADLINE = 600.0
 
+# A shape waits ROUTING then LANDING once per expectation, so the widest one bounds
+# the run.
+_WIDEST_SHAPE = max(len(shape.expect) for shape in shapes.load_shapes())
+# pyproject's 300 s hang guard is shorter than one Argo poll and its thread method
+# kills the process rather than failing the case, so this suite carries its own,
+# above the deadlines that are the real guard here.
+SUITE_TIMEOUT = _WIDEST_SHAPE * (ROUTING_DEADLINE + LANDING_DEADLINE) + FETCH_DEADLINE + 300.0
+
+pytestmark = [pytest.mark.live, pytest.mark.timeout(SUITE_TIMEOUT)]
+
 # The refusal cases: a shape whose expect.yaml says the deployment must reject it
 # on this transport. Built at import so they are their own tests rather than a
 # skipped half of the main one.
@@ -58,6 +66,18 @@ _REFUSALS = [
     for shape in shapes.load_shapes()
     for transport in shapes.transports_for(os.getenv("DFE_E2E_TRANSPORT") or "both")
     if shape.refusal(transport)
+] or [
+    # An empty parametrisation skips for pytest's own reason, which the skip policy
+    # reads as a case that went wrong rather than one nothing declared.
+    pytest.param(
+        None,
+        "",
+        id="none-declared",
+        marks=pytest.mark.skip(
+            reason=f"{shapes.EXPECTED_SKIP} no fixture declares a flow this deployment "
+            "refuses on the transport(s) asked for"
+        ),
+    )
 ]
 
 
@@ -348,9 +368,7 @@ class TestFlows:
             assert landed > 0
             if expectation.marker:
                 assert (
-                    count_rows(
-                        ch_client, table, where=f"_raw LIKE '%{expectation.marker}%'", marker=marker
-                    )
+                    count_rows(ch_client, table, marker=marker, contains=expectation.marker)
                     == landed
                 ), (
                     f"{expectation.source}: {expectation.marker} is set only by the "
@@ -383,10 +401,10 @@ class TestFlows:
             where = (
                 f"_source = '{expectation.source}' AND _timestamp_load > now() - INTERVAL 30 MINUTE"
             )
-            if expectation.marker:
-                where += f" AND _raw LIKE '%{expectation.marker}%'"
             landed = poll_until(
-                lambda t=table, w=where: count_rows(ch_client, t, where=w),
+                lambda t=table, w=where, m=expectation.marker: count_rows(
+                    ch_client, t, where=w, contains=m
+                ),
                 timeout=FETCH_DEADLINE,
                 interval=20.0,
                 desc=f"the fetcher's first records in {table}",
@@ -427,9 +445,10 @@ class TestFlows:
         entries = offered.get("entries") if isinstance(offered, dict) else offered
         if not entries:
             pytest.skip(
-                f"{shapes.EXPECTED_SKIP} this deployment mounts no source catalogue, so it "
-                "offers no entry to compile (dfe-transform-elastic#18 ships sources.yaml "
-                "as a release asset)"
+                f"{shapes.EXPECTED_SKIP} this deployment mounts nothing at "
+                "/etc/dfe/catalogue/sources.yaml (or DFE_SOURCE_CATALOGUE_FILE), so the "
+                "engine offers no entry to compile; the file is a dfe-transform-elastic "
+                "release asset (dfe-transform-elastic#18)"
             )
         entry = str(entries[0]["name"] if isinstance(entries[0], dict) else entries[0])
         created = engine.call("POST", f"/sources/from-catalogue/{entry}", {"transport": transport})
@@ -450,7 +469,7 @@ class TestFlows:
 # claims, and a second parametrisation of the same names is a collection error.
 @pytest.mark.parametrize(("refused_shape", "refused_transport"), _REFUSALS)
 def test_a_flow_the_deployment_cannot_run_is_refused(
-    refused_shape: shapes.FlowShape, refused_transport: str, engine
+    refused_shape: shapes.FlowShape | None, refused_transport: str, engine
 ) -> None:
     """The refusal is the assertion: a flow that cannot run must fail at save.
 
@@ -458,6 +477,7 @@ def test_a_flow_the_deployment_cannot_run_is_refused(
     prove the landing half here; this says the deployment says so too, and says
     why, rather than accepting the source and never starting the pod.
     """
+    assert refused_shape is not None, "the none-declared case carries a skip mark"
     declared = refused_shape.refusal(refused_transport)
     for body in refused_shape.sources:
         response = engine.call("POST", "/sources", {**body, "transport": refused_transport})
