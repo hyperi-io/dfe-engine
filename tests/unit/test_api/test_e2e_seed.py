@@ -256,3 +256,30 @@ def test_seeders_never_create_groups_themselves(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="dfe-nonesuch does not exist"):
         seeder._ensure_group("dfe-nonesuch")
     assert groups.get("dfe-nonesuch") is None
+
+
+def test_no_seeded_match_rule_carries_the_json_column_prefix():
+    """A seeded rule the receiver can never match is a fixture that proves nothing.
+
+    dfe-receiver splits a match field on '.' and walks the RAW payload
+    (src/routing/mod.rs, extract_field_cow), so a '_json.' prefix becomes a first
+    segment no record has. The prefix is meaningful on the schema side, where it
+    names a subcolumn - never in a match rule, and an AST scan is what stops it
+    coming back through any seeder.
+    """
+    import ast
+    from pathlib import Path
+
+    from dfe_engine.api.e2e import seed
+
+    offenders: list[str] = []
+    for module in sorted(Path(seed.__file__).parent.glob("*.py")):
+        tree = ast.parse(module.read_text(encoding="utf-8"))
+        offenders += [
+            f"{module.name}:{node.lineno} {node.value}"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and node.value.startswith("_json.")
+        ]
+    assert offenders == [], f"seeded match fields carry the JSON-column prefix: {offenders}"

@@ -1,0 +1,18 @@
+# Project:   dfe-engine
+# File:      tests/e2e/flows/fixtures/default-flow/expect.yaml
+# Purpose:   What an unmatched record must do on either transport
+# Language:  YAML
+#
+# License:   BUSL-1.1
+# Copyright: (c) 2026 HYPERI PTY LIMITED
+
+description: A record matching no source is stamped with the catch-all and lands in its table.
+origin: default
+
+expect:
+  - source: "{catchall}"
+    table: "{catchall}"
+    topic: "{catchall}_land"
+    load_topic: null
+    marker: null
+    destination: loader
