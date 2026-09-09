@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.19](https://github.com/hyperi-io/dfe-engine/compare/v1.19.18...v1.19.19) (2026-09-09)
+
+### Bug Fixes
+
+* a compiled gRPC destination is an object with an endpoint, and the flows suite runs both transports ([2fb89db](https://github.com/hyperi-io/dfe-engine/commit/2fb89db18ff0be4d023a2cbbabc321bc08cd7fc7))
+
 ## [1.19.18](https://github.com/hyperi-io/dfe-engine/compare/v1.19.17...v1.19.18) (2026-09-09)
 
 ### Bug Fixes
