@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.17](https://github.com/hyperi-io/dfe-engine/compare/v1.19.16...v1.19.17) (2026-09-09)
+
+### Bug Fixes
+
+* the manifest says where an app is offered and deployed, and a source answers its flow ([84ebb3e](https://github.com/hyperi-io/dfe-engine/commit/84ebb3e850f88ffb0223eed08e23424d6d989d17))
+
 ## [1.19.16](https://github.com/hyperi-io/dfe-engine/compare/v1.19.15...v1.19.16) (2026-09-09)
 
 ### Bug Fixes
