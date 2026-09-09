@@ -99,6 +99,9 @@ Auth (local):
 E2E server (Playwright host-run helpers; refused in production):
 - DFE_E2E_SERVER -> e2e_server
 
+Stack identity (what the deploy says this pod came from):
+- DFE_STACK_VERSION -> stack_version
+
 Repository (scope-aligned small-object store; lives in the DFE database):
 - DFE_REPOSITORY_MAX_PREFS_BYTES -> repository.max_prefs_bytes
 - DFE_REPOSITORY_MAX_OBJECT_BYTES -> repository.max_object_bytes
@@ -1354,6 +1357,14 @@ class DFESettings(BaseModel):
     gitops: GitopsSettings = Field(default_factory=GitopsSettings)
     api: APISettings = Field(default_factory=APISettings)
     secrets: SecretsSettings = Field(default_factory=SecretsSettings)
+    stack_version: str = Field(
+        default="",
+        description=(
+            "The certified stack this pod was deployed from, passed by the chart "
+            "from the cluster secret. The console falls back to it when the deploy "
+            "repo pins no stack. DFE_STACK_VERSION."
+        ),
+    )
     env: str = Field(
         default="production",
         description=(
@@ -1905,6 +1916,10 @@ def _get_env_overrides() -> dict:
         overrides["secrets"]["mount"] = val
     if val := _get_env("DFE_SECRETS_ROLE"):
         overrides["secrets"]["role"] = val
+
+    # The stack this pod was deployed from, when the deploy passed it in
+    if val := _get_env("DFE_STACK_VERSION"):
+        overrides["stack_version"] = val
 
     # Deployment posture (production|dev|test|...) - gates the placeholder-secret guard
     if val := _get_env("DFE_ENV"):

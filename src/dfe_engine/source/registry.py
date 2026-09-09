@@ -35,6 +35,7 @@ from scalo.logger import logger
 from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file
 from dfe_engine.source.models import (
     DEFAULT_LANDING_LABEL,
+    RULELESS_OPERATORS,
     Source,
     SourceMatch,
     SourceVersion,
@@ -690,7 +691,6 @@ class SourceRegistry:
             return
         # Lazy import: source_routing imports this module (cycle).
         from dfe_engine.services.source_routing import (
-            RULELESS_OPERATORS,
             UnsupportedMatchOperatorError,
             operator_mode,
         )

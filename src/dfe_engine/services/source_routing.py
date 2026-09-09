@@ -8,6 +8,12 @@ The receiver emit targets the REAL dfe-receiver ``routing`` contract
 ``_source`` (first match wins) and the topic derives as
 ``source_to_topic[_source]`` else ``{_source}{topic_suffix}``.
 
+One source match drives BOTH receiver blocks. It compiles to the ``source_rules``
+entry that labels the record, and on the direct transport to the
+``destinations.rules`` entry that sends it to the stage that handles it - the
+same field and value, read twice, so a source cannot be labelled one way and
+routed another.
+
 Usage:
     from dfe_engine.services.source_routing import compile_receiver_routing, compile_loader_routing
 
@@ -17,15 +23,28 @@ Usage:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Any
+
 from scalo.logger import logger
 
 from dfe_engine.services.models.loader import LoaderRoutingConfig
 from dfe_engine.services.models.receiver import (
+    BUS_DESTINATION,
+    LOADER_DESTINATION,
+    DestinationRule,
+    DestinationsConfig,
     ReceiverMatchMode,
     ReceiverRoutingConfig,
     SourceRule,
 )
-from dfe_engine.source.models import DEFAULT_LANDING_LABEL
+from dfe_engine.source.flow import FlowError, loader_endpoint, resolve_flow
+from dfe_engine.source.models import (
+    DEFAULT_LANDING_LABEL,
+    RULELESS_OPERATORS,
+    TOPIC_LAND_SUFFIX,
+    Source,
+)
 from dfe_engine.source.registry import SourceRegistry
 
 # The top-level field dfe-fetcher stamps with the source's landing label.
@@ -42,19 +61,62 @@ _OPERATOR_TO_MODE: dict[str, ReceiverMatchMode] = {
     "exists": "key_present",
 }
 
-RULELESS_OPERATORS = frozenset({"always"})
-"""Operators the receiver honours WITHOUT a rule.
-
-``always`` is the default flow: an unmatched record already goes to
-``default_source``, so emitting a rule that matches everything would shadow every
-rule after it. The registry save path allows it only on the reserved ``default``
-source.
-"""
-
 
 def operator_mode(operator: str) -> ReceiverMatchMode | None:
     """The receiver router mode for a match operator, or None when it has none."""
     return _OPERATOR_TO_MODE.get(operator)
+
+
+@dataclass(frozen=True, slots=True)
+class ReceiverMatch:
+    """What the receiver tests to recognise one source's records."""
+
+    field: str
+    mode: ReceiverMatchMode
+    value: str | None
+    """The operand, or None for a mode that only tests that the field is there."""
+
+
+def receiver_match(source: Source) -> ReceiverMatch | None:
+    """How the receiver recognises this source, or None when it needs no rule.
+
+    The one reading of a source's match, so the rule that LABELS a record and the
+    destination rule that SENDS it on cannot disagree about which records belong
+    to the source.
+
+    A fetcher-based source has no match rule of its own: its fetcher stamps
+    ``_source`` with the source's landing label on every record, so the match is
+    ``_source == <label>``. One landing on the platform default needs no rule,
+    because the receiver's ``default_source`` already sends an unmatched record
+    there. An explicit per-source rule rather than ``key_value_use`` on
+    ``_source``: the receiver takes untrusted input, and a use-the-value rule
+    would let any sender pick any topic.
+    """
+    if source.match is None:
+        label = source.landing_label()
+        if source.fetcher is None or label == DEFAULT_LANDING_LABEL:
+            return None
+        return ReceiverMatch(field=FETCHER_LABEL_FIELD, mode="key_value_set", value=label)
+
+    # The default flow needs no rule: default_source already sends an unmatched
+    # record there, and a match-everything rule would shadow the rules after it.
+    if source.match.operator in RULELESS_OPERATORS:
+        return None
+
+    mode = operator_mode(source.match.operator)
+    if mode is None:
+        logger.warning(
+            f"Source {source.source!r}: match operator {source.match.operator!r} has no "
+            f"receiver mode (documented receiver gap) - skipping this source in the "
+            f"receiver routing compile"
+        )
+        return None
+
+    return ReceiverMatch(
+        field=source.match.field,
+        mode=mode,
+        value=source.match.value if mode == "key_value_set" else None,
+    )
 
 
 class UnsupportedMatchOperatorError(ValueError):
@@ -75,7 +137,7 @@ def compile_receiver_routing(
     registry: SourceRegistry,
     *,
     default_source: str = DEFAULT_LANDING_LABEL,
-    topic_suffix: str = "_land",
+    topic_suffix: str = TOPIC_LAND_SUFFIX,
 ) -> ReceiverRoutingConfig:
     """Compile Source match rules into the receiver's ``routing`` contract.
 
@@ -88,14 +150,6 @@ def compile_receiver_routing(
     - ``always`` -> no rule at all; that is the default flow, and
       ``default_source`` already sends an unmatched record to it
 
-    A fetcher-based source has no match rule of its own: its fetcher stamps
-    ``_source`` with the source's landing label on every record, so the rule
-    compiled for it is ``_source == <label>`` (key_value_set). One landing on
-    the platform default table needs no rule, because the receiver's
-    ``default_source`` already sends an unmatched record there. An explicit
-    per-source rule rather than ``key_value_use`` on ``_source``: the receiver
-    takes untrusted input, and a use-the-value rule would let any sender pick
-    any topic.
     ``source_to_topic`` is emitted only where a source's landing topic
     deviates from ``{_source}{topic_suffix}`` (none do today - the Source
     model derives ``topic_land`` by that same rule).
@@ -110,40 +164,16 @@ def compile_receiver_routing(
     source_to_topic: dict[str, str] = {}
 
     for source in registry.get_all_sources(states=("active",)):
-        if not source.match:
-            label = source.landing_label()
-            if source.fetcher is not None and label != DEFAULT_LANDING_LABEL:
-                rules.append(
-                    SourceRule(
-                        field=FETCHER_LABEL_FIELD,
-                        mode="key_value_set",
-                        match_value=label,
-                        source=label,
-                    )
-                )
-            continue
-
-        # The default flow needs no rule: default_source already sends an
-        # unmatched record there, and a match-everything rule would shadow the
-        # rules after it.
-        if source.match.operator in RULELESS_OPERATORS:
-            continue
-
-        mode = operator_mode(source.match.operator)
-        if mode is None:
-            logger.warning(
-                f"Source {source.source!r}: match operator {source.match.operator!r} has no "
-                f"receiver mode (documented receiver gap) - skipping this source in the "
-                f"receiver routing compile"
-            )
+        match = receiver_match(source)
+        if match is None:
             continue
 
         rules.append(
             SourceRule(
-                field=source.match.field,
-                mode=mode,
-                match_value=source.match.value if mode == "key_value_set" else None,
-                source=source.source,
+                field=match.field,
+                mode=match.mode,
+                match_value=match.value,
+                source=source.landing_label(),
             )
         )
         expected_topic = f"{source.source}{topic_suffix}"
@@ -155,6 +185,71 @@ def compile_receiver_routing(
         default_source=default_source,
         topic_suffix=topic_suffix,
         source_to_topic=source_to_topic,
+    )
+
+
+def compile_receiver_destinations(registry: SourceRegistry, settings: Any) -> DestinationsConfig:
+    """Compile where the receiver sends each matched record, on the direct transport.
+
+    On the bus the receiver produces to a topic and the next stage consumes it,
+    so there is nothing to name: the default stays the bus and no rule is
+    emitted. On direct there is no store between stages, so every record has to
+    be handed to a stage by address - its source's transform when it has one,
+    else the loader.
+
+    The default destination follows the DEPLOYMENT, not a source, because it is
+    what an unmatched record takes. Unless the default flow itself is direct and
+    carries a transform, in which case that transform IS the destination for
+    everything unmatched, exactly as ``always`` compiles to ``default_source``
+    rather than to a rule.
+    """
+    default = LOADER_DESTINATION if settings.transport.default == "direct" else BUS_DESTINATION
+    rules: list[DestinationRule] = []
+    endpoints: dict[str, str] = {}
+
+    for source in registry.get_all_sources(states=("active",)):
+        try:
+            flow = resolve_flow(source, settings)
+        except FlowError as exc:
+            logger.warning(
+                f"Source {source.source!r} cannot run on this deployment ({exc}) - skipping "
+                f"it in the receiver destinations compile"
+            )
+            continue
+        if flow.transport != "direct":
+            continue
+
+        if flow.transform is not None and flow.transform.endpoint:
+            name, endpoint = flow.transform.instance, flow.transform.endpoint
+        else:
+            name, endpoint = LOADER_DESTINATION, flow.outputs.loader
+        endpoints[name] = endpoint
+
+        match = receiver_match(source)
+        if match is None:
+            # The default flow: everything unmatched already arrives here.
+            if source.match is not None and source.match.operator in RULELESS_OPERATORS:
+                default = name
+            continue
+        if match.value is None:
+            # A destination is picked on field AND value, so this source falls to
+            # the default. The save path refuses it where it would skip a
+            # transform; a stored one only reaches here after the deployment moved.
+            logger.warning(
+                f"Source {source.source!r}: its match tests no value, so on direct it takes "
+                f"the default destination rather than one of its own"
+            )
+            continue
+        rules.append(
+            DestinationRule(match_field=match.field, match_value=match.value, destination=name)
+        )
+
+    if default == LOADER_DESTINATION:
+        endpoints.setdefault(LOADER_DESTINATION, loader_endpoint())
+    return DestinationsConfig(
+        default=default,
+        rules=rules,
+        **{name: {"grpc": endpoint} for name, endpoint in sorted(endpoints.items())},
     )
 
 

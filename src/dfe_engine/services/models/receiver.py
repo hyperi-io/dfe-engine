@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 from dfe_engine.services.models.base import BaseServiceConfig
 from dfe_engine.services.models.common import (
@@ -198,6 +198,13 @@ class ReceiverRoutingConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+BUS_DESTINATION = "kafka"
+LOADER_DESTINATION = "loader"
+
+BUILT_IN_DESTINATIONS = frozenset({BUS_DESTINATION, LOADER_DESTINATION})
+"""The two destinations the receiver resolves without being given an address."""
+
+
 class DestinationRule(BaseModel):
     """Destination routing rule."""
 
@@ -209,21 +216,40 @@ class DestinationRule(BaseModel):
 
 
 class DestinationsConfig(BaseModel):
-    """Destination selection configuration."""
+    """Destination selection, plus the endpoint of every destination it names.
 
-    model_config = ConfigDict(extra="forbid")
+    ``kafka`` and ``loader`` are the receiver's built-in destinations. Any other
+    name is a NAMED endpoint sitting beside these keys as ``<name>: {grpc: uri}``,
+    which is why extras are allowed here: a rule sends a matched record to a
+    transform instance by name. The names the engine compiles are ``loader`` and
+    ``dfe-transform-*`` instances, so none of them can collide with ``default``
+    or ``rules``.
+    """
 
-    default: str = Field(default="kafka", description="kafka or loader")
+    model_config = ConfigDict(extra="allow")
+
+    default: str = Field(default="kafka", description="kafka, loader, or a named destination")
     rules: list[DestinationRule] = []
 
-    @field_validator("default")
-    @classmethod
-    def validate_default(cls, v: str) -> str:
-        allowed = {"kafka", "loader"}
-        if v.lower() not in allowed:
-            msg = f"Invalid default destination: {v}. Allowed: {', '.join(sorted(allowed))}"
+    @model_validator(mode="after")
+    def validate_destinations(self) -> DestinationsConfig:
+        named = self.__pydantic_extra__ or {}
+        for name, entry in named.items():
+            if not isinstance(entry, dict) or not entry.get("grpc"):
+                msg = f"Named destination {name!r} must be a mapping carrying a 'grpc' endpoint"
+                raise ValueError(msg)
+        # A destination the receiver cannot resolve silently drops every record
+        # the rule matched, so nothing may name one that is neither built in nor
+        # declared above.
+        known = BUILT_IN_DESTINATIONS | set(named)
+        unknown = {r.destination for r in self.rules} | {self.default}
+        if unknown - known:
+            msg = (
+                f"Destinations not declared: {', '.join(sorted(unknown - known))}. "
+                f"Known: {', '.join(sorted(known))}"
+            )
             raise ValueError(msg)
-        return v
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -271,18 +297,26 @@ class ReceiverKafkaConfig(BaseModel):
 
 
 class LoaderConnectionConfig(BaseModel):
-    """Connection configuration for dfe-loader transport."""
+    """Connection configuration for dfe-loader transport.
+
+    The transports are the receiver's own (``LoaderConfig`` in its
+    ``src/config/mod.rs``): ``grpc`` is the direct path this block exists for.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     address: str = "dfe-loader:9000"
-    transport: str = Field(default="kafka", description="kafka, zenoh, or memory")
+    transport: str = Field(default="kafka", description="kafka, grpc, or memory")
     timeout_ms: int = Field(default=5000, ge=0)
+    grpc_endpoint: str | None = Field(
+        default=None,
+        description="gRPC endpoint URI; the receiver derives http://{address} when unset",
+    )
 
     @field_validator("transport")
     @classmethod
     def validate_transport(cls, v: str) -> str:
-        allowed = {"kafka", "zenoh", "memory"}
+        allowed = {"kafka", "grpc", "memory"}
         if v.lower() not in allowed:
             msg = f"Invalid transport: {v}. Allowed: {', '.join(sorted(allowed))}"
             raise ValueError(msg)

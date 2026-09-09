@@ -30,7 +30,11 @@ from typing import TYPE_CHECKING
 
 from dfe_engine.appmgmt import catalogue
 from dfe_engine.appmgmt.catalogue import AppDescriptor
-from dfe_engine.source.models import Source
+from dfe_engine.source.models import (
+    OPERATORS_WITHOUT_OPERAND,
+    RULELESS_OPERATORS,
+    Source,
+)
 from dfe_engine.transport import SourceTransport
 
 if TYPE_CHECKING:
@@ -39,6 +43,11 @@ if TYPE_CHECKING:
 ARCHIVER_SERVICE = "dfe-archiver"
 FETCHER_SERVICE = "dfe-fetcher"
 LOADER_SERVICE = "dfe-loader"
+
+# The receiver picks a destination on field AND value, so a match that tests no
+# value cannot name one. The default flow is exempt: it IS the destination
+# everything unmatched already goes to.
+_UNROUTABLE_ON_DIRECT = OPERATORS_WITHOUT_OPERAND - RULELESS_OPERATORS
 
 
 class FlowError(ValueError):
@@ -58,8 +67,8 @@ class FlowTransform:
     variant: str | None
     """The compiled-in program it runs, where the app offers a catalogue of them."""
 
-    listen: str | None
-    """Direct: the endpoint records reach it on. None on the bus."""
+    endpoint: str | None
+    """Direct: the address records reach it on. None on the bus."""
 
     topics: tuple[str, str] | None
     """Bus: the (landing, transformed) topic pair. None on direct."""
@@ -169,11 +178,19 @@ def _resolve_transform(
         purpose=f"run its {transform.engine} transform",
     )
 
+    match = source.match
+    if transport == "direct" and match is not None and match.operator in _UNROUTABLE_ON_DIRECT:
+        raise FlowError(
+            f"source {source.source!r} is matched by {match.operator!r}, which tests no value: "
+            "on direct the receiver hands a record to its transform by field AND value, so "
+            "this source would reach the loader untransformed"
+        )
+
     return FlowTransform(
         app=service,
         instance=catalogue.instance_name(app, source.source),
         variant=transform.variant,
-        listen=catalogue.push_endpoint(app, source.source) if transport == "direct" else None,
+        endpoint=catalogue.push_endpoint(app, source.source) if transport == "direct" else None,
         # topic_load is set exactly when the source has a transform, which is here.
         topics=(source.topic_land, str(source.topic_load)) if transport == "bus" else None,
     )
@@ -193,15 +210,25 @@ def _resolve_input(
     return catalogue.instance_name(fetcher, source.source)
 
 
+def loader_endpoint(catalogue_apps: dict[str, AppDescriptor] | None = None) -> str:
+    """Where any direct-transport stage pushes records for the loader.
+
+    Stack-wide, so it takes no source: every direct flow ends at the same
+    address, and the receiver's destination set names it once.
+    """
+    apps = catalogue_apps if catalogue_apps is not None else catalogue.APP_CATALOGUE
+    return catalogue.push_endpoint(apps[LOADER_SERVICE], "")
+
+
 def _resolve_loader_output(
     source: Source,
     transport: SourceTransport,
     transform: FlowTransform | None,
     apps: dict[str, AppDescriptor],
 ) -> str:
-    loader = _stage_app(LOADER_SERVICE, transport, apps, source=source.source, purpose="load it")
+    _stage_app(LOADER_SERVICE, transport, apps, source=source.source, purpose="load it")
     if transport == "direct":
-        return catalogue.push_endpoint(loader, source.source)
+        return loader_endpoint(apps)
     # On the bus the loader reads whichever topic the last stage wrote.
     return transform.topics[1] if transform and transform.topics else source.topic_land
 

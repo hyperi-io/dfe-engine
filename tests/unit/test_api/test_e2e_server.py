@@ -285,7 +285,7 @@ class TestSeedSourceWithTransform:
         assert _instances(appmgmt_client, headers, "dfe-fetcher") == [_FETCHED]
         stanza = _get(appmgmt_client, f"{_APPS}/dfe-fetcher/{_FETCHED}/routing", headers)
         assert stanza["drift"] is False
-        assert stanza["deployed"]["crates_io"]["topic"] == _FETCHED
+        assert stanza["deployed"]["sources"]["crates_io"]["topic"] == _FETCHED
 
         summary = _get(appmgmt_client, f"{_APPS}/{_VRL}/{_SOURCE}", headers)
         assert summary["telemetry_name"] == f"{_VRL}-{_SOURCE}"
@@ -311,7 +311,7 @@ class TestSeedSourceWithTransform:
         found = _get(appmgmt_client, f"{_APPS}/dfe-receiver/default/routing", headers)
         assert (found["drift"], found["absent"]) == (False, False)
         # The fetcher-based source is routed on the _source label its fetcher stamps.
-        assert [rule["source"] for rule in found["deployed"]["source_rules"]] == [
+        assert [rule["source"] for rule in found["deployed"]["routing"]["source_rules"]] == [
             _FETCHED,
             _SOURCE,
         ]

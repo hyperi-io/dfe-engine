@@ -74,10 +74,30 @@ class TestShippedManifest:
         assert vrl.hot_reload is False
         assert {f.name: f.reload for f in vrl.files}["transforms"] == catalogue.ReloadMode.ROLL
 
-    def test_no_app_declares_an_endpoint_port_of_its_own(self):
-        # Every listener is on the platform default, so an entry here would be a
-        # second copy of that number rather than a deviation from it.
-        assert all(not app.endpoints for app in catalogue.APP_CATALOGUE.values())
+    def test_only_the_loader_answers_on_a_push_listener_today(self):
+        # An app declares the endpoint when it ships the listener, so this set IS
+        # the answer to "what can a direct source be sent to".
+        listening = {
+            name
+            for name, app in catalogue.APP_CATALOGUE.items()
+            if catalogue.PUSH_ENDPOINT in app.endpoints
+        }
+
+        assert listening == {"dfe-loader"}
+
+    def test_the_loader_endpoint_is_the_one_the_charts_render(self):
+        assert catalogue.push_endpoint(catalogue.descriptor("dfe-loader"), "") == (
+            "http://dfe-loader:6000"
+        )
+
+    def test_only_elastic_selects_a_compiled_in_program_by_name(self):
+        variants = {
+            name: app.variant_path
+            for name, app in catalogue.APP_CATALOGUE.items()
+            if app.variant_path
+        }
+
+        assert variants == {"dfe-transform-elastic": "config.source.name"}
 
 
 class TestManifestParsing:
@@ -101,17 +121,60 @@ class TestManifestParsing:
         with pytest.raises(CatalogueError, match="non-empty list"):
             load_catalogue(self._manifest(tmp_path, {"transports": []}))
 
-    def test_a_declared_endpoint_wins_over_the_platform_default(self, tmp_path):
+    def test_the_manifest_owns_the_port_a_stage_is_sent_to(self, tmp_path):
         apps = load_catalogue(
-            self._manifest(tmp_path, {"multiplicity": "single", "endpoints": {"push": 7000}})
+            self._manifest(
+                tmp_path, {"multiplicity": "single", "endpoints": {"push": {"port": 7000}}}
+            )
         )
 
         assert catalogue.push_endpoint(apps["dfe-thing"], "auth") == "http://dfe-thing:7000"
+        assert catalogue.push_listen(apps["dfe-thing"]) == "0.0.0.0:7000"
+
+    def test_a_declared_service_wins_over_the_apps_own_name(self, tmp_path):
+        apps = load_catalogue(
+            self._manifest(
+                tmp_path, {"endpoints": {"push": {"port": 6000, "service": "dfe-thing-ingest"}}}
+            )
+        )
+
+        assert catalogue.push_endpoint(apps["dfe-thing"], "auth") == "http://dfe-thing-ingest:6000"
+
+    def test_an_app_with_no_endpoint_cannot_be_sent_to(self, tmp_path):
+        # No entry means no listener, which is a different thing from a listener
+        # on the usual port - so nothing invents an address for it.
+        apps = load_catalogue(self._manifest(tmp_path, {"multiplicity": "single"}))
+
+        with pytest.raises(catalogue.MissingEndpointError, match="declares no 'push' endpoint"):
+            catalogue.push_endpoint(apps["dfe-thing"], "auth")
 
     def test_a_non_integer_endpoint_port_is_refused(self, tmp_path):
-        path = self._manifest(tmp_path, {"endpoints": {"push": "six thousand"}})
+        path = self._manifest(tmp_path, {"endpoints": {"push": {"port": "six thousand"}}})
 
-        with pytest.raises(CatalogueError, match="ports must be integers"):
+        with pytest.raises(CatalogueError, match="needs an integer port"):
+            load_catalogue(path)
+
+    def test_a_variant_path_outside_every_derived_block_is_refused(self, tmp_path):
+        path = self._manifest(
+            tmp_path,
+            {
+                "multiplicity": "per_config",
+                "variant_path": "config.elsewhere.name",
+                "routing": {
+                    "compiler": "transform",
+                    "scope": "instance",
+                    "values_paths": {"source": "config.source"},
+                },
+            },
+        )
+
+        with pytest.raises(CatalogueError, match="outside every derived block"):
+            load_catalogue(path)
+
+    def test_an_empty_values_paths_mapping_is_refused(self, tmp_path):
+        path = self._manifest(tmp_path, {"routing": {"compiler": "receiver", "values_paths": {}}})
+
+        with pytest.raises(CatalogueError, match="non-empty mapping"):
             load_catalogue(path)
 
 
@@ -128,7 +191,12 @@ class TestNaming:
         assert catalogue.push_endpoint(loader, "auth") == "http://dfe-loader:6000"
 
     def test_a_per_source_app_answers_on_its_instance_service(self):
-        vrl = catalogue.descriptor("dfe-transform-vrl")
+        from dataclasses import replace
+
+        vrl = replace(
+            catalogue.descriptor("dfe-transform-vrl"),
+            endpoints={catalogue.PUSH_ENDPOINT: catalogue.AppEndpoint(port=6000)},
+        )
 
         assert catalogue.push_endpoint(vrl, "auth") == "http://dfe-transform-vrl-auth:6000"
 
