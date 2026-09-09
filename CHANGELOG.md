@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.23](https://github.com/hyperi-io/dfe-engine/compare/v1.19.22...v1.19.23) (2026-09-09)
+
+### Bug Fixes
+
+* correct what the engine says about matching, the loader port and the catalogue ([#334](https://github.com/hyperi-io/dfe-engine/issues/334)) ([69bb5cf](https://github.com/hyperi-io/dfe-engine/commit/69bb5cf965277b32f3c5e18d21285016601ea511)), closes [#335](https://github.com/hyperi-io/dfe-engine/issues/335)
+* **e2e:** run every flow shape the direct transport carries ([10f6852](https://github.com/hyperi-io/dfe-engine/commit/10f6852e3433a11a6d16790f49b2e5614f7367f1))
+
 ## [1.19.22](https://github.com/hyperi-io/dfe-engine/compare/v1.19.21...v1.19.22) (2026-09-09)
 
 ### Bug Fixes
