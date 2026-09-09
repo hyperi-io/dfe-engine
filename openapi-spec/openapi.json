@@ -3441,7 +3441,7 @@
           "Sources"
         ],
         "summary": "Get Source",
-        "description": "Get a full source definition by name, including build/deploy per version.",
+        "description": "Get a full source definition by name, including build/deploy per version.\n\n``default`` is the one name that always answers. It is a normal source once\nwritten; until then the deployment's own default flow is synthesised, so the\nconsole has the card it draws before anyone has configured anything.",
         "operationId": "get_source_api_v1_sources__name__get",
         "parameters": [
           {
@@ -18350,6 +18350,26 @@
         "title": "ErrorResponse",
         "description": "Unified error response.\n\nAll API errors return this shape. The UI can always parse:\n- ``code`` for programmatic branching\n- ``message`` for a human-readable summary\n- ``errors`` for field-level validation details (422 only)\n- ``context`` for optional structured data on specific errors (e.g. conflicts)"
       },
+      "FetcherRoute": {
+        "properties": {
+          "match": {
+            "$ref": "#/components/schemas/SourceMatch",
+            "description": "Which fetched records take this route"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "The source whose landing the matched records go to"
+          }
+        },
+        "type": "object",
+        "required": [
+          "match",
+          "source"
+        ],
+        "title": "FetcherRoute",
+        "description": "One fetched record family this fetcher hands to a DIFFERENT source's landing.\n\nA fetcher polls one upstream but can pull several record shapes off it. A route\nsends the ones that match somewhere other than the owning source's landing, so\nthey get that source's table and transform instead."
+      },
       "FieldError": {
         "properties": {
           "field": {
@@ -26592,6 +26612,29 @@
             "title": "Origin",
             "description": "How the deployed version's data enters: receiver match or a fetcher.",
             "readOnly": true
+          },
+          "transport": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "bus",
+                  "direct"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transport",
+            "description": "Declared transport on the deployed version (None = the deployment default).",
+            "readOnly": true
+          },
+          "archive": {
+            "type": "boolean",
+            "title": "Archive",
+            "description": "Whether the deployed version keeps the raw record.",
+            "readOnly": true
           }
         },
         "type": "object",
@@ -26600,7 +26643,9 @@
           "enabled",
           "match",
           "transform",
-          "origin"
+          "origin",
+          "transport",
+          "archive"
         ],
         "title": "SourceDetailResponse",
         "description": "Full source definition with per-version build/plan/deploy status."
@@ -26664,6 +26709,14 @@
             "type": "object",
             "title": "Config",
             "description": "The fetcher's per-type stanza (services, connections, interval_secs, filter, credential references, ...). Credentials must be env: or vault: references"
+          },
+          "routes": {
+            "items": {
+              "$ref": "#/components/schemas/FetcherRoute"
+            },
+            "type": "array",
+            "title": "Routes",
+            "description": "Send matching fetched records to another source's landing instead of this one's. The named source must exist, which is checked when the fetcher instance is compiled, not here"
           }
         },
         "type": "object",
@@ -26734,16 +26787,17 @@
               "exists",
               "includes",
               "starts_with",
-              "ends_with"
+              "ends_with",
+              "always"
             ],
             "title": "Operator",
-            "description": "How to compare ``field`` to ``value``: equals (default), exists, includes, starts_with, ends_with, not_equals",
+            "description": "How to compare ``field`` to ``value``: equals (default), exists, includes, starts_with, ends_with, not_equals, always. ``always`` matches every record and is reserved for the ``default`` source",
             "default": "equals"
           },
           "value": {
             "type": "string",
             "title": "Value",
-            "description": "Operand for the operator (not used when operator is ``exists``)",
+            "description": "Operand for the operator (not used by ``exists`` or ``always``)",
             "default": ""
           }
         },
@@ -27206,6 +27260,18 @@
             "title": "Engine",
             "description": "Transform engine - a catalogued transform app by engine name (e.g. vrl, vector)"
           },
+          "variant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant",
+            "description": "The compiled-in program this instance runs, where the app offers a catalogue of them (dfe-transform-elastic selects one by source.name). None for an app whose program is the authored files it is given"
+          },
           "config_file": {
             "anyOf": [
               {
@@ -27311,6 +27377,28 @@
               }
             ],
             "description": "Transform stage (optional)"
+          },
+          "transport": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "bus",
+                  "direct"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transport",
+            "description": "How this source's stages hand records on: bus (a broker holds them) or direct (point to point). None takes the deployment default"
+          },
+          "archive": {
+            "type": "boolean",
+            "title": "Archive",
+            "description": "Keep a copy of every record as it arrived, before any transform. The archiver reads the landing topic, so this needs the bus transport",
+            "default": false
           },
           "source_build": {
             "anyOf": [
@@ -27630,6 +27718,28 @@
               }
             ],
             "description": "Fetcher-based origin; required unless ``match`` is set"
+          },
+          "transport": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "bus",
+                  "direct"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transport",
+            "description": "bus or direct; omitted takes the deployment default"
+          },
+          "archive": {
+            "type": "boolean",
+            "title": "Archive",
+            "description": "Keep the raw record as it arrived; needs the bus transport",
+            "default": false
           },
           "views": {
             "anyOf": [

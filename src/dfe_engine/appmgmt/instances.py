@@ -34,6 +34,8 @@ from .catalogue import (
     AppDescriptor,
     Multiplicity,
     descriptor,
+    instance_component,
+    instance_name,
     render_source_binding,
     services,
 )
@@ -70,12 +72,7 @@ class AppInstance:
     @property
     def telemetry_name(self) -> str:
         """The OTel ``service.name`` that distinguishes this instance's metrics."""
-        return f"{self.service}-{self.instance}"
-
-    @property
-    def component(self) -> str:
-        """The chart's component name for this service, without the project prefix."""
-        return self.service.removeprefix("dfe-")
+        return instance_name(self.descriptor, self.instance)
 
     @property
     def descriptor(self) -> AppDescriptor:
@@ -203,7 +200,7 @@ def initial_overlay(app: AppInstance, values: dict | None = None) -> dict:
     set_path(doc, DEPLOY_INSTANCE_PATH, app.instance)
     set_path(doc, OTEL_SERVICE_NAME_PATH, app.telemetry_name)
     if desc.component_is_per_instance:
-        set_path(doc, COMPONENT_PATH, f"{app.component}-{app.instance}")
+        set_path(doc, COMPONENT_PATH, instance_component(desc, app.instance))
     # A source-bound app's instance IS the source, so the binding is derived from
     # the instance name rather than asked for separately.
     for path, value in render_source_binding(desc, app.instance).items():

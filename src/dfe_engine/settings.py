@@ -67,6 +67,10 @@ Kafka:
 - DFE_KAFKA_BOOTSTRAP_SERVERS (legacy: KAFKA_BOOTSTRAP_SERVERS) -> kafka.bootstrap_servers
 - DFE_KAFKA_SECURITY_PROTOCOL (legacy: KAFKA_SECURITY_PROTOCOL) -> kafka.security_protocol
 
+Transport (what carries a source's records between its stages):
+- DFE_TRANSPORT_DEFAULT -> transport.default (bus | direct)
+- DFE_TRANSPORT_BUS_PRESENT -> transport.bus_present (true/false)
+
 Redpanda Cloud lifecycle (control plane; opt-in, WS-C dfe-engine#99):
 - DFE_REDPANDA_API_KEY -> kafka.redpanda_cloud.client_id (OAuth2 client id)
 - DFE_REDPANDA_API_SECRET -> kafka.redpanda_cloud.client_secret (OAuth2 client secret)
@@ -118,6 +122,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from .transport import SourceTransport
 from .yaml_utils import yaml_load
 
 
@@ -420,6 +425,57 @@ class RedpandaCloudSettings(BaseModel):
         return bool(self.client_id and self.client_secret)
 
 
+class TransportSettings(BaseModel):
+    """What this deployment can carry a source's records on, between its stages.
+
+    A source records ``bus`` or ``direct`` and nothing more. Which bus and which
+    direct protocol are facts of the deployment, so they live here: a second bus
+    provider joins behind the same ``bus`` value without touching a source.
+    ``bus_present`` follows the profile - the brokerless profiles run direct.
+
+    Environment variables:
+    - DFE_TRANSPORT_DEFAULT -> transport.default
+    - DFE_TRANSPORT_BUS_PRESENT -> transport.bus_present
+    """
+
+    default: SourceTransport = Field(
+        default="bus",
+        description="Transport a source that names none takes",
+    )
+    bus_present: bool = Field(
+        default=True,
+        description="Whether this deployment runs a bus at all; false means direct only",
+    )
+    bus_provider: str = Field(
+        default="kafka",
+        description="Which bus carries the ``bus`` transport (reported, never chosen per source)",
+    )
+    direct_protocol: str = Field(
+        default="grpc",
+        description="Which protocol carries the ``direct`` transport",
+    )
+
+    def available(self) -> set[str]:
+        """The transports a source may name here.
+
+        Direct is always available: every app compiles its gRPC path in, so a
+        deployment can always run point to point.
+        """
+        return {"direct"} | ({"bus"} if self.bus_present else set())
+
+    @model_validator(mode="after")
+    def _default_must_be_available(self) -> "TransportSettings":
+        # Otherwise every source that names no transport is refused at save, with
+        # the reason sitting two config keys away from the source being written.
+        if self.default not in self.available():
+            raise ValueError(
+                f"transport.default is {self.default!r} but this deployment offers "
+                f"{', '.join(sorted(self.available()))}: set DFE_TRANSPORT_DEFAULT=direct, "
+                "or DFE_TRANSPORT_BUS_PRESENT=true"
+            )
+        return self
+
+
 class KafkaSettings(BaseModel):
     """Kafka connection settings.
 
@@ -450,12 +506,14 @@ class KafkaSettings(BaseModel):
     sasl_username: str = Field(default="", description="SASL username")
     sasl_password: str = Field(default="", description="SASL password")
     redpanda_cloud: RedpandaCloudSettings = Field(default_factory=RedpandaCloudSettings)
-    ensure_topics: bool = Field(
-        default=True,
+    ensure_topics: bool | None = Field(
+        default=None,
         description=(
-            "Create a source's _land/_load topics when it deploys. Turn off only "
-            "where Kafka is not in the path (the direct-gRPC receiver -> loader "
-            "profile); a deploy never fails on the topic step either way."
+            "Create a source's _land/_load topics when it deploys. Unset follows "
+            "``transport.bus_present``, so a brokerless profile asks for nothing "
+            "without a second dial being set to match. True or false is the "
+            "operator's override on top of that fact. A deploy never fails on the "
+            "topic step either way."
         ),
     )
     topic_partitions: int = Field(
@@ -1274,6 +1332,7 @@ class DFESettings(BaseModel):
     hunts: HuntsSettings = Field(default_factory=HuntsSettings)
     artifactory: ArtifactorySettings = Field(default_factory=ArtifactorySettings)
     kafka: KafkaSettings = Field(default_factory=KafkaSettings)
+    transport: TransportSettings = Field(default_factory=TransportSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
     query: QuerySettings = Field(default_factory=QuerySettings)
     query_views: QueryViewSettings = Field(default_factory=QueryViewSettings)
@@ -1371,6 +1430,7 @@ def _get_env_overrides() -> dict:
         "hunts": {},
         "artifactory": {},
         "kafka": {},
+        "transport": {},
         "storage": {},
         "query": {},
         "query_views": {},
@@ -1537,15 +1597,22 @@ def _get_env_overrides() -> dict:
         overrides["kafka"]["sasl_username"] = val
     if val := _get_env("DFE_KAFKA_SASL_PASSWORD", "KAFKA_SASL_PASSWORD"):
         overrides["kafka"]["sasl_password"] = val
-    # Topic creation on source deploy. The Kafka-less profile (receiver -> loader
-    # over direct gRPC) has no broker to reach, so it needs an env route to turn
-    # this off; without one the deploy stalls on the admin timeout every time.
+    # Topic creation on source deploy. Setting this env is the override; left
+    # unset it follows transport.bus_present, which is what a brokerless profile
+    # already declares.
     if val := _get_env("DFE_KAFKA_ENSURE_TOPICS"):
         overrides["kafka"]["ensure_topics"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_KAFKA_TOPIC_PARTITIONS"):
         overrides["kafka"]["topic_partitions"] = int(val)
     if val := _get_env("DFE_KAFKA_TOPIC_REPLICATION_FACTOR"):
         overrides["kafka"]["topic_replication_factor"] = int(val)
+
+    # Transport: what this deployment can carry a source on. The profile sets
+    # both - a brokerless profile is bus_present=false, default=direct.
+    if val := _get_env("DFE_TRANSPORT_DEFAULT"):
+        overrides["transport"]["default"] = val
+    if val := _get_env("DFE_TRANSPORT_BUS_PRESENT"):
+        overrides["transport"]["bus_present"] = val.lower() in ("true", "1", "yes")
 
     # Redpanda Cloud lifecycle (control-plane OAuth2 client; opt-in, WS-C
     # dfe-engine#99). DFE_REDPANDA_API_KEY/_SECRET are the pre-existing names this

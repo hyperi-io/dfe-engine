@@ -375,9 +375,9 @@ class TestFiles:
         assert resp.status_code == 404
         assert resp.json()["code"] == "unknown_file_set"
 
-    def test_vector_reports_a_roll(self, client, app, admin_headers, tmp_path):
-        # The supervisor's reload compares config structs, and its transform config
-        # holds only paths, so a content edit needs a pod roll to take effect.
+    def test_vector_reports_a_hot_reload(self, client, app, admin_headers, tmp_path):
+        # The supervisor watches the transform files and SIGHUPs Vector when only
+        # those changed, so a content edit takes effect without a pod roll.
         _wire(app, tmp_path)
         _define_source(client, admin_headers, "edge")
         client.post(
@@ -391,7 +391,7 @@ class TestFiles:
             headers=admin_headers,
         )
         assert resp.status_code == 200, resp.text
-        assert resp.json()["reload"] == "roll"
+        assert resp.json()["reload"] == "hot"
 
     def test_viewer_cannot_write_a_file(self, client, app, admin_headers, viewer_headers, tmp_path):
         _wire(app, tmp_path)

@@ -2,7 +2,7 @@
 
 GET    /api/v1/sources                  → Paginated source list
 POST   /api/v1/sources                  → Create source
-GET    /api/v1/sources/{name}           → Get source details
+GET    /api/v1/sources/{name}           → Get source details ('default' always answers)
 GET    /api/v1/sources/{name}/versions/{version}  → Get one version snapshot
 GET    /api/v1/sources/{name}/columns   → Composed schema columns for a version
 POST   /api/v1/sources/{name}/build     → Build DDL from a version snapshot
@@ -52,8 +52,10 @@ from dfe_engine.source.deployment import (
     previous_deployed_version_ids,
 )
 from dfe_engine.source.models import (
+    DEFAULT_LANDING_LABEL,
     PaginatedSourceSummaryResponse,
     Source,
+    SourceMatch,
     SourceState,
     SourceSummaryObject,
     SourceVersion,
@@ -683,14 +685,18 @@ def _ensure_source_topics(
 ) -> tuple[list[str], list[str]]:
     """Create the ``_land``/``_load`` topics this source needs.
 
-    Deliberately non-fatal: the schema is already live, and Kafka is absent
-    entirely on the direct-gRPC receiver -> loader profile, where failing the
-    deploy would be wrong. Failures are reported on the response instead.
+    Deliberately non-fatal: the schema is already live, and a brokerless profile
+    has no bus at all, where failing the deploy would be wrong. Failures are
+    reported on the response instead.
 
     Blocking librdkafka calls run in here, so callers on the event loop hand it to
     a thread. ``version_id`` is the version being deployed, not the deployed one.
     """
-    if not settings.kafka.ensure_topics:
+    # Whether a bus is present is the FACT; ensure_topics is the operator's
+    # override on top of it, and unset follows the fact.
+    override = settings.kafka.ensure_topics
+    wanted = settings.transport.bus_present if override is None else override
+    if not wanted:
         return [], []
 
     from dfe_engine.kafka.topics import ensure_topics, source_topic_specs
@@ -919,17 +925,25 @@ async def deploy_source_schema(
     dependencies=[Depends(require_action(scopes_dict["source_read"]))],
 )
 async def get_source(name: str, user: CurrentUser, registry: SourceReg):
-    """Get a full source definition by name, including build/deploy per version."""
+    """Get a full source definition by name, including build/deploy per version.
+
+    ``default`` is the one name that always answers. It is a normal source once
+    written; until then the deployment's own default flow is synthesised, so the
+    console has the card it draws before anyone has configured anything.
+    """
     try:
         source = registry.get_source(name)
     except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Source {name!r} not found",
-            },
-        ) from None
+        if name == DEFAULT_LANDING_LABEL:
+            source = _synthesised_default_source()
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "not_found",
+                    "message": f"Source {name!r} not found",
+                },
+            ) from None
     store = SourceDeploymentStore.from_settings(get_settings())
     return _to_source_detail_response(source, store)
 
@@ -966,6 +980,12 @@ async def update_source(
     from dfe_engine.source.registry import SourceNotFoundError
 
     if not registry.source_exists(name):
+        # The default flow has a card in the console before it has a file, so its
+        # first edit is a PUT to a source nobody created.
+        if name == DEFAULT_LANDING_LABEL:
+            return await create_source(
+                body.model_copy(update={"source": name}), user, registry, request
+            )
         raise HTTPException(
             status_code=404,
             detail={
@@ -1156,6 +1176,24 @@ async def seed_sources(user: CurrentUser, registry: SourceReg):
 def _utc_now_iso() -> str:
 
     return datetime.now(tz=UTC).isoformat()
+
+
+def _synthesised_default_source() -> Source:
+    """The default flow as it runs before anyone has written it down.
+
+    Every record the receiver cannot place is stamped ``default`` and lands in
+    the ``default`` table, whether or not a source file says so. Reporting that
+    as 404 would tell the console the platform's own landing does not exist.
+    Nothing here is stored: a PUT to the same path writes a real source.
+    """
+    return Source.model_validate(
+        {
+            "source": DEFAULT_LANDING_LABEL,
+            "description": "Where a record the receiver cannot place lands",
+            "match": SourceMatch(field="_source", operator="always").model_dump(mode="json"),
+            "transport": get_settings().transport.default,
+        }
+    )
 
 
 def _resolve_source_version(
