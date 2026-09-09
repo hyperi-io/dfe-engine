@@ -353,6 +353,72 @@ class TestDefaultFlow:
         assert "reserved" in resp.json()["message"]
 
 
+class TestGetSourceFlow:
+    """GET /api/v1/sources/{name}/flow -- what the console draws."""
+
+    def test_a_receiver_source_reports_its_match_and_where_it_lands(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+
+        body = client.get("/api/v1/sources/test-source/flow", headers=admin_headers).json()
+
+        assert body["source"] == "test-source"
+        assert body["origin"] == "receiver"
+        assert body["input"] == "tags.collector.type equals test_source"
+        assert body["transport"] == "bus"
+        assert body["carrier"] == "kafka"
+        assert body["transform"] is None
+        assert body["outputs"] == {"loader": "test-source_land", "archive": False}
+        assert body["table"] == "test-source"
+
+    def test_the_default_flow_answers_before_anyone_has_written_it(
+        self, client: TestClient, admin_headers: dict
+    ):
+        # Same rule as GET /sources/default: the console draws the platform's own
+        # landing before anything is configured.
+        body = client.get("/api/v1/sources/default/flow", headers=admin_headers).json()
+
+        assert body["source"] == "default"
+        assert body["input"] == "always"
+        assert body["outputs"]["loader"] == "default_land"
+
+    def test_an_unknown_source_has_no_flow(self, client: TestClient, admin_headers: dict):
+        resp = client.get("/api/v1/sources/nonexistent/flow", headers=admin_headers)
+
+        assert resp.status_code == 404
+
+    def test_a_flow_that_cannot_run_answers_with_the_reason(
+        self, client: TestClient, admin_headers: dict, app, sample_source: dict
+    ):
+        # The console shows this message beside the choice that was refused, so it
+        # has to say which stage refused and why, not just that something failed.
+        client.post(
+            "/api/v1/sources",
+            json={**sample_source, "archive": True},
+            headers=admin_headers,
+        )
+        app.state.settings = app.state.settings.model_copy(
+            update={
+                "transport": app.state.settings.transport.model_copy(
+                    update={"default": "direct", "bus_present": False}
+                )
+            }
+        )
+
+        resp = client.get("/api/v1/sources/test-source/flow", headers=admin_headers)
+
+        assert resp.status_code == 422, resp.text
+        assert "asks to be archived" in resp.json()["message"]
+
+    def test_reading_a_flow_needs_source_read(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+
+        assert client.get("/api/v1/sources/test-source/flow").status_code == 401
+
+
 class TestGetSourceVersion:
     """GET /api/v1/sources/{name}/versions/{version}"""
 
