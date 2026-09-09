@@ -42,7 +42,7 @@ def test_one_rule_becomes_one_windowed_insert(tmp_path: Path):
     sql = compile_hunt_queries(
         {
             "rules": [{"rule_name": "certutil"}],
-            "global_source_table_name": "dfe.default",
+            "global_source_table_name": "dfe.main",
             "global_target_table_name": "dfe.detection",
         },
         "windows_hunt",
@@ -51,7 +51,7 @@ def test_one_rule_becomes_one_windowed_insert(tmp_path: Path):
     assert len(sql) == 1
     statement = sql[0]
     assert statement.startswith("INSERT INTO dfe.detection")
-    assert "FROM dfe.default" in statement
+    assert "FROM dfe.main" in statement
     assert "WHERE {window} AND (process_name = 'certutil.exe')" in statement
     assert "'certutil' AS rule_id" in statement
     assert "'Certutil Abuse' AS rule_name" in statement
@@ -67,7 +67,7 @@ def test_each_rule_gets_its_own_statement(tmp_path: Path):
     sql = compile_hunt_queries(
         {
             "rules": [{"rule_name": "one"}, {"rule_name": "two"}],
-            "global_source_table_name": "dfe.default",
+            "global_source_table_name": "dfe.main",
         },
         "pair",
         rules_dir=tmp_path,
@@ -81,7 +81,7 @@ def test_each_rule_gets_its_own_statement(tmp_path: Path):
 def test_bare_rule_name_strings_are_accepted(tmp_path: Path):
     _save_rule(tmp_path, rule_id="plain", name="Plain", where_clause="a = 1")
     sql = compile_hunt_queries(
-        {"rules": ["plain"], "global_source_table_name": "dfe.default"},
+        {"rules": ["plain"], "global_source_table_name": "dfe.main"},
         "hunt",
         rules_dir=tmp_path,
         default_target="dfe.detection",
@@ -99,7 +99,7 @@ def test_the_rules_own_source_table_wins_over_the_hunts(tmp_path: Path):
         source_table="windows_audit",
     )
     sql = compile_hunt_queries(
-        {"rules": ["scoped"], "global_source_table_name": "dfe.default"},
+        {"rules": ["scoped"], "global_source_table_name": "dfe.main"},
         "hunt",
         rules_dir=tmp_path,
         default_target="dfe.detection",
@@ -110,7 +110,7 @@ def test_the_rules_own_source_table_wins_over_the_hunts(tmp_path: Path):
 
 def test_the_default_target_applies_only_when_nothing_names_one(tmp_path: Path):
     _save_rule(tmp_path, rule_id="r", name="R", where_clause="a = 1")
-    definition = {"rules": ["r"], "global_source_table_name": "dfe.default"}
+    definition = {"rules": ["r"], "global_source_table_name": "dfe.main"}
     assert (
         "INSERT INTO dfe.detection"
         in compile_hunt_queries(
@@ -156,7 +156,7 @@ def test_a_hunt_with_no_rules_compiles_to_nothing(tmp_path: Path):
 def test_a_missing_rule_file_is_dropped_not_guessed(tmp_path: Path):
     _save_rule(tmp_path, rule_id="present", name="Present", where_clause="a = 1")
     sql = compile_hunt_queries(
-        {"rules": ["absent", "present"], "global_source_table_name": "dfe.default"},
+        {"rules": ["absent", "present"], "global_source_table_name": "dfe.main"},
         "h",
         rules_dir=tmp_path,
         default_target="dfe.detection",
@@ -169,7 +169,7 @@ def test_a_rule_with_no_detection_logic_is_dropped(tmp_path: Path):
     _save_rule(tmp_path, rule_id="empty", name="Empty", where_clause="")
     assert (
         compile_hunt_queries(
-            {"rules": ["empty"], "global_source_table_name": "dfe.default"},
+            {"rules": ["empty"], "global_source_table_name": "dfe.main"},
             "h",
             rules_dir=tmp_path,
             default_target="dfe.detection",
@@ -193,7 +193,7 @@ def test_an_unqualified_target_lands_beside_its_source(tmp_path: Path):
     sql = compile_hunt_queries(
         {
             "rules": ["r"],
-            "global_source_table_name": "tenant_a.default",
+            "global_source_table_name": "tenant_a.main",
             "global_target_table_name": "detection",
         },
         "h",

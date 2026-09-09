@@ -335,12 +335,12 @@ class TestDefaultTiers:
     def test_analyst_tier_grants_the_whole_data_db(self):
         """D9: the analyst tier role grants the broad dfe.* for every user, so a new
         source table is visible automatically with no admin action. Isolation is by
-        row policy, not by narrowing the grant to dfe.default."""
+        row policy, not by narrowing the grant to dfe.main."""
         by_name = {t.name: t for t in resolve_grant_databases(DEFAULT_TIERS, "dfe")}
         for n in ("analyst_tier_1", "analyst_tier_2", "analyst_tier_3"):
             grants = by_name[n].grants
             assert "SELECT ON dfe.*" in grants
-            assert "SELECT ON dfe.default" not in grants
+            assert "SELECT ON dfe.main" not in grants
 
     def test_seeded_grants_name_no_database(self):
         """The seeds carry the {db} placeholder, never a database name.

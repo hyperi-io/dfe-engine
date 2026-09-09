@@ -45,7 +45,7 @@ FETCHER_SERVICE = "dfe-fetcher"
 LOADER_SERVICE = "dfe-loader"
 
 # The receiver picks a destination on field AND value, so a match that tests no
-# value cannot name one. The default flow is exempt: it IS the destination
+# value cannot name one. The main flow is exempt: it IS the destination
 # everything unmatched already goes to.
 _UNROUTABLE_ON_DIRECT = OPERATORS_WITHOUT_OPERAND - RULELESS_OPERATORS
 

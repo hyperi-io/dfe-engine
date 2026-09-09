@@ -22,7 +22,7 @@ _HUNT = {
     "display_name": "Visible Hunt",
     "cron": "*/5 * * * *",
     "global_target_table_name": "dfe.detection",
-    "global_source_table_name": "dfe.default",
+    "global_source_table_name": "dfe.main",
     "customers": ["org_a"],
     "rules": ["some_rule"],
 }

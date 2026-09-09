@@ -10,7 +10,7 @@
       "h": 3,
       "config": {
         "name": "Events ingested",
-        "source": "default",
+        "source": "main",
         "displayType": "number",
         "select": [
           {
@@ -32,7 +32,7 @@
       "h": 3,
       "config": {
         "name": "Bytes ingested",
-        "source": "default",
+        "source": "main",
         "displayType": "number",
         "numberFormat": {
           "output": "byte"
@@ -57,7 +57,7 @@
       "h": 3,
       "config": {
         "name": "Active orgs",
-        "source": "default",
+        "source": "main",
         "displayType": "number",
         "select": [
           {
@@ -79,7 +79,7 @@
       "h": 3,
       "config": {
         "name": "Active sources",
-        "source": "default",
+        "source": "main",
         "displayType": "number",
         "select": [
           {
@@ -101,7 +101,7 @@
       "h": 3,
       "config": {
         "name": "Ingest lag p95 (ms)",
-        "source": "default",
+        "source": "main",
         "displayType": "number",
         "select": [
           {
@@ -125,7 +125,7 @@
       "h": 3,
       "config": {
         "name": "Ingest lag max (ms)",
-        "source": "default",
+        "source": "main",
         "displayType": "number",
         "select": [
           {
@@ -147,7 +147,7 @@
       "h": 6,
       "config": {
         "name": "Events per interval by org",
-        "source": "default",
+        "source": "main",
         "displayType": "stacked_bar",
         "granularity": "auto",
         "select": [
@@ -171,7 +171,7 @@
       "h": 6,
       "config": {
         "name": "Events per interval by source",
-        "source": "default",
+        "source": "main",
         "displayType": "stacked_bar",
         "granularity": "auto",
         "select": [
@@ -195,7 +195,7 @@
       "h": 6,
       "config": {
         "name": "Ingest lag percentiles (ms)",
-        "source": "default",
+        "source": "main",
         "displayType": "line",
         "granularity": "auto",
         "select": [
@@ -236,7 +236,7 @@
       "h": 6,
       "config": {
         "name": "Event-time skew distribution (s)",
-        "source": "default",
+        "source": "main",
         "displayType": "heatmap",
         "granularity": "auto",
         "select": [
@@ -259,7 +259,7 @@
       "h": 6,
       "config": {
         "name": "Top orgs by volume",
-        "source": "default",
+        "source": "main",
         "displayType": "table",
         "select": [
           {
@@ -297,7 +297,7 @@
       "h": 6,
       "config": {
         "name": "Source freshness (newest event)",
-        "source": "default",
+        "source": "main",
         "displayType": "table",
         "select": [
           {

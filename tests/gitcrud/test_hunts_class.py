@@ -38,7 +38,7 @@ HUNT_CONFIG = {
     "display_name": "Certutil Abuse",
     "schedule": {"mode": "rate", "interval": "5m"},
     "rules": [{"rule_name": "certutil"}],
-    "global_source_table_name": "dfe.default",
+    "global_source_table_name": "dfe.main",
     "global_target_table_name": "dfe.detection",
 }
 

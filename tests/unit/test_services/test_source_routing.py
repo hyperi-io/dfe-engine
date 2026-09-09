@@ -302,10 +302,10 @@ class TestFetcherSourcesInReceiverRouting:
             }
         ]
 
-    def test_a_default_topic_source_needs_no_rule(self):
-        # default_source already sends an unmatched record to the default topic.
+    def test_a_main_topic_source_needs_no_rule(self):
+        # default_source already sends an unmatched record to the main topic.
         config = compile_receiver_routing(
-            FakeSourceRegistry([_fetched_source("okta-audit", topic="default")])
+            FakeSourceRegistry([_fetched_source("okta-audit", topic="main")])
         )
         assert config.source_rules == []
 
@@ -351,7 +351,7 @@ class TestReceiverRoutingConfigModel:
     def test_defaults_match_receiver_defaults(self):
         config = ReceiverRoutingConfig()
         assert config.source_rules == []
-        assert config.default_source == "default"
+        assert config.default_source == "main"
         assert config.topic_suffix == "_land"
         assert config.source_to_topic == {}
         assert config.legacy_compat is False
@@ -365,7 +365,7 @@ class TestReceiverRoutingConfigModel:
 class TestCompileReceiverRouting:
     def test_compiles_source_rules(self, registry):
         config = compile_receiver_routing(registry)
-        assert config.default_source == "default"
+        assert config.default_source == "main"
         assert config.topic_suffix == "_land"
 
         # active sources with a match (disabled + dormant excluded)
@@ -466,7 +466,7 @@ class TestCompileReceiverRouting:
             assert rule["mode"] in ("key_present", "key_value_set", "key_value_use")
 
         # the engine model itself re-validates the emitted doc (serde-compatible)
-        assert ReceiverRoutingConfig.model_validate(emitted).default_source == "default"
+        assert ReceiverRoutingConfig.model_validate(emitted).default_source == "main"
 
 
 # ---------------------------------------------------------------------------

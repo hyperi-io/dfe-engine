@@ -29,7 +29,7 @@ from dfe_engine.hyperdx.dashboards import (
 
 # Sources the fork seeds on EVERY team (org-connection.ts). A dashboard built
 # only from these resolves for a tenant as well as the platform team.
-TENANT_SOURCES = {"default", "hunts"}
+TENANT_SOURCES = {"main", "hunts"}
 
 # Additionally seeded on the platform/admin team only.
 PLATFORM_SOURCES = {"otel_logs", "otel_traces", "otel_metrics", "clickhouse_system"}

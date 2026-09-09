@@ -25,7 +25,7 @@ validation:
 
 routing:
   source_rules: []  # compiled from Source definitions by the engine
-  default_source: default
+  default_source: main
   topic_suffix: _land
   source_to_topic: {}
   dlq:

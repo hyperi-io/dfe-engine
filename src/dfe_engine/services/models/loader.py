@@ -16,6 +16,7 @@ from dfe_engine.services.models.common import (
     MemoryConfig,
     SaslConfig,
 )
+from dfe_engine.source.models import DEFAULT_LANDING_LABEL, landing_topic
 
 # ---------------------------------------------------------------------------
 # Kafka (Loader-specific: consumer settings)
@@ -76,7 +77,7 @@ class GrpcConfig(BaseModel):
         description="Enable gzip compression for gRPC messages",
     )
     default_topic: str = Field(
-        default="default_land",
+        default=landing_topic(DEFAULT_LANDING_LABEL),
         description="Routing key for messages without a topic in the gRPC metadata",
     )
 
@@ -173,7 +174,8 @@ class LoaderRoutingConfig(BaseModel):
     db_fields: list[str] = []
     table_fields: list[str] = Field(default_factory=lambda: ["_source"])
     default_db: str = "dfe"
-    default_table: str = "main"
+    # The key names the fallback mechanism; its value is the landing table's name.
+    default_table: str = DEFAULT_LANDING_LABEL
     org_id_field: str | None = "org_id"
     org_routes: list[dict[str, Any]] = Field(
         default_factory=list,

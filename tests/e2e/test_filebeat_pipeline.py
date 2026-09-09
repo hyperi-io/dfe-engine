@@ -194,9 +194,9 @@ class TestRouting:
         _post(e2e, [body])
 
         poll_until(
-            lambda: _count(ch_client, f"{e2e.ch_db}.default", run),
+            lambda: _count(ch_client, f"{e2e.ch_db}.main", run),
             timeout=180.0,
-            desc=f"rows in {e2e.ch_db}.default for {run}",
+            desc=f"rows in {e2e.ch_db}.main for {run}",
         )
         assert source_table.gained() == 0
 
@@ -258,7 +258,7 @@ class TestCommonHeaderLowerBound:
         landed = poll_until(
             lambda: (
                 _count(ch_client, f"{e2e.ch_db}.{unknown}", run)
-                or _count(ch_client, f"{e2e.ch_db}.default", run)
+                or _count(ch_client, f"{e2e.ch_db}.main", run)
             ),
             timeout=180.0,
             desc=f"rows for the unschema'd source {unknown}",

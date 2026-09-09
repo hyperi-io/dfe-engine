@@ -4,7 +4,7 @@ GET    /api/v1/sources                  -> Paginated source list
 POST   /api/v1/sources                  -> Create source
 GET    /api/v1/sources/catalogue        -> The sources a deployed transform already handles
 POST   /api/v1/sources/from-catalogue/{entry} -> Create a source from a catalogue entry
-GET    /api/v1/sources/{name}           -> Get source details ('default' always answers)
+GET    /api/v1/sources/{name}           -> Get source details ('main' always answers)
 GET    /api/v1/sources/{name}/flow      -> The stages its records travel, resolved
 GET    /api/v1/sources/{name}/versions/{version}  -> Get one version snapshot
 GET    /api/v1/sources/{name}/columns   -> Composed schema columns for a version
@@ -1171,15 +1171,15 @@ async def deploy_source_schema(
 async def get_source(name: str, user: CurrentUser, registry: SourceReg):
     """Get a full source definition by name, including build/deploy per version.
 
-    ``default`` is the one name that always answers. It is a normal source once
-    written; until then the deployment's own default flow is synthesised, so the
+    ``main`` is the one name that always answers. It is a normal source once
+    written; until then the deployment's own main flow is synthesised, so the
     console has the card it draws before anyone has configured anything.
     """
     try:
         source = registry.get_source(name)
     except SourceNotFoundError:
         if name == DEFAULT_LANDING_LABEL:
-            source = _synthesised_default_source()
+            source = _synthesised_main_source()
         else:
             raise HTTPException(
                 status_code=404,
@@ -1222,7 +1222,7 @@ async def get_source_flow(name: str, user: CurrentUser, registry: SourceReg, set
                 status_code=404,
                 detail={"code": "not_found", "message": f"Source {name!r} not found"},
             ) from None
-        source = _synthesised_default_source()
+        source = _synthesised_main_source()
     try:
         return _flow_response(resolve_flow(source, settings))
     except FlowError as exc:
@@ -1264,7 +1264,7 @@ async def update_source(
     from dfe_engine.source.registry import SourceNotFoundError
 
     if not registry.source_exists(name):
-        # The default flow has a card in the console before it has a file, so its
+        # The main flow has a card in the console before it has a file, so its
         # first edit is a PUT to a source nobody created.
         if name == DEFAULT_LANDING_LABEL:
             return await create_source(
@@ -1497,12 +1497,12 @@ def _to_catalogue_object(
     )
 
 
-def _synthesised_default_source() -> Source:
-    """The default flow as it runs before anyone has written it down.
+def _synthesised_main_source() -> Source:
+    """The main flow as it runs before anyone has written it down.
 
-    Every record the receiver cannot place is stamped ``default`` and lands in
-    the ``default`` table, whether or not a source file says so. Reporting that
-    as 404 would tell the console the platform's own landing does not exist.
+    Every record the receiver cannot place is stamped ``main`` and lands in the
+    ``main`` table, whether or not a source file says so. Reporting that as 404
+    would tell the console the platform's own landing does not exist.
     Nothing here is stored: a PUT to the same path writes a real source.
     """
     return Source.model_validate(

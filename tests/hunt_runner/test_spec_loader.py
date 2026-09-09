@@ -183,7 +183,7 @@ def test_a_hunt_the_api_writes_loads_with_a_query_to_run(tmp_path: Path):
         cron="* * * * *",
         rules=["some_rule"],
         customers=["acme"],
-        global_source_table_name="dfe.default",
+        global_source_table_name="dfe.main",
         global_target_table_name="dfe.detection",
         checkpoint_timestamp_field="_timestamp_load",
     )
@@ -196,7 +196,7 @@ def test_a_hunt_the_api_writes_loads_with_a_query_to_run(tmp_path: Path):
     assert len(spec.queries) == 1
     sql = spec.queries[0]
     assert sql.startswith("INSERT INTO dfe.detection")
-    assert "FROM dfe.default" in sql
+    assert "FROM dfe.main" in sql
     assert "process_name = 'certutil.exe'" in sql
     assert "{window}" in sql  # the worker substitutes the incremental predicate
     assert "'some_rule' AS rule_id" in sql

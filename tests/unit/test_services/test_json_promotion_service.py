@@ -545,13 +545,13 @@ class TestDiscoverPaths:
         discover_paths(
             client,
             db="dfe",
-            source="default",
+            source="main",
             existing_columns=[],
             match_field="_json.tags.collector.type",
             match_value="syslog",
         )
         sql, params = client.calls[0]
-        assert "FROM `dfe`.`default`" in sql
+        assert "FROM `dfe`.`main`" in sql
         assert (
             "WHERE toString(assumeNotNull(_json).`tags.collector.type`) = {match_value:String}"
             in sql
@@ -563,7 +563,7 @@ class TestDiscoverPaths:
         discover_paths(
             client,
             db="dfe",
-            source="default",
+            source="main",
             existing_columns=[],
             match_field="_org_id",
             match_value="acme",
@@ -585,7 +585,7 @@ class TestDiscoverPaths:
         result = discover_paths(
             client,
             db="dfe",
-            source="default",
+            source="main",
             existing_columns=[],
             match_field="_json.f",
             match_value="v",
@@ -602,7 +602,7 @@ class TestDiscoverPaths:
         result = discover_paths(
             client,
             db="dfe",
-            source="default",
+            source="main",
             existing_columns=[],
             match_field="_json.f",
             match_value="v",
@@ -663,13 +663,13 @@ class TestSampleRows:
         sample_rows(
             client,
             db="dfe",
-            source="default",
+            source="main",
             match_field="_json.tags.collector.type",
             match_value="syslog",
             limit=10,
         )
         sql, params = client.calls[0]
-        assert "FROM `dfe`.`default`" in sql
+        assert "FROM `dfe`.`main`" in sql
         assert (
             "WHERE toString(assumeNotNull(_json).`tags.collector.type`) = {match_value:String}"
             in sql
@@ -681,7 +681,7 @@ class TestSampleRows:
         sample_rows(
             client,
             db="dfe",
-            source="default",
+            source="main",
             match_field="_json.tags.type",
             match_operator="exists",
             limit=3,
@@ -696,7 +696,7 @@ class TestSampleRows:
         sample_rows(
             client,
             db="dfe",
-            source="default",
+            source="main",
             match_field="_json.message",
             match_value="error",
             match_operator="includes",
