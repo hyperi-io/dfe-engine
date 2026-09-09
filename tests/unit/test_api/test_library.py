@@ -47,15 +47,20 @@ def _publish(client, headers, name="parse-syslog", content=V1, **body):
 
 
 def _deploy(client, headers, instance="syslog"):
-    # A vrl instance IS a source's processing step, so the source comes first.
+    # A vrl instance IS a source's processing step, so it exists for a source
+    # that is active, deployed, and names this transform.
+    from dfe_engine.api.deps import _registries
+
     client.post(
         "/api/v1/sources",
         json={
             "source": instance,
             "match": {"field": "tags.collector.type", "value": instance},
+            "transform": {"engine": "vrl"},
         },
         headers=headers,
     )
+    _registries["source"].set_deployed_version(instance, "1.0.0")
     return client.post(
         f"/api/v1/apps/{VRL}/instances", json={"instance": instance}, headers=headers
     )

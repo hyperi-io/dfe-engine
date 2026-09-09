@@ -13,10 +13,11 @@ never be authored by hand:
 - The routing block of every stack-scoped app (the receiver's source rules,
   the loader's table map). A source deploy that does not push it leaves the
   receiver on built-in defaults, routing every event to the default topic.
-- The instances of every instance-scoped app (a fetcher per fetcher-based
-  source). An active, deployed source of that origin means an instance named
-  for it exists with the source's stanza compiled in; anything else means no
-  instance.
+- The instances of every instance-scoped app: a fetcher per fetcher-based
+  source, a transform per source that names one. An active, deployed source the
+  app has something to do for means an instance named for it exists with the
+  source's block compiled in; anything else means no instance. Which apps those
+  are is the manifest's to say, so a new one is a manifest edit.
 
 ``plan`` reads the deploy repo and the sources and lists the overlay writes that
 bring the two into step. It never writes: the API applies each change through
@@ -29,7 +30,6 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from dfe_engine.gitcrud import GitCrud
-from dfe_engine.gitcrud.engine import set_path
 from dfe_engine.source.registry import SourceRegistry
 
 from . import catalogue, instances, routing
@@ -95,7 +95,7 @@ def plan(gc: GitCrud, registry: SourceRegistry, settings: Any) -> list[DerivedCh
                 continue
             app = instances.instance_of(desc.service, name)
             doc = instances.initial_overlay(app)
-            set_path(doc, desc.routing_path, compiled)
+            routing.apply(desc, doc, compiled)
             changes.append(DerivedChange(app, "deploy", doc))
 
         for name, app in existing.items():

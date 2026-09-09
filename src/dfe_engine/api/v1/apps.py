@@ -285,14 +285,21 @@ class FileWriteRequest(BaseModel):
 class RoutingResponse(BaseModel):
     """Source-derived routing: what it should be, and what the overlay carries."""
 
-    compiler: str = Field(description="Manifest-declared compiler that derives this block")
-    values_path: str = Field(description="Overlay dot-path the block is written to")
+    compiler: str = Field(description="Manifest-declared compiler that derives these blocks")
+    values_paths: dict[str, str] = Field(
+        default_factory=dict,
+        description="Each derived block by name, and the overlay dot-path it is written to",
+    )
     drift: bool = Field(description="The overlay disagrees with the current sources")
     absent: bool = Field(
         description="The overlay carries no routing, so the app runs on built-in defaults"
     )
-    compiled: dict[str, Any] = Field(default_factory=dict)
-    deployed: dict[str, Any] = Field(default_factory=dict)
+    compiled: dict[str, Any] = Field(
+        default_factory=dict, description="Each block the sources call for now, by name"
+    )
+    deployed: dict[str, Any] = Field(
+        default_factory=dict, description="The same blocks as the overlay carries them"
+    )
     etag: str | None = _etag_field()
 
 
@@ -778,7 +785,7 @@ async def create_instance(
                 },
             )
         found = _routing_status(request, app, doc, registry)
-        set_path(doc, app.descriptor.routing_path, found.compiled)
+        routing.apply(app.descriptor, doc, found.compiled)
     protected = _enforce(request, user, app.overlay_name, doc)
     return commit_overlay(
         request,
@@ -1425,7 +1432,7 @@ async def get_app_routing(
     found = _routing_status(request, app, doc, source_registry)
     return RoutingResponse(
         compiler=found.compiler,
-        values_path=found.values_path,
+        values_paths=found.values_paths,
         drift=found.drift,
         absent=found.absent,
         compiled=found.compiled,
@@ -1452,7 +1459,7 @@ async def sync_app_routing(
     found = _routing_status(request, app, doc, source_registry)
     if not found.drift:
         return WriteResult(changed=False)
-    set_path(doc, app.descriptor.routing_path, found.compiled)
+    routing.apply(app.descriptor, doc, found.compiled)
     protected = _enforce(request, user, app.overlay_name, doc)
     return commit_overlay(
         request,

@@ -31,12 +31,14 @@ from dfe_engine.yaml_utils import yaml_load
 # object it renders is ``dfe-<component>``.
 PROJECT_PREFIX = "dfe-"
 
-# The gRPC port scalo's Push service listens on. One number for every app that
-# has a listener; a manifest ``endpoints`` entry overrides it per app.
-DEFAULT_PUSH_PORT = 6000
-
 PUSH_ENDPOINT = "push"
-"""The endpoint name a direct-transport stage sends to."""
+"""The endpoint name a direct-transport stage sends to.
+
+An app declares it in the manifest exactly when it runs a scalo Push listener, so
+the declaration is also how the engine knows the app can be sent to at all. There
+is deliberately no default port: a missing entry means no listener, which is a
+different thing from a listener on the usual number.
+"""
 
 # dfe-infra chart key paths. Uniform across every chart because they all call the
 # same KEDA library template - see helm/library/dfe-common/templates/_keda.tpl.
@@ -146,6 +148,16 @@ class ConsumedFileSet:
 
 
 @dataclass(frozen=True, slots=True)
+class AppEndpoint:
+    """One listener an app answers on, and where a sender addresses it."""
+
+    port: int
+
+    service: str = ""
+    """Kubernetes Service, when the chart's is not named after the app itself."""
+
+
+@dataclass(frozen=True, slots=True)
 class AppDescriptor:
     """One deployable DFE app."""
 
@@ -166,8 +178,14 @@ class AppDescriptor:
     routing_compiler: str = ""
     """Name of the compiler that derives this app's routing from the sources."""
 
-    routing_path: str = ""
-    """Overlay dot-path the compiled routing is written to."""
+    routing_paths: dict[str, str] = field(default_factory=dict)
+    """Each derived block this app carries, by name, and its overlay dot-path.
+
+    More than one because a block is the app's OWN config section: the receiver's
+    routing rules and its destination set are siblings the app reads separately,
+    and each is owned whole so switching transport removes the other's keys
+    rather than leaving them beside the new ones.
+    """
 
     routing_scope: RoutingScope = RoutingScope.STACK
     """Whether the block compiles from every source or from the bound one."""
@@ -185,12 +203,36 @@ class AppDescriptor:
     rolls the pods as a rolling update whether or not the app could reload.
     """
 
-    endpoints: dict[str, int] = field(default_factory=dict)
-    """Named listener ports, where the app deviates from the platform default."""
+    endpoints: dict[str, AppEndpoint] = field(default_factory=dict)
+    """The listeners this app runs, by name. Absent means the app has none."""
+
+    variant_path: str = ""
+    """This app's own config key naming the compiled-in program an instance runs.
+
+    Declared per app so the engine writes a source's ``transform.variant`` into
+    whatever the app calls it, without knowing which app it is.
+    """
 
     def carries(self, transport: str) -> bool:
         """Whether this app can carry a source on *transport*."""
         return transport in self.transports
+
+    def block_for(self, path: str) -> tuple[str, str]:
+        """The derived block a compiled dot-path belongs to, and the path within it.
+
+        The manifest declares which parts of an overlay the engine owns, so a
+        compiled value outside all of them is a manifest and compiler that
+        disagree - caught here rather than by a key silently going nowhere.
+        """
+        for name, root in self.routing_paths.items():
+            if path == root:
+                return name, ""
+            if path.startswith(f"{root}."):
+                return name, path[len(root) + 1 :]
+        declared = ", ".join(sorted(self.routing_paths.values())) or "none"
+        raise CatalogueError(
+            f"{self.service}: {path!r} is outside every derived block (declared: {declared})"
+        )
 
     @property
     def routing_is_per_instance(self) -> bool:
@@ -209,7 +251,7 @@ class AppDescriptor:
         so the API reports drift against them rather than treating an edit as
         intent.
         """
-        return bool(self.routing_compiler and self.routing_path)
+        return bool(self.routing_compiler and self.routing_paths)
 
     @property
     def component_is_per_instance(self) -> bool:
@@ -257,6 +299,10 @@ class CatalogueError(ValueError):
     """Raised when the app manifest cannot be read or is malformed."""
 
 
+class MissingEndpointError(CatalogueError):
+    """Raised when a stage needs an app's listener and the manifest declares none."""
+
+
 BUNDLED_MANIFEST = Path(__file__).parent / "apps.yaml"
 """Snapshot shipped in the image, pinned to the dfe-infra manifest it came from."""
 
@@ -299,20 +345,35 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
     types = raw.get("source_types") or []
     if not isinstance(types, list):
         raise CatalogueError(f"{service}: source_types must be a list")
-    return AppDescriptor(
+    app = AppDescriptor(
         service=service,
         scale_deployed=bool(raw.get("scale_deployed", True)),
         multiplicity=multiplicity,
         files=tuple(_file_set_from(service, f) for f in raw.get("files") or ()),
         source_binding=dict(binding),
         routing_compiler=str(routing.get("compiler", "")),
-        routing_path=str(routing.get("values_path", "")),
+        routing_paths=_routing_paths_from(service, routing.get("values_paths")),
         routing_scope=scope,
         source_types=tuple(str(t) for t in types),
         transports=_transports_from(service, raw.get("transports")),
         hot_reload=bool(raw.get("hot_reload", False)),
         endpoints=_endpoints_from(service, raw.get("endpoints")),
+        variant_path=str(raw.get("variant_path", "")),
     )
+    # The variant is written into one of the derived blocks, so a path outside
+    # them would be compiled and then dropped on the next sync.
+    if app.variant_path:
+        app.block_for(app.variant_path)
+    return app
+
+
+def _routing_paths_from(service: str, raw: object) -> dict[str, str]:
+    """The overlay dot-path of each block this app's compiler produces."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict) or not raw:
+        raise CatalogueError(f"{service}: routing.values_paths must be a non-empty mapping")
+    return {str(name): str(path) for name, path in raw.items()}
 
 
 def _transports_from(service: str, raw: object) -> frozenset[str]:
@@ -336,16 +397,25 @@ def _transports_from(service: str, raw: object) -> frozenset[str]:
     return frozenset(declared)
 
 
-def _endpoints_from(service: str, raw: object) -> dict[str, int]:
-    """An app's named listener ports, empty when it takes the platform defaults."""
+def _endpoints_from(service: str, raw: object) -> dict[str, AppEndpoint]:
+    """The listeners an app runs, empty when it runs none."""
     if raw is None:
         return {}
     if not isinstance(raw, dict):
-        raise CatalogueError(f"{service}: endpoints must be a mapping of name to port")
-    try:
-        return {str(name): int(port) for name, port in raw.items()}
-    except (TypeError, ValueError) as exc:
-        raise CatalogueError(f"{service}: endpoint ports must be integers: {exc}") from exc
+        raise CatalogueError(f"{service}: endpoints must be a mapping of name to listener")
+    out: dict[str, AppEndpoint] = {}
+    for name, entry in raw.items():
+        if not isinstance(entry, dict):
+            raise CatalogueError(f"{service}: endpoint {name!r} must be a mapping with a port")
+        try:
+            out[str(name)] = AppEndpoint(
+                port=int(entry["port"]), service=str(entry.get("service", ""))
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise CatalogueError(
+                f"{service}: endpoint {name!r} needs an integer port: {exc}"
+            ) from exc
+    return out
 
 
 def _kind_from(name: str, raw: dict) -> ArtifactKind:
@@ -463,16 +533,45 @@ def instance_component(app: AppDescriptor, source: str) -> str:
     return instance_name(app, source).removeprefix(PROJECT_PREFIX)
 
 
+def _push(app: AppDescriptor) -> AppEndpoint:
+    """This app's Push listener, or why it cannot be sent to.
+
+    Refusing rather than assuming a port is the point: an app with no entry has
+    no listener, and inventing an address for it would send a source's records
+    at a port nothing answers on.
+    """
+    endpoint = app.endpoints.get(PUSH_ENDPOINT)
+    if endpoint is None:
+        raise MissingEndpointError(
+            f"{app.service} declares no {PUSH_ENDPOINT!r} endpoint, so nothing can send "
+            "to it on the direct transport; add one to the app manifest when it ships "
+            "a listener"
+        )
+    return endpoint
+
+
 def push_endpoint(app: AppDescriptor, instance: str) -> str:
     """Where a direct-transport stage sends records for this app's *instance*.
 
     A stack-wide app answers on its own Service; a per-config app answers on the
-    instance's. The port is the manifest's when the app declares one, else the
-    platform default - so a chart that moves its listener is a manifest edit.
+    instance's. Both the port and any Service-name override are the manifest's,
+    so a chart that moves its listener is a manifest edit.
     """
-    host = instance_name(app, instance) if app.component_is_per_instance else app.service
-    port = app.endpoints.get(PUSH_ENDPOINT, DEFAULT_PUSH_PORT)
-    return f"http://{host}:{port}"
+    endpoint = _push(app)
+    host = endpoint.service or (
+        instance_name(app, instance) if app.component_is_per_instance else app.service
+    )
+    return f"http://{host}:{endpoint.port}"
+
+
+def push_listen(app: AppDescriptor) -> str:
+    """The bind address this app's own Push listener takes.
+
+    The sender's view of the same manifest entry is ``push_endpoint``: one
+    declared port, rendered as an address to dial and an address to bind. A pod
+    binds every interface it has, so only the port comes from the manifest.
+    """
+    return f"0.0.0.0:{_push(app).port}"
 
 
 def file_set(service: str, name: str) -> ConsumedFileSet:

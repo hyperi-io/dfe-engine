@@ -398,6 +398,13 @@ rejects them at save time for any non-disabled source; if a legacy stored doc
 still carries one, the compile skips that source with a loud warning rather
 than failing the whole receiver config.
 
+On the direct transport there is no topic between the stages, so the same match
+compiles a second time into `destinations`: a rule carrying that field and value
+sends the record to a named endpoint - the source's transform instance when it
+has one, else the loader - and every name it uses is listed beside the rules as
+`<name>: {grpc: <uri>}`. A match that tests no value (`exists`) cannot name a
+destination, so a direct source with a transform is refused at save.
+
 The `_source` field becomes a **first-class field in every event**, injected
 by the receiver before the data hits Kafka. Downstream services (transform,
 loader) consume it directly — no independent routing config needed. Match

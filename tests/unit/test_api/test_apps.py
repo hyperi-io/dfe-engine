@@ -33,17 +33,16 @@ def _wire(app, tmp_path, target: str = "kubernetes"):
     return gc
 
 
-def _define_source(client, headers, name: str):
+def _define_source(client, headers, name: str, transform: dict | None = None):
     """Define the source a source-bound instance is named for.
 
     An instance of a source-bound app IS a source's processing step, so the
     source has to exist first. Idempotent: a repeat is a 409 the caller ignores.
     """
-    return client.post(
-        "/api/v1/sources",
-        json={"source": name, "match": {"field": "tags.collector.type", "value": name}},
-        headers=headers,
-    )
+    body: dict = {"source": name, "match": {"field": "tags.collector.type", "value": name}}
+    if transform is not None:
+        body["transform"] = transform
+    return client.post("/api/v1/sources", json=body, headers=headers)
 
 
 def _define_fetcher_source(client, headers, name: str):
@@ -58,8 +57,24 @@ def _define_fetcher_source(client, headers, name: str):
     )
 
 
+def _live_source(client, headers, name: str, transform: dict | None = None) -> bool:
+    """Define a source and mark it deployed, as a source deploy leaves it.
+
+    A transform or fetcher instance is derived state: it exists for a source that
+    is active, deployed, and names that app. Returns whether the source is there,
+    so a test using an illegal name still exercises the route it meant to.
+    """
+    from dfe_engine.api.deps import _registries
+
+    if _define_source(client, headers, name, transform).status_code != 201:
+        return False
+    _registries["source"].set_deployed_version(name, "1.0.0")
+    return True
+
+
 def _deploy(client, headers, instance: str = "edge", values: dict | None = None):
-    _define_source(client, headers, instance)
+    """Deploy a transform instance the way the source deploy does."""
+    _live_source(client, headers, instance, {"engine": "vrl"})
     return client.post(
         f"/api/v1/apps/{VRL}/instances",
         json={"instance": instance, "values": values or {}},
@@ -96,13 +111,17 @@ class TestCatalogue:
         self, client, app, admin_headers, tmp_path
     ):
         _wire(app, tmp_path)
-        _deploy(client, admin_headers)
+        client.post(
+            "/api/v1/apps/dfe-archiver/instances",
+            json={"instance": "default"},
+            headers=admin_headers,
+        )
         flagged = {
             e["service"]: e["has_compiled_routing"]
             for e in client.get("/api/v1/apps", headers=admin_headers).json()
         }
-        assert flagged[VRL] is False
-        probe = client.get(f"{BASE}/routing", headers=admin_headers)
+        assert flagged["dfe-archiver"] is False
+        probe = client.get("/api/v1/apps/dfe-archiver/default/routing", headers=admin_headers)
         assert probe.status_code == 400
         assert probe.json()["code"] == "routing_not_compiled"
 
@@ -175,7 +194,7 @@ class TestLifecycle:
 
     def test_a_defined_source_deploys(self, client, app, admin_headers, tmp_path):
         _wire(app, tmp_path)
-        assert _define_source(client, admin_headers, "realsource").status_code == 201
+        assert _live_source(client, admin_headers, "realsource", {"engine": "vrl"})
         resp = client.post(
             f"/api/v1/apps/{VRL}/instances",
             json={"instance": "realsource"},
@@ -379,7 +398,7 @@ class TestFiles:
         # The supervisor watches the transform files and SIGHUPs Vector when only
         # those changed, so a content edit takes effect without a pod roll.
         _wire(app, tmp_path)
-        _define_source(client, admin_headers, "edge")
+        _live_source(client, admin_headers, "edge", {"engine": "vector"})
         client.post(
             "/api/v1/apps/dfe-transform-vector/instances",
             json={"instance": "edge"},
@@ -446,7 +465,7 @@ class TestAdversarialRegressions:
         _wire(app, tmp_path)
         service = "dfe-transform-vector"
         instance = "customer-alpha-primary"
-        _define_source(client, admin_headers, instance)
+        _live_source(client, admin_headers, instance, {"engine": "vector"})
         created = client.post(
             f"/api/v1/apps/{service}/instances",
             json={"instance": instance, "values": {}},
@@ -472,7 +491,7 @@ class TestAdversarialRegressions:
         # The source-name cap is this same 40, so the longest legal instance is
         # still a nameable source.
         instance = "c" * 40
-        _define_source(client, admin_headers, instance)
+        _live_source(client, admin_headers, instance, {"engine": "vector"})
         created = client.post(
             f"/api/v1/apps/{service}/instances",
             json={"instance": instance, "values": {}},
@@ -616,8 +635,8 @@ class TestRouting:
         return gc
 
     def test_a_fresh_overlay_reports_absent_routing(self, client, app, admin_headers, tmp_path):
-        # The devex regression: a receiver running on built-in defaults while
-        # every source rule ever defined is ignored.
+        # The regression this guards: a receiver running on built-in defaults
+        # while every source rule ever defined is ignored.
         self._deployed(client, app, admin_headers, tmp_path)
         resp = client.get(f"{self.RECEIVER}/routing", headers=admin_headers)
         assert resp.status_code == 200, resp.text
@@ -625,7 +644,10 @@ class TestRouting:
         assert body["absent"] is True
         assert body["drift"] is True
         assert body["compiler"] == "receiver"
-        assert body["values_path"] == "config.routing"
+        assert body["values_paths"] == {
+            "routing": "config.routing",
+            "destinations": "config.destinations",
+        }
 
     def test_sync_writes_the_block_and_commits(self, client, app, admin_headers, tmp_path):
         gc = self._deployed(client, app, admin_headers, tmp_path)
@@ -636,6 +658,9 @@ class TestRouting:
 
         doc = gc.get("helmvars", "dfe-receiver-default-values")
         assert "source_rules" in doc["config"]["routing"]
+        # Both blocks land: the rules that label a record and the set that says
+        # where a matched one goes.
+        assert doc["config"]["destinations"]["default"] == "kafka"
 
     def test_after_sync_there_is_no_drift(self, client, app, admin_headers, tmp_path):
         self._deployed(client, app, admin_headers, tmp_path)
@@ -651,8 +676,12 @@ class TestRouting:
 
     def test_an_app_without_derived_routing_is_400(self, client, app, admin_headers, tmp_path):
         _wire(app, tmp_path)
-        _deploy(client, admin_headers)
-        resp = client.get(f"{BASE}/routing", headers=admin_headers)
+        client.post(
+            "/api/v1/apps/dfe-archiver/instances",
+            json={"instance": "default"},
+            headers=admin_headers,
+        )
+        resp = client.get("/api/v1/apps/dfe-archiver/default/routing", headers=admin_headers)
         assert resp.status_code == 400
         assert resp.json()["code"] == "routing_not_compiled"
 
@@ -830,7 +859,7 @@ class TestOptimisticConcurrency:
         # Something has to be committed first: an empty deploy repo has no
         # revision, so there is nothing a base revision can be stale against.
         _deploy(client, admin_headers, instance="other")
-        _define_source(client, admin_headers, "edge")
+        _live_source(client, admin_headers, "edge", {"engine": "vrl"})
 
         resp = client.post(
             f"/api/v1/apps/{VRL}/instances",

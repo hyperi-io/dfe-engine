@@ -14,42 +14,24 @@ import pytest
 from dfe_engine.appmgmt import derived, instances
 from dfe_engine.gitcrud.engine import get_path
 from dfe_engine.source.models import Source
-from dfe_engine.source.registry import SourceNotFoundError
+
+from .conftest import FakeRegistry as _Registry
 
 RECEIVER = "dfe-receiver"
 LOADER = "dfe-loader"
 FETCHER = "dfe-fetcher"
+VRL = "dfe-transform-vrl"
 ACTOR = "test"
 
 
-class _Settings:
-    class clickhouse:  # noqa: N801 - mirrors the settings attribute path
-        effective_data_database = "dfe"
-
-
-class _Registry:
-    def __init__(self, sources: list[Source]) -> None:
-        self._sources = {s.source: s for s in sources}
-
-    def get_source(self, source_name: str) -> Source:
-        if source_name not in self._sources:
-            raise SourceNotFoundError(f"Source {source_name!r} not found")
-        return self._sources[source_name]
-
-    def get_all_sources(self, enabled_only: bool = False, *, states=None) -> list[Source]:
-        sources = list(self._sources.values())
-        if states is not None:
-            return [s for s in sources if s.state in states]
-        return sources
-
-
-def _receiver_source(name: str = "filebeat", state: str = "active") -> Source:
+def _receiver_source(name: str = "filebeat", state: str = "active", **fields) -> Source:
     return Source.model_validate(
         {
             "source": name,
             "state": state,
             "deployed_version": "1.0.0",
             "match": {"field": "_json.app", "operator": "equals", "value": name},
+            **fields,
         }
     )
 
@@ -86,11 +68,6 @@ def _apply(crud, changes):
             crud.delete(instances.HELMVARS_CLASS, change.app.overlay_name, ACTOR, message="rm")
         else:
             _put(crud, change.app, change.doc)
-
-
-@pytest.fixture
-def settings():
-    return _Settings()
 
 
 class TestStackRouting:
@@ -226,14 +203,45 @@ class TestFetcherInstances:
         _apply(crud, derived.plan(crud, registry, settings))
         assert derived.plan(crud, registry, settings) == []
 
-    def test_a_transform_instance_is_never_touched(self, crud, settings):
-        # Transforms are source-bound but user-managed: no compiler, no reconcile.
-        app = instances.instance_of("dfe-transform-vrl", "filebeat")
-        _put(crud, app, instances.initial_overlay(app))
 
-        changes = derived.plan(crud, _Registry([]), settings)
+class TestTransformInstances:
+    """A transform instance is derived exactly like a fetcher instance."""
 
-        assert changes == []
+    def test_a_source_that_names_a_transform_gets_its_instance(self, crud, settings):
+        source = _receiver_source(transform={"engine": "vrl"})
+
+        changes = derived.plan(crud, _Registry([source]), settings)
+
+        transform = next(c for c in changes if c.app.service == VRL)
+        assert (transform.app.instance, transform.action) == ("filebeat", "deploy")
+        assert get_path(transform.doc, "config.source.topics") == ["filebeat_land"]
+        assert get_path(transform.doc, "config.sink.topic") == "filebeat_load"
+
+    def test_only_the_app_that_runs_it_gets_an_instance(self, crud, settings):
+        source = _receiver_source(transform={"engine": "vrl"})
+
+        changes = derived.plan(crud, _Registry([source]), settings)
+
+        assert [c.app.service for c in changes if c.app.service.startswith("dfe-transform-")] == [
+            VRL
+        ]
+
+    def test_a_source_with_no_transform_deploys_none(self, crud, settings):
+        changes = derived.plan(crud, _Registry([_receiver_source()]), settings)
+
+        assert [c for c in changes if c.app.service == VRL] == []
+
+    def test_an_instance_whose_source_dropped_its_transform_is_removed(self, crud, settings):
+        _apply(
+            crud,
+            derived.plan(
+                crud, _Registry([_receiver_source(transform={"engine": "vrl"})]), settings
+            ),
+        )
+
+        changes = derived.plan(crud, _Registry([_receiver_source()]), settings)
+
+        assert [(c.app.service, c.action) for c in changes] == [(VRL, "remove")]
 
 
 class TestDescribe:

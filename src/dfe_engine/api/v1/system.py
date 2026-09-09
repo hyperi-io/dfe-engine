@@ -66,14 +66,17 @@ class VersionResponse(BaseModel):
     """What this deployment runs: the certified stack, and the parts of it."""
 
     stack: str | None = Field(
-        description="Certified stack version pinned in the deploy repo; null when there is none."
+        description="Certified stack version this deployment runs; null when nothing states one."
     )
     engine: str = Field(description="dfe-engine package version")
     ui: str | None = Field(
         description="dfe-ui version when the deploy repo pins one off the certified stack."
     )
-    source: Literal["deploy-repo", "engine"] = Field(
-        description="deploy-repo when the stack version was read from pins.yaml, else engine."
+    source: Literal["deploy-repo", "deployment", "engine"] = Field(
+        description=(
+            "deploy-repo when the stack version came from pins.yaml, deployment when it "
+            "came from what deployed this pod, else engine."
+        )
     )
     python_version: str = Field(description="Python interpreter version")
 
@@ -101,21 +104,26 @@ class SettingsSummary(BaseModel):
 
 
 @router.get("/version", response_model=VersionResponse)
-async def get_version(user: CurrentUser, request: Request) -> VersionResponse:
+async def get_version(user: CurrentUser, request: Request, settings: Settings) -> VersionResponse:
     """What this deployment runs.
 
     Authenticated but ungated on purpose: the console footer is on every page, and
-    the body carries versions only. Without a deploy repo the stack is unknown and
-    the engine's own version is the whole answer.
+    the body carries versions only.
+
+    The pins win where there are any: they are what the operator chose. A deploy
+    with no pins base still knows what stood it up, because the chart passes that
+    in, so the footer shows a stack version rather than nothing. With neither, the
+    engine's own version is the whole answer.
     """
     gc = _optional_gitcrud(request)
     pins = load_pins(gc.repo_path) if gc is not None else {}
-    stack = stack_version(pins)
+    pinned = stack_version(pins)
+    stack = pinned or settings.stack_version or None
     return VersionResponse(
         stack=stack,
         engine=__version__,
         ui=component_overrides(pins).get(UI_COMPONENT),
-        source="deploy-repo" if stack else "engine",
+        source="deploy-repo" if pinned else ("deployment" if stack else "engine"),
         python_version=sys.version.split()[0],
     )
 

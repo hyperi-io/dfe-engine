@@ -81,7 +81,15 @@ SourceMatchOperator = Literal[
 ]
 
 # Operators that compare nothing, so ``match.value`` carries no operand.
-_OPERATORS_WITHOUT_OPERAND = frozenset({"exists", "always"})
+OPERATORS_WITHOUT_OPERAND = frozenset({"exists", "always"})
+
+RULELESS_OPERATORS = frozenset({"always"})
+"""Operators the receiver honours WITHOUT a rule.
+
+``always`` is the default flow: an unmatched record already goes to the
+receiver's ``default_source``, so a rule matching everything would shadow every
+rule after it. Reserved for the ``default`` source.
+"""
 
 # Tri-state source lifecycle:
 # - active   - schema materialised + receiver redirect + transform all ON.
@@ -272,7 +280,7 @@ class SourceMatch(BaseModel):
 
     @model_validator(mode="after")
     def _validate_value_for_operator(self) -> SourceMatch:
-        if self.operator in _OPERATORS_WITHOUT_OPERAND:
+        if self.operator in OPERATORS_WITHOUT_OPERAND:
             return self
         if not self.value.strip():
             raise ValueError(f"match.value is required when operator is {self.operator!r}")
@@ -373,6 +381,20 @@ SourceOrigin = Literal["receiver", "fetcher"]
 """
 
 FetcherTopic = Literal["own", "default"]
+
+TOPIC_LAND_SUFFIX = "_land"
+TOPIC_LOAD_SUFFIX = "_load"
+
+
+def landing_topic(source_name: str) -> str:
+    """The topic a source's records arrive on, before any transform."""
+    return f"{source_name}{TOPIC_LAND_SUFFIX}"
+
+
+def transformed_topic(source_name: str) -> str:
+    """The topic a source's transform writes, and the loader then reads."""
+    return f"{source_name}{TOPIC_LOAD_SUFFIX}"
+
 
 DEFAULT_LANDING_LABEL = "default"
 """The ``_source`` label of the platform's default landing table.
@@ -1183,12 +1205,12 @@ class Source(BaseModel):
     @property
     def topic_land(self) -> str:
         """Kafka topic for raw data from receiver."""
-        return f"{self.source}_land"
+        return landing_topic(self.source)
 
     @property
     def topic_load(self) -> str | None:
         """Kafka topic for transformed data (only if transform exists)."""
-        return f"{self.source}_load" if self.transform else None
+        return transformed_topic(self.source) if self.transform else None
 
     @property
     def table_name(self) -> str:
