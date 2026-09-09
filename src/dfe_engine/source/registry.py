@@ -700,7 +700,7 @@ class SourceRegistry:
                 raise SourceValidationError(
                     f"source {source.source!r}: match operator {match.operator!r} matches "
                     f"every record, so it is reserved for the {DEFAULT_LANDING_LABEL!r} "
-                    "source that defines the default flow"
+                    "source that defines the main flow"
                 )
             return
         if operator_mode(match.operator) is None:

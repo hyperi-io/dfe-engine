@@ -30,7 +30,7 @@ _HUNT = {
     "cron": "*/5 * * * *",
     "customers": ["org_a"],
     "rules": ["certutil"],
-    "global_source_table_name": "dfe.default",
+    "global_source_table_name": "dfe.main",
     "global_target_table_name": "dfe.detection",
 }
 

@@ -37,7 +37,7 @@ flowchart LR
   TO --> L
   TL -.->|no transform| L
   TL --> A
-  L --> CH[(ClickHouse<br/>source table, else default)]
+  L --> CH[(ClickHouse<br/>source table, else main)]
 ```
 
 ```mermaid
@@ -57,7 +57,7 @@ flowchart LR
   T -->|sink endpoint| L
   R -.->|no transform| L
   F -.->|no transform| L
-  L --> CH[(ClickHouse<br/>source table, else default)]
+  L --> CH[(ClickHouse<br/>source table, else main)]
 ```
 
 The archiver reads the landing topic, so it keeps the RAW record as it arrived, before any transform, and archive is a bus-form option: a direct source that asks for it is refused at save.
@@ -87,7 +87,7 @@ The source records bus-versus-direct only. Which bus (Kafka today) and which dir
 | transformed topic | `<source>_load` | apps.yaml `source_binding` |
 | app instance (per-source apps only) | `dfe-<component>-<source>`, for example `dfe-transform-vrl-auth` | the app's chart `component`; stack-wide apps such as the receiver carry no suffix |
 | Service and port per app | manifest `endpoints` | apps.yaml |
-| unmatched records | source `default`, table `default` | the default flow |
+| unmatched records | source `main`, table `main` | the main flow |
 
 The engine sets `<source>_load` only when the source has a transform, and the loader's topic discovery suppresses `_land` whenever a `_load` topic for the same source exists. So a `_load` topic left on the broker after a transform is removed starves the source until the topic is deleted; the engine deletes it on the same reconcile. Deployers never type a topic or an endpoint into an app's values file.
 
@@ -126,9 +126,9 @@ Without a webhook Argo polls every 300 s with up to 60 s jitter, so a routing ch
 
 Every app rolls on every config change, so nothing depends on which app can reload which key: the apps that also apply a change in place (the receiver's routing, Vector's transform files) gain nothing extra from it, and apps.yaml records `hot_reload` only as a fact for the console.
 
-## The default flow
+## The main flow
 
-With no sources defined, every record the receiver accepts is stamped `_source: default`, lands in the `default` table, and can be searched. The `default` source is a normal source whose match rule is `operator: always`: it has the deployment's transport, may carry a transform, and may be archived on the bus form. It is read and written at `/api/v1/sources/default` like any other source and the console gives it a card of its own; nothing about it is special code.
+With no sources defined, every record the receiver accepts is stamped `_source: main`, lands in the `main` table, and can be searched. The `main` source is a normal source whose match rule is `operator: always`: it has the deployment's transport, may carry a transform, and may be archived on the bus form. It is read and written at `/api/v1/sources/main` like any other source and the console gives it a card of its own; nothing about it is special code.
 
 ## Adding a transform
 

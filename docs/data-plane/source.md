@@ -123,15 +123,15 @@ match:
   # The model also defines not_equals / includes / starts_with / ends_with,
   # but the receiver's hot-path router cannot evaluate them (a documented
   # receiver gap) - saves reject them for any non-disabled source.
-  # `always` matches every record and is reserved for the `default` source,
-  # which is how the default flow is defined - see source-flow.md.
+  # `always` matches every record and is reserved for the `main` source,
+  # which is how the main flow is defined - see source-flow.md.
 
 # A fetcher-based source has no match rule. The engine deploys one dfe-fetcher
 # instance named for the source, with this stanza compiled into it, when the
 # source is active and deployed, and removes it when the source is not.
 # fetcher:
 #   source_type: okta                   # A family the deployed fetcher ships (apps.yaml source_types)
-#   topic: own                          # own: this source's topic and table | default: the platform default table
+#   topic: own                          # own: this source's topic and table | main: the shared main topic and table
 #   config:                             # The fetcher's own per-type stanza, verbatim
 #     tenant_url: https://example.okta.com
 #     credential_secret: vault:secret/dfe/okta:token   # credentials are env:/vault: references, never literals
@@ -379,7 +379,7 @@ routing:
       mode: key_value_set         # key_present | key_value_set | key_value_use
       match_value: filebeat       # key_value_set only
       source: filebeat            # _source to stamp
-  default_source: default         # _source when no rule matches
+  default_source: main            # _source when no rule matches
   topic_suffix: _land             # Topic derives as {_source}{topic_suffix}
   source_to_topic: {}             # Per-source topic overrides (rarely needed)
 ```
@@ -429,7 +429,7 @@ meet with no lookup at all:
 routing:
   table_fields: [_source]         # The field the receiver stamped
   default_db: dfe                 # Database (or per-org via db_fields + org_routes)
-  default_table: default          # Where an event with no _source lands
+  default_table: main             # Where an event with no _source lands
   source_to_table: {}             # ACTIVE sources whose table name differs
 ```
 
@@ -553,7 +553,7 @@ that is not there costs every deploy the admin timeout.
 |---|---|
 | `_source` label | unique, and `[a-z]([a-z0-9-]*[a-z0-9])?` up to 40 chars |
 | match rule | no conflict across non-disabled sources (same field+operator+value); a dormant source HOLDS its match, only disabling releases it |
-| match operator | receiver-evaluable (`equals` or `exists`); `always` only on the reserved `default` source |
+| match operator | receiver-evaluable (`equals` or `exists`); `always` only on the reserved `main` source |
 | fetcher route | must not name its own source |
 | flow | runnable here: the deployment offers the transport, the transform app carries it, archive only on the bus |
 | transform | engine must be one the app manifest catalogues (`vrl`, `vector`, `elastic`) |

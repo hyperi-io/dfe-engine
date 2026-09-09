@@ -290,9 +290,9 @@ class TestRenderAll:
         )
         s = "\n".join(stmts)
         # the analyst tier role grants the whole data db - an org user reaches every
-        # source table through it, never a narrowed dfe.default
+        # source table through it, never a narrowed dfe.main
         assert "GRANT SELECT ON dfe.* TO `dfe_analyst_tier_2_role`" in s
-        assert "GRANT SELECT ON dfe.default TO `dfe_analyst_tier_2_role`" not in s
+        assert "GRANT SELECT ON dfe.main TO `dfe_analyst_tier_2_role`" not in s
         # no per-user data grant: org and platform users alike only hold the tier
         # role, never a direct dfe.* grant on the user itself
         assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_org_acme`" in s

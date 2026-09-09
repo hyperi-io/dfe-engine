@@ -54,7 +54,7 @@ def _hunt_query(*, db: str, hunt: str, marker: str, rule: str) -> str:
         target_db=db,
         target_table="detection",
         source_db=db,
-        source_table="default",
+        source_table="main",
         where_clause=f"_org_id = '{marker}'",
         rule_id=rule,
         rule_name=rule,

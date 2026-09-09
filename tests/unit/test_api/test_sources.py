@@ -304,41 +304,41 @@ class TestGetSource:
         assert resp.status_code == 404
 
 
-class TestDefaultFlow:
-    """The default flow is a source, read and written at the same path as any other."""
+class TestMainFlow:
+    """The main flow is a source, read and written at the same path as any other."""
 
-    def test_get_default_before_any_write_returns_the_synthesised_view(
+    def test_get_main_before_any_write_returns_the_synthesised_view(
         self, client: TestClient, admin_headers: dict
     ):
-        resp = client.get("/api/v1/sources/default", headers=admin_headers)
+        resp = client.get("/api/v1/sources/main", headers=admin_headers)
 
         assert resp.status_code == 200
         body = resp.json()
-        assert body["source"] == "default"
+        assert body["source"] == "main"
         assert body["match"]["operator"] == "always"
         assert body["transform"] is None
         assert body["archive"] is False
         # Nothing was stored: the list is still empty.
         assert client.get("/api/v1/sources", headers=admin_headers).json()["total"] == 0
 
-    def test_put_default_creates_it_then_updates_it(self, client: TestClient, admin_headers: dict):
+    def test_put_main_creates_it_then_updates_it(self, client: TestClient, admin_headers: dict):
         body = {
             "match": {"field": "_source", "operator": "always"},
             "description": "everything else",
         }
-        created = client.put("/api/v1/sources/default", json=body, headers=admin_headers)
+        created = client.put("/api/v1/sources/main", json=body, headers=admin_headers)
 
         assert created.status_code == 200
-        assert created.json()["source"] == "default"
+        assert created.json()["source"] == "main"
 
         updated = client.put(
-            "/api/v1/sources/default",
+            "/api/v1/sources/main",
             json={**body, "description": "still everything else"},
             headers=admin_headers,
         )
 
         assert updated.status_code == 200
-        stored = client.get("/api/v1/sources/default", headers=admin_headers).json()
+        stored = client.get("/api/v1/sources/main", headers=admin_headers).json()
         assert stored["description"] == "still everything else"
         assert stored["versions"]["1.0.0"]["match"]["operator"] == "always"
 
@@ -372,16 +372,16 @@ class TestGetSourceFlow:
         assert body["outputs"] == {"loader": "test-source_land", "archive": False}
         assert body["table"] == "test-source"
 
-    def test_the_default_flow_answers_before_anyone_has_written_it(
+    def test_the_main_flow_answers_before_anyone_has_written_it(
         self, client: TestClient, admin_headers: dict
     ):
-        # Same rule as GET /sources/default: the console draws the platform's own
+        # Same rule as GET /sources/main: the console draws the platform's own
         # landing before anything is configured.
-        body = client.get("/api/v1/sources/default/flow", headers=admin_headers).json()
+        body = client.get("/api/v1/sources/main/flow", headers=admin_headers).json()
 
-        assert body["source"] == "default"
+        assert body["source"] == "main"
         assert body["input"] == "always"
-        assert body["outputs"]["loader"] == "default_land"
+        assert body["outputs"]["loader"] == "main_land"
 
     def test_an_unknown_source_has_no_flow(self, client: TestClient, admin_headers: dict):
         resp = client.get("/api/v1/sources/nonexistent/flow", headers=admin_headers)

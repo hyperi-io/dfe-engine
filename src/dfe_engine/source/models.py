@@ -380,7 +380,8 @@ SourceOrigin = Literal["receiver", "fetcher"]
 ``fetcher``: one dfe-fetcher deployment, named for the source, polls it in.
 """
 
-FetcherTopic = Literal["own", "default"]
+# Literal takes no constant, so DEFAULT_LANDING_LABEL is restated here and tested.
+FetcherTopic = Literal["own", "main"]
 
 TOPIC_LAND_SUFFIX = "_land"
 TOPIC_LOAD_SUFFIX = "_load"
@@ -403,12 +404,13 @@ The receiver, the fetcher and each transform all read and write it, so a rule
 that tests which source a record is has this as its field.
 """
 
-DEFAULT_LANDING_LABEL = "default"
-"""The ``_source`` label of the platform's default landing table.
+DEFAULT_LANDING_LABEL = "main"
+"""The ``_source`` label of the platform's landing table, ``main``.
 
-Also the reserved name of the source that defines the default flow: it is a
-normal source whose match rule is ``operator: always``, so an unmatched record
-follows the same compiled path as any other.
+Also the reserved name of the source that defines the main flow: it is a normal
+source whose match rule is ``operator: always``, so an unmatched record follows
+the same compiled path as any other. Every producer's fallback label, every
+landing topic stem and the loader's fallback table resolve from this one name.
 """
 
 # Keys the engine sets on the compiled fetcher stanza; a source may not carry them.
@@ -483,7 +485,7 @@ class SourceFetcher(BaseModel):
     ``config`` is the fetcher's own per-type stanza, carried verbatim into the
     deployed instance under ``config.sources.<source_type>``. The engine owns
     ``enabled`` and ``topic`` on that stanza: ``topic`` selects whether records
-    land on the source's own topic (and table) or on the platform default.
+    land on the source's own topic (and table) or on the shared ``main`` landing.
     """
 
     source_type: str = Field(
@@ -496,8 +498,8 @@ class SourceFetcher(BaseModel):
     topic: FetcherTopic = Field(
         default="own",
         description=(
-            "own: records land on this source's topic and table; default: they land "
-            "on the platform default table"
+            "own: records land on this source's topic and table; main: they land on "
+            "the shared main topic and table"
         ),
     )
     config: dict[str, Any] = Field(

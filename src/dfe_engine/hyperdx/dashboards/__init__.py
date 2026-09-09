@@ -10,7 +10,7 @@
 
 The engine is the SSoT for dashboard CONTENT; the deploy layer only carries it.
 The ``.json`` files beside this module are HyperDX **Template** dashboards -- they
-reference sources by NAME (``"source": "default"``), not by the per-team ObjectId a
+reference sources by NAME (``"source": "main"``), not by the per-team ObjectId a
 Document dashboard carries, because there is no id to write until a team exists.
 
 How a file reaches a running HyperDX:

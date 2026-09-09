@@ -16,6 +16,7 @@ from dfe_engine.services.models.common import (
     KafkaTlsConfig,
     SaslConfig,
 )
+from dfe_engine.source.models import DEFAULT_LANDING_LABEL
 
 # ---------------------------------------------------------------------------
 # Server
@@ -178,7 +179,9 @@ class ReceiverRoutingConfig(BaseModel):
         default_factory=list,
         description="_source stamping rules, first match wins (compiled from Source.match)",
     )
-    default_source: str = Field(default="default", description="_source when no rule matches")
+    default_source: str = Field(
+        default=DEFAULT_LANDING_LABEL, description="_source when no rule matches"
+    )
     topic_suffix: str = Field(
         default="_land", description="Suffix appended to _source to form the topic"
     )

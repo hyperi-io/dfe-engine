@@ -203,21 +203,21 @@ class TestList:
         registry.save_source(legacy)
         assert registry.get_source("legacy-op").state == "disabled"
 
-    def test_always_is_reserved_for_the_default_source(self, registry: SourceRegistry):
+    def test_always_is_reserved_for_the_main_source(self, registry: SourceRegistry):
         """It matches every record, so on any other source it would shadow the rest."""
         greedy = Source.model_validate(
             {"source": "greedy", "match": {"field": "_source", "operator": "always"}}
         )
-        with pytest.raises(SourceValidationError, match="reserved for the 'default' source"):
+        with pytest.raises(SourceValidationError, match="reserved for the 'main' source"):
             registry.save_source(greedy)
 
-    def test_the_default_source_may_match_everything(self, registry: SourceRegistry):
+    def test_the_main_source_may_match_everything(self, registry: SourceRegistry):
         registry.save_source(
             Source.model_validate(
-                {"source": "default", "match": {"field": "_source", "operator": "always"}}
+                {"source": "main", "match": {"field": "_source", "operator": "always"}}
             )
         )
-        assert registry.get_source("default").match.operator == "always"
+        assert registry.get_source("main").match.operator == "always"
 
     def test_a_fetcher_route_may_not_name_its_own_source(self, registry: SourceRegistry):
         looping = Source.model_validate(
