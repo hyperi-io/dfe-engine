@@ -62,7 +62,7 @@ def _write_hunt(hunts_dir: Path, hunt: str, rule_id: str, db: str) -> None:
         cron="* * * * *",
         rules=[rule_id],
         customers=["acme"],
-        global_source_table_name=f"{db}.default",
+        global_source_table_name=f"{db}.main",
         global_target_table_name=f"{db}.detection",
     )
     hunts_dir.mkdir(parents=True, exist_ok=True)

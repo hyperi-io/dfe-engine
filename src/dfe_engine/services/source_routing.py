@@ -84,11 +84,11 @@ def receiver_match(source: Source) -> ReceiverMatch | None:
 
     A fetcher-based source has no match rule of its own: its fetcher stamps
     ``_source`` with the source's landing label on every record, so the match is
-    ``_source == <label>``. One landing on the platform default needs no rule,
-    because the receiver's ``default_source`` already sends an unmatched record
-    there. An explicit per-source rule rather than ``key_value_use`` on
-    ``_source``: the receiver takes untrusted input, and a use-the-value rule
-    would let any sender pick any topic.
+    ``_source == <label>``. One landing on ``main`` needs no rule, because the
+    receiver's ``default_source`` already sends an unmatched record there. An
+    explicit per-source rule rather than ``key_value_use`` on ``_source``: the
+    receiver takes untrusted input, and a use-the-value rule would let any
+    sender pick any topic.
     """
     if source.match is None:
         label = source.landing_label()
@@ -96,7 +96,7 @@ def receiver_match(source: Source) -> ReceiverMatch | None:
             return None
         return ReceiverMatch(field=SOURCE_LABEL_FIELD, mode="key_value_set", value=label)
 
-    # The default flow needs no rule: default_source already sends an unmatched
+    # The main flow needs no rule: default_source already sends an unmatched
     # record there, and a match-everything rule would shadow the rules after it.
     if source.match.operator in RULELESS_OPERATORS:
         return None
@@ -145,7 +145,7 @@ def compile_receiver_routing(
 
     - ``equals`` -> ``key_value_set`` (match_value=value, source=_source name)
     - ``exists`` -> ``key_present``  (source=_source name)
-    - ``always`` -> no rule at all; that is the default flow, and
+    - ``always`` -> no rule at all; that is the main flow, and
       ``default_source`` already sends an unmatched record to it
 
     ``source_to_topic`` is emitted only where a source's landing topic

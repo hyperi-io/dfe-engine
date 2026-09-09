@@ -1,10 +1,14 @@
 """Tests for Source Pydantic models."""
 
+from typing import get_args
+
 import pytest
 
 from dfe_engine.appmgmt.catalogue import transform_engines
 from dfe_engine.source.models import (
+    DEFAULT_LANDING_LABEL,
     FetcherRoute,
+    FetcherTopic,
     PaginatedSourceSummaryResponse,
     SchemaColumn,
     Source,
@@ -241,9 +245,13 @@ class TestSourceFetcher:
         assert f.config == {}
         assert f.landing_label("edr") == "edr"
 
-    def test_default_topic_lands_on_the_platform_default(self):
-        f = SourceFetcher(source_type="okta", topic="default")
-        assert f.landing_label("okta-audit") == "default"
+    def test_main_topic_lands_on_the_shared_landing(self):
+        f = SourceFetcher(source_type="okta", topic="main")
+        assert f.landing_label("okta-audit") == "main"
+
+    def test_the_topic_literal_still_carries_the_landing_label(self):
+        # FetcherTopic cannot be built from a constant, so it restates the label.
+        assert DEFAULT_LANDING_LABEL in get_args(FetcherTopic)
 
     def test_unknown_source_type_is_refused(self):
         # The manifest lists the families the fetcher ships; anything else has
@@ -303,11 +311,11 @@ class TestSourceOrigin:
 
     def test_a_fetcher_makes_a_fetcher_source(self):
         s = Source.model_validate(
-            {"source": "okta-audit", "fetcher": {"source_type": "okta", "topic": "default"}}
+            {"source": "okta-audit", "fetcher": {"source_type": "okta", "topic": "main"}}
         )
         assert s.origin == "fetcher"
         assert s.match is None
-        assert s.landing_label() == "default"
+        assert s.landing_label() == "main"
         assert "match" not in s.to_yaml_dict()["versions"]["1.0.0"]
 
     def test_the_write_body_needs_exactly_one_origin(self):

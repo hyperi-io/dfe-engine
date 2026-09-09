@@ -141,9 +141,9 @@ class TestFetcherInstances:
             }
         }
 
-    def test_the_default_topic_reaches_the_stanza(self, crud, settings):
-        changes = derived.plan(crud, _Registry([_fetcher_source(topic="default")]), settings)
-        assert get_path(changes[0].doc, "config.sources.crates_io.topic") == "default"
+    def test_the_main_topic_reaches_the_stanza(self, crud, settings):
+        changes = derived.plan(crud, _Registry([_fetcher_source(topic="main")]), settings)
+        assert get_path(changes[0].doc, "config.sources.crates_io.topic") == "main"
 
     @pytest.mark.parametrize(
         "source",

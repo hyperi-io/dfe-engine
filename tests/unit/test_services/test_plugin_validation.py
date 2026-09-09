@@ -314,7 +314,7 @@ class TestLoaderTransportModelDefaults:
         assert config.recv_timeout_ms == 100
         assert config.max_message_size == 16 * 1024 * 1024
         assert config.compression is False
-        assert config.default_topic == "default_land"
+        assert config.default_topic == "main_land"
 
     def test_loader_config_carries_grpc_block_by_default(self):
         assert LoaderConfig().grpc.listen is None
