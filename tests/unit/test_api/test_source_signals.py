@@ -188,7 +188,7 @@ class TestSourceSignals:
 
         body = client.get("/api/v1/sources/crates/signals", headers=admin_headers).json()
 
-        assert body["table"] == app.state.settings.clickhouse.landing_table
+        assert body["table"] == "main"
         assert body["landed_in_default"] is True
 
     def test_the_main_flow_answers_before_anyone_has_written_it(

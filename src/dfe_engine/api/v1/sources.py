@@ -203,16 +203,16 @@ def _resolve_source_or_main(name: str, registry: Any) -> Source:
         return _synthesised_main_source()
 
 
-def _landing_table(source: Source, settings: Any) -> tuple[str, bool]:
+def _landing_table(source: Source) -> tuple[str, bool]:
     """The table this source's records land in, and whether that is the shared default.
 
-    The loader keys on the ``_source`` label the producer stamped, which is what
-    ``landing_label()`` reports - so a fetcher pushing to the main topic lands in
-    the platform's landing table rather than in a table of its own name.
+    The loader takes the table from the ``_source`` label the producer stamped,
+    through a ``source_to_table`` map the compile fills identically - so the table
+    IS the landing label, and a fetcher pushing to the main topic lands in the
+    platform's landing table rather than in one of its own name.
     """
-    if source.landing_label() == DEFAULT_LANDING_LABEL:
-        return settings.clickhouse.landing_table, True
-    return source.table_name, False
+    label = source.landing_label()
+    return label, label == DEFAULT_LANDING_LABEL
 
 
 def _deployed_loaders(request: Request) -> list[str]:
@@ -1325,7 +1325,7 @@ async def get_source_signals(
     is not an error.
     """
     source = _resolve_source_or_main(name, registry)
-    table, in_default = _landing_table(source, settings)
+    table, in_default = _landing_table(source)
     loaders = _deployed_loaders(request)
     try:
         signals = OperationalReader(
