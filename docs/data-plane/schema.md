@@ -752,7 +752,7 @@ scratch.
 ## Source-Scoped Entities
 
 Beyond the schema itself, several other entities are scoped to a Source.
-See [SOURCE.md](source.md) for the full Source definition.
+See [source-definition.md](source-definition.md) for the full Source definition.
 
 ### Rules
 

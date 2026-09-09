@@ -51,7 +51,7 @@ kafka:
     retries: 5
 
 loader:
-  address: "localhost:9000"
+  address: "localhost:6000"
   transport: kafka
   timeout_ms: 5000
 

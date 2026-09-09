@@ -317,9 +317,13 @@ class LoaderConnectionConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    address: str = "dfe-loader:9000"
-    transport: str = Field(default="kafka", description="kafka, grpc, or memory")
-    timeout_ms: int = Field(default=5000, ge=0)
+    address: str = "dfe-loader:6000"
+    transport: str = Field(default="kafka", description="kafka or grpc")
+    timeout_ms: int = Field(
+        default=5000,
+        ge=0,
+        description="Per-RPC deadline for the receiver's gRPC loader client (0 = none)",
+    )
     grpc_endpoint: str | None = Field(
         default=None,
         description="gRPC endpoint URI; the receiver derives http://{address} when unset",
@@ -328,7 +332,9 @@ class LoaderConnectionConfig(BaseModel):
     @field_validator("transport")
     @classmethod
     def validate_transport(cls, v: str) -> str:
-        allowed = {"kafka", "grpc", "memory"}
+        # `memory` discards every record and the receiver refuses it at startup,
+        # so writing it here would produce a config that cannot boot.
+        allowed = {"kafka", "grpc"}
         if v.lower() not in allowed:
             msg = f"Invalid transport: {v}. Allowed: {', '.join(sorted(allowed))}"
             raise ValueError(msg)

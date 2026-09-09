@@ -131,7 +131,7 @@ _template_overrides: dict[str, dict[str, Any]] = {
     "k8s": {
         "server": {"bind_address": "0.0.0.0:8080"},
         "kafka": {"brokers": ["kafka-bootstrap.kafka.svc.cluster.local:9092"]},
-        "loader": {"address": "dfe-loader.dfe.svc.cluster.local:9000"},
+        "loader": {"address": "dfe-loader.dfe.svc.cluster.local:6000"},
         "metrics": {"address": "0.0.0.0:9090"},
         "buffer": {"memory_limit": 0},
     },
