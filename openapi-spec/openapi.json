@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.19.12"
+    "version": "1.19.14"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -3081,6 +3081,185 @@
         ]
       }
     },
+    "/api/v1/sources/catalogue": {
+      "get": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "List Catalogue",
+        "description": "List the sources the deployed transforms already handle.\n\nEmpty when no catalogue is mounted, which is a deployment without one rather\nthan an error: the catalogue is a release asset of the app that ships it.",
+        "operationId": "list_catalogue_api_v1_sources_catalogue_get",
+        "parameters": [
+          {
+            "name": "intake",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only entries that arrive this way (beats, receiver, fetcher)",
+              "title": "Intake"
+            },
+            "description": "Only entries that arrive this way (beats, receiver, fetcher)"
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search the entry name, package and data stream",
+              "title": "Search"
+            },
+            "description": "Search the entry name, package and data stream"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_CatalogueEntryObject_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sources/from-catalogue/{entry}": {
+      "post": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Create Source From Catalogue",
+        "description": "Create a source from a catalogue entry, on the intake it arrives by.\n\nThe entry supplies the match rule or the fetcher family, the transform\nvariant and the shipped meta schema; everything after that is the ordinary\ncreate, so the source is indistinguishable from a hand-written one.",
+        "operationId": "create_source_from_catalogue_api_v1_sources_from_catalogue__entry__post",
+        "parameters": [
+          {
+            "name": "entry",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entry"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogueSourceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A source of that name already exists, or its match duplicates another",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/SourceNameConflictErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MatchConflictErrorResponse"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "conflict": "#/components/schemas/SourceNameConflictErrorResponse",
+                      "match_conflict": "#/components/schemas/MatchConflictErrorResponse"
+                    }
+                  },
+                  "title": "Response 409 Create Source From Catalogue Api V1 Sources From Catalogue  Entry  Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/sources/{name}/versions/{version}": {
       "get": {
         "tags": [
@@ -3231,7 +3410,7 @@
           "Sources"
         ],
         "summary": "Build Source Schema",
-        "description": "Build complete schema (DDL) from a source version snapshot.\n\nRuns the v2 YAML \u2192 DDL pipeline and returns the generated DDL\nwithout executing it against ClickHouse.",
+        "description": "Build complete schema (DDL) from a source version snapshot.\n\nRuns the v2 YAML -> DDL pipeline and returns the generated DDL\nwithout executing it against ClickHouse.",
         "operationId": "build_source_schema_api_v1_sources__name__build_post",
         "parameters": [
           {
@@ -16909,6 +17088,139 @@
         ],
         "title": "CatalogueEntry"
       },
+      "CatalogueEntryObject": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "The shipping app's key for this source"
+          },
+          "package": {
+            "type": "string",
+            "title": "Package",
+            "description": "Vendor integration package it came from"
+          },
+          "data_stream": {
+            "type": "string",
+            "title": "Data Stream",
+            "description": "Data stream within that package"
+          },
+          "dataset": {
+            "type": "string",
+            "title": "Dataset",
+            "description": "package.data_stream - what a Beats event stamps"
+          },
+          "intakes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Intakes",
+            "description": "Ways this source's payload can reach the platform"
+          },
+          "framing": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Framing",
+            "description": "Pushed intakes only: whether the pipeline wants the syslog line or the body"
+          },
+          "transforms": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Transforms",
+            "description": "Programs the app compiled for this source"
+          },
+          "beats": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Beats",
+            "description": "Beats module and fileset carrying the same source, when one does"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Source name this entry derives; empty when the entry's own name is not a legal source name and one must be supplied on create",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "package",
+          "data_stream",
+          "dataset",
+          "intakes",
+          "transforms"
+        ],
+        "title": "CatalogueEntryObject",
+        "description": "One source a deployed transform already handles, as the console lists it."
+      },
+      "CatalogueSourceRequest": {
+        "properties": {
+          "intake": {
+            "type": "string",
+            "title": "Intake",
+            "description": "How this source's data arrives: beats, receiver or fetcher"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Source name; defaults to the entry's own name as a Kubernetes label"
+          },
+          "transform": {
+            "type": "string",
+            "title": "Transform",
+            "description": "Which of the entry's transforms this source runs",
+            "default": "default"
+          },
+          "transport": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "bus",
+                  "direct"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transport",
+            "description": "bus or direct; omitted takes the deployment default"
+          },
+          "archive": {
+            "type": "boolean",
+            "title": "Archive",
+            "description": "Keep the raw record as it arrived; needs the bus transport",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "intake"
+        ],
+        "title": "CatalogueSourceRequest",
+        "description": "Create a source from a catalogue entry."
+      },
       "CelCheckBatchRequest": {
         "properties": {
           "expressions": {
@@ -17857,34 +18169,6 @@
           "permissions"
         ],
         "title": "CreateRoleRequest"
-      },
-      "DDLResult": {
-        "properties": {
-          "source_name": {
-            "type": "string",
-            "title": "Source Name"
-          },
-          "create_table": {
-            "type": "string",
-            "title": "Create Table",
-            "description": "CREATE TABLE DDL"
-          },
-          "views": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object",
-            "title": "Views",
-            "description": "View name \u2192 DDL"
-          }
-        },
-        "type": "object",
-        "required": [
-          "source_name",
-          "create_table"
-        ],
-        "title": "DDLResult",
-        "description": "Generated DDL output."
       },
       "DatabaseInfo": {
         "properties": {
@@ -21894,6 +22178,72 @@
           "prev_page"
         ],
         "title": "PaginatedResponse[CatalogRuleSummary]"
+      },
+      "PaginatedResponse_CatalogueEntryObject_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogueEntryObject"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[CatalogueEntryObject]"
       },
       "PaginatedResponse_DeploymentSummary_": {
         "properties": {
@@ -26575,7 +26925,7 @@
             },
             "type": "object",
             "title": "Versions",
-            "description": "Version id \u2192 configuration snapshot and pipeline artifacts"
+            "description": "Version id -> configuration snapshot and pipeline artifacts"
           },
           "enabled": {
             "type": "boolean",
@@ -26876,7 +27226,7 @@
           "ddl": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/DDLResult"
+                "$ref": "#/components/schemas/dfe_engine__api__v1__sources__DDLResult"
               },
               {
                 "type": "null"
@@ -29772,6 +30122,34 @@
         ],
         "title": "TestResponse"
       },
+      "dfe_engine__api__v1__schemas__DDLResult": {
+        "properties": {
+          "source_name": {
+            "type": "string",
+            "title": "Source Name"
+          },
+          "create_table": {
+            "type": "string",
+            "title": "Create Table",
+            "description": "CREATE TABLE DDL"
+          },
+          "views": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Views",
+            "description": "View name \u2192 DDL"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_name",
+          "create_table"
+        ],
+        "title": "DDLResult",
+        "description": "Generated DDL output."
+      },
       "dfe_engine__api__v1__schemas__SchemaBuildResult": {
         "properties": {
           "source_name": {
@@ -29793,7 +30171,7 @@
           "ddl": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/DDLResult"
+                "$ref": "#/components/schemas/dfe_engine__api__v1__schemas__DDLResult"
               },
               {
                 "type": "null"
@@ -29939,6 +30317,34 @@
         "title": "SyncResponse",
         "description": "Submit/poll envelope for a provider sync (submit -> poll, like the sampler)."
       },
+      "dfe_engine__api__v1__sources__DDLResult": {
+        "properties": {
+          "source_name": {
+            "type": "string",
+            "title": "Source Name"
+          },
+          "create_table": {
+            "type": "string",
+            "title": "Create Table",
+            "description": "CREATE TABLE DDL"
+          },
+          "views": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Views",
+            "description": "View name -> DDL"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_name",
+          "create_table"
+        ],
+        "title": "DDLResult",
+        "description": "Generated DDL output."
+      },
       "dfe_engine__api__v1__sources__SchemaBuildResult": {
         "properties": {
           "source_name": {
@@ -29960,7 +30366,7 @@
           "ddl": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/DDLResult"
+                "$ref": "#/components/schemas/dfe_engine__api__v1__sources__DDLResult"
               },
               {
                 "type": "null"

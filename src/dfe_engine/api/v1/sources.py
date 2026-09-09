@@ -1,19 +1,21 @@
-"""Sources router — CRUD, pagination, search, sort, bulk operations.
+"""Sources router -- CRUD, pagination, search, sort, bulk operations.
 
-GET    /api/v1/sources                  → Paginated source list
-POST   /api/v1/sources                  → Create source
-GET    /api/v1/sources/{name}           → Get source details ('default' always answers)
-GET    /api/v1/sources/{name}/versions/{version}  → Get one version snapshot
-GET    /api/v1/sources/{name}/columns   → Composed schema columns for a version
-POST   /api/v1/sources/{name}/build     → Build DDL from a version snapshot
-POST   /api/v1/sources/{name}/plan      → Dry-run deploy plan (not persisted)
-POST   /api/v1/sources/{name}/deploy    → Deploy version to ClickHouse
-PUT    /api/v1/sources/{name}           → Update source
-PATCH  /api/v1/sources/{name}           → Enable or disable source
-DELETE /api/v1/sources/{name}           → Delete source
-POST   /api/v1/sources/bulk             → Bulk enable/disable/delete
-POST   /api/v1/sources/seed             → Seed built-in defaults
-POST   /api/v1/sources/reconcile-apps   → Bring the derived app state into step with the sources
+GET    /api/v1/sources                  -> Paginated source list
+POST   /api/v1/sources                  -> Create source
+GET    /api/v1/sources/catalogue        -> The sources a deployed transform already handles
+POST   /api/v1/sources/from-catalogue/{entry} -> Create a source from a catalogue entry
+GET    /api/v1/sources/{name}           -> Get source details ('default' always answers)
+GET    /api/v1/sources/{name}/versions/{version}  -> Get one version snapshot
+GET    /api/v1/sources/{name}/columns   -> Composed schema columns for a version
+POST   /api/v1/sources/{name}/build     -> Build DDL from a version snapshot
+POST   /api/v1/sources/{name}/plan      -> Dry-run deploy plan (not persisted)
+POST   /api/v1/sources/{name}/deploy    -> Deploy version to ClickHouse
+PUT    /api/v1/sources/{name}           -> Update source
+PATCH  /api/v1/sources/{name}           -> Enable or disable source
+DELETE /api/v1/sources/{name}           -> Delete source
+POST   /api/v1/sources/bulk             -> Bulk enable/disable/delete
+POST   /api/v1/sources/seed             -> Seed built-in defaults
+POST   /api/v1/sources/reconcile-apps   -> Bring the derived app state into step with the sources
 
 Every write that changes what the apps must do -- a deploy, a state change, a
 delete, an edit -- ends by reconciling the deploy repo: the receiver and loader
@@ -40,7 +42,9 @@ from dfe_engine.appmgmt import derived
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.git_identity import git_author
+from dfe_engine.manifest import ManifestError
 from dfe_engine.settings import get_settings
+from dfe_engine.source import catalogue as source_catalogue_module
 from dfe_engine.source.deployment import (
     SchemaDeployResult,
     SourceBuildArtifact,
@@ -53,6 +57,7 @@ from dfe_engine.source.deployment import (
 )
 from dfe_engine.source.models import (
     DEFAULT_LANDING_LABEL,
+    SOURCE_LABEL_FIELD,
     PaginatedSourceSummaryResponse,
     Source,
     SourceMatch,
@@ -67,6 +72,7 @@ from dfe_engine.source.registry import (
     SourceNotFoundError,
     SourceValidationError,
 )
+from dfe_engine.transport import SourceTransport
 
 router = APIRouter(prefix="/sources", tags=["Sources"])
 
@@ -224,6 +230,56 @@ class SeedResponse(BaseModel):
     seeded: int = Field(description="Number of sources seeded")
 
 
+class CatalogueEntryObject(BaseModel):
+    """One source a deployed transform already handles, as the console lists it."""
+
+    name: str = Field(description="The shipping app's key for this source")
+    package: str = Field(description="Vendor integration package it came from")
+    data_stream: str = Field(description="Data stream within that package")
+    dataset: str = Field(description="package.data_stream - what a Beats event stamps")
+    intakes: list[str] = Field(description="Ways this source's payload can reach the platform")
+    framing: str | None = Field(
+        default=None,
+        description="Pushed intakes only: whether the pipeline wants the syslog line or the body",
+    )
+    transforms: list[str] = Field(description="Programs the app compiled for this source")
+    beats: dict[str, str] = Field(
+        default_factory=dict,
+        description="Beats module and fileset carrying the same source, when one does",
+    )
+    source: str = Field(
+        default="",
+        description=(
+            "Source name this entry derives; empty when the entry's own name is not a "
+            "legal source name and one must be supplied on create"
+        ),
+    )
+
+
+class CatalogueSourceRequest(BaseModel):
+    """Create a source from a catalogue entry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    intake: str = Field(description="How this source's data arrives: beats, receiver or fetcher")
+    name: str | None = Field(
+        default=None,
+        description="Source name; defaults to the entry's own name as a Kubernetes label",
+    )
+    transform: str = Field(
+        default=source_catalogue_module.DEFAULT_TRANSFORM,
+        description="Which of the entry's transforms this source runs",
+    )
+    transport: SourceTransport | None = Field(
+        default=None,
+        description="bus or direct; omitted takes the deployment default",
+    )
+    archive: bool = Field(
+        default=False,
+        description="Keep the raw record as it arrived; needs the bus transport",
+    )
+
+
 class SchemaColumn(BaseModel):
     """A column in a composed source schema (API response)."""
 
@@ -239,7 +295,7 @@ class DDLResult(BaseModel):
 
     source_name: str
     create_table: str = Field(description="CREATE TABLE DDL")
-    views: dict[str, str] = Field(default_factory=dict, description="View name → DDL")
+    views: dict[str, str] = Field(default_factory=dict, description="View name -> DDL")
 
 
 class SchemaBuildResult(BaseModel):
@@ -295,7 +351,7 @@ class SourceDetailResponse(Source):
 
     versions: dict[str, SourceVersionDetail] = Field(
         default_factory=dict,
-        description="Version id → configuration snapshot and pipeline artifacts",
+        description="Version id -> configuration snapshot and pipeline artifacts",
     )
 
 
@@ -397,6 +453,116 @@ async def create_source(
     return _source_response(
         source, message="created", apps=_reconcile_apps(request, user, registry)
     )
+
+
+@router.get(
+    "/catalogue",
+    response_model=PaginatedResponse[CatalogueEntryObject],
+    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
+)
+async def list_catalogue(
+    user: CurrentUser,
+    pagination: PaginationParams = Depends(),
+    intake: str | None = Query(
+        None, description="Only entries that arrive this way (beats, receiver, fetcher)"
+    ),
+    search: str | None = Query(None, description="Search the entry name, package and data stream"),
+) -> PaginatedResponse[CatalogueEntryObject]:
+    """List the sources the deployed transforms already handle.
+
+    Empty when no catalogue is mounted, which is a deployment without one rather
+    than an error: the catalogue is a release asset of the app that ships it.
+    """
+    catalogue = _source_catalogue()
+    if catalogue is None:
+        return PaginatedResponse.from_list([], pagination.page, pagination.per_page)
+    if intake is not None and intake not in source_catalogue_module.INTAKES:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "validation_error",
+                "message": (
+                    f"Unknown intake {intake!r}. Must be: "
+                    f"{', '.join(sorted(source_catalogue_module.INTAKES))}"
+                ),
+            },
+        )
+
+    rows = [
+        _to_catalogue_object(entry)
+        for entry in catalogue.entries.values()
+        if intake is None or intake in entry.intakes
+    ]
+    if search:
+        needle = search.lower()
+        rows = [
+            row
+            for row in rows
+            if needle in row.name.lower()
+            or needle in row.package.lower()
+            or needle in row.data_stream.lower()
+        ]
+    rows.sort(key=lambda row: row.name)
+    return PaginatedResponse.from_list(rows, pagination.page, pagination.per_page)
+
+
+@router.post(
+    "/from-catalogue/{entry}",
+    response_model=SourceResponse,
+    status_code=201,
+    responses={
+        409: {
+            "model": SourceCreateConflictResponse,
+            "description": "A source of that name already exists, or its match duplicates another",
+        },
+    },
+    dependencies=[Depends(require_action(scopes_dict["source_write"]))],
+)
+async def create_source_from_catalogue(
+    entry: str,
+    body: CatalogueSourceRequest,
+    user: CurrentUser,
+    registry: SourceReg,
+    settings: Settings,
+    request: Request,
+):
+    """Create a source from a catalogue entry, on the intake it arrives by.
+
+    The entry supplies the match rule or the fetcher family, the transform
+    variant and the shipped meta schema; everything after that is the ordinary
+    create, so the source is indistinguishable from a hand-written one.
+    """
+    catalogue = _source_catalogue()
+    if catalogue is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "not_configured",
+                "message": "no source catalogue is mounted on this deployment",
+            },
+        )
+    try:
+        write = source_catalogue_module.write_request_for(
+            catalogue,
+            catalogue.entry(entry),
+            intake=body.intake,
+            settings=settings,
+            name=body.name,
+            transform=body.transform,
+            transport=body.transport,
+            archive=body.archive,
+        )
+    except source_catalogue_module.SourceCatalogueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "catalogue_error", "message": str(exc)},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+    return await create_source(write, user, registry, request)
 
 
 @router.get(
@@ -540,7 +706,7 @@ async def build_source_schema(
 ) -> SchemaBuildResult:
     """Build complete schema (DDL) from a source version snapshot.
 
-    Runs the v2 YAML → DDL pipeline and returns the generated DDL
+    Runs the v2 YAML -> DDL pipeline and returns the generated DDL
     without executing it against ClickHouse.
     """
     from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
@@ -1178,6 +1344,41 @@ def _utc_now_iso() -> str:
     return datetime.now(tz=UTC).isoformat()
 
 
+def _source_catalogue() -> source_catalogue_module.SourceCatalogue | None:
+    """The mounted catalogue, or a 502 naming what is wrong with it.
+
+    A missing catalogue is None and the routes answer empty; a catalogue that is
+    there but unreadable is a deployment fault worth saying out loud.
+    """
+    try:
+        return source_catalogue_module.source_catalogue()
+    except ManifestError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "catalogue_error", "message": str(exc)},
+        ) from exc
+
+
+def _to_catalogue_object(
+    entry: source_catalogue_module.CatalogueEntry,
+) -> CatalogueEntryObject:
+    try:
+        derived = entry.source_name()
+    except ValueError:
+        derived = ""
+    return CatalogueEntryObject(
+        name=entry.name,
+        package=entry.package,
+        data_stream=entry.data_stream,
+        dataset=entry.dataset,
+        intakes=sorted(entry.intakes),
+        framing=entry.framing,
+        transforms=list(entry.transforms),
+        beats=dict(entry.beats),
+        source=derived,
+    )
+
+
 def _synthesised_default_source() -> Source:
     """The default flow as it runs before anyone has written it down.
 
@@ -1190,7 +1391,9 @@ def _synthesised_default_source() -> Source:
         {
             "source": DEFAULT_LANDING_LABEL,
             "description": "Where a record the receiver cannot place lands",
-            "match": SourceMatch(field="_source", operator="always").model_dump(mode="json"),
+            "match": SourceMatch(field=SOURCE_LABEL_FIELD, operator="always").model_dump(
+                mode="json"
+            ),
             "transport": get_settings().transport.default,
         }
     )

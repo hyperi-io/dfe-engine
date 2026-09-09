@@ -396,6 +396,13 @@ def transformed_topic(source_name: str) -> str:
     return f"{source_name}{TOPIC_LOAD_SUFFIX}"
 
 
+SOURCE_LABEL_FIELD = "_source"
+"""The field every producer stamps with the label a record belongs to.
+
+The receiver, the fetcher and each transform all read and write it, so a rule
+that tests which source a record is has this as its field.
+"""
+
 DEFAULT_LANDING_LABEL = "default"
 """The ``_source`` label of the platform's default landing table.
 
