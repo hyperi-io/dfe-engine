@@ -72,7 +72,7 @@ kafka:
     retries: 5
 
 loader:
-  address: "dfe-loader.dfe.svc.cluster.local:9000"
+  address: "dfe-loader.dfe.svc.cluster.local:6000"
   transport: kafka
   timeout_ms: 5000
 

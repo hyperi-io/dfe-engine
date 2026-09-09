@@ -260,9 +260,10 @@ class SourceMatch(BaseModel):
     field: str = Field(
         ...,
         description=(
-            "Field to match on. Prefix with '_json.' to match a path inside the "
-            "JSON column (e.g. '_json._source_fetcher'); a bare name matches a "
-            "real top-level column (e.g. '_org_id')."
+            "Field to match on: a dotted path into the record as it arrives "
+            "(e.g. 'tags.collector.type', or a bare '_source'). The receiver "
+            "matches the JSON payload, not a ClickHouse column, so a '_json.' "
+            "prefix would be read as a first segment no record has."
         ),
     )
     operator: SourceMatchOperator = Field(

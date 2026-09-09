@@ -705,17 +705,6 @@ ARTIFACT_KINDS: dict[str, ArtifactKind] = load_kinds()
 MESH_HOST_PATTERN: str = load_mesh()
 
 
-def reload_catalogue(path: Path | str | None = None) -> dict[str, AppDescriptor]:
-    """Re-read the manifest in place, so a remounted file takes effect."""
-    global MESH_HOST_PATTERN
-    APP_CATALOGUE.clear()
-    APP_CATALOGUE.update(load_catalogue(path))
-    ARTIFACT_KINDS.clear()
-    ARTIFACT_KINDS.update(load_kinds(path))
-    MESH_HOST_PATTERN = load_mesh(path)
-    return APP_CATALOGUE
-
-
 class UnknownAppError(KeyError):
     """Raised when a service name is not in the catalogue."""
 
