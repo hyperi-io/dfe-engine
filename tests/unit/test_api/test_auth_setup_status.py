@@ -77,7 +77,11 @@ def _deploy_repo_crud(tmp_path: Path) -> GitCrud:
 
 
 def _complete_setup(app) -> None:
-    """Satisfy every required step: org, real user, minted admin password."""
+    """Satisfy every required step -- an organisation and a real user.
+
+    The admin password is minted here too, as a deployed engine's is, but it
+    gates ``default_credentials`` rather than any wizard step.
+    """
     app.state.org_registry.create("acme", display_name="Acme")
     app.state.account_store.create("alice", "a-strong-user-password", groups=["dfe-admins"])
     # The admin password is injected config, so moving off the default is a config change.
@@ -93,13 +97,8 @@ def test_setup_status_public_and_incomplete_on_fresh_bootstrap(tmp_path):
             setup = resp.json()["initial_setup"]
             assert setup["complete"] is False
             # Optional OIDC is listed in steps but never in pending_steps.
-            assert setup["steps"] == [
-                "oidc_provider",
-                "organisations",
-                "first_user",
-                "admin_password",
-            ]
-            assert setup["pending_steps"] == ["organisations", "first_user", "admin_password"]
+            assert setup["steps"] == ["oidc_provider", "organisations", "first_user"]
+            assert setup["pending_steps"] == ["organisations", "first_user"]
             assert setup["completed_steps"] == []
             assert setup["current_step"] == "organisations"
     finally:
@@ -107,20 +106,23 @@ def test_setup_status_public_and_incomplete_on_fresh_bootstrap(tmp_path):
 
 
 def test_setup_status_reads_the_configured_password_not_the_stored_hash(tmp_path):
-    """A store-side reset is reverted at the next boot, so it cannot clear the step."""
+    """A store-side reset is reverted at the next boot, so it cannot clear the flag.
+
+    The default password is reported by ``default_credentials`` -- the wizard has
+    no step for it, because every deployment mints its own at deploy time.
+    """
     app = create_app(settings=_settings(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
-            setup = client.get("/api/v1/auth/setup-status").json()["initial_setup"]
-            assert "admin_password" in setup["pending_steps"]
+            body = client.get("/api/v1/auth/setup-status").json()
+            assert body["default_credentials"] is True
+            assert "admin_password" not in body["initial_setup"]["steps"]
 
             app.state.account_store.reset_password(admin_account_name(), "a-store-only-password")
-            setup = client.get("/api/v1/auth/setup-status").json()["initial_setup"]
-            assert "admin_password" in setup["pending_steps"]
+            assert client.get("/api/v1/auth/setup-status").json()["default_credentials"] is True
 
             app.state.settings.auth.local.admin_password = MINTED_ADMIN
-            setup = client.get("/api/v1/auth/setup-status").json()["initial_setup"]
-            assert "admin_password" in setup["completed_steps"]
+            assert client.get("/api/v1/auth/setup-status").json()["default_credentials"] is False
     finally:
         _registries.clear()
 
@@ -180,21 +182,15 @@ def test_setup_status_reports_auth_steps_even_when_auth_is_disabled(tmp_path):
     """DFE_AUTH_ENABLED=false does not stop bootstrap seeding a live admin/changeme.
 
     ``bootstrap_auth`` runs unconditionally and ``POST /auth/login`` never
-    checks the toggle, so the wizard must still call for the rotation and the
-    first real user.
+    checks the toggle, so the wizard must still call for the first real user.
     """
     app = create_app(settings=_settings_auth_disabled(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             setup = client.get("/api/v1/auth/setup-status").json()["initial_setup"]
 
-            assert setup["steps"] == [
-                "oidc_provider",
-                "organisations",
-                "first_user",
-                "admin_password",
-            ]
-            assert setup["pending_steps"] == ["organisations", "first_user", "admin_password"]
+            assert setup["steps"] == ["oidc_provider", "organisations", "first_user"]
+            assert setup["pending_steps"] == ["organisations", "first_user"]
             assert setup["complete"] is False
     finally:
         _registries.clear()
@@ -230,7 +226,7 @@ def test_setup_status_complete_when_all_required_steps_done(tmp_path):
             assert setup["complete"] is True
             assert setup["pending_steps"] == []
             assert setup["current_step"] is None
-            assert setup["completed_steps"] == ["organisations", "first_user", "admin_password"]
+            assert setup["completed_steps"] == ["organisations", "first_user"]
     finally:
         _registries.clear()
 
@@ -243,7 +239,7 @@ def test_setup_status_partial_completion(tmp_path):
 
             setup = client.get("/api/v1/auth/setup-status").json()["initial_setup"]
             assert setup["complete"] is False
-            assert setup["pending_steps"] == ["first_user", "admin_password"]
+            assert setup["pending_steps"] == ["first_user"]
             assert setup["completed_steps"] == ["organisations"]
             assert setup["current_step"] == "first_user"
     finally:
@@ -254,11 +250,12 @@ def test_setup_status_returns_registries_while_incomplete(tmp_path):
     app = create_app(settings=_settings(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
+            # No real user yet, so the wizard still has a step to render these for.
             app.state.org_registry.create("acme", display_name="Acme")
-            app.state.account_store.create("alice", "a-strong-user-password")
 
             body = client.get("/api/v1/auth/setup-status").json()
 
+            assert body["initial_setup"]["complete"] is False
             assert [o["name"] for o in body["organisations"]] == ["acme"]
             assert body["oidc_providers"] == []
     finally:

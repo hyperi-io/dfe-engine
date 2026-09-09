@@ -150,10 +150,10 @@ class Accounts(Seed):
     def _mirror_to_deploy_repo(self, name: str) -> None:
         """Persist the break-glass account into the deploy repo, as a real write does.
 
-        The setup wizard will not call itself finished until the durable copy of
-        the break-glass admin MATCHES the live one, and it compares the stored
+        ``setup-status`` reports the break-glass admin as durable only when the
+        copy in the deploy repo MATCHES the live one, and it compares the stored
         password hash. Writing only the live store therefore leaves every seeded
-        e2e run parked on the rotate-the-break-glass step forever.
+        e2e run reporting an undurable break-glass account.
 
         The hash is read back from the store rather than re-derived, because
         bcrypt salts afresh every time: deriving it twice would produce two hashes

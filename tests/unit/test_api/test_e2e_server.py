@@ -567,12 +567,11 @@ def _setup_status(client: TestClient) -> dict:
 
 
 class TestBreakGlassDurability:
-    """Seeding has to leave the break-glass admin durable, or setup never finishes.
+    """Seeding has to leave the break-glass admin durable in the deploy repo.
 
-    The wizard only calls the rotate-the-break-glass step done once the deploy
-    repo's copy of the account matches the live one. A seeder that wrote only the
-    live store left every gitops-enabled Playwright run bounced to
-    ``/setup/resetBreakGlassAccount``, forever.
+    ``setup-status`` reports the account as durable only once the repo's copy
+    matches the live one, so a seeder that wrote only the live store left every
+    gitops-enabled Playwright run reading an undurable break-glass account.
     """
 
     @staticmethod
