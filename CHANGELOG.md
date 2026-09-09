@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.13](https://github.com/hyperi-io/dfe-engine/compare/v1.19.12...v1.19.13) (2026-09-09)
+
+### Bug Fixes
+
+* **api:** system version reports the stack from the deploy repo pins ([d03629a](https://github.com/hyperi-io/dfe-engine/commit/d03629acc0e8f897acb4aba2a3a5a253a2196130))
+* **source:** a source declares its transport, transform variant, archive and fetcher routes ([436dbdc](https://github.com/hyperi-io/dfe-engine/commit/436dbdc2315349dc89a82abb83f6a31691a00127)), closes [#315](https://github.com/hyperi-io/dfe-engine/issues/315)
+
 ## [1.19.12](https://github.com/hyperi-io/dfe-engine/compare/v1.19.11...v1.19.12) (2026-09-08)
 
 ### Bug Fixes
