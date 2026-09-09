@@ -17,6 +17,7 @@ flowchart LR
 | Doc | Covers |
 |---|---|
 | [source.md](source.md) | Source as the top-level data abstraction |
+| [source-flow.md](source-flow.md) | INPUT, optional TRANSFORM, OUTPUT on the Kafka or gRPC transport; what compiles from a source; how a change reaches a pod |
 | [schema.md](schema.md) | schema type system: primitives, attributes, use cases, DDL |
 | [schema-classes.md](schema-classes.md) | engine class reference for the schema system (SchemaLoader, SchemaBuilderV2, DDL generation) |
 | [schema-sync.md](schema-sync.md) | engine<->loader runtime schema contract |
