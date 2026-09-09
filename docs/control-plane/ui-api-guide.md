@@ -1,4 +1,4 @@
-# DFE Engine API — UI Integration Guide
+# DFE Engine API -- UI Integration Guide
 
 This document covers everything a frontend developer needs to integrate
 with the DFE Engine REST API.
@@ -123,7 +123,7 @@ const tableRows = list.items;
 const pathTree = list.objects;
 ```
 
-Query parameters: `page` (1-based), `per_page` (1–100 or `-1` for all, default 25),
+Query parameters: `page` (1-based), `per_page` (1-100 or `-1` for all, default 25),
 `search` (text filter), `sort_by`, `sort_order` (asc/desc). Schema list also
 accepts repeated `schema_type` (top-level path segment, e.g. `meta`).
 
@@ -205,8 +205,8 @@ K8s/KEDA deployment config (replicas, resources, scaling).
 | GET | `/queries/views` | List parameterized views |
 | GET | `/queries/views/namespaces` | List view namespaces |
 | GET | `/queries/views/{label}` | View definition + parameters |
-| POST | `/queries/views/{label}/execute` | Execute view → JSON |
-| POST | `/queries/raw` | Raw query → JSON |
+| POST | `/queries/views/{label}/execute` | Execute view -> JSON |
+| POST | `/queries/raw` | Raw query -> JSON |
 | GET | `/queries/health` | Query engine health |
 
 View execution returns **JSON** (`QueryResponse`) with fields:
@@ -284,6 +284,8 @@ es.addEventListener('complete', (e) => {
 | POST | `/transforms/compile` | Compile VRL/CEL transform |
 | POST | `/transforms/test` | Test transform against sample data |
 | GET | `/system/version` | Stack, engine and ui versions (the console footer) |
+| GET | `/system/deployment` | Profile, transports, mesh and versions -- what a pane must not guess |
+| GET | `/sources/{name}/signals` | Records a minute and last arrival for one source |
 | GET | `/system/settings` | Current settings |
 
 ## Governed Ops (curated actions - the operator dials)
@@ -354,7 +356,7 @@ exposes the set. Three mechanisms, in order of preference:
    default (e.g. `required_action`). Show the derived value, do not ask for it.
 
 A free-text input for any of these is a contract bug - report it against the
-engine, not something to paper over in the UI.
+engine rather than hiding it behind a UI that accepts anything.
 
 ## Repository (UI preferences + small objects)
 
