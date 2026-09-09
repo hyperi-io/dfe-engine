@@ -160,10 +160,22 @@ def _stage_app(
     return app
 
 
+def _mesh_namespace(settings: DFESettings) -> str:
+    """Where this deployment's pool listeners live, or empty when it has none.
+
+    The one reader of the two deployment facts, so every address in a flow is
+    built the same way: off the mesh a sender dials a stage's own Service, on it
+    the listener alias fronting that stage's pool.
+    """
+    transport = settings.transport
+    return transport.mesh_namespace if transport.mesh_enabled else ""
+
+
 def _resolve_transform(
     source: Source,
     transport: SourceTransport,
     apps: dict[str, AppDescriptor],
+    mesh_namespace: str,
 ) -> FlowTransform | None:
     transform = source.transform
     if transform is None:
@@ -190,7 +202,11 @@ def _resolve_transform(
         app=service,
         instance=catalogue.instance_name(app, source.source),
         variant=transform.variant,
-        endpoint=catalogue.push_endpoint(app, source.source) if transport == "direct" else None,
+        endpoint=(
+            catalogue.push_endpoint(app, source.source, mesh_namespace)
+            if transport == "direct"
+            else None
+        ),
         # topic_load is set exactly when the source has a transform, which is here.
         topics=(source.topic_land, str(source.topic_load)) if transport == "bus" else None,
     )
@@ -210,14 +226,18 @@ def _resolve_input(
     return catalogue.instance_name(fetcher, source.source)
 
 
-def loader_endpoint(catalogue_apps: dict[str, AppDescriptor] | None = None) -> str:
+def loader_endpoint(
+    settings: DFESettings, catalogue_apps: dict[str, AppDescriptor] | None = None
+) -> str:
     """Where any direct-transport stage pushes records for the loader.
 
     Stack-wide, so it takes no source: every direct flow ends at the same
-    address, and the receiver's destination set names it once.
+    address, and the receiver's destination set names it once. It still takes the
+    deployment, because the loader is a pool like any other stage and the mesh
+    fronts it the same way.
     """
     apps = catalogue_apps if catalogue_apps is not None else catalogue.APP_CATALOGUE
-    return catalogue.push_endpoint(apps[LOADER_SERVICE], "")
+    return catalogue.push_endpoint(apps[LOADER_SERVICE], "", _mesh_namespace(settings))
 
 
 def _resolve_loader_output(
@@ -225,10 +245,11 @@ def _resolve_loader_output(
     transport: SourceTransport,
     transform: FlowTransform | None,
     apps: dict[str, AppDescriptor],
+    settings: DFESettings,
 ) -> str:
     _stage_app(LOADER_SERVICE, transport, apps, source=source.source, purpose="load it")
     if transport == "direct":
-        return loader_endpoint(apps)
+        return loader_endpoint(settings, apps)
     # On the bus the loader reads whichever topic the last stage wrote.
     return transform.topics[1] if transform and transform.topics else source.topic_land
 
@@ -267,7 +288,7 @@ def resolve_flow(
     transport = _resolve_transport(source, settings)
     _check_archive(source, transport, apps)
 
-    transform = _resolve_transform(source, transport, apps)
+    transform = _resolve_transform(source, transport, apps, _mesh_namespace(settings))
     return SourceFlow(
         source=source.source,
         transport=transport,
@@ -280,7 +301,7 @@ def resolve_flow(
         input=_resolve_input(source, transport, apps),
         transform=transform,
         outputs=FlowOutputs(
-            loader=_resolve_loader_output(source, transport, transform, apps),
+            loader=_resolve_loader_output(source, transport, transform, apps, settings),
             archive=source.archive,
         ),
         table=source.table_name,

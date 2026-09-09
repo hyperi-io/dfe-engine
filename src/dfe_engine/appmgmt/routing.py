@@ -40,16 +40,18 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from dfe_engine.gitcrud.engine import del_path, get_path, set_path
-from dfe_engine.source.flow import FlowError, SourceFlow, resolve_flow
 from dfe_engine.source.models import Source
 from dfe_engine.source.registry import SourceNotFoundError, SourceRegistry
 
 from . import catalogue
 from .catalogue import AppDescriptor, CatalogueError
 from .instances import AppInstance
+
+if TYPE_CHECKING:
+    from dfe_engine.source.flow import SourceFlow
 
 # The apps' own names for the two transports. A source records bus or direct;
 # the compiled config names the mechanism, because that is what the app reads.
@@ -124,6 +126,10 @@ def _flow(source: Source, settings: Any) -> SourceFlow:
     save, so reaching a FlowError here means the deployment moved underneath a
     stored source - reported, never compiled around.
     """
+    # Imported here because the resolver reaches back into this package for the
+    # catalogue: at module level the two would deadlock on whichever loads first.
+    from dfe_engine.source.flow import FlowError, resolve_flow
+
     try:
         return resolve_flow(source, settings)
     except FlowError as exc:

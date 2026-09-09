@@ -537,6 +537,40 @@ class TestEnvOverrides:
         assert settings.auth.enabled is True
 
 
+class TestTransportMesh:
+    """The deployment's half of a pool address: whether, and where."""
+
+    def test_the_pools_are_dialled_directly_by_default(self):
+        from dfe_engine.settings import TransportSettings
+
+        transport = TransportSettings()
+
+        assert transport.mesh_enabled is False
+        assert transport.mesh_namespace == ""
+
+    def test_mesh_without_a_namespace_is_refused(self):
+        from dfe_engine.settings import TransportSettings
+
+        with pytest.raises(ValidationError, match="DFE_MESH_NAMESPACE"):
+            TransportSettings(mesh_enabled=True)
+
+    def test_a_namespace_with_the_mesh_off_is_accepted(self):
+        # Every profile passes the namespace; only the switch says to use it.
+        from dfe_engine.settings import TransportSettings
+
+        assert TransportSettings(mesh_namespace="envoy-gateway-system").mesh_enabled is False
+
+    def test_env_override(self, monkeypatch):
+        from dfe_engine.settings import _get_env_overrides
+
+        monkeypatch.setenv("DFE_MESH_ENABLED", "true")
+        monkeypatch.setenv("DFE_MESH_NAMESPACE", "envoy-gateway-system")
+        overrides = _get_env_overrides()
+
+        assert overrides["transport"]["mesh_enabled"] is True
+        assert overrides["transport"]["mesh_namespace"] == "envoy-gateway-system"
+
+
 class TestGitopsMode:
     def test_default_is_team(self):
         from dfe_engine.settings import GitopsSettings
