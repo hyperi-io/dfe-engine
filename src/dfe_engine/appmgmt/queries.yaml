@@ -92,11 +92,10 @@ queries:
   # Per-timestamp fleet totals of the loader's per-table counter, for the ONE
   # table a source's records land in. `loader_messages_by_table_total` carries the
   # table as an OTel attribute (dfe-loader src/metrics/mod.rs:217), and the loader
-  # is the only stage that counts a record against a table, so this is where a
-  # source's throughput is observable at all.
-  # The rate and the last increase are computed by the caller off these rows,
-  # rather than in SQL, for the reason counter_rates gives: the OTel resource
-  # carries no pod identity, so the fleet is summed per timestamp first.
+  # is the only stage counting a record against a table.
+  # The fleet is summed per timestamp for the reason counter_rates gives: the OTel
+  # resource carries no pod identity. The rate and the last increase are then
+  # differenced by the caller rather than in SQL.
   # ServiceName is bound to the deployed loader instances so the query still hits
   # the metrics tables' ORDER BY prefix (ServiceName, MetricName, ...).
   source_landing_counter:

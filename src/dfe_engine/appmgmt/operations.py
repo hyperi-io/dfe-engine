@@ -238,8 +238,7 @@ class OperationalReader:
         safe_table = self._safe_identifier(table)
         services = [self._safe_identifier(name) for name in loaders]
         if not services:
-            # Nothing is deployed to count records against a table, so there is no
-            # series to be absent OR present - the honest answer is neither.
+            # Nothing is deployed to count records against a table, so no series exists.
             return SourceSignals(table=table, window_seconds=self._window)
         rows = self._run("source_landing_counter", {"services": services, "table": safe_table})
         points = [(_epoch(ts) or 0.0, float(total)) for ts, total in rows]

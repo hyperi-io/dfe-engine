@@ -780,8 +780,7 @@ async def list_apps(
     """Every manageable app, with the instances currently deployed."""
     gc = _gitcrud(request)
     deployed = instances.list_instances(gc)
-    # A caller that names no profile means "this one", and the engine is told what
-    # this one is -- so the answer stops defaulting to every app being offered.
+    # A caller naming no profile means this one, which the deployer injected.
     judged_against = profile or settings.deployment.profile
     entries: list[CatalogueEntry] = []
     for service in catalogue.services():

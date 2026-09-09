@@ -207,9 +207,9 @@ def _landing_table(source: Source) -> tuple[str, bool]:
     """The table this source's records land in, and whether that is the shared default.
 
     The loader takes the table from the ``_source`` label the producer stamped,
-    through a ``source_to_table`` map the compile fills identically - so the table
-    IS the landing label, and a fetcher pushing to the main topic lands in the
-    platform's landing table rather than in one of its own name.
+    and the ``source_to_table`` map the compile emits is the identity - so the
+    table IS the landing label. A fetcher pushing to the main topic therefore
+    lands in the platform's landing table rather than in one of its own name.
     """
     label = source.landing_label()
     return label, label == DEFAULT_LANDING_LABEL
