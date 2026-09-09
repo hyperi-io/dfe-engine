@@ -106,6 +106,11 @@ def get_path(doc: dict, dotpath: str, default: Any = None) -> Any:
     return cur
 
 
+def del_path(doc: dict, dotpath: str) -> bool:
+    """Public dot-path remover; returns whether anything was there. Mutates ``doc``."""
+    return _del_path(doc, dotpath)
+
+
 def _del_path(doc: dict, dotpath: str) -> bool:
     parts = dotpath.split(".")
     cur = doc

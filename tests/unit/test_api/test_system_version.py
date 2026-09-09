@@ -8,9 +8,11 @@
 
 """The stack version comes from the deploy repo's pins.yaml, through gitcrud.
 
-Without a deploy repo the engine's own version is the whole answer, which is what
-the docker and dev profiles run. Every page of the console calls this, so it is
-open to any authenticated user and closed to an anonymous one.
+A deploy with no pins base still knows what stood it up, because the chart passes
+that in, so the footer falls back to it. With neither, the engine's own version is
+the whole answer, which is what the docker and dev profiles run. Every page of the
+console calls this, so it is open to any authenticated user and closed to an
+anonymous one.
 """
 
 from __future__ import annotations
@@ -64,6 +66,28 @@ class TestGetVersion:
         body = client.get("/api/v1/system/version", headers=admin_headers).json()
         assert body["stack"] is None
         assert body["source"] == "engine"
+
+    def test_the_deployment_answers_when_the_deploy_repo_pins_nothing(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path, pins=None)
+        app.state.settings.stack_version = "2.2.0-rc.13"
+
+        body = client.get("/api/v1/system/version", headers=admin_headers).json()
+
+        assert body["stack"] == "2.2.0-rc.13"
+        assert body["source"] == "deployment"
+
+    def test_the_pins_win_over_what_deployed_the_pod(self, client, app, admin_headers, tmp_path):
+        # The pins are what the operator chose; the deployment value is only
+        # what happened to stand this pod up.
+        _wire(app, tmp_path)
+        app.state.settings.stack_version = "2.2.0-rc.12"
+
+        body = client.get("/api/v1/system/version", headers=admin_headers).json()
+
+        assert body["stack"] == "2.2.0-rc.13"
+        assert body["source"] == "deploy-repo"
 
     def test_any_authenticated_user_can_read_it(self, client, app, viewer_headers, tmp_path):
         _wire(app, tmp_path)

@@ -38,8 +38,10 @@ from typing import TYPE_CHECKING, Any
 from confluent_kafka.admin import AdminClient, NewTopic
 from scalo.logger import logger
 
+from dfe_engine.source.models import transformed_topic
+
 if TYPE_CHECKING:
-    from dfe_engine.settings import Settings
+    from dfe_engine.settings import DFESettings
     from dfe_engine.source.models import Source
 
 
@@ -78,7 +80,7 @@ def admin_config(
     provider: str | None = None,
     username: str | None = None,
     password: str | None = None,
-    settings: Settings | None = None,
+    settings: DFESettings | None = None,
 ) -> dict[str, Any]:
     """Build the librdkafka admin config, sourced from settings unless overridden.
 
@@ -161,7 +163,7 @@ def build_admin(
     provider: str | None = None,
     username: str | None = None,
     password: str | None = None,
-    settings: Settings | None = None,
+    settings: DFESettings | None = None,
 ) -> TopicAdmin:
     return TopicAdmin(
         admin_config(
@@ -195,9 +197,9 @@ def source_topic_specs(
     specs = [_spec(source.topic_land)]
     transform = source.version(version_id).transform if version_id else source.transform
     if transform:
-        # The _load convention lives on Source.topic_load; resolved here against
-        # the chosen version rather than whichever one happens to be deployed.
-        specs.append(_spec(f"{source.source}_load"))
+        # Resolved against the CHOSEN version rather than whichever one happens
+        # to be deployed, which is why this is not Source.topic_load.
+        specs.append(_spec(transformed_topic(source.source)))
     return specs
 
 
@@ -205,7 +207,7 @@ def ensure_topics(
     specs: list[TopicSpec],
     *,
     admin: TopicAdmin | None = None,
-    settings: Settings | None = None,
+    settings: DFESettings | None = None,
     bootstrap: str | None = None,
     dry_run: bool = False,
 ) -> TopicEnsureResult:

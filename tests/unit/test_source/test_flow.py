@@ -39,6 +39,21 @@ def _fetched(name: str = "okta", **fields) -> Source:
     return Source.model_validate(data)
 
 
+def _with_listener(service: str) -> dict:
+    """The catalogue as it is once *service* ships its Push listener.
+
+    Declaring the transport and the endpoint is the WHOLE of what a transform
+    gains one, so the direct form is exercised through a manifest edit.
+    """
+    apps = dict(catalogue.APP_CATALOGUE)
+    apps[service] = replace(
+        apps[service],
+        transports=frozenset({"bus", "direct"}),
+        endpoints={catalogue.PUSH_ENDPOINT: catalogue.AppEndpoint(port=6000)},
+    )
+    return apps
+
+
 class TestBusTransport:
     def test_receiver_source_lands_on_its_own_topic(self):
         flow = resolve_flow(_source(), _settings(default="bus"))
@@ -63,7 +78,7 @@ class TestBusTransport:
         assert flow.transform.instance == "dfe-transform-vrl-auth"
         assert flow.transform.variant == "okta_system"
         assert flow.transform.topics == ("auth_land", "auth_load")
-        assert flow.transform.listen is None
+        assert flow.transform.endpoint is None
         # The loader reads whatever the LAST stage wrote.
         assert flow.outputs.loader == "auth_load"
 
@@ -89,23 +104,16 @@ class TestDirectTransport:
         assert flow.transform is None
         assert flow.outputs.loader == "http://dfe-loader:6000"
 
-    def test_transform_listens_on_its_own_instance_service(self):
-        # No shipped transform carries direct yet, so declaring the transport is
-        # the whole of what one gains when its listener ships.
-        with_listener = dict(catalogue.APP_CATALOGUE)
-        with_listener["dfe-transform-vector"] = replace(
-            with_listener["dfe-transform-vector"], transports=frozenset({"bus", "direct"})
-        )
-
+    def test_transform_answers_on_its_own_instance_service(self):
         flow = resolve_flow(
             _source(transport="direct", transform={"engine": "vector"}),
             _settings(default="direct"),
-            with_listener,
+            _with_listener("dfe-transform-vector"),
         )
 
         assert flow.transform is not None
         assert flow.transform.instance == "dfe-transform-vector-auth"
-        assert flow.transform.listen == "http://dfe-transform-vector-auth:6000"
+        assert flow.transform.endpoint == "http://dfe-transform-vector-auth:6000"
         assert flow.transform.topics is None
         assert flow.outputs.loader == "http://dfe-loader:6000"
 
@@ -174,6 +182,37 @@ class TestRefusals:
 
         with pytest.raises(FlowError, match="dfe-loader carries only bus"):
             resolve_flow(_source(transport="direct"), _settings(default="direct"), bus_only)
+
+    def test_a_transform_on_direct_needs_a_match_the_receiver_can_route_on(self):
+        # The receiver picks a destination on field AND value, so an `exists`
+        # match would send the source to the loader untransformed.
+        with pytest.raises(FlowError, match="tests no value"):
+            resolve_flow(
+                Source.model_validate(
+                    {
+                        "source": "auth",
+                        "match": {"field": "_json.app", "operator": "exists"},
+                        "transport": "direct",
+                        "transform": {"engine": "vector"},
+                    }
+                ),
+                _settings(default="direct"),
+                _with_listener("dfe-transform-vector"),
+            )
+
+    def test_the_same_match_is_fine_without_a_transform(self):
+        flow = resolve_flow(
+            Source.model_validate(
+                {
+                    "source": "auth",
+                    "match": {"field": "_json.app", "operator": "exists"},
+                    "transport": "direct",
+                }
+            ),
+            _settings(default="direct"),
+        )
+
+        assert flow.outputs.loader == "http://dfe-loader:6000"
 
     def test_a_bus_only_fetcher_refuses_a_direct_source(self):
         bus_only = dict(catalogue.APP_CATALOGUE)

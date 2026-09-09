@@ -5975,7 +5975,7 @@
           "System"
         ],
         "summary": "Get Version",
-        "description": "What this deployment runs.\n\nAuthenticated but ungated on purpose: the console footer is on every page, and\nthe body carries versions only. Without a deploy repo the stack is unknown and\nthe engine's own version is the whole answer.",
+        "description": "What this deployment runs.\n\nAuthenticated but ungated on purpose: the console footer is on every page, and\nthe body carries versions only.\n\nThe pins win where there are any: they are what the operator chose. A deploy\nwith no pins base still knows what stood it up, because the chart passes that\nin, so the footer shows a stack version rather than nothing. With neither, the\nengine's own version is the whole answer.",
         "operationId": "get_version_api_v1_system_version_get",
         "responses": {
           "200": {
@@ -24293,12 +24293,15 @@
           "compiler": {
             "type": "string",
             "title": "Compiler",
-            "description": "Manifest-declared compiler that derives this block"
+            "description": "Manifest-declared compiler that derives these blocks"
           },
-          "values_path": {
-            "type": "string",
-            "title": "Values Path",
-            "description": "Overlay dot-path the block is written to"
+          "values_paths": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Values Paths",
+            "description": "Each derived block by name, and the overlay dot-path it is written to"
           },
           "drift": {
             "type": "boolean",
@@ -24313,12 +24316,14 @@
           "compiled": {
             "additionalProperties": true,
             "type": "object",
-            "title": "Compiled"
+            "title": "Compiled",
+            "description": "Each block the sources call for now, by name"
           },
           "deployed": {
             "additionalProperties": true,
             "type": "object",
-            "title": "Deployed"
+            "title": "Deployed",
+            "description": "The same blocks as the overlay carries them"
           },
           "etag": {
             "anyOf": [
@@ -24336,7 +24341,6 @@
         "type": "object",
         "required": [
           "compiler",
-          "values_path",
           "drift",
           "absent"
         ],
@@ -29010,7 +29014,7 @@
               }
             ],
             "title": "Stack",
-            "description": "Certified stack version pinned in the deploy repo; null when there is none."
+            "description": "Certified stack version this deployment runs; null when nothing states one."
           },
           "engine": {
             "type": "string",
@@ -29033,10 +29037,11 @@
             "type": "string",
             "enum": [
               "deploy-repo",
+              "deployment",
               "engine"
             ],
             "title": "Source",
-            "description": "deploy-repo when the stack version was read from pins.yaml, else engine."
+            "description": "deploy-repo when the stack version came from pins.yaml, deployment when it came from what deployed this pod, else engine."
           },
           "python_version": {
             "type": "string",
