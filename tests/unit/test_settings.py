@@ -489,6 +489,21 @@ class TestEnvOverrides:
         settings = load_settings()
         assert settings.deployment.config_dir == "/custom/deploy"
 
+    def test_profile_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_PROFILE", " scale-mesh ")
+        settings = load_settings()
+        assert settings.deployment.profile == "scale-mesh"
+
+    def test_profile_defaults_to_unknown(self):
+        # An engine nobody told cannot judge which apps a tier offers, and says so
+        # rather than guessing the widest deployment.
+        assert load_settings().deployment.profile == ""
+
+    def test_ui_version_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_UI_VERSION", "v1.5.1")
+        settings = load_settings()
+        assert settings.ui_version == "v1.5.1"
+
     def test_services_config_yaml_dir_override(self, monkeypatch):
         monkeypatch.setenv("DFE_SERVICES_CONFIG_YAML_DIR", "/custom/svc")
         settings = load_settings()

@@ -286,9 +286,12 @@ def _transform(
 
 Compiler = Callable[[AppDescriptor, SourceRegistry, Any, str | None], dict[str, Any]]
 
+# Named because callers outside the compile path select the loading stage by it.
+LOADER_COMPILER = "loader"
+
 _COMPILERS: dict[str, Compiler] = {
     "receiver": _receiver,
-    "loader": _loader,
+    LOADER_COMPILER: _loader,
     "fetcher": _fetcher,
     "transform": _transform,
 }

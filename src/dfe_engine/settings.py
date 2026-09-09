@@ -103,6 +103,8 @@ E2E server (Playwright host-run helpers; refused in production):
 
 Stack identity (what the deploy says this pod came from):
 - DFE_STACK_VERSION -> stack_version
+- DFE_UI_VERSION -> ui_version (the dfe-ui pin the deploy rendered)
+- DFE_PROFILE -> deployment.profile (the tier the deploy chose; empty = unknown)
 
 Repository (scope-aligned small-object store; lives in the DFE database):
 - DFE_REPOSITORY_MAX_PREFS_BYTES -> repository.max_prefs_bytes
@@ -831,9 +833,21 @@ class DeploymentSettings(BaseModel):
     - DFE_DEPLOYMENT_CONFIG_DIR -> deployment.config_dir
     - DFE_DEPLOYMENT_TARGET -> deployment.target
     - DFE_DEPLOYMENT_NAMESPACE -> deployment.namespace
+    - DFE_PROFILE -> deployment.profile
     """
 
     config_dir: str = Field(default="", description="YAML directory for deployment configurations")
+    profile: str = Field(
+        default="",
+        description=(
+            "The tier this deployment was stood up as (slim, single, scale, "
+            "scale-mesh, or a deployer's own name). Injected by the deployer from "
+            "the one place it is already known, never detected, and reported "
+            "rather than interpreted: the engine judges an app's offer against it "
+            "but never changes what it deploys. Empty means unknown, which is what "
+            "a Compose deployment and a hand-run engine both are. DFE_PROFILE."
+        ),
+    )
     namespace: str = Field(
         default="",
         description=(
@@ -1393,6 +1407,15 @@ class DFESettings(BaseModel):
             "repo pins no stack. DFE_STACK_VERSION."
         ),
     )
+    ui_version: str = Field(
+        default="",
+        description=(
+            "The dfe-ui version this deployment renders, passed by the engine chart "
+            "from the same versions.yaml pin the ui chart's appVersion carries. "
+            "Helm cannot read a sibling chart, so the engine is told rather than "
+            "asked. The deploy repo's pins win where they name one. DFE_UI_VERSION."
+        ),
+    )
     env: str = Field(
         default="production",
         description=(
@@ -1802,6 +1825,8 @@ def _get_env_overrides() -> dict:
         overrides["deployment"]["target"] = val.strip().lower()
     if val := _get_env("DFE_DEPLOYMENT_NAMESPACE"):
         overrides["deployment"]["namespace"] = val
+    if val := _get_env("DFE_PROFILE"):
+        overrides["deployment"]["profile"] = val.strip()
 
     # Transform validation
     if val := _get_env("DFE_TRANSFORM_VALIDATION_ENABLED"):
@@ -1954,6 +1979,8 @@ def _get_env_overrides() -> dict:
     # The stack this pod was deployed from, when the deploy passed it in
     if val := _get_env("DFE_STACK_VERSION"):
         overrides["stack_version"] = val
+    if val := _get_env("DFE_UI_VERSION"):
+        overrides["ui_version"] = val
 
     # Deployment posture (production|dev|test|...) - gates the placeholder-secret guard
     if val := _get_env("DFE_ENV"):

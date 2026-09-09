@@ -145,6 +145,15 @@ def list_instances(gc: GitCrud, service: str | None = None) -> list[AppInstance]
     )
 
 
+def instances_routed_by(gc: GitCrud, compiler: str) -> list[AppInstance]:
+    """Every deployed instance whose routing this compiler derives.
+
+    Keeps a caller that needs a particular stage off a hardcoded app name: which
+    app runs a stage is the manifest's answer, not the engine's.
+    """
+    return [i for i in list_instances(gc) if descriptor(i.service).routing_compiler == compiler]
+
+
 def additional_instance_allowed(gc: GitCrud, app: AppInstance) -> tuple[bool, str]:
     """Whether this app's shape permits another instance alongside the ones deployed.
 
