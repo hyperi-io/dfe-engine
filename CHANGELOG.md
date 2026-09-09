@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.24](https://github.com/hyperi-io/dfe-engine/compare/v1.19.23...v1.19.24) (2026-09-09)
+
+### Bug Fixes
+
+* sense the cluster when a source deploy builds its DDL ([#336](https://github.com/hyperi-io/dfe-engine/issues/336)) ([9963f85](https://github.com/hyperi-io/dfe-engine/commit/9963f856177c63c1ab53ab54860ec6049b21db59))
+
 ## [1.19.23](https://github.com/hyperi-io/dfe-engine/compare/v1.19.22...v1.19.23) (2026-09-09)
 
 ### Bug Fixes
