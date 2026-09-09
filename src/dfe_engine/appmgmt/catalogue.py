@@ -24,7 +24,19 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
+from dfe_engine.transport import TRANSPORTS
 from dfe_engine.yaml_utils import yaml_load
+
+# Every DFE app's chart and image name starts with this, and every Kubernetes
+# object it renders is ``dfe-<component>``.
+PROJECT_PREFIX = "dfe-"
+
+# The gRPC port scalo's Push service listens on. One number for every app that
+# has a listener; a manifest ``endpoints`` entry overrides it per app.
+DEFAULT_PUSH_PORT = 6000
+
+PUSH_ENDPOINT = "push"
+"""The endpoint name a direct-transport stage sends to."""
 
 # dfe-infra chart key paths. Uniform across every chart because they all call the
 # same KEDA library template - see helm/library/dfe-common/templates/_keda.tpl.
@@ -163,6 +175,23 @@ class AppDescriptor:
     source_types: tuple[str, ...] = ()
     """The source families a source-bound instance of this app can poll."""
 
+    transports: frozenset[str] = frozenset({"bus"})
+    """Which transports this app can carry a source's records on."""
+
+    hot_reload: bool = False
+    """Whether the app can apply a config change in place; reported, never acted on.
+
+    Every chart checksums its whole config into the pod template, so a change
+    rolls the pods as a rolling update whether or not the app could reload.
+    """
+
+    endpoints: dict[str, int] = field(default_factory=dict)
+    """Named listener ports, where the app deviates from the platform default."""
+
+    def carries(self, transport: str) -> bool:
+        """Whether this app can carry a source on *transport*."""
+        return transport in self.transports
+
     @property
     def routing_is_per_instance(self) -> bool:
         """Whether each instance's routing comes from its own source.
@@ -280,7 +309,43 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
         routing_path=str(routing.get("values_path", "")),
         routing_scope=scope,
         source_types=tuple(str(t) for t in types),
+        transports=_transports_from(service, raw.get("transports")),
+        hot_reload=bool(raw.get("hot_reload", False)),
+        endpoints=_endpoints_from(service, raw.get("endpoints")),
     )
+
+
+def _transports_from(service: str, raw: object) -> frozenset[str]:
+    """The transports an app declares, defaulting to the bus alone.
+
+    Refusing an unknown name here is what makes the model's refusals trustworthy:
+    a typo would otherwise read as "this app cannot do direct" and reject sources
+    for a reason nobody could see.
+    """
+    if raw is None:
+        return frozenset({"bus"})
+    if not isinstance(raw, list) or not raw:
+        raise CatalogueError(f"{service}: transports must be a non-empty list")
+    declared = {str(t) for t in raw}
+    unknown = declared - TRANSPORTS
+    if unknown:
+        raise CatalogueError(
+            f"{service}: unknown transport(s) {', '.join(sorted(unknown))}; "
+            f"valid: {', '.join(sorted(TRANSPORTS))}"
+        )
+    return frozenset(declared)
+
+
+def _endpoints_from(service: str, raw: object) -> dict[str, int]:
+    """An app's named listener ports, empty when it takes the platform defaults."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise CatalogueError(f"{service}: endpoints must be a mapping of name to port")
+    try:
+        return {str(name): int(port) for name, port in raw.items()}
+    except (TypeError, ValueError) as exc:
+        raise CatalogueError(f"{service}: endpoint ports must be integers: {exc}") from exc
 
 
 def _kind_from(name: str, raw: dict) -> ArtifactKind:
@@ -379,6 +444,37 @@ def render_source_binding(app: AppDescriptor, source: str) -> dict[str, object]:
     return {path: _fill(template) for path, template in app.source_binding.items()}
 
 
+def instance_name(app: AppDescriptor, source: str) -> str:
+    """The deployed name of this app's instance for *source*.
+
+    The one place the ``dfe-<component>-<source>`` convention lives. It is the
+    Argo Application name, the OTel ``service.name``, and the stem of every
+    Kubernetes object the instance's chart renders, so all three move together.
+    """
+    return f"{app.service}-{source}"
+
+
+def instance_component(app: AppDescriptor, source: str) -> str:
+    """The chart ``component`` for that instance - the name without the project prefix.
+
+    ``dfe-common.fullname`` prepends the project again, so handing it the full
+    name would render ``dfe-dfe-transform-vrl-auth``.
+    """
+    return instance_name(app, source).removeprefix(PROJECT_PREFIX)
+
+
+def push_endpoint(app: AppDescriptor, instance: str) -> str:
+    """Where a direct-transport stage sends records for this app's *instance*.
+
+    A stack-wide app answers on its own Service; a per-config app answers on the
+    instance's. The port is the manifest's when the app declares one, else the
+    platform default - so a chart that moves its listener is a manifest edit.
+    """
+    host = instance_name(app, instance) if app.component_is_per_instance else app.service
+    port = app.endpoints.get(PUSH_ENDPOINT, DEFAULT_PUSH_PORT)
+    return f"http://{host}:{port}"
+
+
 def file_set(service: str, name: str) -> ConsumedFileSet:
     """Resolve one of an app's consumed-file sets by name."""
     for candidate in descriptor(service).files:
@@ -408,6 +504,11 @@ def source_types() -> set[str]:
 def instance_routed_apps() -> list[AppDescriptor]:
     """The apps whose instances the engine derives one-per-source from the routing."""
     return [app for app in APP_CATALOGUE.values() if app.routing_is_per_instance]
+
+
+def transform_service(engine: str) -> str:
+    """The catalogued app name a source's ``transform.engine`` selects."""
+    return f"{TRANSFORM_SERVICE_PREFIX}{engine}"
 
 
 def transform_engines() -> set[str]:

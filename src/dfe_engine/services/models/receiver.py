@@ -134,6 +134,9 @@ class ValidationConfig(BaseModel):
 # Routing
 # ---------------------------------------------------------------------------
 
+ReceiverMatchMode = Literal["key_present", "key_value_set", "key_value_use"]
+"""The receiver hot-path router's whole mode set (dfe-receiver ``src/config/mod.rs``)."""
+
 
 class SourceRule(BaseModel):
     """One `_source` stamping rule - the dfe-receiver ``SourceRule`` serde contract.
@@ -149,7 +152,7 @@ class SourceRule(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     field: str = Field(..., description="JSON field path (dot notation for nested)")
-    mode: Literal["key_present", "key_value_set", "key_value_use"] = Field(
+    mode: ReceiverMatchMode = Field(
         ..., description="Match mode (key_present | key_value_set | key_value_use)"
     )
     match_value: str | None = Field(

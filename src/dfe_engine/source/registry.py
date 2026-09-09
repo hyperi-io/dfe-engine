@@ -34,7 +34,10 @@ from scalo.logger import logger
 
 from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file
 from dfe_engine.source.models import (
+    DEFAULT_LANDING_LABEL,
     Source,
+    SourceMatch,
+    SourceVersion,
     SourceWriteRequest,
     apply_source_write_update,
     draft_build_version_to_invalidate,
@@ -629,29 +632,17 @@ class SourceRegistry:
     # -----------------------------------------------------------------
 
     def _validate_save(self, source: Source) -> None:
-        """Validate before saving: unique source, receiver-evaluable match, no conflicts."""
-        try:
-            candidate_match = source.versions[source.current].match
-        except KeyError:
-            candidate_match = None
+        """Validate before saving: unique source, runnable flow, no match conflicts."""
+        candidate_version = source.versions.get(source.current)
+        candidate_match = candidate_version.match if candidate_version else None
 
-        # A source with a match is receiver-routed: its operator must map onto
-        # the receiver's hot-path modes (source_routing._OPERATOR_TO_MODE is
-        # the SSoT). The unmapped operators are a DOCUMENTED receiver gap. A
-        # DISABLED source skips the gate - disabling is exactly how an operator
-        # retires a stored legacy-operator source; active/dormant still reject
-        # (a dormant source may activate later).
-        if candidate_match is not None and source.state != "disabled":
-            # Lazy import: source_routing imports this module (cycle).
-            from dfe_engine.services.source_routing import (
-                _OPERATOR_TO_MODE,
-                UnsupportedMatchOperatorError,
-            )
-
-            if candidate_match.operator not in _OPERATOR_TO_MODE:
-                raise SourceValidationError(
-                    str(UnsupportedMatchOperatorError(source.source, candidate_match.operator))
-                )
+        # A DISABLED source skips every gate below - disabling is exactly how an
+        # operator retires a stored source the current rules would reject;
+        # active/dormant still reject (a dormant source may activate later).
+        if source.state != "disabled":
+            self._validate_match_operator(source, candidate_match)
+            self._validate_fetcher_routes(source, candidate_version)
+            self._validate_flow(source)
 
         for table in self._names():
             if table == source.source:
@@ -684,6 +675,69 @@ class SourceRegistry:
                     field=candidate_match.field,
                     value=candidate_match.value,
                 )
+
+    @staticmethod
+    def _validate_match_operator(source: Source, match: SourceMatch | None) -> None:
+        """A receiver-routed source's operator must be one the receiver can act on.
+
+        ``always`` is the default flow's rule and compiles to the receiver's
+        ``default_source`` rather than to a rule, so it is legal only for the
+        reserved source that flow belongs to. Everything else must map onto a
+        hot-path router mode; the operators that do not are a documented
+        receiver gap.
+        """
+        if match is None:
+            return
+        # Lazy import: source_routing imports this module (cycle).
+        from dfe_engine.services.source_routing import (
+            RULELESS_OPERATORS,
+            UnsupportedMatchOperatorError,
+            operator_mode,
+        )
+
+        if match.operator in RULELESS_OPERATORS:
+            if source.source != DEFAULT_LANDING_LABEL:
+                raise SourceValidationError(
+                    f"source {source.source!r}: match operator {match.operator!r} matches "
+                    f"every record, so it is reserved for the {DEFAULT_LANDING_LABEL!r} "
+                    "source that defines the default flow"
+                )
+            return
+        if operator_mode(match.operator) is None:
+            raise SourceValidationError(
+                str(UnsupportedMatchOperatorError(source.source, match.operator))
+            )
+
+    @staticmethod
+    def _validate_fetcher_routes(source: Source, version: SourceVersion | None) -> None:
+        """A fetcher route sends records ELSEWHERE, so it may not name its own source.
+
+        That the named source exists is checked when the fetcher instance is
+        compiled: a route may legitimately be written before its target is.
+        """
+        fetcher = version.fetcher if version else None
+        for route in fetcher.routes if fetcher else ():
+            if route.source == source.source:
+                raise SourceValidationError(
+                    f"source {source.source!r}: a fetcher route names its own source; "
+                    "records with no route already land there"
+                )
+
+    @staticmethod
+    def _validate_flow(source: Source) -> None:
+        """The source's stages must be runnable on this deployment.
+
+        The resolver holds every transport rule (what the deployment offers, what
+        each app carries, archive needing the bus), so the save path asks it
+        rather than restating any of them.
+        """
+        from dfe_engine.settings import get_settings
+        from dfe_engine.source.flow import FlowError, resolve_flow
+
+        try:
+            resolve_flow(source, get_settings())
+        except FlowError as exc:
+            raise SourceValidationError(str(exc)) from exc
 
     # -----------------------------------------------------------------
     # Change Callbacks

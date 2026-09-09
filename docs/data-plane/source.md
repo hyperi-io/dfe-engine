@@ -57,6 +57,7 @@ A Source **contains** all source-scoped components:
 | **origin** | Yes | Exactly one of a receiver `match` rule or a `fetcher` |
 | **schema** | Yes | ClickHouse table definition (starts as common header only). See [SCHEMA.md](schema.md) |
 | **transform** | No | Enrichment/normalisation stage (vector or wasm) |
+| **flow** | No | `transport` (bus or direct) and `archive`; unset takes the deployment default. See [source-flow.md](source-flow.md) |
 | **rules** | No | SQL detection queries against this source's table |
 | **views** | No | Naming-standard views (sigma, ecs, cim, ocsf) with per-source field overrides |
 
@@ -98,6 +99,12 @@ display_name: Filebeat
 description: Elastic Filebeat log collector
 state: active                           # Lifecycle: active | dormant | disabled (see Lifecycle)
 
+# --- Flow (optional; see source-flow.md) ---
+transport: bus                          # bus (a broker holds records between stages) | direct (gRPC,
+                                        # nothing stored). Omit to take the deployment default
+archive: false                          # Keep the raw record as it arrived. Needs the bus transport:
+                                        # the archiver reads the landing topic, and direct has none
+
 # --- Header ---
 # Common schema header. When a source is first created, the schema starts
 # as JUST this header — the common fields for the selected type + version.
@@ -112,10 +119,12 @@ header:
 match:
   field: tags.collector.type            # JSON field to inspect
   operator: equals                      # equals (default) | exists - the receiver-evaluable set
-  value: filebeat                       # Operand (unused when operator is exists)
+  value: filebeat                       # Operand (unused when operator is exists or always)
   # The model also defines not_equals / includes / starts_with / ends_with,
   # but the receiver's hot-path router cannot evaluate them (a documented
   # receiver gap) - saves reject them for any non-disabled source.
+  # `always` matches every record and is reserved for the `default` source,
+  # which is how the default flow is defined - see source-flow.md.
 
 # A fetcher-based source has no match rule. The engine deploys one dfe-fetcher
 # instance named for the source, with this stanza compiled into it, when the
@@ -129,6 +138,9 @@ match:
 #     services:
 #       - name: system_log
 #     interval_secs: 300
+#   routes:                             # Fetched records that belong to ANOTHER source
+#     - match: {field: eventType, operator: starts_with, value: policy.}
+#       source: okta-policy             # Their landing, table and transform, not this source's
 
 # --- Topics (derived, not configured) ---
 # topic_land: filebeat_land             # Auto: {_source}_land
@@ -138,7 +150,8 @@ match:
 # If present, data flows: _land → transform → _load
 # If absent, data flows: _land → loader directly
 transform:
-  engine: vector                        # vector | wasm
+  engine: vector                        # A catalogued transform app, by engine name (apps.yaml)
+  variant: filebeat.okta.default        # The compiled-in program, where the app offers a catalogue
   config_file: /etc/vector/filebeat.yaml
   # engine-specific fields follow the existing VectorSourceConfig / WasmSourceConfig
   env: {}                               # Per-transform ENV overrides
@@ -377,6 +390,7 @@ Operator translation:
 |-------------------------|-----------------|
 | `equals` | `key_value_set` |
 | `exists` | `key_present` |
+| `always` | no rule; `default_source` already sends an unmatched record there |
 
 The other four operators (`not_equals`, `includes`, `starts_with`,
 `ends_with`) have no receiver mode - a documented receiver gap. The registry
@@ -481,8 +495,8 @@ ClickHouse column comments in DDL.
 
 ## Source Registry
 
-Sources are managed as YAML files - one file per source - by
-`SourceRegistry`, which has two storage backends:
+Sources are YAML files - one per source - managed by `SourceRegistry`, which has
+two storage backends:
 
 - **gitcrud** (preferred - active whenever gitops is enabled): the
   all-in-one source YAML IS the gitcrud doc in the deploy repo's
@@ -518,25 +532,24 @@ Sources are managed as YAML files - one file per source - by
 version has a transform) rather than leaving them to the broker's
 `auto.create.topics.enable`, which yields mis-partitioned unmanaged topics and on
 Confluent Cloud non-Dedicated is not available at all. The topic step never fails
-a deploy: the schema is already live by then, and any topic that could not be
-created comes back in `topics_failed` on the response. Width comes from
-`DFE_KAFKA_TOPIC_PARTITIONS` / `DFE_KAFKA_TOPIC_REPLICATION_FACTOR`. On the
-Kafka-less profile (receiver -> loader over direct gRPC) set
-`DFE_KAFKA_ENSURE_TOPICS=false` - there is no broker, and leaving it on costs
-every deploy the admin timeout before it gives up.
+a deploy: the schema is already live, and a topic that could not be created comes
+back in `topics_failed`. Width comes from `DFE_KAFKA_TOPIC_PARTITIONS` /
+`DFE_KAFKA_TOPIC_REPLICATION_FACTOR`. A brokerless profile
+(`DFE_TRANSPORT_BUS_PRESENT=false`) skips the step, since reaching for a broker
+that is not there costs every deploy the admin timeout.
+`DFE_KAFKA_ENSURE_TOPICS=false` turns it off where a broker does exist.
 
 ### Validation Rules
 
-- `_source` label must be unique
-- `_source` label must match naming rules (`[a-z]([a-z0-9-]*[a-z0-9])?`, max 40 chars)
-- Match rules must not conflict across non-disabled sources (same
-  field+operator+value); a dormant source HOLDS its match, only disabling
-  releases it
-- Match operator must be receiver-evaluable (`equals` or `exists`) for any
-  non-disabled source
-- If transform is specified, engine must be `vector` or `wasm`
-- Schema YAML files must exist and pass SchemaBuilder validation
-- Schema must include `_source` as a column (injected if missing)
+| What | Rule |
+|---|---|
+| `_source` label | unique, and `[a-z]([a-z0-9-]*[a-z0-9])?` up to 40 chars |
+| match rule | no conflict across non-disabled sources (same field+operator+value); a dormant source HOLDS its match, only disabling releases it |
+| match operator | receiver-evaluable (`equals` or `exists`); `always` only on the reserved `default` source |
+| fetcher route | must not name its own source |
+| flow | runnable here: the deployment offers the transport, the transform app carries it, archive only on the bus |
+| transform | engine must be `vector` or `wasm` |
+| schema | files exist and pass SchemaBuilder validation, and carry `_source` as a column (injected if missing) |
 
 ---
 
