@@ -127,9 +127,9 @@ class TestEnvWiring:
 
 
 class TestTopicEnvWiring:
-    """The topic-creation dials bind to env. The Kafka-less profile (receiver ->
-    loader over direct gRPC) has no broker, so it must be able to turn the topic
-    step off from the deploy that configures it."""
+    """The topic-creation dials bind to env. Unset means "follow the transport",
+    so a brokerless profile needs no second dial; setting the env is the operator
+    overriding that fact from the deploy that configures it."""
 
     @pytest.fixture(autouse=True)
     def _hermetic(self, monkeypatch):
@@ -141,7 +141,8 @@ class TestTopicEnvWiring:
         # No topic env set, so the section is pruned entirely and the model defaults stand.
         assert "kafka" not in _get_env_overrides()
         ks = KafkaSettings()
-        assert ks.ensure_topics is True
+        # None, not True: no override, so the deploy hook follows bus_present.
+        assert ks.ensure_topics is None
         assert (ks.topic_partitions, ks.topic_replication_factor) == (3, 1)
 
     @pytest.mark.parametrize("raw", ["false", "False", "0", "no", "anything-not-truthy"])

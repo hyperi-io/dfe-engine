@@ -31,6 +31,7 @@ from pydantic import (
 
 from dfe_engine.api.pagination import PaginatedResponseWithObjects, PathTree
 from dfe_engine.source.engine_registry import EngineRegistry, InvalidEngineError
+from dfe_engine.transport import SourceTransport
 
 # _source naming: a Kubernetes DNS-1123 label that starts with a letter. A
 # source-bound app's instance name IS the source name, so this charset must stay
@@ -76,7 +77,11 @@ SourceMatchOperator = Literal[
     "includes",
     "starts_with",
     "ends_with",
+    "always",
 ]
+
+# Operators that compare nothing, so ``match.value`` carries no operand.
+_OPERATORS_WITHOUT_OPERAND = frozenset({"exists", "always"})
 
 # Tri-state source lifecycle:
 # - active   - schema materialised + receiver redirect + transform all ON.
@@ -256,17 +261,18 @@ class SourceMatch(BaseModel):
         default="equals",
         description=(
             "How to compare ``field`` to ``value``: equals (default), exists, "
-            "includes, starts_with, ends_with, not_equals"
+            "includes, starts_with, ends_with, not_equals, always. ``always`` "
+            "matches every record and is reserved for the ``default`` source"
         ),
     )
     value: str = Field(
         default="",
-        description="Operand for the operator (not used when operator is ``exists``)",
+        description="Operand for the operator (not used by ``exists`` or ``always``)",
     )
 
     @model_validator(mode="after")
     def _validate_value_for_operator(self) -> SourceMatch:
-        if self.operator == "exists":
+        if self.operator in _OPERATORS_WITHOUT_OPERAND:
             return self
         if not self.value.strip():
             raise ValueError(f"match.value is required when operator is {self.operator!r}")
@@ -332,6 +338,14 @@ class SourceTransform(BaseModel):
         ...,
         description="Transform engine - a catalogued transform app by engine name (e.g. vrl, vector)",
     )
+    variant: str | None = Field(
+        default=None,
+        description=(
+            "The compiled-in program this instance runs, where the app offers a "
+            "catalogue of them (dfe-transform-elastic selects one by source.name). "
+            "None for an app whose program is the authored files it is given"
+        ),
+    )
     config_file: str | None = Field(default=None, description="Path to engine-specific config")
     env: dict[str, str] = Field(default_factory=dict, description="Per-transform ENV overrides")
     files: list[str] = Field(default_factory=list, description="Enrichment files (CSV, MMDB)")
@@ -361,7 +375,12 @@ SourceOrigin = Literal["receiver", "fetcher"]
 FetcherTopic = Literal["own", "default"]
 
 DEFAULT_LANDING_LABEL = "default"
-"""The ``_source`` label of the platform's default landing table."""
+"""The ``_source`` label of the platform's default landing table.
+
+Also the reserved name of the source that defines the default flow: it is a
+normal source whose match rule is ``operator: always``, so an unmatched record
+follows the same compiled path as any other.
+"""
 
 # Keys the engine sets on the compiled fetcher stanza; a source may not carry them.
 _FETCHER_ENGINE_KEYS = frozenset({"enabled", "topic"})
@@ -412,6 +431,23 @@ def _find_plaintext_credential(value: Any, path: str = "") -> str | None:
     return None
 
 
+class FetcherRoute(BaseModel):
+    """One fetched record family this fetcher hands to a DIFFERENT source's landing.
+
+    A fetcher polls one upstream but can pull several record shapes off it. A route
+    sends the ones that match somewhere other than the owning source's landing, so
+    they get that source's table and transform instead.
+    """
+
+    match: SourceMatch = Field(..., description="Which fetched records take this route")
+    source: str = Field(..., description="The source whose landing the matched records go to")
+
+    @field_validator("source")
+    @classmethod
+    def _validate_source(cls, v: str) -> str:
+        return validate_source_name(v)
+
+
 class SourceFetcher(BaseModel):
     """Fetcher-based origin: one dfe-fetcher deployment, named for the source.
 
@@ -441,6 +477,14 @@ class SourceFetcher(BaseModel):
             "The fetcher's per-type stanza (services, connections, interval_secs, "
             "filter, credential references, ...). Credentials must be env: or vault: "
             "references"
+        ),
+    )
+    routes: list[FetcherRoute] = Field(
+        default_factory=list,
+        description=(
+            "Send matching fetched records to another source's landing instead of "
+            "this one's. The named source must exist, which is checked when the "
+            "fetcher instance is compiled, not here"
         ),
     )
 
@@ -544,7 +588,13 @@ _VERSIONED_KEYS = (
     "fetcher",
     "match",
     "transform",
+    "transport",
+    "archive",
 )
+
+# ``variant`` selects which compiled-in program the transform runs; it changes
+# what a record becomes, never the shape of the table it lands in.
+_TRANSFORM_KEYS_WITHOUT_TABLE_EFFECT = {"variant"}
 
 
 class SourceVersion(BaseModel):
@@ -585,6 +635,20 @@ class SourceVersion(BaseModel):
     )
     transform: SourceTransform | None = Field(
         default=None, description="Transform stage (optional)"
+    )
+    transport: SourceTransport | None = Field(
+        default=None,
+        description=(
+            "How this source's stages hand records on: bus (a broker holds them) "
+            "or direct (point to point). None takes the deployment default"
+        ),
+    )
+    archive: bool = Field(
+        default=False,
+        description=(
+            "Keep a copy of every record as it arrived, before any transform. The "
+            "archiver reads the landing topic, so this needs the bus transport"
+        ),
     )
 
     @model_validator(mode="after")
@@ -704,6 +768,14 @@ class SourceWriteRequest(BaseModel):
     fetcher: SourceFetcher | None = Field(
         default=None, description="Fetcher-based origin; required unless ``match`` is set"
     )
+    transport: SourceTransport | None = Field(
+        default=None,
+        description="bus or direct; omitted takes the deployment default",
+    )
+    archive: bool = Field(
+        default=False,
+        description="Keep the raw record as it arrived; needs the bus transport",
+    )
     views: list[SourceView] | None = Field(
         default=None,
         description="Naming-standard views for this revision (sigma, ecs, cim, ocsf)",
@@ -757,6 +829,8 @@ class SourceWriteRequest(BaseModel):
             fetcher=self.fetcher,
             match=self.match,
             transform=self.transform,
+            transport=self.transport,
+            archive=self.archive,
         )
 
 
@@ -777,11 +851,21 @@ def source_from_write(write: SourceWriteRequest, *, source_name: str) -> Source:
 
 
 def _build_merged_version_snapshot(existing: Source, write: SourceWriteRequest) -> SourceVersion:
-    """Build the version snapshot for a write, inheriting unset optional fields."""
+    """Build the version snapshot for a write, inheriting unset optional fields.
+
+    ``transport`` and ``archive`` inherit on ABSENCE from the body, not on their
+    value: ``transport: null`` is how a source is put back on the deployment
+    default, and ``archive: false`` is how archiving is turned off, so a PUT that
+    only edits the description must not read as either.
+    """
     snapshot = write.to_version_snapshot()
+    inherited: dict[str, Any] = {}
     if write.transform is None and existing.transform is not None:
-        snapshot = snapshot.model_copy(update={"transform": existing.transform})
-    return snapshot
+        inherited["transform"] = existing.transform
+    for field in ("transport", "archive"):
+        if field not in write.model_fields_set:
+            inherited[field] = getattr(existing, field)
+    return snapshot.model_copy(update=inherited) if inherited else snapshot
 
 
 def _schema_pin_for_bump(schema: SourceSchema) -> tuple[Any, ...]:
@@ -794,8 +878,20 @@ def _schema_pin_for_bump(schema: SourceSchema) -> tuple[Any, ...]:
     )
 
 
+def _transform_pin_for_bump(transform: SourceTransform | None) -> dict[str, Any] | None:
+    """The transform fields that change the table, so a deployed edit needs a version."""
+    if transform is None:
+        return None
+    return transform.model_dump(mode="json", exclude=_TRANSFORM_KEYS_WITHOUT_TABLE_EFFECT)
+
+
 def source_version_bump_required(previous: SourceVersion, updated: SourceVersion) -> bool:
-    """True when a deployed source needs a new major version id for this snapshot change."""
+    """True when a deployed source needs a new major version id for this snapshot change.
+
+    ``transport``, ``archive``, ``transform.variant`` and ``fetcher.routes`` are
+    deliberately absent: they move records around, and a version id exists to
+    pin the shape of the table those records land in.
+    """
     prev_schema = previous.effective_schema()
     new_schema = updated.effective_schema()
     if _schema_pin_for_bump(prev_schema) != _schema_pin_for_bump(new_schema):
@@ -806,9 +902,7 @@ def source_version_bump_required(previous: SourceVersion, updated: SourceVersion
     new_views = [v.model_dump(mode="json") for v in updated.views]
     if prev_views != new_views:
         return True
-    prev_transform = previous.transform.model_dump(mode="json") if previous.transform else None
-    new_transform = updated.transform.model_dump(mode="json") if updated.transform else None
-    return prev_transform != new_transform
+    return _transform_pin_for_bump(previous.transform) != _transform_pin_for_bump(updated.transform)
 
 
 def draft_build_version_to_invalidate(existing: Source, updated: Source) -> str | None:
@@ -1062,6 +1156,18 @@ class Source(BaseModel):
     def origin(self) -> SourceOrigin:
         """How the deployed version's data enters: receiver match or a fetcher."""
         return self.version().origin
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def transport(self) -> SourceTransport | None:
+        """Declared transport on the deployed version (None = the deployment default)."""
+        return self.version().transport
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def archive(self) -> bool:
+        """Whether the deployed version keeps the raw record."""
+        return self.version().archive
 
     def landing_label(self) -> str:
         """The ``_source`` label this source's records carry when they land."""

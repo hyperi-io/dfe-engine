@@ -21,6 +21,7 @@ from scalo.logger import logger
 
 from dfe_engine.services.models.loader import LoaderRoutingConfig
 from dfe_engine.services.models.receiver import (
+    ReceiverMatchMode,
     ReceiverRoutingConfig,
     SourceRule,
 )
@@ -36,10 +37,24 @@ FETCHER_LABEL_FIELD = "_source"
 # receiver gap. The registry save path rejects them for non-disabled sources
 # (see UnsupportedMatchOperatorError); compile skips a stored legacy one with
 # a loud warning instead of failing the whole receiver config.
-_OPERATOR_TO_MODE = {
+_OPERATOR_TO_MODE: dict[str, ReceiverMatchMode] = {
     "equals": "key_value_set",
     "exists": "key_present",
 }
+
+RULELESS_OPERATORS = frozenset({"always"})
+"""Operators the receiver honours WITHOUT a rule.
+
+``always`` is the default flow: an unmatched record already goes to
+``default_source``, so emitting a rule that matches everything would shadow every
+rule after it. The registry save path allows it only on the reserved ``default``
+source.
+"""
+
+
+def operator_mode(operator: str) -> ReceiverMatchMode | None:
+    """The receiver router mode for a match operator, or None when it has none."""
+    return _OPERATOR_TO_MODE.get(operator)
 
 
 class UnsupportedMatchOperatorError(ValueError):
@@ -59,7 +74,7 @@ class UnsupportedMatchOperatorError(ValueError):
 def compile_receiver_routing(
     registry: SourceRegistry,
     *,
-    default_source: str = "default",
+    default_source: str = DEFAULT_LANDING_LABEL,
     topic_suffix: str = "_land",
 ) -> ReceiverRoutingConfig:
     """Compile Source match rules into the receiver's ``routing`` contract.
@@ -70,6 +85,8 @@ def compile_receiver_routing(
 
     - ``equals`` -> ``key_value_set`` (match_value=value, source=_source name)
     - ``exists`` -> ``key_present``  (source=_source name)
+    - ``always`` -> no rule at all; that is the default flow, and
+      ``default_source`` already sends an unmatched record to it
 
     A fetcher-based source has no match rule of its own: its fetcher stamps
     ``_source`` with the source's landing label on every record, so the rule
@@ -106,7 +123,13 @@ def compile_receiver_routing(
                 )
             continue
 
-        mode = _OPERATOR_TO_MODE.get(source.match.operator)
+        # The default flow needs no rule: default_source already sends an
+        # unmatched record there, and a match-everything rule would shadow the
+        # rules after it.
+        if source.match.operator in RULELESS_OPERATORS:
+            continue
+
+        mode = operator_mode(source.match.operator)
         if mode is None:
             logger.warning(
                 f"Source {source.source!r}: match operator {source.match.operator!r} has no "

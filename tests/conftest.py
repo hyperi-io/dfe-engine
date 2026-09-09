@@ -364,8 +364,8 @@ def _no_clickhouse_bootstrap_hang(request):
 def _no_kafka_broker_calls(request):
     """Test-session guard 3/3: no unit test reaches a real Kafka broker.
 
-    A source deploy creates that source's topics, and ``kafka.ensure_topics``
-    defaults on with ``bootstrap_servers`` defaulting to ``localhost:9092``. Any
+    A source deploy creates that source's topics, and the default deployment has
+    a bus, with ``bootstrap_servers`` defaulting to ``localhost:9092``. Any
     test that deploys a source therefore spends the full 10s admin timeout on a
     box with no broker - and on a box that HAS one (a developer's local Redpanda)
     it creates that test's topics on it for real. Both are wrong for a unit test.

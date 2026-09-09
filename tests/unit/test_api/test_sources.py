@@ -304,6 +304,55 @@ class TestGetSource:
         assert resp.status_code == 404
 
 
+class TestDefaultFlow:
+    """The default flow is a source, read and written at the same path as any other."""
+
+    def test_get_default_before_any_write_returns_the_synthesised_view(
+        self, client: TestClient, admin_headers: dict
+    ):
+        resp = client.get("/api/v1/sources/default", headers=admin_headers)
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["source"] == "default"
+        assert body["match"]["operator"] == "always"
+        assert body["transform"] is None
+        assert body["archive"] is False
+        # Nothing was stored: the list is still empty.
+        assert client.get("/api/v1/sources", headers=admin_headers).json()["total"] == 0
+
+    def test_put_default_creates_it_then_updates_it(self, client: TestClient, admin_headers: dict):
+        body = {
+            "match": {"field": "_source", "operator": "always"},
+            "description": "everything else",
+        }
+        created = client.put("/api/v1/sources/default", json=body, headers=admin_headers)
+
+        assert created.status_code == 200
+        assert created.json()["source"] == "default"
+
+        updated = client.put(
+            "/api/v1/sources/default",
+            json={**body, "description": "still everything else"},
+            headers=admin_headers,
+        )
+
+        assert updated.status_code == 200
+        stored = client.get("/api/v1/sources/default", headers=admin_headers).json()
+        assert stored["description"] == "still everything else"
+        assert stored["versions"]["1.0.0"]["match"]["operator"] == "always"
+
+    def test_always_is_refused_on_any_other_source(self, client: TestClient, admin_headers: dict):
+        resp = client.post(
+            "/api/v1/sources",
+            json={"source": "greedy", "match": {"field": "_source", "operator": "always"}},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert "reserved" in resp.json()["message"]
+
+
 class TestGetSourceVersion:
     """GET /api/v1/sources/{name}/versions/{version}"""
 

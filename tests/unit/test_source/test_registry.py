@@ -203,6 +203,95 @@ class TestList:
         registry.save_source(legacy)
         assert registry.get_source("legacy-op").state == "disabled"
 
+    def test_always_is_reserved_for_the_default_source(self, registry: SourceRegistry):
+        """It matches every record, so on any other source it would shadow the rest."""
+        greedy = Source.model_validate(
+            {"source": "greedy", "match": {"field": "_source", "operator": "always"}}
+        )
+        with pytest.raises(SourceValidationError, match="reserved for the 'default' source"):
+            registry.save_source(greedy)
+
+    def test_the_default_source_may_match_everything(self, registry: SourceRegistry):
+        registry.save_source(
+            Source.model_validate(
+                {"source": "default", "match": {"field": "_source", "operator": "always"}}
+            )
+        )
+        assert registry.get_source("default").match.operator == "always"
+
+    def test_a_fetcher_route_may_not_name_its_own_source(self, registry: SourceRegistry):
+        looping = Source.model_validate(
+            {
+                "source": "okta",
+                "fetcher": {
+                    "source_type": "okta",
+                    "routes": [{"match": {"field": "eventType", "value": "x"}, "source": "okta"}],
+                },
+            }
+        )
+        with pytest.raises(SourceValidationError, match="names its own source"):
+            registry.save_source(looping)
+
+    def test_a_route_to_another_source_saves_before_that_source_exists(
+        self, registry: SourceRegistry
+    ):
+        """A route may legitimately be written before its target; compile checks it."""
+        registry.save_source(
+            Source.model_validate(
+                {
+                    "source": "okta",
+                    "fetcher": {
+                        "source_type": "okta",
+                        "routes": [
+                            {"match": {"field": "eventType", "value": "x"}, "source": "audit"}
+                        ],
+                    },
+                }
+            )
+        )
+        assert registry.get_source("okta").fetcher.routes[0].source == "audit"
+
+    def test_archive_on_the_direct_transport_is_refused(self, registry: SourceRegistry):
+        direct = Source.model_validate(
+            {
+                "source": "auth",
+                "match": {"field": "_source", "value": "auth"},
+                "transport": "direct",
+                "archive": True,
+            }
+        )
+        with pytest.raises(SourceValidationError, match="archive needs the bus transport"):
+            registry.save_source(direct)
+
+    def test_a_transform_that_does_not_carry_the_transport_is_refused(
+        self, registry: SourceRegistry
+    ):
+        direct = Source.model_validate(
+            {
+                "source": "auth",
+                "match": {"field": "_source", "value": "auth"},
+                "transport": "direct",
+                "transform": {"engine": "elastic"},
+            }
+        )
+        with pytest.raises(SourceValidationError, match="carries only bus"):
+            registry.save_source(direct)
+
+    def test_disabling_is_the_exit_from_a_flow_the_deployment_cannot_run(
+        self, registry: SourceRegistry
+    ):
+        stuck = Source.model_validate(
+            {
+                "source": "auth",
+                "state": "disabled",
+                "match": {"field": "_source", "value": "auth"},
+                "transport": "direct",
+                "archive": True,
+            }
+        )
+        registry.save_source(stuck)
+        assert registry.get_source("auth").state == "disabled"
+
     def test_disabled_releases_match(self, registry: SourceRegistry):
         registry.save_source(_make_source("dis", match_value="shared", state="disabled"))
         registry.save_source(_make_source("act", match_value="shared", state="active"))

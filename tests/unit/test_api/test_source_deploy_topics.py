@@ -13,12 +13,17 @@ import pytest
 
 from dfe_engine.api.v1.sources import _ensure_source_topics
 from dfe_engine.kafka.topics import TopicEnsureResult
-from dfe_engine.settings import KafkaSettings
+from dfe_engine.settings import KafkaSettings, TransportSettings
 from dfe_engine.source.models import Source, SourceMatch, SourceTransform
 
 
-def _settings(**kafka) -> SimpleNamespace:
-    return SimpleNamespace(kafka=KafkaSettings(**kafka))
+def _settings(*, bus_present: bool = True, **kafka) -> SimpleNamespace:
+    return SimpleNamespace(
+        kafka=KafkaSettings(**kafka),
+        transport=TransportSettings(
+            bus_present=bus_present, default="bus" if bus_present else "direct"
+        ),
+    )
 
 
 def _source(name="filebeat", *, transform=True) -> Source:
@@ -31,13 +36,35 @@ def _source(name="filebeat", *, transform=True) -> Source:
 
 class TestOffSwitch:
     def test_disabled_reaches_no_broker_at_all(self, monkeypatch):
-        """The Kafka-less profile has no broker; the hook must not try to find one."""
+        """The operator's override; the hook must not try to find a broker."""
 
         def _boom(*args, **kwargs):
-            raise AssertionError("ensure_topics called while ensure_topics=False")
+            raise AssertionError("ensure_topics called while it was switched off")
 
         monkeypatch.setattr("dfe_engine.kafka.topics.ensure_topics", _boom)
         assert _ensure_source_topics(_source(), _settings(ensure_topics=False)) == ([], [])
+
+    def test_a_brokerless_deployment_reaches_no_broker_either(self, monkeypatch):
+        """No bus is the fact the unset switch follows, so one dial does it."""
+
+        def _boom(*args, **kwargs):
+            raise AssertionError("ensure_topics called on a deployment with no bus")
+
+        monkeypatch.setattr("dfe_engine.kafka.topics.ensure_topics", _boom)
+        assert _ensure_source_topics(_source(), _settings(bus_present=False)) == ([], [])
+
+    def test_an_explicit_yes_overrides_the_brokerless_fact(self, monkeypatch):
+        """An operator pointing at a broker the profile does not know about."""
+        monkeypatch.setattr(
+            "dfe_engine.kafka.topics.ensure_topics",
+            lambda specs, **kw: TopicEnsureResult(created=[s.name for s in specs]),
+        )
+        ensured, failed = _ensure_source_topics(
+            _source(), _settings(bus_present=False, ensure_topics=True)
+        )
+
+        assert ensured == ["filebeat_land", "filebeat_load"]
+        assert failed == []
 
 
 class TestReporting:

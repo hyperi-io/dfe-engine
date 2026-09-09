@@ -4,6 +4,7 @@ import pytest
 
 from dfe_engine.appmgmt.catalogue import transform_engines
 from dfe_engine.source.models import (
+    FetcherRoute,
     PaginatedSourceSummaryResponse,
     SchemaColumn,
     Source,
@@ -1139,6 +1140,147 @@ class TestSourceWriteRequest:
             {**base, "views": [{"standard": "sigma", "taxonomy": "windows"}]}
         )
         assert source_version_bump_required(added, same) is False
+
+
+class TestFlowFieldsDoNotBump:
+    """A version id pins the shape of a table, so routing changes must not bump it."""
+
+    BASE = {
+        "date_time": "2026-01-01",
+        "match": {"field": "f", "value": "v"},
+        "schema": {},
+        "transform": {"engine": "vrl"},
+    }
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            pytest.param({"transport": "direct"}, id="transport"),
+            pytest.param({"archive": True}, id="archive"),
+            pytest.param({"transform": {"engine": "vrl", "variant": "okta"}}, id="variant"),
+        ],
+    )
+    def test_routing_change_does_not_bump(self, change):
+        prev = SourceVersion.model_validate(self.BASE)
+        updated = SourceVersion.model_validate({**self.BASE, **change})
+
+        assert source_version_bump_required(prev, updated) is False
+
+    def test_a_fetcher_route_does_not_bump(self):
+        base = {"date_time": "2026-01-01", "fetcher": {"source_type": "okta"}, "schema": {}}
+        prev = SourceVersion.model_validate(base)
+        routed = SourceVersion.model_validate(
+            {
+                **base,
+                "fetcher": {
+                    "source_type": "okta",
+                    "routes": [{"match": {"field": "eventType", "value": "x"}, "source": "other"}],
+                },
+            }
+        )
+
+        assert source_version_bump_required(prev, routed) is False
+
+    def test_swapping_the_transform_engine_still_bumps(self):
+        prev = SourceVersion.model_validate(self.BASE)
+        swapped = SourceVersion.model_validate({**self.BASE, "transform": {"engine": "vector"}})
+
+        assert source_version_bump_required(prev, swapped) is True
+
+
+class TestFlowFields:
+    def test_transport_and_archive_default_to_the_deployment_and_off(self):
+        source = Source.model_validate(
+            {"source": "auth", "match": {"field": "_source", "value": "auth"}}
+        )
+
+        assert source.transport is None
+        assert source.archive is False
+
+    def test_flow_fields_round_trip_through_a_write(self):
+        write = SourceWriteRequest.model_validate(
+            {
+                "source": "auth",
+                "match": {"field": "_source", "value": "auth"},
+                "transport": "direct",
+                "archive": False,
+                "transform": {"engine": "vrl", "variant": "okta_system"},
+            }
+        )
+        snapshot = write.to_version_snapshot()
+
+        assert snapshot.transport == "direct"
+        assert snapshot.archive is False
+        assert snapshot.transform is not None
+        assert snapshot.transform.variant == "okta_system"
+
+    def test_a_put_that_omits_them_keeps_the_flow_the_source_already_has(self):
+        """A description edit is not a request to move the source off direct."""
+        existing = Source.model_validate(
+            {
+                "source": "auth",
+                "match": {"field": "_source", "value": "auth"},
+                "transport": "direct",
+                "archive": True,
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {"description": "doc-only edit", "match": {"field": "_source", "value": "auth"}}
+        )
+
+        updated = apply_source_write_update(existing, write)
+
+        assert updated.transport == "direct"
+        assert updated.archive is True
+        assert updated.description == "doc-only edit"
+
+    def test_a_put_that_sends_them_still_turns_them_off(self):
+        """Inheritance is on ABSENCE, so neither field becomes one-way."""
+        existing = Source.model_validate(
+            {
+                "source": "auth",
+                "match": {"field": "_source", "value": "auth"},
+                "transport": "direct",
+                "archive": True,
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {
+                "match": {"field": "_source", "value": "auth"},
+                "transport": None,
+                "archive": False,
+            }
+        )
+
+        updated = apply_source_write_update(existing, write)
+
+        assert updated.transport is None
+        assert updated.archive is False
+
+    def test_a_legacy_flat_document_carries_the_flow_fields_into_its_version(self):
+        source = Source.model_validate(
+            {
+                "source": "auth",
+                "match": {"field": "_source", "value": "auth"},
+                "transport": "bus",
+                "archive": True,
+            }
+        )
+
+        assert source.versions["1.0.0"].transport == "bus"
+        assert source.archive is True
+
+    def test_always_needs_no_operand_and_every_other_operator_does(self):
+        assert SourceMatch(field="_source", operator="always").value == ""
+
+        with pytest.raises(ValueError, match=r"match\.value is required"):
+            SourceMatch(field="_source", operator="equals")
+
+    def test_a_fetcher_route_validates_the_source_it_names(self):
+        with pytest.raises(ValueError, match="DNS-1123 label"):
+            FetcherRoute.model_validate(
+                {"match": {"field": "f", "value": "v"}, "source": "Not_A_Label"}
+            )
 
 
 class TestSourceVersionGetResponse:
