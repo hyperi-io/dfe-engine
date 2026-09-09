@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.19.14"
+    "version": "1.19.15"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -3824,6 +3824,47 @@
                 }
               }
             }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sources/{name}/flow": {
+      "get": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Get Source Flow",
+        "description": "The stages this source's records travel, resolved against this deployment.\n\nThe console draws the flow from this rather than from the source's fields,\nfor the same reason the compilers write from it: the topics, the endpoints\nand the instance running each stage follow from the source plus the\ndeployment, and one resolver is what keeps the drawing and the deployed\nconfig the same answer.",
+        "operationId": "get_source_flow_api_v1_sources__name__flow_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceFlowResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The source's stages cannot be run as declared - the message names which stage refused and why"
           }
         },
         "security": [
@@ -11924,17 +11965,41 @@
         "summary": "List Apps",
         "description": "Every manageable app, with the instances currently deployed.",
         "operationId": "list_apps_api_v1_apps_get",
+        "parameters": [
+          {
+            "name": "profile",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Deployment profile to judge each app's offer against, so the rule stays in one place rather than being re-derived by every caller. Omit it and every app is reported as offered.",
+              "default": "",
+              "title": "Profile"
+            },
+            "description": "Deployment profile to judge each app's offer against, so the rule stays in one place rather than being re-derived by every caller. Omit it and every app is reported as offered."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/CatalogueEntry"
                   },
-                  "type": "array",
                   "title": "Response List Apps Api V1 Apps Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -16440,6 +16505,35 @@
             "description": "stack: the routing compiles from every source into one deployment; instance: it compiles from the one source the instance is named for, and the engine deploys and removes such instances with their sources",
             "default": "stack"
           },
+          "optional": {
+            "type": "boolean",
+            "title": "Optional",
+            "description": "Whether a deployment runs without this app. Derived from default_in being empty, so it cannot disagree with it: an app nothing deploys by default is the one an operator turns on.",
+            "default": false
+          },
+          "profiles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Profiles",
+            "description": "The deployment profiles this app may be deployed in; empty means every profile. An offer to list, not a gate: the deploy repo decides what is actually deployed."
+          },
+          "default_in": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default In",
+            "description": "The profiles a deployment runs this app in without being asked. Null means the same as profiles; an empty list means nothing deploys it, which is what optional reports."
+          },
           "file_sets": {
             "items": {
               "$ref": "#/components/schemas/FileSetSummary"
@@ -17053,6 +17147,41 @@
             "title": "Routing Scope",
             "description": "stack: the routing compiles from every source into one deployment; instance: it compiles from the one source the instance is named for, and the engine deploys and removes such instances with their sources",
             "default": "stack"
+          },
+          "optional": {
+            "type": "boolean",
+            "title": "Optional",
+            "description": "Whether a deployment runs without this app. Derived from default_in being empty, so it cannot disagree with it: an app nothing deploys by default is the one an operator turns on.",
+            "default": false
+          },
+          "profiles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Profiles",
+            "description": "The deployment profiles this app may be deployed in; empty means every profile. An offer to list, not a gate: the deploy repo decides what is actually deployed."
+          },
+          "default_in": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default In",
+            "description": "The profiles a deployment runs this app in without being asked. Null means the same as profiles; an empty list means nothing deploys it, which is what optional reports."
+          },
+          "offered": {
+            "type": "boolean",
+            "title": "Offered",
+            "description": "Whether this app is offered in the profile the caller asked about. True for every app when the caller named no profile, so a console that does not know the deployment's profile lists everything rather than hiding what it cannot rule out.",
+            "default": true
           },
           "source_types": {
             "items": {
@@ -18948,6 +19077,87 @@
         ],
         "title": "FilterTier",
         "description": "Performance tier for a filter expression."
+      },
+      "FlowOutputsModel": {
+        "properties": {
+          "loader": {
+            "type": "string",
+            "title": "Loader",
+            "description": "The topic the loader consumes, or the endpoint it is pushed to"
+          },
+          "archive": {
+            "type": "boolean",
+            "title": "Archive",
+            "description": "Whether the archiver also keeps the raw record off the landing topic"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loader",
+          "archive"
+        ],
+        "title": "FlowOutputsModel",
+        "description": "Where the records end up."
+      },
+      "FlowTransformModel": {
+        "properties": {
+          "app": {
+            "type": "string",
+            "title": "App",
+            "description": "Catalogued app running it, e.g. dfe-transform-vrl"
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Its deployed name, e.g. dfe-transform-vrl-auth"
+          },
+          "variant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant",
+            "description": "The compiled-in program it runs, where the app offers a catalogue of them"
+          },
+          "endpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endpoint",
+            "description": "Direct: the address records reach it on. Null on the bus."
+          },
+          "topics": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topics",
+            "description": "Bus: the landing and transformed topics. Null on direct."
+          }
+        },
+        "type": "object",
+        "required": [
+          "app",
+          "instance"
+        ],
+        "title": "FlowTransformModel",
+        "description": "The transform stage, when the source has one."
       },
       "FromHyperdxRequest": {
         "properties": {
@@ -27079,6 +27289,63 @@
         ],
         "title": "SourceFetcher",
         "description": "Fetcher-based origin: one dfe-fetcher deployment, named for the source.\n\n``config`` is the fetcher's own per-type stanza, carried verbatim into the\ndeployed instance under ``config.sources.<source_type>``. The engine owns\n``enabled`` and ``topic`` on that stanza: ``topic`` selects whether records\nland on the source's own topic (and table) or on the platform default."
+      },
+      "SourceFlowResponse": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "transport": {
+            "type": "string",
+            "title": "Transport",
+            "description": "bus: a broker holds records between stages; direct: no store"
+          },
+          "carrier": {
+            "type": "string",
+            "title": "Carrier",
+            "description": "What carries it here - the bus provider, or the direct protocol"
+          },
+          "origin": {
+            "type": "string",
+            "title": "Origin",
+            "description": "receiver or fetcher"
+          },
+          "input": {
+            "type": "string",
+            "title": "Input",
+            "description": "The receiver match that selects the records, or the fetcher instance polling them"
+          },
+          "transform": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FlowTransformModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outputs": {
+            "$ref": "#/components/schemas/FlowOutputsModel"
+          },
+          "table": {
+            "type": "string",
+            "title": "Table"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "transport",
+          "carrier",
+          "origin",
+          "input",
+          "outputs",
+          "table"
+        ],
+        "title": "SourceFlowResponse",
+        "description": "One source's whole path, as the resolver reports it.\n\nThe wire shape of ``dfe_engine.source.flow.SourceFlow``, and the only copy of\nit: everything here is built by ``_flow_response`` from that dataclass, so a\nstage the resolver gains is a field added in one place."
       },
       "SourceHeader": {
         "properties": {

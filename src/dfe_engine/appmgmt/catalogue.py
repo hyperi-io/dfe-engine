@@ -230,7 +230,28 @@ class AppDescriptor:
     """
 
     transports: frozenset[str] = frozenset({"bus"})
-    """Which transports this app can carry a source's records on."""
+    """Which transports this app can carry a source's records on.
+
+    Empty where the app carries no records at all, which is a different statement
+    from carrying them on the bus: the door an appliance dials before it posts to
+    the receiver is deployable and dialable, and no source ever names it.
+    """
+
+    profiles: frozenset[str] = frozenset()
+    """The deployment profiles this app MAY be deployed in; empty means all.
+
+    An offer the console lists, not a gate: a profile is a set of values in the
+    cascade rather than a name a chart reads, so the deploy repo stays the only
+    thing that decides what is deployed.
+    """
+
+    default_in: frozenset[str] | None = None
+    """The profiles a deployment runs this app in WITHOUT being asked.
+
+    None means the same as ``profiles``, so an app that says nothing about
+    either is deployed everywhere. An empty set is the other end of the same
+    scale: nothing deploys it, and an operator turns it on.
+    """
 
     hot_reload: bool = False
     """Whether the app can apply a config change in place; reported, never acted on.
@@ -255,6 +276,24 @@ class AppDescriptor:
     def carries(self, transport: str) -> bool:
         """Whether this app can carry a source on *transport*."""
         return transport in self.transports
+
+    def offered_in(self, profile: str) -> bool:
+        """Whether this deployment profile may deploy this app.
+
+        An app naming no profiles may be deployed in all of them, and a caller
+        that knows no profile is told the same, so an unset deployment fact
+        lists everything rather than silently hiding the optional apps.
+        """
+        return not self.profiles or not profile or profile in self.profiles
+
+    @property
+    def optional(self) -> bool:
+        """Whether a deployment runs without this app.
+
+        Derived rather than declared: an app nothing deploys by default IS the
+        optional one, so the two facts cannot drift apart in the manifest.
+        """
+        return self.default_in is not None and not self.default_in
 
     def block_for(self, path: str) -> tuple[str, str]:
         """The derived block a compiled dot-path belongs to, and the path within it.
@@ -399,6 +438,8 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
             service, raw.get("catalogue_packages"), families
         ),
         transports=_transports_from(service, raw.get("transports")),
+        profiles=_profiles_from(service, "profiles", raw.get("profiles")),
+        default_in=_default_in_from(service, raw.get("default_in")),
         hot_reload=bool(raw.get("hot_reload", False)),
         endpoints=_endpoints_from(service, raw.get("endpoints")),
         variant_path=str(raw.get("variant_path", "")),
@@ -484,7 +525,9 @@ def _transports_from(service: str, raw: object) -> frozenset[str]:
 
     Refusing an unknown name here is what makes the model's refusals trustworthy:
     a typo would otherwise read as "this app cannot do direct" and reject sources
-    for a reason nobody could see.
+    for a reason nobody could see. An explicit empty list is a statement in its
+    own right - this app carries no records - and is kept, because defaulting it
+    to the bus would claim a data path the app does not have.
     """
     if raw is None:
         return frozenset({"bus"})
@@ -499,6 +542,42 @@ def _transports_from(service: str, raw: object) -> frozenset[str]:
             f"valid: {', '.join(sorted(TRANSPORTS))}"
         )
     return frozenset(declared)
+
+
+def _profile_names(service: str, key: str, raw: object) -> frozenset[str]:
+    """One manifest key's list of profile names."""
+    if not isinstance(raw, list):
+        raise CatalogueError(f"{service}: {key} must be a list of profile names")
+    return frozenset(str(p) for p in raw)
+
+
+def _profiles_from(service: str, key: str, raw: object) -> frozenset[str]:
+    """Where an app MAY be deployed, empty meaning every profile.
+
+    An empty list is refused rather than read as "all": a list written and left
+    empty says the app may be deployed nowhere, which no manifest means, and the
+    absent key already says "everywhere".
+    """
+    if raw is None:
+        return frozenset()
+    names = _profile_names(service, key, raw)
+    if not names:
+        raise CatalogueError(
+            f"{service}: {key} must be a non-empty list; omit the key for every profile"
+        )
+    return names
+
+
+def _default_in_from(service: str, raw: object) -> frozenset[str] | None:
+    """Where an app is deployed WITHOUT being asked, None meaning wherever it may be.
+
+    An empty list is the meaningful case here rather than a mistake: it is how a
+    manifest says nothing deploys this app until an operator turns it on, which
+    is what makes the app optional.
+    """
+    if raw is None:
+        return None
+    return _profile_names(service, "default_in", raw)
 
 
 def _endpoints_from(service: str, raw: object) -> dict[str, AppEndpoint]:
