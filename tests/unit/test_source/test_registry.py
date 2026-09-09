@@ -251,7 +251,9 @@ class TestList:
         )
         assert registry.get_source("okta").fetcher.routes[0].source == "audit"
 
-    def test_archive_on_the_direct_transport_is_refused(self, registry: SourceRegistry):
+    def test_archive_on_the_direct_transport_is_accepted(self, registry: SourceRegistry):
+        # The archiver declares direct and a Push listener, so the save that once
+        # named the refusal now lands the source.
         direct = Source.model_validate(
             {
                 "source": "auth",
@@ -260,8 +262,9 @@ class TestList:
                 "archive": True,
             }
         )
-        with pytest.raises(SourceValidationError, match="archive needs the bus transport"):
-            registry.save_source(direct)
+        registry.save_source(direct)
+
+        assert registry.get_source("auth").archive is True
 
     def test_a_transform_that_does_not_carry_the_transport_is_refused(
         self, registry: SourceRegistry

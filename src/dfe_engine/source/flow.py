@@ -281,8 +281,9 @@ def resolve_flow(
     """The stages this source's records travel, or the reason they cannot.
 
     Raises ``FlowError`` when the deployment does not offer the transport the
-    source asks for, or when an app in the flow does not carry it - which is how
-    archive on direct is refused, since the archiver reads the landing topic.
+    source asks for, or when an app in the flow does not carry it - a manifest
+    fact per app, so a transport an app ships a listener for stops being refused
+    the moment the manifest says so.
     """
     apps = catalogue_apps if catalogue_apps is not None else catalogue.APP_CATALOGUE
     transport = _resolve_transport(source, settings)

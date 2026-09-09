@@ -393,9 +393,11 @@ class TestGetSourceFlow:
     ):
         # The console shows this message beside the choice that was refused, so it
         # has to say which stage refused and why, not just that something failed.
+        # A source outlives the deployment shape it was written under: this one
+        # names the bus, and the broker is gone by the time the flow is read.
         client.post(
             "/api/v1/sources",
-            json={**sample_source, "archive": True},
+            json={**sample_source, "transport": "bus"},
             headers=admin_headers,
         )
         app.state.settings = app.state.settings.model_copy(
@@ -409,7 +411,7 @@ class TestGetSourceFlow:
         resp = client.get("/api/v1/sources/test-source/flow", headers=admin_headers)
 
         assert resp.status_code == 422, resp.text
-        assert "asks to be archived" in resp.json()["message"]
+        assert "asks for the bus transport" in resp.json()["message"]
 
     def test_reading_a_flow_needs_source_read(
         self, client: TestClient, admin_headers: dict, sample_source: dict
