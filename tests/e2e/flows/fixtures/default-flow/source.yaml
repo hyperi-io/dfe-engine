@@ -1,0 +1,11 @@
+# Project:   dfe-engine
+# File:      tests/e2e/flows/fixtures/default-flow/source.yaml
+# Purpose:   The default flow - nothing is created, the deployment's own default carries it
+# Language:  YAML
+#
+# License:   BUSL-1.1
+# Copyright: (c) 2026 HYPERI PTY LIMITED
+
+# The default source ships with the deployment and defines the flow every
+# unmatched record takes, so this shape creates nothing.
+sources: []

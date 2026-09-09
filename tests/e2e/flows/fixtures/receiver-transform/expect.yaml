@@ -1,0 +1,21 @@
+# Project:   dfe-engine
+# File:      tests/e2e/flows/fixtures/receiver-transform/expect.yaml
+# Purpose:   What the receiver-transform shape must produce on either transport
+# Language:  YAML
+#
+# License:   BUSL-1.1
+# Copyright: (c) 2026 HYPERI PTY LIMITED
+
+description: A matched record passes through a VRL instance, which stamps a field the payload never carried.
+origin: receiver
+
+# Uploaded into the transform instance's file set before the payload is sent.
+transform_file: transform.vrl
+
+expect:
+  - source: flowvrl
+    table: flowvrl
+    topic: flowvrl_land
+    load_topic: flowvrl_load
+    marker: flow_transformed
+    destination: dfe-transform-vrl-flowvrl

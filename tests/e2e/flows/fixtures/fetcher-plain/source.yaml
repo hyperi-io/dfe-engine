@@ -1,0 +1,25 @@
+# Project:   dfe-engine
+# File:      tests/e2e/flows/fixtures/fetcher-plain/source.yaml
+# Purpose:   Fetcher origin on its own topic, no transform
+# Language:  YAML
+#
+# License:   BUSL-1.1
+# Copyright: (c) 2026 HYPERI PTY LIMITED
+
+sources:
+  - source: flowfetch
+    display_name: Flow e2e - fetcher, own topic, no transform
+    description: A public registry, so the stanza needs no credentials.
+    fetcher:
+      source_type: crates_io
+      topic: own
+      config:
+        crates:
+          - scalo
+        interval_secs: 60
+    header:
+      type: common-header/timeseries
+      version: 1.0.1
+    schema:
+      meta_schema: meta/syslog
+      meta_schema_version: 1.0.0

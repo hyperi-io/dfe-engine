@@ -22,6 +22,10 @@ Configure via env (typically `dfe-engine`-side of a `single`/`standard` deployme
   DFE_E2E_HYPERDX_API_KEY  HyperDX API key (optional)
   DFE_E2E_ENGINE_URL       dfe-engine API base
   DFE_E2E_ENGINE_TOKEN     bearer/JWT for the engine API
+  DFE_E2E_ENGINE_USER/_PASSWORD  local login the flow suite mints its own token
+                           from, because a flow run outlives one token
+  DFE_E2E_TRANSPORT        the data path the flow suite must prove:
+                           kafka | grpc | both
   DFE_E2E_DEPLOY_REPO_URL  deploy repo (to verify engine git writes)
   DFE_E2E_DEPLOY_REPO_TOKEN / _USER  HTTPS creds for the deploy repo
   DFE_E2E_TRANSFORM        which transform app is deployed for the source under
@@ -60,6 +64,11 @@ class E2EConfig:
     hyperdx_api_key: str | None
     engine_url: str | None
     engine_token: str | None
+    engine_user: str
+    engine_password: str | None
+    # The data path the flow suite must prove, in the deployment's own words
+    # (kafka | grpc | both). Empty means nothing asked, so the flow suite gates.
+    transport: str
     deploy_repo_url: str | None
     deploy_repo_token: str | None
     deploy_repo_user: str
@@ -87,6 +96,9 @@ def _cfg() -> E2EConfig:
         hyperdx_api_key=os.getenv("DFE_E2E_HYPERDX_API_KEY"),
         engine_url=os.getenv("DFE_E2E_ENGINE_URL"),
         engine_token=os.getenv("DFE_E2E_ENGINE_TOKEN"),
+        engine_user=os.getenv("DFE_E2E_ENGINE_USER", "admin"),
+        engine_password=os.getenv("DFE_E2E_ENGINE_PASSWORD"),
+        transport=os.getenv("DFE_E2E_TRANSPORT", ""),
         deploy_repo_url=os.getenv("DFE_E2E_DEPLOY_REPO_URL"),
         deploy_repo_token=os.getenv("DFE_E2E_DEPLOY_REPO_TOKEN"),
         deploy_repo_user=os.getenv("DFE_E2E_DEPLOY_REPO_USER", "dfe"),
@@ -199,6 +211,54 @@ def poll_until(
         f"timed out after {timeout}s waiting for {desc}"
         + (f" (last error: {last_exc})" if last_exc else "")
     )
+
+
+def post_events(cfg: E2EConfig, bodies: list[dict]) -> None:
+    """POST each body to the deployment's ingest endpoint.
+
+    Shared because both live suites send the same way, and a second copy would be
+    a second place for the token header or the TLS posture to drift. Callers gate
+    on ``require(cfg, "receiver_url")`` first.
+    """
+    import httpx
+
+    url = must(cfg.receiver_url)
+    headers = {"Content-Type": "application/json"}
+    if cfg.receiver_token:
+        headers["Authorization"] = f"Bearer {cfg.receiver_token}"
+    with httpx.Client(verify=cfg.verify, timeout=30.0) as client:
+        for body in bodies:
+            response = client.post(url, json=body, headers=headers)
+            assert response.status_code < 300, f"receiver rejected the event: {response.text}"
+
+
+# ClickHouse says one of these when the table or database is simply not there
+# yet, which is the only absence a poll should read as "no rows".
+NOT_THERE_YET = ("UNKNOWN_TABLE", "UNKNOWN_DATABASE", "does not exist", "doesn't exist")
+
+
+def count_rows(ch_client, table: str, *, where: str = "", marker: str | None = None) -> int:
+    """Rows in *table*, narrowed by a WHERE and/or this run's marker.
+
+    Answers 0 only while the table or database does not exist yet. Every other
+    error is raised: a query that cannot run - an unknown column, a function the
+    column's type will not take - otherwise reads as an empty table forever, and
+    a test that can only report zero proves nothing.
+
+    The marker is matched on ``_raw``, the String copy of the payload. ``_json``
+    holds the same bytes as the ClickHouse JSON type, which LIKE refuses, and a
+    typed source table carries neither - such a table is counted with a delta
+    instead.
+    """
+    clauses = [c for c in (where, "_raw LIKE %(m)s" if marker else "") if c]
+    sql = f"SELECT count() FROM {table}" + (f" WHERE {' AND '.join(clauses)}" if clauses else "")
+    try:
+        result = ch_client.query(sql, parameters={"m": f"%{marker}%"} if marker else None)
+    except Exception as exc:
+        if any(text in str(exc) for text in NOT_THERE_YET):
+            return 0
+        raise
+    return int(result.result_rows[0][0]) if result.result_rows else 0
 
 
 @pytest.fixture(scope="session")

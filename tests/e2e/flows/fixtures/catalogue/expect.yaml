@@ -1,0 +1,23 @@
+# Project:   dfe-engine
+# File:      tests/e2e/flows/fixtures/catalogue/expect.yaml
+# Purpose:   What a source created from a catalogue entry must produce
+# Language:  YAML
+#
+# License:   BUSL-1.1
+# Copyright: (c) 2026 HYPERI PTY LIMITED
+
+description: A catalogue entry compiles into an ordinary source whose records land in its own table.
+origin: catalogue
+
+# {entry} is the catalogue entry the suite picks at run time; a deployment that
+# mounts no catalogue offers none, and the case reports an expected skip.
+catalogue:
+  intake: receiver
+
+expect:
+  - source: "{entry}"
+    table: "{entry}"
+    topic: "{entry}_land"
+    load_topic: "{entry}_load"
+    marker: null
+    destination: "dfe-transform-elastic-{entry}"

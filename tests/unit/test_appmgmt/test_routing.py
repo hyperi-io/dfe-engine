@@ -242,7 +242,7 @@ class TestReceiverOnDirect:
 
         assert compiled["destinations"] == {
             "default": "loader",
-            "loader": {"grpc": LOADER_ENDPOINT},
+            "loader": {"grpc": {"endpoint": LOADER_ENDPOINT}},
             "rules": [
                 {"match_field": "_json.app", "match_value": "auth", "destination": "loader"},
                 {"match_field": "_source", "match_value": "okta-audit", "destination": "loader"},
@@ -258,8 +258,8 @@ class TestReceiverOnDirect:
 
         assert compiled["destinations"] == {
             "default": "loader",
-            "dfe-transform-vrl-auth": {"grpc": VRL_AUTH_ENDPOINT},
-            "loader": {"grpc": LOADER_ENDPOINT},
+            "dfe-transform-vrl-auth": {"grpc": {"endpoint": VRL_AUTH_ENDPOINT}},
+            "loader": {"grpc": {"endpoint": LOADER_ENDPOINT}},
             "rules": [
                 {
                     "match_field": "_json.app",
@@ -269,6 +269,26 @@ class TestReceiverOnDirect:
                 {"match_field": "_source", "match_value": "okta-audit", "destination": "loader"},
             ],
         }
+
+    def test_a_named_destination_is_addressed_the_way_the_fetcher_addresses_one(
+        self, direct_settings
+    ):
+        """Both compilers hand the receiver and the fetcher the same gRPC block.
+
+        The receiver deserialises a named destination as ``DestinationSpec``
+        (``src/config/mod.rs``), so ``grpc`` is a struct with an ``endpoint``, not
+        a URI. Emitting the bare string made receiver v1.15.30 refuse the whole
+        config file, and a receiver that will not start takes the direct
+        transport with it - which no assertion on the rules would have caught.
+        """
+        registry = FakeRegistry([_matched("auth"), _fetched()])
+
+        receiver = routing.compile_for(catalogue.descriptor(RECEIVER), registry, direct_settings)
+        fetcher = routing.compile_for(
+            catalogue.descriptor(FETCHER), registry, direct_settings, instance="okta-audit"
+        )
+
+        assert receiver["destinations"]["loader"]["grpc"] == fetcher["output"]["grpc"]
 
     def test_the_labelling_rule_and_the_destination_rule_read_one_match(self, direct_settings):
         registry = FakeRegistry([_matched("auth")])
