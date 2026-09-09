@@ -1,0 +1,114 @@
+#  Project:      dfe-engine
+#  File:         tests/unit/test_appmgmt/test_operations.py
+#  Purpose:      Per-source signals read off the loader's per-table counter
+#  Language:     Python
+#
+#  License:      BUSL-1.1
+#  Copyright:    (c) 2026 HYPERI PTY LIMITED
+"""The arithmetic between a counter series and a number a console can show.
+
+A monotonic counter says nothing on its own: the rate is a difference over
+elapsed time, and "when did records last arrive" is the last time the total
+MOVED, not the last time the loader reported. Both go wrong quietly, so both
+are asserted here rather than only through the route.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from dfe_engine.appmgmt.operations import MetricsUnavailableError, OperationalReader
+
+LOADERS = ["dfe-loader-main"]
+
+
+class FakeClickHouse:
+    def __init__(self, rows=None, fail: bool = False) -> None:
+        self.rows = rows or []
+        self.fail = fail
+        self.calls: list[tuple[str, dict, dict]] = []
+
+    def execute(self, sql: str, parameters=None, settings=None):
+        self.calls.append((sql, dict(parameters or {}), dict(settings or {})))
+        if self.fail:
+            raise RuntimeError("clickhouse is down")
+        return self.rows
+
+
+def _reader(rows=None, fail: bool = False) -> tuple[OperationalReader, FakeClickHouse]:
+    ch = FakeClickHouse(rows, fail)
+    return OperationalReader(ch, "dfe"), ch
+
+
+def test_the_rate_is_the_delta_over_the_elapsed_time():
+    reader, _ = _reader([(0.0, 100.0), (60.0, 220.0), (120.0, 340.0)])
+
+    signals = reader.source_signals("auth", LOADERS)
+
+    assert signals.records_per_min == pytest.approx(120.0)
+    assert signals.last_seen_epoch == 120.0
+
+
+def test_one_sample_cannot_be_differenced():
+    reader, _ = _reader([(0.0, 100.0)])
+
+    assert reader.source_signals("auth", LOADERS).records_per_min is None
+
+
+def test_a_reset_counter_reports_nothing_rather_than_a_negative_rate():
+    # A pod restart zeroes its counter; the window has to roll past the restart
+    # before the number means anything again.
+    reader, _ = _reader([(0.0, 900.0), (60.0, 10.0)])
+
+    assert reader.source_signals("auth", LOADERS).records_per_min is None
+
+
+def test_a_flat_counter_reports_no_arrival():
+    reader, _ = _reader([(0.0, 500.0), (60.0, 500.0), (120.0, 500.0)])
+
+    signals = reader.source_signals("auth", LOADERS)
+
+    assert signals.records_per_min == 0.0
+    assert signals.last_seen_epoch is None
+
+
+def test_the_last_arrival_is_the_last_increase_not_the_last_report():
+    reader, _ = _reader([(0.0, 10.0), (60.0, 40.0), (120.0, 40.0), (180.0, 40.0)])
+
+    assert reader.source_signals("auth", LOADERS).last_seen_epoch == 60.0
+
+
+def test_no_loader_asks_the_database_nothing():
+    reader, ch = _reader([(0.0, 1.0), (60.0, 2.0)])
+
+    signals = reader.source_signals("auth", [])
+
+    assert ch.calls == []
+    assert signals.records_per_min is None
+    assert signals.last_seen_epoch is None
+
+
+def test_the_query_is_bound_and_time_bounded():
+    reader, ch = _reader([(0.0, 1.0), (60.0, 2.0)])
+
+    reader.source_signals("auth", LOADERS)
+
+    sql, params, settings = ch.calls[0]
+    assert "dfe.otel_metrics_sum" in sql
+    assert params == {"services": LOADERS, "table": "auth", "window_seconds": 300}
+    assert settings["max_execution_time"] == 10
+
+
+def test_a_database_failure_is_raised_rather_than_reported_as_zero():
+    reader, _ = _reader(fail=True)
+
+    with pytest.raises(MetricsUnavailableError):
+        reader.source_signals("auth", LOADERS)
+
+
+@pytest.mark.parametrize("bad", ["auth; DROP TABLE x", "dfe.auth", "auth table"])
+def test_an_unsafe_table_name_is_refused(bad):
+    reader, _ = _reader()
+
+    with pytest.raises(ValueError):
+        reader.source_signals(bad, LOADERS)

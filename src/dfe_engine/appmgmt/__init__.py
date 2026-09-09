@@ -58,8 +58,19 @@ from .library import (
     VersionNotFoundError,
 )
 from .links import ArtifactNotLinkableError, Link, LinkNotFoundError, LinkStatus, Usage
-from .operations import AppMetrics, AppStatus, MetricsUnavailableError, OperationalReader
-from .routing import RoutingNotCompiledError, RoutingStatus, UnknownRoutingCompilerError
+from .operations import (
+    AppMetrics,
+    AppStatus,
+    MetricsUnavailableError,
+    OperationalReader,
+    SourceSignals,
+)
+from .routing import (
+    LOADER_COMPILER,
+    RoutingNotCompiledError,
+    RoutingStatus,
+    UnknownRoutingCompilerError,
+)
 from .scaling import DeployTarget, InvalidDialError, ScalingDials
 from .validation import ValidationResult, ValidationStatus, validate, validate_language
 
@@ -88,6 +99,7 @@ __all__ = [
     "InvalidContentError",
     "InvalidDialError",
     "InvalidFilenameError",
+    "LOADER_COMPILER",
     "InvalidInstanceError",
     "LifecycleState",
     "Link",
@@ -98,6 +110,7 @@ __all__ = [
     "OperationalReader",
     "ReloadMode",
     "ScalingDials",
+    "SourceSignals",
     "TagNotFoundError",
     "UnknownAppError",
     "UnknownKindError",

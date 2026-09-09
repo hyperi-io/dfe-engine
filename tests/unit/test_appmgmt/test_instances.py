@@ -116,6 +116,21 @@ def test_list_filters_by_service(crud):
     assert len(instances.list_instances(crud)) == 2
 
 
+def test_instances_are_found_by_the_compiler_that_routes_them(crud):
+    # A caller needing a particular stage asks the manifest which app runs it, so
+    # renaming or replacing the loading stage does not need an engine release.
+    from dfe_engine.appmgmt import LOADER_COMPILER
+
+    vrl = instances.instance_of(VRL, "edge")
+    loader = instances.instance_of("dfe-loader", "default")
+    for app in (vrl, loader):
+        crud.put(HELMVARS_CLASS, app.overlay_name, instances.initial_overlay(app), actor="alice")
+
+    found = instances.instances_routed_by(crud, LOADER_COMPILER)
+
+    assert [i.telemetry_name for i in found] == ["dfe-loader-default"]
+
+
 def test_unmanaged_values_file_is_not_listed_as_an_instance(crud):
     # A hand-written overlay for something outside the catalogue stays visible to
     # the raw helm API but must not masquerade as a managed instance.

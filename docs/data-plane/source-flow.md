@@ -126,6 +126,12 @@ Without a webhook Argo polls every 300 s with up to 60 s jitter, so a routing ch
 
 Every app rolls on every config change, so nothing depends on which app can reload which key: the apps that also apply a change in place (the receiver's routing, Vector's transform files) gain nothing extra from it, and apps.yaml records `hot_reload` only as a fact for the console.
 
+## Asking what the deployment is, and what a source is doing
+
+Two reads carry the facts a console would otherwise have to guess at. `GET /api/v1/system/deployment` answers what this deployment IS: the profile the deployer injected as `DFE_PROFILE`, the transports it can carry a source on and which one a source that names none takes, whether the stage pools sit behind mesh listeners and where, and the stack, engine and dfe-ui versions. `GET /api/v1/system/version` serves the version half from the same function, so the footer and the deployment card cannot disagree, and `GET /api/v1/apps` judges each app's `offered` against the deployment's own profile when the caller names none.
+
+`GET /api/v1/sources/{name}/signals` answers what one source is doing: `records_per_min` and `last_seen` over a bounded five-minute window, read from the loader's `loader_messages_by_table_total` counter in the otel database, plus `landed_in_default`. The counter is per TABLE, so `landed_in_default` says the number covers the whole shared landing table rather than this source alone - which is the case for a fetcher pushing to the main topic. Either reading is null where no series answers, and the route still returns 200: a source only just defined has nothing to report, and a zero would claim a measurement nobody took.
+
 ## The main flow
 
 With no sources defined, every record the receiver accepts is stamped `_source: main`, lands in the `main` table, and can be searched. The `main` source is a normal source whose match rule is `operator: always`: it has the deployment's transport, may carry a transform, and may be archived on the bus form. It is read and written at `/api/v1/sources/main` like any other source and the console gives it a card of its own; nothing about it is special code.

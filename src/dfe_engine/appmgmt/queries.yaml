@@ -89,6 +89,31 @@ queries:
       bucket_seconds: 60
     timeout_seconds: 20
 
+  # Per-timestamp fleet totals of the loader's per-table counter, for the ONE
+  # table a source's records land in. `loader_messages_by_table_total` carries the
+  # table as an OTel attribute (dfe-loader src/metrics/mod.rs:217), and the loader
+  # is the only stage counting a record against a table.
+  # The fleet is summed per timestamp for the reason counter_rates gives: the OTel
+  # resource carries no pod identity. The rate and the last increase are then
+  # differenced by the caller rather than in SQL.
+  # ServiceName is bound to the deployed loader instances so the query still hits
+  # the metrics tables' ORDER BY prefix (ServiceName, MetricName, ...).
+  source_landing_counter:
+    database: otel
+    sql: >
+      SELECT TimeUnix AS ts, sum(Value) AS total
+      FROM __DB__.otel_metrics_sum
+      WHERE ServiceName IN {services:Array(String)}
+        AND MetricName = 'loader_messages_by_table_total'
+        AND Attributes['table'] = {table:String}
+        AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
+      GROUP BY ts
+      ORDER BY ts
+    params: [services, table]
+    binds:
+      window_seconds: 300
+    timeout_seconds: 10
+
   # Every scalo app emits `info`, so a recent row means the app is reporting.
   # Replica count is deliberately absent: the OTel resource carries no pod
   # identity, so every replica of one instance is indistinguishable here.
