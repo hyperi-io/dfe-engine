@@ -529,6 +529,7 @@ two storage backends:
 | Operation | Effect |
 |-----------|--------|
 | **Create** | Validates the source definition and updates receiver match rules. No topics, no DDL - those land on deploy |
+| **Create from catalogue** | Compiles one entry of a transform's shipped catalogue into that same write body - the match rule or fetcher family for the intake chosen, the transform variant, and the shipped meta schema when one exists - then takes the ordinary create path |
 | **Deploy** | Runs the schema DDL, then creates that source's Kafka topics for the version being deployed |
 | **Read** | Returns source config + status (topic exists, table exists, transform running) |
 | **Update** | Validates changes, applies schema migration if fields changed, updates receiver/transform config |
@@ -555,7 +556,8 @@ that is not there costs every deploy the admin timeout.
 | match operator | receiver-evaluable (`equals` or `exists`); `always` only on the reserved `default` source |
 | fetcher route | must not name its own source |
 | flow | runnable here: the deployment offers the transport, the transform app carries it, archive only on the bus |
-| transform | engine must be `vector` or `wasm` |
+| transform | engine must be one the app manifest catalogues (`vrl`, `vector`, `elastic`) |
+| catalogue entry | the intake must be one the entry arrives by, the transform one it ships, and the source name a legal label - the entry's own name is used when it is one |
 | schema | files exist and pass SchemaBuilder validation, and carry `_source` as a column (injected if missing) |
 
 ---
@@ -797,6 +799,8 @@ Sources are the primary API entity. The shipped surface
 ```
 GET    /api/v1/sources                  # List sources (paginated)
 POST   /api/v1/sources                  # Create source (flat write body; views/transform/fetcher inline)
+GET    /api/v1/sources/catalogue        # Sources a deployed transform already handles (filter: intake, search)
+POST   /api/v1/sources/from-catalogue/{entry}  # Create a source from a catalogue entry on one of its intakes
 GET    /api/v1/sources/{name}           # Get source (deployed-version accessors + state + enabled)
 GET    /api/v1/sources/{name}/versions/{version}  # One immutable version snapshot
 GET    /api/v1/sources/{name}/columns   # Composed schema columns for a version

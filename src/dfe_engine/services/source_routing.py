@@ -42,13 +42,11 @@ from dfe_engine.source.flow import FlowError, loader_endpoint, resolve_flow
 from dfe_engine.source.models import (
     DEFAULT_LANDING_LABEL,
     RULELESS_OPERATORS,
+    SOURCE_LABEL_FIELD,
     TOPIC_LAND_SUFFIX,
     Source,
 )
 from dfe_engine.source.registry import SourceRegistry
-
-# The top-level field dfe-fetcher stamps with the source's landing label.
-FETCHER_LABEL_FIELD = "_source"
 
 # SourceMatch.operator -> receiver SourceRule.mode. The receiver's hot-path
 # router has exactly three modes; the other four engine operators (not_equals,
@@ -96,7 +94,7 @@ def receiver_match(source: Source) -> ReceiverMatch | None:
         label = source.landing_label()
         if source.fetcher is None or label == DEFAULT_LANDING_LABEL:
             return None
-        return ReceiverMatch(field=FETCHER_LABEL_FIELD, mode="key_value_set", value=label)
+        return ReceiverMatch(field=SOURCE_LABEL_FIELD, mode="key_value_set", value=label)
 
     # The default flow needs no rule: default_source already sends an unmatched
     # record there, and a match-everything rule would shadow the rules after it.
