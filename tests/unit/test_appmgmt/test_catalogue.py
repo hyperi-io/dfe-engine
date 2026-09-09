@@ -133,6 +133,37 @@ class TestShippedManifest:
 
         assert variants == {"dfe-transform-elastic": "config.source.name"}
 
+    def test_elastic_is_the_one_app_shipping_a_source_catalogue(self):
+        shipping = {
+            name: app.catalogue for name, app in catalogue.APP_CATALOGUE.items() if app.catalogue
+        }
+
+        assert set(shipping) == {"dfe-transform-elastic"}
+        binding = shipping["dfe-transform-elastic"]
+        assert binding.file == "sources.yaml"
+        assert binding.entries_key == "sources"
+        assert binding.variant("okta", "default") == "filebeat.okta.default"
+
+    def test_the_mounted_catalogue_finds_its_owner_by_filename(self):
+        assert catalogue.catalogue_app("sources.yaml").service == "dfe-transform-elastic"
+
+    def test_a_catalogue_no_app_ships_is_refused_with_what_is_declared(self):
+        with pytest.raises(CatalogueError, match=r"declared: sources\.yaml"):
+            catalogue.catalogue_app("elsewhere.yaml")
+
+    def test_a_package_the_fetcher_names_the_same_way_needs_no_mapping(self):
+        assert catalogue.source_type_for_package("okta") == "okta"
+        assert catalogue.source_type_for_package("aws") == "aws"
+
+    def test_the_manifest_carries_the_names_the_two_spell_apart(self):
+        assert catalogue.source_type_for_package("1password") == "onepassword"
+        assert catalogue.source_type_for_package("cisco_duo") == "duo"
+        assert catalogue.source_type_for_package("golang") == "go_modules"
+        assert catalogue.source_type_for_package("o365") == "m365"
+
+    def test_a_package_no_family_polls_has_none(self):
+        assert catalogue.source_type_for_package("zoom") is None
+
 
 class TestManifestParsing:
     def _manifest(self, tmp_path, app: dict, **top):
@@ -227,6 +258,44 @@ class TestManifestParsing:
 
         with pytest.raises(CatalogueError, match="'mesh' must be a mapping"):
             catalogue.load_mesh(path)
+
+    def test_a_catalogue_missing_a_key_names_what_it_needs(self, tmp_path):
+        path = self._manifest(tmp_path, {"catalogue": {"file": "sources.yaml"}})
+
+        with pytest.raises(CatalogueError, match="file, entries_key and variant_pattern"):
+            load_catalogue(path)
+
+    def test_a_variant_pattern_naming_an_unknown_placeholder_is_refused(self, tmp_path):
+        path = self._manifest(
+            tmp_path,
+            {
+                "catalogue": {
+                    "file": "sources.yaml",
+                    "entries_key": "sources",
+                    "variant_pattern": "{vendor}.{entry}",
+                }
+            },
+        )
+
+        with pytest.raises(CatalogueError, match="takes only"):
+            load_catalogue(path)
+
+    def test_a_catalogue_package_naming_a_family_the_app_lacks_is_refused(self, tmp_path):
+        path = self._manifest(
+            tmp_path,
+            {"source_types": ["okta"], "catalogue_packages": {"duo": ["cisco_duo"]}},
+        )
+
+        with pytest.raises(CatalogueError, match="not one of its source_types"):
+            load_catalogue(path)
+
+    def test_an_empty_package_list_is_refused(self, tmp_path):
+        path = self._manifest(
+            tmp_path, {"source_types": ["duo"], "catalogue_packages": {"duo": []}}
+        )
+
+        with pytest.raises(CatalogueError, match="non-empty list of packages"):
+            load_catalogue(path)
 
 
 class TestNaming:

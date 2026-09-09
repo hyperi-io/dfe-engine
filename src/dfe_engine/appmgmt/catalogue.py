@@ -19,13 +19,12 @@ deploys the dfe-infra family, so those names are the ones that reach a cluster.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
+from dfe_engine.manifest import ManifestError, manifest_path, read_manifest
 from dfe_engine.transport import TRANSPORTS
-from dfe_engine.yaml_utils import yaml_load
 
 # Every DFE app's chart and image name starts with this, and every Kubernetes
 # object it renders is ``dfe-<component>``.
@@ -163,6 +162,31 @@ class AppEndpoint:
 
 
 @dataclass(frozen=True, slots=True)
+class CatalogueBinding:
+    """An app that ships a catalogue of sources it already knows how to handle.
+
+    The app owns the catalogue; this says which file carries it, where the
+    entries sit inside that file, and how one entry names the compiled-in
+    program it selects. All three are the app's own conventions, so an app with
+    a differently shaped catalogue joins by being declared here rather than by a
+    branch in the engine.
+    """
+
+    file: str
+    """Filename the app publishes it under - what a mounted copy is checked against."""
+
+    entries_key: str
+    """Top-level key in that file holding the entries, one per source."""
+
+    variant_pattern: str
+    """How an entry becomes ``transform.variant``; ``{entry}`` and ``{transform}``."""
+
+    def variant(self, entry: str, transform: str) -> str:
+        """The compiled-in program an entry's named transform selects."""
+        return self.variant_pattern.format(entry=entry, transform=transform)
+
+
+@dataclass(frozen=True, slots=True)
 class AppDescriptor:
     """One deployable DFE app."""
 
@@ -198,6 +222,13 @@ class AppDescriptor:
     source_types: tuple[str, ...] = ()
     """The source families a source-bound instance of this app can poll."""
 
+    catalogue_packages: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    """Family -> the catalogue packages it polls, where the two spell the vendor apart.
+
+    An exact name match needs no entry, so this stays the exceptions list rather
+    than a second copy of ``source_types``.
+    """
+
     transports: frozenset[str] = frozenset({"bus"})
     """Which transports this app can carry a source's records on."""
 
@@ -217,6 +248,9 @@ class AppDescriptor:
     Declared per app so the engine writes a source's ``transform.variant`` into
     whatever the app calls it, without knowing which app it is.
     """
+
+    catalogue: CatalogueBinding | None = None
+    """The catalogue of sources this app ships, when it ships one."""
 
     def carries(self, transport: str) -> bool:
         """Whether this app can carry a source on *transport*."""
@@ -300,7 +334,7 @@ class ArtifactKind:
     encoding: Encoding
 
 
-class CatalogueError(ValueError):
+class CatalogueError(ManifestError):
     """Raised when the app manifest cannot be read or is malformed."""
 
 
@@ -350,6 +384,7 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
     types = raw.get("source_types") or []
     if not isinstance(types, list):
         raise CatalogueError(f"{service}: source_types must be a list")
+    families = tuple(str(t) for t in types)
     app = AppDescriptor(
         service=service,
         scale_deployed=bool(raw.get("scale_deployed", True)),
@@ -359,11 +394,15 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
         routing_compiler=str(routing.get("compiler", "")),
         routing_paths=_routing_paths_from(service, routing.get("values_paths")),
         routing_scope=scope,
-        source_types=tuple(str(t) for t in types),
+        source_types=families,
+        catalogue_packages=_catalogue_packages_from(
+            service, raw.get("catalogue_packages"), families
+        ),
         transports=_transports_from(service, raw.get("transports")),
         hot_reload=bool(raw.get("hot_reload", False)),
         endpoints=_endpoints_from(service, raw.get("endpoints")),
         variant_path=str(raw.get("variant_path", "")),
+        catalogue=_catalogue_from(service, raw.get("catalogue")),
     )
     # The variant is written into one of the derived blocks, so a path outside
     # them would be compiled and then dropped on the next sync.
@@ -379,6 +418,65 @@ def _routing_paths_from(service: str, raw: object) -> dict[str, str]:
     if not isinstance(raw, dict) or not raw:
         raise CatalogueError(f"{service}: routing.values_paths must be a non-empty mapping")
     return {str(name): str(path) for name, path in raw.items()}
+
+
+def _catalogue_packages_from(
+    service: str, raw: object, families: tuple[str, ...]
+) -> dict[str, tuple[str, ...]]:
+    """Which catalogue packages each of this app's families polls.
+
+    Every key has to be one of the app's own ``source_types``: a family it does
+    not have cannot poll anything, and a typo there would silently offer a
+    catalogue entry a fetcher family that does not exist.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise CatalogueError(
+            f"{service}: catalogue_packages must be a mapping of family to packages"
+        )
+    out: dict[str, tuple[str, ...]] = {}
+    for family, packages in raw.items():
+        if str(family) not in families:
+            raise CatalogueError(
+                f"{service}: catalogue_packages names {family!r}, which is not one of its "
+                f"source_types ({', '.join(families) or 'none'})"
+            )
+        if not isinstance(packages, list) or not packages:
+            raise CatalogueError(
+                f"{service}: catalogue_packages[{family!r}] must be a non-empty list of packages"
+            )
+        out[str(family)] = tuple(str(p) for p in packages)
+    return out
+
+
+def _catalogue_from(service: str, raw: object) -> CatalogueBinding | None:
+    """The catalogue this app ships, or None when it ships none."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise CatalogueError(f"{service}: catalogue must be a mapping")
+    try:
+        binding = CatalogueBinding(
+            file=str(raw["file"]),
+            entries_key=str(raw["entries_key"]),
+            variant_pattern=str(raw["variant_pattern"]),
+        )
+    except KeyError as exc:
+        raise CatalogueError(
+            f"{service}: catalogue needs file, entries_key and variant_pattern; missing {exc}"
+        ) from exc
+    # Rendered here rather than at the first use, so a pattern naming a
+    # placeholder the engine never substitutes is a manifest error, not a
+    # transform instance told to run a program with a brace in its name.
+    try:
+        binding.variant("entry", "transform")
+    except (KeyError, IndexError) as exc:
+        raise CatalogueError(
+            f"{service}: catalogue.variant_pattern {binding.variant_pattern!r} takes only "
+            f"{{entry}} and {{transform}}: {exc}"
+        ) from exc
+    return binding
 
 
 def _transports_from(service: str, raw: object) -> frozenset[str]:
@@ -439,18 +537,13 @@ def _read_manifest(path: Path | str | None) -> dict:
     """Load the manifest document.
 
     Resolution order: the given path, then ``DFE_APP_CATALOGUE_FILE``, then the
-    snapshot bundled in the image.
+    snapshot bundled in the image. The snapshot is always there, so the resolver
+    always names a file.
     """
-    source = Path(path or os.getenv("DFE_APP_CATALOGUE_FILE") or BUNDLED_MANIFEST)
-    if not source.is_file():
-        raise CatalogueError(f"app manifest not found: {source}")
-    try:
-        doc = yaml_load(source) or {}
-    except Exception as exc:
-        raise CatalogueError(f"app manifest {source} is not readable: {exc}") from exc
-    if not isinstance(doc, dict):
-        raise CatalogueError(f"app manifest {source} is not a mapping")
-    return doc
+    source = manifest_path(path, "DFE_APP_CATALOGUE_FILE", BUNDLED_MANIFEST)
+    if source is None:
+        raise CatalogueError("app manifest not found: nothing names one")
+    return read_manifest(source, what="app manifest")
 
 
 def load_catalogue(path: Path | str | None = None) -> dict[str, AppDescriptor]:
@@ -659,6 +752,40 @@ def source_types() -> set[str]:
     manifest edit rather than an engine release.
     """
     return {t for app in APP_CATALOGUE.values() for t in app.source_types}
+
+
+def source_type_for_package(package: str) -> str | None:
+    """The fetcher family that polls a catalogue package, or None when none does.
+
+    A catalogue names its packages the way its own vendor does, and the fetcher
+    names its families the way ITS vendor does; the two agree most of the time
+    and the manifest carries the handful of places they do not. An unmapped
+    package is a real answer: the fetcher cannot poll that source.
+    """
+    for app in APP_CATALOGUE.values():
+        if package in app.source_types:
+            return package
+        for family, packages in app.catalogue_packages.items():
+            if package in packages:
+                return family
+    return None
+
+
+def catalogue_app(filename: str) -> AppDescriptor:
+    """The app whose catalogue a mounted file carries.
+
+    Matched on the filename the app declares, so the transform that owns a
+    mounted catalogue is a fact in the manifest rather than an assumption about
+    which app is the only one with a catalogue today.
+    """
+    declared = {app.catalogue.file: app for app in APP_CATALOGUE.values() if app.catalogue}
+    try:
+        return declared[filename]
+    except KeyError:
+        raise CatalogueError(
+            f"no catalogued app ships a source catalogue named {filename!r} "
+            f"(declared: {', '.join(sorted(declared)) or 'none'})"
+        ) from None
 
 
 def instance_routed_apps() -> list[AppDescriptor]:
