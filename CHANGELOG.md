@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.20](https://github.com/hyperi-io/dfe-engine/compare/v1.19.19...v1.19.20) (2026-09-09)
+
+### Bug Fixes
+
+* the catch-all source and landing table are main everywhere ([351baaa](https://github.com/hyperi-io/dfe-engine/commit/351baaa33a9c573135c304945cd62fd8d8851b21))
+
 ## [1.19.19](https://github.com/hyperi-io/dfe-engine/compare/v1.19.18...v1.19.19) (2026-09-09)
 
 ### Bug Fixes
