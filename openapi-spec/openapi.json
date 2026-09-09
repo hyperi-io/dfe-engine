@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.19.17"
+    "version": "1.19.18"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -142,6 +142,33 @@
         "summary": "Get Setup Status",
         "description": "Report first-run setup state and what is configured (no auth \u2014 pre-login UI).\n\nDriven by the setup state machine (``state_machines/setup.py``). The\nregistries the wizard renders \u2014 OIDC providers and organisations \u2014 are\nreturned while setup is outstanding and dropped once it completes, so a\nconfigured deployment does not serve its inventory to anonymous callers.\nThe exception is the name and display name of each enabled OIDC provider,\nwhich stay (no configuration) because the login screen needs to know which\nIdPs to offer and what to call them. Accounts are never returned; the\n``first_user`` step reports whether a real (non break-glass) user exists.",
         "operationId": "get_setup_status_api_v1_auth_setup_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupStatus"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/setup/retire-admin": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Retire Bootstrap Admin",
+        "description": "Retire the bootstrap admin: disable it and record the fact in the deploy repo.\n\nThe deployment mints the admin password and the engine reasserts it on every\nboot, so until it is retired the plaintext in the Secret or ``.env`` is a\nworking admin credential for anyone with cluster or host access. Retiring\nends the reseed: the account stays disabled, the password may be deleted, and\n``breakglass`` is the recovery path.\n\nRefused unless the deployment already has an enabled admin-role account of its\nown -- ``retire_admin_available`` on the setup status is the same predicate, so\nthe wizard only offers what this accepts. Returns the setup status, which now\nreports ``admin_retired``. Reversal is not an API: remove ``admin_retired``\nfrom ``governance/settings/auth.yaml`` in the deploy repo and restart.",
+        "operationId": "retire_bootstrap_admin_api_v1_auth_setup_retire_admin_post",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -26830,6 +26857,24 @@
             "type": "integer",
             "title": "Default Ttl Days",
             "description": "Retention in days a source gets when it sets none; 0 = none."
+          },
+          "admin_username": {
+            "type": "string",
+            "title": "Admin Username",
+            "description": "The bootstrap admin's account name, which the deployment may rename. The console names it in the retire prompt and marks it retired in the account list, so it cannot guess at 'admin'.",
+            "default": ""
+          },
+          "admin_retired": {
+            "type": "boolean",
+            "title": "Admin Retired",
+            "description": "True when the bootstrap admin has been retired: the deploy repo carries the fact, the account is disabled and never reseeded, and the minted password may be deleted from the Secret or .env.",
+            "default": false
+          },
+          "retire_admin_available": {
+            "type": "boolean",
+            "title": "Retire Admin Available",
+            "description": "True when retiring the bootstrap admin would be accepted now: setup is complete, an enabled admin-role account other than the seeded pair exists, and the admin is not retired yet. The wizard enables its button on it.",
+            "default": false
           }
         },
         "type": "object",

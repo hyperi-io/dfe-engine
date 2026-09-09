@@ -389,16 +389,19 @@ def hydrate_from_deploy_repo(
     return restored
 
 
-def publish_seed(
+def publish_direct(
     gc: GitCrud | None,
     account: Account,
+    *,
+    summary: str,
+    actor: str = "dfe-engine",
 ) -> None:
-    """Direct-commit a freshly seeded account into the deploy repo (best-effort).
+    """Direct-commit an account doc into the deploy repo (best-effort, never routed).
 
-    The initial break-glass admin is seeded at boot; persisting it straight away
-    means the emergency credential is durable from the first start, not only after
-    an operator rotates it. Direct commit (not routed): a review PR nobody merges
-    would leave the break-glass out of the durable copy.
+    For the changes that have to be durable the moment they happen: the admin
+    seeded at boot, and the same account disabled when it is retired. A review PR
+    nobody merges would leave the durable copy showing a live admin credential,
+    which is the state both of those writes exist to settle.
     """
     if gc is None:
         return
@@ -408,8 +411,8 @@ def publish_seed(
             ACCOUNTS_CLASS,
             account.username,
             doc,
-            "dfe-engine",
-            _commit_message(account.username, "seed account", "dfe-engine", ""),
+            actor,
+            _commit_message(account.username, summary, actor, ""),
         )
     except Exception as exc:  # durability is best-effort; never break startup
-        logger.warning("Account seed not persisted to the deploy repo", error=str(exc))
+        logger.warning("Account change not persisted to the deploy repo", error=str(exc))
