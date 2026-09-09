@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from dfe_engine.auth import breakglass
+from dfe_engine.auth import admin_retirement, breakglass
 from dfe_engine.auth.bootstrap import (
     DefaultCredentialsError,
     bootstrap_auth,
@@ -76,6 +76,11 @@ class TestPostureGate:
     @pytest.mark.parametrize("env", ["production", "dev"])
     def test_a_minted_password_passes_in_any_posture(self, env):
         assert require_admin_password(MINTED_ADMIN, env) is False
+
+    @pytest.mark.parametrize("env", ["production", "dev"])
+    def test_a_retired_admin_starts_with_no_password_at_all(self, env):
+        """The point of retiring: the operator deletes the injected credential."""
+        assert require_admin_password("", env, retired=True) is False
 
     def test_default_credentials_predicate(self):
         assert default_credentials_in_use("") is True
@@ -201,6 +206,118 @@ class TestBreakGlassHash:
 
         assert breakglass.is_enabled(crud) is True
         assert breakglass.stored_hash(crud) == ""
+
+
+# ── Retiring the bootstrap admin ─────────────────────────────
+
+
+class TestRetireTheBootstrapAdmin:
+    def test_the_fact_round_trips_through_the_deploy_repo(self, crud):
+        assert admin_retirement.is_retired(crud) is False
+
+        admin_retirement.set_retired(crud, "kaz")
+
+        assert admin_retirement.is_retired(crud) is True
+        assert crud.get(admin_retirement.CLASS, admin_retirement.NAME)["admin_retired"] is True
+
+    def test_the_fact_shares_the_file_with_the_break_glass_hash(self, tmp_path: Path, crud):
+        bootstrap_auth(
+            tmp_path / "auth",
+            default_admin_password=MINTED_ADMIN,
+            gitcrud=crud,
+            breakglass_password=MINTED_BREAKGLASS,
+        )
+
+        admin_retirement.set_retired(crud, "kaz")
+
+        doc = crud.get(breakglass.CLASS, breakglass.NAME)
+        assert doc["admin_retired"] is True
+        assert doc["breakglass"]["password_hash"].startswith("$2")
+
+    def test_no_deploy_repo_means_no_retirement(self):
+        assert admin_retirement.is_retired(None) is False
+
+    def test_an_unreadable_settings_file_reads_as_not_retired(self, crud):
+        path = crud.repo_path / "governance" / "settings" / "auth.yaml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{{ not: yaml\n")
+
+        assert admin_retirement.is_retired(crud) is False
+
+    def test_the_seed_is_skipped_and_the_account_disabled(self, tmp_path: Path, crud):
+        auth_dir = tmp_path / "auth"
+        store, *_ = bootstrap_auth(auth_dir, default_admin_password=MINTED_ADMIN, gitcrud=crud)
+        assert store.get("admin").enabled is True
+
+        admin_retirement.set_retired(crud, "kaz")
+        store, *_ = bootstrap_auth(auth_dir, default_admin_password=MINTED_ADMIN, gitcrud=crud)
+
+        # The hash is left alone -- the disabled account is what refuses the login.
+        assert store.get("admin").enabled is False
+
+    def test_a_rebuilt_store_does_not_bring_the_admin_back(self, tmp_path: Path, crud):
+        bootstrap_auth(tmp_path / "auth", default_admin_password=MINTED_ADMIN, gitcrud=crud)
+        admin_retirement.set_retired(crud, "kaz")
+
+        # A rebuilt pod: empty auth dir, same deploy repo, no configured password.
+        store, *_ = bootstrap_auth(tmp_path / "rebuilt-auth", gitcrud=crud)
+
+        admin = store.get("admin")
+        assert admin is None or admin.enabled is False
+
+    def test_named_seed_accounts_still_reconcile(self, tmp_path: Path, crud):
+        """Retirement is about the bootstrap admin, not the deployment's own seeds."""
+        admin_retirement.set_retired(crud, "kaz")
+        seeds = [SeedAccount(username="kay", password=MINTED_SEED, groups=["dfe-viewers"])]
+
+        store, *_ = bootstrap_auth(tmp_path / "auth", gitcrud=crud, seed_accounts=seeds)
+
+        assert store.verify_password("kay", MINTED_SEED)
+
+
+class TestAnotherAdminExists:
+    """The one predicate the API refuses on and the wizard enables its button from."""
+
+    def _stores(self, tmp_path: Path, crud):
+        store, groups, *_ = bootstrap_auth(
+            tmp_path / "auth",
+            default_admin_password=MINTED_ADMIN,
+            gitcrud=crud,
+            breakglass_password=MINTED_BREAKGLASS,
+        )
+        return store, groups
+
+    def test_the_seeded_pair_does_not_count(self, tmp_path: Path, crud):
+        store, groups = self._stores(tmp_path, crud)
+
+        assert admin_retirement.another_admin_exists(store, groups, "admin") is False
+
+    def test_an_enabled_admin_group_member_counts(self, tmp_path: Path, crud):
+        store, groups = self._stores(tmp_path, crud)
+        store.create("alice", MINTED_SEED, groups=["dfe-admins"])
+
+        assert admin_retirement.another_admin_exists(store, groups, "admin") is True
+
+    def test_a_disabled_account_does_not_count(self, tmp_path: Path, crud):
+        store, groups = self._stores(tmp_path, crud)
+        store.create("alice", MINTED_SEED, groups=["dfe-admins"])
+        store.update("alice", enabled=False)
+
+        assert admin_retirement.another_admin_exists(store, groups, "admin") is False
+
+    def test_a_user_without_the_admin_role_does_not_count(self, tmp_path: Path, crud):
+        store, groups = self._stores(tmp_path, crud)
+        store.create("bob", MINTED_SEED, groups=["dfe-viewers"])
+
+        assert admin_retirement.another_admin_exists(store, groups, "admin") is False
+
+    def test_an_org_scoped_admin_does_not_count(self, tmp_path: Path, crud):
+        """Org-scoped roles bind inside that org, so its members cannot run the deployment."""
+        store, groups = self._stores(tmp_path, crud)
+        groups.create("acme-admins", roles=["admin"], scope="org:acme")
+        store.create("carol", MINTED_SEED, groups=["acme-admins"])
+
+        assert admin_retirement.another_admin_exists(store, groups, "admin") is False
 
 
 # ── Deployment hints ─────────────────────────────────────────

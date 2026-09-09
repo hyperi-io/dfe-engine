@@ -20,6 +20,10 @@ Two accounts are seeded from injected config, through ONE reconcile path:
 ``breakglass`` the recovery admin, seeded from a hash committed in the deploy
                repo (:mod:`dfe_engine.auth.breakglass`).
 
+Once the deployment has an admin of its own, the operator retires the bootstrap
+admin (:mod:`dfe_engine.auth.admin_retirement`): the seed is skipped, the account
+stays disabled, and the injected password may be deleted from the secret store.
+
 Usage::
 
     from pathlib import Path
@@ -91,12 +95,15 @@ def default_credentials_in_use(admin_password: str) -> bool:
     return not candidate or candidate == _DEFAULT_PASSWORD
 
 
-def require_admin_password(admin_password: str, environment: str) -> bool:
+def require_admin_password(admin_password: str, environment: str, *, retired: bool = False) -> bool:
     """Refuse to start on the default admin password outside a dev posture.
 
     The posture predicate is the one gitops auto-merge gates on
     (:func:`dfe_engine.settings.is_dev_posture`), so a deployment cannot be dev
     enough to auto-merge yet production enough to be refused here, or the reverse.
+
+    ``retired`` lifts the refusal: a retired admin is never seeded, so an absent
+    password is the intended end state and the operator has deleted it.
 
     Returns True when a dev posture is running on the default -- the caller
     surfaces that as ``default_credentials`` so the UI can banner and force a
@@ -105,6 +112,8 @@ def require_admin_password(admin_password: str, environment: str) -> bool:
     Raises:
         DefaultCredentialsError: production posture with no minted password.
     """
+    if retired:
+        return False
     if not default_credentials_in_use(admin_password):
         return False
     if is_dev_posture(environment):
@@ -159,8 +168,8 @@ def bootstrap_auth(
             to ``admin``.
         gitcrud: When gitops is enabled, the deploy-repo engine. The live store is
             hydrated from it before the reconcile, a freshly created admin is
-            persisted back into it, and the break-glass hash is read from its
-            governance settings.
+            persisted back into it, and the break-glass hash and the
+            admin-retirement fact are read from its governance settings.
         seed_accounts: Named accounts reconciled on every boot (config wins), so
             shared team logins survive a teardown+rebuild unchanged (dfe-infra #106).
         breakglass_password: First-boot break-glass password. Minted into the
@@ -209,26 +218,32 @@ def bootstrap_auth(
     if restored:
         logger.info(f"Restored {restored} account(s) from the deploy repo")
 
+    from dfe_engine.auth import admin_retirement
     from dfe_engine.settings import SeedAccount
 
     # One reconcile path for every config-owned account: the admin goes through the
     # same mechanism as the named seeds, so a rebuild restores the minted credential.
     admin_name = admin_account_name(default_admin_name)
-    specs = [
-        SeedAccount(
-            username=admin_name,
-            password=admin_account_password(default_admin_password),
-            groups=[_ADMIN_GROUP],
-        ),
-        *(s for s in (seed_accounts or []) if s.username != admin_name),
-    ]
+    retired = admin_retirement.is_retired(gitcrud)
+    specs = [s for s in (seed_accounts or []) if s.username != admin_name]
+    if not retired:
+        specs.insert(
+            0,
+            SeedAccount(
+                username=admin_name,
+                password=admin_account_password(default_admin_password),
+                groups=[_ADMIN_GROUP],
+            ),
+        )
     created = _reconcile_seed_accounts(account_store, group_store, specs)
 
+    if retired:
+        _disable_retired_admin(account_store, admin_name)
     # Persist a freshly created admin so it is durable from the first start.
-    if admin_name in created:
+    elif admin_name in created:
         seeded = account_store.get(admin_name)
         if seeded is not None:
-            account_durability.publish_seed(gitcrud, seeded)
+            account_durability.publish_direct(gitcrud, seeded, summary="seed account")
 
     # The recovery admin: its hash lives in the deploy repo, not in config.
     from dfe_engine.auth import breakglass
@@ -236,6 +251,22 @@ def bootstrap_auth(
     breakglass.seed(account_store, group_store, gitcrud, breakglass_password)
 
     return account_store, group_store, api_key_store, role_store, role_config
+
+
+def _disable_retired_admin(
+    account_store: AccountStore | DocuStoreAccountStore,
+    admin_name: str,
+) -> None:
+    """Keep a retired admin disabled, whatever the deploy repo's copy of it says.
+
+    The retirement fact is the authority: an account doc restored from a commit
+    made before the retirement is still enabled, and this is what stops that
+    rebuild handing the credential back.
+    """
+    account = account_store.get(admin_name)
+    if account is not None and account.enabled:
+        account_store.update(admin_name, enabled=False)
+        logger.info(f"Local admin '{admin_name}' is retired; disabled the account")
 
 
 def _seed_roles(dest: Path) -> None:
