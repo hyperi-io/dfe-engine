@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.27](https://github.com/hyperi-io/dfe-engine/compare/v1.19.26...v1.19.27) (2026-09-10)
+
+### Bug Fixes
+
+* **e2e:** retry an ingest the receiver answers 5xx mid-roll ([#339](https://github.com/hyperi-io/dfe-engine/issues/339)) ([3e34c2a](https://github.com/hyperi-io/dfe-engine/commit/3e34c2a7a18f5aae361bd269f02843350df2af8d))
+* seed a deployment's default app instances when the deploy repo carries none ([#340](https://github.com/hyperi-io/dfe-engine/issues/340)) ([9352c4a](https://github.com/hyperi-io/dfe-engine/commit/9352c4a610e806165e4fda9b7f3424a36cdc1c7a))
+
 ## [1.19.26](https://github.com/hyperi-io/dfe-engine/compare/v1.19.25...v1.19.26) (2026-09-10)
 
 ### Bug Fixes
