@@ -284,7 +284,7 @@ es.addEventListener('complete', (e) => {
 | POST | `/transforms/compile` | Compile VRL/CEL transform |
 | POST | `/transforms/test` | Test transform against sample data |
 | GET | `/system/version` | Stack, engine and ui versions (the console footer) |
-| GET | `/system/deployment` | Profile, transports, mesh and versions -- what a pane must not guess |
+| GET | `/system/deployment` | Profile, transports, mesh, whether compiled routing reaches the running apps, and versions -- what a pane must not guess |
 | GET | `/sources/{name}/signals` | Records a minute and last arrival for one source |
 | GET | `/system/settings` | Current settings |
 
