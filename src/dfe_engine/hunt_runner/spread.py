@@ -46,6 +46,13 @@ def current_fire(hunt_id: str, interval_seconds: int, now_epoch: int, fraction: 
     return (now_epoch // interval_seconds) * interval_seconds + offset
 
 
-def due_now(hunt_id: str, interval_seconds: int, now_epoch: int, fraction: float = 0.8) -> bool:
-    """True if this interval's scheduled fire has arrived (now >= boundary+offset)."""
-    return now_epoch >= current_fire(hunt_id, interval_seconds, now_epoch, fraction)
+def latest_fire(hunt_id: str, interval_seconds: int, now_epoch: int, fraction: float = 0.8) -> int:
+    """The most recent scheduled fire at or before now.
+
+    This interval's fire once it has arrived, else the previous interval's. A fire
+    stays owed until its watermark is written, so a runner whose ticks all land
+    before the offset (a 46s offset polled at :00/:15/:30/:45) still runs the hunt
+    once per interval instead of never.
+    """
+    fire = current_fire(hunt_id, interval_seconds, now_epoch, fraction)
+    return fire if now_epoch >= fire else fire - interval_seconds

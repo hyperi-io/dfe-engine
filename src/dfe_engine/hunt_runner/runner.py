@@ -29,7 +29,7 @@ from scalo.logger import logger
 
 from .ch_coordinator import ChCoordinator
 from .models import HuntSpec
-from .spread import current_fire, due_now
+from .spread import latest_fire
 from .worker import HuntWorker
 
 
@@ -54,16 +54,15 @@ class HuntRunner:
     def _fire_for(self, spec: HuntSpec, now: int, requested: dict[str, int]) -> int | None:
         """The fire this tick should run for the hunt, or None if there is nothing.
 
-        The schedule first: this interval's fire, unless the watermark says it is
-        already done. Failing that, an operator's run-now, which is just a fire the
-        API wrote down. Both go through the same claim, so a requested run cannot
-        double-run one already in flight.
+        The schedule first: the latest fire at or before now, unless the watermark
+        says it is already done. Failing that, an operator's run-now, which is just
+        a fire the API wrote down. Both go through the same claim, so a requested
+        run cannot double-run one already in flight.
         """
-        if due_now(spec.hunt_id, spec.interval_seconds, now):
-            fire = current_fire(spec.hunt_id, spec.interval_seconds, now)
-            watermark = self._coord.get_watermark(spec.hunt_id)
-            if watermark is None or watermark < fire:
-                return fire
+        fire = latest_fire(spec.hunt_id, spec.interval_seconds, now)
+        watermark = self._coord.get_watermark(spec.hunt_id)
+        if watermark is None or watermark < fire:
+            return fire
         return requested.get(spec.hunt_id)
 
     def _beat(self, now: int) -> None:
