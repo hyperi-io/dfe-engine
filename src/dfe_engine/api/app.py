@@ -98,6 +98,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     bootstrap_clickhouse(settings=settings, gitcrud=gitcrud)
 
+    # Ahead of the reconcile below because a source's overlay may link a shipped
+    # artefact, which has to exist before the link resolves.
+    if gitcrud is not None:
+        from dfe_engine.appmgmt import seed
+
+        try:
+            for line in seed.seed_library(gitcrud, seed.seed_dir()):
+                logger.info("Seeded the library from mounted content", change=line)
+        except Exception as exc:  # the library is still usable without shipped content
+            logger.warning("library not seeded from mounted content", error=str(exc))
+
     # The deploy repo's derived app state follows the sources, and a fresh deploy
     # seeds its apps with none: compile it in now, or the receiver has no
     # destination until somebody writes a source.
