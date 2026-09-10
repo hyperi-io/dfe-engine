@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.35](https://github.com/hyperi-io/dfe-engine/compare/v1.19.34...v1.19.35) (2026-09-10)
+
+### Bug Fixes
+
+* **docs:** the fetcher's ingest listener defaults off, and a Compose deployment applies no routing ([808e3b4](https://github.com/hyperi-io/dfe-engine/commit/808e3b4d55570fba6a3a7d70f14bb4b41059fa2f)), closes [#85](https://github.com/hyperi-io/dfe-engine/issues/85)
+
 ## [1.19.34](https://github.com/hyperi-io/dfe-engine/compare/v1.19.33...v1.19.34) (2026-09-10)
 
 ### Bug Fixes
