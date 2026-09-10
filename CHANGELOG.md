@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.33](https://github.com/hyperi-io/dfe-engine/compare/v1.19.32...v1.19.33) (2026-09-10)
+
+### Bug Fixes
+
+* a posted batch lands one row per element, and a fetched source is refused where nothing fetches ([66bf4b9](https://github.com/hyperi-io/dfe-engine/commit/66bf4b997e9fd0d88b0d8370287eb4a374d76f28)), closes [#72](https://github.com/hyperi-io/dfe-engine/issues/72)
+
 ## [1.19.32](https://github.com/hyperi-io/dfe-engine/compare/v1.19.31...v1.19.32) (2026-09-10)
 
 ### Bug Fixes
