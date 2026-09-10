@@ -261,6 +261,25 @@ def post_events(cfg: E2EConfig, bodies: list[dict]) -> None:
             break
 
 
+def drop_table(ch_client, db: str, name: str) -> None:
+    """DROP a table on every replica of the cluster the server declares.
+
+    A drop without ON CLUSTER lands on the one replica the connection reached,
+    and the next CREATE IF NOT EXISTS ON CLUSTER then makes an orphan with its own
+    replication path there, so a third of the writes and reads go to it.
+    """
+    cluster = ""
+    try:
+        rows = ch_client.query(
+            "SELECT substitution FROM system.macros WHERE macro = 'cluster'"
+        ).result_rows
+        cluster = str(rows[0][0]) if rows else ""
+    except Exception:
+        cluster = ""
+    on_cluster = f" ON CLUSTER {cluster} SYNC" if cluster else ""
+    ch_client.command(f"DROP TABLE IF EXISTS {db}.`{name}`{on_cluster}")
+
+
 # ClickHouse says one of these when the table or database is simply not there
 # yet, which is the only absence a poll should read as "no rows".
 NOT_THERE_YET = ("UNKNOWN_TABLE", "UNKNOWN_DATABASE", "does not exist", "doesn't exist")

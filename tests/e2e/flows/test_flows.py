@@ -34,7 +34,7 @@ from typing import Any
 
 import pytest
 
-from tests.e2e.conftest import count_rows, poll_until, post_events, require
+from tests.e2e.conftest import count_rows, drop_table, poll_until, post_events, require
 from tests.e2e.flows import shapes
 from tests.e2e.flows.conftest import EngineAPI
 
@@ -294,7 +294,7 @@ def flow_sources(engine: EngineAPI, e2e, ch_client):
     _delete(engine, tuple(created))
     for name in created:
         try:
-            ch_client.command(f"DROP TABLE IF EXISTS {e2e.ch_db}.`{name}`")
+            drop_table(ch_client, e2e.ch_db, name)
         except Exception as exc:  # a table this run never got as far as creating
             print(f"could not drop {e2e.ch_db}.{name}: {exc}")
 
