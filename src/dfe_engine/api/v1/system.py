@@ -1,6 +1,6 @@
 """System router — deployment facts, settings summary, default retention.
 
-GET /api/v1/system/deployment  → What this deployment IS: profile, transports, mesh, versions
+GET /api/v1/system/deployment  → What this deployment IS: profile, transports, mesh, routing, versions
 GET /api/v1/system/version     → What this deployment runs: stack, engine, ui
 GET /api/v1/system/settings    → Redacted settings summary
 GET /api/v1/system/retention   → Effective default TTL and where it comes from
@@ -25,6 +25,7 @@ from dfe_engine.api.deps import (
     get_clickhouse_client,
     require_action,
 )
+from dfe_engine.appmgmt import DeployTarget, routing
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.gitcrud import GitCrud
@@ -116,6 +117,15 @@ class DeploymentResponse(BaseModel):
     )
     transports: TransportFacts
     mesh: MeshFacts
+    applies_routing: bool = Field(
+        description=(
+            "Whether the routing a deployed source compiles to reaches the apps "
+            "that run it. False on a Compose stack, which mounts each app's config "
+            "file read-only: the engine still writes the overlay, and nothing "
+            "carries it into the container, so a console must not offer the source "
+            "as live."
+        )
+    )
     stack: str | None = Field(
         description="Certified stack version this deployment runs; null when nothing states one."
     )
@@ -183,6 +193,7 @@ def deployment_facts(request: Request, settings: Any) -> DeploymentResponse:
             enabled=transport.mesh_enabled,
             namespace=transport.mesh_namespace,
         ),
+        applies_routing=routing.reaches_apps(DeployTarget(settings.deployment.target)),
         stack=stack,
         engine=__version__,
         ui=component_overrides(pins).get(UI_COMPONENT) or settings.ui_version or None,

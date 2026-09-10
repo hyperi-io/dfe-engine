@@ -20,7 +20,9 @@ Waiting is on the outcome, never on a duration: a routing change reaches a pod
 when Argo next polls, so the suite probes with a throwaway marker until the
 routing is live, and only then sends the payload it asserts on. That ordering is
 what makes "and nothing took the catch-all" mean something - an early probe row
-in the catch-all table is the wait, not a failure.
+in the catch-all table is the wait, not a failure. A deployment that applies no
+engine routing to its running apps can never end that wait, so the shapes needing
+it skip on the deployment's own fact rather than running the deadline out.
 
 The catch-all's names are the DEPLOYMENT's, not the fixture's: the label off the
 receiver's compiled routing and the table off the loader's, read once, so the
@@ -310,6 +312,7 @@ class TestFlows:
         catchall: tuple[str, str],
         carried: tuple[str, ...],
         offered: tuple[str, ...],
+        applies_routing: bool,
     ) -> None:
         require(e2e, "receiver_url", "ch_host")
         refusal = shape.refusal(transport, carried, offered)
@@ -319,7 +322,7 @@ class TestFlows:
                 f"{transport} ({refusal}), so there is no landing to prove - the "
                 "refusal case asserts it instead"
             )
-        reason = shape.skip_reason(transport)
+        reason = shape.skip_reason(transport) or shape.unrouted_reason(applies_routing)
         if reason:
             pytest.skip(reason)
         if shape.origin == "catalogue":
@@ -481,6 +484,7 @@ def test_a_flow_the_deployment_cannot_run_is_refused(
     engine,
     carried: tuple[str, ...],
     offered: tuple[str, ...],
+    applies_routing: bool,
 ) -> None:
     """The refusal is the assertion: a flow that cannot run must fail at save.
 
@@ -494,10 +498,15 @@ def test_a_flow_the_deployment_cannot_run_is_refused(
     """
     declared = shape.refusal(transport, carried, offered)
     if declared is None:
+        # A shape the deployment accepts but never routes is skipped for THAT
+        # reason: the end-to-end case beside this one does not prove it either.
         pytest.skip(
-            f"{shapes.EXPECTED_SKIP} this deployment carries {transport}, deploys every "
-            f"app the {shape.name} flow needs, and each of them carries the transport, "
-            "so the end-to-end case proves it"
+            shape.unrouted_reason(applies_routing)
+            or (
+                f"{shapes.EXPECTED_SKIP} this deployment carries {transport}, deploys every "
+                f"app the {shape.name} flow needs, and each of them carries the transport, "
+                "so the end-to-end case proves it"
+            )
         )
     if not shape.sources:
         pytest.skip(

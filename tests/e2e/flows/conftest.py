@@ -115,17 +115,39 @@ def engine(e2e: E2EConfig) -> EngineAPI:
 
 
 @pytest.fixture(scope="session")
-def carried(engine: EngineAPI) -> tuple[str, ...]:
+def deployment(engine: EngineAPI) -> dict[str, Any]:
+    """What the deployment says it is, read once for every fact taken off it."""
+    return engine.json("GET", "/system/deployment")
+
+
+@pytest.fixture(scope="session")
+def carried(deployment: dict[str, Any]) -> tuple[str, ...]:
     """The transports this deployment carries, read from the deployment itself.
 
     A profile binds every stage to one at deploy time, and a fixture cannot know
     which profile it is being run against, so this is what decides whether a case
     proves a landing or proves a refusal.
     """
-    facts = engine.json("GET", "/system/deployment")
-    carries = tuple(facts["transports"]["available"])
-    assert carries, f"the deployment reports no transport at all: {facts['transports']}"
+    carries = tuple(deployment["transports"]["available"])
+    assert carries, f"the deployment reports no transport at all: {deployment['transports']}"
     return carries
+
+
+@pytest.fixture(scope="session")
+def applies_routing(deployment: dict[str, Any]) -> bool:
+    """Whether a deployed source's routing reaches the apps that run it.
+
+    Read for the same reason the transports are: a Compose stack mounts each app's
+    config file read-only, so the overlay the engine writes stops at the deploy
+    repo and no source created through the API ever reaches the receiver. A
+    deployment that does not report the fact is one this suite cannot judge.
+    """
+    fact = deployment.get("applies_routing")
+    assert fact is not None, (
+        "the deployment reports no applies_routing, so it runs an engine older "
+        "than the fact the routed shapes read"
+    )
+    return bool(fact)
 
 
 @pytest.fixture(scope="session")
