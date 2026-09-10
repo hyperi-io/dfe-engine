@@ -12,7 +12,7 @@ the network model. The system map is [../architecture.md](../architecture.md).
 | Doc | Covers |
 |---|---|
 | [backing-services.md](backing-services.md) | per-backend swap-seam matrix |
-| [transports.md](transports.md) | profile x transport, the Kafka provider swap, the scale-mesh Envoy balancer and receiver buffers |
+| [transports.md](transports.md) | profile x transport, the Kafka provider swap, the mesh tier's Envoy balancer and receiver buffers |
 | [keda-scaling.md](keda-scaling.md) | CPU-default + opt-in ScalingPressure via dfe-keda-shim |
 | [managed-kafka-lifecycle.md](managed-kafka-lifecycle.md) | managed-Kafka cost + delete-to-empty lifecycle |
 | [observability-standard.md](observability-standard.md) | one OTel destination, modes, log schema |
@@ -102,9 +102,9 @@ and the balancer per tier: [transports.md](transports.md).
 | **slim** | k8s | gRPC (receiver->loader direct) | **no** | minimum-viable + safety | bare-minimum k8s; smallest |
 | **single** | k8s | Kafka | **yes** (single broker) | reliability | one node of everything, with Kafka |
 | **scale** | k8s | Kafka | **yes** (multi-broker cluster) | reliability | everything clustered (ReplicatedMergeTree + dedicated Keeper) |
-| **scale-mesh** | k8s | gRPC, Envoy listener per stage pool | **no** | reliability | scale's replicas and ClickHouse cluster with no broker; the receiver buffers instead |
+| **mesh** | k8s | gRPC, Envoy listener per stage pool | **no** | reliability | scale's replicas and ClickHouse cluster with no broker; the receiver buffers instead |
 
-A tier sets defaults; a deployer overrides any single dial. `scale-mesh`
+A tier sets defaults; a deployer overrides any single dial. `mesh`
 composes as `scale` below with Kafka and Kafbat off.
 
 ## Default composition per k8s tier

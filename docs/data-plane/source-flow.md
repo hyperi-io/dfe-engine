@@ -12,7 +12,7 @@ A source names where its records come in, whether they are transformed, and wher
 
 ## The flow in one diagram
 
-Two transports carry the same three stages. The bus (Kafka on the `single` and `scale` profiles) holds records between stages, so a stage can be down and nothing is lost. Direct gRPC (`slim`, `scale-mesh`) stores nothing between stages, so the receiver's and the fetcher's own buffers are the only slack.
+Two transports carry the same three stages. The bus (Kafka on the `single` and `scale` profiles) holds records between stages, so a stage can be down and nothing is lost. Direct gRPC (`slim`, `mesh`) stores nothing between stages, so the receiver's and the fetcher's own buffers are the only slack.
 
 ```mermaid
 flowchart LR
@@ -75,7 +75,7 @@ A source declares `transport: bus` or `transport: direct`. Left unset, it takes 
 | slim | direct | gRPC | one replica; the KEDA ceiling of two would pin senders to pods |
 | single | bus | Kafka topics on one broker | consumer groups |
 | scale | bus | Kafka topics on a broker cluster | consumer groups |
-| scale-mesh | direct | gRPC | a listener per stage pool, see [../deployment/transports.md](../deployment/transports.md) |
+| mesh | direct | gRPC | a listener per stage pool, see [../deployment/transports.md](../deployment/transports.md) |
 
 The source records bus-versus-direct only. Which bus (Kafka today) and which direct protocol (gRPC) are deployment facts, so a second bus provider joins behind the same `transport: bus` value without a change to the source model.
 
