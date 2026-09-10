@@ -5,12 +5,16 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""One source definition in, a row in the right table out - on both transports.
+"""One source definition in, a row in the right table out - or the refusal, said plainly.
 
 Each case creates its shape's sources through the engine API with the transport
 set, waits for the reconcile to reach the running apps, sends or waits for the
 records, and asserts where they landed AND where they did not. Then it deletes
 what it made and asserts the instance went with it.
+
+A deployment carries ONE transport, so a run asked for both proves a landing on
+the one it carries and a refusal on the other. Which is which is read off the
+deployment, not assumed from the transport the run was started with.
 
 Waiting is on the outcome, never on a duration: a routing change reaches a pod
 when Argo next polls, so the suite probes with a throwaway marker until the
@@ -28,7 +32,6 @@ declare. See docs/data-plane/source-flow.md for the shape this proves.
 
 from __future__ import annotations
 
-import os
 import uuid
 from typing import Any
 
@@ -57,28 +60,6 @@ _WIDEST_SHAPE = max(len(shape.expect) for shape in shapes.load_shapes())
 SUITE_TIMEOUT = _WIDEST_SHAPE * (ROUTING_DEADLINE + LANDING_DEADLINE) + FETCH_DEADLINE + 300.0
 
 pytestmark = [pytest.mark.live, pytest.mark.timeout(SUITE_TIMEOUT)]
-
-# The refusal cases: a shape whose expect.yaml says the deployment must reject it
-# on this transport. Built at import so they are their own tests rather than a
-# skipped half of the main one.
-_REFUSALS = [
-    pytest.param(shape, transport, id=f"{shape.name}-{transport}")
-    for shape in shapes.load_shapes()
-    for transport in shapes.transports_for(os.getenv("DFE_E2E_TRANSPORT") or "both")
-    if shape.refusal(transport)
-] or [
-    # An empty parametrisation skips for pytest's own reason, which the skip policy
-    # reads as a case that went wrong rather than one nothing declared.
-    pytest.param(
-        None,
-        "",
-        id="none-declared",
-        marks=pytest.mark.skip(
-            reason=f"{shapes.EXPECTED_SKIP} no fixture declares a flow this deployment "
-            "refuses on the transport(s) asked for"
-        ),
-    )
-]
 
 
 def _marker() -> str:
@@ -311,8 +292,16 @@ class TestFlows:
         ch_client,
         flow_sources,
         catchall: tuple[str, str],
+        carried: tuple[str, ...],
     ) -> None:
         require(e2e, "receiver_url", "ch_host")
+        refusal = shape.refusal(transport, carried)
+        if refusal:
+            pytest.skip(
+                f"{shapes.EXPECTED_SKIP} this deployment refuses {shape.name} on "
+                f"{transport} ({refusal}), so there is no landing to prove - the "
+                "refusal case asserts it instead"
+            )
         reason = shape.skip_reason(transport)
         if reason:
             pytest.skip(reason)
@@ -469,26 +458,35 @@ class TestFlows:
             _assert_topics(deployed, expectation)
 
 
-# Its own parameter names: the shape/transport pair is what pytest_generate_tests
-# claims, and a second parametrisation of the same names is a collection error.
-@pytest.mark.parametrize(("refused_shape", "refused_transport"), _REFUSALS)
 def test_a_flow_the_deployment_cannot_run_is_refused(
-    refused_shape: shapes.FlowShape | None, refused_transport: str, engine
+    shape: shapes.FlowShape, transport: str, engine, carried: tuple[str, ...]
 ) -> None:
     """The refusal is the assertion: a flow that cannot run must fail at save.
 
     Not the same claim as the skip beside it. The skip says this suite cannot
     prove the landing half here; this says the deployment says so too, and says
     why, rather than accepting the source and never starting the pod.
+
+    On a bus deployment asked to prove both transports, this is what the direct
+    half of the run proves.
     """
-    assert refused_shape is not None, "the none-declared case carries a skip mark"
-    declared = refused_shape.refusal(refused_transport)
-    for body in refused_shape.sources:
-        response = engine.call("POST", "/sources", {**body, "transport": refused_transport})
+    declared = shape.refusal(transport, carried)
+    if declared is None:
+        pytest.skip(
+            f"{shapes.EXPECTED_SKIP} this deployment carries {transport} and every app in "
+            f"the {shape.name} flow carries it too, so the end-to-end case proves it"
+        )
+    if not shape.sources:
+        pytest.skip(
+            f"{shapes.EXPECTED_SKIP} the {shape.name} shape writes no source of its own, "
+            "so it has nothing to be refused at save"
+        )
+    for body in shape.sources:
+        response = engine.call("POST", "/sources", {**body, "transport": transport})
         assert response.status_code >= 400, (
-            f"{body['source']!r} was accepted on {refused_transport}, which cannot run it"
+            f"{body['source']!r} was accepted on {transport}, which cannot run it"
         )
         assert declared in response.text, (
-            f"{body['source']!r} was refused on {refused_transport}, but not for the "
+            f"{body['source']!r} was refused on {transport}, but not for the "
             f"declared reason ({declared!r}): {response.text}"
         )

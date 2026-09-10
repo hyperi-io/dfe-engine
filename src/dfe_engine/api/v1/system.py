@@ -88,8 +88,9 @@ class TransportFacts(BaseModel):
     default: str = Field(description="Transport a source that names none takes here.")
     available: list[str] = Field(
         description=(
-            "Every transport a source may name here. Direct is always in the list; "
-            "bus is there only where this deployment runs one."
+            "Every transport a source may name here. One entry: a deployment binds "
+            "its stages to a single transport, and a source on the other is refused "
+            "at save."
         )
     )
 

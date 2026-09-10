@@ -114,6 +114,20 @@ def engine(e2e: E2EConfig) -> EngineAPI:
     return api
 
 
+@pytest.fixture(scope="session")
+def carried(engine: EngineAPI) -> tuple[str, ...]:
+    """The transports this deployment carries, read from the deployment itself.
+
+    A profile binds every stage to one at deploy time, and a fixture cannot know
+    which profile it is being run against, so this is what decides whether a case
+    proves a landing or proves a refusal.
+    """
+    facts = engine.json("GET", "/system/deployment")
+    carries = tuple(facts["transports"]["available"])
+    assert carries, f"the deployment reports no transport at all: {facts['transports']}"
+    return carries
+
+
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     """Parametrise every flow test over shapes x the transports asked for.
 
