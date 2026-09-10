@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from dfe_engine.gitops.repo import GitopsRepo, PublishResult
-from dfe_engine.yaml_utils import yaml_dump_string, yaml_load
+from dfe_engine.yaml_utils import yaml_dump_string, yaml_load, yaml_load_string
 
 from .commit_policy import validate_name
 from .registry import ResourceClass, ResourceClassRegistry, default_registry
@@ -219,6 +219,21 @@ class GitCrud:
         if not f.is_file():
             raise ResourceNotFoundError(self._rel(cls, name))
         return yaml_load(f) or {}
+
+    def get_remote(self, cls_name: str, name: str) -> dict:
+        """Read a resource's YAML doc as the REMOTE deploy repo holds it right now.
+
+        A write another replica pushed reaches this clone only on its next fetch, so a
+        caller that must not act on a stale absence reads through here instead of
+        :meth:`get`. Empty when there is no remote, the resource is absent there, or
+        the file holds something other than a mapping.
+        """
+        cls = self._cls(cls_name)
+        raw = self._repo.read_remote_file(self._rel(cls, name))
+        if raw is None:
+            return {}
+        doc = yaml_load_string(raw)
+        return doc if isinstance(doc, dict) else {}
 
     def vars(self, cls_name: str, name: str) -> dict[str, Any]:
         """Flatten a resource to dot-path vars (enumeration for Tier-1)."""

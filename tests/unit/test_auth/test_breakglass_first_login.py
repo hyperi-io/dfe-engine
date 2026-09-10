@@ -20,6 +20,7 @@ import secrets
 from pathlib import Path
 
 import pytest
+from dulwich import porcelain
 
 from dfe_engine.auth import admin_retirement, breakglass
 from dfe_engine.auth.bootstrap import (
@@ -40,6 +41,7 @@ from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud.registry import default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.settings import SeedAccount
+from dfe_engine.yaml_utils import yaml_load
 
 MINTED_ADMIN = secrets.token_urlsafe(16)
 MINTED_BREAKGLASS = secrets.token_urlsafe(16)
@@ -206,6 +208,57 @@ class TestBreakGlassHash:
 
         assert breakglass.is_enabled(crud) is True
         assert breakglass.stored_hash(crud) == ""
+
+
+# ── Two replicas, one deploy repo ────────────────────────────
+
+
+def _shared_deploy_repo(tmp_path: Path) -> tuple[str, str]:
+    """A bare deploy repo with one commit, and the branch it lives on."""
+    remote = tmp_path / "remote.git"
+    porcelain.init(str(remote), bare=True)
+    seed = tmp_path / "seed"
+    porcelain.clone(str(remote), str(seed))
+    (seed / "README").write_text("seed\n", encoding="utf-8")
+    porcelain.add(str(seed), paths=[str(seed / "README")])
+    porcelain.commit(str(seed), message=b"init", author=b"t <t@t>", committer=b"t <t@t>")
+    branch = porcelain.active_branch(str(seed)).decode()
+    porcelain.push(str(seed), str(remote), f"refs/heads/{branch}".encode())
+    return str(remote), branch
+
+
+def _replica(tmp_path: Path, name: str, remote: str, branch: str) -> GitCrud:
+    """A replica's own clone of the shared deploy repo."""
+    repo = GitopsRepo(local_path=str(tmp_path / name), repo_url=remote, branch=branch, push=True)
+    return GitCrud(repo, default_registry())
+
+
+class TestTwoReplicas:
+    """Two engine replicas boot together against one deploy repo (dfe-engine#346)."""
+
+    def test_the_second_replica_adopts_the_committed_hash(self, tmp_path: Path):
+        remote, branch = _shared_deploy_repo(tmp_path)
+        first = _replica(tmp_path, "a", remote, branch)
+        second = _replica(tmp_path, "b", remote, branch)
+
+        minted = breakglass.mint_hash(first, MINTED_BREAKGLASS)
+        # The second replica's clone predates the mint, so only the remote has it.
+        adopted = breakglass.mint_hash(second, MINTED_BREAKGLASS)
+
+        assert adopted == minted
+
+    def test_one_break_glass_hash_reaches_the_deploy_repo(self, tmp_path: Path):
+        remote, branch = _shared_deploy_repo(tmp_path)
+        first = _replica(tmp_path, "a", remote, branch)
+        second = _replica(tmp_path, "b", remote, branch)
+
+        minted = breakglass.mint_hash(first, MINTED_BREAKGLASS)
+        breakglass.mint_hash(second, MINTED_BREAKGLASS)
+
+        check = tmp_path / "check"
+        porcelain.clone(remote, str(check))
+        doc = yaml_load(check / "governance" / "settings" / "auth.yaml")
+        assert doc["breakglass"]["password_hash"] == minted
 
 
 # ── Retiring the bootstrap admin ─────────────────────────────
