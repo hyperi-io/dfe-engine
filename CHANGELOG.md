@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.30](https://github.com/hyperi-io/dfe-engine/compare/v1.19.29...v1.19.30) (2026-09-10)
+
+### Bug Fixes
+
+* **gitops:** a replica's push never overwrites another's ([e81f8bf](https://github.com/hyperi-io/dfe-engine/commit/e81f8bf7c4bc0ed9f083e0632bf9a63948a57310))
+
 ## [1.19.29](https://github.com/hyperi-io/dfe-engine/compare/v1.19.28...v1.19.29) (2026-09-10)
 
 ### Bug Fixes
