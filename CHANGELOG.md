@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.29](https://github.com/hyperi-io/dfe-engine/compare/v1.19.28...v1.19.29) (2026-09-10)
+
+### Bug Fixes
+
+* rename the scale-mesh profile to mesh ([#345](https://github.com/hyperi-io/dfe-engine/issues/345)) ([f8a54c5](https://github.com/hyperi-io/dfe-engine/commit/f8a54c5ebcd6b7647e81c4be6d5f916c5fda3b52)), closes [#265](https://github.com/hyperi-io/dfe-engine/issues/265)
+
 ## [1.19.28](https://github.com/hyperi-io/dfe-engine/compare/v1.19.27...v1.19.28) (2026-09-10)
 
 ### Bug Fixes
