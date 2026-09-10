@@ -309,9 +309,10 @@ class TestFlows:
         flow_sources,
         catchall: tuple[str, str],
         carried: tuple[str, ...],
+        offered: tuple[str, ...],
     ) -> None:
         require(e2e, "receiver_url", "ch_host")
-        refusal = shape.refusal(transport, carried)
+        refusal = shape.refusal(transport, carried, offered)
         if refusal:
             pytest.skip(
                 f"{shapes.EXPECTED_SKIP} this deployment refuses {shape.name} on "
@@ -475,7 +476,11 @@ class TestFlows:
 
 
 def test_a_flow_the_deployment_cannot_run_is_refused(
-    shape: shapes.FlowShape, transport: str, engine, carried: tuple[str, ...]
+    shape: shapes.FlowShape,
+    transport: str,
+    engine,
+    carried: tuple[str, ...],
+    offered: tuple[str, ...],
 ) -> None:
     """The refusal is the assertion: a flow that cannot run must fail at save.
 
@@ -484,13 +489,15 @@ def test_a_flow_the_deployment_cannot_run_is_refused(
     why, rather than accepting the source and never starting the pod.
 
     On a bus deployment asked to prove both transports, this is what the direct
-    half of the run proves.
+    half of the run proves. On a tier that deploys no fetcher, it is what the
+    fetcher shapes prove.
     """
-    declared = shape.refusal(transport, carried)
+    declared = shape.refusal(transport, carried, offered)
     if declared is None:
         pytest.skip(
-            f"{shapes.EXPECTED_SKIP} this deployment carries {transport} and every app in "
-            f"the {shape.name} flow carries it too, so the end-to-end case proves it"
+            f"{shapes.EXPECTED_SKIP} this deployment carries {transport}, deploys every "
+            f"app the {shape.name} flow needs, and each of them carries the transport, "
+            "so the end-to-end case proves it"
         )
     if not shape.sources:
         pytest.skip(
