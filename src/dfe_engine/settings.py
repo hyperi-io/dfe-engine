@@ -841,7 +841,7 @@ class DeploymentSettings(BaseModel):
         default="",
         description=(
             "The tier this deployment was stood up as (slim, single, scale, "
-            "scale-mesh, or a deployer's own name). Injected by the deployer from "
+            "mesh, or a deployer's own name). Injected by the deployer from "
             "the one place it is already known, never detected, and reported "
             "rather than interpreted: the engine judges an app's offer against it "
             "but never changes what it deploys. Empty means unknown, which is what "

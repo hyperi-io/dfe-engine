@@ -142,7 +142,7 @@ class TestOptionalApps:
         """The archiver, made optional, so the shipped manifest stays the assertion."""
         replaced = replace(
             catalogue.descriptor("dfe-archiver"),
-            profiles=frozenset({"scale", "scale-mesh"}),
+            profiles=frozenset({"scale", "mesh"}),
             default_in=frozenset(),
         )
         monkeypatch.setitem(catalogue.APP_CATALOGUE, "dfe-archiver", replaced)
@@ -173,7 +173,7 @@ class TestOptionalApps:
         )
 
         assert entry["optional"] is True
-        assert entry["profiles"] == ["scale", "scale-mesh"]
+        assert entry["profiles"] == ["mesh", "scale"]
         assert entry["default_in"] == []
 
     def test_the_offer_is_judged_against_the_profile_the_caller_names(
@@ -226,7 +226,7 @@ class TestOptionalApps:
         got = client.get("/api/v1/apps/dfe-archiver/default", headers=admin_headers).json()
 
         assert got["optional"] is True
-        assert got["profiles"] == ["scale", "scale-mesh"]
+        assert got["profiles"] == ["mesh", "scale"]
         assert got["default_in"] == []
 
 
