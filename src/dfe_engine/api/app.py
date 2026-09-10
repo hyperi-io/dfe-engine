@@ -98,6 +98,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     bootstrap_clickhouse(settings=settings, gitcrud=gitcrud)
 
+    # An app instance IS its values overlay, so a deploy repo carrying none
+    # deploys nothing and the reconcile below has nothing to compile onto.
+    if gitcrud is not None:
+        from dfe_engine.appmgmt import seed_instances
+
+        try:
+            for service in seed_instances.seed_default_instances(gitcrud, settings):
+                logger.info("Seeded a default app instance", app=service)
+        except Exception as exc:  # the deploy repo is seeded again on the next start
+            logger.warning("default app instances not seeded at startup", error=str(exc))
+
     # The deploy repo's derived app state follows the sources, and a fresh deploy
     # seeds its apps with none: compile it in now, or the receiver has no
     # destination until somebody writes a source.
