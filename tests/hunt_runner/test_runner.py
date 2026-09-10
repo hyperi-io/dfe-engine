@@ -59,14 +59,33 @@ def test_decide_runs_when_due_idle_and_under_cap():
     assert d.action == "run"
 
 
-def test_due_now_and_current_fire():
-    from dfe_engine.hunt_runner.spread import current_fire, due_now
+def test_latest_fire_is_this_interval_once_arrived_else_the_previous():
+    from dfe_engine.hunt_runner.spread import current_fire, latest_fire
 
-    # fire = boundary + stable offset; due once now passes it
+    # fire = boundary + stable offset; owed from the moment now passes it
     fire = current_fire("h", 600, 1000)
     assert 600 <= fire < 1200
-    assert due_now("h", 600, fire) is True
-    assert due_now("h", 600, fire - 1) is False
+    assert latest_fire("h", 600, fire) == fire
+    assert latest_fire("h", 600, fire - 1) == fire - 600
+
+
+def test_a_hunt_whose_offset_falls_between_ticks_still_runs_every_interval():
+    """A 15s poll ticking at :00/:15/:30/:45 never lands inside [46, 60)."""
+    from dfe_engine.hunt_runner.models import HuntSpec
+
+    hunt_id = "post-1682300-71da5fa4"
+    assert phase_offset(hunt_id, 60) == 46
+    coord = _WatermarkCoordinator()
+    worker = _CountingWorker()
+    spec = HuntSpec(hunt_id=hunt_id, interval_seconds=60, queries=["SELECT 1"])
+    runner = HuntRunner(coord, worker, {hunt_id: spec}, cap=8)
+    base = 1_789_027_260
+    ticks = [base + minute * 60 + phase for minute in range(3) for phase in (0, 15, 30, 45)]
+    for now in ticks:
+        runner.tick(now)
+    # Once per interval, never twice, and never zero.
+    assert worker.runs == 3
+    assert coord.watermarks[hunt_id] == base + 2 * 60 + 46 - 60
 
 
 def test_mark_deferred_flags_too_aggressive():
@@ -111,6 +130,22 @@ class _RecordingCoordinator:
 
     def release(self, hunt_id: str, fire: int) -> None:
         self.calls.append("release")
+
+
+class _WatermarkCoordinator(_RecordingCoordinator):
+    """A coordinator whose watermark advances the way the worker writes it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.watermarks: dict[str, int] = {}
+
+    def get_watermark(self, hunt_id: str) -> int | None:
+        return self.watermarks.get(hunt_id)
+
+    def try_claim(self, hunt_id: str, fire: int, now: int) -> bool:
+        self.calls.append("try_claim")
+        self.watermarks[hunt_id] = fire
+        return True
 
 
 class _CountingWorker:

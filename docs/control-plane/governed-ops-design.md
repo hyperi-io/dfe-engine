@@ -302,9 +302,9 @@ graph TD
 
 The smarts are deterministic, not random. `spread.phase_offset` gives each hunt a
 stable offset inside its interval from a hash of its id, so hunts on the same
-schedule fan out evenly and never stampede ClickHouse at the boundary. `due_now`
-asks whether this interval's fire has arrived. A global cap hard-limits how much hits
-CH at once.
+schedule fan out evenly and never stampede ClickHouse at the boundary. `latest_fire`
+names the most recent fire at or before now, and it stays owed until its watermark
+is written. A global cap hard-limits how much hits CH at once.
 
 A run never doubles up. To claim, a worker INSERTs a lease row for `(hunt, fire)`
 then reads the rows back for that key and settles on one deterministic winner (claim
@@ -316,7 +316,7 @@ the user their schedule is too tight.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> due: phase_offset + due_now
+    [*] --> due: phase_offset + latest_fire
     due --> running: worker claims (insert+resolve, under cap)
     running --> done: query committed, watermark advanced
     running --> due: lease expired (worker died) -> reclaimed

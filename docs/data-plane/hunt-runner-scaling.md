@@ -52,13 +52,14 @@ waking KEDA, without a DELETE.
 KEDA runs `schedule.due_query(db)` against ClickHouse (via the fail-safe
 `dfe-keda-shim`'s `/keda/hunt-backlog` endpoint - see "KEDA ScaledObject"
 below) - the count of hunts that are due-and-unclaimed. It uses the EXACT
-arithmetic the worker uses (`spread.current_fire`):
+arithmetic the worker uses (`spread.latest_fire`):
 
 ```
 boundary = intDiv(now(), interval) * interval      -- start of this interval
-fire     = boundary + phase_offset                  -- this interval's scheduled fire
-due      = now() >= fire                             -- the fire has arrived
-           AND watermark < fire                      -- that fire not already completed
+current  = boundary + phase_offset                  -- this interval's scheduled fire
+fire     = if(now() >= current, current,            -- the latest fire at or before now
+              current - interval)
+due      = watermark < fire                          -- that fire not already completed
            AND lease_until <= now()                  -- not currently running
 ```
 
@@ -82,7 +83,7 @@ never diverges from a worker's. It cannot, because both compute the same
 thing from the same inputs:
 
 1. **Parity, proven.** `tests/hunt_runner/test_schedule.py` asserts the scaler
-   predicate equals `runner.tick`'s own gate (via `spread.current_fire`/`due_now` +
+   predicate equals `runner.tick`'s own gate (via `spread.latest_fire` +
    the watermark + lease checks) across a full matrix of (hunt_id, interval, now,
    watermark, lease). `tests/integration/test_hunt_schedule_scaler.py` then proves
    the SQL string implements that predicate against real ClickHouse - counting
@@ -107,12 +108,13 @@ thing from the same inputs:
    interval, so `due_count` rises gradually and KEDA scales out smoothly rather
    than all-at-once at the boundary.
 
-Bounded catch-up: a worker that starts inside `[boundary, boundary+offset)` waits
-for this interval's fire rather than back-filling a still-owed prior fire; the
-scaler matches it exactly (no busy-spin), and the owed fire is picked up at the
-next `due_now`. Max lateness for any fire is under one interval - inherent to the
-phase-offset design, and identical whether the decision is made by KEDA or a
-resident worker.
+Bounded catch-up: a fire stays owed until its watermark is written, so a worker
+that ticks inside `[boundary, boundary+offset)` runs the previous interval's fire
+if nothing ran it, and the scaler counts it the same way. Without that, a hunt
+whose offset sits between two poll ticks (a 46s offset polled at :00/:15/:30/:45)
+never fires at all. Max lateness for any fire is under one interval - inherent
+to the phase-offset design, and identical whether the decision is made by KEDA
+or a resident worker.
 
 ## No operational dependency on dfe-engine
 
