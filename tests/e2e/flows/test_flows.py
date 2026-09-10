@@ -26,6 +26,10 @@ The catch-all's names are the DEPLOYMENT's, not the fixture's: the label off the
 receiver's compiled routing and the table off the loader's, read once, so the
 suite holds either side of the rename and fails when only one side moved.
 
+A batched POST is a pair of cases of its own rather than a shape: a shape sends
+one request per record, and what a batch has to prove is that ONE request
+carrying N events becomes N rows rather than 202 and nothing.
+
 Skipped cases are governed: conftest fails the run on any skip a fixture did not
 declare. See docs/data-plane/source-flow.md for the shape this proves.
 """
@@ -37,7 +41,15 @@ from typing import Any
 
 import pytest
 
-from tests.e2e.conftest import count_rows, drop_table, poll_until, post_events, require
+from tests.e2e.conftest import (
+    count_rows,
+    drop_table,
+    poll_until,
+    post_batch,
+    post_events,
+    post_ndjson,
+    require,
+)
 from tests.e2e.flows import shapes
 from tests.e2e.flows.conftest import EngineAPI
 
@@ -50,6 +62,10 @@ LANDING_DEADLINE = 240.0
 # A fetcher polls its upstream on its own schedule, and the first fetch follows
 # the pod becoming ready.
 FETCH_DEADLINE = 600.0
+
+# Events in one batched POST, enough that a receiver forwarding the body whole
+# lands a count nothing could mistake for the batch.
+BATCH_SIZE = 25
 
 # A shape waits ROUTING then LANDING once per expectation, so the widest one bounds
 # the run.
@@ -293,9 +309,10 @@ class TestFlows:
         flow_sources,
         catchall: tuple[str, str],
         carried: tuple[str, ...],
+        offered: tuple[str, ...],
     ) -> None:
         require(e2e, "receiver_url", "ch_host")
-        refusal = shape.refusal(transport, carried)
+        refusal = shape.refusal(transport, carried, offered)
         if refusal:
             pytest.skip(
                 f"{shapes.EXPECTED_SKIP} this deployment refuses {shape.name} on "
@@ -459,7 +476,11 @@ class TestFlows:
 
 
 def test_a_flow_the_deployment_cannot_run_is_refused(
-    shape: shapes.FlowShape, transport: str, engine, carried: tuple[str, ...]
+    shape: shapes.FlowShape,
+    transport: str,
+    engine,
+    carried: tuple[str, ...],
+    offered: tuple[str, ...],
 ) -> None:
     """The refusal is the assertion: a flow that cannot run must fail at save.
 
@@ -468,13 +489,15 @@ def test_a_flow_the_deployment_cannot_run_is_refused(
     why, rather than accepting the source and never starting the pod.
 
     On a bus deployment asked to prove both transports, this is what the direct
-    half of the run proves.
+    half of the run proves. On a tier that deploys no fetcher, it is what the
+    fetcher shapes prove.
     """
-    declared = shape.refusal(transport, carried)
+    declared = shape.refusal(transport, carried, offered)
     if declared is None:
         pytest.skip(
-            f"{shapes.EXPECTED_SKIP} this deployment carries {transport} and every app in "
-            f"the {shape.name} flow carries it too, so the end-to-end case proves it"
+            f"{shapes.EXPECTED_SKIP} this deployment carries {transport}, deploys every "
+            f"app the {shape.name} flow needs, and each of them carries the transport, "
+            "so the end-to-end case proves it"
         )
     if not shape.sources:
         pytest.skip(
@@ -490,3 +513,71 @@ def test_a_flow_the_deployment_cannot_run_is_refused(
             f"{body['source']!r} was refused on {transport}, but not for the "
             f"declared reason ({declared!r}): {response.text}"
         )
+
+
+def _element(marker: str, index: int) -> str:
+    """This run's token for one element of a batch.
+
+    Fixed width so no element's token is a substring of another's, which is what
+    lets a row be counted by the element it came from.
+    """
+    return f"{marker}-{index:04d}"
+
+
+def _batch(marker: str) -> list[dict[str, Any]]:
+    """One distinct record per element, each carrying its own index token.
+
+    The index rides inside a string rather than as a JSON number because the row
+    is matched on a ``_raw`` substring, and how a number is rendered belongs to
+    whatever serialised it.
+    """
+    return [
+        {"message": f"flow e2e {_element(marker, index)} batched", "host": {"name": "flow-e2e"}}
+        for index in range(BATCH_SIZE)
+    ]
+
+
+def _assert_one_row_per_element(e2e, ch_client, catchall_table: str, marker: str) -> None:
+    """Every element of the batch landed, once each.
+
+    Both halves are the assertion. The count catches a receiver that forwards the
+    batch whole, which answers 202 and lands nothing at all; the per-element
+    count catches a split that duplicated or dropped one.
+    """
+    table = f"{e2e.ch_db}.{catchall_table}"
+    poll_until(
+        lambda: count_rows(ch_client, table, marker=marker) >= BATCH_SIZE,
+        timeout=LANDING_DEADLINE,
+        desc=f"all {BATCH_SIZE} records of the batch in {table}",
+    )
+    landed = count_rows(ch_client, table, marker=marker)
+    assert landed == BATCH_SIZE, f"a batch of {BATCH_SIZE} events landed {landed} row(s) in {table}"
+    for index in range(BATCH_SIZE):
+        seen = count_rows(ch_client, table, contains=_element(marker, index))
+        assert seen == 1, f"element {index} of the batch landed {seen} row(s) in {table}"
+
+
+class TestABatchedPost:
+    """One POST carrying many events lands one row per event.
+
+    Both bodies take the catch-all flow rather than a source of their own: what
+    is under test is the receiver splitting the body, the catch-all is deployed
+    on every profile and either transport, and going through it means no Argo
+    poll stands between the post and the assertion.
+    """
+
+    def test_a_json_array_lands_one_row_per_element(
+        self, e2e, ch_client, catchall: tuple[str, str]
+    ) -> None:
+        require(e2e, "receiver_url", "ch_host")
+        marker = _marker()
+        post_batch(e2e, _batch(marker))
+        _assert_one_row_per_element(e2e, ch_client, catchall[1], marker)
+
+    def test_an_ndjson_body_lands_one_row_per_line(
+        self, e2e, ch_client, catchall: tuple[str, str]
+    ) -> None:
+        require(e2e, "receiver_url", "ch_host")
+        marker = _marker()
+        post_ndjson(e2e, _batch(marker))
+        _assert_one_row_per_element(e2e, ch_client, catchall[1], marker)

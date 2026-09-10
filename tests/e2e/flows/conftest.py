@@ -128,6 +128,19 @@ def carried(engine: EngineAPI) -> tuple[str, ...]:
     return carries
 
 
+@pytest.fixture(scope="session")
+def offered(engine: EngineAPI) -> tuple[str, ...]:
+    """The apps this deployment offers, judged against its own profile by the engine.
+
+    Read rather than derived for the same reason the transports are: a profile
+    deploys a subset of the catalogue, a fixture cannot know which one it is
+    running against, and a shape whose origin needs an app this tier does not
+    deploy is refused at save exactly as a source on the other transport is.
+    """
+    apps = engine.json("GET", "/apps")
+    return tuple(str(a["service"]) for a in apps if a.get("offered", True))
+
+
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     """Parametrise every flow test over shapes x the transports asked for.
 

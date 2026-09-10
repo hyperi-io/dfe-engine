@@ -16,9 +16,9 @@ copies of the convention.
 
 Every refusal is here for the same reason: a flow that cannot run must fail at
 save, where the person who typed it is still looking, not at a pod that then
-never starts. What an app CAN carry is data in apps.yaml, so a transform gains
-the direct transport by shipping its listener and being listed - never by a
-condition added here.
+never starts. What an app CAN carry and which profiles deploy it are both data
+in apps.yaml, so a transform gains the direct transport by shipping its listener
+and being listed - never by a condition added here.
 
 See docs/data-plane/source-flow.md for the shape this builds.
 """
@@ -141,16 +141,28 @@ def _stage_app(
     *,
     source: str,
     purpose: str,
+    profile: str,
 ) -> AppDescriptor:
     """The app running one stage of this source, or why it cannot run it.
 
-    The ONE place a transport refusal is raised. What an app carries is data in
-    apps.yaml, so this never grows a branch per app.
+    The ONE place a stage refusal is raised. Which profiles may deploy an app and
+    what it carries are both data in apps.yaml, so this never grows a branch per
+    app.
+
+    The offer is checked first because it is the wider statement: a tier that
+    deploys nothing to run this stage cannot run the source on either transport.
+    A deployment that names no profile refuses nothing, so a hand-run engine is
+    unchanged.
     """
     app = apps.get(service)
     if app is None:
         raise FlowError(
             f"source {source!r} needs {service} to {purpose}, but no such app is catalogued"
+        )
+    if not app.offered_in(profile):
+        raise FlowError(
+            f"source {source!r} needs {service} to {purpose}, but the {profile} "
+            f"profile does not deploy {service}"
         )
     if not app.carries(transport):
         raise FlowError(
@@ -176,6 +188,7 @@ def _resolve_transform(
     transport: SourceTransport,
     apps: dict[str, AppDescriptor],
     mesh_namespace: str,
+    profile: str,
 ) -> FlowTransform | None:
     transform = source.transform
     if transform is None:
@@ -188,6 +201,7 @@ def _resolve_transform(
         apps,
         source=source.source,
         purpose=f"run its {transform.engine} transform",
+        profile=profile,
     )
 
     match = source.match
@@ -213,7 +227,7 @@ def _resolve_transform(
 
 
 def _resolve_input(
-    source: Source, transport: SourceTransport, apps: dict[str, AppDescriptor]
+    source: Source, transport: SourceTransport, apps: dict[str, AppDescriptor], profile: str
 ) -> str:
     """The receiver match that selects the records, or the fetcher that pulls them.
 
@@ -222,7 +236,14 @@ def _resolve_input(
     """
     if source.origin == "receiver":
         return _match_expression(source)
-    fetcher = _stage_app(FETCHER_SERVICE, transport, apps, source=source.source, purpose="fetch it")
+    fetcher = _stage_app(
+        FETCHER_SERVICE,
+        transport,
+        apps,
+        source=source.source,
+        purpose="fetch it",
+        profile=profile,
+    )
     return catalogue.instance_name(fetcher, source.source)
 
 
@@ -247,7 +268,14 @@ def _resolve_loader_output(
     apps: dict[str, AppDescriptor],
     settings: DFESettings,
 ) -> str:
-    _stage_app(LOADER_SERVICE, transport, apps, source=source.source, purpose="load it")
+    _stage_app(
+        LOADER_SERVICE,
+        transport,
+        apps,
+        source=source.source,
+        purpose="load it",
+        profile=settings.deployment.profile,
+    )
     if transport == "direct":
         return loader_endpoint(settings, apps)
     # On the bus the loader reads whichever topic the last stage wrote.
@@ -281,15 +309,17 @@ def resolve_flow(
     """The stages this source's records travel, or the reason they cannot.
 
     Raises ``FlowError`` when the deployment does not offer the transport the
-    source asks for, or when an app in the flow does not carry it - a manifest
-    fact per app, so a transport an app ships a listener for stops being refused
-    the moment the manifest says so.
+    source asks for, when this deployment's profile deploys no app to run one of
+    its stages, or when an app in the flow does not carry the transport - all
+    manifest facts per app, so an app stops being refused the moment the manifest
+    says so.
     """
     apps = catalogue_apps if catalogue_apps is not None else catalogue.APP_CATALOGUE
+    profile = settings.deployment.profile
     transport = _resolve_transport(source, settings)
     _check_archive(source, transport, apps)
 
-    transform = _resolve_transform(source, transport, apps, _mesh_namespace(settings))
+    transform = _resolve_transform(source, transport, apps, _mesh_namespace(settings), profile)
     return SourceFlow(
         source=source.source,
         transport=transport,
@@ -299,7 +329,7 @@ def resolve_flow(
             else settings.transport.direct_protocol
         ),
         origin=source.origin,
-        input=_resolve_input(source, transport, apps),
+        input=_resolve_input(source, transport, apps, profile),
         transform=transform,
         outputs=FlowOutputs(
             loader=_resolve_loader_output(source, transport, transform, apps, settings),

@@ -38,6 +38,10 @@ DEPLOYMENT_TRANSPORTS: dict[str, str] = {"kafka": "bus", "grpc": "direct"}
 # fails the run (see conftest.py).
 EXPECTED_SKIP = "EXPECTED-SKIP:"
 
+# The app each origin needs the deployment to run before its records can exist.
+# The receiver takes every source, so only a fetcher-origin shape names one.
+ORIGIN_APPS: dict[str, str] = {"fetcher": "dfe-fetcher"}
+
 # What an unmatched record is stamped with, and the table it lands in. Fixtures
 # write {catchall} and the run fills it from the receiver's compiled
 # routing.default_source, because the name belongs to the deployed release.
@@ -132,23 +136,31 @@ class FlowShape:
         reason = self.expected_skip.get(transport)
         return f"{EXPECTED_SKIP} {reason}" if reason else None
 
-    def refusal(self, transport: str, carried: Sequence[str]) -> str | None:
+    def refusal(self, transport: str, carried: Sequence[str], offered: Sequence[str]) -> str | None:
         """The refusal the API must give on *transport* here, or None when it must save.
 
-        Two refusals reach the same save. A deployment binds its stages to ONE
-        transport, so a source on the other is refused whatever the shape is -
-        that is read off the deployment at run time, never declared per fixture.
-        What an app in this shape's flow cannot carry is the fixture's own.
+        Three refusals reach the same save, and two of them are the deployment's
+        rather than the fixture's. A deployment binds its stages to ONE transport,
+        so a source on the other is refused whatever the shape is; and a tier that
+        deploys no app to run this shape's origin refuses it on either transport,
+        which is why a fetcher-origin shape is refused on Compose rather than
+        written and never polled. Both are read off the deployment at run time,
+        never declared per fixture. What an app in this shape's flow cannot carry
+        is the fixture's own.
 
         Args:
             transport: The source transport the case is running.
             carried: What the deployment reports it carries.
+            offered: The apps the deployment reports it offers.
 
         Returns:
             The substring the refusal must contain, or None.
         """
         if transport not in carried:
             return f"asks for the {transport} transport"
+        needed = ORIGIN_APPS.get(self.origin)
+        if needed is not None and needed not in offered:
+            return f"does not deploy {needed}"
         return self.refused.get(transport)
 
 

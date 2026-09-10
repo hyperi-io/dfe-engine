@@ -24,9 +24,9 @@ from dfe_engine.source.flow import FlowError, resolve_flow
 from dfe_engine.source.models import Source
 
 
-def _settings(**transport) -> DFESettings:
-    """Settings differing from the defaults only in the transport block."""
-    return DFESettings(env="dev", transport=transport)
+def _settings(*, profile: str = "", **transport) -> DFESettings:
+    """Settings differing from the defaults only in the transport block and the profile."""
+    return DFESettings(env="dev", transport=transport, deployment={"profile": profile})
 
 
 def _source(name: str = "auth", **fields) -> Source:
@@ -276,3 +276,56 @@ class TestRefusals:
 
         with pytest.raises(FlowError, match="dfe-fetcher carries only bus"):
             resolve_flow(_fetched(transport="direct"), _settings(default="direct"), bus_only)
+
+
+class TestAProfileThatDeploysNoSuchApp:
+    """A tier that deploys nothing to run a stage must refuse the source at save.
+
+    Accepting one writes an instance into the overlay that nothing reads, and the
+    operator finds out by waiting for records that were never coming.
+    """
+
+    COMPOSE = ("docker-slim", "docker-single")
+    KUBERNETES = ("slim", "single", "scale", "mesh")
+
+    @pytest.mark.parametrize("profile", COMPOSE)
+    def test_a_fetched_source_is_refused_where_no_fetcher_is_deployed(self, profile):
+        with pytest.raises(FlowError, match="does not deploy dfe-fetcher"):
+            resolve_flow(_fetched(), _settings(default="bus", profile=profile))
+
+    def test_the_refusal_names_the_profile_that_gave_it(self):
+        with pytest.raises(FlowError, match="the docker-single profile"):
+            resolve_flow(_fetched(), _settings(default="bus", profile="docker-single"))
+
+    @pytest.mark.parametrize("profile", KUBERNETES)
+    def test_a_tier_that_deploys_one_still_resolves_it(self, profile):
+        assert resolve_flow(_fetched(), _settings(default="bus", profile=profile)).input == (
+            "dfe-fetcher-okta"
+        )
+
+    def test_a_deployment_naming_no_profile_refuses_nothing(self):
+        # An unset profile is unknown, not empty, so a hand-run engine keeps
+        # resolving every flow it did before.
+        assert resolve_flow(_fetched(), _settings(default="bus")).input == "dfe-fetcher-okta"
+
+    @pytest.mark.parametrize("profile", COMPOSE)
+    def test_a_posted_source_is_untouched(self, profile):
+        # The receiver is stack-wide and every tier deploys one.
+        assert resolve_flow(_source(), _settings(default="bus", profile=profile)).origin == (
+            "receiver"
+        )
+
+    def test_the_rule_is_manifest_data_rather_than_a_branch_per_app(self):
+        # A transform restricted to another tier is refused the same way, which
+        # is what stops this growing an app name per stage.
+        restricted = dict(catalogue.APP_CATALOGUE)
+        restricted["dfe-transform-vrl"] = replace(
+            catalogue.descriptor("dfe-transform-vrl"), profiles=frozenset({"scale"})
+        )
+
+        with pytest.raises(FlowError, match="does not deploy dfe-transform-vrl"):
+            resolve_flow(
+                _source(transform={"engine": "vrl"}),
+                _settings(default="bus", profile="slim"),
+                restricted,
+            )
