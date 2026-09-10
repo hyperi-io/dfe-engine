@@ -14,11 +14,11 @@ memory, so it is MATERIALISED into a small CH table (``hunt_schedule``) at
 config-deploy time (an Argo post-sync hook, or the engine on a hunt-config change).
 
 The scaler query then counts due-and-unclaimed hunts using the SAME arithmetic the
-worker uses (``spread.current_fire``): for a hunt with interval I and stable offset
-P, boundary = now // I * I, fire = boundary + P, and the hunt is due iff
+worker uses (``spread.latest_fire``): for a hunt with interval I and stable offset
+P, boundary = now // I * I, fire = boundary + P if now >= boundary + P else
+boundary + P - I (the latest fire at or before now), and the hunt is due iff
 
-    now >= fire            # this interval's fire has arrived
-    AND watermark < fire   # that fire is not already completed
+    watermark < fire       # that fire is not already completed
     AND no active lease    # it is not currently running
 
 That EXACT parity with the worker's own skip conditions (runner.tick) is what makes
@@ -101,12 +101,13 @@ def publish_schedule(
 def due_query(database: str) -> str:
     """The KEDA ClickHouse-scaler query: number of due-and-unclaimed hunts.
 
-    Pure-SQL parity with spread.current_fire + runner.tick's skip conditions. The
+    Pure-SQL parity with spread.latest_fire + runner.tick's skip conditions. The
     enabled=1 filter is applied in the inner subquery so a tombstone (interval=0)
     can never reach the intDiv (no divide-by-zero). KEDA scales workers on this
     count (targetValue = hunts-per-worker) and to zero when it returns 0.
     """
-    fire = "(intDiv(toInt64(now()), s.interval_seconds) * s.interval_seconds + s.phase_offset)"
+    current = "(intDiv(toInt64(now()), s.interval_seconds) * s.interval_seconds + s.phase_offset)"
+    fire = f"if(toInt64(now()) >= {current}, {current}, {current} - s.interval_seconds)"
     return (
         "SELECT count() AS due FROM ("
         "SELECT hunt_id, interval_seconds, phase_offset FROM ("
@@ -117,8 +118,7 @@ def due_query(database: str) -> str:
         f"FROM `{database}`.hunt_watermark GROUP BY hunt_id) w USING (hunt_id) "
         "LEFT JOIN (SELECT hunt_id, argMax(lease_until, claimed) AS lu "
         f"FROM `{database}`.hunt_lease GROUP BY hunt_id) l USING (hunt_id) "
-        f"WHERE toInt64(now()) >= {fire} "
-        f"AND coalesce(w.wm, 0) < {fire} "
+        f"WHERE coalesce(w.wm, 0) < {fire} "
         "AND coalesce(l.lu, 0) <= toInt64(now())"
     )
 
