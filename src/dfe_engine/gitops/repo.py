@@ -222,6 +222,45 @@ class GitopsRepo:
         porcelain.init(str(self._path))
         return self._path
 
+    def sync(self, *, discard_local: bool = False) -> bool:
+        """Fast-forward the tracked branch to the remote's head.
+
+        Every engine replica holds its own clone of one deploy repo, so the clone a
+        write lands on is behind whenever another replica pushed first, and a commit
+        made on that head is a non-fast-forward push. Returns True when the local
+        branch moved. ``discard_local`` drops a local commit the remote never took
+        (a rejected push) so the caller can re-apply the write on the remote head.
+        """
+        if not self._repo_url:
+            return False
+        from dulwich.graph import can_fast_forward
+        from dulwich.repo import Repo
+
+        result = self._remote_op(
+            lambda errstream: porcelain.fetch(
+                str(self._path), self._authed_url(), errstream=errstream
+            )
+        )
+        self._scrub_remote()
+        remote_head = result.refs.get(b"refs/heads/" + self._branch.encode())
+        if remote_head is None:
+            return False
+        local = self.head_revision()
+        if local == remote_head.decode():
+            return False
+        if local is not None and not discard_local:
+            with Repo(str(self._path)) as repo:
+                if not can_fast_forward(repo, local.encode(), remote_head):
+                    raise GitopsRemoteError(
+                        f"the deploy repo clone diverged from {self._branch}: local "
+                        f"{local[:12]} is not behind remote {remote_head.decode()[:12]}"
+                    )
+        repo_path = str(self._path)
+        porcelain.update_ref(repo_path, b"refs/heads/" + self._branch.encode(), remote_head)
+        porcelain.reset(repo_path, "hard", remote_head)
+        logger.info("Gitops clone fast-forwarded to the remote head", commit=remote_head.decode())
+        return True
+
     def publish(
         self,
         artifacts: Mapping[str, str | bytes],
@@ -242,12 +281,65 @@ class GitopsRepo:
           locally and remotely -- a reviewer merges the PR. This is how a
           production+team write is kept off main (see gitcrud/routing.py).
         """
+        # The write goes on the remote's head, never on whatever this clone last saw.
+        if self._push and self._repo_url:
+            self.sync()
+
         # Capture the base BEFORE staging so PR mode can restore the tracked
         # branch to it after committing. An empty repo has no base to branch from.
         base_head = self.head_revision()
         if branch and base_head is None:
             raise ValueError("cannot open a review branch: the deploy repo has no commits yet")
 
+        sha_str, written = self._stage_and_commit(artifacts, deletions, message)
+        if sha_str is None:
+            logger.info("Gitops repo unchanged; skipping commit")
+            return PublishResult(changed=False, files=written)
+
+        if branch:
+            # base_head is non-None here: the empty-repo case raised above.
+            return self._route_to_branch(sha_str, branch, cast("str", base_head), written)
+
+        pushed = False
+        if self._push and self._repo_url:
+            refspec = f"refs/heads/{self._branch}".encode()
+            try:
+                self._push_refspec(refspec)
+            except GitopsRemoteError as exc:
+                # The remote moved between the sync and the push, so the local commit
+                # is orphaned: take the remote head and re-apply this write once. A
+                # push the remote rejected for any other reason stays an error.
+                if not self.sync(discard_local=True):
+                    raise
+                logger.warning(
+                    "Gitops push rejected; re-applying the write on the remote head",
+                    error=str(exc),
+                )
+                sha_str, written = self._stage_and_commit(artifacts, deletions, message)
+                if sha_str is None:
+                    logger.info("Gitops repo unchanged after the remote caught up")
+                    return PublishResult(changed=False, files=written)
+                self._push_refspec(refspec)
+            pushed = True
+
+        logger.info(
+            "Published gitops artifacts",
+            commit=sha_str,
+            files=len(written),
+            pushed=pushed,
+        )
+        return PublishResult(changed=True, files=written, commit_sha=sha_str, pushed=pushed)
+
+    def _stage_and_commit(
+        self,
+        artifacts: Mapping[str, str | bytes],
+        deletions: list[str] | None,
+        message: str,
+    ) -> tuple[str | None, list[str]]:
+        """Write and stage the artifacts; commit when anything changed.
+
+        Returns the commit SHA (None when nothing was staged) and the paths touched.
+        """
         written: list[str] = []
         for rel, content in sorted(artifacts.items()):
             target = self._path / rel
@@ -269,8 +361,7 @@ class GitopsRepo:
         status = porcelain.status(str(self._path))
         staged = status.staged
         if not (staged["add"] or staged["modify"] or staged["delete"]):
-            logger.info("Gitops repo unchanged; skipping commit")
-            return PublishResult(changed=False, files=written)
+            return None, written
 
         sha = porcelain.commit(
             str(self._path),
@@ -278,24 +369,7 @@ class GitopsRepo:
             author=self._author,
             committer=self._author,
         )
-        sha_str = sha.decode() if isinstance(sha, bytes) else str(sha)
-
-        if branch:
-            # base_head is non-None here: the empty-repo case raised above.
-            return self._route_to_branch(sha_str, branch, cast("str", base_head), written)
-
-        pushed = False
-        if self._push and self._repo_url:
-            self._push_refspec(f"refs/heads/{self._branch}".encode())
-            pushed = True
-
-        logger.info(
-            "Published gitops artifacts",
-            commit=sha_str,
-            files=len(written),
-            pushed=pushed,
-        )
-        return PublishResult(changed=True, files=written, commit_sha=sha_str, pushed=pushed)
+        return (sha.decode() if isinstance(sha, bytes) else str(sha)), written
 
     def _push_refspec(self, refspec: bytes) -> None:
         """Push one refspec to the configured remote, credentials never logged."""
