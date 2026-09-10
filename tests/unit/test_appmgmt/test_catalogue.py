@@ -151,7 +151,7 @@ class TestShippedManifest:
             if app.profiles
         }
 
-        assert restricted == {"culvert": ["scale", "scale-mesh"]}
+        assert restricted == {"culvert": ["mesh", "scale"]}
 
     def test_the_apps_nothing_deploys_by_default_are_the_per_source_ones_and_the_door(self):
         # An instance of a per-source app arrives with its source, and the edge
@@ -291,13 +291,11 @@ class TestManifestParsing:
 
     def test_an_app_may_be_deployed_only_in_the_profiles_it_names(self, tmp_path):
         apps = load_catalogue(
-            self._manifest(
-                tmp_path, {"multiplicity": "single", "profiles": ["scale", "scale-mesh"]}
-            )
+            self._manifest(tmp_path, {"multiplicity": "single", "profiles": ["scale", "mesh"]})
         )
         app = apps["dfe-thing"]
 
-        assert app.profiles == frozenset({"scale", "scale-mesh"})
+        assert app.profiles == frozenset({"scale", "mesh"})
         assert app.offered_in("scale")
         assert not app.offered_in("slim")
         # Nothing says otherwise, so it is deployed wherever it may be.
@@ -309,7 +307,7 @@ class TestManifestParsing:
                 tmp_path,
                 {
                     "multiplicity": "single",
-                    "profiles": ["scale", "scale-mesh"],
+                    "profiles": ["scale", "mesh"],
                     "default_in": [],
                 },
             )
@@ -318,14 +316,14 @@ class TestManifestParsing:
 
         assert app.default_in == frozenset()
         assert app.optional is True
-        assert app.offered_in("scale-mesh")
+        assert app.offered_in("mesh")
         assert not app.offered_in("slim")
 
     def test_an_app_can_be_deployable_further_than_it_is_deployed(self, tmp_path):
         apps = load_catalogue(
             self._manifest(
                 tmp_path,
-                {"profiles": ["single", "scale", "scale-mesh"], "default_in": ["scale"]},
+                {"profiles": ["single", "scale", "mesh"], "default_in": ["scale"]},
             )
         )
         app = apps["dfe-thing"]

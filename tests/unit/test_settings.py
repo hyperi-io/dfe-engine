@@ -490,9 +490,9 @@ class TestEnvOverrides:
         assert settings.deployment.config_dir == "/custom/deploy"
 
     def test_profile_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_PROFILE", " scale-mesh ")
+        monkeypatch.setenv("DFE_PROFILE", " mesh ")
         settings = load_settings()
-        assert settings.deployment.profile == "scale-mesh"
+        assert settings.deployment.profile == "mesh"
 
     def test_profile_defaults_to_unknown(self):
         # An engine nobody told cannot judge which apps a tier offers, and says so

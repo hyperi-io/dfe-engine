@@ -37,11 +37,11 @@ def _wire(app, tmp_path, pins: str | None = PINS) -> GitCrud:
 
 class TestDeploymentFacts:
     def test_reports_the_profile_the_deployer_injected(self, client, app, admin_headers):
-        app.state.settings.deployment.profile = "scale-mesh"
+        app.state.settings.deployment.profile = "mesh"
 
         body = client.get("/api/v1/system/deployment", headers=admin_headers).json()
 
-        assert body["profile"] == "scale-mesh"
+        assert body["profile"] == "mesh"
 
     def test_an_unset_profile_is_empty_rather_than_guessed(self, client, admin_headers):
         resp = client.get("/api/v1/system/deployment", headers=admin_headers)

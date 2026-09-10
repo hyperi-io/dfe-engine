@@ -26,7 +26,7 @@ parses and validates the fixtures and holds the transport rule.
 `DFE_E2E_TRANSPORT` says which data path to prove: `kafka`, `grpc`, or `both`.
 `both` runs each shape twice and FAILS on a deployment that cannot carry one of
 them -- a slim deploy is direct-only, so `both` there is a failure by design and
-the run belongs on `scale` or `scale-mesh`.
+the run belongs on `scale` or `mesh`.
 
 Every skip has to be one a fixture declared: `flows/conftest.py` fails the whole
 run on any other, because a suite that reports green with half its cases skipped
