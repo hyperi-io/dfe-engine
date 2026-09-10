@@ -42,6 +42,7 @@ whole suite reuses rather than one deployment's endpoint:
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from collections.abc import Callable
@@ -218,8 +219,17 @@ def poll_until(
 INGEST_RETRY_WINDOW = 180.0
 
 
-def post_events(cfg: E2EConfig, bodies: list[dict]) -> None:
-    """POST each body to the deployment's ingest endpoint.
+def _json_body(payload: Any) -> bytes:
+    """Serialise exactly as httpx's own ``json=`` would.
+
+    One record and a batch of them must reach the receiver in the same encoding,
+    or the only difference the batch cases prove is the serialiser's.
+    """
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+def _post(cfg: E2EConfig, body: bytes, content_type: str) -> None:
+    """POST one prepared body to the deployment's ingest endpoint.
 
     Shared because both live suites send the same way, and a second copy would be
     a second place for the token header or the TLS posture to drift. Callers gate
@@ -233,32 +243,65 @@ def post_events(cfg: E2EConfig, bodies: list[dict]) -> None:
     import httpx
 
     url = must(cfg.receiver_url)
-    headers = {"Content-Type": "application/json"}
+    headers = {"Content-Type": content_type}
     if cfg.receiver_token:
         headers["Authorization"] = f"Bearer {cfg.receiver_token}"
+    deadline = time.monotonic() + INGEST_RETRY_WINDOW
+    while True:
+        try:
+            with httpx.Client(verify=cfg.verify, timeout=30.0) as client:
+                response = client.post(url, content=body, headers=headers)
+        except httpx.TransportError as exc:
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    f"the receiver never answered within {INGEST_RETRY_WINDOW}s: {exc}"
+                ) from exc
+            time.sleep(2.0)
+            continue
+        if response.status_code >= 500:
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    f"the receiver kept failing for {INGEST_RETRY_WINDOW}s: "
+                    f"{response.status_code} {response.text}"
+                )
+            time.sleep(2.0)
+            continue
+        assert response.status_code < 300, f"receiver rejected the event: {response.text}"
+        break
+
+
+def post_events(cfg: E2EConfig, bodies: list[dict]) -> None:
+    """POST each body to the deployment's ingest endpoint, one request per record."""
     for body in bodies:
-        deadline = time.monotonic() + INGEST_RETRY_WINDOW
-        while True:
-            try:
-                with httpx.Client(verify=cfg.verify, timeout=30.0) as client:
-                    response = client.post(url, json=body, headers=headers)
-            except httpx.TransportError as exc:
-                if time.monotonic() >= deadline:
-                    raise AssertionError(
-                        f"the receiver never answered within {INGEST_RETRY_WINDOW}s: {exc}"
-                    ) from exc
-                time.sleep(2.0)
-                continue
-            if response.status_code >= 500:
-                if time.monotonic() >= deadline:
-                    raise AssertionError(
-                        f"the receiver kept failing for {INGEST_RETRY_WINDOW}s: "
-                        f"{response.status_code} {response.text}"
-                    )
-                time.sleep(2.0)
-                continue
-            assert response.status_code < 300, f"receiver rejected the event: {response.text}"
-            break
+        _post(cfg, _json_body(body), "application/json")
+
+
+def batch_body(bodies: list[dict]) -> bytes:
+    """Every record as ONE top-level JSON array, the way a batching client sends."""
+    return _json_body(bodies)
+
+
+def ndjson_body(bodies: list[dict]) -> bytes:
+    """Every record as ONE newline-delimited body, one complete value per line."""
+    return b"\n".join(_json_body(body) for body in bodies)
+
+
+def post_batch(cfg: E2EConfig, bodies: list[dict]) -> None:
+    """POST every body as one JSON array request.
+
+    Same endpoint, headers and retry window as ``post_events``, because the body
+    shape is the only thing under test here.
+    """
+    _post(cfg, batch_body(bodies), "application/json")
+
+
+def post_ndjson(cfg: E2EConfig, bodies: list[dict]) -> None:
+    """POST every body as one newline-delimited request.
+
+    The other batch shape the ingest endpoint advertises, so it carries the same
+    one-row-per-record obligation as an array.
+    """
+    _post(cfg, ndjson_body(bodies), "application/x-ndjson")
 
 
 def drop_table(ch_client, db: str, name: str) -> None:
