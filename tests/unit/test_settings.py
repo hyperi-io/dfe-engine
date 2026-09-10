@@ -12,6 +12,7 @@ from dfe_engine.settings import (
     load_settings,
     reset_settings,
 )
+from dfe_engine.transport import SourceTransport
 
 
 @pytest.fixture(autouse=True)
@@ -550,6 +551,36 @@ class TestEnvOverrides:
         assert settings.clickhouse.port == 9000
         assert settings.api.port == 9090
         assert settings.auth.enabled is True
+
+
+class TestTransportAvailability:
+    """What a deployment can carry a source on: the one transport it was stood up with."""
+
+    # dfe-infra binds every stage to one transport from the profile's kafka.mode,
+    # so the other one has nothing listening for a record.
+    @pytest.mark.parametrize(
+        ("profile", "carried"),
+        [("slim", "direct"), ("mesh", "direct"), ("single", "bus"), ("scale", "bus")],
+    )
+    def test_a_profile_carries_the_transport_it_was_stood_up_with(
+        self, profile: str, carried: SourceTransport
+    ):
+        from dfe_engine.settings import TransportSettings
+
+        transport = TransportSettings(default=carried, bus_present=carried == "bus")
+
+        assert transport.available() == {carried}, f"{profile} carries {carried} alone"
+
+    def test_a_bus_deployment_does_not_offer_direct(self):
+        from dfe_engine.settings import TransportSettings
+
+        assert "direct" not in TransportSettings(default="bus", bus_present=True).available()
+
+    def test_a_bus_default_without_a_bus_is_refused(self):
+        from dfe_engine.settings import TransportSettings
+
+        with pytest.raises(ValidationError, match="DFE_TRANSPORT_BUS_PRESENT"):
+            TransportSettings(default="bus", bus_present=False)
 
 
 class TestTransportMesh:

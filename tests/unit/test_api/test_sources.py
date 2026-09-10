@@ -285,6 +285,45 @@ class TestCreateSource:
         assert resp.status_code == 403
 
 
+class TestCreateOnATransportTheDeploymentLacks:
+    """A source may name only what this deployment carries, and is told so at save."""
+
+    @pytest.fixture(autouse=True)
+    def _bus_deployment(self, monkeypatch, api_settings):
+        # The save path reads the process-wide settings, so the deployment a
+        # refusal is judged against is the one the app was built with.
+        monkeypatch.setattr("dfe_engine.settings.get_settings", lambda: api_settings)
+
+    def test_direct_on_a_bus_deployment_is_refused_with_the_reason(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        # The loader consumes the topic on a bus deployment, so a direct source
+        # would compile an endpoint nothing serves and its records would land
+        # nowhere. Refusing at save is where the person who typed it can see it.
+        resp = client.post(
+            "/api/v1/sources",
+            json={**sample_source, "transport": "direct"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        body = resp.json()
+        assert body["code"] == "validation_error"
+        assert "asks for the direct transport" in body["message"]
+        assert "offers bus" in body["message"]
+
+    def test_the_transport_the_deployment_carries_still_saves(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        resp = client.post(
+            "/api/v1/sources",
+            json={**sample_source, "transport": "bus"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 201, resp.text
+
+
 class TestGetSource:
     """GET /api/v1/sources/{name}"""
 

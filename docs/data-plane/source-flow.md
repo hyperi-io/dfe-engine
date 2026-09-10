@@ -64,11 +64,11 @@ The archiver reads the landing topic, so it keeps the RAW record as it arrived, 
 
 The second diagram is the shape a transform takes once it declares `direct`. dfe-transform-vrl and dfe-transform-vector declare it; dfe-transform-elastic does not yet, so a direct source that names it is refused at save. Shipping the listener and adding the `transports` entry is the whole change.
 
-## Two transports, one per source
+## Two transports, one per deployment
 
-A source declares `transport: bus` or `transport: direct`. Left unset, it takes the deployment's default, which follows the profile's `kafka.mode`: `disabled` means direct, anything else means bus. A source that names a transport the deployment lacks is refused at save. Separately, a flow is never mixed: every stage of one source runs on the same transport.
+A source declares `transport: bus` or `transport: direct`. Left unset, it takes the deployment's own, which follows the profile's `kafka.mode`: `disabled` means direct, anything else means bus. Every stage is bound to that one at deploy, so it is the only transport the deployment carries and a source naming the other is refused at save with the reason - `GET /api/v1/system/deployment` reports the same one transport, so a console never offers the other. Separately, a flow is never mixed: every stage of one source runs on the same transport.
 
-| Profile | Default transport | Between stages | Balancing between pools |
+| Profile | Transport | Between stages | Balancing between pools |
 |---|---|---|---|
 | dfe-docker slim | direct | gRPC | one replica of each |
 | dfe-docker single | bus | Kafka topics on one broker | one replica of each |
@@ -128,7 +128,7 @@ Every app rolls on every config change, so nothing depends on which app can relo
 
 ## Asking what the deployment is, and what a source is doing
 
-Two reads carry the facts a console would otherwise have to guess at. `GET /api/v1/system/deployment` answers what this deployment IS: the profile the deployer injected as `DFE_PROFILE`, the transports it can carry a source on and which one a source that names none takes, whether the stage pools sit behind mesh listeners and where, and the stack, engine and dfe-ui versions. `GET /api/v1/system/version` serves the version half from the same function, so the footer and the deployment card cannot disagree, and `GET /api/v1/apps` judges each app's `offered` against the deployment's own profile when the caller names none.
+Two reads carry the facts a console would otherwise have to guess at. `GET /api/v1/system/deployment` answers what this deployment IS: the profile the deployer injected as `DFE_PROFILE`, the one transport it carries a source on - which is both the only one a source may name and the one a source that names none takes - whether the stage pools sit behind mesh listeners and where, and the stack, engine and dfe-ui versions. `GET /api/v1/system/version` serves the version half from the same function, so the footer and the deployment card cannot disagree, and `GET /api/v1/apps` judges each app's `offered` against the deployment's own profile when the caller names none.
 
 `GET /api/v1/sources/{name}/signals` answers what one source is doing: `records_per_min` and `last_seen` over a bounded five-minute window, read from the loader's `loader_messages_by_table_total` counter in the otel database, plus `landed_in_default`. The counter is per TABLE, so `landed_in_default` says the number covers the whole shared landing table rather than this source alone - which is the case for a fetcher pushing to the main topic. Either reading is null where no series answers, and the route still returns 200: a source only just defined has nothing to report, and a zero would claim a measurement nobody took.
 

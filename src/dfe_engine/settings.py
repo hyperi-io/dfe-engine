@@ -438,7 +438,13 @@ class TransportSettings(BaseModel):
     A source records ``bus`` or ``direct`` and nothing more. Which bus and which
     direct protocol are facts of the deployment, so they live here: a second bus
     provider joins behind the same ``bus`` value without touching a source.
-    ``bus_present`` follows the profile - the brokerless profiles run direct.
+
+    ONE transport per deployment. Every stage is bound to it at deploy time - on
+    the bus the loader consumes the topic, on direct it listens for a push - and
+    no stage does both, so a source on the other transport lands nowhere.
+    ``default`` names the one this deployment was stood up with; ``bus_present``
+    says whether a broker exists here at all, which is what topic creation
+    follows.
 
     The mesh pair is the same kind of fact one level down: on direct a stage is a
     pool of pods, and a deployment either dials the pool's Service or puts a
@@ -454,7 +460,10 @@ class TransportSettings(BaseModel):
 
     default: SourceTransport = Field(
         default="bus",
-        description="Transport a source that names none takes",
+        description=(
+            "The transport this deployment's stages are bound to, and the one a "
+            "source that names none takes"
+        ),
     )
     bus_present: bool = Field(
         default=True,
@@ -478,22 +487,21 @@ class TransportSettings(BaseModel):
     )
 
     def available(self) -> set[str]:
-        """The transports a source may name here.
+        """The transports a source may name here: the one the deployment carries.
 
-        Direct is always available: every app compiles its gRPC path in, so a
-        deployment can always run point to point.
+        What an app CAN carry is a capability in apps.yaml; this is what this
+        deployment DOES carry, and only that reaches a running stage.
         """
-        return {"direct"} | ({"bus"} if self.bus_present else set())
+        return {self.default}
 
     @model_validator(mode="after")
-    def _default_must_be_available(self) -> "TransportSettings":
-        # Otherwise every source that names no transport is refused at save, with
-        # the reason sitting two config keys away from the source being written.
-        if self.default not in self.available():
+    def _a_bus_default_needs_a_bus(self) -> "TransportSettings":
+        # Every source would take a topic no broker holds, and the reason would sit
+        # two config keys away from the source being written.
+        if self.default == "bus" and not self.bus_present:
             raise ValueError(
-                f"transport.default is {self.default!r} but this deployment offers "
-                f"{', '.join(sorted(self.available()))}: set DFE_TRANSPORT_DEFAULT=direct, "
-                "or DFE_TRANSPORT_BUS_PRESENT=true"
+                "transport.default is 'bus' but this deployment runs no bus: set "
+                "DFE_TRANSPORT_DEFAULT=direct, or DFE_TRANSPORT_BUS_PRESENT=true"
             )
         return self
 

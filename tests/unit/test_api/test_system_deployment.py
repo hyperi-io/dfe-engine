@@ -57,13 +57,15 @@ class TestDeploymentFacts:
 
         assert body["transports"] == {"default": "direct", "available": ["direct"]}
 
-    def test_a_deployment_with_a_bus_offers_both(self, client, app, admin_headers):
+    def test_a_deployment_with_a_bus_offers_the_bus_alone(self, client, app, admin_headers):
+        # The loader consumes the topic here and serves no push listener, so a
+        # console offering direct would offer a flow that lands nowhere.
         app.state.settings.transport.bus_present = True
         app.state.settings.transport.default = "bus"
 
         body = client.get("/api/v1/system/deployment", headers=admin_headers).json()
 
-        assert body["transports"] == {"default": "bus", "available": ["bus", "direct"]}
+        assert body["transports"] == {"default": "bus", "available": ["bus"]}
 
     def test_the_mesh_pair_is_reported_together(self, client, app, admin_headers):
         app.state.settings.transport.mesh_enabled = True
