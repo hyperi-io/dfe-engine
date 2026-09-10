@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.28](https://github.com/hyperi-io/dfe-engine/compare/v1.19.27...v1.19.28) (2026-09-10)
+
+### Bug Fixes
+
+* **e2e:** drop a flow table on every replica of the cluster ([#342](https://github.com/hyperi-io/dfe-engine/issues/342)) ([9e9bad1](https://github.com/hyperi-io/dfe-engine/commit/9e9bad17af582e953815dd6fd055a09547b0b851))
+* **gitops:** fast-forward the clone to the remote head before every publish ([#344](https://github.com/hyperi-io/dfe-engine/issues/344)) ([20852ae](https://github.com/hyperi-io/dfe-engine/commit/20852ae62d429d9bfc35305020ccbe28a0afed0e))
+
 ## [1.19.27](https://github.com/hyperi-io/dfe-engine/compare/v1.19.26...v1.19.27) (2026-09-10)
 
 ### Bug Fixes
