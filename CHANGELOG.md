@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.26](https://github.com/hyperi-io/dfe-engine/compare/v1.19.25...v1.19.26) (2026-09-10)
+
+### Bug Fixes
+
+* seed the library from the content the deploy mounts ([#337](https://github.com/hyperi-io/dfe-engine/issues/337)) ([fc85982](https://github.com/hyperi-io/dfe-engine/commit/fc859827a116d5aa61b840f2bd41b7e3847aeefd)), closes [#263](https://github.com/hyperi-io/dfe-engine/issues/263)
+
 ## [1.19.25](https://github.com/hyperi-io/dfe-engine/compare/v1.19.24...v1.19.25) (2026-09-10)
 
 ### Bug Fixes
