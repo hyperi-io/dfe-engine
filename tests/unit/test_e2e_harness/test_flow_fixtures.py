@@ -264,6 +264,49 @@ class TestAnAppTheDeploymentDoesNotDeploy:
         assert declared == "asks for the direct transport"
 
 
+class TestADeploymentThatAppliesNoRouting:
+    """A Compose stack accepts a source and never routes it, so the case cannot land."""
+
+    def test_every_receiver_shape_skips(self) -> None:
+        routed = [s for s in shapes.load_shapes() if s.origin == "receiver"]
+        assert {s.name for s in routed} == {
+            "archived",
+            "multi-destination",
+            "receiver-plain",
+            "receiver-transform",
+        }
+        for shape in routed:
+            assert "applies no engine routing to its running apps" in str(
+                shape.unrouted_reason(False)
+            ), shape.name
+
+    def test_the_catch_all_and_the_catalogue_still_run(self) -> None:
+        # Neither needs a running app to pick up new routing: an unmatched record
+        # takes the flow the deployment already runs, and the catalogue case
+        # asserts what the entry compiled to.
+        for name in ("default-flow", "catalogue"):
+            shape = next(s for s in shapes.load_shapes() if s.name == name)
+            assert shape.unrouted_reason(False) is None
+
+    def test_a_fetcher_shape_is_left_to_the_refusal(self) -> None:
+        # No Compose tier deploys a fetcher, so the deployment refuses the source
+        # outright and that refusal is the assertion.
+        for shape in shapes.load_shapes():
+            if shape.origin != "fetcher":
+                continue
+            assert shape.unrouted_reason(False) is None, shape.name
+
+    def test_a_deployment_that_applies_it_skips_nothing(self) -> None:
+        for shape in shapes.load_shapes():
+            assert shape.unrouted_reason(True) is None, shape.name
+
+    def test_the_skip_is_one_the_policy_accepts(self) -> None:
+        plain = next(s for s in shapes.load_shapes() if s.name == "receiver-plain")
+        reason = str(plain.unrouted_reason(False))
+
+        assert undeclared_skips([("flows::receiver-plain-bus", reason)]) == []
+
+
 class TestTheSkipPolicy:
     def test_a_declared_skip_passes(self) -> None:
         assert (
