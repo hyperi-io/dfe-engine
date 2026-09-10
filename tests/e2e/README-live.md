@@ -14,7 +14,7 @@ service roles actually materialise as ClickHouse objects -- the two-axis RBAC
 model end to end. It needs `DFE_E2E_ENGINE_URL`/`_TOKEN`, plus the `_CH_*` vars
 for its CH assertions. `flows/` is the flow suite, below.
 
-## flows/ -- every source shape, on both transports
+## flows/ -- every source shape, landing or refused
 
 `flows/fixtures/<shape>/` is the one fixture set: `source.yaml` (the create
 bodies verbatim), `payload.ndjson` (`{marker}` is substituted per run) and
@@ -24,15 +24,18 @@ receiver destination on direct). A new shape is a directory, not a test.
 parses and validates the fixtures and holds the transport rule.
 
 `DFE_E2E_TRANSPORT` says which data path to prove: `kafka`, `grpc`, or `both`.
-`both` runs each shape twice and FAILS on a deployment that cannot carry one of
-them -- a slim deploy is direct-only, so `both` there is a failure by design and
-the run belongs on `scale` or `mesh`.
+A deployment carries ONE transport, so `both` proves a landing on the transport
+it carries and a REFUSAL on the other: the engine refuses a source naming a
+transport nothing here serves, and that refusal is the assertion. Which is which
+comes from `GET /api/v1/system/deployment`, so `both` is honest on `scale` and
+`single` (bus) and on `slim` and `mesh` (direct) alike.
 
 Every skip has to be one a fixture declared: `flows/conftest.py` fails the whole
 run on any other, because a suite that reports green with half its cases skipped
 has proved nothing. A declared skip carries the `EXPECTED-SKIP:` marker and says
-what is missing -- the archived shape on direct (dfe-archiver carries the bus
-only) and the catalogue shape where no catalogue is mounted.
+what is missing -- whichever half of a shape's pair the other half already
+proved, the catalogue shape where no catalogue is mounted, and the catalogue
+shape on direct (the app shipping the catalogue carries the bus alone).
 
 Both lanes run this same suite from a checkout of this repo:
 `dfe-ops acceptance --suite flows` for Kubernetes, `make test-flows` in

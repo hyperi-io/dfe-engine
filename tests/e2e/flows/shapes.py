@@ -19,7 +19,7 @@ shape run on this transport", which is what the unit tests exercise and what
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -110,7 +110,9 @@ class FlowShape:
     """transport -> why this shape cannot run there yet."""
 
     refused: Mapping[str, str]
-    """transport -> the substring the API's refusal must carry."""
+    """transport -> the substring the API's refusal must carry, where an app in this
+    shape's flow does not carry that transport. What the DEPLOYMENT carries is read
+    off the deployment instead, so no fixture repeats it."""
 
     transform_file: tuple[str, str] | None
     """(filename, content) uploaded into the transform instance's file set."""
@@ -130,8 +132,23 @@ class FlowShape:
         reason = self.expected_skip.get(transport)
         return f"{EXPECTED_SKIP} {reason}" if reason else None
 
-    def refusal(self, transport: str) -> str | None:
-        """The refusal the API must give on *transport*, or None when it must save."""
+    def refusal(self, transport: str, carried: Sequence[str]) -> str | None:
+        """The refusal the API must give on *transport* here, or None when it must save.
+
+        Two refusals reach the same save. A deployment binds its stages to ONE
+        transport, so a source on the other is refused whatever the shape is -
+        that is read off the deployment at run time, never declared per fixture.
+        What an app in this shape's flow cannot carry is the fixture's own.
+
+        Args:
+            transport: The source transport the case is running.
+            carried: What the deployment reports it carries.
+
+        Returns:
+            The substring the refusal must contain, or None.
+        """
+        if transport not in carried:
+            return f"asks for the {transport} transport"
         return self.refused.get(transport)
 
 

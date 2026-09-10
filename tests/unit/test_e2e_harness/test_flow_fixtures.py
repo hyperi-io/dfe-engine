@@ -174,9 +174,24 @@ class TestTheTransportRule:
         archiver = catalogue.APP_CATALOGUE["dfe-archiver"]
         archived = next(s for s in shapes.load_shapes() if s.name == "archived")
         for transport in shapes.transports_for("both"):
-            carried = archiver.carries(transport)
-            assert (archived.skip_reason(transport) is None) is carried
-            assert (archived.refusal(transport) is None) is carried
+            carries = archiver.carries(transport)
+            # A deployment that carries this transport, so the archiver is the
+            # only thing left that can refuse the shape.
+            assert (archived.skip_reason(transport) is None) is carries
+            assert (archived.refusal(transport, (transport,)) is None) is carries
+
+    def test_a_transport_the_deployment_does_not_carry_refuses_every_shape(self) -> None:
+        # The bus profiles bind the loader to the topic, so nothing serves a direct
+        # source there whatever the shape asks for.
+        for shape in shapes.load_shapes():
+            assert shape.refusal("direct", ("bus",)) == "asks for the direct transport"
+            assert shape.refusal("bus", ("direct",)) == "asks for the bus transport"
+
+    def test_a_shape_the_deployment_can_run_is_not_refused(self) -> None:
+        plain = next(s for s in shapes.load_shapes() if s.name == "receiver-plain")
+
+        for transport in shapes.transports_for("both"):
+            assert plain.refusal(transport, (transport,)) is None
 
     def test_the_catalogue_shape_runs_wherever_the_app_shipping_it_does(self) -> None:
         # Every entry compiles onto the transform of the app that ships the

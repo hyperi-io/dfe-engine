@@ -8,7 +8,7 @@
 
 # Transports and profiles
 
-DFE moves records between stages on one of two transports: a data bus, or direct gRPC. The profile picks the default and what exists to carry it; a source can pick the other transport only where the deployment provides it. The flow itself is [../data-plane/source-flow.md](../data-plane/source-flow.md).
+DFE moves records between stages on one of two transports: a data bus, or direct gRPC. The profile picks which one, and every stage is bound to it at deploy - on the bus the loader consumes the topic, on direct it listens for a push, and no stage does both. So a deployment carries one transport, `GET /api/v1/system/deployment` reports that one, and a source naming the other is refused at save rather than accepted into a flow that lands nowhere. The flow itself is [../data-plane/source-flow.md](../data-plane/source-flow.md).
 
 ## Pick the profile by what you need to survive
 

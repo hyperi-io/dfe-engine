@@ -36,6 +36,20 @@ def registry(sources_dir) -> SourceRegistry:
     SourceRegistry.reset_instance()
 
 
+@pytest.fixture
+def direct_deployment(monkeypatch):
+    """Stand the save path on a brokerless deployment, as slim and mesh are.
+
+    The save reads the process-wide settings, and a source may name only the
+    transport the deployment carries, so a direct case has to say which
+    deployment it is being saved on.
+    """
+    from dfe_engine.settings import DFESettings
+
+    settings = DFESettings(env="dev", transport={"default": "direct", "bus_present": False})
+    monkeypatch.setattr("dfe_engine.settings.get_settings", lambda: settings)
+
+
 def _make_source(name: str, match_value: str | None = None, **kwargs) -> Source:
     """Helper to create a Source with minimal fields."""
     data = {"source": name, **kwargs}
@@ -251,7 +265,9 @@ class TestList:
         )
         assert registry.get_source("okta").fetcher.routes[0].source == "audit"
 
-    def test_archive_on_the_direct_transport_is_accepted(self, registry: SourceRegistry):
+    def test_archive_on_the_direct_transport_is_accepted(
+        self, registry: SourceRegistry, direct_deployment
+    ):
         # The archiver declares direct and a Push listener, so the save that once
         # named the refusal now lands the source.
         direct = Source.model_validate(
@@ -267,7 +283,7 @@ class TestList:
         assert registry.get_source("auth").archive is True
 
     def test_a_transform_that_does_not_carry_the_transport_is_refused(
-        self, registry: SourceRegistry
+        self, registry: SourceRegistry, direct_deployment
     ):
         direct = Source.model_validate(
             {
