@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.34](https://github.com/hyperi-io/dfe-engine/compare/v1.19.33...v1.19.34) (2026-09-10)
+
+### Bug Fixes
+
+* skip the routed flow shapes where nothing applies the routing ([9a4cff6](https://github.com/hyperi-io/dfe-engine/commit/9a4cff65626fff390536a79920dac2b69d3ed560))
+
 ## [1.19.33](https://github.com/hyperi-io/dfe-engine/compare/v1.19.32...v1.19.33) (2026-09-10)
 
 ### Bug Fixes
