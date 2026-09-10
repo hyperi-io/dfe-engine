@@ -78,6 +78,21 @@ def _section(crud: GitCrud) -> dict:
     return section if isinstance(section, dict) else {}
 
 
+def _remote_hash(crud: GitCrud) -> str:
+    """The hash the REMOTE deploy repo carries right now, or empty when it carries none.
+
+    Fail-soft for the same reason :func:`_settings_doc` is: an unreachable remote must
+    not stop a boot, and reading it as absent only costs a mint.
+    """
+    try:
+        section = crud.get_remote(CLASS, NAME).get("breakglass")
+    except Exception as exc:
+        logger.warning("Could not read the break-glass hash from the remote", error=str(exc))
+        return ""
+    value = section.get("password_hash", "") if isinstance(section, dict) else ""
+    return value if isinstance(value, str) else ""
+
+
 def stored_hash(crud: GitCrud | None) -> str:
     """The committed bcrypt hash, or empty when there is none."""
     if crud is None:
@@ -112,13 +127,24 @@ def set_enabled(crud: GitCrud, enabled: bool, actor: str) -> None:
 
 
 def mint_hash(crud: GitCrud, password: str, actor: str = "dfe-engine") -> str:
-    """Hash *password* and commit it as the break-glass hash. Returns the hash."""
+    """Commit a hash of *password* as the break-glass hash, unless one is already there.
+
+    Replicas boot together and each reads its own clone, which on a first boot carries
+    no hash yet, so the deploy repo is read before minting and after committing -- one
+    deployment must end up with ONE break-glass credential, not one per replica.
+
+    Returns:
+        The hash the deploy repo holds for the account.
+    """
+    committed = _remote_hash(crud)
+    if committed:
+        return committed
     digest = hash_password(password)
     message = build_message(
         CommitContext(ctype="rbac", scope=NAME, summary="mint break-glass hash", actor=actor)
     )
     crud.set_key(CLASS, NAME, KEY_HASH, digest, actor, message=message)
-    return digest
+    return _remote_hash(crud) or digest
 
 
 def seed(

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
+import pytest
 from dulwich import porcelain
 
-from dfe_engine.gitops.repo import GitopsRepo, PublishResult
+from dfe_engine.gitops.repo import GitopsRemoteError, GitopsRepo, PublishResult
 
 
 def _bare_remote(tmp_path: Path) -> str:
@@ -134,8 +136,6 @@ def test_a_push_the_remote_moved_under_is_re_applied_once(tmp_path: Path, monkey
 
 def test_a_rejected_push_with_a_quiet_remote_stays_an_error(tmp_path: Path, monkeypatch) -> None:
     """Only a moved remote earns the retry; any other rejection is raised as it was."""
-    from dfe_engine.gitops.repo import GitopsRemoteError
-
     remote, branch = _seeded_remote(tmp_path)
     repo = GitopsRepo(local_path=str(tmp_path / "a"), repo_url=remote, branch=branch, push=True)
     repo.ensure()
@@ -150,3 +150,69 @@ def test_a_rejected_push_with_a_quiet_remote_stays_an_error(tmp_path: Path, monk
         assert "remote said no" in str(exc)
     else:
         raise AssertionError("a rejected push on a quiet remote must raise")
+
+
+def _local_commit(work: Path, rel: str, content: str, message: bytes) -> None:
+    """Commit a file in ``work`` without pushing it -- a replica mid-write."""
+    target = work / rel
+    target.write_text(content, encoding="utf-8")
+    porcelain.add(str(work), paths=[str(target)])
+    porcelain.commit(str(work), message=message, author=b"t <t@t>", committer=b"t <t@t>")
+
+
+def test_two_clones_writing_on_the_same_base_both_land(tmp_path: Path) -> None:
+    """Two replicas, one deploy repo: neither write is lost and neither clone strands."""
+    remote, branch = _seeded_remote(tmp_path)
+    first = GitopsRepo(local_path=str(tmp_path / "a"), repo_url=remote, branch=branch, push=True)
+    second = GitopsRepo(local_path=str(tmp_path / "b"), repo_url=remote, branch=branch, push=True)
+    first.ensure()
+    second.ensure()
+
+    assert first.publish({"a.yaml": "a: 1\n"}, message="from a").pushed is True
+    assert second.publish({"b.yaml": "b: 1\n"}, message="from b").pushed is True
+    assert _remote_files(tmp_path, remote, "check") == {"a.yaml", "b.yaml"}
+
+    assert first.publish({"c.yaml": "c: 1\n"}, message="from a again").pushed is True
+    assert second.publish({"d.yaml": "d: 1\n"}, message="from b again").pushed is True
+    assert _remote_files(tmp_path, remote, "check2") == {"a.yaml", "b.yaml", "c.yaml", "d.yaml"}
+
+
+def test_a_stranded_clone_still_serves_its_next_write(tmp_path: Path) -> None:
+    """A clone left holding a commit the remote never took keeps writing, on its head."""
+    remote, branch = _seeded_remote(tmp_path)
+    first = GitopsRepo(local_path=str(tmp_path / "a"), repo_url=remote, branch=branch, push=True)
+    second = GitopsRepo(local_path=str(tmp_path / "b"), repo_url=remote, branch=branch, push=True)
+    first.ensure()
+    second.ensure()
+
+    # The state a lost push race leaves behind: a commit on the old base here, and a
+    # remote that has moved past it from the other replica.
+    _local_commit(tmp_path / "b", "stranded.yaml", "s: 1\n", b"stranded")
+    first.publish({"a.yaml": "a: 1\n"}, message="from a")
+
+    res = second.publish({"b.yaml": "b: 1\n"}, message="from b")
+
+    assert res.pushed is True
+    assert _remote_files(tmp_path, remote, "check") == {"a.yaml", "b.yaml"}
+
+
+def test_a_refused_ref_raises_instead_of_reporting_a_successful_push(tmp_path: Path) -> None:
+    """dulwich reports a refused ref in ref_status and returns normally; we must not."""
+    remote, branch = _seeded_remote(tmp_path)
+    repo = GitopsRepo(local_path=str(tmp_path / "a"), repo_url=remote, branch=branch, push=True)
+    repo.ensure()
+    _local_commit(tmp_path / "a", "a.yaml", "a: 1\n", b"from a")
+
+    # HEAD resolves to the branch, so the second update is stale by the time it is
+    # applied -- the refusal a ref another replica moved produces, on demand.
+    branch_ref = f"refs/heads/{branch}".encode()
+    result = porcelain.push(
+        str(tmp_path / "a"),
+        remote,
+        [branch_ref, branch_ref + b":HEAD"],
+        errstream=io.BytesIO(),
+    )
+    assert result.ref_status[b"HEAD"] is not None
+
+    with pytest.raises(GitopsRemoteError, match="refused"):
+        repo._raise_on_refused(result)
