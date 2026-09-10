@@ -49,6 +49,7 @@ from dfe_engine.source.registry import SourceNotFoundError, SourceRegistry
 from . import catalogue
 from .catalogue import AppDescriptor, CatalogueError
 from .instances import AppInstance
+from .scaling import DeployTarget
 
 if TYPE_CHECKING:
     from dfe_engine.source.flow import SourceFlow
@@ -106,6 +107,18 @@ class RoutingStatus:
         source rule ever defined.
         """
         return not self.deployed
+
+
+def reaches_apps(target: DeployTarget) -> bool:
+    """Whether an overlay written here reaches the app that reads it.
+
+    On Kubernetes the GitOps controller applies the overlay and the pod rolls onto
+    it. A Compose stack mounts each app's config file read-only and nothing carries
+    the overlay into the container, so the write stops at the deploy repo and the
+    running app keeps the routing it started with. A target the deployer did not
+    name is not assumed to be Compose.
+    """
+    return target is not DeployTarget.DOCKER
 
 
 def _bound_source(registry: SourceRegistry, instance: str | None) -> Source:

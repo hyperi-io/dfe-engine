@@ -34,8 +34,11 @@ Every skip has to be one a fixture declared: `flows/conftest.py` fails the whole
 run on any other, because a suite that reports green with half its cases skipped
 has proved nothing. A declared skip carries the `EXPECTED-SKIP:` marker and says
 what is missing -- whichever half of a shape's pair the other half already
-proved, the catalogue shape where no catalogue is mounted, and the catalogue
-shape on direct (the app shipping the catalogue carries the bus alone).
+proved, the catalogue shape where no catalogue is mounted, the catalogue shape on
+direct (the app shipping the catalogue carries the bus alone), and every shape
+that needs a new source's routing at the receiver where the deployment reports
+`applies_routing: false` (a Compose stack mounts each app's config file
+read-only, so the overlay stops at the deploy repo).
 
 Both lanes run this same suite from a checkout of this repo:
 `dfe-ops acceptance --suite flows` for Kubernetes, `make test-flows` in

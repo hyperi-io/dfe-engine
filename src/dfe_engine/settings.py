@@ -852,8 +852,9 @@ class DeploymentSettings(BaseModel):
             "mesh, or a deployer's own name). Injected by the deployer from "
             "the one place it is already known, never detected, and reported "
             "rather than interpreted: the engine judges an app's offer against it "
-            "but never changes what it deploys. Empty means unknown, which is what "
-            "a Compose deployment and a hand-run engine both are. DFE_PROFILE."
+            "but never changes what it deploys. Empty means unknown, which a "
+            "hand-run engine is; every deployer names one, dfe-docker included. "
+            "DFE_PROFILE."
         ),
     )
     namespace: str = Field(

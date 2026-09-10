@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.19.28"
+    "version": "1.19.32"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -18529,6 +18529,11 @@
           "mesh": {
             "$ref": "#/components/schemas/MeshFacts"
           },
+          "applies_routing": {
+            "type": "boolean",
+            "title": "Applies Routing",
+            "description": "Whether the routing a deployed source compiles to reaches the apps that run it. False on a Compose stack, which mounts each app's config file read-only: the engine still writes the overlay, and nothing carries it into the container, so a console must not offer the source as live."
+          },
           "stack": {
             "anyOf": [
               {
@@ -18574,6 +18579,7 @@
           "profile",
           "transports",
           "mesh",
+          "applies_routing",
           "stack",
           "engine",
           "ui",

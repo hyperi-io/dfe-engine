@@ -42,6 +42,11 @@ EXPECTED_SKIP = "EXPECTED-SKIP:"
 # The receiver takes every source, so only a fetcher-origin shape names one.
 ORIGIN_APPS: dict[str, str] = {"fetcher": "dfe-fetcher"}
 
+# The origins whose records only land once a RUNNING app carries the routing the
+# new source compiles to. The catch-all needs no routing change, and a catalogue
+# case asserts the compile rather than a landing, so neither is one of them.
+ROUTED_ORIGINS: tuple[str, ...] = ("receiver",)
+
 # What an unmatched record is stamped with, and the table it lands in. Fixtures
 # write {catchall} and the run fills it from the receiver's compiled
 # routing.default_source, because the name belongs to the deployed release.
@@ -135,6 +140,27 @@ class FlowShape:
         """
         reason = self.expected_skip.get(transport)
         return f"{EXPECTED_SKIP} {reason}" if reason else None
+
+    def unrouted_reason(self, applies_routing: bool) -> str | None:
+        """Why this shape cannot land where nothing applies the engine's routing.
+
+        A receiver-origin case lands only once the receiver runs the rule its
+        source created, which a Compose stack never does: it mounts the receiver's
+        config file read-only and nothing carries the engine's overlay into the
+        container. The deployment reports the fact, so no fixture declares it.
+
+        Args:
+            applies_routing: What the deployment reports about its running apps.
+
+        Returns:
+            The declared skip, or None where the routing does reach the apps.
+        """
+        if applies_routing or self.origin not in ROUTED_ORIGINS:
+            return None
+        return (
+            f"{EXPECTED_SKIP} this deployment applies no engine routing to its running "
+            f"apps, so the sources {self.name} creates never reach the receiver"
+        )
 
     def refusal(self, transport: str, carried: Sequence[str], offered: Sequence[str]) -> str | None:
         """The refusal the API must give on *transport* here, or None when it must save.
