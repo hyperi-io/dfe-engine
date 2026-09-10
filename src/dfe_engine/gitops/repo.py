@@ -21,18 +21,38 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TypeVar, cast
+from typing import TYPE_CHECKING, TypeVar, cast
 
 from dulwich import porcelain
 from scalo.logger import logger
 
 from .dulwich_auth import RedactingErrStream, redact_credentials, scrub_remote_credentials
 
+if TYPE_CHECKING:
+    from dulwich.client import SendPackResult
+
 T = TypeVar("T")
 
 
 class GitopsRemoteError(RuntimeError):
     """A remote git op failed, with any URL credentials stripped from the message."""
+
+
+class GitopsDivergedError(GitopsRemoteError):
+    """This clone holds a commit the remote branch does not, so it cannot fast-forward.
+
+    Attributes:
+        local: The clone's head commit SHA.
+        remote: The remote branch's head commit SHA.
+    """
+
+    def __init__(self, branch: str, local: str, remote: str) -> None:
+        super().__init__(
+            f"the deploy repo clone diverged from {branch}: local {local[:12]} "
+            f"is not behind remote {remote[:12]}"
+        )
+        self.local = local
+        self.remote = remote
 
 
 @dataclass
@@ -251,10 +271,7 @@ class GitopsRepo:
         if local is not None and not discard_local:
             with Repo(str(self._path)) as repo:
                 if not can_fast_forward(repo, local.encode(), remote_head):
-                    raise GitopsRemoteError(
-                        f"the deploy repo clone diverged from {self._branch}: local "
-                        f"{local[:12]} is not behind remote {remote_head.decode()[:12]}"
-                    )
+                    raise GitopsDivergedError(self._branch, local, remote_head.decode())
         repo_path = str(self._path)
         porcelain.update_ref(repo_path, b"refs/heads/" + self._branch.encode(), remote_head)
         porcelain.reset(repo_path, "hard", remote_head)
@@ -283,7 +300,7 @@ class GitopsRepo:
         """
         # The write goes on the remote's head, never on whatever this clone last saw.
         if self._push and self._repo_url:
-            self.sync()
+            self._sync_onto_remote_head()
 
         # Capture the base BEFORE staging so PR mode can restore the tracked
         # branch to it after committing. An empty repo has no base to branch from.
@@ -330,6 +347,26 @@ class GitopsRepo:
         )
         return PublishResult(changed=True, files=written, commit_sha=sha_str, pushed=pushed)
 
+    def _sync_onto_remote_head(self) -> None:
+        """Fast-forward onto the remote head, dropping a local commit it never took.
+
+        A push that loses the compare-and-swap leaves this clone holding a commit the
+        remote refused, and without this every later write on the replica fails against
+        it.
+        """
+        try:
+            self.sync()
+        except GitopsDivergedError as exc:
+            logger.warning(
+                "Gitops clone diverged from the deploy repo: discarding the local commit "
+                "the remote never took -- its content was a seed or a write a caller "
+                "re-applies -- and writing on the remote head",
+                branch=self._branch,
+                local=exc.local,
+                remote=exc.remote,
+            )
+            self.sync(discard_local=True)
+
     def _stage_and_commit(
         self,
         artifacts: Mapping[str, str | bytes],
@@ -372,8 +409,16 @@ class GitopsRepo:
         return (sha.decode() if isinstance(sha, bytes) else str(sha)), written
 
     def _push_refspec(self, refspec: bytes) -> None:
-        """Push one refspec to the configured remote, credentials never logged."""
-        self._remote_op(
+        """Push one refspec as a compare-and-swap, credentials never logged.
+
+        The update carries the ref's SHA as this clone last saw it, so the remote
+        applies it only while the ref still holds that SHA -- another replica's push
+        makes it stale, and the deploy repo keeps what it already has.
+
+        Raises:
+            GitopsRemoteError: the op failed, or the remote refused a ref.
+        """
+        result = self._remote_op(
             lambda errstream: porcelain.push(
                 str(self._path),
                 self._authed_url(),
@@ -381,6 +426,27 @@ class GitopsRepo:
                 errstream=errstream,
             )
         )
+        self._raise_on_refused(result)
+
+    def _raise_on_refused(self, result: SendPackResult) -> None:
+        """Turn a ref the remote refused into an error.
+
+        ``porcelain.push`` writes a refused ref to its errstream and returns normally,
+        so an unread ``ref_status`` is a write the remote never took reported to the
+        caller as a success.
+
+        Raises:
+            GitopsRemoteError: at least one ref carries a refusal.
+        """
+        refused = sorted(
+            f"{ref.decode()}: {status}"
+            for ref, status in (result.ref_status or {}).items()
+            if status is not None
+        )
+        if refused:
+            raise GitopsRemoteError(
+                redact_credentials("the remote refused the push -- " + "; ".join(refused))
+            )
 
     def _route_to_branch(
         self, sha_str: str, branch: str, base_head: str, written: list[str]
