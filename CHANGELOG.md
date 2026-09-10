@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.32](https://github.com/hyperi-io/dfe-engine/compare/v1.19.31...v1.19.32) (2026-09-10)
+
+### Bug Fixes
+
+* **hunt-runner:** a fire stays owed until its watermark is written ([065691f](https://github.com/hyperi-io/dfe-engine/commit/065691f89b0094c0ad8a16f32e194281aacc9980)), closes [#350](https://github.com/hyperi-io/dfe-engine/issues/350)
+
 ## [1.19.31](https://github.com/hyperi-io/dfe-engine/compare/v1.19.30...v1.19.31) (2026-09-10)
 
 ### Bug Fixes
