@@ -15,14 +15,22 @@ that the skip policy fails a run on any skip a fixture did not declare.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
 import yaml
 
 from dfe_engine.appmgmt import catalogue
+from dfe_engine.settings import DFESettings
+from dfe_engine.source.flow import FlowError, resolve_flow
+from dfe_engine.source.models import Source
 from tests.e2e.flows import shapes
 from tests.e2e.flows.conftest import undeclared_skips
+
+# What a deployment of the whole catalogue offers, so a case about the transport
+# rule is not also making a statement about which apps are deployed.
+EVERY_APP = tuple(catalogue.APP_CATALOGUE)
 
 
 class TestTheCommittedFixtures:
@@ -178,20 +186,20 @@ class TestTheTransportRule:
             # A deployment that carries this transport, so the archiver is the
             # only thing left that can refuse the shape.
             assert (archived.skip_reason(transport) is None) is carries
-            assert (archived.refusal(transport, (transport,)) is None) is carries
+            assert (archived.refusal(transport, (transport,), EVERY_APP) is None) is carries
 
     def test_a_transport_the_deployment_does_not_carry_refuses_every_shape(self) -> None:
         # The bus profiles bind the loader to the topic, so nothing serves a direct
         # source there whatever the shape asks for.
         for shape in shapes.load_shapes():
-            assert shape.refusal("direct", ("bus",)) == "asks for the direct transport"
-            assert shape.refusal("bus", ("direct",)) == "asks for the bus transport"
+            assert shape.refusal("direct", ("bus",), EVERY_APP) == "asks for the direct transport"
+            assert shape.refusal("bus", ("direct",), EVERY_APP) == "asks for the bus transport"
 
     def test_a_shape_the_deployment_can_run_is_not_refused(self) -> None:
         plain = next(s for s in shapes.load_shapes() if s.name == "receiver-plain")
 
         for transport in shapes.transports_for("both"):
-            assert plain.refusal(transport, (transport,)) is None
+            assert plain.refusal(transport, (transport,), EVERY_APP) is None
 
     def test_the_catalogue_shape_runs_wherever_the_app_shipping_it_does(self) -> None:
         # Every entry compiles onto the transform of the app that ships the
@@ -200,6 +208,60 @@ class TestTheTransportRule:
         entry = next(s for s in shapes.load_shapes() if s.name == "catalogue")
         for transport in shapes.transports_for("both"):
             assert (entry.skip_reason(transport) is None) is shipper.carries(transport)
+
+
+class TestAnAppTheDeploymentDoesNotDeploy:
+    def _without(self, service: str) -> tuple[str, ...]:
+        return tuple(a for a in EVERY_APP if a != service)
+
+    def test_a_fetcher_shape_is_refused_where_no_fetcher_is_deployed(self) -> None:
+        fetchers = [s for s in shapes.load_shapes() if s.origin == "fetcher"]
+        assert fetchers, "no fetcher-origin shape left to check"
+        offered = self._without("dfe-fetcher")
+        for shape in fetchers:
+            for transport in shapes.transports_for("both"):
+                declared = shape.refusal(transport, (transport,), offered)
+                assert declared == "does not deploy dfe-fetcher", f"{shape.name}: {declared}"
+
+    def test_the_declared_substring_is_the_engine_refusal(self) -> None:
+        # The live case asserts this substring against the engine's own 422, so a
+        # reworded refusal has to fail here rather than on a deployment.
+        fetcher = next(s for s in shapes.load_shapes() if s.origin == "fetcher")
+        declared = str(fetcher.refusal("bus", ("bus",), self._without("dfe-fetcher")))
+
+        with pytest.raises(FlowError, match=re.escape(declared)):
+            resolve_flow(
+                Source.model_validate({"source": "okta", "fetcher": {"source_type": "okta"}}),
+                DFESettings(
+                    env="dev",
+                    transport={"default": "bus"},
+                    deployment={"profile": "docker-slim"},
+                ),
+            )
+
+    def test_a_deployment_that_deploys_one_is_untouched(self) -> None:
+        for shape in shapes.load_shapes():
+            for transport in shapes.transports_for("both"):
+                if shape.skip_reason(transport):
+                    continue
+                assert shape.refusal(transport, (transport,), EVERY_APP) is None, shape.name
+
+    def test_no_other_origin_reads_the_offer(self) -> None:
+        # Only an origin with an app of its own is affected; the receiver is
+        # stack-wide and every deployment runs one.
+        for shape in shapes.load_shapes():
+            if shape.origin == "fetcher":
+                continue
+            for transport in shapes.transports_for("both"):
+                declared = shape.refusal(transport, (transport,), self._without("dfe-fetcher"))
+                assert declared == shape.refusal(transport, (transport,), EVERY_APP), shape.name
+
+    def test_the_transport_refusal_still_wins(self) -> None:
+        # A transport the deployment does not carry refuses every shape, so it is
+        # the reason reported even where the app is missing too.
+        fetcher = next(s for s in shapes.load_shapes() if s.origin == "fetcher")
+        declared = fetcher.refusal("direct", ("bus",), self._without("dfe-fetcher"))
+        assert declared == "asks for the direct transport"
 
 
 class TestTheSkipPolicy:

@@ -151,7 +151,12 @@ class TestShippedManifest:
             if app.profiles
         }
 
-        assert restricted == {"culvert": ["mesh", "scale"]}
+        # The fetcher is Kubernetes-only because Compose ships no fetcher service,
+        # so a source asking to be fetched there is refused rather than written.
+        assert restricted == {
+            "culvert": ["mesh", "scale"],
+            "dfe-fetcher": ["mesh", "scale", "single", "slim"],
+        }
 
     def test_the_apps_nothing_deploys_by_default_are_the_per_source_ones_and_the_door(self):
         # An instance of a per-source app arrives with its source, and the edge
