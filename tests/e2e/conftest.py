@@ -225,9 +225,10 @@ def post_events(cfg: E2EConfig, bodies: list[dict]) -> None:
     a second place for the token header or the TLS posture to drift. Callers gate
     on ``require(cfg, "receiver_url")`` first.
 
-    A connection dropped mid-roll is retried until ``INGEST_RETRY_WINDOW`` runs
-    out, because rolling on a routing change is the behaviour under test. A
-    rejection the receiver answers with still fails on the spot.
+    A connection dropped mid-roll, or a 5xx from a pod on its way out, is retried
+    until ``INGEST_RETRY_WINDOW`` runs out, because rolling on a routing change is
+    the behaviour under test. A 4xx the receiver answers with still fails on the
+    spot: that is a rejection of the record, not of the moment.
     """
     import httpx
 
@@ -246,6 +247,14 @@ def post_events(cfg: E2EConfig, bodies: list[dict]) -> None:
                     raise AssertionError(
                         f"the receiver never answered within {INGEST_RETRY_WINDOW}s: {exc}"
                     ) from exc
+                time.sleep(2.0)
+                continue
+            if response.status_code >= 500:
+                if time.monotonic() >= deadline:
+                    raise AssertionError(
+                        f"the receiver kept failing for {INGEST_RETRY_WINDOW}s: "
+                        f"{response.status_code} {response.text}"
+                    )
                 time.sleep(2.0)
                 continue
             assert response.status_code < 300, f"receiver rejected the event: {response.text}"
