@@ -194,16 +194,28 @@ class Accounts(Seed):
 
     def _upsert_local_account(self, name: str, password: str, *, groups: list[str]) -> bool:
         """Create the account or reset password / merge groups / enable it."""
+        from dfe_engine.auth.bootstrap import admin_account_name, seeded_account_email
+        from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
+
         existing = self._account_store.get(name)
+        recovery = self._settings.auth.local.recovery_email if self._settings is not None else ""
+        email = (
+            seeded_account_email(name, recovery)
+            if name in {admin_account_name(), BREAKGLASS_USERNAME}
+            else ""
+        )
         if existing is None:
-            self._account_store.create(name, password, groups=list(groups))
+            self._account_store.create(name, password, groups=list(groups), email=email)
             return True
         self._account_store.reset_password(name, password)
         merged = list(existing.groups)
         for group in groups:
             if group not in merged:
                 merged.append(group)
-        self._account_store.update(name, groups=merged, enabled=True)
+        updates: dict[str, object] = {"groups": merged, "enabled": True}
+        if email and (not existing.email or (recovery.strip() and existing.email != email)):
+            updates["email"] = email
+        self._account_store.update(name, **updates)
         return False
 
     def _ensure_membership(self, group_name: str, username: str) -> None:
