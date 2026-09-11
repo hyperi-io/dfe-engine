@@ -91,8 +91,8 @@ PASSWORD_REUSE_WINDOW = 5
 class CreateAccountRequest(BaseModel):
     username: str = Field(description="Unique account name")
     password: str = Field(description="Plaintext password (bcrypt-hashed before storage)")
+    email: str = Field(min_length=1, description="Contact email")
     groups: list[str] = Field(default_factory=list, description="Group memberships")
-    email: str = Field(default="", description="Contact email")
     phone: str = Field(default="", description="Contact phone")
     name: str = Field(default="", description="Display name")
 
@@ -100,7 +100,7 @@ class CreateAccountRequest(BaseModel):
 class UpdateAccountRequest(BaseModel):
     groups: list[str] | None = Field(None, description="Replace group memberships")
     enabled: bool | None = Field(None, description="Enable or disable the account")
-    email: str | None = Field(None, description="Contact email")
+    email: str | None = Field(None, min_length=1, description="Contact email")
     phone: str | None = Field(None, description="Contact phone")
     name: str | None = Field(None, description="Display name")
 
@@ -160,8 +160,8 @@ class AccountResponse(BaseModel):
     enabled: bool
     groups: list[str]
     email: str
-    phone: str
-    name: str
+    phone: str = ""
+    name: str = ""
     created_at: str
     updated_at: str
 

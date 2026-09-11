@@ -159,6 +159,7 @@ const source_scopes = {
 
 const system_scopes = {
   system_read: "system:read",
+  system_write: "system:write",
 } as const;
 
 const tasks_scopes = {

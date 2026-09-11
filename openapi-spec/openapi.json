@@ -16435,11 +16435,13 @@
           },
           "phone": {
             "type": "string",
-            "title": "Phone"
+            "title": "Phone",
+            "default": ""
           },
           "name": {
             "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "default": ""
           },
           "created_at": {
             "type": "string",
@@ -16456,8 +16458,6 @@
           "enabled",
           "groups",
           "email",
-          "phone",
-          "name",
           "created_at",
           "updated_at"
         ],
@@ -18143,6 +18143,12 @@
             "title": "Password",
             "description": "Plaintext password (bcrypt-hashed before storage)"
           },
+          "email": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Email",
+            "description": "Contact email"
+          },
           "groups": {
             "items": {
               "type": "string"
@@ -18150,12 +18156,6 @@
             "type": "array",
             "title": "Groups",
             "description": "Group memberships"
-          },
-          "email": {
-            "type": "string",
-            "title": "Email",
-            "description": "Contact email",
-            "default": ""
           },
           "phone": {
             "type": "string",
@@ -18173,7 +18173,8 @@
         "type": "object",
         "required": [
           "username",
-          "password"
+          "password",
+          "email"
         ],
         "title": "CreateAccountRequest"
       },
@@ -29470,7 +29471,8 @@
           "email": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "minLength": 1
               },
               {
                 "type": "null"

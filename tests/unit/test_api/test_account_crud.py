@@ -19,7 +19,12 @@ class TestCreateAccount:
     def test_create_account(self, client, admin_headers):
         resp = client.post(
             "/api/v1/auth/accounts",
-            json={"username": "newuser", "password": "s3cret", "groups": ["dfe-viewers"]},
+            json={
+                "username": "newuser",
+                "password": "s3cret",
+                "email": "newuser@example.com",
+                "groups": ["dfe-viewers"],
+            },
             headers=admin_headers,
         )
         assert resp.status_code == 201
@@ -28,7 +33,7 @@ class TestCreateAccount:
         assert data["enabled"] is True
         assert data["groups"] == ["dfe-viewers"]
         assert "password_hash" not in data
-        assert data["email"] == ""
+        assert data["email"] == "newuser@example.com"
         assert data["phone"] == ""
         assert data["name"] == ""
 
@@ -59,15 +64,47 @@ class TestCreateAccount:
         assert got.json()["phone"] == "+15551212"
         assert got.json()["name"] == "With Contact"
 
+    def test_create_without_email_returns_422(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "no-email", "password": "pw"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+
+    def test_create_empty_email_returns_422(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "empty-email", "password": "pw", "email": ""},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+
+    def test_create_with_email_only(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "email-only",
+                "password": "pw",
+                "email": "only@example.com",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["email"] == "only@example.com"
+        assert data["phone"] == ""
+        assert data["name"] == ""
+
     def test_create_duplicate_returns_409(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "dupuser", "password": "pw1"},
+            json={"username": "dupuser", "password": "pw1", "email": "dupuser@example.com"},
             headers=admin_headers,
         )
         resp = client.post(
             "/api/v1/auth/accounts",
-            json={"username": "dupuser", "password": "pw2"},
+            json={"username": "dupuser", "password": "pw2", "email": "dupuser@example.com"},
             headers=admin_headers,
         )
         assert resp.status_code == 409
@@ -169,7 +206,7 @@ class TestUpdateAccount:
         # Create account first
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "updatable", "password": "pw"},
+            json={"username": "updatable", "password": "pw", "email": "updatable@example.com"},
             headers=admin_headers,
         )
         resp = client.put(
@@ -189,6 +226,7 @@ class TestUpdateAccount:
             json={
                 "username": "grp-sync",
                 "password": "pw",
+                "email": "grp-sync@example.com",
                 "groups": ["dfe-viewers"],
             },
             headers=admin_headers,
@@ -272,19 +310,36 @@ class TestUpdateAccount:
         )
         resp = client.put(
             "/api/v1/auth/accounts/contact-clear",
-            json={"email": "", "phone": "", "name": ""},
+            json={"phone": "", "name": ""},
             headers=admin_headers,
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["email"] == ""
+        assert data["email"] == "gone@example.com"
         assert data["phone"] == ""
         assert data["name"] == ""
+
+    def test_update_empty_email_returns_422(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "email-required",
+                "password": "pw",
+                "email": "keep@example.com",
+            },
+            headers=admin_headers,
+        )
+        resp = client.put(
+            "/api/v1/auth/accounts/email-required",
+            json={"email": ""},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
 
     def test_update_enabled(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "disableme", "password": "pw"},
+            json={"username": "disableme", "password": "pw", "email": "disableme@example.com"},
             headers=admin_headers,
         )
         resp = client.put(
@@ -318,7 +373,7 @@ class TestResetPassword:
     def test_reset_password(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "pwreset", "password": "oldpw"},
+            json={"username": "pwreset", "password": "oldpw", "email": "pwreset@example.com"},
             headers=admin_headers,
         )
         resp = client.post(
@@ -332,7 +387,7 @@ class TestResetPassword:
     def test_reset_to_current_password_rejected(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "pwsame", "password": "samepw"},
+            json={"username": "pwsame", "password": "samepw", "email": "pwsame@example.com"},
             headers=admin_headers,
         )
         resp = client.post(
@@ -447,7 +502,7 @@ class TestDeleteAccount:
     def test_delete_account(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "deleteme", "password": "pw"},
+            json={"username": "deleteme", "password": "pw", "email": "deleteme@example.com"},
             headers=admin_headers,
         )
         resp = client.delete("/api/v1/auth/accounts/deleteme", headers=admin_headers)
