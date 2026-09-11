@@ -377,8 +377,11 @@ class TestScaling:
         assert resp.json()["code"] == "invalid_dial"
 
     def test_dials_are_refused_off_kubernetes(self, client, app, admin_headers, tmp_path):
-        _wire(app, tmp_path, target="docker")
+        # The instance is deployed first: a docker target refuses the source that
+        # would derive one, which is a different refusal from the dials'.
+        _wire(app, tmp_path)
         _deploy(client, admin_headers)
+        app.state.settings.deployment.target = "docker"
         resp = client.put(f"{BASE}/scaling", json={"max_replicas": 4}, headers=admin_headers)
         assert resp.status_code == 409
         assert resp.json()["code"] == "scaling_unsupported"
@@ -387,8 +390,9 @@ class TestScaling:
         self, client, app, admin_headers, tmp_path
     ):
         # The dials must render disabled with a reason, not vanish from the UI.
-        _wire(app, tmp_path, target="docker")
+        _wire(app, tmp_path)
         _deploy(client, admin_headers)
+        app.state.settings.deployment.target = "docker"
         got = client.get(f"{BASE}/scaling", headers=admin_headers).json()
         assert got["supported"] is False
         assert got["deploy_target"] == "docker"

@@ -34,6 +34,7 @@ from .catalogue import (
     MEMORY_REQUEST_PATH,
     REPLICA_COUNT_PATH,
     AppDescriptor,
+    Multiplicity,
 )
 
 # Kubernetes quantity forms we accept. CPU is either a plain number of cores or
@@ -71,6 +72,24 @@ class ScalingDials:
     memory_request: str | None = None
     cpu_limit: str | None = None
     memory_limit: str | None = None
+
+
+def instance_ceiling(app: AppDescriptor, target: DeployTarget) -> int | None:
+    """How many deployments of *app* this target can RUN, None meaning unbounded.
+
+    Read off the manifest's multiplicity rather than a list of app names, so an
+    app becomes per-config by being declared one.
+
+    A single-deployment app is one everywhere. A per-config app is unbounded on
+    Kubernetes, where each overlay renders its own Argo Application. Compose
+    declares its services in a committed file and creates none at run time, so it
+    holds ONE of each -- and because nothing yet carries a config into that
+    container, the number it can actually run there is zero. A target nobody
+    named is not assumed to be Compose.
+    """
+    if app.multiplicity is not Multiplicity.PER_CONFIG:
+        return 1
+    return 0 if target is DeployTarget.DOCKER else None
 
 
 def support(app: AppDescriptor, target: DeployTarget) -> tuple[bool, str]:
