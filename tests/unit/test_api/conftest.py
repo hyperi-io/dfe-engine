@@ -25,6 +25,7 @@ from dfe_engine.settings import (
     ServicesSettings,
     SourceSettings,
 )
+from tests.support.core_sources import write_landing_definition
 
 # The admin password these fixtures inject, as a deployment's secret store would.
 ADMIN_PASSWORD = "test-admin-pw"
@@ -45,6 +46,9 @@ def api_settings(tmp_path: Path) -> DFESettings:
     auth_dir.mkdir()
     schemas_dir = tmp_path / "schemas"
     schemas_dir.mkdir()
+    # Stands in for the image-baked schema seed: without it the app seeds no
+    # landing source, and every test that expects `main` to exist fails.
+    write_landing_definition(schemas_dir=schemas_dir)
     secrets_dir = tmp_path / "secrets"
     secrets_dir.mkdir()
 

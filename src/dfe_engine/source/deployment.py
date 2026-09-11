@@ -531,6 +531,21 @@ class SourceDeploymentStore:
         yaml_dump(doc.model_dump(mode="json"), path)
         return True
 
+    def delete_source_records(self, source_name: str) -> list[Path]:
+        """Remove every build, plan and deploy record for a source; return what went.
+
+        A record left behind outlives the source it describes, and the next source
+        to take that name inherits it -- reporting itself built and deployed before
+        it ever was.
+        """
+        removed = []
+        for root in (self.builds_dir, self.plans_dir, self.deploys_dir):
+            path = self._source_file(root, source_name)
+            if path.is_file():
+                path.unlink()
+                removed.append(path)
+        return removed
+
     def load_build(self, source_name: str, version: str) -> SourceBuildArtifact | None:
         doc = self._read_document(self.builds_dir, source_name, SourceBuildDocument)
         if doc is None or version not in doc.versions:

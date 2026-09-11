@@ -67,11 +67,18 @@ class Sources(Seed):
         return created
 
     def delete_all(self) -> None:
-        """Clear every source definition. A no-op when no registry is configured."""
+        """Clear every operator source definition. A no-op when no registry is configured.
+
+        Engine-owned sources are left in place: they are not seeded state, the
+        registry refuses to delete them, and the next start would render them
+        back regardless.
+        """
         registry = self._source_registry
         if registry is None:
             return
         for entry in registry.list_sources():
+            if entry.get("resource_type") == "core":
+                continue
             registry.delete_source(str(entry["source"]), created_by=SEED_ACTOR)
 
     def _ensure_source(self, name: str, *, fetched: bool = False) -> bool:

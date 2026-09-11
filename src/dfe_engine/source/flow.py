@@ -101,8 +101,8 @@ class SourceFlow:
     the arrow between two stages.
     """
 
-    origin: str
-    """``receiver`` or ``fetcher``."""
+    origin: str | None
+    """``receiver``, ``fetcher``, or None when nothing selects the records."""
 
     input: str
     """The receiver match that selects the records, or the fetcher instance polling them."""
@@ -249,6 +249,9 @@ def _resolve_input(
     The receiver is stack-wide and takes every source, so only a fetcher-based
     source has an app to check here.
     """
+    if source.origin is None:
+        # Nothing selects these records. They arrived through a receiver or a fetcher like any other and reached this table because the loader had nowhere else to send them.
+        return "records the loader could not route elsewhere"
     if source.origin == "receiver":
         return _match_expression(source)
     fetcher = _stage_app(

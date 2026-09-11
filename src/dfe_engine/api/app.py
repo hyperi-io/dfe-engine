@@ -96,7 +96,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     from dfe_engine.clickhouse.bootstrap import bootstrap_clickhouse
 
-    bootstrap_clickhouse(settings=settings, gitcrud=gitcrud)
+    tables_bootstrapped = bootstrap_clickhouse(settings=settings, gitcrud=gitcrud)
+
+    # After the bootstrap, which is what makes the landing table exist: the seed records the source as deployed, and that must not be claimed before it is true.
+    from dfe_engine.api.deps import get_source_registry_optional
+    from dfe_engine.source.core_sources import seed_core_sources
+
+    source_registry = get_source_registry_optional()
+    if source_registry is not None:
+        try:
+            seed_core_sources(
+                registry=source_registry,
+                settings=settings,
+                tables_bootstrapped=tables_bootstrapped,
+            )
+        except Exception as exc:  # a failed seed must never break startup
+            logger.warning("core sources not seeded at startup", error=str(exc))
 
     # Ahead of the reconcile below because a source's overlay may link a shipped
     # artefact, which has to exist before the link resolves.

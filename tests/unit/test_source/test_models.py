@@ -290,13 +290,32 @@ class TestSourceFetcher:
 
 
 class TestSourceOrigin:
-    def test_a_source_needs_exactly_one_origin(self):
+    def test_an_operator_source_needs_exactly_one_origin(self):
         with pytest.raises(ValueError, match="exactly one"):
             Source.model_validate({"source": "x"})
-        with pytest.raises(ValueError, match="exactly one"):
+        with pytest.raises(ValueError, match="not both"):
             Source.model_validate(
                 {
                     "source": "x",
+                    "match": {"field": "f", "value": "v"},
+                    "fetcher": {"source_type": "okta"},
+                }
+            )
+
+    def test_a_core_source_may_have_no_origin_at_all(self):
+        s = Source.model_validate({"source": "main", "resource_type": "core"})
+
+        assert s.origin is None
+        assert s.match is None
+        assert s.fetcher is None
+        assert s.model_dump(mode="json")["origin"] is None
+
+    def test_a_core_source_still_cannot_declare_both(self):
+        with pytest.raises(ValueError, match="not both"):
+            Source.model_validate(
+                {
+                    "source": "main",
+                    "resource_type": "core",
                     "match": {"field": "f", "value": "v"},
                     "fetcher": {"source_type": "okta"},
                 }

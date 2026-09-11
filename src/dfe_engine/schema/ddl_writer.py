@@ -146,7 +146,7 @@ class DDLFileWriter:
         )
         return TableSpec(name=table_name, columns=columns, config=config)
 
-    def _render(self, spec: TableSpec) -> str:
+    def render_spec(self, spec: TableSpec) -> str:
         """Render a spec's CREATE TABLE."""
         return self._ddl_gen.generate_create_table(
             table_name=spec.name, columns=spec.columns, config=spec.config, generated_time=None
@@ -168,13 +168,13 @@ class DDLFileWriter:
         self, profile_name: str = _DEFAULT_PROFILE, profile_version: str | None = None
     ) -> str:
         """Generate DDL for the default ingestion table (profile columns only)."""
-        return self._render(
+        return self.render_spec(
             self.default_table_spec(profile_name=profile_name, profile_version=profile_version)
         )
 
     def generate_profile_table(self, profile_name: str, profile_version: str | None = None) -> str:
         """Generate DDL for a profile-only reference table."""
-        return self._render(
+        return self.render_spec(
             self._profile_table_spec(
                 table_name=f"_{profile_name}_profile",
                 profile_name=profile_name,
@@ -208,7 +208,7 @@ class DDLFileWriter:
         self, detection_checkpoint_version: str | None = None, schemas_root_path: Path | None = None
     ) -> str:
         """Generate DDL for the hunt detection checkpoint table (no profile)."""
-        return self._render(
+        return self.render_spec(
             self.detection_checkpoint_table_spec(
                 detection_checkpoint_version=detection_checkpoint_version,
                 schemas_root_path=schemas_root_path,
@@ -263,7 +263,7 @@ class DDLFileWriter:
         schemas_root_path: Path | None = None,
     ) -> str:
         """Generate DDL for the hunt detection table."""
-        return self._render(
+        return self.render_spec(
             self.detection_table_spec(
                 profile_name=profile_name,
                 profile_version=profile_version,

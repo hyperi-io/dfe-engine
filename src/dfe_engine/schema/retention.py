@@ -67,6 +67,9 @@ def reconcile_default_ttl(
         resolver=resolver,
     )
     for source in sources:
+        # apply_core_schema above owns the engine's own tables, TTL included, so reconciling one here would re-apply what it has just applied.
+        if source.resource_type == "core":
+            continue
         doc = store.load_deploy_document(source.source)
         version = doc.deployed_version if doc is not None else None
         if not version or version not in source.versions:

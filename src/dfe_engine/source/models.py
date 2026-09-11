@@ -30,6 +30,7 @@ from pydantic import (
 )
 
 from dfe_engine.api.pagination import PaginatedResponseWithObjects, PathTree
+from dfe_engine.core_resources.yaml_resource_type import ResourceType
 from dfe_engine.source.engine_registry import EngineRegistry, InvalidEngineError
 from dfe_engine.transport import SourceTransport
 
@@ -379,6 +380,8 @@ SourceOrigin = Literal["receiver", "fetcher"]
 
 ``receiver``: the always-present receiver pool identifies it by ``match``.
 ``fetcher``: one dfe-fetcher deployment, named for the source, polls it in.
+
+A source can have NO origin, and then it is None. That is the catch-all table the loader writes to when it has nowhere else to send a record: those records came in through a receiver or a fetcher like any other, so naming either would be false, and the table does not select them.
 """
 
 # Literal takes no constant, so DEFAULT_LANDING_LABEL is restated here and tested.
@@ -408,10 +411,11 @@ that tests which source a record is has this as its field.
 DEFAULT_LANDING_LABEL = "main"
 """The ``_source`` label of the platform's landing table, ``main``.
 
-Also the reserved name of the source that defines the main flow: it is a normal
-source whose match rule is ``operator: always``, so an unmatched record follows
-the same compiled path as any other. Every producer's fallback label, every
-landing topic stem and the loader's fallback table resolve from this one name.
+Also the reserved name of the engine-owned landing source, which carries no match
+rule at all: an unmatched record already reaches this table through the receiver's
+``default_source`` and the loader's ``default_table``, so a rule would only shadow
+every rule after it. Every producer's fallback label, every landing topic stem and
+the loader's fallback table resolve from this one name.
 """
 
 # Keys the engine sets on the compiled fetcher stanza; a source may not carry them.
@@ -607,7 +611,9 @@ class SourceView(BaseModel):
 
 
 _DEFAULT_SOURCE_VERSION = "1.0.0"
-_FORBIDDEN_WRITE_KEYS = frozenset({"versions", "current", "deployed_version", "date_time"})
+_FORBIDDEN_WRITE_KEYS = frozenset(
+    {"versions", "current", "deployed_version", "date_time", "resource_type"}
+)
 # 2.1 keys removed by the views clean break. Rejected LOUDLY on write: with
 # extra="ignore" a pre-2.2 client would otherwise get a 200 while its mapping
 # config silently vanished.
@@ -684,17 +690,20 @@ class SourceVersion(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _exactly_one_origin(self) -> SourceVersion:
-        if (self.match is None) == (self.fetcher is None):
+    def _at_most_one_origin(self) -> SourceVersion:
+        # Declaring both is always wrong. Declaring NEITHER is legal only for a core source fronting the landing table, which the receiver reaches through default_source rather than through a rule -- so the exactly-one rule is enforced one level up, on Source, where resource_type is known.
+        if self.match is not None and self.fetcher is not None:
             raise ValueError(
-                "a source is receiver-based (match) or fetcher-based (fetcher): set exactly one"
+                "a source is receiver-based (match) or fetcher-based (fetcher): set one, not both"
             )
         return self
 
     @property
-    def origin(self) -> SourceOrigin:
-        """Which way this version's data enters the platform."""
-        return "fetcher" if self.fetcher is not None else "receiver"
+    def origin(self) -> SourceOrigin | None:
+        """Which way this version's data enters the platform, or None when nothing selects it."""
+        if self.fetcher is not None:
+            return "fetcher"
+        return "receiver" if self.match is not None else None
 
     def effective_header(self) -> SourceHeader:
         """Header for runtime/DDL resolution, defaulting the profile when unauthored."""
@@ -995,6 +1004,7 @@ def apply_source_write_update(existing: Source, write: SourceWriteRequest) -> So
 
     payload: dict[str, Any] = {
         "source": existing.source,
+        "resource_type": existing.resource_type,
         "display_name": write.display_name
         if write.display_name is not None
         else existing.display_name,
@@ -1026,6 +1036,10 @@ class Source(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
     source: str = Field(..., description="The _source label — immutable identifier")
+    resource_type: ResourceType = Field(
+        default="custom",
+        description="core for engine-owned sources, custom for operator-created ones",
+    )
     display_name: str | None = Field(default=None, description="Human-readable display name")
     description: str | None = Field(default=None, description="Source description")
     state: SourceState = Field(
@@ -1107,6 +1121,13 @@ class Source(BaseModel):
         """Enforce _source naming rules."""
         return validate_source_name(v)
 
+    @field_validator("resource_type", mode="before")
+    @classmethod
+    def _coerce_resource_type(cls, value: Any) -> ResourceType:
+        if value == "core":
+            return "core"
+        return "custom"
+
     @model_validator(mode="after")
     def _validate_versions_and_display_name(self) -> Source:
         """Default display_name and ensure version pointers are valid."""
@@ -1124,7 +1145,19 @@ class Source(BaseModel):
             raise ValueError(
                 f"deployed_version '{self.deployed_version}' is not defined in versions"
             )
+        self._validate_origin_declared()
         return self
+
+    def _validate_origin_declared(self) -> None:
+        # An operator's source must say how its data arrives. Only a core source may omit both: it fronts the catch-all landing table, which takes what the receiver could not place, so a match rule would shadow every rule after it.
+        if self.resource_type == "core":
+            return
+        for version_id, version in self.versions.items():
+            if version.match is None and version.fetcher is None:
+                raise ValueError(
+                    f"version '{version_id}': a source is receiver-based (match) or "
+                    "fetcher-based (fetcher): set exactly one"
+                )
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -1185,8 +1218,8 @@ class Source(BaseModel):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
-    def origin(self) -> SourceOrigin:
-        """How the deployed version's data enters: receiver match or a fetcher."""
+    def origin(self) -> SourceOrigin | None:
+        """How the deployed version's data enters: a receiver match, a fetcher, or nothing."""
         return self.version().origin
 
     @computed_field  # type: ignore[prop-decorator]
@@ -1239,6 +1272,9 @@ class Source(BaseModel):
             "current": self.current,
             "versions": {vid: ver.to_yaml_dict() for vid, ver in sorted(self.versions.items())},
         }
+        # Written only when set, so an operator's stored source keeps the shape it had before core sources existed.
+        if self.resource_type == "core":
+            data["resource_type"] = self.resource_type
         if self.deployed_version is not None:
             data["deployed_version"] = self.deployed_version
         if self.description is not None:
@@ -1255,6 +1291,10 @@ class SourceVersionGetResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     source: str = Field(..., description="Source name (_source label)")
+    resource_type: ResourceType = Field(
+        default="custom",
+        description="core for engine-owned sources, custom for operator-created ones",
+    )
     display_name: str | None = Field(default=None, description="Human-readable display name")
     description: str | None = Field(default=None, description="Source description")
     state: SourceState = Field(default="active", description="Lifecycle state")
@@ -1285,6 +1325,10 @@ class SourceSummaryObject(BaseModel):
     """Summary row for paginated source list (mirrors ``SchemaSummaryObject``)."""
 
     name: str = Field(description="Source name (_source label)")
+    resource_type: ResourceType = Field(
+        default="custom",
+        description="core for engine-owned sources, custom for operator-created ones",
+    )
     display_name: str | None = Field(default=None, description="Human-readable display name")
     description: str | None = Field(default=None, description="Source description")
     state: SourceState = Field(default="active", description="Lifecycle state")
@@ -1304,8 +1348,9 @@ class SourceSummaryObject(BaseModel):
         default=False, description="Whether a transform stage is configured"
     )
     has_fetcher: bool = Field(default=False, description="Whether a fetcher is configured")
-    origin: SourceOrigin = Field(
-        default="receiver", description="How data enters: receiver match or a fetcher"
+    origin: SourceOrigin | None = Field(
+        default=None,
+        description="How data enters: a receiver match, a fetcher, or null when nothing selects it",
     )
     views: list[str] = Field(
         default_factory=list,

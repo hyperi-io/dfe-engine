@@ -261,6 +261,12 @@ def _instances(client: TestClient, headers: dict[str, str], service: str) -> lis
     return by_service[service]["instances"]
 
 
+def _operator_sources(client: TestClient, headers: dict[str, str]) -> list[str]:
+    """Seeded source names, without the landing source the engine always owns."""
+    listed = _get(client, _SOURCES, headers)
+    return [s["name"] for s in listed["items"] if s["resource_type"] != "core"]
+
+
 class TestSeedSourceWithTransform:
     """The Sources/<source> page: a source, its bound apps, and compiled routing."""
 
@@ -328,8 +334,7 @@ class TestSeedSourceWithTransform:
         _seed(appmgmt_client, "seed_source_with_transform")
         headers = _admin(appmgmt_client)
 
-        listed = _get(appmgmt_client, _SOURCES, headers)
-        assert [s["name"] for s in listed["items"]] == [_FETCHED, _SOURCE]
+        assert _operator_sources(appmgmt_client, headers) == [_FETCHED, _SOURCE]
         assert _instances(appmgmt_client, headers, _VRL) == [_SOURCE]
         assert _instances(appmgmt_client, headers, "dfe-fetcher") == [_FETCHED]
         files = _get(appmgmt_client, f"{_APPS}/{_VRL}/{_SOURCE}/files/transforms", headers)
@@ -340,7 +345,7 @@ class TestSeedSourceWithTransform:
         _seed(appmgmt_client, "reset_all")
         headers = _admin(appmgmt_client)
 
-        assert _get(appmgmt_client, _SOURCES, headers)["items"] == []
+        assert _operator_sources(appmgmt_client, headers) == []
         assert _instances(appmgmt_client, headers, _VRL) == []
         assert _instances(appmgmt_client, headers, "dfe-receiver") == []
         assert appmgmt_client.get(f"{_SOURCES}/{_SOURCE}", headers=headers).status_code == 404
