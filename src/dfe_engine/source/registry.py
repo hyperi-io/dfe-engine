@@ -32,6 +32,10 @@ from pydantic import ValidationError
 from scalo.config import DirectoryConfigStore
 from scalo.logger import logger
 
+from dfe_engine.core_resources.yaml_resource_type import (
+    CORE_RESOURCE_MUTATION_MESSAGE,
+    config_is_core,
+)
 from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file
 from dfe_engine.source.models import (
     DEFAULT_LANDING_LABEL,
@@ -77,6 +81,18 @@ def _first_error_message(exc: ValidationError) -> str:
     location = ".".join(str(part) for part in first.get("loc", ()))
     message = str(first.get("msg", "")).removeprefix("Value error, ")
     return f"{location}: {message}" if location else message
+
+
+class SourceCoreResourceError(SourceValidationError):
+    """A write targets a stored source the engine owns."""
+
+    def __init__(self, *, action: str, source: str) -> None:
+        self.source = source
+        self.action = action
+        super().__init__(
+            f"{CORE_RESOURCE_MUTATION_MESSAGE}: cannot {action} source {source!r}, which the "
+            "engine owns and reconciles from the deployment's own settings."
+        )
 
 
 class SourceMatchConflictError(SourceValidationError):
@@ -369,11 +385,30 @@ class SourceRegistry:
 
         return Source.model_validate(config_data)
 
+    def core_source_names(self) -> list[str]:
+        """Every stored engine-owned source, by name.
+
+        Reads raw docs rather than going through ``list_sources``, which drops any
+        source the model cannot parse -- a core one dropped there would be invisible
+        to the seeder and still refused by the gates, so unreachable from both sides.
+        """
+        return sorted(name for name in self._names() if self.is_core(name))
+
+    def is_core(self, source_name: str) -> bool:
+        """Whether the STORED source is engine-owned, whatever an incoming body claims.
+
+        Reads the raw doc, so it answers for a stored source the model can no longer
+        parse -- which is the one the gates most need to refuse.
+        """
+        return config_is_core(self._get_raw(source_name))
+
     def save_source(
         self,
         source: Source | dict[str, Any],
         created_by: str | None = None,
         description: str | None = None,
+        *,
+        core_reconcile: bool = False,
     ) -> Source:
         """Save a source definition to the YAML directory.
 
@@ -385,6 +420,8 @@ class SourceRegistry:
             source: Source model or dict.
             created_by: Username/identity of who made the change.
             description: Description of the change.
+            core_reconcile: Engine-only. Permits the write that keeps a core source
+                in step with the deployment's settings. No request path sets it.
 
         Returns:
             Validated Source model.
@@ -400,7 +437,7 @@ class SourceRegistry:
                 raise SourceValidationError(f"Invalid source definition: {e}") from e
 
         # Validate uniqueness and match conflicts
-        self._validate_save(source)
+        self._validate_save(source, core_reconcile=core_reconcile)
 
         # Serialize and write
         config_data = source.to_yaml_dict()
@@ -495,7 +532,13 @@ class SourceRegistry:
         msg = description or f"source: deploy {source_name} version {version_id}"
         return self.save_source(updated, created_by=created_by, description=msg)
 
-    def delete_source(self, source_name: str, created_by: str | None = None) -> None:
+    def delete_source(
+        self,
+        source_name: str,
+        created_by: str | None = None,
+        *,
+        core_reconcile: bool = False,
+    ) -> None:
         """Delete a source definition.
 
         Removes the YAML file and commits the deletion if git-aware.
@@ -504,7 +547,16 @@ class SourceRegistry:
             source_name: The _source label.
             created_by: Username/identity of who deleted it (gitcrud commit
                 attribution, same as save).
+            core_reconcile: Engine-only. Permits removing a core source the
+                settings no longer name. No request path sets it.
+
+        Raises:
+            SourceCoreResourceError: The stored source is engine-owned.
         """
+        # Its own gate: delete_source does not pass through _validate_save.
+        if not (core_reconcile) and self.is_core(source_name):
+            raise SourceCoreResourceError(action="delete", source=source_name)
+
         deleted = self._delete_raw(
             source_name,
             created_by=created_by,
@@ -549,6 +601,7 @@ class SourceRegistry:
             results.append(
                 {
                     "source": source.source,
+                    "resource_type": source.resource_type,
                     "display_name": source.display_name,
                     "description": source.description,
                     "state": source.state,
@@ -632,8 +685,12 @@ class SourceRegistry:
     # Validation
     # -----------------------------------------------------------------
 
-    def _validate_save(self, source: Source) -> None:
-        """Validate before saving: unique source, runnable flow, no match conflicts."""
+    def _validate_save(self, source: Source, *, core_reconcile: bool = False) -> None:
+        """Validate before saving: not core, unique source, runnable flow, no match conflicts."""
+        # Read the STORED doc, not the incoming one: an operator body claiming resource_type is rejected at the model, and a body that omits it must not be able to demote a core source by overwriting it.
+        if not (core_reconcile) and self.is_core(source.source):
+            raise SourceCoreResourceError(action="modify", source=source.source)
+
         candidate_version = source.versions.get(source.current)
         candidate_match = candidate_version.match if candidate_version else None
 

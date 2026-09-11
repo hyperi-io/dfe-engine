@@ -95,6 +95,20 @@ def core_table_specs(
     ]
 
 
+def landing_table_ddl(targets: CoreSchemaTargets) -> str:
+    """The landing table's CREATE TABLE, exactly as ``apply_core_schema`` applies it.
+
+    The source build path renders its own DDL from the stored schema, which is not
+    the same statement: anything recording what the bootstrap deployed has to read
+    the spec the bootstrap uses, not rebuild one beside it.
+    """
+    writer = DDLFileWriter(database=targets.database, landing_table=targets.landing_table)
+    spec = with_default_ttl(
+        writer.default_table_spec(profile_name=targets.profile), targets.default_ttl_days
+    )
+    return writer.render_spec(spec)
+
+
 def apply_core_schema(
     client: Any,
     targets: CoreSchemaTargets,

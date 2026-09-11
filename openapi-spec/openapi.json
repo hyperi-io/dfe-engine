@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.19.32"
+    "version": "1.19.36"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -3647,7 +3647,7 @@
           "Sources"
         ],
         "summary": "Get Source",
-        "description": "Get a full source definition by name, including build/deploy per version.\n\n``main`` is the one name that always answers. It is a normal source once\nwritten; until then the deployment's own main flow is synthesised, so the\nconsole has the card it draws before anyone has configured anything.",
+        "description": "Get a full source definition by name, including build/deploy per version.",
         "operationId": "get_source_api_v1_sources__name__get",
         "parameters": [
           {
@@ -27297,6 +27297,16 @@
             "title": "Source",
             "description": "The _source label \u2014 immutable identifier"
           },
+          "resource_type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "custom"
+            ],
+            "title": "Resource Type",
+            "description": "core for engine-owned sources, custom for operator-created ones",
+            "default": "custom"
+          },
           "display_name": {
             "anyOf": [
               {
@@ -27389,13 +27399,20 @@
             "readOnly": true
           },
           "origin": {
-            "type": "string",
-            "enum": [
-              "receiver",
-              "fetcher"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "receiver",
+                  "fetcher"
+                ]
+              },
+              {
+                "type": "null"
+              }
             ],
             "title": "Origin",
-            "description": "How the deployed version's data enters: receiver match or a fetcher.",
+            "description": "How the deployed version's data enters: a receiver match, a fetcher, or nothing.",
             "readOnly": true
           },
           "transport": {
@@ -27528,9 +27545,16 @@
             "description": "What carries it here - the bus provider, or the direct protocol"
           },
           "origin": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Origin",
-            "description": "receiver or fetcher"
+            "description": "receiver, fetcher, or null when nothing selects the records"
           },
           "input": {
             "type": "string",
@@ -27560,7 +27584,6 @@
           "source",
           "transport",
           "carrier",
-          "origin",
           "input",
           "outputs",
           "table"
@@ -28029,6 +28052,16 @@
             "title": "Name",
             "description": "Source name (_source label)"
           },
+          "resource_type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "custom"
+            ],
+            "title": "Resource Type",
+            "description": "core for engine-owned sources, custom for operator-created ones",
+            "default": "custom"
+          },
           "display_name": {
             "anyOf": [
               {
@@ -28126,14 +28159,20 @@
             "default": false
           },
           "origin": {
-            "type": "string",
-            "enum": [
-              "receiver",
-              "fetcher"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "receiver",
+                  "fetcher"
+                ]
+              },
+              {
+                "type": "null"
+              }
             ],
             "title": "Origin",
-            "description": "How data enters: receiver match or a fetcher",
-            "default": "receiver"
+            "description": "How data enters: a receiver match, a fetcher, or null when nothing selects it"
           },
           "views": {
             "items": {
@@ -28336,6 +28375,16 @@
             "type": "string",
             "title": "Source",
             "description": "Source name (_source label)"
+          },
+          "resource_type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "custom"
+            ],
+            "title": "Resource Type",
+            "description": "core for engine-owned sources, custom for operator-created ones",
+            "default": "custom"
           },
           "display_name": {
             "anyOf": [
