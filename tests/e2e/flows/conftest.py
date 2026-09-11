@@ -163,6 +163,19 @@ def offered(engine: EngineAPI) -> tuple[str, ...]:
     return tuple(str(a["service"]) for a in apps if a.get("offered", True))
 
 
+@pytest.fixture(scope="session")
+def per_config(engine: EngineAPI) -> tuple[str, ...]:
+    """The apps this deployment runs one deployment of PER SOURCE.
+
+    Read off the catalogue for the same reason the offer is: whether a stage
+    arrives with its source is the manifest's to say, and a target that cannot
+    configure such an instance refuses the source rather than storing one nothing
+    runs.
+    """
+    apps = engine.json("GET", "/apps")
+    return tuple(str(a["service"]) for a in apps if a.get("multiplicity") == "per_config")
+
+
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     """Parametrise every flow test over shapes x the transports asked for.
 

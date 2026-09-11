@@ -42,6 +42,10 @@ EXPECTED_SKIP = "EXPECTED-SKIP:"
 # The receiver takes every source, so only a fetcher-origin shape names one.
 ORIGIN_APPS: dict[str, str] = {"fetcher": "dfe-fetcher"}
 
+# A source's transform.engine selects the app the same way the engine's catalogue
+# does, so a shape knows which transform app its flow needs.
+TRANSFORM_SERVICE_PREFIX = "dfe-transform-"
+
 # The origins whose records only land once a RUNNING app carries the routing the
 # new source compiles to. The catch-all needs no routing change, and a catalogue
 # case asserts the compile rather than a landing, so neither is one of them.
@@ -162,22 +166,48 @@ class FlowShape:
             f"apps, so the sources {self.name} creates never reach the receiver"
         )
 
-    def refusal(self, transport: str, carried: Sequence[str], offered: Sequence[str]) -> str | None:
+    def per_config_apps(self, per_config: Sequence[str]) -> tuple[str, ...]:
+        """The apps in this shape's flow that the deployment runs one-per-source.
+
+        Args:
+            per_config: The services the deployment reports as ``per_config``.
+
+        Returns:
+            Their service names, in flow order.
+        """
+        needed = [ORIGIN_APPS[self.origin]] if self.origin in ORIGIN_APPS else []
+        for entry in self.sources:
+            engine = (entry.get("transform") or {}).get("engine")
+            if engine:
+                needed.append(f"{TRANSFORM_SERVICE_PREFIX}{engine}")
+        return tuple(name for name in needed if name in per_config)
+
+    def refusal(
+        self,
+        transport: str,
+        carried: Sequence[str],
+        offered: Sequence[str],
+        per_config: Sequence[str] = (),
+        applies_routing: bool = True,
+    ) -> str | None:
         """The refusal the API must give on *transport* here, or None when it must save.
 
-        Three refusals reach the same save, and two of them are the deployment's
+        Four refusals reach the same save, and three of them are the deployment's
         rather than the fixture's. A deployment binds its stages to ONE transport,
-        so a source on the other is refused whatever the shape is; and a tier that
-        deploys no app to run this shape's origin refuses it on either transport,
-        which is why a fetcher-origin shape is refused on Compose rather than
-        written and never polled. Both are read off the deployment at run time,
-        never declared per fixture. What an app in this shape's flow cannot carry
-        is the fixture's own.
+        so a source on the other is refused whatever the shape is; a tier that
+        deploys no app to run this shape's origin refuses it on either transport;
+        and a target that cannot configure a one-per-source app refuses a shape
+        needing one, which is why a fetcher or transform shape is refused on
+        Compose rather than written and never run. All three are read off the
+        deployment at run time, never declared per fixture. What an app in this
+        shape's flow cannot carry is the fixture's own.
 
         Args:
             transport: The source transport the case is running.
             carried: What the deployment reports it carries.
             offered: The apps the deployment reports it offers.
+            per_config: The apps the deployment reports it runs one-per-source.
+            applies_routing: Whether the engine's writes reach the running apps.
 
         Returns:
             The substring the refusal must contain, or None.
@@ -187,6 +217,8 @@ class FlowShape:
         needed = ORIGIN_APPS.get(self.origin)
         if needed is not None and needed not in offered:
             return f"does not deploy {needed}"
+        if not applies_routing and self.per_config_apps(per_config):
+            return "cannot configure one"
         return self.refused.get(transport)
 
 

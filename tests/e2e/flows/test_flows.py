@@ -312,10 +312,11 @@ class TestFlows:
         catchall: tuple[str, str],
         carried: tuple[str, ...],
         offered: tuple[str, ...],
+        per_config: tuple[str, ...],
         applies_routing: bool,
     ) -> None:
         require(e2e, "receiver_url", "ch_host")
-        refusal = shape.refusal(transport, carried, offered)
+        refusal = shape.refusal(transport, carried, offered, per_config, applies_routing)
         if refusal:
             pytest.skip(
                 f"{shapes.EXPECTED_SKIP} this deployment refuses {shape.name} on "
@@ -484,6 +485,7 @@ def test_a_flow_the_deployment_cannot_run_is_refused(
     engine,
     carried: tuple[str, ...],
     offered: tuple[str, ...],
+    per_config: tuple[str, ...],
     applies_routing: bool,
 ) -> None:
     """The refusal is the assertion: a flow that cannot run must fail at save.
@@ -494,9 +496,10 @@ def test_a_flow_the_deployment_cannot_run_is_refused(
 
     On a bus deployment asked to prove both transports, this is what the direct
     half of the run proves. On a tier that deploys no fetcher, it is what the
-    fetcher shapes prove.
+    fetcher shapes prove. On Compose it is also what every shape needing a
+    one-per-source app proves, because nothing there can configure one.
     """
-    declared = shape.refusal(transport, carried, offered)
+    declared = shape.refusal(transport, carried, offered, per_config, applies_routing)
     if declared is None:
         # A shape the deployment accepts but never routes is skipped for THAT
         # reason: the end-to-end case beside this one does not prove it either.

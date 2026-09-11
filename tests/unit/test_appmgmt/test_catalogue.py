@@ -151,22 +151,22 @@ class TestShippedManifest:
             if app.profiles
         }
 
-        # The fetcher is Kubernetes-only because Compose ships no fetcher service,
-        # so a source asking to be fetched there is refused rather than written.
+        # docker-slim runs the core data path alone, so the fetcher may not be
+        # deployed there and a source asking to be fetched is refused.
         assert restricted == {
             "culvert": ["mesh", "scale"],
-            "dfe-fetcher": ["mesh", "scale", "single", "slim"],
+            "dfe-fetcher": ["docker-single", "mesh", "scale", "single", "slim"],
         }
 
     def test_the_apps_nothing_deploys_by_default_are_the_per_source_ones_and_the_door(self):
         # An instance of a per-source app arrives with its source, and the edge
         # door is dialled by an appliance fleet a deployment may not have, so
-        # neither is seeded by a profile.
+        # neither is seeded by a profile. The fetcher and the vrl transform are
+        # the exception: Compose creates no service at run time, so docker-single
+        # starts one of each idle.
         optional = {name for name, app in catalogue.APP_CATALOGUE.items() if app.optional}
 
         assert optional == {
-            "dfe-fetcher",
-            "dfe-transform-vrl",
             "dfe-transform-vector",
             "dfe-transform-elastic",
             "culvert",
@@ -175,7 +175,11 @@ class TestShippedManifest:
     def test_the_stack_wide_apps_are_deployed_wherever_they_may_be(self):
         # The core data path plus the two consoles: a DFE without them is not one,
         # so none of them waits for an operator to turn it on.
-        always = {name for name, app in catalogue.APP_CATALOGUE.items() if not app.optional}
+        always = {
+            name
+            for name, app in catalogue.APP_CATALOGUE.items()
+            if not app.optional and app.multiplicity is catalogue.Multiplicity.SINGLE
+        }
 
         assert always == {
             "dfe-receiver",
@@ -214,6 +218,7 @@ class TestShippedManifest:
                 "config.extractors.containers",
                 "config.ingest.enabled",
             ),
+            "dfe-transform-vrl": ("config.source.topics",),
         }
 
     def test_only_elastic_selects_a_compiled_in_program_by_name(self):
