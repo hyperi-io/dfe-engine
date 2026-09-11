@@ -56,26 +56,34 @@ class JitProvisioner:
         user_id: str,
         oidc_groups: list[str],
         source_provider: str,
+        email: str = "",
     ) -> Account:
-        """Create or update shadow account. Non-fatal on HyperDX failures."""
+        """Create or update shadow account. Non-fatal on HyperDX failures.
+
+        ``email`` is the IdP-asserted address (OIDC ``email`` claim / ``X-Oidc-Email``).
+        It is written on first create and reconciled on later logins when present.
+        """
         safe_name = self.sanitise_username(user_id)
         now = datetime.now(UTC).isoformat()
+        wanted_email = email.strip()
 
         existing = self._accounts.get(safe_name)
         if existing is not None:
             # Subsequent login — update groups if changed + last_login_at
+            updates: dict[str, object] = {"last_login_at": now}
             if set(existing.groups) != set(oidc_groups):
                 added = [g for g in oidc_groups if g not in existing.groups]
                 removed = [g for g in existing.groups if g not in oidc_groups]
-                self._accounts.update(safe_name, groups=oidc_groups, last_login_at=now)
+                updates["groups"] = oidc_groups
                 audit_jit_groups_updated(user_id, added, removed)
-            else:
-                self._accounts.update(safe_name, last_login_at=now)
+            if wanted_email and existing.email != wanted_email:
+                updates["email"] = wanted_email
+            self._accounts.update(safe_name, **updates)
             return self._accounts.get(safe_name)
 
         # First login — create shadow account
         try:
-            self._accounts.create(safe_name, "", groups=oidc_groups)
+            self._accounts.create(safe_name, "", groups=oidc_groups, email=wanted_email)
             self._accounts.update(
                 safe_name,
                 external=True,
@@ -84,7 +92,10 @@ class JitProvisioner:
             )
         except ValueError:
             # Race condition: another request created it
-            self._accounts.update(safe_name, groups=oidc_groups, last_login_at=now)
+            race_updates: dict[str, object] = {"groups": oidc_groups, "last_login_at": now}
+            if wanted_email:
+                race_updates["email"] = wanted_email
+            self._accounts.update(safe_name, **race_updates)
             return self._accounts.get(safe_name)
 
         # Resolve org_ids from groups

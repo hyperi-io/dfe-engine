@@ -152,6 +152,7 @@ def seed(
     group_store: GroupStore | DocuStoreGroupStore,
     crud: GitCrud | None,
     mint_password: str = "",
+    recovery_email: str = "",
 ) -> str:
     """Reconcile the break-glass account against the committed hash. Returns the hash.
 
@@ -170,6 +171,13 @@ def seed(
         return ""
 
     account = account_store.get(USERNAME)
+    from dfe_engine.auth.bootstrap import seeded_account_email
+
+    wanted = seeded_account_email(USERNAME, recovery_email)
+    if recovery_email.strip():
+        email = wanted
+    else:
+        email = account.email if account and account.email else wanted
     if account is None or account.password_hash != digest:
         # enabled stays True on the account: the governance flag is the ONE switch.
         now = datetime.now(UTC).isoformat()
@@ -179,10 +187,13 @@ def seed(
                 password_hash=digest,
                 enabled=True,
                 groups=[GROUP],
+                email=email,
                 created_at=account.created_at if account else now,
                 updated_at=now,
             )
         )
         logger.info("Reconciled the break-glass account from the deploy repo hash")
+    elif account.email != email:
+        account_store.update(USERNAME, email=email)
     group_store.add_member(GROUP, USERNAME)
     return digest

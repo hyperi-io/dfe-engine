@@ -212,7 +212,11 @@ class TestUpdateGroup:
     def test_update_members_syncs_account_groups(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "memsync-user", "password": "pw"},
+            json={
+                "username": "memsync-user",
+                "password": "pw",
+                "email": "memsync-user@example.com",
+            },
             headers=admin_headers,
         )
         client.post(
@@ -239,7 +243,12 @@ class TestUpdateGroup:
     def test_remove_member_syncs_account_groups(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "rm-sync-user", "password": "pw", "groups": ["rm-sync-group"]},
+            json={
+                "username": "rm-sync-user",
+                "password": "pw",
+                "email": "rm-sync-user@example.com",
+                "groups": ["rm-sync-group"],
+            },
             headers=admin_headers,
         )
         client.post(

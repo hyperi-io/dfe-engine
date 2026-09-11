@@ -47,6 +47,7 @@ from dfe_engine.auth.api_keys import APIKeyStore
 from dfe_engine.auth.groups import DocuStoreGroupStore, GroupStore
 from dfe_engine.auth.role_store import RoleStore
 from dfe_engine.auth.roles import RoleConfig
+from dfe_engine.git_identity import DEFAULT_FALLBACK_DOMAIN
 from dfe_engine.settings import is_dev_posture
 
 if TYPE_CHECKING:
@@ -72,6 +73,21 @@ def admin_account_name(override: str = "") -> str:
     if override and override != _DEFAULT_ADMIN_NAME:
         return override
     return _DEFAULT_ADMIN_NAME
+
+
+def seeded_account_email(username: str, recovery_email: str = "") -> str:
+    """Contact email for a bootstrap-seeded local account.
+
+    ``DFE_RECOVERY_EMAIL`` wins when set; otherwise ``{username}@dfe.local``.
+    """
+    if recovery_email.strip():
+        return recovery_email.strip()
+    return f"{username}@{DEFAULT_FALLBACK_DOMAIN}"
+
+
+def _is_synthetic_fallback_email(email: str, username: str) -> bool:
+    """True when *email* is the placeholder ``{username}@dfe.local``."""
+    return email == f"{username}@{DEFAULT_FALLBACK_DOMAIN}"
 
 
 def admin_account_password(override: str = "") -> str:
@@ -148,6 +164,7 @@ def bootstrap_auth(
     gitcrud: GitCrud | None = None,
     seed_accounts: list[SeedAccount] | None = None,
     breakglass_password: str = "",
+    recovery_email: str = "",
 ) -> tuple[
     AccountStore | DocuStoreAccountStore,
     GroupStore | DocuStoreGroupStore,
@@ -174,6 +191,8 @@ def bootstrap_auth(
             shared team logins survive a teardown+rebuild unchanged (dfe-infra #106).
         breakglass_password: First-boot break-glass password. Minted into the
             deploy repo as a hash when none is committed, ignored thereafter.
+        recovery_email: Contact email for the admin and break-glass accounts
+            (``DFE_RECOVERY_EMAIL``). Empty falls back to ``{username}@dfe.local``.
 
     Returns:
         Tuple of (AccountStore, GroupStore, APIKeyStore, RoleStore, RoleConfig).
@@ -233,6 +252,7 @@ def bootstrap_auth(
                 username=admin_name,
                 password=admin_account_password(default_admin_password),
                 groups=[_ADMIN_GROUP],
+                email=seeded_account_email(admin_name, recovery_email),
             ),
         )
     created = _reconcile_seed_accounts(account_store, group_store, specs)
@@ -248,7 +268,13 @@ def bootstrap_auth(
     # The recovery admin: its hash lives in the deploy repo, not in config.
     from dfe_engine.auth import breakglass
 
-    breakglass.seed(account_store, group_store, gitcrud, breakglass_password)
+    breakglass.seed(
+        account_store,
+        group_store,
+        gitcrud,
+        breakglass_password,
+        recovery_email=recovery_email,
+    )
 
     return account_store, group_store, api_key_store, role_store, role_config
 
@@ -310,16 +336,29 @@ def _reconcile_seed_accounts(
 
         account = account_store.get(spec.username)
         if account is None:
-            account_store.create(spec.username, spec.password, groups=wanted_groups)
+            account_store.create(
+                spec.username, spec.password, groups=wanted_groups, email=spec.email
+            )
             created.append(spec.username)
             logger.info(f"Seeded named account '{spec.username}'")
         else:
             if spec.password and not account_store.verify_password(spec.username, spec.password):
                 account_store.reset_password(spec.username, spec.password)
                 logger.info(f"Reconciled password for seed account '{spec.username}'")
+            updates: dict[str, object] = {}
             if set(account.groups) != set(wanted_groups):
-                account_store.update(spec.username, groups=wanted_groups)
-                logger.info(f"Reconciled groups for seed account '{spec.username}'")
+                updates["groups"] = wanted_groups
+            if spec.email and (
+                not account.email
+                or (
+                    account.email != spec.email
+                    and not _is_synthetic_fallback_email(spec.email, spec.username)
+                )
+            ):
+                updates["email"] = spec.email
+            if updates:
+                account_store.update(spec.username, **updates)
+                logger.info(f"Reconciled fields for seed account '{spec.username}'")
 
         # Reconcile the group rosters to match the account's groups exactly.
         wanted = set(wanted_groups)

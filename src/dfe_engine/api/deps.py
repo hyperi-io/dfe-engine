@@ -550,7 +550,7 @@ async def get_current_user(request: Request) -> AuthContext:
         jit = getattr(request.app.state, "jit_provisioner", None)
         if jit:
             try:
-                jit.ensure_account(oidc_subject, groups, "oidc")
+                jit.ensure_account(oidc_subject, groups, "oidc", email=oidc_email or "")
             except Exception:
                 logger.exception("JIT provisioning failed", user_id=oidc_subject)
 

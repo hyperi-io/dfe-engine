@@ -67,6 +67,9 @@ class Account(BaseModel):
     external_id: str = ""
     """Provider-specific external identifier (SCIM externalId / IdP object ID)."""
     last_login_at: str = ""
+    email: str = ""
+    phone: str = ""
+    name: str = ""
     created_at: str = ""
     updated_at: str = ""
     attributes: dict[str, Any] = Field(default_factory=dict)
@@ -99,6 +102,9 @@ class AccountStore:
         password: str,
         *,
         groups: list[str] | None = None,
+        email: str = "",
+        phone: str = "",
+        name: str = "",
     ) -> Account:
         """Create a new account.
 
@@ -106,6 +112,9 @@ class AccountStore:
             username: Unique account name.
             password: Plaintext password — bcrypt-hashed before storage.
             groups: Optional list of group memberships.
+            email: Optional contact email.
+            phone: Optional contact phone.
+            name: Optional display name (distinct from ``username``).
 
         Returns:
             The newly created Account.
@@ -125,6 +134,9 @@ class AccountStore:
             password_hash=hash_password(password) if password else _UNUSABLE_PASSWORD_HASH,
             enabled=True,
             groups=groups or [],
+            email=email,
+            phone=phone,
+            name=name,
             created_at=now,
             updated_at=now,
         )
@@ -168,13 +180,14 @@ class AccountStore:
     def update(self, username: str, **fields: object) -> Account:
         """Update mutable fields on an existing account.
 
-        Permitted fields: ``enabled``, ``groups``.
-        Updating ``username`` or ``password_hash`` directly is not permitted
-        (use :meth:`reset_password` to change the password).
+        Permitted fields: ``enabled``, ``groups``, ``email``, ``phone``,
+        ``name``, plus the external-identity stamps. Updating ``username`` or
+        ``password_hash`` directly is not permitted (use :meth:`reset_password`
+        to change the password).
 
         Args:
             username: Account to update.
-            **fields: Fields to update (``enabled``, ``groups``).
+            **fields: Fields to update.
 
         Returns:
             The updated Account.
@@ -187,22 +200,8 @@ class AccountStore:
             raise KeyError(username)
 
         account = self._read(path)
-
-        # Apply permitted field updates only
-        if "enabled" in fields:
-            account = account.model_copy(update={"enabled": fields["enabled"]})
-        if "groups" in fields:
-            account = account.model_copy(update={"groups": fields["groups"]})
-        if "external" in fields:
-            account = account.model_copy(update={"external": fields["external"]})
-        if "source_provider" in fields:
-            account = account.model_copy(update={"source_provider": fields["source_provider"]})
-        if "external_id" in fields:
-            account = account.model_copy(update={"external_id": fields["external_id"]})
-        if "last_login_at" in fields:
-            account = account.model_copy(update={"last_login_at": fields["last_login_at"]})
-
-        account = account.model_copy(update={"updated_at": _now()})
+        updates = {k: fields[k] for k in _UPDATABLE_FIELDS if k in fields}
+        account = account.model_copy(update={**updates, "updated_at": _now()})
         self._write(path, account)
         return account
 
@@ -321,7 +320,7 @@ class AccountStore:
 
 
 # Fields update() may change; username and password_hash are excluded (the
-# password changes only via reset_password). Kept identical to the YAML store.
+# password changes only via reset_password). Shared by both store backends.
 _UPDATABLE_FIELDS = (
     "enabled",
     "groups",
@@ -329,6 +328,9 @@ _UPDATABLE_FIELDS = (
     "source_provider",
     "external_id",
     "last_login_at",
+    "email",
+    "phone",
+    "name",
 )
 
 
@@ -351,6 +353,9 @@ class DocuStoreAccountStore:
         password: str,
         *,
         groups: list[str] | None = None,
+        email: str = "",
+        phone: str = "",
+        name: str = "",
     ) -> Account:
         """Create a new account. Raises ValueError if the name is invalid or taken."""
         if not _VALID_NAME.match(username):
@@ -363,6 +368,9 @@ class DocuStoreAccountStore:
             password_hash=hash_password(password) if password else _UNUSABLE_PASSWORD_HASH,
             enabled=True,
             groups=groups or [],
+            email=email,
+            phone=phone,
+            name=name,
             created_at=now,
             updated_at=now,
         )

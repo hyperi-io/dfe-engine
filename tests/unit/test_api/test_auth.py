@@ -223,7 +223,12 @@ class TestPermissions:
 
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "nogrp", "password": "pw", "groups": []},
+            json={
+                "username": "nogrp",
+                "password": "pw",
+                "email": "nogrp@example.com",
+                "groups": [],
+            },
             headers=admin_headers,
         )
         token = create_access_token(

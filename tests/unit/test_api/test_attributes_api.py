@@ -25,7 +25,7 @@ class TestAccountAttributes:
     def _make_account(self, client, admin_headers, username: str) -> None:
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": username, "password": "pw"},
+            json={"username": username, "password": "pw", "email": f"{username}@example.com"},
             headers=admin_headers,
         )
 

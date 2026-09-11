@@ -230,6 +230,18 @@ async def oidc_callback(
             detail={"code": "unauthorized", "message": "IdP id_token carried no subject"},
         )
 
+    jit = getattr(request.app.state, "jit_provisioner", None)
+    if jit:
+        try:
+            jit.ensure_account(
+                identity.subject,
+                identity.groups,
+                provider,
+                email=identity.email,
+            )
+        except Exception:
+            logger.exception("JIT provisioning failed", user_id=identity.subject)
+
     # RE-MINT: the engine's own ES384 identity token is the ONLY token downstream
     # apps ever see. iss/iat/exp are set by the authority.
     token = jwt_authority_for(settings).sign(

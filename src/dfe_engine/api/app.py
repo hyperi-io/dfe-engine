@@ -207,6 +207,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         gitcrud=gitcrud,
         seed_accounts=settings.auth.local.seed_accounts,
         breakglass_password=settings.auth.local.breakglass_password,
+        recovery_email=settings.auth.local.recovery_email,
     )
     app.state.account_store = account_store
     app.state.group_store = group_store

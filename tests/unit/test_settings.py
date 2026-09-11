@@ -340,6 +340,11 @@ class TestEnvOverrides:
         assert settings.auth.local.admin_name == "breakglass"
         assert settings.auth.local.admin_password == "a-configured-admin-password"
 
+    def test_recovery_email_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_RECOVERY_EMAIL", "ops@example.com")
+        settings = load_settings()
+        assert settings.auth.local.recovery_email == "ops@example.com"
+
     def test_local_admin_unset_falls_back_to_shipped_defaults(self, monkeypatch):
         # Unset leaves the defaults.yaml values, so a deploy that sets neither
         # var seeds the admin account with the published "changeme".

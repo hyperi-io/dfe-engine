@@ -238,7 +238,11 @@ class TestAccountGroupWorkflow:
         # Create account
         resp = e2e_client.post(
             "/api/v1/auth/accounts",
-            json={"username": "e2e_user", "password": "e2e-user-pw"},
+            json={
+                "username": "e2e_user",
+                "password": "e2e-user-pw",
+                "email": "e2e_user@example.com",
+            },
             headers=headers,
         )
         assert resp.status_code == 201

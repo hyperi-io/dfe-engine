@@ -186,6 +186,7 @@ def test_reset_all_recreates_break_glass_admin(tmp_path, monkeypatch):
     remaining = accounts.list()
     assert len(remaining) == 1
     assert remaining[0].username == admin_name
+    assert remaining[0].email == "admin@dfe.local"
     assert accounts.verify_password(admin_name, admin_account_password())
 
 

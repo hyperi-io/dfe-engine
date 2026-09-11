@@ -54,6 +54,21 @@ class TestEnsureAccount:
         assert not account.password_hash.startswith("$2")
         assert account.last_login_at != ""
 
+    def test_first_login_stores_oidc_email(self, stores):
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+        account = jit.ensure_account("guid-123", ["acme-viewers"], "entra", email="jane@corp.com")
+        assert account.email == "jane@corp.com"
+
+    def test_subsequent_login_backfills_oidc_email(self, stores):
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+        jit.ensure_account("guid-123", ["acme-viewers"], "entra")
+        assert accounts.get("guid-123").email == ""
+
+        jit.ensure_account("guid-123", ["acme-viewers"], "entra", email="jane@corp.com")
+        assert accounts.get("guid-123").email == "jane@corp.com"
+
     def test_subsequent_login_updates_timestamp(self, stores):
         accounts, groups = stores
         jit = JitProvisioner(account_store=accounts, group_store=groups)
