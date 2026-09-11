@@ -367,6 +367,53 @@ class TestUpdateAccount:
         assert resp.status_code == 403
 
 
+class TestResetOwnPassword:
+    """POST /api/v1/auth/accounts/reset-password uses the current session."""
+
+    def test_authenticated_user_resets_own_password(self, client, app, viewer_headers):
+        resp = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"new_password": "viewer-new-pw"},
+            headers=viewer_headers,
+        )
+        assert resp.status_code == 200
+        store = app.state.account_store
+        assert store.verify_password("viewer", "viewer-new-pw")
+        assert not store.verify_password("viewer", "test-viewer-pw")
+
+    def test_query_username_cannot_reset_another_account(self, client, app, viewer_headers):
+        from tests.unit.test_api.conftest import ADMIN_PASSWORD
+
+        resp = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            params={"username": "admin"},
+            json={"new_password": "hijacked-pw"},
+            headers=viewer_headers,
+        )
+        assert resp.status_code == 200
+        store = app.state.account_store
+        assert store.verify_password("admin", ADMIN_PASSWORD)
+        assert store.verify_password("viewer", "hijacked-pw")
+
+    def test_requires_authentication(self, client):
+        resp = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"new_password": "pw"},
+        )
+        assert resp.status_code == 401
+
+    def test_reset_to_current_password_rejected(self, client, viewer_headers):
+        resp = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"new_password": "test-viewer-pw"},
+            headers=viewer_headers,
+        )
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["code"] == "password_reused"
+        assert "current" not in body["message"].lower()
+
+
 class TestResetPassword:
     """POST /api/v1/auth/accounts/{username}/reset-password"""
 

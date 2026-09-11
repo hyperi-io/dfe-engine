@@ -12,10 +12,12 @@ POST   /api/v1/auth/accounts                        → Create account
 GET    /api/v1/auth/accounts                        → List accounts
 GET    /api/v1/auth/accounts/{username}             → Get account detail
 PUT    /api/v1/auth/accounts/{username}             → Update account
-POST   /api/v1/auth/accounts/{username}/reset-password → Reset password
+POST   /api/v1/auth/accounts/reset-password         → Reset own password (session)
+POST   /api/v1/auth/accounts/{username}/reset-password → Reset password (admin)
 DELETE /api/v1/auth/accounts/{username}             → Delete account
 
-All endpoints require admin role (org:write).
+Admin endpoints require account write/reset scopes. ``POST /reset-password`` is
+the session-owner's own password change and only requires a logged-in user.
 Password hashes are NEVER returned in any response.
 """
 
@@ -186,6 +188,46 @@ def _account_response(account: Account) -> AccountResponse:
     )
 
 
+def _reset_stored_password(
+    request: Request,
+    settings: Settings,
+    *,
+    username: str,
+    new_password: str,
+    actor: str,
+) -> ResetPasswordResponse:
+    """Apply a password reset in the live store and mirror it if git-backed."""
+    from dfe_engine.auth.accounts import AccountStore
+
+    store: AccountStore = request.app.state.account_store
+    existing = store.get(username)
+    if existing is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Account '{username}' not found"},
+        )
+    if store.verify_password(username, new_password):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "password_reused",
+                "message": (
+                    f"New password may not match any of the last {PASSWORD_REUSE_WINDOW} passwords"
+                ),
+            },
+        )
+    store.reset_password(username, new_password)
+    git = _persist_account(
+        request,
+        settings,
+        username=username,
+        account=store.get(username) or existing,
+        summary="reset password",
+        actor=actor,
+    )
+    return ResetPasswordResponse(git=git)
+
+
 # ── Endpoints ────────────────────────────────────────────────
 
 
@@ -342,6 +384,33 @@ async def update_account(
 
 
 @router.post(
+    "/reset-password",
+    status_code=200,
+    response_model=ResetPasswordResponse,
+)
+async def reset_current_user_password(
+    body: ResetPasswordRequest,
+    user: CurrentUser,
+    request: Request,
+    settings: Settings,
+) -> ResetPasswordResponse:
+    """Reset the authenticated user's password.
+
+    The username is taken from the session, not the request, so a caller cannot
+    reset another account through this route. The live store takes the new
+    password immediately; the ``git`` block reports whether the durable mirror
+    merged, is pending review, or is a no-op for a non-git-backed account.
+    """
+    return _reset_stored_password(
+        request,
+        settings,
+        username=user.user_id,
+        new_password=body.new_password,
+        actor=user.user_id,
+    )
+
+
+@router.post(
     "/{username}/reset-password",
     status_code=200,
     response_model=ResetPasswordResponse,
@@ -363,36 +432,13 @@ async def reset_password(
     block reports whether that mirror merged straight away (dev/solo) or is a
     pending review PR / CLI merge (production+team), or is a no-op file share.
     """
-    from dfe_engine.auth.accounts import AccountStore
-
-    store: AccountStore = request.app.state.account_store
-    existing = store.get(username)
-    if existing is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Account '{username}' not found"},
-        )
-    if store.verify_password(username, body.new_password):
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "password_reused",
-                "message": (
-                    f"New password may not match any of the last {PASSWORD_REUSE_WINDOW} passwords"
-                ),
-            },
-        )
-    store.reset_password(username, body.new_password)
-    # Persist the post-reset account; the fallback satisfies the type, not the flow.
-    git = _persist_account(
+    return _reset_stored_password(
         request,
         settings,
         username=username,
-        account=store.get(username) or existing,
-        summary="reset password",
+        new_password=body.new_password,
         actor=user.user_id,
     )
-    return ResetPasswordResponse(git=git)
 
 
 @router.post(
