@@ -24,10 +24,14 @@ from dfe_engine.source.flow import FlowError, resolve_flow
 from dfe_engine.source.models import Source
 
 
-def _settings(*, profile: str = "", target: str = "unknown", **transport) -> DFESettings:
+def _settings(
+    *, profile: str = "", target: str = "unknown", app_config_dir: str = "", **transport
+) -> DFESettings:
     """Settings differing from the defaults only in the transport block and the deployment."""
     return DFESettings(
-        env="dev", transport=transport, deployment={"profile": profile, "target": target}
+        env="dev",
+        transport=transport,
+        deployment={"profile": profile, "target": target, "app_config_dir": app_config_dir},
     )
 
 
@@ -333,15 +337,16 @@ class TestAProfileThatDeploysNoSuchApp:
 
 
 class TestATargetThatRunsOneOfEachApp:
-    """A per-config stage needs its own deployment, and Compose cannot make one.
+    """A per-config stage needs its own deployment, and Compose holds one of each.
 
     Compose declares its services in a committed file and creates none at run
-    time, so the one instance it holds is started idle and nothing yet carries a
-    config into it. A source needing its own would be saved and never run, so it
-    is refused at save instead.
+    time, so the resident container is started idle and the first source to need
+    it fills it. Where nothing renders the engine's config into that container
+    the source would be saved and never run, so it is refused at save instead.
     """
 
     DOCKER = {"profile": "docker-single", "target": "docker"}
+    WRITING = {**DOCKER, "app_config_dir": "/app/app-config"}
 
     def test_a_kubernetes_tier_runs_one_per_source(self):
         for name in ("okta", "cloudflare"):
@@ -351,7 +356,7 @@ class TestATargetThatRunsOneOfEachApp:
             )
             assert flow.input == f"dfe-fetcher-{name}"
 
-    def test_a_fetched_source_is_refused_on_a_docker_target(self):
+    def test_a_fetched_source_is_refused_where_nothing_renders_the_config(self):
         with pytest.raises(FlowError, match="cannot configure one"):
             resolve_flow(_fetched(), _settings(default="bus", **self.DOCKER))
 
@@ -361,7 +366,7 @@ class TestATargetThatRunsOneOfEachApp:
 
         said = str(refused.value)
         assert "runs a single dfe-fetcher and it is deployed idle" in said
-        assert "Compose config writer" in said
+        assert "app-config directory" in said
 
     def test_a_transformed_source_is_refused_the_same_way(self):
         # The transform is per-config too, so the rule reads the manifest rather
@@ -370,6 +375,20 @@ class TestATargetThatRunsOneOfEachApp:
             resolve_flow(
                 _source(transform={"engine": "vrl"}), _settings(default="bus", **self.DOCKER)
             )
+
+    def test_a_docker_target_that_renders_its_app_config_takes_the_first_source(self):
+        # The cap is one, not zero: the resident container now gets a config, so
+        # the source it is given runs. The SECOND is refused against the deploy
+        # repo, which the flow resolver never reads.
+        flow = resolve_flow(_fetched(), _settings(default="bus", **self.WRITING))
+        assert flow.input == "dfe-fetcher-okta"
+
+    def test_a_transformed_source_is_taken_the_same_way(self):
+        flow = resolve_flow(
+            _source(transform={"engine": "vrl"}), _settings(default="bus", **self.WRITING)
+        )
+        assert flow.transform is not None
+        assert flow.transform.app == "dfe-transform-vrl"
 
     def test_a_source_needing_only_stack_wide_apps_still_saves(self):
         # The receiver and the loader are one deployment each, so a plain posted

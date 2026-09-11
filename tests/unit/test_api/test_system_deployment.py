@@ -80,14 +80,26 @@ class TestDeploymentFacts:
 
         assert body["mesh"] == {"enabled": False, "namespace": ""}
 
-    def test_a_compose_deployment_applies_no_routing_to_its_apps(self, client, app, admin_headers):
-        # Compose mounts each app's config file read-only, so the overlay the
-        # engine writes on a deploy stops at the deploy repo.
+    def test_a_compose_deployment_that_renders_no_app_config_applies_no_routing(
+        self, client, app, admin_headers
+    ):
+        # Nothing carries the overlay into the container, so the write the engine
+        # makes on a deploy stops at the deploy repo.
         app.state.settings.deployment.target = "docker"
 
         body = client.get("/api/v1/system/deployment", headers=admin_headers).json()
 
         assert body["applies_routing"] is False
+
+    def test_a_compose_deployment_that_renders_its_app_config_applies_it(
+        self, client, app, admin_headers
+    ):
+        app.state.settings.deployment.target = "docker"
+        app.state.settings.deployment.app_config_dir = "/app/app-config"
+
+        body = client.get("/api/v1/system/deployment", headers=admin_headers).json()
+
+        assert body["applies_routing"] is True
 
     def test_kubernetes_applies_it(self, client, app, admin_headers):
         app.state.settings.deployment.target = "kubernetes"

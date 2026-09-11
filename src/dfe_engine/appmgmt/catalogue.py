@@ -142,6 +142,14 @@ class ConsumedFileSet:
     dir_path: str
     """Dot-path of the app's own setting naming the directory it reads."""
 
+    entries_path: str
+    """Dot-path of the app's own setting holding one ``{name, path}`` entry per file.
+
+    The other half of ``dir_path``: a set the app names table by table rather
+    than by directory. Whoever owns the mount derives the entries, because only
+    it knows the path - the chart on Kubernetes, the Compose writer off it.
+    """
+
     suffixes: tuple[str, ...]
     """Accepted file extensions. A name outside these is refused."""
 
@@ -281,6 +289,14 @@ class AppDescriptor:
     catalogue: CatalogueBinding | None = None
     """The catalogue of sources this app ships, when it ships one."""
 
+    config_file: str = ""
+    """The config file this app's own image reads, by name; empty where it reads none.
+
+    Declared because it is the app's fact, not the deployment's: the image's own
+    CMD spells it. On Kubernetes the chart mounts the rendered ConfigMap under
+    that name; off it, the Compose writer renders the same content there.
+    """
+
     def carries(self, transport: str) -> bool:
         """Whether this app can carry a source on *transport*."""
         return transport in self.transports
@@ -396,17 +412,26 @@ BUNDLED_MANIFEST = Path(__file__).parent / "apps.yaml"
 def _file_set_from(service: str, raw: dict) -> ConsumedFileSet:
     try:
         values_path = str(raw["values_path"])
-        return ConsumedFileSet(
+        file_set = ConsumedFileSet(
             name=str(raw["name"]),
             values_path=values_path,
             links_path=str(raw.get("links_path") or f"{values_path}Links"),
             dir_path=str(raw.get("dir_setting", "")),
+            entries_path=str(raw.get("entries_path", "")),
             suffixes=tuple(str(s) for s in raw["suffixes"]),
             language=str(raw["language"]),
             reload=ReloadMode(str(raw.get("reload", ReloadMode.RESTART))),
         )
     except (KeyError, ValueError) as exc:
         raise CatalogueError(f"{service}: invalid file set {raw!r}: {exc}") from exc
+    # Both would have the renderer name the same files twice, and the app read
+    # one of the two answers depending on which key it happens to consult.
+    if file_set.dir_path and file_set.entries_path:
+        raise CatalogueError(
+            f"{service}: file set {file_set.name!r} declares both dir_setting and "
+            "entries_path; an app reads a set as a directory or entry by entry, not both"
+        )
+    return file_set
 
 
 def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
@@ -453,12 +478,35 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
         endpoints=_endpoints_from(service, raw.get("endpoints")),
         variant_path=str(raw.get("variant_path", "")),
         catalogue=_catalogue_from(service, raw.get("catalogue")),
+        config_file=_config_file_from(service, raw.get("consumes")),
     )
     # The variant is written into one of the derived blocks, so a path outside
     # them would be compiled and then dropped on the next sync.
     if app.variant_path:
         app.block_for(app.variant_path)
     return app
+
+
+def _config_file_from(service: str, raw: object) -> str:
+    """The config file name this app's image reads, empty when it reads none.
+
+    A plain basename, because whoever renders it decides the directory: the
+    chart's mount on Kubernetes, the writer's output directory off it. A path
+    here would put the file somewhere neither of them mounts.
+    """
+    if raw is None:
+        return ""
+    if not isinstance(raw, dict):
+        raise CatalogueError(f"{service}: consumes must be a mapping")
+    name = str(raw.get("config", ""))
+    if not name:
+        raise CatalogueError(f"{service}: consumes needs a config file name")
+    if "/" in name or name in (".", ".."):
+        raise CatalogueError(
+            f"{service}: consumes.config is {name!r}; it must be a plain file name, "
+            "because the directory belongs to whoever mounts it"
+        )
+    return name
 
 
 def _routing_paths_from(service: str, raw: object) -> dict[str, str]:

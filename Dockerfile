@@ -49,10 +49,15 @@ RUN uv sync --frozen --no-dev
 # boot and, with no writable secrets dir and no runtime WORKDIR, it defaulted to
 # ./.secrets under / and crash-looped as non-root. COPY --from preserves this
 # ownership into the runtime stage.
+#
+# /app/app-config is where a deployment with no chart has the engine render each
+# app's own config file. It exists in the image so a volume mounted there
+# inherits this ownership; a mountpoint the image does not own lands root-owned
+# and the engine runs as UID 1000.
 RUN /app/.venv/bin/python -c \
     "import dfe_schemas, shutil; shutil.copytree(dfe_schemas.schemas_root(), '/app/schemas-seed')" \
-    && mkdir -p /app/schemas /app/config /app/secrets \
-    && chown -R 1000:1000 /app/schemas /app/config /app/secrets
+    && mkdir -p /app/schemas /app/config /app/secrets /app/app-config \
+    && chown -R 1000:1000 /app/schemas /app/config /app/secrets /app/app-config
 
 # --- Runtime stage (aligned with hyperi-pylib deployment contract) ---
 # Digest-pinned runtime base (#106). python:3.12-slim is already Debian 13
