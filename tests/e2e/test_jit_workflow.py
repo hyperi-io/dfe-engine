@@ -86,6 +86,20 @@ class TestJitWorkflow:
         assert account.external is True
         assert account.last_login_at != ""
 
+    def test_oidc_first_login_populates_email_from_oidc(self, jit_client):
+        resp = jit_client.get(
+            "/api/v1/auth/me",
+            headers={
+                "X-Oidc-Subject": "newuser@corp.com",
+                "X-Oidc-Email": "newuser@corp.com",
+                "X-Oidc-Groups": "test-org-viewers",
+            },
+        )
+        assert resp.status_code == 200
+        account = jit_client.app.state.account_store.get("newuser-corp-com")
+        assert account is not None
+        assert account.email == "newuser@corp.com"
+
     def test_oidc_subsequent_login_updates_timestamp(self, jit_client):
         headers = {
             "X-Oidc-Subject": "returning@corp.com",
