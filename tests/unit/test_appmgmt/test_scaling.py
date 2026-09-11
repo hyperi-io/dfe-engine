@@ -17,6 +17,28 @@ from dfe_engine.appmgmt.scaling import DeployTarget, InvalidDialError
 VRL = catalogue.descriptor("dfe-transform-vrl")
 
 
+LOADER = catalogue.descriptor("dfe-loader")
+
+
+def test_a_per_config_app_is_unbounded_on_kubernetes():
+    assert scaling.instance_ceiling(VRL, DeployTarget.KUBERNETES) is None
+
+
+def test_a_per_config_app_cannot_be_run_on_docker():
+    # Compose holds one service per app and nothing carries a config into it, so
+    # an instance written here would never run.
+    assert scaling.instance_ceiling(VRL, DeployTarget.DOCKER) == 0
+
+
+def test_a_single_deployment_app_is_one_everywhere():
+    for target in DeployTarget:
+        assert scaling.instance_ceiling(LOADER, target) == 1
+
+
+def test_an_unknown_target_is_not_assumed_to_be_compose():
+    assert scaling.instance_ceiling(VRL, DeployTarget.UNKNOWN) is None
+
+
 def test_dials_apply_on_kubernetes():
     supported, reason = scaling.support(VRL, DeployTarget.KUBERNETES)
     assert supported is True

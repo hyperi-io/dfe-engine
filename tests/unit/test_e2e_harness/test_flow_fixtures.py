@@ -32,6 +32,14 @@ from tests.e2e.flows.conftest import undeclared_skips
 # rule is not also making a statement about which apps are deployed.
 EVERY_APP = tuple(catalogue.APP_CATALOGUE)
 
+# The apps a deployment runs one of per source, read off the manifest rather than
+# listed, which is how the rule stays free of an app name.
+PER_CONFIG = tuple(
+    name
+    for name, app in catalogue.APP_CATALOGUE.items()
+    if app.multiplicity is catalogue.Multiplicity.PER_CONFIG
+)
+
 
 class TestTheCommittedFixtures:
     def test_every_shape_parses(self) -> None:
@@ -262,6 +270,65 @@ class TestAnAppTheDeploymentDoesNotDeploy:
         fetcher = next(s for s in shapes.load_shapes() if s.origin == "fetcher")
         declared = fetcher.refusal("direct", ("bus",), self._without("dfe-fetcher"))
         assert declared == "asks for the direct transport"
+
+
+class TestATargetThatCannotConfigureAPerSourceApp:
+    """Compose runs ONE of each app and creates none at run time, so a shape that
+    needs its own instance is refused rather than stored and never run."""
+
+    def _needing(self) -> list[shapes.FlowShape]:
+        return [s for s in shapes.load_shapes() if s.per_config_apps(PER_CONFIG)]
+
+    def test_every_shape_needing_one_is_refused(self) -> None:
+        needing = self._needing()
+        assert {s.name for s in needing} == {
+            "fetcher-plain",
+            "fetcher-transform",
+            "receiver-transform",
+        }
+        for shape in needing:
+            for transport in shapes.transports_for("both"):
+                declared = shape.refusal(
+                    transport, (transport,), EVERY_APP, PER_CONFIG, applies_routing=False
+                )
+                assert declared == "cannot configure one", f"{shape.name}: {declared}"
+
+    def test_a_shape_needing_none_is_untouched(self) -> None:
+        for shape in shapes.load_shapes():
+            if shape.per_config_apps(PER_CONFIG):
+                continue
+            for transport in shapes.transports_for("both"):
+                assert shape.refusal(
+                    transport, (transport,), EVERY_APP, PER_CONFIG, applies_routing=False
+                ) == shape.refusal(transport, (transport,), EVERY_APP), shape.name
+
+    def test_a_target_that_applies_routing_refuses_none_of_them(self) -> None:
+        for shape in self._needing():
+            for transport in shapes.transports_for("both"):
+                if shape.skip_reason(transport):
+                    continue
+                assert (
+                    shape.refusal(
+                        transport, (transport,), EVERY_APP, PER_CONFIG, applies_routing=True
+                    )
+                    is None
+                ), shape.name
+
+    def test_the_declared_substring_is_the_engine_refusal(self) -> None:
+        # The live case asserts this substring against the engine's own 422, so a
+        # reworded refusal has to fail here rather than on a deployment.
+        shape = next(s for s in shapes.load_shapes() if s.name == "fetcher-plain")
+        declared = str(shape.refusal("bus", ("bus",), EVERY_APP, PER_CONFIG, applies_routing=False))
+
+        with pytest.raises(FlowError, match=re.escape(declared)):
+            resolve_flow(
+                Source.model_validate({"source": "okta", "fetcher": {"source_type": "okta"}}),
+                DFESettings(
+                    env="dev",
+                    transport={"default": "bus"},
+                    deployment={"profile": "docker-single", "target": "docker"},
+                ),
+            )
 
 
 class TestADeploymentThatAppliesNoRouting:

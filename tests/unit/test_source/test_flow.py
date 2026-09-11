@@ -24,9 +24,11 @@ from dfe_engine.source.flow import FlowError, resolve_flow
 from dfe_engine.source.models import Source
 
 
-def _settings(*, profile: str = "", **transport) -> DFESettings:
-    """Settings differing from the defaults only in the transport block and the profile."""
-    return DFESettings(env="dev", transport=transport, deployment={"profile": profile})
+def _settings(*, profile: str = "", target: str = "unknown", **transport) -> DFESettings:
+    """Settings differing from the defaults only in the transport block and the deployment."""
+    return DFESettings(
+        env="dev", transport=transport, deployment={"profile": profile, "target": target}
+    )
 
 
 def _source(name: str = "auth", **fields) -> Source:
@@ -288,14 +290,13 @@ class TestAProfileThatDeploysNoSuchApp:
     COMPOSE = ("docker-slim", "docker-single")
     KUBERNETES = ("slim", "single", "scale", "mesh")
 
-    @pytest.mark.parametrize("profile", COMPOSE)
-    def test_a_fetched_source_is_refused_where_no_fetcher_is_deployed(self, profile):
+    def test_a_fetched_source_is_refused_where_no_fetcher_is_deployed(self):
         with pytest.raises(FlowError, match="does not deploy dfe-fetcher"):
-            resolve_flow(_fetched(), _settings(default="bus", profile=profile))
+            resolve_flow(_fetched(), _settings(default="bus", profile="docker-slim"))
 
     def test_the_refusal_names_the_profile_that_gave_it(self):
-        with pytest.raises(FlowError, match="the docker-single profile"):
-            resolve_flow(_fetched(), _settings(default="bus", profile="docker-single"))
+        with pytest.raises(FlowError, match="the docker-slim profile"):
+            resolve_flow(_fetched(), _settings(default="bus", profile="docker-slim"))
 
     @pytest.mark.parametrize("profile", KUBERNETES)
     def test_a_tier_that_deploys_one_still_resolves_it(self, profile):
@@ -329,3 +330,65 @@ class TestAProfileThatDeploysNoSuchApp:
                 _settings(default="bus", profile="slim"),
                 restricted,
             )
+
+
+class TestATargetThatRunsOneOfEachApp:
+    """A per-config stage needs its own deployment, and Compose cannot make one.
+
+    Compose declares its services in a committed file and creates none at run
+    time, so the one instance it holds is started idle and nothing yet carries a
+    config into it. A source needing its own would be saved and never run, so it
+    is refused at save instead.
+    """
+
+    DOCKER = {"profile": "docker-single", "target": "docker"}
+
+    def test_a_kubernetes_tier_runs_one_per_source(self):
+        for name in ("okta", "cloudflare"):
+            flow = resolve_flow(
+                _fetched(name, fetcher={"source_type": name}),
+                _settings(default="bus", profile="single", target="kubernetes"),
+            )
+            assert flow.input == f"dfe-fetcher-{name}"
+
+    def test_a_fetched_source_is_refused_on_a_docker_target(self):
+        with pytest.raises(FlowError, match="cannot configure one"):
+            resolve_flow(_fetched(), _settings(default="bus", **self.DOCKER))
+
+    def test_the_refusal_says_it_runs_one_and_names_what_turns_it_on(self):
+        with pytest.raises(FlowError) as refused:
+            resolve_flow(_fetched(), _settings(default="bus", **self.DOCKER))
+
+        said = str(refused.value)
+        assert "runs a single dfe-fetcher and it is deployed idle" in said
+        assert "Compose config writer" in said
+
+    def test_a_transformed_source_is_refused_the_same_way(self):
+        # The transform is per-config too, so the rule reads the manifest rather
+        # than naming the fetcher.
+        with pytest.raises(FlowError, match="cannot configure one"):
+            resolve_flow(
+                _source(transform={"engine": "vrl"}), _settings(default="bus", **self.DOCKER)
+            )
+
+    def test_a_source_needing_only_stack_wide_apps_still_saves(self):
+        # The receiver and the loader are one deployment each, so a plain posted
+        # source is untouched by the cap.
+        assert resolve_flow(_source(), _settings(default="bus", **self.DOCKER)).origin == "receiver"
+
+    def test_an_app_declared_single_is_not_capped(self):
+        single = dict(catalogue.APP_CATALOGUE)
+        single["dfe-fetcher"] = replace(
+            catalogue.descriptor("dfe-fetcher"), multiplicity=catalogue.Multiplicity.SINGLE
+        )
+
+        assert (
+            resolve_flow(_fetched(), _settings(default="bus", **self.DOCKER), single).input
+            == "dfe-fetcher-okta"
+        )
+
+    def test_a_target_nobody_named_refuses_nothing(self):
+        assert (
+            resolve_flow(_fetched(), _settings(default="bus", profile="docker-single")).input
+            == "dfe-fetcher-okta"
+        )

@@ -19,11 +19,11 @@ from dfe_engine.settings import DFESettings
 PROFILE = "docker-slim"
 ACTOR = "test"
 
-# The apps a Compose slim deployment runs unasked. Spelled out rather than
-# recomputed, so a manifest that stops seeding the receiver or the loader fails
-# here instead of in a deployment whose flows refuse every shape.
+# The apps a Compose slim deployment runs unasked -- the core data path and the
+# console, with no archiver. Spelled out rather than recomputed, so a manifest
+# that stops seeding the receiver or the loader fails here instead of in a
+# deployment whose flows refuse every shape.
 EXPECTED = [
-    "dfe-archiver",
     "dfe-engine",
     "dfe-loader",
     "dfe-receiver",
@@ -80,12 +80,12 @@ class TestSeedDefaultInstances:
 
     def test_an_app_the_operator_removed_is_not_seeded_again(self, crud):
         seed_instances.seed_default_instances(crud, _settings())
-        app = instances.instance_of("dfe-archiver", seed_instances.SEED_INSTANCE)
+        app = instances.instance_of("dfe-loader", seed_instances.SEED_INSTANCE)
         crud.delete(instances.HELMVARS_CLASS, app.overlay_name, ACTOR, message="cfg(x): remove")
 
         assert seed_instances.seed_default_instances(crud, _settings()) == []
         assert not instances.exists(crud, app)
-        assert "dfe-archiver" in _marker(crud)
+        assert "dfe-loader" in _marker(crud)
 
     def test_a_repo_with_no_marker_adopts_the_overlays_it_has(self, crud):
         app = instances.instance_of("dfe-receiver", seed_instances.SEED_INSTANCE)

@@ -16,9 +16,10 @@ copies of the convention.
 
 Every refusal is here for the same reason: a flow that cannot run must fail at
 save, where the person who typed it is still looking, not at a pod that then
-never starts. What an app CAN carry and which profiles deploy it are both data
-in apps.yaml, so a transform gains the direct transport by shipping its listener
-and being listed - never by a condition added here.
+never starts. What an app CAN carry, which profiles deploy it and whether it runs
+one deployment or one per source are all data in apps.yaml, so a transform gains
+the direct transport by shipping its listener and being listed - never by a
+condition added here.
 
 See docs/data-plane/source-flow.md for the shape this builds.
 """
@@ -30,6 +31,7 @@ from typing import TYPE_CHECKING
 
 from dfe_engine.appmgmt import catalogue
 from dfe_engine.appmgmt.catalogue import AppDescriptor
+from dfe_engine.appmgmt.scaling import DeployTarget, instance_ceiling
 from dfe_engine.source.models import (
     OPERATORS_WITHOUT_OPERAND,
     RULELESS_OPERATORS,
@@ -141,13 +143,13 @@ def _stage_app(
     *,
     source: str,
     purpose: str,
-    profile: str,
+    settings: DFESettings,
 ) -> AppDescriptor:
     """The app running one stage of this source, or why it cannot run it.
 
-    The ONE place a stage refusal is raised. Which profiles may deploy an app and
-    what it carries are both data in apps.yaml, so this never grows a branch per
-    app.
+    The ONE place a stage refusal is raised. Which profiles may deploy an app,
+    what it carries and how many of it a target can run are all data in
+    apps.yaml, so this never grows a branch per app.
 
     The offer is checked first because it is the wider statement: a tier that
     deploys nothing to run this stage cannot run the source on either transport.
@@ -155,6 +157,7 @@ def _stage_app(
     unchanged.
     """
     app = apps.get(service)
+    profile = settings.deployment.profile
     if app is None:
         raise FlowError(
             f"source {source!r} needs {service} to {purpose}, but no such app is catalogued"
@@ -163,6 +166,15 @@ def _stage_app(
         raise FlowError(
             f"source {source!r} needs {service} to {purpose}, but the {profile} "
             f"profile does not deploy {service}"
+        )
+    if instance_ceiling(app, DeployTarget(settings.deployment.target)) == 0:
+        raise FlowError(
+            f"source {source!r} needs its own {service} to {purpose}, and this deployment "
+            f"cannot configure one: {profile or 'compose'} runs a single {service} and it is "
+            "deployed idle, but nothing carries the engine's config into that container "
+            "yet, so the source would be saved and never run. Deploy on Kubernetes, which "
+            f"runs one {service} per source, or wait for the Compose config writer, which "
+            f"turns that idle {service} on and caps it at one"
         )
     if not app.carries(transport):
         raise FlowError(
@@ -188,7 +200,7 @@ def _resolve_transform(
     transport: SourceTransport,
     apps: dict[str, AppDescriptor],
     mesh_namespace: str,
-    profile: str,
+    settings: DFESettings,
 ) -> FlowTransform | None:
     transform = source.transform
     if transform is None:
@@ -201,7 +213,7 @@ def _resolve_transform(
         apps,
         source=source.source,
         purpose=f"run its {transform.engine} transform",
-        profile=profile,
+        settings=settings,
     )
 
     match = source.match
@@ -227,7 +239,10 @@ def _resolve_transform(
 
 
 def _resolve_input(
-    source: Source, transport: SourceTransport, apps: dict[str, AppDescriptor], profile: str
+    source: Source,
+    transport: SourceTransport,
+    apps: dict[str, AppDescriptor],
+    settings: DFESettings,
 ) -> str:
     """The receiver match that selects the records, or the fetcher that pulls them.
 
@@ -242,7 +257,7 @@ def _resolve_input(
         apps,
         source=source.source,
         purpose="fetch it",
-        profile=profile,
+        settings=settings,
     )
     return catalogue.instance_name(fetcher, source.source)
 
@@ -274,7 +289,7 @@ def _resolve_loader_output(
         apps,
         source=source.source,
         purpose="load it",
-        profile=settings.deployment.profile,
+        settings=settings,
     )
     if transport == "direct":
         return loader_endpoint(settings, apps)
@@ -310,16 +325,15 @@ def resolve_flow(
 
     Raises ``FlowError`` when the deployment does not offer the transport the
     source asks for, when this deployment's profile deploys no app to run one of
-    its stages, or when an app in the flow does not carry the transport - all
-    manifest facts per app, so an app stops being refused the moment the manifest
-    says so.
+    its stages, when the target cannot run an instance of a per-config stage, or
+    when an app in the flow does not carry the transport - all manifest facts per
+    app, so an app stops being refused the moment the manifest says so.
     """
     apps = catalogue_apps if catalogue_apps is not None else catalogue.APP_CATALOGUE
-    profile = settings.deployment.profile
     transport = _resolve_transport(source, settings)
     _check_archive(source, transport, apps)
 
-    transform = _resolve_transform(source, transport, apps, _mesh_namespace(settings), profile)
+    transform = _resolve_transform(source, transport, apps, _mesh_namespace(settings), settings)
     return SourceFlow(
         source=source.source,
         transport=transport,
@@ -329,7 +343,7 @@ def resolve_flow(
             else settings.transport.direct_protocol
         ),
         origin=source.origin,
-        input=_resolve_input(source, transport, apps, profile),
+        input=_resolve_input(source, transport, apps, settings),
         transform=transform,
         outputs=FlowOutputs(
             loader=_resolve_loader_output(source, transport, transform, apps, settings),
