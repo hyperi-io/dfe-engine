@@ -36,7 +36,10 @@ from dfe_engine.api.pagination import (
 )
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
-from dfe_engine.core_resources.yaml_resource_type import ResourceType
+from dfe_engine.core_resources.yaml_resource_type import (
+    CORE_RESOURCE_MUTATION_MESSAGE,
+    ResourceType,
+)
 from dfe_engine.git_identity import git_author
 from dfe_engine.schema.column_query import filter_columns
 from dfe_engine.schema.models import (
@@ -1762,6 +1765,21 @@ async def promote_field(
             status_code=404,
             detail={"code": "not_found", "message": f"Source '{source_name}' not found"},
         ) from None
+
+    # Refused up front, not at the source write below: that write happens only after the
+    # schema fork has been committed, so the registry's own refusal would leave the fork
+    # behind and answer 500.
+    if source.resource_type == "core":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "conflict",
+                "message": (
+                    f"{CORE_RESOURCE_MUTATION_MESSAGE}: cannot promote a field on source "
+                    f"{source_name!r}, which the engine owns."
+                ),
+            },
+        )
 
     _version_id, ver = _resolve_source_version(source, None, source_name)
     had_meta_schema = bool(ver.effective_schema().meta_schema)

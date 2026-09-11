@@ -4,7 +4,7 @@ GET    /api/v1/sources                  -> Paginated source list
 POST   /api/v1/sources                  -> Create source
 GET    /api/v1/sources/catalogue        -> The sources a deployed transform already handles
 POST   /api/v1/sources/from-catalogue/{entry} -> Create a source from a catalogue entry
-GET    /api/v1/sources/{name}           -> Get source details ('main' always answers)
+GET    /api/v1/sources/{name}           -> Get source details
 GET    /api/v1/sources/{name}/flow      -> The stages its records travel, resolved
 GET    /api/v1/sources/{name}/versions/{version}  -> Get one version snapshot
 GET    /api/v1/sources/{name}/columns   -> Composed schema columns for a version
@@ -65,10 +65,8 @@ from dfe_engine.source.deployment import (
 from dfe_engine.source.flow import FlowError, SourceFlow, resolve_flow
 from dfe_engine.source.models import (
     DEFAULT_LANDING_LABEL,
-    SOURCE_LABEL_FIELD,
     PaginatedSourceSummaryResponse,
     Source,
-    SourceMatch,
     SourceState,
     SourceSummaryObject,
     SourceVersion,
@@ -76,6 +74,7 @@ from dfe_engine.source.models import (
     SourceWriteRequest,
 )
 from dfe_engine.source.registry import (
+    SourceCoreResourceError,
     SourceMatchConflictError,
     SourceNotFoundError,
     SourceValidationError,
@@ -87,6 +86,16 @@ router = APIRouter(prefix="/sources", tags=["Sources"])
 
 def _raise_save_validation_http(exc: SourceValidationError) -> NoReturn:
     """Map registry validation errors to HTTP responses (never 500)."""
+    # 409, matching the core-resource guard's answer for roles, schemas and field maps.
+    if isinstance(exc, SourceCoreResourceError):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "conflict",
+                "message": str(exc),
+                "source": exc.source,
+            },
+        ) from exc
     if isinstance(exc, SourceMatchConflictError):
         raise HTTPException(
             status_code=409,
@@ -185,22 +194,15 @@ def _reconcile_apps(request: Request, user: Any, registry: Any) -> tuple[list[st
     return done, None
 
 
-def _resolve_source_or_main(name: str, registry: Any) -> Source:
-    """One source, or the synthesised main flow, or 404.
-
-    ``main`` is a real source in every deployment that has authored one and a
-    synthesised one everywhere else, so a console asking about the main flow gets
-    the same answer either way.
-    """
+def _resolve_source(name: str, registry: Any) -> Source:
+    """One source, or 404."""
     try:
         return registry.get_source(name)
     except SourceNotFoundError:
-        if name != DEFAULT_LANDING_LABEL:
-            raise HTTPException(
-                status_code=404,
-                detail={"code": "not_found", "message": f"Source {name!r} not found"},
-            ) from None
-        return _synthesised_main_source()
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Source {name!r} not found"},
+        ) from None
 
 
 def _landing_table(source: Source) -> tuple[str, bool]:
@@ -448,7 +450,10 @@ class SourceFlowResponse(BaseModel):
     carrier: str = Field(
         description="What carries it here - the bus provider, or the direct protocol"
     )
-    origin: str = Field(description="receiver or fetcher")
+    origin: str | None = Field(
+        default=None,
+        description="receiver, fetcher, or null when nothing selects the records",
+    )
     input: str = Field(
         description="The receiver match that selects the records, or the fetcher instance polling them"
     )
@@ -761,6 +766,7 @@ async def get_source_version(
     snap = source.versions[version]
     return SourceVersionGetDetailResponse(
         source=source.source,
+        resource_type=source.resource_type,
         display_name=source.display_name,
         description=source.description,
         state=source.state,
@@ -1264,25 +1270,17 @@ async def deploy_source_schema(
     dependencies=[Depends(require_action(scopes_dict["source_read"]))],
 )
 async def get_source(name: str, user: CurrentUser, registry: SourceReg):
-    """Get a full source definition by name, including build/deploy per version.
-
-    ``main`` is the one name that always answers. It is a normal source once
-    written; until then the deployment's own main flow is synthesised, so the
-    console has the card it draws before anyone has configured anything.
-    """
+    """Get a full source definition by name, including build/deploy per version."""
     try:
         source = registry.get_source(name)
     except SourceNotFoundError:
-        if name == DEFAULT_LANDING_LABEL:
-            source = _synthesised_main_source()
-        else:
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "code": "not_found",
-                    "message": f"Source {name!r} not found",
-                },
-            ) from None
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Source {name!r} not found",
+            },
+        ) from None
     store = SourceDeploymentStore.from_settings(get_settings())
     return _to_source_detail_response(source, store)
 
@@ -1309,7 +1307,7 @@ async def get_source_flow(name: str, user: CurrentUser, registry: SourceReg, set
     deployment, and one resolver is what keeps the drawing and the deployed
     config the same answer.
     """
-    source = _resolve_source_or_main(name, registry)
+    source = _resolve_source(name, registry)
     try:
         return _flow_response(resolve_flow(source, settings))
     except FlowError as exc:
@@ -1340,7 +1338,7 @@ async def get_source_signals(
     absent: a source that was only just defined has nothing to report, and that
     is not an error.
     """
-    source = _resolve_source_or_main(name, registry)
+    source = _resolve_source(name, registry)
     table, in_default = _landing_table(source)
     loaders = _deployed_loaders(request)
     try:
@@ -1397,12 +1395,6 @@ async def update_source(
     from dfe_engine.source.registry import SourceNotFoundError
 
     if not registry.source_exists(name):
-        # The main flow has a card in the console before it has a file, so its
-        # first edit is a PUT to a source nobody created.
-        if name == DEFAULT_LANDING_LABEL:
-            return await create_source(
-                body.model_copy(update={"source": name}), user, registry, request
-            )
         raise HTTPException(
             status_code=404,
             detail={
@@ -1497,7 +1489,10 @@ async def delete_source(name: str, user: CurrentUser, registry: SourceReg, reque
                 "message": f"Source {name!r} not found",
             },
         )
-    registry.delete_source(name, created_by=git_author(user))
+    try:
+        registry.delete_source(name, created_by=git_author(user))
+    except SourceValidationError as e:
+        _raise_save_validation_http(e)
     audit_resource_change(user.user_id, "source", name, "deleted")
     _reconcile_apps(request, user, registry)
 
@@ -1630,26 +1625,6 @@ def _to_catalogue_object(
     )
 
 
-def _synthesised_main_source() -> Source:
-    """The main flow as it runs before anyone has written it down.
-
-    Every record the receiver cannot place is stamped ``main`` and lands in the
-    ``main`` table, whether or not a source file says so. Reporting that as 404
-    would tell the console the platform's own landing does not exist.
-    Nothing here is stored: a PUT to the same path writes a real source.
-    """
-    return Source.model_validate(
-        {
-            "source": DEFAULT_LANDING_LABEL,
-            "description": "Where a record the receiver cannot place lands",
-            "match": SourceMatch(field=SOURCE_LABEL_FIELD, operator="always").model_dump(
-                mode="json"
-            ),
-            "transport": get_settings().transport.default,
-        }
-    )
-
-
 def _resolve_source_version(
     registry: SourceReg,
     name: str,
@@ -1757,6 +1732,7 @@ def _to_summary(raw: dict[str, Any]) -> SourceSummaryObject:
     """Convert registry list row to ``SourceSummaryObject``."""
     return SourceSummaryObject(
         name=raw.get("source", ""),
+        resource_type=raw.get("resource_type", "custom"),
         display_name=raw.get("display_name"),
         description=raw.get("description"),
         state=raw.get("state", "active"),
@@ -1768,7 +1744,7 @@ def _to_summary(raw: dict[str, Any]) -> SourceSummaryObject:
         header_type=raw.get("header_type"),
         has_transform=bool(raw.get("has_transform")),
         has_fetcher=bool(raw.get("has_fetcher")),
-        origin=raw.get("origin", "receiver"),
+        origin=raw.get("origin"),
         views=list(raw.get("views") or []),
     )
 

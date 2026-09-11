@@ -39,11 +39,16 @@ if TYPE_CHECKING:
     from dfe_engine.gitcrud import GitCrud
 
 
-def bootstrap_clickhouse(*, settings: DFESettings, gitcrud: GitCrud | None = None) -> None:
-    """Create or reconcile the core tables if the deployment asks for it."""
+def bootstrap_clickhouse(*, settings: DFESettings, gitcrud: GitCrud | None = None) -> bool:
+    """Create or reconcile the core tables if the deployment asks for it.
+
+    Returns whether the core tables are now known to exist. False covers both a
+    deployment that switched the bootstrap off and one whose ClickHouse could not
+    be reached, so a caller must not report a core table as deployed on it.
+    """
     if not (settings.clickhouse.bootstrap_tables):
         logger.info("ClickHouse table bootstrap disabled; skipping")
-        return
+        return False
 
     # The console override in the deploy repo wins over the env default.
     targets = replace(
@@ -58,9 +63,10 @@ def bootstrap_clickhouse(*, settings: DFESettings, gitcrud: GitCrud | None = Non
         log_report(report, prefix="bootstrap")
     except Exception as exc:
         logger.error(f"ClickHouse bootstrap failed for database {targets.database!r}: {exc}")
-        return
+        return False
 
     # Independent of the core tables: a server with query logging disabled never
     # materialises system.query_log, and nothing in DFE fails without the cost
     # leaderboard, so it carries its own guard.
     apply_query_log_archive(client, targets)
+    return True

@@ -12,12 +12,15 @@ from dfe_engine.source.registry import SourceValidationError
 class TestListSources:
     """GET /api/v1/sources"""
 
-    def test_list_empty(self, client: TestClient, admin_headers: dict):
+    def test_list_before_any_source_is_created(self, client: TestClient, admin_headers: dict):
+        # Never empty: the engine seeds the landing table's own source on startup.
         resp = client.get("/api/v1/sources", headers=admin_headers)
         assert resp.status_code == 200
         data = resp.json()
-        assert data["items"] == []
-        assert data["total"] == 0
+        assert [item["name"] for item in data["items"]] == ["main"]
+        assert data["items"][0]["resource_type"] == "core"
+        assert data["items"][0]["origin"] is None
+        assert data["total"] == 1
         assert data["page"] == 1
         assert data["total_pages"] == 1
 
@@ -27,12 +30,13 @@ class TestListSources:
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] >= 1
-        names = [item["name"] for item in data["items"]]
-        assert "test-source" in names
+        by_name = {item["name"]: item for item in data["items"]}
+        assert "test-source" in by_name
         assert "objects" in data
-        assert data["items"][0]["versions"] == ["1.0.0"]
-        assert data["items"][0]["current"] == "1.0.0"
-        assert data["items"][0]["deployed_version"] is None
+        created = by_name["test-source"]
+        assert created["versions"] == ["1.0.0"]
+        assert created["current"] == "1.0.0"
+        assert created["deployed_version"] is None
 
     def test_list_pagination(self, client: TestClient, admin_headers: dict):
         # Create 5 sources
@@ -47,11 +51,11 @@ class TestListSources:
                 headers=admin_headers,
             )
 
-        # Page 1, 2 per page
+        # Six in total: the five above plus the seeded landing source.
         resp = client.get("/api/v1/sources?page=1&per_page=2", headers=admin_headers)
         data = resp.json()
         assert len(data["items"]) == 2
-        assert data["total"] == 5
+        assert data["total"] == 6
         assert data["total_pages"] == 3
         assert data["next_page"] == 2
         assert data["prev_page"] is None
@@ -59,7 +63,7 @@ class TestListSources:
         # Page 3 (last)
         resp = client.get("/api/v1/sources?page=3&per_page=2", headers=admin_headers)
         data = resp.json()
-        assert len(data["items"]) == 1
+        assert len(data["items"]) == 2
         assert data["next_page"] is None
         assert data["prev_page"] == 2
 
@@ -344,9 +348,9 @@ class TestGetSource:
 
 
 class TestMainFlow:
-    """The main flow is a source, read and written at the same path as any other."""
+    """The landing table's source: seeded by the engine, read but never written."""
 
-    def test_get_main_before_any_write_returns_the_synthesised_view(
+    def test_main_is_seeded_and_read_like_any_other_source(
         self, client: TestClient, admin_headers: dict
     ):
         resp = client.get("/api/v1/sources/main", headers=admin_headers)
@@ -354,32 +358,73 @@ class TestMainFlow:
         assert resp.status_code == 200
         body = resp.json()
         assert body["source"] == "main"
-        assert body["match"]["operator"] == "always"
+        assert body["resource_type"] == "core"
+        # No match and no fetcher: the loader sends records here when it has nowhere else.
+        assert body["match"] is None
+        assert body["origin"] is None
         assert body["transform"] is None
         assert body["archive"] is False
-        # Nothing was stored: the list is still empty.
-        assert client.get("/api/v1/sources", headers=admin_headers).json()["total"] == 0
 
-    def test_put_main_creates_it_then_updates_it(self, client: TestClient, admin_headers: dict):
-        body = {
-            "match": {"field": "_source", "operator": "always"},
-            "description": "everything else",
-        }
-        created = client.put("/api/v1/sources/main", json=body, headers=admin_headers)
-
-        assert created.status_code == 200
-        assert created.json()["source"] == "main"
-
-        updated = client.put(
+    def test_put_main_is_refused(self, client: TestClient, admin_headers: dict):
+        resp = client.put(
             "/api/v1/sources/main",
-            json={**body, "description": "still everything else"},
+            json={
+                "match": {"field": "_source", "value": "main"},
+                "description": "hijacked",
+            },
             headers=admin_headers,
         )
 
-        assert updated.status_code == 200
+        assert resp.status_code == 409, resp.text
+        assert "main" in resp.json()["message"]
         stored = client.get("/api/v1/sources/main", headers=admin_headers).json()
-        assert stored["description"] == "still everything else"
-        assert stored["versions"]["1.0.0"]["match"]["operator"] == "always"
+        assert stored["description"] != "hijacked"
+
+    def test_delete_main_is_refused(self, client: TestClient, admin_headers: dict):
+        resp = client.delete("/api/v1/sources/main", headers=admin_headers)
+
+        assert resp.status_code == 409, resp.text
+        assert client.get("/api/v1/sources/main", headers=admin_headers).status_code == 200
+
+    def test_bulk_delete_reports_main_as_failed_and_leaves_it(
+        self, client: TestClient, admin_headers: dict
+    ):
+        resp = client.post(
+            "/api/v1/sources/bulk",
+            json={"action": "delete", "sources": ["main"]},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["succeeded"] == []
+        assert [f["source"] for f in body["failed"]] == ["main"]
+        assert client.get("/api/v1/sources/main", headers=admin_headers).status_code == 200
+
+    def test_a_clone_of_main_is_refused(self, client: TestClient, admin_headers: dict):
+        # A clone copies the body, which carries neither a match nor a fetcher.
+        resp = client.post(
+            "/api/v1/sources",
+            json={"source": "main-copy", "description": "clone of the landing source"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+
+    def test_resource_type_in_a_write_body_is_refused(
+        self, client: TestClient, admin_headers: dict
+    ):
+        resp = client.post(
+            "/api/v1/sources",
+            json={
+                "source": "pretender",
+                "resource_type": "core",
+                "match": {"field": "_source", "value": "pretender"},
+            },
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
 
     def test_always_is_refused_on_any_other_source(self, client: TestClient, admin_headers: dict):
         resp = client.post(
@@ -411,15 +456,13 @@ class TestGetSourceFlow:
         assert body["outputs"] == {"loader": "test-source_land", "archive": False}
         assert body["table"] == "test-source"
 
-    def test_the_main_flow_answers_before_anyone_has_written_it(
-        self, client: TestClient, admin_headers: dict
-    ):
-        # Same rule as GET /sources/main: the console draws the platform's own
-        # landing before anything is configured.
+    def test_the_landing_flow_names_what_reaches_it(self, client: TestClient, admin_headers: dict):
         body = client.get("/api/v1/sources/main/flow", headers=admin_headers).json()
 
         assert body["source"] == "main"
-        assert body["input"] == "always"
+        assert body["origin"] is None
+        # Nothing selects these records; they arrived on some other path and went unclaimed.
+        assert body["input"] == "records the loader could not route elsewhere"
         assert body["outputs"]["loader"] == "main_land"
 
     def test_an_unknown_source_has_no_flow(self, client: TestClient, admin_headers: dict):
