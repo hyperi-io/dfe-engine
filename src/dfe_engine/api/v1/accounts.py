@@ -92,11 +92,17 @@ class CreateAccountRequest(BaseModel):
     username: str = Field(description="Unique account name")
     password: str = Field(description="Plaintext password (bcrypt-hashed before storage)")
     groups: list[str] = Field(default_factory=list, description="Group memberships")
+    email: str = Field(default="", description="Contact email")
+    phone: str = Field(default="", description="Contact phone")
+    name: str = Field(default="", description="Display name")
 
 
 class UpdateAccountRequest(BaseModel):
     groups: list[str] | None = Field(None, description="Replace group memberships")
     enabled: bool | None = Field(None, description="Enable or disable the account")
+    email: str | None = Field(None, description="Contact email")
+    phone: str | None = Field(None, description="Contact phone")
+    name: str | None = Field(None, description="Display name")
 
 
 class ResetPasswordRequest(BaseModel):
@@ -153,6 +159,9 @@ class AccountResponse(BaseModel):
     username: str
     enabled: bool
     groups: list[str]
+    email: str
+    phone: str
+    name: str
     created_at: str
     updated_at: str
 
@@ -161,6 +170,20 @@ class AttributesRequest(BaseModel):
     """Full-replace body for an account's attribute blob (non-sensitive or sensitive)."""
 
     attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+def _account_response(account: Account) -> AccountResponse:
+    """Map a stored account to the public response (never includes password_hash)."""
+    return AccountResponse(
+        username=account.username,
+        enabled=account.enabled,
+        groups=account.groups,
+        email=account.email,
+        phone=account.phone,
+        name=account.name,
+        created_at=account.created_at,
+        updated_at=account.updated_at,
+    )
 
 
 # ── Endpoints ────────────────────────────────────────────────
@@ -189,7 +212,14 @@ async def create_account(
             status_code=409,
             detail={"code": "conflict", "message": f"Account '{body.username}' already exists"},
         )
-    account = store.create(body.username, body.password, groups=body.groups)
+    account = store.create(
+        body.username,
+        body.password,
+        groups=body.groups,
+        email=body.email,
+        phone=body.phone,
+        name=body.name,
+    )
     sync_group_members_for_account_groups_change(
         group_store,
         body.username,
@@ -203,13 +233,7 @@ async def create_account(
         summary="create account",
         actor=user.user_id,
     )
-    return AccountResponse(
-        username=account.username,
-        enabled=account.enabled,
-        groups=account.groups,
-        created_at=account.created_at,
-        updated_at=account.updated_at,
-    )
+    return _account_response(account)
 
 
 @router.get(
@@ -221,7 +245,7 @@ async def list_accounts(
     user: CurrentUser,
     request: Request,
     pagination: PaginationParams = Depends(),
-    search: str | None = Query(None, description="Search in username"),
+    search: str | None = Query(None, description="Search in username, name, or email"),
     sort_by: str | None = Query(None, description="Sort field (username, created_at, updated_at)"),
     sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
@@ -229,17 +253,8 @@ async def list_accounts(
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    rows = [
-        AccountResponse(
-            username=a.username,
-            enabled=a.enabled,
-            groups=a.groups,
-            created_at=a.created_at,
-            updated_at=a.updated_at,
-        ).model_dump()
-        for a in store.list()
-    ]
-    rows = apply_search(rows, search, ["username"])
+    rows = [_account_response(a).model_dump() for a in store.list()]
+    rows = apply_search(rows, search, ["username", "name", "email"])
     rows = apply_sort(rows, sort_by, sort_order)
     summaries = [AccountResponse.model_validate(row) for row in rows]
     return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
@@ -265,13 +280,7 @@ async def get_account(
             status_code=404,
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
         )
-    return AccountResponse(
-        username=account.username,
-        enabled=account.enabled,
-        groups=account.groups,
-        created_at=account.created_at,
-        updated_at=account.updated_at,
-    )
+    return _account_response(account)
 
 
 @router.put(
@@ -286,7 +295,7 @@ async def update_account(
     request: Request,
     settings: Settings,
 ):
-    """Update account groups or enabled status (admin only)."""
+    """Update account groups, enabled status, or contact fields (admin only)."""
     from dfe_engine.auth.accounts import AccountStore
     from dfe_engine.auth.membership import sync_group_members_for_account_groups_change
 
@@ -303,6 +312,12 @@ async def update_account(
         update_fields["groups"] = body.groups
     if body.enabled is not None:
         update_fields["enabled"] = body.enabled
+    if body.email is not None:
+        update_fields["email"] = body.email
+    if body.phone is not None:
+        update_fields["phone"] = body.phone
+    if body.name is not None:
+        update_fields["name"] = body.name
     if body.groups is not None:
         old_groups = set(existing.groups)
         new_groups = set(body.groups)
@@ -323,13 +338,7 @@ async def update_account(
         summary="update account",
         actor=user.user_id,
     )
-    return AccountResponse(
-        username=account.username,
-        enabled=account.enabled,
-        groups=account.groups,
-        created_at=account.created_at,
-        updated_at=account.updated_at,
-    )
+    return _account_response(account)
 
 
 @router.post(

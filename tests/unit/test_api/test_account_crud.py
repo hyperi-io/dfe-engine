@@ -28,9 +28,36 @@ class TestCreateAccount:
         assert data["enabled"] is True
         assert data["groups"] == ["dfe-viewers"]
         assert "password_hash" not in data
+        assert data["email"] == ""
+        assert data["phone"] == ""
+        assert data["name"] == ""
 
         group = client.get("/api/v1/auth/groups/dfe-viewers", headers=admin_headers)
         assert "newuser" in group.json()["members"]
+
+    def test_create_account_with_contact_fields(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "with-contact",
+                "password": "s3cret",
+                "email": "with-contact@example.com",
+                "phone": "+15551212",
+                "name": "With Contact",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["email"] == "with-contact@example.com"
+        assert data["phone"] == "+15551212"
+        assert data["name"] == "With Contact"
+
+        got = client.get("/api/v1/auth/accounts/with-contact", headers=admin_headers)
+        assert got.status_code == 200
+        assert got.json()["email"] == "with-contact@example.com"
+        assert got.json()["phone"] == "+15551212"
+        assert got.json()["name"] == "With Contact"
 
     def test_create_duplicate_returns_409(self, client, admin_headers):
         client.post(
@@ -76,10 +103,40 @@ class TestListAccounts:
         # No password hashes leaked
         for account in data:
             assert "password_hash" not in account
+            assert "email" in account
+            assert "phone" in account
+            assert "name" in account
 
     def test_list_requires_admin(self, client, viewer_headers):
         resp = client.get("/api/v1/auth/accounts", headers=viewer_headers)
         assert resp.status_code == 403
+
+    def test_list_search_matches_name_and_email(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "search-me",
+                "password": "pw",
+                "email": "needle@example.com",
+                "name": "Findable Person",
+            },
+            headers=admin_headers,
+        )
+        by_email = client.get(
+            "/api/v1/auth/accounts",
+            params={"search": "needle@example.com"},
+            headers=admin_headers,
+        )
+        assert by_email.status_code == 200
+        assert any(a["username"] == "search-me" for a in by_email.json()["items"])
+
+        by_name = client.get(
+            "/api/v1/auth/accounts",
+            params={"search": "Findable Person"},
+            headers=admin_headers,
+        )
+        assert by_name.status_code == 200
+        assert any(a["username"] == "search-me" for a in by_name.json()["items"])
 
 
 class TestGetAccount:
@@ -91,6 +148,9 @@ class TestGetAccount:
         data = resp.json()
         assert data["username"] == "admin"
         assert "password_hash" not in data
+        assert "email" in data
+        assert "phone" in data
+        assert "name" in data
 
     def test_get_nonexistent_returns_404(self, client, admin_headers):
         resp = client.get("/api/v1/auth/accounts/nonexistent", headers=admin_headers)
@@ -142,6 +202,84 @@ class TestUpdateAccount:
         analysts = client.get("/api/v1/auth/groups/dfe-analysts", headers=admin_headers)
         assert "grp-sync" not in viewers.json()["members"]
         assert "grp-sync" in analysts.json()["members"]
+
+    def test_update_contact_fields(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "contact-upd",
+                "password": "pw",
+                "email": "old@example.com",
+                "phone": "+1000",
+                "name": "Old Name",
+            },
+            headers=admin_headers,
+        )
+        resp = client.put(
+            "/api/v1/auth/accounts/contact-upd",
+            json={
+                "email": "new@example.com",
+                "phone": "+2000",
+                "name": "New Name",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["email"] == "new@example.com"
+        assert resp.json()["phone"] == "+2000"
+        assert resp.json()["name"] == "New Name"
+
+        got = client.get("/api/v1/auth/accounts/contact-upd", headers=admin_headers)
+        assert got.json()["email"] == "new@example.com"
+        assert got.json()["phone"] == "+2000"
+        assert got.json()["name"] == "New Name"
+
+    def test_update_contact_fields_omitted_are_unchanged(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "contact-omit",
+                "password": "pw",
+                "email": "keep@example.com",
+                "phone": "+1111",
+                "name": "Keep Me",
+            },
+            headers=admin_headers,
+        )
+        resp = client.put(
+            "/api/v1/auth/accounts/contact-omit",
+            json={"enabled": False},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["enabled"] is False
+        assert data["email"] == "keep@example.com"
+        assert data["phone"] == "+1111"
+        assert data["name"] == "Keep Me"
+
+    def test_update_contact_fields_empty_string_clears(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "contact-clear",
+                "password": "pw",
+                "email": "gone@example.com",
+                "phone": "+9999",
+                "name": "Gone",
+            },
+            headers=admin_headers,
+        )
+        resp = client.put(
+            "/api/v1/auth/accounts/contact-clear",
+            json={"email": "", "phone": "", "name": ""},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["email"] == ""
+        assert data["phone"] == ""
+        assert data["name"] == ""
 
     def test_update_enabled(self, client, admin_headers):
         client.post(

@@ -387,10 +387,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Search in username",
+              "description": "Search in username, name, or email",
               "title": "Search"
             },
-            "description": "Search in username"
+            "description": "Search in username, name, or email"
           },
           {
             "name": "sort_by",
@@ -525,7 +525,7 @@
           "Accounts"
         ],
         "summary": "Update Account",
-        "description": "Update account groups or enabled status (admin only).",
+        "description": "Update account groups, enabled status, or contact fields (admin only).",
         "operationId": "update_account_api_v1_auth_accounts__username__put",
         "parameters": [
           {
@@ -16429,6 +16429,18 @@
             "type": "array",
             "title": "Groups"
           },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "phone": {
+            "type": "string",
+            "title": "Phone"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
           "created_at": {
             "type": "string",
             "title": "Created At"
@@ -16443,6 +16455,9 @@
           "username",
           "enabled",
           "groups",
+          "email",
+          "phone",
+          "name",
           "created_at",
           "updated_at"
         ],
@@ -18135,6 +18150,24 @@
             "type": "array",
             "title": "Groups",
             "description": "Group memberships"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email",
+            "description": "Contact email",
+            "default": ""
+          },
+          "phone": {
+            "type": "string",
+            "title": "Phone",
+            "description": "Contact phone",
+            "default": ""
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Display name",
+            "default": ""
           }
         },
         "type": "object",
@@ -29433,6 +29466,42 @@
             ],
             "title": "Enabled",
             "description": "Enable or disable the account"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email",
+            "description": "Contact email"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone",
+            "description": "Contact phone"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Display name"
           }
         },
         "type": "object",
