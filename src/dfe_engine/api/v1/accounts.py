@@ -11,14 +11,16 @@
 POST   /api/v1/auth/accounts                        → Create account
 GET    /api/v1/auth/accounts                        → List accounts
 GET    /api/v1/auth/accounts/{username}             → Get account detail
-PUT    /api/v1/auth/accounts/{username}             → Update account
+GET    /api/v1/auth/accounts/me                     → Get own account (session)
+PUT    /api/v1/auth/accounts/me                     → Update own contact fields (session)
+PUT    /api/v1/auth/accounts/{username}             → Update account (admin)
 POST   /api/v1/auth/accounts/reset-password         → Reset own password (session)
 POST   /api/v1/auth/accounts/{username}/reset-password → Reset password (admin)
 DELETE /api/v1/auth/accounts/{username}             → Delete account
 
-Admin endpoints require account write/reset scopes. ``POST /reset-password`` is
-the session-owner's own password change and only requires a logged-in user.
-Password hashes are NEVER returned in any response.
+Admin endpoints require account write/reset scopes. ``GET/PUT /me`` and
+``POST /reset-password`` are the session-owner's own account and only require
+a logged-in user. Password hashes are NEVER returned in any response.
 """
 
 from __future__ import annotations
@@ -107,6 +109,14 @@ class UpdateAccountRequest(BaseModel):
     name: str | None = Field(None, description="Display name")
 
 
+class UpdateOwnAccountRequest(BaseModel):
+    """Contact fields a session owner may change on their own account."""
+
+    email: str | None = Field(None, min_length=1, description="Contact email")
+    phone: str | None = Field(None, description="Contact phone")
+    name: str | None = Field(None, description="Display name")
+
+
 class ResetPasswordRequest(BaseModel):
     new_password: str = Field(description="New plaintext password")
 
@@ -186,6 +196,30 @@ def _account_response(account: Account) -> AccountResponse:
         created_at=account.created_at,
         updated_at=account.updated_at,
     )
+
+
+def _contact_updates(
+    body: UpdateAccountRequest | UpdateOwnAccountRequest,
+) -> dict[str, object]:
+    """Partial contact-field updates; omitted values are left unchanged."""
+    fields: dict[str, object] = {}
+    if body.email is not None:
+        fields["email"] = body.email
+    if body.phone is not None:
+        fields["phone"] = body.phone
+    if body.name is not None:
+        fields["name"] = body.name
+    return fields
+
+
+def _require_account(store: Any, username: str) -> Account:
+    account = store.get(username)
+    if account is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Account '{username}' not found"},
+        )
+    return account
 
 
 def _reset_stored_password(
@@ -302,6 +336,47 @@ async def list_accounts(
     return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
 
 
+@router.get("/me", response_model=AccountResponse)
+async def get_current_user_account(
+    user: CurrentUser,
+    request: Request,
+):
+    """Return the authenticated user's account. No extra scope required."""
+    from dfe_engine.auth.accounts import AccountStore
+
+    store: AccountStore = request.app.state.account_store
+    return _account_response(_require_account(store, user.user_id))
+
+
+@router.put("/me", response_model=AccountResponse)
+async def update_current_user_account(
+    body: UpdateOwnAccountRequest,
+    user: CurrentUser,
+    request: Request,
+    settings: Settings,
+):
+    """Update the authenticated user's contact fields. No extra scope required.
+
+    Groups and enabled cannot be changed here: those stay on the admin
+    ``PUT /{username}`` route, which requires ``account:write``.
+    """
+    from dfe_engine.auth.accounts import AccountStore
+
+    store: AccountStore = request.app.state.account_store
+    existing = _require_account(store, user.user_id)
+    fields = _contact_updates(body)
+    account = store.update(user.user_id, **fields) if fields else existing
+    _persist_account(
+        request,
+        settings,
+        username=account.username,
+        account=account,
+        summary="update own account",
+        actor=user.user_id,
+    )
+    return _account_response(account)
+
+
 @router.get(
     "/{username}",
     response_model=AccountResponse,
@@ -343,23 +418,12 @@ async def update_account(
 
     store: AccountStore = request.app.state.account_store
     group_store = request.app.state.group_store
-    existing = store.get(username)
-    if existing is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Account '{username}' not found"},
-        )
-    update_fields: dict[str, object] = {}
+    existing = _require_account(store, username)
+    update_fields: dict[str, object] = _contact_updates(body)
     if body.groups is not None:
         update_fields["groups"] = body.groups
     if body.enabled is not None:
         update_fields["enabled"] = body.enabled
-    if body.email is not None:
-        update_fields["email"] = body.email
-    if body.phone is not None:
-        update_fields["phone"] = body.phone
-    if body.name is not None:
-        update_fields["name"] = body.name
     if body.groups is not None:
         old_groups = set(existing.groups)
         new_groups = set(body.groups)

@@ -473,6 +473,78 @@
         ]
       }
     },
+    "/api/v1/auth/accounts/me": {
+      "get": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Get Current User Account",
+        "description": "Return the authenticated user's account. No extra scope required.",
+        "operationId": "get_current_user_account_api_v1_auth_accounts_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Update Current User Account",
+        "description": "Update the authenticated user's contact fields. No extra scope required.\n\nGroups and enabled cannot be changed here: those stay on the admin\n``PUT /{username}`` route, which requires ``account:write``.",
+        "operationId": "update_current_user_account_api_v1_auth_accounts_me_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOwnAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/accounts/{username}": {
       "get": {
         "tags": [
@@ -29648,6 +29720,50 @@
         },
         "type": "object",
         "title": "UpdateOrgRequest"
+      },
+      "UpdateOwnAccountRequest": {
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email",
+            "description": "Contact email"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone",
+            "description": "Contact phone"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Display name"
+          }
+        },
+        "type": "object",
+        "title": "UpdateOwnAccountRequest",
+        "description": "Contact fields a session owner may change on their own account."
       },
       "UpdateProviderRequest": {
         "properties": {

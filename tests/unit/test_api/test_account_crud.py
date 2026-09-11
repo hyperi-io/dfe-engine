@@ -367,6 +367,93 @@ class TestUpdateAccount:
         assert resp.status_code == 403
 
 
+class TestOwnAccount:
+    """GET/PUT /api/v1/auth/accounts/me uses the current session."""
+
+    def test_get_own_account(self, client, viewer_headers):
+        resp = client.get("/api/v1/auth/accounts/me", headers=viewer_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["username"] == "viewer"
+        assert "password_hash" not in data
+        assert "email" in data
+        assert "phone" in data
+        assert "name" in data
+
+    def test_update_own_contact_fields(self, client, viewer_headers):
+        resp = client.put(
+            "/api/v1/auth/accounts/me",
+            json={
+                "email": "viewer@example.com",
+                "phone": "+1555",
+                "name": "Viewer User",
+            },
+            headers=viewer_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["username"] == "viewer"
+        assert resp.json()["email"] == "viewer@example.com"
+        assert resp.json()["phone"] == "+1555"
+        assert resp.json()["name"] == "Viewer User"
+
+        got = client.get("/api/v1/auth/accounts/me", headers=viewer_headers)
+        assert got.json()["email"] == "viewer@example.com"
+        assert got.json()["phone"] == "+1555"
+        assert got.json()["name"] == "Viewer User"
+
+    def test_update_own_omitted_fields_are_unchanged(self, client, viewer_headers):
+        client.put(
+            "/api/v1/auth/accounts/me",
+            json={
+                "email": "keep-own@example.com",
+                "phone": "+1111",
+                "name": "Keep Own",
+            },
+            headers=viewer_headers,
+        )
+        resp = client.put(
+            "/api/v1/auth/accounts/me",
+            json={"name": "Renamed Own"},
+            headers=viewer_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["email"] == "keep-own@example.com"
+        assert data["phone"] == "+1111"
+        assert data["name"] == "Renamed Own"
+
+    def test_update_own_cannot_change_groups_or_enabled(self, client, app, viewer_headers):
+        before = app.state.account_store.get("viewer")
+        resp = client.put(
+            "/api/v1/auth/accounts/me",
+            json={"groups": ["dfe-admins"], "enabled": False},
+            headers=viewer_headers,
+        )
+        assert resp.status_code == 200
+        after = app.state.account_store.get("viewer")
+        assert after.groups == before.groups
+        assert after.enabled is True
+
+    def test_update_own_empty_email_returns_422(self, client, viewer_headers):
+        resp = client.put(
+            "/api/v1/auth/accounts/me",
+            json={"email": ""},
+            headers=viewer_headers,
+        )
+        assert resp.status_code == 422
+
+    def test_update_own_requires_authentication(self, client):
+        resp = client.put(
+            "/api/v1/auth/accounts/me",
+            json={"name": "Nope"},
+        )
+        assert resp.status_code == 401
+
+    def test_get_own_requires_authentication(self, client):
+        resp = client.get("/api/v1/auth/accounts/me")
+        assert resp.status_code == 401
+
+
 class TestResetOwnPassword:
     """POST /api/v1/auth/accounts/reset-password uses the current session."""
 
