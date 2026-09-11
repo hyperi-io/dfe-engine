@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.36](https://github.com/hyperi-io/dfe-engine/compare/v1.19.35...v1.19.36) (2026-09-11)
+
+### Bug Fixes
+
+* **appmgmt:** refuse a source needing its own app where Compose cannot make one ([#356](https://github.com/hyperi-io/dfe-engine/issues/356)) ([ca635f7](https://github.com/hyperi-io/dfe-engine/commit/ca635f78a89f65fb15837994b96241f1fc7be523)), closes [dfe-docker#99](https://github.com/hyperi-io/dfe-docker/issues/99)
+* **deps:** update dependency node to v24.20.0 ([#296](https://github.com/hyperi-io/dfe-engine/issues/296)) ([0c67bc7](https://github.com/hyperi-io/dfe-engine/commit/0c67bc764bf6ee70c30b6b9e7b4d1053a2c23550))
+
 ## [1.19.35](https://github.com/hyperi-io/dfe-engine/compare/v1.19.34...v1.19.35) (2026-09-10)
 
 ### Bug Fixes
