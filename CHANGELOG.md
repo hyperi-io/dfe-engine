@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.19.37](https://github.com/hyperi-io/dfe-engine/compare/v1.19.36...v1.19.37) (2026-09-11)
+
+### Bug Fixes
+
+* seed a core source for the landing table ([#358](https://github.com/hyperi-io/dfe-engine/issues/358)) ([92d7dd1](https://github.com/hyperi-io/dfe-engine/commit/92d7dd149fc70093e98e19ba6a23f6a42e827604)), closes [#295](https://github.com/hyperi-io/dfe-engine/issues/295)
+* take dfe-schemas 0.2.2 for sources/ ([#359](https://github.com/hyperi-io/dfe-engine/issues/359)) ([e0b316b](https://github.com/hyperi-io/dfe-engine/commit/e0b316bc5a47d9695ce221480c61b12cfc413db0))
+
 ## [1.19.36](https://github.com/hyperi-io/dfe-engine/compare/v1.19.35...v1.19.36) (2026-09-11)
 
 ### Bug Fixes
