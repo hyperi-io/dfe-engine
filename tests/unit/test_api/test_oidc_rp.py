@@ -403,3 +403,13 @@ def test_callback_without_return_to_answers_json(client, app):
     assert body["subject"] == "stub-user"
     assert body["token_type"] == "bearer"
     assert body["access_token"]
+
+
+def test_callback_jit_provisions_account_with_oidc_email(client, app):
+    app.state.oidc_rp = _FakeOidcRp()
+    resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+    assert resp.status_code == 200
+    account = app.state.account_store.get("stub-user")
+    assert account is not None
+    assert account.email == "stub@example.test"
+    assert account.external is True

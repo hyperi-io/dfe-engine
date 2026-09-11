@@ -11,12 +11,16 @@
 POST   /api/v1/auth/accounts                        → Create account
 GET    /api/v1/auth/accounts                        → List accounts
 GET    /api/v1/auth/accounts/{username}             → Get account detail
-PUT    /api/v1/auth/accounts/{username}             → Update account
-POST   /api/v1/auth/accounts/{username}/reset-password → Reset password
+GET    /api/v1/auth/accounts/me                     → Get own account (session)
+PUT    /api/v1/auth/accounts/me                     → Update own contact fields (session)
+PUT    /api/v1/auth/accounts/{username}             → Update account (admin)
+POST   /api/v1/auth/accounts/reset-password         → Reset own password (session)
+POST   /api/v1/auth/accounts/{username}/reset-password → Reset password (admin)
 DELETE /api/v1/auth/accounts/{username}             → Delete account
 
-All endpoints require admin role (org:write).
-Password hashes are NEVER returned in any response.
+Admin endpoints require account write/reset scopes. ``GET/PUT /me`` and
+``POST /reset-password`` are the session-owner's own account and only require
+a logged-in user. Password hashes are NEVER returned in any response.
 """
 
 from __future__ import annotations
@@ -91,12 +95,26 @@ PASSWORD_REUSE_WINDOW = 5
 class CreateAccountRequest(BaseModel):
     username: str = Field(description="Unique account name")
     password: str = Field(description="Plaintext password (bcrypt-hashed before storage)")
+    email: str = Field(min_length=1, description="Contact email")
     groups: list[str] = Field(default_factory=list, description="Group memberships")
+    phone: str = Field(default="", description="Contact phone")
+    name: str = Field(default="", description="Display name")
 
 
 class UpdateAccountRequest(BaseModel):
     groups: list[str] | None = Field(None, description="Replace group memberships")
     enabled: bool | None = Field(None, description="Enable or disable the account")
+    email: str | None = Field(None, min_length=1, description="Contact email")
+    phone: str | None = Field(None, description="Contact phone")
+    name: str | None = Field(None, description="Display name")
+
+
+class UpdateOwnAccountRequest(BaseModel):
+    """Contact fields a session owner may change on their own account."""
+
+    email: str | None = Field(None, min_length=1, description="Contact email")
+    phone: str | None = Field(None, description="Contact phone")
+    name: str | None = Field(None, description="Display name")
 
 
 class ResetPasswordRequest(BaseModel):
@@ -153,6 +171,9 @@ class AccountResponse(BaseModel):
     username: str
     enabled: bool
     groups: list[str]
+    email: str
+    phone: str = ""
+    name: str = ""
     created_at: str
     updated_at: str
 
@@ -161,6 +182,84 @@ class AttributesRequest(BaseModel):
     """Full-replace body for an account's attribute blob (non-sensitive or sensitive)."""
 
     attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+def _account_response(account: Account) -> AccountResponse:
+    """Map a stored account to the public response (never includes password_hash)."""
+    return AccountResponse(
+        username=account.username,
+        enabled=account.enabled,
+        groups=account.groups,
+        email=account.email,
+        phone=account.phone,
+        name=account.name,
+        created_at=account.created_at,
+        updated_at=account.updated_at,
+    )
+
+
+def _contact_updates(
+    body: UpdateAccountRequest | UpdateOwnAccountRequest,
+) -> dict[str, object]:
+    """Partial contact-field updates; omitted values are left unchanged."""
+    fields: dict[str, object] = {}
+    if body.email is not None:
+        fields["email"] = body.email
+    if body.phone is not None:
+        fields["phone"] = body.phone
+    if body.name is not None:
+        fields["name"] = body.name
+    return fields
+
+
+def _require_account(store: Any, username: str) -> Account:
+    account = store.get(username)
+    if account is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Account '{username}' not found"},
+        )
+    return account
+
+
+def _reset_stored_password(
+    request: Request,
+    settings: Settings,
+    *,
+    username: str,
+    new_password: str,
+    actor: str,
+) -> ResetPasswordResponse:
+    """Apply a password reset in the live store and mirror it if git-backed."""
+    from dfe_engine.auth.accounts import AccountStore
+
+    store: AccountStore = request.app.state.account_store
+    existing = store.get(username)
+    if existing is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Account '{username}' not found"},
+        )
+    if store.verify_password(username, new_password):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "password_reused",
+                "message": (
+                    f"New password may not match any of the last {PASSWORD_REUSE_WINDOW} passwords"
+                ),
+            },
+        )
+    store.reset_password(username, new_password)
+    git = _persist_account(
+        request,
+        settings,
+        username=username,
+        account=store.get(username) or existing,
+        summary="reset password",
+        actor=actor,
+    )
+    return ResetPasswordResponse(git=git)
 
 
 # ── Endpoints ────────────────────────────────────────────────
@@ -189,7 +288,14 @@ async def create_account(
             status_code=409,
             detail={"code": "conflict", "message": f"Account '{body.username}' already exists"},
         )
-    account = store.create(body.username, body.password, groups=body.groups)
+    account = store.create(
+        body.username,
+        body.password,
+        groups=body.groups,
+        email=body.email,
+        phone=body.phone,
+        name=body.name,
+    )
     sync_group_members_for_account_groups_change(
         group_store,
         body.username,
@@ -203,13 +309,7 @@ async def create_account(
         summary="create account",
         actor=user.user_id,
     )
-    return AccountResponse(
-        username=account.username,
-        enabled=account.enabled,
-        groups=account.groups,
-        created_at=account.created_at,
-        updated_at=account.updated_at,
-    )
+    return _account_response(account)
 
 
 @router.get(
@@ -221,7 +321,7 @@ async def list_accounts(
     user: CurrentUser,
     request: Request,
     pagination: PaginationParams = Depends(),
-    search: str | None = Query(None, description="Search in username"),
+    search: str | None = Query(None, description="Search in username, name, or email"),
     sort_by: str | None = Query(None, description="Sort field (username, created_at, updated_at)"),
     sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
@@ -229,20 +329,52 @@ async def list_accounts(
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    rows = [
-        AccountResponse(
-            username=a.username,
-            enabled=a.enabled,
-            groups=a.groups,
-            created_at=a.created_at,
-            updated_at=a.updated_at,
-        ).model_dump()
-        for a in store.list()
-    ]
-    rows = apply_search(rows, search, ["username"])
+    rows = [_account_response(a).model_dump() for a in store.list()]
+    rows = apply_search(rows, search, ["username", "name", "email"])
     rows = apply_sort(rows, sort_by, sort_order)
     summaries = [AccountResponse.model_validate(row) for row in rows]
     return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
+
+
+@router.get("/me", response_model=AccountResponse)
+async def get_current_user_account(
+    user: CurrentUser,
+    request: Request,
+):
+    """Return the authenticated user's account. No extra scope required."""
+    from dfe_engine.auth.accounts import AccountStore
+
+    store: AccountStore = request.app.state.account_store
+    return _account_response(_require_account(store, user.user_id))
+
+
+@router.put("/me", response_model=AccountResponse)
+async def update_current_user_account(
+    body: UpdateOwnAccountRequest,
+    user: CurrentUser,
+    request: Request,
+    settings: Settings,
+):
+    """Update the authenticated user's contact fields. No extra scope required.
+
+    Groups and enabled cannot be changed here: those stay on the admin
+    ``PUT /{username}`` route, which requires ``account:write``.
+    """
+    from dfe_engine.auth.accounts import AccountStore
+
+    store: AccountStore = request.app.state.account_store
+    existing = _require_account(store, user.user_id)
+    fields = _contact_updates(body)
+    account = store.update(user.user_id, **fields) if fields else existing
+    _persist_account(
+        request,
+        settings,
+        username=account.username,
+        account=account,
+        summary="update own account",
+        actor=user.user_id,
+    )
+    return _account_response(account)
 
 
 @router.get(
@@ -265,13 +397,7 @@ async def get_account(
             status_code=404,
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
         )
-    return AccountResponse(
-        username=account.username,
-        enabled=account.enabled,
-        groups=account.groups,
-        created_at=account.created_at,
-        updated_at=account.updated_at,
-    )
+    return _account_response(account)
 
 
 @router.put(
@@ -286,19 +412,14 @@ async def update_account(
     request: Request,
     settings: Settings,
 ):
-    """Update account groups or enabled status (admin only)."""
+    """Update account groups, enabled status, or contact fields (admin only)."""
     from dfe_engine.auth.accounts import AccountStore
     from dfe_engine.auth.membership import sync_group_members_for_account_groups_change
 
     store: AccountStore = request.app.state.account_store
     group_store = request.app.state.group_store
-    existing = store.get(username)
-    if existing is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Account '{username}' not found"},
-        )
-    update_fields: dict[str, object] = {}
+    existing = _require_account(store, username)
+    update_fields: dict[str, object] = _contact_updates(body)
     if body.groups is not None:
         update_fields["groups"] = body.groups
     if body.enabled is not None:
@@ -323,12 +444,33 @@ async def update_account(
         summary="update account",
         actor=user.user_id,
     )
-    return AccountResponse(
-        username=account.username,
-        enabled=account.enabled,
-        groups=account.groups,
-        created_at=account.created_at,
-        updated_at=account.updated_at,
+    return _account_response(account)
+
+
+@router.post(
+    "/reset-password",
+    status_code=200,
+    response_model=ResetPasswordResponse,
+)
+async def reset_current_user_password(
+    body: ResetPasswordRequest,
+    user: CurrentUser,
+    request: Request,
+    settings: Settings,
+) -> ResetPasswordResponse:
+    """Reset the authenticated user's password.
+
+    The username is taken from the session, not the request, so a caller cannot
+    reset another account through this route. The live store takes the new
+    password immediately; the ``git`` block reports whether the durable mirror
+    merged, is pending review, or is a no-op for a non-git-backed account.
+    """
+    return _reset_stored_password(
+        request,
+        settings,
+        username=user.user_id,
+        new_password=body.new_password,
+        actor=user.user_id,
     )
 
 
@@ -354,36 +496,13 @@ async def reset_password(
     block reports whether that mirror merged straight away (dev/solo) or is a
     pending review PR / CLI merge (production+team), or is a no-op file share.
     """
-    from dfe_engine.auth.accounts import AccountStore
-
-    store: AccountStore = request.app.state.account_store
-    existing = store.get(username)
-    if existing is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Account '{username}' not found"},
-        )
-    if store.verify_password(username, body.new_password):
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "password_reused",
-                "message": (
-                    f"New password may not match any of the last {PASSWORD_REUSE_WINDOW} passwords"
-                ),
-            },
-        )
-    store.reset_password(username, body.new_password)
-    # Persist the post-reset account; the fallback satisfies the type, not the flow.
-    git = _persist_account(
+    return _reset_stored_password(
         request,
         settings,
         username=username,
-        account=store.get(username) or existing,
-        summary="reset password",
+        new_password=body.new_password,
         actor=user.user_id,
     )
-    return ResetPasswordResponse(git=git)
 
 
 @router.post(

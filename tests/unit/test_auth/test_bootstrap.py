@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dfe_engine.auth.bootstrap import bootstrap_auth
+from dfe_engine.auth.bootstrap import bootstrap_auth, seeded_account_email
 from dfe_engine.settings import SeedAccount
 
 
@@ -24,6 +24,37 @@ def test_seed_admin_defaults_to_admin(tmp_path: Path, monkeypatch):
     assert group is not None
     assert "admin" in group.members
     assert account_store.verify_password("admin", "changeme")
+    assert account_store.get("admin").email == "admin@dfe.local"
+
+
+def test_bootstrap_backfills_admin_email_when_missing(tmp_path: Path):
+    auth_dir = tmp_path / "auth"
+    account_store, *_ = bootstrap_auth(auth_dir)
+    account_store.update("admin", email="")
+
+    account_store, *_ = bootstrap_auth(auth_dir)
+    assert account_store.get("admin").email == "admin@dfe.local"
+
+
+def test_seeded_account_email_prefers_recovery_email():
+    assert seeded_account_email("admin") == "admin@dfe.local"
+    assert seeded_account_email("admin", "ops@example.com") == "ops@example.com"
+    assert seeded_account_email("admin", "  ops@example.com  ") == "ops@example.com"
+
+
+def test_recovery_email_seeds_admin(tmp_path: Path):
+    account_store, *_ = bootstrap_auth(tmp_path / "auth", recovery_email="ops@example.com")
+
+    assert account_store.get("admin").email == "ops@example.com"
+
+
+def test_recovery_email_reconciles_admin_over_fallback(tmp_path: Path):
+    auth_dir = tmp_path / "auth"
+    account_store, *_ = bootstrap_auth(auth_dir)
+    assert account_store.get("admin").email == "admin@dfe.local"
+
+    account_store, *_ = bootstrap_auth(auth_dir, recovery_email="ops@example.com")
+    assert account_store.get("admin").email == "ops@example.com"
 
 
 def test_explicit_password_beats_the_default(tmp_path: Path, monkeypatch):

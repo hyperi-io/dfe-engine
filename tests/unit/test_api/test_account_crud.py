@@ -19,7 +19,12 @@ class TestCreateAccount:
     def test_create_account(self, client, admin_headers):
         resp = client.post(
             "/api/v1/auth/accounts",
-            json={"username": "newuser", "password": "s3cret", "groups": ["dfe-viewers"]},
+            json={
+                "username": "newuser",
+                "password": "s3cret",
+                "email": "newuser@example.com",
+                "groups": ["dfe-viewers"],
+            },
             headers=admin_headers,
         )
         assert resp.status_code == 201
@@ -28,19 +33,78 @@ class TestCreateAccount:
         assert data["enabled"] is True
         assert data["groups"] == ["dfe-viewers"]
         assert "password_hash" not in data
+        assert data["email"] == "newuser@example.com"
+        assert data["phone"] == ""
+        assert data["name"] == ""
 
         group = client.get("/api/v1/auth/groups/dfe-viewers", headers=admin_headers)
         assert "newuser" in group.json()["members"]
 
+    def test_create_account_with_contact_fields(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "with-contact",
+                "password": "s3cret",
+                "email": "with-contact@example.com",
+                "phone": "+15551212",
+                "name": "With Contact",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["email"] == "with-contact@example.com"
+        assert data["phone"] == "+15551212"
+        assert data["name"] == "With Contact"
+
+        got = client.get("/api/v1/auth/accounts/with-contact", headers=admin_headers)
+        assert got.status_code == 200
+        assert got.json()["email"] == "with-contact@example.com"
+        assert got.json()["phone"] == "+15551212"
+        assert got.json()["name"] == "With Contact"
+
+    def test_create_without_email_returns_422(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "no-email", "password": "pw"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+
+    def test_create_empty_email_returns_422(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "empty-email", "password": "pw", "email": ""},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+
+    def test_create_with_email_only(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "email-only",
+                "password": "pw",
+                "email": "only@example.com",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["email"] == "only@example.com"
+        assert data["phone"] == ""
+        assert data["name"] == ""
+
     def test_create_duplicate_returns_409(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "dupuser", "password": "pw1"},
+            json={"username": "dupuser", "password": "pw1", "email": "dupuser@example.com"},
             headers=admin_headers,
         )
         resp = client.post(
             "/api/v1/auth/accounts",
-            json={"username": "dupuser", "password": "pw2"},
+            json={"username": "dupuser", "password": "pw2", "email": "dupuser@example.com"},
             headers=admin_headers,
         )
         assert resp.status_code == 409
@@ -76,10 +140,40 @@ class TestListAccounts:
         # No password hashes leaked
         for account in data:
             assert "password_hash" not in account
+            assert "email" in account
+            assert "phone" in account
+            assert "name" in account
 
     def test_list_requires_admin(self, client, viewer_headers):
         resp = client.get("/api/v1/auth/accounts", headers=viewer_headers)
         assert resp.status_code == 403
+
+    def test_list_search_matches_name_and_email(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "search-me",
+                "password": "pw",
+                "email": "needle@example.com",
+                "name": "Findable Person",
+            },
+            headers=admin_headers,
+        )
+        by_email = client.get(
+            "/api/v1/auth/accounts",
+            params={"search": "needle@example.com"},
+            headers=admin_headers,
+        )
+        assert by_email.status_code == 200
+        assert any(a["username"] == "search-me" for a in by_email.json()["items"])
+
+        by_name = client.get(
+            "/api/v1/auth/accounts",
+            params={"search": "Findable Person"},
+            headers=admin_headers,
+        )
+        assert by_name.status_code == 200
+        assert any(a["username"] == "search-me" for a in by_name.json()["items"])
 
 
 class TestGetAccount:
@@ -91,6 +185,9 @@ class TestGetAccount:
         data = resp.json()
         assert data["username"] == "admin"
         assert "password_hash" not in data
+        assert "email" in data
+        assert "phone" in data
+        assert "name" in data
 
     def test_get_nonexistent_returns_404(self, client, admin_headers):
         resp = client.get("/api/v1/auth/accounts/nonexistent", headers=admin_headers)
@@ -109,7 +206,7 @@ class TestUpdateAccount:
         # Create account first
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "updatable", "password": "pw"},
+            json={"username": "updatable", "password": "pw", "email": "updatable@example.com"},
             headers=admin_headers,
         )
         resp = client.put(
@@ -129,6 +226,7 @@ class TestUpdateAccount:
             json={
                 "username": "grp-sync",
                 "password": "pw",
+                "email": "grp-sync@example.com",
                 "groups": ["dfe-viewers"],
             },
             headers=admin_headers,
@@ -143,10 +241,105 @@ class TestUpdateAccount:
         assert "grp-sync" not in viewers.json()["members"]
         assert "grp-sync" in analysts.json()["members"]
 
+    def test_update_contact_fields(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "contact-upd",
+                "password": "pw",
+                "email": "old@example.com",
+                "phone": "+1000",
+                "name": "Old Name",
+            },
+            headers=admin_headers,
+        )
+        resp = client.put(
+            "/api/v1/auth/accounts/contact-upd",
+            json={
+                "email": "new@example.com",
+                "phone": "+2000",
+                "name": "New Name",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["email"] == "new@example.com"
+        assert resp.json()["phone"] == "+2000"
+        assert resp.json()["name"] == "New Name"
+
+        got = client.get("/api/v1/auth/accounts/contact-upd", headers=admin_headers)
+        assert got.json()["email"] == "new@example.com"
+        assert got.json()["phone"] == "+2000"
+        assert got.json()["name"] == "New Name"
+
+    def test_update_contact_fields_omitted_are_unchanged(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "contact-omit",
+                "password": "pw",
+                "email": "keep@example.com",
+                "phone": "+1111",
+                "name": "Keep Me",
+            },
+            headers=admin_headers,
+        )
+        resp = client.put(
+            "/api/v1/auth/accounts/contact-omit",
+            json={"enabled": False},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["enabled"] is False
+        assert data["email"] == "keep@example.com"
+        assert data["phone"] == "+1111"
+        assert data["name"] == "Keep Me"
+
+    def test_update_contact_fields_empty_string_clears(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "contact-clear",
+                "password": "pw",
+                "email": "gone@example.com",
+                "phone": "+9999",
+                "name": "Gone",
+            },
+            headers=admin_headers,
+        )
+        resp = client.put(
+            "/api/v1/auth/accounts/contact-clear",
+            json={"phone": "", "name": ""},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["email"] == "gone@example.com"
+        assert data["phone"] == ""
+        assert data["name"] == ""
+
+    def test_update_empty_email_returns_422(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "email-required",
+                "password": "pw",
+                "email": "keep@example.com",
+            },
+            headers=admin_headers,
+        )
+        resp = client.put(
+            "/api/v1/auth/accounts/email-required",
+            json={"email": ""},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+
     def test_update_enabled(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "disableme", "password": "pw"},
+            json={"username": "disableme", "password": "pw", "email": "disableme@example.com"},
             headers=admin_headers,
         )
         resp = client.put(
@@ -174,13 +367,147 @@ class TestUpdateAccount:
         assert resp.status_code == 403
 
 
+class TestOwnAccount:
+    """GET/PUT /api/v1/auth/accounts/me uses the current session."""
+
+    def test_get_own_account(self, client, viewer_headers):
+        resp = client.get("/api/v1/auth/accounts/me", headers=viewer_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["username"] == "viewer"
+        assert "password_hash" not in data
+        assert "email" in data
+        assert "phone" in data
+        assert "name" in data
+
+    def test_update_own_contact_fields(self, client, viewer_headers):
+        resp = client.put(
+            "/api/v1/auth/accounts/me",
+            json={
+                "email": "viewer@example.com",
+                "phone": "+1555",
+                "name": "Viewer User",
+            },
+            headers=viewer_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["username"] == "viewer"
+        assert resp.json()["email"] == "viewer@example.com"
+        assert resp.json()["phone"] == "+1555"
+        assert resp.json()["name"] == "Viewer User"
+
+        got = client.get("/api/v1/auth/accounts/me", headers=viewer_headers)
+        assert got.json()["email"] == "viewer@example.com"
+        assert got.json()["phone"] == "+1555"
+        assert got.json()["name"] == "Viewer User"
+
+    def test_update_own_omitted_fields_are_unchanged(self, client, viewer_headers):
+        client.put(
+            "/api/v1/auth/accounts/me",
+            json={
+                "email": "keep-own@example.com",
+                "phone": "+1111",
+                "name": "Keep Own",
+            },
+            headers=viewer_headers,
+        )
+        resp = client.put(
+            "/api/v1/auth/accounts/me",
+            json={"name": "Renamed Own"},
+            headers=viewer_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["email"] == "keep-own@example.com"
+        assert data["phone"] == "+1111"
+        assert data["name"] == "Renamed Own"
+
+    def test_update_own_cannot_change_groups_or_enabled(self, client, app, viewer_headers):
+        before = app.state.account_store.get("viewer")
+        resp = client.put(
+            "/api/v1/auth/accounts/me",
+            json={"groups": ["dfe-admins"], "enabled": False},
+            headers=viewer_headers,
+        )
+        assert resp.status_code == 200
+        after = app.state.account_store.get("viewer")
+        assert after.groups == before.groups
+        assert after.enabled is True
+
+    def test_update_own_empty_email_returns_422(self, client, viewer_headers):
+        resp = client.put(
+            "/api/v1/auth/accounts/me",
+            json={"email": ""},
+            headers=viewer_headers,
+        )
+        assert resp.status_code == 422
+
+    def test_update_own_requires_authentication(self, client):
+        resp = client.put(
+            "/api/v1/auth/accounts/me",
+            json={"name": "Nope"},
+        )
+        assert resp.status_code == 401
+
+    def test_get_own_requires_authentication(self, client):
+        resp = client.get("/api/v1/auth/accounts/me")
+        assert resp.status_code == 401
+
+
+class TestResetOwnPassword:
+    """POST /api/v1/auth/accounts/reset-password uses the current session."""
+
+    def test_authenticated_user_resets_own_password(self, client, app, viewer_headers):
+        resp = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"new_password": "viewer-new-pw"},
+            headers=viewer_headers,
+        )
+        assert resp.status_code == 200
+        store = app.state.account_store
+        assert store.verify_password("viewer", "viewer-new-pw")
+        assert not store.verify_password("viewer", "test-viewer-pw")
+
+    def test_query_username_cannot_reset_another_account(self, client, app, viewer_headers):
+        from tests.unit.test_api.conftest import ADMIN_PASSWORD
+
+        resp = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            params={"username": "admin"},
+            json={"new_password": "hijacked-pw"},
+            headers=viewer_headers,
+        )
+        assert resp.status_code == 200
+        store = app.state.account_store
+        assert store.verify_password("admin", ADMIN_PASSWORD)
+        assert store.verify_password("viewer", "hijacked-pw")
+
+    def test_requires_authentication(self, client):
+        resp = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"new_password": "pw"},
+        )
+        assert resp.status_code == 401
+
+    def test_reset_to_current_password_rejected(self, client, viewer_headers):
+        resp = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"new_password": "test-viewer-pw"},
+            headers=viewer_headers,
+        )
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["code"] == "password_reused"
+        assert "current" not in body["message"].lower()
+
+
 class TestResetPassword:
     """POST /api/v1/auth/accounts/{username}/reset-password"""
 
     def test_reset_password(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "pwreset", "password": "oldpw"},
+            json={"username": "pwreset", "password": "oldpw", "email": "pwreset@example.com"},
             headers=admin_headers,
         )
         resp = client.post(
@@ -194,7 +521,7 @@ class TestResetPassword:
     def test_reset_to_current_password_rejected(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "pwsame", "password": "samepw"},
+            json={"username": "pwsame", "password": "samepw", "email": "pwsame@example.com"},
             headers=admin_headers,
         )
         resp = client.post(
@@ -309,7 +636,7 @@ class TestDeleteAccount:
     def test_delete_account(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "deleteme", "password": "pw"},
+            json={"username": "deleteme", "password": "pw", "email": "deleteme@example.com"},
             headers=admin_headers,
         )
         resp = client.delete("/api/v1/auth/accounts/deleteme", headers=admin_headers)

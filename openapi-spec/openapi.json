@@ -387,10 +387,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Search in username",
+              "description": "Search in username, name, or email",
               "title": "Search"
             },
-            "description": "Search in username"
+            "description": "Search in username, name, or email"
           },
           {
             "name": "sort_by",
@@ -473,6 +473,78 @@
         ]
       }
     },
+    "/api/v1/auth/accounts/me": {
+      "get": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Get Current User Account",
+        "description": "Return the authenticated user's account. No extra scope required.",
+        "operationId": "get_current_user_account_api_v1_auth_accounts_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Update Current User Account",
+        "description": "Update the authenticated user's contact fields. No extra scope required.\n\nGroups and enabled cannot be changed here: those stay on the admin\n``PUT /{username}`` route, which requires ``account:write``.",
+        "operationId": "update_current_user_account_api_v1_auth_accounts_me_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOwnAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/accounts/{username}": {
       "get": {
         "tags": [
@@ -525,7 +597,7 @@
           "Accounts"
         ],
         "summary": "Update Account",
-        "description": "Update account groups or enabled status (admin only).",
+        "description": "Update account groups, enabled status, or contact fields (admin only).",
         "operationId": "update_account_api_v1_auth_accounts__username__put",
         "parameters": [
           {
@@ -597,6 +669,53 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/accounts/reset-password": {
+      "post": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Reset Current User Password",
+        "description": "Reset the authenticated user's password.\n\nThe username is taken from the session, not the request, so a caller cannot\nreset another account through this route. The live store takes the new\npassword immediately; the ``git`` block reports whether the durable mirror\nmerged, is pending review, or is a no-op for a non-git-backed account.",
+        "operationId": "reset_current_user_password_api_v1_auth_accounts_reset_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetPasswordResponse"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -16429,6 +16548,20 @@
             "type": "array",
             "title": "Groups"
           },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "phone": {
+            "type": "string",
+            "title": "Phone",
+            "default": ""
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "default": ""
+          },
           "created_at": {
             "type": "string",
             "title": "Created At"
@@ -16443,6 +16576,7 @@
           "username",
           "enabled",
           "groups",
+          "email",
           "created_at",
           "updated_at"
         ],
@@ -18128,6 +18262,12 @@
             "title": "Password",
             "description": "Plaintext password (bcrypt-hashed before storage)"
           },
+          "email": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Email",
+            "description": "Contact email"
+          },
           "groups": {
             "items": {
               "type": "string"
@@ -18135,12 +18275,25 @@
             "type": "array",
             "title": "Groups",
             "description": "Group memberships"
+          },
+          "phone": {
+            "type": "string",
+            "title": "Phone",
+            "description": "Contact phone",
+            "default": ""
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Display name",
+            "default": ""
           }
         },
         "type": "object",
         "required": [
           "username",
-          "password"
+          "password",
+          "email"
         ],
         "title": "CreateAccountRequest"
       },
@@ -29433,6 +29586,43 @@
             ],
             "title": "Enabled",
             "description": "Enable or disable the account"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email",
+            "description": "Contact email"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone",
+            "description": "Contact phone"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Display name"
           }
         },
         "type": "object",
@@ -29530,6 +29720,50 @@
         },
         "type": "object",
         "title": "UpdateOrgRequest"
+      },
+      "UpdateOwnAccountRequest": {
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email",
+            "description": "Contact email"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone",
+            "description": "Contact phone"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Display name"
+          }
+        },
+        "type": "object",
+        "title": "UpdateOwnAccountRequest",
+        "description": "Contact fields a session owner may change on their own account."
       },
       "UpdateProviderRequest": {
         "properties": {

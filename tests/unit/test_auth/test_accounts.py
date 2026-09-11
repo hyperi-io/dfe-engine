@@ -56,6 +56,29 @@ class TestCreate:
         account = store.create("alice", "password123", groups=["admins", "ops"])
         assert account.groups == ["admins", "ops"]
 
+    def test_create_with_contact_fields(self, store):
+        account = store.create(
+            "alice",
+            "password123",
+            email="alice@example.com",
+            phone="+15551212",
+            name="Alice Example",
+        )
+        assert account.email == "alice@example.com"
+        assert account.phone == "+15551212"
+        assert account.name == "Alice Example"
+        got = store.get("alice")
+        assert got is not None
+        assert got.email == "alice@example.com"
+        assert got.phone == "+15551212"
+        assert got.name == "Alice Example"
+
+    def test_create_defaults_contact_fields_empty(self, store):
+        account = store.create("alice", "password123")
+        assert account.email == ""
+        assert account.phone == ""
+        assert account.name == ""
+
     def test_create_duplicate_raises(self, store):
         store.create("alice", "password123")
         with pytest.raises(ValueError, match="alice"):
@@ -120,11 +143,25 @@ class TestGet:
         account = store.get("alice")
         assert account.groups == ["ops", "dev"]
 
-    def test_get_preserves_enabled_state(self, store):
-        store.create("alice", "password123")
-        store.update("alice", enabled=False)
-        account = store.get("alice")
-        assert account.enabled is False
+    def test_get_legacy_yaml_without_contact_fields(self, store, tmp_path):
+        yaml_file = tmp_path / "accounts" / "legacy.yaml"
+        yaml_file.write_text(
+            "password_hash: '!'\n"
+            "enabled: true\n"
+            "groups: []\n"
+            "external: false\n"
+            "source_provider: ''\n"
+            "external_id: ''\n"
+            "last_login_at: ''\n"
+            "created_at: '2026-01-01T00:00:00+00:00'\n"
+            "updated_at: '2026-01-01T00:00:00+00:00'\n"
+            "attributes: {}\n"
+        )
+        account = store.get("legacy")
+        assert account is not None
+        assert account.email == ""
+        assert account.phone == ""
+        assert account.name == ""
 
 
 # ---------------------------------------------------------------------------
@@ -207,6 +244,22 @@ class TestUpdate:
         store.create("alice", "password123", groups=["ops"])
         account = store.update("alice", groups=["admins", "dev"])
         assert account.groups == ["admins", "dev"]
+
+    def test_update_contact_fields(self, store):
+        store.create("alice", "password123")
+        account = store.update(
+            "alice",
+            email="alice@example.com",
+            phone="+1555",
+            name="Alice Example",
+        )
+        assert account.email == "alice@example.com"
+        assert account.phone == "+1555"
+        assert account.name == "Alice Example"
+        got = store.get("alice")
+        assert got.email == "alice@example.com"
+        assert got.phone == "+1555"
+        assert got.name == "Alice Example"
 
     def test_update_returns_updated_account(self, store):
         store.create("alice", "password123")

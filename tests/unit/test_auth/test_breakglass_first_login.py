@@ -149,6 +149,54 @@ class TestBreakGlassHash:
         assert committed.startswith("$2")
         assert store.verify_password(breakglass.USERNAME, MINTED_BREAKGLASS)
         assert breakglass.USERNAME in groups.get(breakglass.GROUP).members
+        assert store.get(breakglass.USERNAME).email == "breakglass@dfe.local"
+
+    def test_break_glass_email_is_backfilled_when_missing(self, tmp_path: Path, crud):
+        store, *_ = bootstrap_auth(
+            tmp_path / "auth",
+            default_admin_password=MINTED_ADMIN,
+            gitcrud=crud,
+            breakglass_password=MINTED_BREAKGLASS,
+        )
+        store.update(breakglass.USERNAME, email="")
+
+        store, *_ = bootstrap_auth(
+            tmp_path / "auth",
+            default_admin_password=MINTED_ADMIN,
+            gitcrud=crud,
+        )
+        assert store.get(breakglass.USERNAME).email == "breakglass@dfe.local"
+
+    def test_recovery_email_seeds_admin_and_breakglass(self, tmp_path: Path, crud):
+        store, *_ = bootstrap_auth(
+            tmp_path / "auth",
+            default_admin_password=MINTED_ADMIN,
+            gitcrud=crud,
+            breakglass_password=MINTED_BREAKGLASS,
+            recovery_email="ops@example.com",
+        )
+
+        assert store.get("admin").email == "ops@example.com"
+        assert store.get(breakglass.USERNAME).email == "ops@example.com"
+
+    def test_recovery_email_reconciles_breakglass_over_fallback(self, tmp_path: Path, crud):
+        auth_dir = tmp_path / "auth"
+        store, *_ = bootstrap_auth(
+            auth_dir,
+            default_admin_password=MINTED_ADMIN,
+            gitcrud=crud,
+            breakglass_password=MINTED_BREAKGLASS,
+        )
+        assert store.get(breakglass.USERNAME).email == "breakglass@dfe.local"
+
+        store, *_ = bootstrap_auth(
+            auth_dir,
+            default_admin_password=MINTED_ADMIN,
+            gitcrud=crud,
+            recovery_email="ops@example.com",
+        )
+        assert store.get("admin").email == "ops@example.com"
+        assert store.get(breakglass.USERNAME).email == "ops@example.com"
 
     def test_the_committed_hash_survives_a_rebuilt_store(self, tmp_path: Path, crud):
         bootstrap_auth(

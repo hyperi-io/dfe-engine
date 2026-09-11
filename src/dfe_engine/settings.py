@@ -94,6 +94,7 @@ Auth (local):
 - DFE_AUTH_LOCAL_VIEWER_PASSWORD -> auth.local.viewer_password
 - DFE_AUTH_LOCAL_ORG_ID -> auth.local.org_id
 - DFE_AUTH_BREAKGLASS_PASSWORD -> auth.local.breakglass_password
+- DFE_RECOVERY_EMAIL -> auth.local.recovery_email
 - DFE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH -> auth.local.admin_password_secret_path
 - DFE_AUTH_LOCAL_ADMIN_SECRET_NAME -> auth.local.admin_secret_name
 - DFE_AUTH_LOCAL_ADMIN_SECRET_KEY -> auth.local.admin_secret_key
@@ -1026,6 +1027,10 @@ class SeedAccount(BaseModel):
         default_factory=list,
         description="Group memberships to reconcile (e.g. dfe-analysts, dfe-viewers).",
     )
+    email: str = Field(
+        default="",
+        description="Contact email. Empty -> left unchanged on reconcile.",
+    )
 
 
 class LocalAuthSettings(BaseModel):
@@ -1057,6 +1062,13 @@ class LocalAuthSettings(BaseModel):
             "First-boot password for the break-glass recovery admin. Hashed into the "
             "deploy repo's governance settings when no hash is committed yet, and "
             "ignored from then on. DFE_AUTH_BREAKGLASS_PASSWORD."
+        ),
+    )
+    recovery_email: str = Field(
+        default="",
+        description=(
+            "Contact email for the bootstrap admin and break-glass recovery accounts. "
+            "DFE_RECOVERY_EMAIL. Empty falls back to {username}@dfe.local."
         ),
     )
     admin_password_secret_path: str = Field(
@@ -1874,6 +1886,8 @@ def _get_env_overrides() -> dict:
         overrides["auth"].setdefault("local", {})["org_id"] = val
     if val := _get_env("DFE_AUTH_BREAKGLASS_PASSWORD"):
         overrides["auth"].setdefault("local", {})["breakglass_password"] = val
+    if val := _get_env("DFE_RECOVERY_EMAIL"):
+        overrides["auth"].setdefault("local", {})["recovery_email"] = val
     if val := _get_env("DFE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH"):
         overrides["auth"].setdefault("local", {})["admin_password_secret_path"] = val
     if val := _get_env("DFE_AUTH_LOCAL_ADMIN_SECRET_NAME"):
