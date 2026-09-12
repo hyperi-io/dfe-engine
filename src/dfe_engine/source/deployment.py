@@ -103,6 +103,17 @@ class SchemaDeployResult(BaseModel):
             "the schema is live; POST /api/v1/sources/reconcile-apps retries it."
         ),
     )
+    hyperdx_source_id: str | None = Field(
+        default=None,
+        description="HyperDX source now pointed at this source's table, by id",
+    )
+    hyperdx_source_error: str | None = Field(
+        default=None,
+        description=(
+            "Why HyperDX was not pointed at the table. Never fails the deploy - "
+            "the schema is live and HyperDX may be down or not deployed at all."
+        ),
+    )
 
 
 class VersionedSourceArtifactDocument(BaseModel):

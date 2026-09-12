@@ -23,6 +23,9 @@ delete, an edit -- ends by reconciling the deploy repo: the receiver and loader
 routing blocks are recompiled, and a fetcher-based source gains or loses its
 fetcher instance. The reconcile never fails the source write; its outcome is
 reported, and ``reconcile-apps`` retries it.
+
+A deploy also points HyperDX at the table it just made, and a delete takes that
+source away again. Like the reconcile, neither ever fails the source write.
 """
 
 from __future__ import annotations
@@ -192,6 +195,50 @@ def _reconcile_apps(request: Request, user: Any, registry: Any) -> tuple[list[st
         logger.warning(f"apps not reconciled with the sources: {exc}")
         return done, str(exc)
     return done, None
+
+
+async def _sync_hyperdx_source(
+    request: Request, source: Source, database: str, columns: list[str]
+) -> tuple[str | None, str | None]:
+    """Point HyperDX at the table this deploy just made. Never raises.
+
+    Returns the HyperDX source id and, when nothing was written, why. A
+    deployment without HyperDX has nothing to point at.
+    """
+    client = getattr(request.app.state, "hyperdx_client", None)
+    if client is None:
+        return None, None
+
+    from dfe_engine.hyperdx.sources import ensure_source
+
+    try:
+        source_id = await ensure_source(
+            client,
+            name=source.source,
+            database=database,
+            table=source.table_name,
+            columns=columns,
+        )
+    except Exception as exc:
+        logger.warning(f"HyperDX not pointed at source '{source.source}': {exc}")
+        return None, str(exc)
+    if source_id is None:
+        return None, "HyperDX did not accept the source; see the engine log"
+    return source_id, None
+
+
+async def _remove_hyperdx_source(request: Request, name: str) -> None:
+    """Drop the HyperDX source for a DFE source that is going away. Never raises."""
+    client = getattr(request.app.state, "hyperdx_client", None)
+    if client is None:
+        return
+
+    from dfe_engine.hyperdx.sources import remove_source
+
+    try:
+        await remove_source(client, name=name)
+    except Exception as exc:
+        logger.warning(f"HyperDX source not removed for '{name}': {exc}")
 
 
 def _resolve_source(name: str, registry: Any) -> Source:
@@ -1242,8 +1289,20 @@ async def deploy_source_schema(
     # The receiver's rule for this source, the loader's table map and (for a
     # fetcher-based source) the fetcher instance are what make the deploy live.
     apps_synced, apps_error = _reconcile_apps(request, user, registry)
+
+    # The HyperDX source is how an operator sees the rows the new table takes;
+    # without it the deploy lands and stays invisible until someone adds one.
+    hyperdx_id, hyperdx_error = await _sync_hyperdx_source(
+        request, source, db, [col.name for col in result.columns]
+    )
+
     deploy_result = deploy_result.model_copy(
-        update={"apps_synced": apps_synced, "apps_sync_error": apps_error}
+        update={
+            "apps_synced": apps_synced,
+            "apps_sync_error": apps_error,
+            "hyperdx_source_id": hyperdx_id,
+            "hyperdx_source_error": hyperdx_error,
+        }
     )
     store.save_deploy(deploy_result, source)
 
@@ -1495,6 +1554,7 @@ async def delete_source(name: str, user: CurrentUser, registry: SourceReg, reque
         _raise_save_validation_http(e)
     audit_resource_change(user.user_id, "source", name, "deleted")
     _reconcile_apps(request, user, registry)
+    await _remove_hyperdx_source(request, name)
 
 
 @router.post(
@@ -1540,6 +1600,9 @@ async def bulk_action(
     if succeeded:
         audit_resource_change(user.user_id, "source", ",".join(succeeded), body.action)
         _reconcile_apps(request, user, registry)
+        if body.action == "delete":
+            for name in succeeded:
+                await _remove_hyperdx_source(request, name)
     return result
 
 
