@@ -260,7 +260,10 @@ def _render_one(
     target = app_dir / app.config_file
     rendered = yaml_dump_string(config)
     config_changed = not target.is_file() or target.read_text(encoding="utf-8") != rendered
-    if config_changed:
+    # Rewritten when only a file set changed, so the file's mtime moves: the
+    # config file is the app's trigger surface, and a program appearing in a
+    # directory it already names is invisible to a watcher polling that file.
+    if config_changed or changed_sets:
         app_dir.mkdir(parents=True, exist_ok=True)
         _atomic_write(target, rendered)
 

@@ -157,6 +157,22 @@ class TestFileSets:
         directory = Path(settings.deployment.app_config_dir, VRL, "transforms")
         assert list(directory.iterdir()) == []
 
+    def test_a_new_program_rewrites_the_config_the_app_watches(self, crud, tmp_path):
+        # The app polls its config file, and a program appearing in a directory
+        # that file already names moves nothing it can see.
+        settings = _settings(tmp_path)
+        app = _deploy(crud, VRL, "filebeat")
+        appconfig.render(crud, settings)
+        target = Path(settings.deployment.app_config_dir, VRL, "config.yaml")
+        before = target.stat().st_mtime_ns
+
+        doc = instances.read_overlay(crud, app)
+        files.upsert_file(doc, file_set(VRL, "transforms"), "100_filebeat.vrl", ".a = 1\n")
+        _put(crud, app, doc)
+        appconfig.render(crud, settings)
+
+        assert target.stat().st_mtime_ns != before
+
     def test_a_table_the_app_names_entry_by_entry_gets_a_derived_entry(self, crud, tmp_path):
         settings = _settings(tmp_path)
         app = _deploy(crud, VRL, "filebeat")
