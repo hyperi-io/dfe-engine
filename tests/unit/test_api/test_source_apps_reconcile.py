@@ -173,7 +173,10 @@ class TestFetcherInstancesFollowTheSources:
         resp = client.post("/api/v1/sources/reconcile-apps", headers=admin_headers)
 
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"changes": ["dfe-receiver/main: sync routing"]}
+        assert resp.json() == {
+            "changes": ["dfe-receiver/main: sync routing"],
+            "restart_required": [],
+        }
         assert _rules(gc) == ["kvproof"]
 
     def test_reconcile_apps_without_a_deploy_repo_is_503(self, client, admin_headers):

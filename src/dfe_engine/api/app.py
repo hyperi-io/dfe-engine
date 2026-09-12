@@ -150,6 +150,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as exc:  # the apps are still reconciled on the next source write
             logger.warning("apps not reconciled with the sources at startup", error=str(exc))
 
+    # Where no chart renders the overlay into the app's own config file, the
+    # engine does it -- and it must happen before the containers that mount the
+    # result are gated on this one becoming healthy.
+    if gitcrud is not None:
+        from dfe_engine.appmgmt import appconfig
+
+        for hint in appconfig.render_and_report(gitcrud, settings):
+            logger.info("An app's rendered config needs its container restarted", hint=hint)
+
     # Bootstrap auth stores
     from dfe_engine.auth.bootstrap import bootstrap_auth
     from dfe_engine.auth.local_provider import LocalAuthProvider

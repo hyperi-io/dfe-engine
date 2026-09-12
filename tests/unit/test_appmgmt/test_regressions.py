@@ -180,6 +180,30 @@ class TestInstanceCountFollowsMultiplicity:
         assert allowed is True
         assert reason == ""
 
+    def test_a_target_that_holds_one_takes_the_first_and_refuses_the_second(self, crud):
+        # Compose runs one container per app, so the first source binds it and
+        # the second would be stored and never run.
+        first = instances.additional_instance_allowed(
+            crud, instances.instance_of(FETCHER, "alpha"), 1
+        )
+        assert first == (True, "")
+
+        self._deploy(crud, FETCHER, "alpha")
+        allowed, reason = instances.additional_instance_allowed(
+            crud, instances.instance_of(FETCHER, "beta"), 1
+        )
+
+        assert allowed is False
+        assert "already bound to alpha" in reason
+        assert "needs Kubernetes" in reason
+
+    def test_rewriting_the_bound_instance_is_not_a_second_one(self, crud):
+        self._deploy(crud, FETCHER, "alpha")
+        allowed, _ = instances.additional_instance_allowed(
+            crud, instances.instance_of(FETCHER, "alpha"), 1
+        )
+        assert allowed is True
+
     def test_a_per_config_overlay_carries_the_instance_in_its_component(self):
         # dfe-common.fullname is {project}-{component} with no instance of its own,
         # so the component is the only thing keeping two deployments' names apart.

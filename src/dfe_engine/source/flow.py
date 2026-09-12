@@ -56,6 +56,21 @@ class FlowError(ValueError):
     """Raised when a source's stages cannot be run as declared."""
 
 
+def stage_instance_ceiling(app: AppDescriptor, settings: DFESettings) -> int | None:
+    """How many deployments of *app* this deployment can run, None meaning unbounded.
+
+    The one reader of both deployment facts the cap depends on, so the save path
+    and the deploy-repo check cannot disagree about how many a target holds.
+    """
+    from dfe_engine.appmgmt import appconfig
+
+    return instance_ceiling(
+        app,
+        DeployTarget(settings.deployment.target),
+        writes_app_config=appconfig.enabled(settings),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class FlowTransform:
     """The transform stage, when the source has one."""
@@ -167,14 +182,14 @@ def _stage_app(
             f"source {source!r} needs {service} to {purpose}, but the {profile} "
             f"profile does not deploy {service}"
         )
-    if instance_ceiling(app, DeployTarget(settings.deployment.target)) == 0:
+    if stage_instance_ceiling(app, settings) == 0:
         raise FlowError(
             f"source {source!r} needs its own {service} to {purpose}, and this deployment "
             f"cannot configure one: {profile or 'compose'} runs a single {service} and it is "
-            "deployed idle, but nothing carries the engine's config into that container "
-            "yet, so the source would be saved and never run. Deploy on Kubernetes, which "
-            f"runs one {service} per source, or wait for the Compose config writer, which "
-            f"turns that idle {service} on and caps it at one"
+            "deployed idle, but nothing renders the engine's config into that container, "
+            "so the source would be saved and never run. Deploy on Kubernetes, which runs "
+            f"one {service} per source, or point this deployment's app-config directory at "
+            "what its containers mount"
         )
     if not app.carries(transport):
         raise FlowError(

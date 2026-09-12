@@ -73,6 +73,7 @@ from dfe_engine.appmgmt import (
     OperationalReader,
     UnknownAppError,
     ValidationResult,
+    appconfig,
     catalogue,
     dryrun,
     files,
@@ -97,6 +98,7 @@ from dfe_engine.gitcrud.engine import ResourceNotFoundError, flatten, set_path
 from dfe_engine.gitcrud.routing import ReviewRequiredError, route_write
 from dfe_engine.governance import PolicyStore, ProtectedVarError
 from dfe_engine.sampling import SampleRequest, SamplerError
+from dfe_engine.source.flow import stage_instance_ceiling
 from dfe_engine.source.registry import SourceNotFoundError
 
 router = APIRouter(prefix="/apps", tags=["App Management"])
@@ -140,6 +142,14 @@ class WriteResult(BaseModel):
         description=(
             "How the change reaches the running process: 'hot' applies without a "
             "restart, 'roll' needs the pod to roll, 'restart' needs a manual one."
+        ),
+    )
+    restart_required: list[str] = Field(
+        default_factory=list,
+        description=(
+            "One command per app whose running process cannot take this change "
+            "where it stands. Empty where the write was hot, or where a GitOps "
+            "controller rolls the pod itself."
         ),
     )
 
@@ -743,6 +753,7 @@ def commit_overlay(
         auto_merged=outcome.auto_merged,
         review_required=outcome.review_required,
         pr_url=outcome.pr_url,
+        restart_required=appconfig.render_and_report(gc, settings),
     )
 
 
@@ -827,7 +838,8 @@ async def create_instance(
                 "message": f"{service}/{body.instance} is already deployed",
             },
         )
-    allowed, reason = instances.additional_instance_allowed(gc, app)
+    ceiling = stage_instance_ceiling(app.descriptor, request.app.state.settings)
+    allowed, reason = instances.additional_instance_allowed(gc, app, ceiling)
     if not allowed:
         raise HTTPException(409, detail={"code": "single_instance_app", "message": reason})
     _require_source(request, app)
@@ -958,6 +970,7 @@ def remove_overlay(
         auto_merged=outcome.auto_merged,
         review_required=outcome.review_required,
         pr_url=outcome.pr_url,
+        restart_required=appconfig.render_and_report(gc, settings),
     )
 
 

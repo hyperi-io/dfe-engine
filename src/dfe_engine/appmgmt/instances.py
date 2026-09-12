@@ -154,22 +154,43 @@ def instances_routed_by(gc: GitCrud, compiler: str) -> list[AppInstance]:
     return [i for i in list_instances(gc) if descriptor(i.service).routing_compiler == compiler]
 
 
-def additional_instance_allowed(gc: GitCrud, app: AppInstance) -> tuple[bool, str]:
-    """Whether this app's shape permits another instance alongside the ones deployed.
+def additional_instance_allowed(
+    gc: GitCrud, app: AppInstance, ceiling: int | None = None
+) -> tuple[bool, str]:
+    """Whether this deployment permits another instance alongside the ones deployed.
 
-    A scale-pool app is one config scaled by KEDA, and its chart names Kubernetes
-    objects from the component alone, so a second config would render the same object
-    names and the two Argo Applications would fight over them under self-heal.
+    Two limits meet here. A scale-pool app is one config scaled by KEDA, and its
+    chart names Kubernetes objects from the component alone, so a second config
+    would render the same object names and the two Argo Applications would fight
+    over them under self-heal. A per-config app is unbounded on Kubernetes and
+    capped by the TARGET elsewhere: Compose declares its services in a committed
+    file and creates none at run time, so it runs one container per app and a
+    second source needing its own would be stored and never run.
+
+    Args:
+        gc: The deploy repo.
+        app: The instance being created.
+        ceiling: How many of this app the target can run, from
+            ``scaling.instance_ceiling``; None means unbounded.
     """
-    if descriptor(app.service).multiplicity is not Multiplicity.SINGLE:
-        return True, ""
+    desc = descriptor(app.service)
     deployed = [i for i in list_instances(gc, service=app.service) if i != app]
-    if not deployed:
+    if desc.multiplicity is Multiplicity.SINGLE:
+        if not deployed:
+            return True, ""
+        running = ", ".join(i.instance for i in deployed)
+        return False, (
+            f"{app.service} runs one deployment for the whole stack (already deployed: "
+            f"{running}). Raise its replica ceiling rather than deploying another."
+        )
+    if ceiling is None or len(deployed) < ceiling:
         return True, ""
-    running = ", ".join(i.instance for i in deployed)
+    running = ", ".join(i.instance for i in deployed) or "none"
     return False, (
-        f"{app.service} runs one deployment for the whole stack (already deployed: "
-        f"{running}). Raise its replica ceiling rather than deploying another."
+        f"this deployment runs {ceiling} {app.service} and it is already bound to "
+        f"{running}. Compose declares its services in a committed file and creates "
+        "none at run time, so a second one needs Kubernetes, which runs one "
+        f"{app.service} per source."
     )
 
 

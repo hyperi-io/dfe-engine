@@ -21,6 +21,8 @@ protected-var policy, optimistic concurrency, review routing and audit apply her
 without being reimplemented.
 """
 
+from . import appconfig
+from .appconfig import RenderedApp
 from .catalogue import (
     APP_CATALOGUE,
     ARTIFACT_KINDS,
@@ -89,6 +91,8 @@ __all__ = [
     "ArtifactVersion",
     "ConsumedFileSet",
     "DeployTarget",
+    "RenderedApp",
+    "appconfig",
     "DryRunResult",
     "DryRunStatus",
     "Encoding",

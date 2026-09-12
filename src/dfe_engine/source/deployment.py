@@ -114,6 +114,14 @@ class SchemaDeployResult(BaseModel):
             "the schema is live and HyperDX may be down or not deployed at all."
         ),
     )
+    restart_required: list[str] = Field(
+        default_factory=list,
+        description=(
+            "One command per app whose running process cannot take this deploy's "
+            "config change where it stands. Empty where every write was hot, or "
+            "where a GitOps controller rolls the pod itself."
+        ),
+    )
 
 
 class VersionedSourceArtifactDocument(BaseModel):

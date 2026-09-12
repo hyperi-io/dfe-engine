@@ -843,6 +843,9 @@ class DeploymentSettings(BaseModel):
     - DFE_DEPLOYMENT_TARGET -> deployment.target
     - DFE_DEPLOYMENT_NAMESPACE -> deployment.namespace
     - DFE_PROFILE -> deployment.profile
+    - DFE_DEPLOYMENT_APP_CONFIG_DIR -> deployment.app_config_dir
+    - DFE_DEPLOYMENT_APP_CONFIG_BASE_DIR -> deployment.app_config_base_dir
+    - DFE_DEPLOYMENT_APP_CONFIG_MOUNT -> deployment.app_config_mount
     """
 
     config_dir: str = Field(default="", description="YAML directory for deployment configurations")
@@ -874,6 +877,35 @@ class DeploymentSettings(BaseModel):
             "dials are reported unsupported rather than silently accepted. "
             "Defaults to unknown so an unset deployment refuses rather than "
             "guesses. Injected by the deployer, not detected."
+        ),
+    )
+    app_config_dir: str = Field(
+        default="",
+        description=(
+            "Directory the engine renders each app's own config file into, one "
+            "sub-directory per app. Set by a deployer that has no chart to do it "
+            "and mounts the result into its containers; empty means something "
+            "else delivers the overlay, which on Kubernetes is the app's chart. "
+            "DFE_DEPLOYMENT_APP_CONFIG_DIR."
+        ),
+    )
+    app_config_base_dir: str = Field(
+        default="",
+        description=(
+            "Directory holding the deployment's own base config per app, as "
+            "<service>.yaml. The instance overlay is merged OVER it, so brokers, "
+            "warehouse credentials and spool paths stay with the deployment "
+            "instead of being committed to the deploy repo. "
+            "DFE_DEPLOYMENT_APP_CONFIG_BASE_DIR."
+        ),
+    )
+    app_config_mount: str = Field(
+        default="",
+        description=(
+            "Path the APPS see app_config_dir at, where the two differ - the "
+            "engine and the app mount one directory at their own paths, and a "
+            "rendered file names the app's. Empty means they are the same. "
+            "DFE_DEPLOYMENT_APP_CONFIG_MOUNT."
         ),
     )
 
@@ -1848,6 +1880,12 @@ def _get_env_overrides() -> dict:
         overrides["deployment"]["namespace"] = val
     if val := _get_env("DFE_PROFILE"):
         overrides["deployment"]["profile"] = val.strip()
+    if val := _get_env("DFE_DEPLOYMENT_APP_CONFIG_DIR"):
+        overrides["deployment"]["app_config_dir"] = val.strip()
+    if val := _get_env("DFE_DEPLOYMENT_APP_CONFIG_BASE_DIR"):
+        overrides["deployment"]["app_config_base_dir"] = val.strip()
+    if val := _get_env("DFE_DEPLOYMENT_APP_CONFIG_MOUNT"):
+        overrides["deployment"]["app_config_mount"] = val.strip()
 
     # Transform validation
     if val := _get_env("DFE_TRANSFORM_VALIDATION_ENABLED"):
