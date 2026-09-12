@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.19.36"
+    "version": "1.19.37"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -15823,6 +15823,33 @@
         ]
       }
     },
+    "/api/v1/hyperdx/sources": {
+      "get": {
+        "tags": [
+          "HyperDX"
+        ],
+        "summary": "Hyperdx Sources",
+        "description": "List every HyperDX team and the DFE sources on it.\n\nA deploy writes its source to every team, so this is the read that says where\nit landed. 503 when HyperDX is not deployed or not answering -- an empty list\nwould read as \"the source is missing\", which is a different fault.",
+        "operationId": "hyperdx_sources_api_v1_hyperdx_sources_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HyperDXSourcesResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/repository/preferences": {
       "get": {
         "tags": [
@@ -20676,6 +20703,77 @@
         ],
         "title": "HyperDXConnection",
         "description": "Connection material in the fork's shape (name, host URL, username, password)."
+      },
+      "HyperDXSourcesResponse": {
+        "properties": {
+          "teams": {
+            "items": {
+              "$ref": "#/components/schemas/HyperDXTeamSources"
+            },
+            "type": "array",
+            "title": "Teams"
+          }
+        },
+        "type": "object",
+        "title": "HyperDXSourcesResponse",
+        "description": "Where every deployed DFE source actually landed in HyperDX."
+      },
+      "HyperDXTeamSource": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "HyperDX source id on that team"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "DFE source name; the HyperDX source carries the same one"
+          },
+          "table": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Table",
+            "description": "The ClickHouse table the source reads (databaseName, tableName)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "HyperDXTeamSource",
+        "description": "One HyperDX source on one team, as the fork holds it."
+      },
+      "HyperDXTeamSources": {
+        "properties": {
+          "team": {
+            "type": "string",
+            "title": "Team",
+            "description": "HyperDX team id"
+          },
+          "team_name": {
+            "type": "string",
+            "title": "Team Name",
+            "description": "HyperDX team name; the caller's OIDC group"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/HyperDXTeamSource"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "type": "object",
+        "required": [
+          "team",
+          "team_name"
+        ],
+        "title": "HyperDXTeamSources",
+        "description": "One HyperDX team and the DFE sources it holds."
       },
       "InitialSetupState": {
         "properties": {
@@ -26681,17 +26779,17 @@
             "title": "Apps Sync Error",
             "description": "Why the apps could not be brought into step. Never fails the deploy - the schema is live; POST /api/v1/sources/reconcile-apps retries it."
           },
-          "hyperdx_source_id": {
+          "hyperdx_source_teams": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "integer"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Hyperdx Source Id",
-            "description": "HyperDX source now pointed at this source's table, by id"
+            "title": "Hyperdx Source Teams",
+            "description": "How many HyperDX teams now carry a source over this source's table"
           },
           "hyperdx_source_error": {
             "anyOf": [

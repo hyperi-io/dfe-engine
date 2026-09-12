@@ -21,6 +21,10 @@ create/delete endpoints; the reachable surface is::
     GET/POST /sources             telemetry sources on the caller's team
     PUT/DELETE /sources/:id
 
+The one exception is the fork's ``/dfe/sources`` routes, which act on every team
+rather than the caller's: the engine's own team has no connection and no humans,
+so a DFE source written there reaches nobody.
+
 All operations are **non-fatal**: if HyperDX is unreachable, failures are
 logged as warnings and the caller proceeds normally.
 
@@ -319,6 +323,48 @@ class HyperDXClient:
             source_id=source_id,
         )
         return data is not None
+
+    # ------------------------------------------------------------------
+    # DFE sources (the fork's cross-team fan-out, not the team-scoped surface)
+    # ------------------------------------------------------------------
+
+    async def put_dfe_source(self, name: str, spec: dict[str, Any]) -> dict[str, Any] | None:
+        """Create or replace one DFE source on EVERY team, each over its own connection.
+
+        Args:
+            name: DFE source name; the HyperDX source carries the same name.
+            spec: Source body without ``name`` or ``connection``.
+
+        Returns:
+            ``{"name", "written", "skipped"}`` by team name, or None on failure.
+        """
+        data = await self._request(
+            "put",
+            f"/dfe/sources/{name}",
+            json_body=spec,
+            op="put_dfe_source",
+            source=name,
+        )
+        return data if isinstance(data, dict) else None
+
+    async def delete_dfe_source(self, name: str) -> dict[str, Any] | None:
+        """Remove one DFE source from every team holding it.
+
+        Returns:
+            ``{"name", "removed"}`` by team name, or None on failure.
+        """
+        data = await self._request(
+            "delete",
+            f"/dfe/sources/{name}",
+            op="delete_dfe_source",
+            source=name,
+        )
+        return data if isinstance(data, dict) else None
+
+    async def list_dfe_sources(self) -> dict[str, Any] | None:
+        """List every team and the DFE sources it holds, or None on failure."""
+        data = await self._request("get", "/dfe/sources", op="list_dfe_sources")
+        return data if isinstance(data, dict) else None
 
     # ------------------------------------------------------------------
     # Saved searches
