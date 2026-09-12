@@ -201,7 +201,8 @@ class GitCrud:
 
         Each engine replica holds its own clone, so without this a read serves
         whatever this pod last wrote and a write on one replica is invisible on
-        every other one. One ref advertisement when the remote has not moved.
+        every other one. One ref advertisement when the remote has not moved, and
+        a burst of reads shares one -- see GitopsRepo.refresh.
         """
         self._repo.refresh()
 

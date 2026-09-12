@@ -130,3 +130,22 @@ class TestAnyResourceClassAcrossReplicas:
         crud_a.put("sources", "syslog", {"source": "syslog"}, actor="kaz")
 
         assert crud_b.head_revision() == crud_a.head_revision()
+
+    def test_a_burst_of_reads_asks_the_remote_once(self, replicas, monkeypatch) -> None:
+        """A listing reads every document: that is one round trip, not one each."""
+        crud_a, crud_b = replicas
+        crud_a.put("sources", "syslog", {"source": "syslog"}, actor="kaz")
+        asked: list[float] = []
+        real_remote_head = crud_b.repo.remote_head
+
+        def counted() -> str | None:
+            asked.append(0.0)
+            return real_remote_head()
+
+        monkeypatch.setattr(crud_b.repo, "remote_head", counted)
+
+        for _ in range(5):
+            assert crud_b.get("sources", "syslog")["source"] == "syslog"
+            assert crud_b.list("sources") == ["syslog"]
+
+        assert len(asked) == 1

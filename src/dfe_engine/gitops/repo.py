@@ -22,6 +22,7 @@ import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from time import monotonic
 from typing import TYPE_CHECKING, TypeVar, cast
 
 from dulwich import porcelain
@@ -33,6 +34,11 @@ if TYPE_CHECKING:
     from dulwich.client import SendPackResult
 
 T = TypeVar("T")
+
+# One listing reads every document in a class, so the head check is coalesced into
+# one round trip per burst; 2s keeps that cheap while a publish on this clone
+# reopens the check immediately.
+_REFRESH_WINDOW_SECONDS = 2.0
 
 
 class GitopsRemoteError(RuntimeError):
@@ -103,6 +109,8 @@ class GitopsRepo:
         # A refresh runs on every read, so an unreachable remote is reported on the
         # transition rather than once per read.
         self._refresh_failed = False
+        # When the head was last asked for; None means the next read asks.
+        self._checked_at: float | None = None
 
     @property
     def path(self) -> Path:
@@ -269,6 +277,11 @@ class GitopsRepo:
         is invisible here until this runs -- the read half of read-your-writes across
         replicas. Cheap when nothing moved: one ref advertisement and no fetch.
 
+        The head is asked for at most once per ``_REFRESH_WINDOW_SECONDS``, so a
+        listing that reads N documents costs one round trip rather than N; a publish
+        on this clone reopens the check, and an unreachable remote is retried on the
+        same window instead of on every read.
+
         Only a pushing clone follows the remote: one holding a commit it never pushed
         is the sole copy of it, and a reset would destroy it. Best-effort -- a remote
         this clone cannot reach leaves it serving what it already has, because a read
@@ -276,6 +289,10 @@ class GitopsRepo:
         """
         if not (self._push and self._repo_url):
             return False
+        checked_at = self._checked_at
+        if checked_at is not None and monotonic() - checked_at < _REFRESH_WINDOW_SECONDS:
+            return False
+        self._checked_at = monotonic()
         moved = False
         try:
             remote = self.remote_head()
@@ -368,7 +385,12 @@ class GitopsRepo:
         # A reader refreshing this clone resets the working tree, so the whole
         # write -- sync, stage, commit, push -- holds the tree to itself.
         with self._lock:
-            return self._publish_locked(artifacts, message, deletions, branch)
+            try:
+                return self._publish_locked(artifacts, message, deletions, branch)
+            finally:
+                # This clone just wrote, so the next read asks the remote again
+                # rather than answering from inside the window.
+                self._checked_at = None
 
     def _publish_locked(
         self,
