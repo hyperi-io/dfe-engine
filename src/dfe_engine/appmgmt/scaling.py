@@ -74,7 +74,9 @@ class ScalingDials:
     memory_limit: str | None = None
 
 
-def instance_ceiling(app: AppDescriptor, target: DeployTarget) -> int | None:
+def instance_ceiling(
+    app: AppDescriptor, target: DeployTarget, *, writes_app_config: bool = False
+) -> int | None:
     """How many deployments of *app* this target can RUN, None meaning unbounded.
 
     Read off the manifest's multiplicity rather than a list of app names, so an
@@ -83,13 +85,21 @@ def instance_ceiling(app: AppDescriptor, target: DeployTarget) -> int | None:
     A single-deployment app is one everywhere. A per-config app is unbounded on
     Kubernetes, where each overlay renders its own Argo Application. Compose
     declares its services in a committed file and creates none at run time, so it
-    holds ONE of each -- and because nothing yet carries a config into that
-    container, the number it can actually run there is zero. A target nobody
-    named is not assumed to be Compose.
+    holds ONE of each: one where the engine renders that container's config, and
+    zero where nothing does and the source would be saved and never run. A target
+    nobody named is not assumed to be Compose.
+
+    Args:
+        app: The app the ceiling is being asked about.
+        target: Where this deployment runs.
+        writes_app_config: Whether the engine renders the apps' config files
+            here, which is ``appconfig.enabled``.
     """
     if app.multiplicity is not Multiplicity.PER_CONFIG:
         return 1
-    return 0 if target is DeployTarget.DOCKER else None
+    if target is not DeployTarget.DOCKER:
+        return None
+    return 1 if writes_app_config else 0
 
 
 def support(app: AppDescriptor, target: DeployTarget) -> tuple[bool, str]:

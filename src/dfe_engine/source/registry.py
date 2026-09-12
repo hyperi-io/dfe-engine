@@ -701,6 +701,7 @@ class SourceRegistry:
             self._validate_match_operator(source, candidate_match)
             self._validate_fetcher_routes(source, candidate_version)
             self._validate_flow(source)
+            self._validate_instance_room(source)
 
         for table in self._names():
             if table == source.source:
@@ -795,6 +796,42 @@ class SourceRegistry:
             resolve_flow(source, get_settings())
         except FlowError as exc:
             raise SourceValidationError(str(exc)) from exc
+
+    def _validate_instance_room(self, source: Source) -> None:
+        """A stage needing its OWN deployment must have one free here.
+
+        Kubernetes renders an Argo Application per overlay, so there is always
+        room. Compose declares its services in a committed file and creates none
+        at run time, so the first source to need a one-per-source app takes the
+        resident container and the next is refused rather than stored and never
+        run.
+        """
+        if self._crud is None:
+            return
+        from dfe_engine.appmgmt import instances
+        from dfe_engine.settings import get_settings
+        from dfe_engine.source.flow import (
+            FETCHER_SERVICE,
+            FlowError,
+            resolve_flow,
+            stage_instance_ceiling,
+        )
+
+        settings = get_settings()
+        try:
+            flow = resolve_flow(source, settings)
+        except FlowError:  # _validate_flow already reported it
+            return
+
+        needed = {flow.transform.app} if flow.transform is not None else set()
+        if source.fetcher is not None:
+            needed.add(FETCHER_SERVICE)
+        for service in sorted(needed):
+            app = instances.instance_of(service, source.source)
+            ceiling = stage_instance_ceiling(app.descriptor, settings)
+            allowed, reason = instances.additional_instance_allowed(self._crud, app, ceiling)
+            if not allowed:
+                raise SourceValidationError(f"source {source.source!r}: {reason}")
 
     # -----------------------------------------------------------------
     # Change Callbacks

@@ -109,16 +109,25 @@ class RoutingStatus:
         return not self.deployed
 
 
-def reaches_apps(target: DeployTarget) -> bool:
+def reaches_apps(target: DeployTarget, *, writes_app_config: bool) -> bool:
     """Whether an overlay written here reaches the app that reads it.
 
-    On Kubernetes the GitOps controller applies the overlay and the pod rolls onto
-    it. A Compose stack mounts each app's config file read-only and nothing carries
-    the overlay into the container, so the write stops at the deploy repo and the
-    running app keeps the routing it started with. A target the deployer did not
-    name is not assumed to be Compose.
+    A fact about the DEPLOYMENT rather than a test of its target, because two
+    different mechanisms deliver the same overlay. On Kubernetes the GitOps
+    controller applies it and the pod rolls onto it. On Compose there is no
+    chart, so ``appconfig`` renders each app's own config file into a directory
+    the containers mount - and a Compose deployment that wires neither still
+    reports false, since its running receiver would keep the routing it started
+    with.
+
+    Args:
+        target: Where this deployment runs.
+        writes_app_config: Whether the engine itself renders the apps' config
+            files here, which is ``appconfig.enabled``.
     """
-    return target is not DeployTarget.DOCKER
+    if target is DeployTarget.DOCKER:
+        return writes_app_config
+    return True
 
 
 def _bound_source(registry: SourceRegistry, instance: str | None) -> Source:

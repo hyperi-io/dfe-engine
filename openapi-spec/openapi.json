@@ -16834,6 +16834,14 @@
             "type": "array",
             "title": "Changes",
             "description": "Overlay writes made (service/instance: action)"
+          },
+          "restart_required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Restart Required",
+            "description": "One command per app whose running process cannot take this change where it stands."
           }
         },
         "type": "object",
@@ -18114,6 +18122,14 @@
             "title": "Reload",
             "description": "How the change reaches the running process: 'hot' applies without a restart, 'roll' needs the pod to roll, 'restart' needs a manual one."
           },
+          "restart_required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Restart Required",
+            "description": "One command per app whose running process cannot take this change where it stands. Empty where the write was hot, or where a GitOps controller rolls the pod itself."
+          },
           "copied": {
             "items": {
               "type": "string"
@@ -18712,7 +18728,7 @@
           "applies_routing": {
             "type": "boolean",
             "title": "Applies Routing",
-            "description": "Whether the routing a deployed source compiles to reaches the apps that run it. False on a Compose stack, which mounts each app's config file read-only: the engine still writes the overlay, and nothing carries it into the container, so a console must not offer the source as live."
+            "description": "Whether the routing a deployed source compiles to reaches the apps that run it. A GitOps controller applies it on Kubernetes; off it the engine renders each app's config file into a directory the containers mount. False where neither is wired, so a console must not offer the source as live."
           },
           "stack": {
             "anyOf": [
@@ -21249,6 +21265,14 @@
             ],
             "title": "Reload",
             "description": "How the change reaches the running process: 'hot' applies without a restart, 'roll' needs the pod to roll, 'restart' needs a manual one."
+          },
+          "restart_required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Restart Required",
+            "description": "One command per app whose running process cannot take this change where it stands. Empty where the write was hot, or where a GitOps controller rolls the pod itself."
           },
           "link": {
             "anyOf": [
@@ -24927,6 +24951,14 @@
             "title": "Reload",
             "description": "How the change reaches the running process: 'hot' applies without a restart, 'roll' needs the pod to roll, 'restart' needs a manual one."
           },
+          "restart_required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Restart Required",
+            "description": "One command per app whose running process cannot take this change where it stands. Empty where the write was hot, or where a GitOps controller rolls the pod itself."
+          },
           "relinked": {
             "items": {
               "$ref": "#/components/schemas/LinkModel"
@@ -26802,6 +26834,14 @@
             ],
             "title": "Hyperdx Source Error",
             "description": "Why HyperDX was not pointed at the table. Never fails the deploy - the schema is live and HyperDX may be down or not deployed at all."
+          },
+          "restart_required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Restart Required",
+            "description": "One command per app whose running process cannot take this deploy's config change where it stands. Empty where every write was hot, or where a GitOps controller rolls the pod itself."
           }
         },
         "type": "object",
@@ -28101,6 +28141,14 @@
             ],
             "title": "Apps Sync Error",
             "description": "Why the apps could not be brought into step; reconcile-apps retries it"
+          },
+          "restart_required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Restart Required",
+            "description": "One command per app whose running process cannot take this change where it stands. Empty where every write was hot, or where a GitOps controller rolls the pod itself."
           }
         },
         "type": "object",
@@ -30871,6 +30919,14 @@
             ],
             "title": "Reload",
             "description": "How the change reaches the running process: 'hot' applies without a restart, 'roll' needs the pod to roll, 'restart' needs a manual one."
+          },
+          "restart_required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Restart Required",
+            "description": "One command per app whose running process cannot take this change where it stands. Empty where the write was hot, or where a GitOps controller rolls the pod itself."
           }
         },
         "type": "object",

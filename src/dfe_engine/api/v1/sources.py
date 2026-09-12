@@ -31,6 +31,7 @@ source away again. Like the reconcile, neither ever fails the source write.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, NoReturn
 
@@ -46,6 +47,7 @@ from dfe_engine.appmgmt import (
     LOADER_COMPILER,
     MetricsUnavailableError,
     OperationalReader,
+    appconfig,
     derived,
     instances,
 )
@@ -142,6 +144,14 @@ class SourceResponse(BaseModel):
         default=None,
         description="Why the apps could not be brought into step; reconcile-apps retries it",
     )
+    restart_required: list[str] = Field(
+        default_factory=list,
+        description=(
+            "One command per app whose running process cannot take this change where "
+            "it stands. Empty where every write was hot, or where a GitOps controller "
+            "rolls the pod itself."
+        ),
+    )
 
 
 class AppsReconcileResponse(BaseModel):
@@ -150,38 +160,56 @@ class AppsReconcileResponse(BaseModel):
     changes: list[str] = Field(
         default_factory=list, description="Overlay writes made (service/instance: action)"
     )
+    restart_required: list[str] = Field(
+        default_factory=list,
+        description=(
+            "One command per app whose running process cannot take this change where it stands."
+        ),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class AppsSync:
+    """What bringing the apps into step with the sources did, and what it now needs."""
+
+    changes: list[str]
+    error: str | None = None
+    restart_required: list[str] = field(default_factory=list)
 
 
 def _source_response(
     source: Source,
     *,
     message: str,
-    apps: tuple[list[str], str | None] = ([], None),
+    apps: AppsSync | None = None,
 ) -> SourceResponse:
-    synced, error = apps
+    synced = apps or AppsSync(changes=[])
     return SourceResponse(
         source=source.source,
         message=message,
         current=source.current,
         deployed_version=source.deployed_version,
         versions=sorted(source.versions.keys()),
-        apps_synced=synced,
-        apps_sync_error=error,
+        apps_synced=synced.changes,
+        apps_sync_error=synced.error,
+        restart_required=synced.restart_required,
     )
 
 
-def _reconcile_apps(request: Request, user: Any, registry: Any) -> tuple[list[str], str | None]:
+def _reconcile_apps(request: Request, user: Any, registry: Any) -> AppsSync:
     """Apply what the sources imply about the deployed apps. Never raises.
 
-    Returns the writes made and, when the reconcile could not run or complete,
-    why. A deployment without a deploy repo has nothing to reconcile.
+    Returns the writes made, why the reconcile could not complete when it did
+    not, and the restart each app needs where this deployment renders its config
+    files itself. A deployment without a deploy repo has nothing to reconcile.
     """
     gc = getattr(request.app.state, "gitcrud", None)
     if gc is None:
-        return [], None
+        return AppsSync(changes=[])
+    settings = request.app.state.settings
     done: list[str] = []
     try:
-        for change in derived.plan(gc, registry, request.app.state.settings):
+        for change in derived.plan(gc, registry, settings):
             if change.action == "remove":
                 remove_overlay(request, user, change.app)
             else:
@@ -190,11 +218,13 @@ def _reconcile_apps(request: Request, user: Any, registry: Any) -> tuple[list[st
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else exc.detail.get("message", "")
         logger.warning(f"apps not reconciled with the sources: {detail}")
-        return done, str(detail)
+        return AppsSync(changes=done, error=str(detail))
     except Exception as exc:
         logger.warning(f"apps not reconciled with the sources: {exc}")
-        return done, str(exc)
-    return done, None
+        return AppsSync(changes=done, error=str(exc))
+    # Re-rendered even when the reconcile wrote nothing: a source deploy changes
+    # the loader's table map through the same overlay the plan found in step.
+    return AppsSync(changes=done, restart_required=appconfig.render_and_report(gc, settings))
 
 
 async def _sync_hyperdx_source(
@@ -1288,7 +1318,7 @@ async def deploy_source_schema(
 
     # The receiver's rule for this source, the loader's table map and (for a
     # fetcher-based source) the fetcher instance are what make the deploy live.
-    apps_synced, apps_error = _reconcile_apps(request, user, registry)
+    apps = _reconcile_apps(request, user, registry)
 
     # The HyperDX source is how an operator sees the rows the new table takes;
     # without it the deploy lands and stays invisible until someone adds one.
@@ -1298,8 +1328,9 @@ async def deploy_source_schema(
 
     deploy_result = deploy_result.model_copy(
         update={
-            "apps_synced": apps_synced,
-            "apps_sync_error": apps_error,
+            "apps_synced": apps.changes,
+            "apps_sync_error": apps.error,
+            "restart_required": apps.restart_required,
             "hyperdx_source_teams": hyperdx_teams,
             "hyperdx_source_error": hyperdx_error,
         }
@@ -1317,7 +1348,7 @@ async def deploy_source_schema(
             "version": version_id,
             "topics_ensured": topics_ensured,
             "topics_failed": topics_failed,
-            "apps_synced": apps_synced,
+            "apps_synced": apps.changes,
         },
     )
     return deploy_result
@@ -1624,13 +1655,13 @@ async def reconcile_apps(user: CurrentUser, registry: SourceReg, request: Reques
             status_code=503,
             detail={"code": "not_configured", "message": "gitops is not enabled"},
         )
-    changes, error = _reconcile_apps(request, user, registry)
-    if error:
+    apps = _reconcile_apps(request, user, registry)
+    if apps.error:
         raise HTTPException(
             status_code=502,
-            detail={"code": "reconcile_failed", "message": error, "changes": changes},
+            detail={"code": "reconcile_failed", "message": apps.error, "changes": apps.changes},
         )
-    return AppsReconcileResponse(changes=changes)
+    return AppsReconcileResponse(changes=apps.changes, restart_required=apps.restart_required)
 
 
 @router.post(
