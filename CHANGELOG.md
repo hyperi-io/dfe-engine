@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.20.1](https://github.com/hyperi-io/dfe-engine/compare/v1.20.0...v1.20.1) (2026-09-12)
+
+### Bug Fixes
+
+* **gitops:** give every replica one view of the deploy repo ([7575d13](https://github.com/hyperi-io/dfe-engine/commit/7575d13f251f12467db20ea992bb3d6eac653273)), closes [#361](https://github.com/hyperi-io/dfe-engine/issues/361)
+
 ## [1.20.0](https://github.com/hyperi-io/dfe-engine/compare/v1.19.37...v1.20.0) (2026-09-12)
 
 ### Features
