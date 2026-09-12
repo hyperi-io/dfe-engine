@@ -199,11 +199,11 @@ def _reconcile_apps(request: Request, user: Any, registry: Any) -> tuple[list[st
 
 async def _sync_hyperdx_source(
     request: Request, source: Source, database: str, columns: list[str]
-) -> tuple[str | None, str | None]:
+) -> tuple[int | None, str | None]:
     """Point HyperDX at the table this deploy just made. Never raises.
 
-    Returns the HyperDX source id and, when nothing was written, why. A
-    deployment without HyperDX has nothing to point at.
+    Returns how many HyperDX teams now carry the source and, when nothing was
+    written, why. A deployment without HyperDX has nothing to point at.
     """
     client = getattr(request.app.state, "hyperdx_client", None)
     if client is None:
@@ -212,7 +212,7 @@ async def _sync_hyperdx_source(
     from dfe_engine.hyperdx.sources import ensure_source
 
     try:
-        source_id = await ensure_source(
+        teams = await ensure_source(
             client,
             name=source.source,
             database=database,
@@ -222,9 +222,9 @@ async def _sync_hyperdx_source(
     except Exception as exc:
         logger.warning(f"HyperDX not pointed at source '{source.source}': {exc}")
         return None, str(exc)
-    if source_id is None:
+    if teams is None:
         return None, "HyperDX did not accept the source; see the engine log"
-    return source_id, None
+    return len(teams), None
 
 
 async def _remove_hyperdx_source(request: Request, name: str) -> None:
@@ -1292,7 +1292,7 @@ async def deploy_source_schema(
 
     # The HyperDX source is how an operator sees the rows the new table takes;
     # without it the deploy lands and stays invisible until someone adds one.
-    hyperdx_id, hyperdx_error = await _sync_hyperdx_source(
+    hyperdx_teams, hyperdx_error = await _sync_hyperdx_source(
         request, source, db, [col.name for col in result.columns]
     )
 
@@ -1300,7 +1300,7 @@ async def deploy_source_schema(
         update={
             "apps_synced": apps_synced,
             "apps_sync_error": apps_error,
-            "hyperdx_source_id": hyperdx_id,
+            "hyperdx_source_teams": hyperdx_teams,
             "hyperdx_source_error": hyperdx_error,
         }
     )
