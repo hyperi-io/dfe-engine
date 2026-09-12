@@ -20,7 +20,7 @@ import pytest
 from dulwich import porcelain
 
 from dfe_engine.gitcrud import GitCrud
-from dfe_engine.gitops.repo import GitopsRepo
+from dfe_engine.gitops.repo import GitopsRepo, read_scope
 from dfe_engine.source.models import Source, SourceMatch, SourceView
 from dfe_engine.source.registry import SourceNotFoundError, SourceRegistry
 
@@ -131,21 +131,59 @@ class TestAnyResourceClassAcrossReplicas:
 
         assert crud_b.head_revision() == crud_a.head_revision()
 
-    def test_a_burst_of_reads_asks_the_remote_once(self, replicas, monkeypatch) -> None:
+
+class TestOneViewPerRequest:
+    """A request reads many documents; they all answer from one view of the repo."""
+
+    @staticmethod
+    def _count_head_checks(crud: GitCrud, monkeypatch) -> list[str]:
+        asked: list[str] = []
+        real_remote_head = crud.repo.remote_head
+
+        def counted() -> str | None:
+            head = real_remote_head()
+            asked.append(head or "")
+            return head
+
+        monkeypatch.setattr(crud.repo, "remote_head", counted)
+        return asked
+
+    def test_a_burst_of_reads_in_one_scope_asks_the_remote_once(
+        self, replicas, monkeypatch
+    ) -> None:
         """A listing reads every document: that is one round trip, not one each."""
         crud_a, crud_b = replicas
         crud_a.put("sources", "syslog", {"source": "syslog"}, actor="kaz")
-        asked: list[float] = []
-        real_remote_head = crud_b.repo.remote_head
+        asked = self._count_head_checks(crud_b, monkeypatch)
 
-        def counted() -> str | None:
-            asked.append(0.0)
-            return real_remote_head()
-
-        monkeypatch.setattr(crud_b.repo, "remote_head", counted)
-
-        for _ in range(5):
-            assert crud_b.get("sources", "syslog")["source"] == "syslog"
-            assert crud_b.list("sources") == ["syslog"]
+        with read_scope():
+            for _ in range(5):
+                assert crud_b.get("sources", "syslog")["source"] == "syslog"
+                assert crud_b.list("sources") == ["syslog"]
 
         assert len(asked) == 1
+
+    def test_the_next_scope_asks_again(self, replicas, monkeypatch) -> None:
+        """One view per request, not one per process: the next request re-checks."""
+        crud_a, crud_b = replicas
+        asked = self._count_head_checks(crud_b, monkeypatch)
+
+        with read_scope():
+            assert crud_b.list("sources") == []
+        crud_a.put("sources", "syslog", {"source": "syslog"}, actor="kaz")
+        with read_scope():
+            assert crud_b.list("sources") == ["syslog"]
+
+        assert len(asked) == 2
+
+    def test_a_write_reopens_the_scopes_check(self, replicas, monkeypatch) -> None:
+        """A replica that writes mid-request reads its own write back, not the view."""
+        crud_a, crud_b = replicas
+        asked = self._count_head_checks(crud_b, monkeypatch)
+
+        with read_scope():
+            assert crud_b.list("sources") == []
+            crud_b.put("sources", "syslog", {"source": "syslog"}, actor="kay")
+            assert crud_b.list("sources") == ["syslog"]
+
+        assert len(asked) == 2

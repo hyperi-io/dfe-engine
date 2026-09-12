@@ -19,10 +19,11 @@ HTTPS path that URL carries the deploy token (F-GITOPS-TOKEN).
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
-from time import monotonic
 from typing import TYPE_CHECKING, TypeVar, cast
 
 from dulwich import porcelain
@@ -35,10 +36,27 @@ if TYPE_CHECKING:
 
 T = TypeVar("T")
 
-# One listing reads every document in a class, so the head check is coalesced into
-# one round trip per burst; 2s keeps that cheap while a publish on this clone
-# reopens the check immediately.
-_REFRESH_WINDOW_SECONDS = 2.0
+# The clones whose head this scope has already taken; None outside a scope.
+_READ_SCOPE: ContextVar[set[GitopsRepo] | None] = ContextVar("dfe_gitops_read_scope", default=None)
+
+
+@contextmanager
+def read_scope() -> Iterator[None]:
+    """Answer every read in this block from one view of the deploy repo.
+
+    A request reads many documents and a listing reads them all, so without this
+    each one pays its own ref advertisement. The first read takes the remote's head
+    and the rest of the block reuses it; the next block asks again. Outside a scope
+    -- the CLI, background work -- every read asks, which is what they want.
+    """
+    # Restored by setting the previous value, not by resetting a token: a token
+    # reset raises when the block exits in a different context (see tags_context).
+    previous = _READ_SCOPE.get()
+    _READ_SCOPE.set(set())
+    try:
+        yield
+    finally:
+        _READ_SCOPE.set(previous)
 
 
 class GitopsRemoteError(RuntimeError):
@@ -109,8 +127,6 @@ class GitopsRepo:
         # A refresh runs on every read, so an unreachable remote is reported on the
         # transition rather than once per read.
         self._refresh_failed = False
-        # When the head was last asked for; None means the next read asks.
-        self._checked_at: float | None = None
 
     @property
     def path(self) -> Path:
@@ -277,10 +293,10 @@ class GitopsRepo:
         is invisible here until this runs -- the read half of read-your-writes across
         replicas. Cheap when nothing moved: one ref advertisement and no fetch.
 
-        The head is asked for at most once per ``_REFRESH_WINDOW_SECONDS``, so a
-        listing that reads N documents costs one round trip rather than N; a publish
-        on this clone reopens the check, and an unreachable remote is retried on the
-        same window instead of on every read.
+        Inside a :func:`read_scope` the head is taken once and the rest of the scope
+        reuses it, so a listing of N documents costs one round trip rather than N; a
+        publish reopens the check, and a remote this clone cannot reach costs one
+        failed connection per scope instead of one per read.
 
         Only a pushing clone follows the remote: one holding a commit it never pushed
         is the sole copy of it, and a reset would destroy it. Best-effort -- a remote
@@ -289,10 +305,11 @@ class GitopsRepo:
         """
         if not (self._push and self._repo_url):
             return False
-        checked_at = self._checked_at
-        if checked_at is not None and monotonic() - checked_at < _REFRESH_WINDOW_SECONDS:
-            return False
-        self._checked_at = monotonic()
+        scope = _READ_SCOPE.get()
+        if scope is not None:
+            if self in scope:
+                return False
+            scope.add(self)
         moved = False
         try:
             remote = self.remote_head()
@@ -388,9 +405,11 @@ class GitopsRepo:
             try:
                 return self._publish_locked(artifacts, message, deletions, branch)
             finally:
-                # This clone just wrote, so the next read asks the remote again
-                # rather than answering from inside the window.
-                self._checked_at = None
+                # This clone just wrote, so the next read in this scope asks the
+                # remote again instead of reusing the head from before the write.
+                scope = _READ_SCOPE.get()
+                if scope is not None:
+                    scope.discard(self)
 
     def _publish_locked(
         self,
