@@ -18,6 +18,7 @@ HTTPS path that URL carries the deploy token (F-GITOPS-TOKEN).
 
 from __future__ import annotations
 
+import os
 import threading
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
@@ -32,9 +33,25 @@ from scalo.logger import logger
 from .dulwich_auth import RedactingErrStream, redact_credentials, scrub_remote_credentials
 
 if TYPE_CHECKING:
-    from dulwich.client import SendPackResult
+    import urllib3
+    from dulwich.client import FetchPackResult, LsRemoteResult, SendPackResult
+    from dulwich.config import Config
 
 T = TypeVar("T")
+
+# Every API read pays a ref advertisement and may pay a fetch behind it, both under
+# the tree lock, so a forge that drops packets rather than refusing them must not
+# hold a request -- or every other reader -- for the OS connect timeout.
+REMOTE_HEAD_TIMEOUT_SECONDS = 3.0
+
+# Only the HTTP(S) client takes a pool manager, so only these schemes can be bounded.
+_BOUNDABLE_SCHEMES = ("http://", "https://")
+
+
+def _as_path_bytes(host_path: str | bytes) -> bytes:
+    """dulwich's clients take the remote path as bytes; the transport hands back either."""
+    return host_path.encode() if isinstance(host_path, str) else host_path
+
 
 # The clones whose head this scope has already taken; None outside a scope.
 _READ_SCOPE: ContextVar[set[GitopsRepo] | None] = ContextVar("dfe_gitops_read_scope", default=None)
@@ -279,12 +296,85 @@ class GitopsRepo:
         One ref advertisement, so a reader can tell whether its clone is behind
         before paying for a fetch. None when there is no remote configured or the
         remote does not carry the tracked branch.
+
+        Bounded by ``REMOTE_HEAD_TIMEOUT_SECONDS`` on the HTTP(S) transport, and a
+        remote that exceeds it raises :class:`GitopsRemoteError` -- the same signal
+        an unreachable forge already gives, so :meth:`refresh` serves this clone.
         """
         if not self._repo_url:
             return None
-        result = self._remote_op(lambda _errstream: porcelain.ls_remote(self._authed_url()))
+        result = self._remote_op(lambda _errstream: self._ls_remote())
         head = result.refs.get(b"refs/heads/" + self._branch.encode())
         return head.decode() if head is not None else None
+
+    def _ls_remote(self) -> LsRemoteResult:
+        """List the remote's refs, with the HTTP(S) transport held to a timeout.
+
+        ``porcelain.ls_remote`` takes no timeout, so the client is built here the
+        way porcelain builds it and handed a bounded pool manager. An SSH or local
+        remote keeps dulwich's own behaviour.
+        """
+        from dulwich.client import get_transport_and_path
+        from dulwich.config import StackedConfig, env_config
+
+        url = self._authed_url()
+        if not url.startswith(_BOUNDABLE_SCHEMES):
+            return porcelain.ls_remote(url)
+
+        config = StackedConfig.default()
+        env_override = env_config(os.environ)
+        if env_override is not None:
+            config.backends.insert(0, env_override)
+        client, host_path = get_transport_and_path(
+            url, config=config, pool_manager=self._bounded_pool(config)
+        )
+        return client.get_refs(_as_path_bytes(host_path))
+
+    def _fetch(self, errstream: RedactingErrStream) -> FetchPackResult:
+        """Fetch objects into the local store, with the HTTP(S) transport bounded.
+
+        ``porcelain.fetch`` takes no timeout either, and :meth:`sync` runs it under
+        the tree lock on the read path, so a forge that stops answering part way
+        through would hold every other reader with it. This is porcelain's body for
+        the shape this class uses -- a URL remote, which imports no remote-tracking
+        refs and needs no reflog entry.
+        """
+        from dulwich.client import get_transport_and_path
+        from dulwich.gc import maybe_auto_gc
+        from dulwich.repo import Repo
+
+        url = self._authed_url()
+        if not url.startswith(_BOUNDABLE_SCHEMES):
+            return porcelain.fetch(str(self._path), url, errstream=errstream)
+
+        with Repo(str(self._path)) as repo:
+            config = repo.get_config_stack()
+            client, host_path = get_transport_and_path(
+                url, config=config, pool_manager=self._bounded_pool(config)
+            )
+            result = client.fetch(_as_path_bytes(host_path), repo, progress=errstream.write)
+            # porcelain.fetch ends on this, and a clone that lives as long as the pod
+            # would otherwise accumulate loose objects fetch after fetch.
+            maybe_auto_gc(repo)
+            return result
+
+    def _bounded_pool(self, config: Config) -> urllib3.PoolManager:
+        """A urllib3 manager whose connect and read both give up at the bound.
+
+        The read timeout is between reads rather than across the whole transfer, so
+        a large pack that keeps moving is not at risk -- only one that stops.
+        """
+        from dulwich.client import default_urllib3_manager
+
+        # base_url is the credential-free URL: it only selects the http.* config
+        # sections and the proxy-bypass decision, neither of which wants the token.
+        manager = default_urllib3_manager(
+            config, base_url=self._repo_url, timeout=REMOTE_HEAD_TIMEOUT_SECONDS
+        )
+        # urllib3 retries a failed connect three times by default, which would make
+        # the real bound four times the timeout.
+        manager.connection_pool_kw["retries"] = False
+        return manager
 
     def refresh(self) -> bool:
         """Take the remote's head when it has moved; returns whether this clone moved.
@@ -300,30 +390,69 @@ class GitopsRepo:
 
         Only a pushing clone follows the remote: one holding a commit it never pushed
         is the sole copy of it, and a reset would destroy it. Best-effort -- a remote
-        this clone cannot reach leaves it serving what it already has, because a read
-        must not fail on a forge blip.
+        this clone cannot reach, or one slower than ``REMOTE_HEAD_TIMEOUT_SECONDS``,
+        leaves it serving what it already has, because a read must not fail on a
+        forge blip.
+        """
+        pending = self._pending_remote_head()
+        if pending is None:
+            return False
+        with self._lock:
+            return self._take_head(pending)
+
+    @contextmanager
+    def read_locked(self) -> Iterator[None]:
+        """Hold the working tree still while the caller reads it.
+
+        :meth:`publish` stages and commits under this lock and a refresh hard-resets
+        under it, so a read that walks the tree outside the block can miss a file
+        that exists or load one mid-rewrite.
+
+        The ref advertisement runs BEFORE the lock is taken: a forge slow to answer
+        would otherwise queue every reader behind one network call.
+        """
+        pending = self._pending_remote_head()
+        with self._lock:
+            if pending is not None:
+                self._take_head(pending)
+            yield
+
+    def _pending_remote_head(self) -> str | None:
+        """The remote head this clone has not taken yet, or None to stay put.
+
+        Runs the ref advertisement, so callers take the tree lock after it, not
+        around it.
         """
         if not (self._push and self._repo_url):
-            return False
+            return None
         scope = _READ_SCOPE.get()
         if scope is not None:
             if self in scope:
-                return False
+                return None
             scope.add(self)
-        moved = False
         try:
             remote = self.remote_head()
-            if remote is not None and remote != self.head_revision():
-                with self._lock:
-                    # Re-checked under the lock: a publish may have taken this head.
-                    if remote != self.head_revision():
-                        self._sync_onto_remote_head()
-                        moved = True
+        except GitopsRemoteError as exc:
+            self._note_unreachable(exc)
+            return None
+        if remote is None or remote == self.head_revision():
+            self._note_reachable()
+            return None
+        return remote
+
+    def _take_head(self, remote: str) -> bool:
+        """Reset onto ``remote``; returns whether this clone moved. Caller holds the lock."""
+        # Re-checked under the lock: a publish may have taken this head.
+        if remote == self.head_revision():
+            self._note_reachable()
+            return False
+        try:
+            self._sync_onto_remote_head()
         except GitopsRemoteError as exc:
             self._note_unreachable(exc)
             return False
         self._note_reachable()
-        return moved
+        return True
 
     def _note_unreachable(self, exc: GitopsRemoteError) -> None:
         """Report a refresh failure once, not once per read."""
@@ -351,17 +480,17 @@ class GitopsRepo:
         made on that head is a non-fast-forward push. Returns True when the local
         branch moved. ``discard_local`` drops a local commit the remote never took
         (a rejected push) so the caller can re-apply the write on the remote head.
+
+        The fetch is bounded (see :meth:`_fetch`) because a read reaches this with
+        the tree lock held, and raises :class:`GitopsRemoteError` on the bound --
+        which on the read path leaves the clone serving what it has.
         """
         if not self._repo_url:
             return False
         from dulwich.graph import can_fast_forward
         from dulwich.repo import Repo
 
-        result = self._remote_op(
-            lambda errstream: porcelain.fetch(
-                str(self._path), self._authed_url(), errstream=errstream
-            )
-        )
+        result = self._remote_op(self._fetch)
         self._scrub_remote()
         remote_head = result.refs.get(b"refs/heads/" + self._branch.encode())
         if remote_head is None:

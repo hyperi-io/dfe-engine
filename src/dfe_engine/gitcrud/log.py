@@ -142,10 +142,13 @@ def read_log(
     Raises UnknownCursorError if ``before`` is given but never matched a commit
     during the walk - an unknown/bad cursor must not look like end-of-history.
     """
-    if crud.head_revision() is None:
-        return [], None
     entries: list[LogEntry] = []
-    with Repo(str(crud.repo_path)) as repo:
+    # The walk reads the clone's refs and objects, so it takes the tree guard: a
+    # refresh or a publish resets the tracked ref underneath it otherwise.
+    with crud.reading(), Repo(str(crud.repo_path)) as repo:
+        # The guard just made the local head current, so read it off the clone.
+        if crud.repo.head_revision() is None:
+            return [], None
         applied = _reachable(repo, applied_revision) if applied_revision else None
         skipping = before is not None
         exhausted = True
