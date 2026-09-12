@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 from dfe_engine.gitcrud import GitCrud
+from dfe_engine.gitcrud import log as log_module
 from dfe_engine.gitcrud.commit_policy import CommitContext, build_message
 from dfe_engine.gitcrud.log import UnknownCursorError, group_log, read_log
 from dfe_engine.gitcrud.registry import default_registry
@@ -81,6 +84,34 @@ class TestReadLog:
         entries, _ = read_log(crud, applied_revision=first.commit_sha)
         assert entries[0].state == "pending"  # newest, after the applied SHA
         assert entries[1].state == "applied"
+
+
+class TestTheWalkHoldsTheTree:
+    def test_the_history_walk_runs_under_the_publish_lock(self, crud, monkeypatch) -> None:
+        """A publish resets the tracked ref, so the walk must not start outside the lock."""
+        _commit_var(crud, "receiver-default", "keda.maxReplicas", 5, "derek")
+        contended: list[bool] = []
+        real_repo_cls = log_module.Repo
+
+        def probe() -> None:
+            # RLock is reentrant for its owner, so the probe runs on another thread.
+            taken = crud.repo._lock.acquire(blocking=False)
+            contended.append(not taken)
+            if taken:
+                crud.repo._lock.release()
+
+        def probing_repo(path: str):
+            prober = threading.Thread(target=probe)
+            prober.start()
+            prober.join(timeout=10.0)
+            return real_repo_cls(path)
+
+        monkeypatch.setattr(log_module, "Repo", probing_repo)
+
+        entries, _ = read_log(crud)
+
+        assert len(entries) == 1
+        assert contended == [True]
 
 
 class TestGroupLog:
