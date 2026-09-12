@@ -3,6 +3,19 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.20.0](https://github.com/hyperi-io/dfe-engine/compare/v1.19.37...v1.20.0) (2026-09-12)
+
+### Features
+
+* account changes ([#360](https://github.com/hyperi-io/dfe-engine/issues/360)) ([f50f732](https://github.com/hyperi-io/dfe-engine/commit/f50f7329190ea4189761e89acd409f85e9bf7e8a))
+
+### Bug Fixes
+
+* **appmgmt:** render each app's config where no chart does it ([#368](https://github.com/hyperi-io/dfe-engine/issues/368)) ([e7d6aba](https://github.com/hyperi-io/dfe-engine/commit/e7d6abaea967a15e668b6b0923cd6fe340ee3514))
+* create a HyperDX source for each DFE source on deploy ([#364](https://github.com/hyperi-io/dfe-engine/issues/364)) ([96c7fae](https://github.com/hyperi-io/dfe-engine/commit/96c7fae3e9a0df969b66bea59db257e39d30a96d))
+* drop the stale schemas gitlink so the release checkout survives ([8d26ad2](https://github.com/hyperi-io/dfe-engine/commit/8d26ad2cb90db69b58ccdebd16678f122868db56)), closes [#360](https://github.com/hyperi-io/dfe-engine/issues/360) [#367](https://github.com/hyperi-io/dfe-engine/issues/367)
+* write the HyperDX source to every team, and read back where it landed ([#366](https://github.com/hyperi-io/dfe-engine/issues/366)) ([40f4e3e](https://github.com/hyperi-io/dfe-engine/commit/40f4e3e9cfeb45cc591858f77eecf89061fe9e5b))
+
 ## [1.19.37](https://github.com/hyperi-io/dfe-engine/compare/v1.19.36...v1.19.37) (2026-09-11)
 
 ### Bug Fixes
