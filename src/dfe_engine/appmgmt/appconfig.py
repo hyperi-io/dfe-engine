@@ -152,7 +152,9 @@ def _write_file_set(directory: Path, entries: list[files.AppFile]) -> bool:
     wanted = {entry.name: entry.content for entry in entries}
     present: dict[str, str] = {}
     if directory.is_dir():
-        present = {p.name: p.read_text(encoding="utf-8") for p in directory.iterdir() if p.is_file()}
+        present = {
+            p.name: p.read_text(encoding="utf-8") for p in directory.iterdir() if p.is_file()
+        }
     if present == wanted:
         return False
     if directory.exists():

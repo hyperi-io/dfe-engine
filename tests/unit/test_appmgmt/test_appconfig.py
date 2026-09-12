@@ -137,9 +137,7 @@ class TestFileSets:
 
         config = _rendered(settings, VRL)
         assert config["transforms"]["dir"] == f"{MOUNT}/{VRL}/transforms"
-        written = Path(
-            settings.deployment.app_config_dir, VRL, "transforms", "100_filebeat.vrl"
-        )
+        written = Path(settings.deployment.app_config_dir, VRL, "transforms", "100_filebeat.vrl")
         assert written.read_text(encoding="utf-8") == ".marked = true\n"
 
     def test_a_removed_program_leaves_the_directory(self, crud, tmp_path):
@@ -203,9 +201,7 @@ class TestFileSets:
         appconfig.render(crud, settings)
 
         entries = _rendered(settings, VRL)["enrichment_tables"]
-        assert entries == [
-            {"name": "timezones", "path": "/elsewhere.csv", "key_columns": ["zone"]}
-        ]
+        assert entries == [{"name": "timezones", "path": "/elsewhere.csv", "key_columns": ["zone"]}]
 
 
 class TestWhatTakingTheChangeCosts:
