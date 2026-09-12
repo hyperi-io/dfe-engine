@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.20.2](https://github.com/hyperi-io/dfe-engine/compare/v1.20.1...v1.20.2) (2026-09-12)
+
+### Bug Fixes
+
+* **gitops:** bound every remote call the read path can wait on ([c9f6c7d](https://github.com/hyperi-io/dfe-engine/commit/c9f6c7dc6cf74b00a2a0fe5bb845027ac5882d7e))
+
 ## [1.20.1](https://github.com/hyperi-io/dfe-engine/compare/v1.20.0...v1.20.1) (2026-09-12)
 
 ### Bug Fixes
