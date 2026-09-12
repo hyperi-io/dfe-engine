@@ -14,6 +14,7 @@ tests are the read half: write on A, read on B.
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import pytest
@@ -130,6 +131,80 @@ class TestAnyResourceClassAcrossReplicas:
         crud_a.put("sources", "syslog", {"source": "syslog"}, actor="kaz")
 
         assert crud_b.head_revision() == crud_a.head_revision()
+
+
+class TestReadsHoldTheTree:
+    """One working tree, many request threads: a read must not walk a tree mid-write."""
+
+    # A publish that is deliberately parked cannot finish, so a reader that does
+    # come back has walked the tree it was holding.
+    _JOIN_SECONDS = 10.0
+    _MUST_NOT_FINISH_SECONDS = 0.5
+
+    @staticmethod
+    def _local_crud(tmp_path: Path) -> tuple[GitopsRepo, GitCrud]:
+        repo = GitopsRepo(local_path=str(tmp_path / "work"), repo_url="", branch="main", push=False)
+        return repo, GitCrud(repo)
+
+    def test_a_read_walks_the_tree_under_the_publish_lock(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        repo, crud = self._local_crud(tmp_path)
+        crud.put("sources", "syslog", {"source": "syslog"}, actor="kaz")
+        contended: list[bool] = []
+        real_read_doc = crud._read_doc
+
+        def probe() -> None:
+            # RLock is reentrant for its owner, so the probe runs on another thread.
+            taken = repo._lock.acquire(blocking=False)
+            contended.append(not taken)
+            if taken:
+                repo._lock.release()
+
+        def probing_read_doc(cls, name: str) -> dict:
+            prober = threading.Thread(target=probe)
+            prober.start()
+            prober.join(timeout=self._JOIN_SECONDS)
+            return real_read_doc(cls, name)
+
+        monkeypatch.setattr(crud, "_read_doc", probing_read_doc)
+
+        assert crud.get("sources", "syslog") == {"source": "syslog"}
+        assert contended == [True]
+
+    def test_a_listing_waits_for_a_publish_to_finish_staging(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """The 404-for-a-resource-that-exists window: list while the tree is half written."""
+        repo, crud = self._local_crud(tmp_path)
+        crud.put("sources", "syslog", {"source": "syslog"}, actor="kaz")
+        staging, finish, listed = threading.Event(), threading.Event(), threading.Event()
+        names: list[list[str]] = []
+        real_stage = repo._stage_and_commit
+
+        def parked_stage(*args, **kwargs):
+            staging.set()
+            assert finish.wait(timeout=self._JOIN_SECONDS)
+            return real_stage(*args, **kwargs)
+
+        def read() -> None:
+            names.append(crud.list("sources"))
+            listed.set()
+
+        monkeypatch.setattr(repo, "_stage_and_commit", parked_stage)
+        writer = threading.Thread(
+            target=crud.put, args=("sources", "filebeat", {"source": "filebeat"}, "kay")
+        )
+        writer.start()
+        assert staging.wait(timeout=self._JOIN_SECONDS)
+        reader = threading.Thread(target=read)
+        reader.start()
+
+        assert listed.wait(timeout=self._MUST_NOT_FINISH_SECONDS) is False
+        finish.set()
+        writer.join(timeout=self._JOIN_SECONDS)
+        reader.join(timeout=self._JOIN_SECONDS)
+        assert names == [["filebeat", "syslog"]]
 
 
 class TestOneViewPerRequest:

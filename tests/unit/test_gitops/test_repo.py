@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import io
 import shutil
+import socket
+import threading
+import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from dulwich import porcelain
 
+from dfe_engine.gitops import repo as repo_module
 from dfe_engine.gitops.repo import GitopsRemoteError, GitopsRepo, PublishResult
+
+# The hanging-forge tests must fail on the timeout, not on the machine being slow.
+_HANG_TIMEOUT_SECONDS = 1.0
+_HANG_BOUND_SECONDS = 10.0
 
 
 def _bare_remote(tmp_path: Path) -> str:
@@ -249,6 +258,113 @@ def test_refresh_serves_this_clone_when_the_deploy_repo_is_unreachable(tmp_path:
     assert repo.refresh() is False
     assert repo.head_revision() == head
     assert (tmp_path / "a" / "README").read_text() == "seed\n"
+
+
+class _RecordingLogger:
+    """Stand-in for the module logger: what a run of failed refreshes actually says."""
+
+    def __init__(self) -> None:
+        self.warnings: list[str] = []
+        self.infos: list[str] = []
+
+    def warning(self, message: str, **_fields: object) -> None:
+        self.warnings.append(message)
+
+    def info(self, message: str, **_fields: object) -> None:
+        self.infos.append(message)
+
+
+@pytest.fixture
+def black_holed_forge(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+    """A URL whose listener completes the handshake and then never answers.
+
+    The shape a wedged forge has, and the one an unbounded read blocks on: the SYN
+    is answered from the kernel's backlog, so the connect succeeds and the client
+    waits on a reply that never comes rather than being refused.
+    """
+    for name in ("http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(repo_module, "REMOTE_HEAD_TIMEOUT_SECONDS", _HANG_TIMEOUT_SECONDS)
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    try:
+        yield f"http://127.0.0.1:{listener.getsockname()[1]}/deploy.git"
+    finally:
+        listener.close()
+
+
+def test_remote_head_gives_up_on_a_forge_that_never_answers(
+    tmp_path: Path, black_holed_forge: str
+) -> None:
+    """Unbounded, this blocks for the OS connect timeout with the request open."""
+    repo = GitopsRepo(
+        local_path=str(tmp_path / "a"), repo_url=black_holed_forge, branch="main", push=True
+    )
+
+    started = time.monotonic()
+    with pytest.raises(GitopsRemoteError):
+        repo.remote_head()
+
+    assert time.monotonic() - started < _HANG_BOUND_SECONDS
+
+
+def _clone_then_point_at(tmp_path: Path, url: str) -> GitopsRepo:
+    """A populated clone of a real remote, configured against ``url`` from now on."""
+    remote, branch = _seeded_remote(tmp_path)
+    work = tmp_path / "a"
+    porcelain.clone(remote, str(work), branch=branch.encode())
+    return GitopsRepo(local_path=str(work), repo_url=url, branch=branch, push=True)
+
+
+def test_refresh_serves_this_clone_when_the_forge_stops_answering(
+    tmp_path: Path, black_holed_forge: str
+) -> None:
+    """A forge that hangs is a forge blip: the read answers from what the clone has."""
+    repo = _clone_then_point_at(tmp_path, black_holed_forge)
+    head = repo.head_revision()
+
+    started = time.monotonic()
+    assert repo.refresh() is False
+
+    assert time.monotonic() - started < _HANG_BOUND_SECONDS
+    assert repo.head_revision() == head
+    assert (tmp_path / "a" / "README").read_text() == "seed\n"
+
+
+def test_a_hanging_forge_is_reported_once_per_outage_not_once_per_read(
+    tmp_path: Path, black_holed_forge: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same contract as an unreachable forge: one warning, then quiet until it returns."""
+    repo = _clone_then_point_at(tmp_path, black_holed_forge)
+    recorder = _RecordingLogger()
+    monkeypatch.setattr(repo_module, "logger", recorder)
+
+    for _ in range(3):
+        assert repo.refresh() is False
+
+    assert len(recorder.warnings) == 1
+
+
+def test_read_locked_holds_the_tree_lock_across_the_read(tmp_path: Path) -> None:
+    """A publish resets and stages under this lock, so a reader must not walk past it."""
+    repo = GitopsRepo(local_path=str(tmp_path / "work"), repo_url="", branch="main", push=False)
+    repo.ensure()
+    contended: list[bool] = []
+
+    def probe() -> None:
+        # RLock is reentrant for its owner, so the probe runs on another thread.
+        taken = repo._lock.acquire(blocking=False)
+        contended.append(not taken)
+        if taken:
+            repo._lock.release()
+
+    with repo.read_locked():
+        prober = threading.Thread(target=probe)
+        prober.start()
+        prober.join(timeout=_HANG_BOUND_SECONDS)
+
+    assert contended == [True]
 
 
 def test_a_refused_ref_raises_instead_of_reporting_a_successful_push(tmp_path: Path) -> None:
