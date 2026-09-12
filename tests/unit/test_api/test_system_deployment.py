@@ -18,7 +18,10 @@ and the two can never disagree.
 
 from __future__ import annotations
 
+import threading
+
 from dfe_engine import __version__
+from dfe_engine.api.v1 import system
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 
@@ -157,6 +160,34 @@ class TestDeploymentFacts:
         _wire(app, tmp_path)
 
         assert client.get("/api/v1/system/deployment", headers=admin_headers).json()["ui"] is None
+
+    def test_the_pins_are_read_under_the_publish_lock(
+        self, client, app, admin_headers, tmp_path, monkeypatch
+    ):
+        """pins.yaml comes off the working tree, so a publish must not reset under it."""
+        gc = _wire(app, tmp_path)
+        contended: list[bool] = []
+        real_load_pins = system.load_pins
+
+        def probe() -> None:
+            # RLock is reentrant for its owner, so the probe runs on another thread.
+            taken = gc.repo._lock.acquire(blocking=False)
+            contended.append(not taken)
+            if taken:
+                gc.repo._lock.release()
+
+        def probing_load_pins(path):
+            prober = threading.Thread(target=probe)
+            prober.start()
+            prober.join(timeout=10.0)
+            return real_load_pins(path)
+
+        monkeypatch.setattr(system, "load_pins", probing_load_pins)
+
+        body = client.get("/api/v1/system/deployment", headers=admin_headers).json()
+
+        assert body["stack"] == "2.2.0-rc.13"
+        assert contended == [True]
 
     def test_any_authenticated_user_can_read_it(self, client, viewer_headers):
         resp = client.get("/api/v1/system/deployment", headers=viewer_headers)

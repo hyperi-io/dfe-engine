@@ -197,7 +197,7 @@ class GitCrud:
     def _file(self, cls: ResourceClass, name: str) -> Path:
         return self._repo.path / self._rel(cls, name)
 
-    def _fresh(self) -> AbstractContextManager[None]:
+    def reading(self) -> AbstractContextManager[None]:
         """Take any write another replica pushed, and hold the tree for the read.
 
         Each engine replica holds its own clone, so without the refresh a read
@@ -216,7 +216,7 @@ class GitCrud:
         resource.
         """
         cls = self._cls(cls_name)
-        with self._fresh():
+        with self.reading():
             directory = self._repo.path / cls.directory
             if not directory.is_dir():
                 return []
@@ -228,7 +228,7 @@ class GitCrud:
     def get(self, cls_name: str, name: str) -> dict:
         """Read a resource's YAML doc."""
         cls = self._cls(cls_name)
-        with self._fresh():
+        with self.reading():
             return self._read_doc(cls, name)
 
     def _read_doc(self, cls: ResourceClass, name: str) -> dict:
@@ -259,7 +259,7 @@ class GitCrud:
 
     def head_revision(self) -> str | None:
         """Current repo HEAD SHA - the optimistic-concurrency version token."""
-        with self._fresh():
+        with self.reading():
             return self._repo.head_revision()
 
     def get_with_revision(self, cls_name: str, name: str) -> tuple[dict, str | None]:
@@ -268,7 +268,7 @@ class GitCrud:
         # One guard over both: a publish landing between them would hand back a doc
         # tagged with a revision it did not come from, and the If-Match write that
         # quotes it would overwrite that publish.
-        with self._fresh():
+        with self.reading():
             return self._read_doc(cls, name), self._repo.head_revision()
 
     def _guard_revision(self, cls_name: str, name: str, base_revision: str | None) -> None:
@@ -276,7 +276,7 @@ class GitCrud:
         if base_revision is None:
             return
         cls = self._cls(cls_name)
-        with self._fresh():
+        with self.reading():
             head = self._repo.head_revision()
             if head is None or head == base_revision:
                 return
@@ -327,7 +327,7 @@ class GitCrud:
     def payloads(self, cls_name: str, name: str) -> builtins.list[str]:
         """Every payload file in a bundle, as bundle-relative posix paths."""
         cls = self._require_bundle(cls_name)
-        with self._fresh():
+        with self.reading():
             return self._payload_names(cls, name)
 
     def _payload_names(self, cls: ResourceClass, name: str) -> builtins.list[str]:
@@ -345,7 +345,7 @@ class GitCrud:
         """Read one payload file out of a bundle, verbatim."""
         cls = self._require_bundle(cls_name)
         rel = self._rel_payload(cls, name, relpath)
-        with self._fresh():
+        with self.reading():
             target = self._repo.path / rel
             if not target.is_file():
                 raise ResourceNotFoundError(rel)
@@ -404,7 +404,7 @@ class GitCrud:
         cls = self._cls(cls_name)
         # The doc is read before it is written, so a stale tree here writes back a
         # resource another replica's doc has moved on from.
-        with self._fresh():
+        with self.reading():
             doc = self._read_doc(cls, name) if self._file(cls, name).is_file() else {}
         _set_path(doc, dotpath, value)
         msg = message or f"{cls.name}({name}): set {dotpath} by {actor}"
@@ -449,7 +449,7 @@ class GitCrud:
         cls = self._cls(cls_name)
         # Absence is decided against the tree, so a stale one 404s a resource
         # another replica created and leaves it deployed.
-        with self._fresh():
+        with self.reading():
             if not self._file(cls, name).is_file():
                 raise ResourceNotFoundError(self._rel(cls, name))
             deletions = [self._rel(cls, name)]

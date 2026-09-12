@@ -346,6 +346,38 @@ def test_a_hanging_forge_is_reported_once_per_outage_not_once_per_read(
     assert len(recorder.warnings) == 1
 
 
+def test_sync_gives_up_on_a_forge_that_never_answers(
+    tmp_path: Path, black_holed_forge: str
+) -> None:
+    """The fetch runs under the tree lock, so unbounded it holds every other reader."""
+    repo = _clone_then_point_at(tmp_path, black_holed_forge)
+
+    started = time.monotonic()
+    with pytest.raises(GitopsRemoteError):
+        repo.sync()
+
+    assert time.monotonic() - started < _HANG_BOUND_SECONDS
+
+
+def test_a_fetch_that_hangs_leaves_the_read_serving_this_clone(
+    tmp_path: Path, black_holed_forge: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The remote answers the advertisement and then stops: still not a failed read."""
+    repo = _clone_then_point_at(tmp_path, black_holed_forge)
+    head = repo.head_revision()
+    monkeypatch.setattr(repo, "remote_head", lambda: "0" * 40)
+    recorder = _RecordingLogger()
+    monkeypatch.setattr(repo_module, "logger", recorder)
+
+    started = time.monotonic()
+    for _ in range(3):
+        assert repo.refresh() is False
+
+    assert time.monotonic() - started < _HANG_BOUND_SECONDS
+    assert repo.head_revision() == head
+    assert len(recorder.warnings) == 1
+
+
 def test_read_locked_holds_the_tree_lock_across_the_read(tmp_path: Path) -> None:
     """A publish resets and stages under this lock, so a reader must not walk past it."""
     repo = GitopsRepo(local_path=str(tmp_path / "work"), repo_url="", branch="main", push=False)

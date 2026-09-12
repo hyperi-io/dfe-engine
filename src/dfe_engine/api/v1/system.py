@@ -179,7 +179,13 @@ def deployment_facts(request: Request, settings: Any) -> DeploymentResponse:
     engine's own version is the whole answer.
     """
     gc = _optional_gitcrud(request)
-    pins = load_pins(gc.repo_path) if gc is not None else {}
+    if gc is None:
+        pins = {}
+    else:
+        # pins.yaml is read straight off the working tree, so it takes the same
+        # guard every gitcrud read takes rather than racing a publish's reset.
+        with gc.reading():
+            pins = load_pins(gc.repo_path)
     pinned = stack_version(pins)
     stack = pinned or settings.stack_version or None
     transport = settings.transport

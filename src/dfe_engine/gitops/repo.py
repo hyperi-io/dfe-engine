@@ -33,13 +33,25 @@ from scalo.logger import logger
 from .dulwich_auth import RedactingErrStream, redact_credentials, scrub_remote_credentials
 
 if TYPE_CHECKING:
-    from dulwich.client import LsRemoteResult, SendPackResult
+    import urllib3
+    from dulwich.client import FetchPackResult, LsRemoteResult, SendPackResult
+    from dulwich.config import Config
 
 T = TypeVar("T")
 
-# The ref advertisement fronts every API read, so a forge that drops packets rather
-# than refusing them must not hold a request open for the OS connect timeout.
+# Every API read pays a ref advertisement and may pay a fetch behind it, both under
+# the tree lock, so a forge that drops packets rather than refusing them must not
+# hold a request -- or every other reader -- for the OS connect timeout.
 REMOTE_HEAD_TIMEOUT_SECONDS = 3.0
+
+# Only the HTTP(S) client takes a pool manager, so only these schemes can be bounded.
+_BOUNDABLE_SCHEMES = ("http://", "https://")
+
+
+def _as_path_bytes(host_path: str | bytes) -> bytes:
+    """dulwich's clients take the remote path as bytes; the transport hands back either."""
+    return host_path.encode() if isinstance(host_path, str) else host_path
+
 
 # The clones whose head this scope has already taken; None outside a scope.
 _READ_SCOPE: ContextVar[set[GitopsRepo] | None] = ContextVar("dfe_gitops_read_scope", default=None)
@@ -299,31 +311,70 @@ class GitopsRepo:
         """List the remote's refs, with the HTTP(S) transport held to a timeout.
 
         ``porcelain.ls_remote`` takes no timeout, so the client is built here the
-        way porcelain builds it and handed a pool manager carrying one. Only the
-        HTTP(S) client takes a pool manager, so an SSH or local remote keeps
-        dulwich's own behaviour.
+        way porcelain builds it and handed a bounded pool manager. An SSH or local
+        remote keeps dulwich's own behaviour.
         """
-        from dulwich.client import default_urllib3_manager, get_transport_and_path
+        from dulwich.client import get_transport_and_path
         from dulwich.config import StackedConfig, env_config
 
         url = self._authed_url()
-        if not url.startswith(("http://", "https://")):
+        if not url.startswith(_BOUNDABLE_SCHEMES):
             return porcelain.ls_remote(url)
 
         config = StackedConfig.default()
         env_override = env_config(os.environ)
         if env_override is not None:
             config.backends.insert(0, env_override)
+        client, host_path = get_transport_and_path(
+            url, config=config, pool_manager=self._bounded_pool(config)
+        )
+        return client.get_refs(_as_path_bytes(host_path))
+
+    def _fetch(self, errstream: RedactingErrStream) -> FetchPackResult:
+        """Fetch objects into the local store, with the HTTP(S) transport bounded.
+
+        ``porcelain.fetch`` takes no timeout either, and :meth:`sync` runs it under
+        the tree lock on the read path, so a forge that stops answering part way
+        through would hold every other reader with it. This is porcelain's body for
+        the shape this class uses -- a URL remote, which imports no remote-tracking
+        refs and needs no reflog entry.
+        """
+        from dulwich.client import get_transport_and_path
+        from dulwich.gc import maybe_auto_gc
+        from dulwich.repo import Repo
+
+        url = self._authed_url()
+        if not url.startswith(_BOUNDABLE_SCHEMES):
+            return porcelain.fetch(str(self._path), url, errstream=errstream)
+
+        with Repo(str(self._path)) as repo:
+            config = repo.get_config_stack()
+            client, host_path = get_transport_and_path(
+                url, config=config, pool_manager=self._bounded_pool(config)
+            )
+            result = client.fetch(_as_path_bytes(host_path), repo, progress=errstream.write)
+            # porcelain.fetch ends on this, and a clone that lives as long as the pod
+            # would otherwise accumulate loose objects fetch after fetch.
+            maybe_auto_gc(repo)
+            return result
+
+    def _bounded_pool(self, config: Config) -> urllib3.PoolManager:
+        """A urllib3 manager whose connect and read both give up at the bound.
+
+        The read timeout is between reads rather than across the whole transfer, so
+        a large pack that keeps moving is not at risk -- only one that stops.
+        """
+        from dulwich.client import default_urllib3_manager
+
         # base_url is the credential-free URL: it only selects the http.* config
         # sections and the proxy-bypass decision, neither of which wants the token.
-        pool_manager = default_urllib3_manager(
+        manager = default_urllib3_manager(
             config, base_url=self._repo_url, timeout=REMOTE_HEAD_TIMEOUT_SECONDS
         )
         # urllib3 retries a failed connect three times by default, which would make
         # the real bound four times the timeout.
-        pool_manager.connection_pool_kw["retries"] = False
-        client, host_path = get_transport_and_path(url, config=config, pool_manager=pool_manager)
-        return client.get_refs(host_path.encode() if isinstance(host_path, str) else host_path)
+        manager.connection_pool_kw["retries"] = False
+        return manager
 
     def refresh(self) -> bool:
         """Take the remote's head when it has moved; returns whether this clone moved.
@@ -429,17 +480,17 @@ class GitopsRepo:
         made on that head is a non-fast-forward push. Returns True when the local
         branch moved. ``discard_local`` drops a local commit the remote never took
         (a rejected push) so the caller can re-apply the write on the remote head.
+
+        The fetch is bounded (see :meth:`_fetch`) because a read reaches this with
+        the tree lock held, and raises :class:`GitopsRemoteError` on the bound --
+        which on the read path leaves the clone serving what it has.
         """
         if not self._repo_url:
             return False
         from dulwich.graph import can_fast_forward
         from dulwich.repo import Repo
 
-        result = self._remote_op(
-            lambda errstream: porcelain.fetch(
-                str(self._path), self._authed_url(), errstream=errstream
-            )
-        )
+        result = self._remote_op(self._fetch)
         self._scrub_remote()
         remote_head = result.refs.get(b"refs/heads/" + self._branch.encode())
         if remote_head is None:
