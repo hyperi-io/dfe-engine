@@ -42,6 +42,19 @@ from dfe_engine.api.v1.system import router as system_router
 from dfe_engine.api.v1.tasks import router as tasks_router
 from dfe_engine.api.v1.transforms import router as transforms_router
 from dfe_engine.clickhouse.attribution import tags_context
+from dfe_engine.gitops.repo import read_scope
+
+
+async def _deploy_repo_scope():
+    """One view of the deploy repo per request.
+
+    Each engine replica reads its own clone, so the first read of the request takes
+    the remote's head and every read after it answers from that same view; the next
+    request checks again. Without the scope a listing would ask the deploy repo once
+    per source.
+    """
+    with read_scope():
+        yield
 
 
 async def _attribution_scope(request: Request):
@@ -57,7 +70,9 @@ async def _attribution_scope(request: Request):
         yield
 
 
-v1_router = APIRouter(prefix="/v1", dependencies=[Depends(_attribution_scope)])
+v1_router = APIRouter(
+    prefix="/v1", dependencies=[Depends(_attribution_scope), Depends(_deploy_repo_scope)]
+)
 v1_router.include_router(auth_router)
 # OIDC RP login/callback - self-prefixed /auth/oidc, unauthenticated (it IS login)
 v1_router.include_router(oidc_login_router)
