@@ -9,6 +9,12 @@
 """HyperDX integration — team, connection and per-DFE-source management."""
 
 from dfe_engine.hyperdx.client import HyperDXClient, SyncResult
-from dfe_engine.hyperdx.sources import ensure_source, remove_source
+from dfe_engine.hyperdx.sources import ensure_source, list_sources_by_team, remove_source
 
-__all__ = ["HyperDXClient", "SyncResult", "ensure_source", "remove_source"]
+__all__ = [
+    "HyperDXClient",
+    "SyncResult",
+    "ensure_source",
+    "list_sources_by_team",
+    "remove_source",
+]

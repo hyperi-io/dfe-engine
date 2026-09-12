@@ -103,9 +103,9 @@ class SchemaDeployResult(BaseModel):
             "the schema is live; POST /api/v1/sources/reconcile-apps retries it."
         ),
     )
-    hyperdx_source_id: str | None = Field(
+    hyperdx_source_teams: int | None = Field(
         default=None,
-        description="HyperDX source now pointed at this source's table, by id",
+        description="How many HyperDX teams now carry a source over this source's table",
     )
     hyperdx_source_error: str | None = Field(
         default=None,

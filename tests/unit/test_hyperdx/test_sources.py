@@ -8,9 +8,10 @@
 
 """A deploy points HyperDX at the table it made, and nothing about that may fail it.
 
-Two things are worth breaking the build over. A re-deploy that CREATES rather than
-updates leaves a team with two sources of the same name and a UI that picks one at
-random, and HyperDX being down or absent must cost the deploy nothing -- the
+Two things are worth breaking the build over. The write must go to the fork's
+cross-team route rather than the team-scoped ``/sources`` surface -- the engine's
+own team holds no connection and no humans, so a source written there reaches
+nobody. And HyperDX being down or absent must cost the deploy nothing: the
 schema, the topics and the app routing are all already live by then.
 """
 
@@ -23,8 +24,8 @@ import pytest
 
 from dfe_engine.api.v1.sources import _remove_hyperdx_source, _sync_hyperdx_source
 from dfe_engine.hyperdx.sources import (
-    TEMPLATE_SOURCE_NAME,
     ensure_source,
+    list_sources_by_team,
     remove_source,
     source_spec,
     timestamp_column,
@@ -35,77 +36,56 @@ from dfe_engine.hyperdx.sources import (
 TIMESERIES_COLUMNS = ["_timestamp_load", "_timestamp", "_uuid", "_org_id", "_source", "_json"]
 PASSTHROUGH_COLUMNS = ["_timestamp_load", "_uuid", "_org_id", "_json"]
 
-CONNECTION_ID = "65f0000000000000000000aa"
-
-
-def seeded_template() -> dict[str, Any]:
-    """The source the fork seeds on every team, as ``GET /sources`` returns it."""
-    return {
-        "id": "65f0000000000000000000b1",
-        "name": TEMPLATE_SOURCE_NAME,
-        "kind": "log",
-        "connection": CONNECTION_ID,
-        "from": {"databaseName": "dfe", "tableName": "default"},
-        "timestampValueExpression": "_timestamp",
-    }
+# Two human teams plus the engine's own service team, which has no connection.
+HUMAN_TEAMS = ["dfe-admins", "customer-acme"]
+SERVICE_TEAM = "dfe"
 
 
 class FakeHyperDX:
-    """The fork's ``/sources`` surface in memory, with the client's failure contract.
+    """The fork's ``/dfe/sources`` surface in memory, with the client's failure contract.
 
-    The real client is non-fatal: every call returns None/False rather than
-    raising, so ``reachable=False`` is what an unreachable HyperDX looks like to
-    a caller.
+    The real client is non-fatal: every call returns None rather than raising, so
+    ``reachable=False`` is what an unreachable HyperDX looks like to a caller.
     """
 
-    def __init__(
-        self,
-        sources: list[dict[str, Any]] | None = None,
-        connections: list[dict[str, Any]] | None = None,
-        *,
-        reachable: bool = True,
-    ) -> None:
-        self.sources = list(sources or [])
-        self.connections = list(connections or [])
+    def __init__(self, *, reachable: bool = True, owned: bool = True) -> None:
         self.reachable = reachable
-        self.creates = 0
-        self.updates = 0
+        # False stands for the fork's 409: the name belongs to its seeded set.
+        self.owned = owned
+        self.sources: dict[str, dict[str, Any]] = {}
+        self.puts = 0
         self.deletes = 0
-        self._serial = 0
 
-    async def list_sources(self) -> list[dict[str, Any]] | None:
-        return list(self.sources) if self.reachable else None
+    async def put_dfe_source(self, name: str, spec: dict[str, Any]) -> dict[str, Any] | None:
+        if not self.reachable or not self.owned:
+            return None
+        self.puts += 1
+        self.sources[name] = spec
+        return {"name": name, "written": list(HUMAN_TEAMS), "skipped": [SERVICE_TEAM]}
 
-    async def list_connections(self) -> list[dict[str, Any]] | None:
-        return list(self.connections) if self.reachable else None
-
-    async def create_source(self, source: dict[str, Any]) -> dict[str, Any] | None:
+    async def delete_dfe_source(self, name: str) -> dict[str, Any] | None:
         if not self.reachable:
             return None
-        self.creates += 1
-        self._serial += 1
-        created = {**source, "id": f"65f00000000000000000{self._serial:04d}"}
-        self.sources.append(created)
-        return created
-
-    async def update_source(self, source_id: str, source: dict[str, Any]) -> bool:
-        if not self.reachable:
-            return False
-        self.updates += 1
-        for index, existing in enumerate(self.sources):
-            if existing.get("id") == source_id:
-                self.sources[index] = {**source, "id": source_id}
-                return True
-        return False
-
-    async def delete_source(self, source_id: str) -> bool:
-        if not self.reachable:
-            return False
         self.deletes += 1
-        remaining = [s for s in self.sources if s.get("id") != source_id]
-        dropped = len(remaining) < len(self.sources)
-        self.sources = remaining
-        return dropped
+        removed = HUMAN_TEAMS if self.sources.pop(name, None) is not None else []
+        return {"name": name, "removed": list(removed)}
+
+    async def list_dfe_sources(self) -> dict[str, Any] | None:
+        if not self.reachable:
+            return None
+        return {
+            "teams": [
+                {
+                    "team": f"id-{team}",
+                    "teamName": team,
+                    "sources": [
+                        {"id": f"{team}-{name}", "name": name, "from": spec["from"]}
+                        for name, spec in self.sources.items()
+                    ],
+                }
+                for team in HUMAN_TEAMS
+            ]
+        }
 
 
 def request_with(client: Any) -> SimpleNamespace:
@@ -142,31 +122,27 @@ class TestTimestampColumn:
 
 
 class TestSourceSpec:
-    def test_mirrors_the_seeded_template(self):
-        spec = source_spec(
-            name="filebeat",
-            database="dfe",
-            table="filebeat",
-            connection_id=CONNECTION_ID,
-            timestamp="_timestamp",
-        )
-        assert spec["name"] == "filebeat"
+    def test_mirrors_the_seeded_landing_source(self):
+        spec = source_spec(database="dfe", table="filebeat", timestamp="_timestamp")
+
         assert spec["kind"] == "log"
-        assert spec["connection"] == CONNECTION_ID
         assert spec["from"] == {"databaseName": "dfe", "tableName": "filebeat"}
         assert spec["timestampValueExpression"] == "_timestamp"
         assert spec["displayedTimestampValueExpression"] == "_timestamp"
 
+    def test_carries_no_name_and_no_connection(self):
+        # The name is the path segment and the connection is resolved per team;
+        # sending either would pin every team to one team's connection.
+        spec = source_spec(database="dfe", table="filebeat", timestamp="_timestamp")
+
+        assert "name" not in spec
+        assert "connection" not in spec
+
     def test_surfaces_the_structured_payload_not_the_raw_text(self):
         # _raw is captured only when asked for and may be NULL, so it is never
         # the body, the implicit search column or the default view.
-        spec = source_spec(
-            name="filebeat",
-            database="dfe",
-            table="filebeat",
-            connection_id=CONNECTION_ID,
-            timestamp="_timestamp",
-        )
+        spec = source_spec(database="dfe", table="filebeat", timestamp="_timestamp")
+
         assert spec["bodyExpression"] == "_json"
         assert spec["implicitColumnExpression"] == "_json"
         assert spec["defaultTableSelectExpression"] == "_timestamp,_json"
@@ -178,59 +154,30 @@ class TestSourceSpec:
 
 
 class TestEnsureSource:
-    async def test_creates_the_source_on_deploy(self):
-        client = FakeHyperDX(sources=[seeded_template()])
+    async def test_reports_every_team_the_source_landed_on(self):
+        client = FakeHyperDX()
 
-        source_id = await ensure_source(
+        teams = await ensure_source(
             client, name="filebeat", database="dfe", table="filebeat", columns=TIMESERIES_COLUMNS
         )
 
-        assert source_id
-        assert client.creates == 1
-        created = next(s for s in client.sources if s["name"] == "filebeat")
-        assert created["from"] == {"databaseName": "dfe", "tableName": "filebeat"}
-        assert created["timestampValueExpression"] == "_timestamp"
+        assert teams == HUMAN_TEAMS
+        assert client.puts == 1
 
-    async def test_takes_the_connection_from_the_seeded_template(self):
-        # Every DFE source on a team has to hang off the one connection the
-        # fork seeded, or the fork refuses it as another team's.
-        other = {**seeded_template(), "id": "other", "name": "hunts", "connection": "wrong"}
-        client = FakeHyperDX(sources=[other, seeded_template()])
+    async def test_writes_the_table_the_deploy_just_made(self):
+        client = FakeHyperDX()
 
         await ensure_source(
             client, name="filebeat", database="dfe", table="filebeat", columns=TIMESERIES_COLUMNS
         )
 
-        created = next(s for s in client.sources if s["name"] == "filebeat")
-        assert created["connection"] == CONNECTION_ID
+        assert client.sources["filebeat"]["from"] == {
+            "databaseName": "dfe",
+            "tableName": "filebeat",
+        }
 
-    async def test_falls_back_to_the_teams_connection_list(self):
-        client = FakeHyperDX(sources=[], connections=[{"id": CONNECTION_ID, "name": "platform"}])
-
-        await ensure_source(
-            client, name="filebeat", database="dfe", table="filebeat", columns=TIMESERIES_COLUMNS
-        )
-
-        created = next(s for s in client.sources if s["name"] == "filebeat")
-        assert created["connection"] == CONNECTION_ID
-
-    async def test_redeploy_updates_and_never_duplicates(self):
-        client = FakeHyperDX(sources=[seeded_template()])
-
-        first = await ensure_source(
-            client, name="filebeat", database="dfe", table="filebeat", columns=TIMESERIES_COLUMNS
-        )
-        second = await ensure_source(
-            client, name="filebeat", database="dfe", table="filebeat", columns=TIMESERIES_COLUMNS
-        )
-
-        assert first == second
-        assert client.creates == 1
-        assert client.updates == 1
-        assert [s["name"] for s in client.sources].count("filebeat") == 1
-
-    async def test_redeploy_moves_the_source_to_the_new_table(self):
-        client = FakeHyperDX(sources=[seeded_template()])
+    async def test_a_redeploy_moves_the_source_to_the_new_table(self):
+        client = FakeHyperDX()
         await ensure_source(
             client, name="filebeat", database="dfe", table="filebeat", columns=TIMESERIES_COLUMNS
         )
@@ -243,38 +190,34 @@ class TestEnsureSource:
             columns=PASSTHROUGH_COLUMNS,
         )
 
-        current = next(s for s in client.sources if s["name"] == "filebeat")
+        current = client.sources["filebeat"]
         assert current["from"]["databaseName"] == "dfe_other"
         assert current["timestampValueExpression"] == "_timestamp_load"
 
     async def test_unreachable_hyperdx_writes_nothing(self):
-        client = FakeHyperDX(sources=[seeded_template()], reachable=False)
+        client = FakeHyperDX(reachable=False)
 
-        source_id = await ensure_source(
+        teams = await ensure_source(
             client, name="filebeat", database="dfe", table="filebeat", columns=TIMESERIES_COLUMNS
         )
 
-        assert source_id is None
-        assert client.creates == 0
-        assert client.updates == 0
+        assert teams is None
+        assert client.puts == 0
 
-    async def test_no_connection_to_hang_it_on(self):
-        client = FakeHyperDX(sources=[], connections=[])
+    async def test_a_name_the_fork_seeded_is_refused(self):
+        # The fork 409s a name it seeded itself (`main`, `hunts`, the otel set);
+        # replacing it would retarget the landing view of every team.
+        client = FakeHyperDX(owned=False)
 
         assert (
             await ensure_source(
-                client,
-                name="filebeat",
-                database="dfe",
-                table="filebeat",
-                columns=TIMESERIES_COLUMNS,
+                client, name="main", database="dfe", table="main", columns=TIMESERIES_COLUMNS
             )
             is None
         )
-        assert client.creates == 0
 
-    async def test_no_timestamp_column(self):
-        client = FakeHyperDX(sources=[seeded_template()])
+    async def test_no_timestamp_column_never_reaches_the_fork(self):
+        client = FakeHyperDX()
 
         assert (
             await ensure_source(
@@ -282,7 +225,7 @@ class TestEnsureSource:
             )
             is None
         )
-        assert client.creates == 0
+        assert client.puts == 0
 
 
 # ---------------------------------------------------------------------------
@@ -292,31 +235,47 @@ class TestEnsureSource:
 
 class TestRemoveSource:
     async def test_removes_the_source_on_delete(self):
-        client = FakeHyperDX(sources=[seeded_template()])
+        client = FakeHyperDX()
         await ensure_source(
             client, name="filebeat", database="dfe", table="filebeat", columns=TIMESERIES_COLUMNS
         )
 
         assert await remove_source(client, name="filebeat") is True
-        assert client.deletes == 1
-        assert [s["name"] for s in client.sources] == [TEMPLATE_SOURCE_NAME]
-
-    async def test_leaves_the_seeded_sources_alone(self):
-        client = FakeHyperDX(sources=[seeded_template()])
-
-        await remove_source(client, name="filebeat")
-
-        assert client.deletes == 0
-        assert [s["name"] for s in client.sources] == [TEMPLATE_SOURCE_NAME]
+        assert client.sources == {}
 
     async def test_absent_source_is_already_gone(self):
-        client = FakeHyperDX(sources=[seeded_template()])
+        client = FakeHyperDX()
+
         assert await remove_source(client, name="filebeat") is True
 
     async def test_unreachable_hyperdx_reports_failure(self):
-        client = FakeHyperDX(sources=[seeded_template()], reachable=False)
+        client = FakeHyperDX(reachable=False)
+
         assert await remove_source(client, name="filebeat") is False
         assert client.deletes == 0
+
+
+# ---------------------------------------------------------------------------
+# list_sources_by_team
+# ---------------------------------------------------------------------------
+
+
+class TestListSourcesByTeam:
+    async def test_reports_the_source_on_each_human_team(self):
+        client = FakeHyperDX()
+        await ensure_source(
+            client, name="filebeat", database="dfe", table="filebeat", columns=TIMESERIES_COLUMNS
+        )
+
+        listing = await list_sources_by_team(client)
+
+        assert [entry["teamName"] for entry in listing] == HUMAN_TEAMS
+        assert [source["name"] for source in listing[0]["sources"]] == ["filebeat"]
+
+    async def test_unreachable_hyperdx_is_not_an_empty_listing(self):
+        # An empty list reads as "the source is missing", which is a different
+        # fault from "HyperDX did not answer".
+        assert await list_sources_by_team(FakeHyperDX(reachable=False)) is None
 
 
 # ---------------------------------------------------------------------------
@@ -327,45 +286,48 @@ class TestRemoveSource:
 class Exploding:
     """A client that raises rather than returning the non-fatal None."""
 
-    async def list_sources(self):
+    async def put_dfe_source(self, name, spec):
+        raise RuntimeError("connection refused")
+
+    async def delete_dfe_source(self, name):
         raise RuntimeError("connection refused")
 
 
 class TestRouterHelpers:
-    async def test_deploy_reports_the_new_source(self):
-        client = FakeHyperDX(sources=[seeded_template()])
+    async def test_deploy_reports_how_many_teams_carry_the_source(self):
+        client = FakeHyperDX()
 
-        source_id, error = await _sync_hyperdx_source(
+        teams, error = await _sync_hyperdx_source(
             request_with(client), dfe_source("filebeat"), "dfe", TIMESERIES_COLUMNS
         )
 
-        assert source_id
+        assert teams == len(HUMAN_TEAMS)
         assert error is None
 
     async def test_deploy_survives_an_unreachable_hyperdx(self):
-        client = FakeHyperDX(sources=[seeded_template()], reachable=False)
+        client = FakeHyperDX(reachable=False)
 
-        source_id, error = await _sync_hyperdx_source(
+        teams, error = await _sync_hyperdx_source(
             request_with(client), dfe_source("filebeat"), "dfe", TIMESERIES_COLUMNS
         )
 
-        assert source_id is None
+        assert teams is None
         assert error
 
     async def test_deploy_survives_a_raising_client(self):
-        source_id, error = await _sync_hyperdx_source(
+        teams, error = await _sync_hyperdx_source(
             request_with(Exploding()), dfe_source("filebeat"), "dfe", TIMESERIES_COLUMNS
         )
 
-        assert source_id is None
+        assert teams is None
         assert "connection refused" in error
 
     async def test_deployment_without_hyperdx_reports_nothing(self):
-        source_id, error = await _sync_hyperdx_source(
+        teams, error = await _sync_hyperdx_source(
             request_with(None), dfe_source("filebeat"), "dfe", TIMESERIES_COLUMNS
         )
 
-        assert (source_id, error) == (None, None)
+        assert (teams, error) == (None, None)
 
     async def test_delete_survives_a_raising_client(self):
         await _remove_hyperdx_source(request_with(Exploding()), "filebeat")
@@ -376,7 +338,8 @@ class TestRouterHelpers:
 
 @pytest.mark.parametrize("columns", [TIMESERIES_COLUMNS, PASSTHROUGH_COLUMNS])
 async def test_every_core_header_profile_yields_a_source(columns):
-    client = FakeHyperDX(sources=[seeded_template()])
+    client = FakeHyperDX()
+
     assert await ensure_source(
         client, name="filebeat", database="dfe", table="filebeat", columns=columns
     )

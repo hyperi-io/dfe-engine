@@ -1,11 +1,13 @@
 #  Project:      dfe-engine
 #  File:         api/v1/hyperdx.py
-#  Purpose:      RBAC'd per-org ClickHouse connection material for the HyperDX fork
+#  Purpose:      RBAC'd HyperDX reads: per-org connection material, and source placement
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""GET /api/v1/hyperdx/connection - the caller's OWN org ClickHouse connection.
+"""The fork's two reads: the caller's org connection, and where its sources landed.
+
+GET /api/v1/hyperdx/connection - the caller's OWN org ClickHouse connection.
 
 The fork calls this with the user's forwarded dfe_token to seed exactly ONE
 connection on that user's team: the pinned ``dfe_org_<org>`` CH user, or the
@@ -19,14 +21,19 @@ Which identity a caller resolves to mirrors ``governance.ch.bindings`` exactly:
 any role beyond ``org_viewer`` reads UNRESTRICTED (the platform reader); a caller
 holding only ``org_viewer`` is fenced to its single org; anything else fails
 closed. The ``query:execute`` gate keeps callers with no data-plane access out.
+
+GET /api/v1/hyperdx/sources - every HyperDX team and the DFE sources on it.
+
+A deploy writes its source to every team over that team's own connection, so this
+is the read that says where it landed; ``source:read`` gates it.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, Field
 
-from dfe_engine.api.deps import CurrentUser, Settings, is_action_allowed
+from dfe_engine.api.deps import CurrentUser, Settings, is_action_allowed, require_action
 from dfe_engine.auth import Scope
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.governance.ch.bindings import ORG_VIEWER_ROLE
@@ -150,4 +157,80 @@ async def hyperdx_connection(
         )
     return HyperDXConnection(
         name=org.name, host=host, username=org_user_name(org.name), password=password
+    )
+
+
+class HyperDXTeamSource(BaseModel):
+    """One HyperDX source on one team, as the fork holds it."""
+
+    id: str = Field(description="HyperDX source id on that team")
+    name: str = Field(description="DFE source name; the HyperDX source carries the same one")
+    table: dict[str, str] = Field(
+        default_factory=dict,
+        description="The ClickHouse table the source reads (databaseName, tableName)",
+    )
+
+
+class HyperDXTeamSources(BaseModel):
+    """One HyperDX team and the DFE sources it holds."""
+
+    team: str = Field(description="HyperDX team id")
+    team_name: str = Field(description="HyperDX team name; the caller's OIDC group")
+    sources: list[HyperDXTeamSource] = Field(default_factory=list)
+
+
+class HyperDXSourcesResponse(BaseModel):
+    """Where every deployed DFE source actually landed in HyperDX."""
+
+    teams: list[HyperDXTeamSources] = Field(default_factory=list)
+
+
+@router.get(
+    "/sources",
+    response_model=HyperDXSourcesResponse,
+    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
+)
+async def hyperdx_sources(request: Request) -> HyperDXSourcesResponse:
+    """List every HyperDX team and the DFE sources on it.
+
+    A deploy writes its source to every team, so this is the read that says where
+    it landed. 503 when HyperDX is not deployed or not answering -- an empty list
+    would read as "the source is missing", which is a different fault.
+    """
+    client = getattr(request.app.state, "hyperdx_client", None)
+    if client is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "hyperdx_absent", "message": "this deployment has no HyperDX"},
+        )
+
+    from dfe_engine.hyperdx.sources import list_sources_by_team
+
+    listing = await list_sources_by_team(client)
+    if listing is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "hyperdx_unreachable", "message": "HyperDX did not answer"},
+        )
+
+    return HyperDXSourcesResponse(
+        teams=[
+            HyperDXTeamSources(
+                team=str(entry.get("team", "")),
+                team_name=str(entry.get("teamName", "")),
+                sources=[
+                    HyperDXTeamSource(
+                        id=str(source.get("id", "")),
+                        name=str(source.get("name", "")),
+                        table={
+                            key: str(value)
+                            for key, value in (source.get("from") or {}).items()
+                            if isinstance(value, str)
+                        },
+                    )
+                    for source in entry.get("sources") or []
+                ],
+            )
+            for entry in listing
+        ]
     )

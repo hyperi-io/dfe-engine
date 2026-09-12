@@ -5,12 +5,13 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""Unit tests for GET /api/v1/hyperdx/connection.
+"""Unit tests for the two GET /api/v1/hyperdx reads.
 
-The handler is called directly with real fakes (a file-backed secrets store, a
+The handlers are called directly with real fakes (a file-backed secrets store, a
 list-only org registry) - the RBAC gate is a standard require_action dependency
-covered elsewhere. The invariant under test: a caller only ever resolves to its
-OWN org's credential, and anything ambiguous fails closed.
+covered elsewhere. The invariant under test for ``/connection``: a caller only
+ever resolves to its OWN org's credential, and anything ambiguous fails closed.
+For ``/sources``: an unreachable HyperDX is never reported as an empty listing.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from dfe_engine.api.v1.hyperdx import hyperdx_connection
+from dfe_engine.api.v1.hyperdx import hyperdx_connection, hyperdx_sources
 from dfe_engine.auth.models import AuthContext
 from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import SecretsSettings
@@ -162,4 +163,64 @@ async def test_org_without_a_credential_is_503(tmp_path):
 
     with pytest.raises(HTTPException) as exc:
         await hyperdx_connection(req, user, settings)
+    assert exc.value.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/hyperdx/sources
+# ---------------------------------------------------------------------------
+
+
+class FakeFork:
+    """The fork's GET /dfe/sources, or an unreachable one."""
+
+    def __init__(self, teams: list[dict] | None) -> None:
+        self._teams = teams
+
+    async def list_dfe_sources(self):
+        return None if self._teams is None else {"teams": self._teams}
+
+
+def _sources_request(client):
+    return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(hyperdx_client=client)))
+
+
+async def test_sources_reports_the_team_each_source_landed_on():
+    client = FakeFork(
+        [
+            {
+                "team": "t1",
+                "teamName": "dfe-admins",
+                "sources": [
+                    {
+                        "id": "s1",
+                        "name": "filebeat",
+                        "from": {"databaseName": "dfe", "tableName": "filebeat"},
+                    }
+                ],
+            },
+            {"team": "t2", "teamName": "customer-acme", "sources": []},
+        ]
+    )
+
+    listing = await hyperdx_sources(_sources_request(client))
+
+    assert [team.team_name for team in listing.teams] == ["dfe-admins", "customer-acme"]
+    assert listing.teams[0].sources[0].name == "filebeat"
+    assert listing.teams[0].sources[0].table == {
+        "databaseName": "dfe",
+        "tableName": "filebeat",
+    }
+
+
+async def test_sources_is_503_when_hyperdx_does_not_answer():
+    # An empty listing reads as "the source is missing", a different fault.
+    with pytest.raises(HTTPException) as exc:
+        await hyperdx_sources(_sources_request(FakeFork(None)))
+    assert exc.value.status_code == 503
+
+
+async def test_sources_is_503_on_a_deployment_without_hyperdx():
+    with pytest.raises(HTTPException) as exc:
+        await hyperdx_sources(_sources_request(None))
     assert exc.value.status_code == 503
