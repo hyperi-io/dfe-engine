@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import shutil
 from pathlib import Path
 
 import pytest
@@ -194,6 +195,60 @@ def test_a_stranded_clone_still_serves_its_next_write(tmp_path: Path) -> None:
 
     assert res.pushed is True
     assert _remote_files(tmp_path, remote, "check") == {"a.yaml", "b.yaml"}
+
+
+def test_refresh_takes_a_commit_the_other_clone_pushed(tmp_path: Path) -> None:
+    """A clone only sees another replica's write once it takes the remote's head."""
+    remote, branch = _seeded_remote(tmp_path)
+    first = GitopsRepo(local_path=str(tmp_path / "a"), repo_url=remote, branch=branch, push=True)
+    second = GitopsRepo(local_path=str(tmp_path / "b"), repo_url=remote, branch=branch, push=True)
+    first.ensure()
+    second.ensure()
+
+    first.publish({"a.yaml": "a: 1\n"}, message="from a")
+    assert not (tmp_path / "b" / "a.yaml").exists()
+
+    assert second.refresh() is True
+    assert (tmp_path / "b" / "a.yaml").read_text() == "a: 1\n"
+    assert second.head_revision() == first.head_revision()
+
+
+def test_refresh_is_a_noop_when_the_remote_has_not_moved(tmp_path: Path) -> None:
+    remote, branch = _seeded_remote(tmp_path)
+    repo = GitopsRepo(local_path=str(tmp_path / "a"), repo_url=remote, branch=branch, push=True)
+    repo.ensure()
+    head = repo.head_revision()
+
+    assert repo.refresh() is False
+    assert repo.head_revision() == head
+
+
+def test_refresh_leaves_a_clone_that_does_not_push_alone(tmp_path: Path) -> None:
+    """A clone holding a commit it never pushed is the only copy: never reset it."""
+    remote, branch = _seeded_remote(tmp_path)
+    pusher = GitopsRepo(local_path=str(tmp_path / "a"), repo_url=remote, branch=branch, push=True)
+    keeper = GitopsRepo(local_path=str(tmp_path / "b"), repo_url=remote, branch=branch, push=False)
+    pusher.ensure()
+    keeper.ensure()
+
+    _local_commit(tmp_path / "b", "local.yaml", "l: 1\n", b"local only")
+    pusher.publish({"a.yaml": "a: 1\n"}, message="from a")
+
+    assert keeper.refresh() is False
+    assert (tmp_path / "b" / "local.yaml").read_text() == "l: 1\n"
+
+
+def test_refresh_serves_this_clone_when_the_deploy_repo_is_unreachable(tmp_path: Path) -> None:
+    """A forge blip must not fail a read: the clone keeps answering from what it has."""
+    remote, branch = _seeded_remote(tmp_path)
+    repo = GitopsRepo(local_path=str(tmp_path / "a"), repo_url=remote, branch=branch, push=True)
+    repo.ensure()
+    head = repo.head_revision()
+    shutil.rmtree(remote)
+
+    assert repo.refresh() is False
+    assert repo.head_revision() == head
+    assert (tmp_path / "a" / "README").read_text() == "seed\n"
 
 
 def test_a_refused_ref_raises_instead_of_reporting_a_successful_push(tmp_path: Path) -> None:

@@ -18,7 +18,10 @@ HTTPS path that URL carries the deploy token (F-GITOPS-TOKEN).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+import threading
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar, cast
@@ -32,6 +35,28 @@ if TYPE_CHECKING:
     from dulwich.client import SendPackResult
 
 T = TypeVar("T")
+
+# The clones whose head this scope has already taken; None outside a scope.
+_READ_SCOPE: ContextVar[set[GitopsRepo] | None] = ContextVar("dfe_gitops_read_scope", default=None)
+
+
+@contextmanager
+def read_scope() -> Iterator[None]:
+    """Answer every read in this block from one view of the deploy repo.
+
+    A request reads many documents and a listing reads them all, so without this
+    each one pays its own ref advertisement. The first read takes the remote's head
+    and the rest of the block reuses it; the next block asks again. Outside a scope
+    -- the CLI, background work -- every read asks, which is what they want.
+    """
+    # Restored by setting the previous value, not by resetting a token: a token
+    # reset raises when the block exits in a different context (see tags_context).
+    previous = _READ_SCOPE.get()
+    _READ_SCOPE.set(set())
+    try:
+        yield
+    finally:
+        _READ_SCOPE.set(previous)
 
 
 class GitopsRemoteError(RuntimeError):
@@ -96,6 +121,12 @@ class GitopsRepo:
         self._username = username
         self._token = token
         self._author = f"{author_name} <{author_email}>".encode()
+        # One working tree, many request threads: a reset must never land between
+        # another thread's staging and its commit.
+        self._lock = threading.RLock()
+        # A refresh runs on every read, so an unreachable remote is reported on the
+        # transition rather than once per read.
+        self._refresh_failed = False
 
     @property
     def path(self) -> Path:
@@ -242,6 +273,76 @@ class GitopsRepo:
         porcelain.init(str(self._path))
         return self._path
 
+    def remote_head(self) -> str | None:
+        """The remote branch's head SHA, read without fetching a single object.
+
+        One ref advertisement, so a reader can tell whether its clone is behind
+        before paying for a fetch. None when there is no remote configured or the
+        remote does not carry the tracked branch.
+        """
+        if not self._repo_url:
+            return None
+        result = self._remote_op(lambda _errstream: porcelain.ls_remote(self._authed_url()))
+        head = result.refs.get(b"refs/heads/" + self._branch.encode())
+        return head.decode() if head is not None else None
+
+    def refresh(self) -> bool:
+        """Take the remote's head when it has moved; returns whether this clone moved.
+
+        Every engine replica reads its OWN clone, so a resource another replica wrote
+        is invisible here until this runs -- the read half of read-your-writes across
+        replicas. Cheap when nothing moved: one ref advertisement and no fetch.
+
+        Inside a :func:`read_scope` the head is taken once and the rest of the scope
+        reuses it, so a listing of N documents costs one round trip rather than N; a
+        publish reopens the check, and a remote this clone cannot reach costs one
+        failed connection per scope instead of one per read.
+
+        Only a pushing clone follows the remote: one holding a commit it never pushed
+        is the sole copy of it, and a reset would destroy it. Best-effort -- a remote
+        this clone cannot reach leaves it serving what it already has, because a read
+        must not fail on a forge blip.
+        """
+        if not (self._push and self._repo_url):
+            return False
+        scope = _READ_SCOPE.get()
+        if scope is not None:
+            if self in scope:
+                return False
+            scope.add(self)
+        moved = False
+        try:
+            remote = self.remote_head()
+            if remote is not None and remote != self.head_revision():
+                with self._lock:
+                    # Re-checked under the lock: a publish may have taken this head.
+                    if remote != self.head_revision():
+                        self._sync_onto_remote_head()
+                        moved = True
+        except GitopsRemoteError as exc:
+            self._note_unreachable(exc)
+            return False
+        self._note_reachable()
+        return moved
+
+    def _note_unreachable(self, exc: GitopsRemoteError) -> None:
+        """Report a refresh failure once, not once per read."""
+        if self._refresh_failed:
+            return
+        self._refresh_failed = True
+        logger.warning(
+            "Cannot reach the deploy repo: serving this clone until it is back",
+            branch=self._branch,
+            error=str(exc),
+        )
+
+    def _note_reachable(self) -> None:
+        """Close the warning a run of failed refreshes opened."""
+        if not self._refresh_failed:
+            return
+        self._refresh_failed = False
+        logger.info("Deploy repo reachable again; reads are current", branch=self._branch)
+
     def sync(self, *, discard_local: bool = False) -> bool:
         """Fast-forward the tracked branch to the remote's head.
 
@@ -298,6 +399,26 @@ class GitopsRepo:
           locally and remotely -- a reviewer merges the PR. This is how a
           production+team write is kept off main (see gitcrud/routing.py).
         """
+        # A reader refreshing this clone resets the working tree, so the whole
+        # write -- sync, stage, commit, push -- holds the tree to itself.
+        with self._lock:
+            try:
+                return self._publish_locked(artifacts, message, deletions, branch)
+            finally:
+                # This clone just wrote, so the next read in this scope asks the
+                # remote again instead of reusing the head from before the write.
+                scope = _READ_SCOPE.get()
+                if scope is not None:
+                    scope.discard(self)
+
+    def _publish_locked(
+        self,
+        artifacts: Mapping[str, str | bytes],
+        message: str,
+        deletions: list[str] | None,
+        branch: str | None,
+    ) -> PublishResult:
+        """The publish body; the caller holds the tree lock."""
         # The write goes on the remote's head, never on whatever this clone last saw.
         if self._push and self._repo_url:
             self._sync_onto_remote_head()
