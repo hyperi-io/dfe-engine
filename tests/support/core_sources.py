@@ -9,13 +9,12 @@
 """The seeded landing definition, shared by every test whose app startup seeds it.
 
 In a deployment this file arrives from dfe-schemas through the image-baked schema
-seed. Tests cannot rely on the installed wheel carrying it - the engine pins a
-dfe-schemas that predates ``sources/`` - so they write this copy into their own
-tmp schemas directory instead.
+seed, which a test's tmp schemas directory does not have - so tests write this
+copy into their own instead of reading the installed wheel.
 
 ``TestShippedDefinition`` in ``tests/unit/test_source/test_core_sources.py`` is the
-drift guard: it compares this dict against the real file once the installed
-dfe-schemas ships one.
+drift guard: it compares this dict against the file the installed dfe-schemas
+ships at ``sources/main.yaml``.
 """
 
 from __future__ import annotations

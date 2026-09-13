@@ -40,7 +40,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from scalo.logger import logger
 
 from dfe_engine.api.deps import ClickHouseClient, CurrentUser, Settings, SourceReg, require_action
-from dfe_engine.api.errors import MatchConflictErrorResponse, SourceCreateConflictResponse
+from dfe_engine.api.errors import (
+    CoreResourceConflictErrorResponse,
+    SourceCreateConflictResponse,
+    SourceWriteConflictResponse,
+)
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.api.v1.apps import commit_overlay, remove_overlay
 from dfe_engine.appmgmt import (
@@ -120,6 +124,23 @@ def _raise_save_validation_http(exc: SourceValidationError) -> NoReturn:
             "message": str(exc),
         },
     ) from exc
+
+
+def _failure_code(exc: Exception) -> str:
+    """The code a bulk entry reports, so one refusal reads the same on either route.
+
+    Ordered narrowest first: the two conflict errors both subclass
+    ``SourceValidationError``.
+    """
+    if isinstance(exc, SourceCoreResourceError):
+        return "conflict"
+    if isinstance(exc, SourceMatchConflictError):
+        return "match_conflict"
+    if isinstance(exc, SourceNotFoundError):
+        return "not_found"
+    if isinstance(exc, SourceValidationError):
+        return "validation_error"
+    return "internal_error"
 
 
 # ── Response models ──────────────────────────────────────────
@@ -350,7 +371,13 @@ class BulkActionResponse(BaseModel):
 
     action: str
     succeeded: list[str] = Field(default_factory=list)
-    failed: list[dict[str, str]] = Field(default_factory=list)
+    failed: list[dict[str, str]] = Field(
+        default_factory=list,
+        description=(
+            "One entry per source left untouched: its name, the same code the "
+            "single-source route answers with, and the message"
+        ),
+    )
 
 
 class SeedResponse(BaseModel):
@@ -1458,8 +1485,11 @@ async def get_source_signals(
     response_model=SourceResponse,
     responses={
         409: {
-            "model": MatchConflictErrorResponse,
-            "description": "Receiver match duplicates another enabled source",
+            "model": SourceWriteConflictResponse,
+            "description": (
+                "Receiver match duplicates another enabled source (code match_conflict), "
+                "or the source is engine-owned and no write path may change it (code conflict)"
+            ),
         },
     },
     dependencies=[Depends(require_action(scopes_dict["source_write"]))],
@@ -1516,8 +1546,12 @@ async def update_source(
     response_model=SourceResponse,
     responses={
         409: {
-            "model": MatchConflictErrorResponse,
-            "description": "Enabling would duplicate another enabled source's receiver match",
+            "model": SourceWriteConflictResponse,
+            "description": (
+                "Enabling would duplicate another enabled source's receiver match (code "
+                "match_conflict), or the source is engine-owned and no write path may "
+                "change it (code conflict)"
+            ),
         },
     },
     dependencies=[Depends(require_action(scopes_dict["source_write"]))],
@@ -1567,10 +1601,20 @@ async def patch_source_enabled(
 @router.delete(
     "/{name}",
     status_code=204,
+    responses={
+        409: {
+            "model": CoreResourceConflictErrorResponse,
+            "description": "The source is engine-owned and no write path may delete it",
+        },
+    },
     dependencies=[Depends(require_action(scopes_dict["source_delete"]))],
 )
 async def delete_source(name: str, user: CurrentUser, registry: SourceReg, request: Request):
-    """Delete a source by name. Its fetcher instance and receiver rule go with it."""
+    """Delete a source by name. Its fetcher instance and receiver rule go with it.
+
+    An engine-owned source -- the landing table's own -- is refused with 409
+    ``conflict``, the same answer PUT and PATCH give.
+    """
     if not registry.source_exists(name):
         raise HTTPException(
             status_code=404,
@@ -1625,7 +1669,7 @@ async def bulk_action(
                 registry.save_source(updated, created_by=git_author(user))
             succeeded.append(name)
         except Exception as e:
-            failed.append({"source": name, "error": str(e)})
+            failed.append({"source": name, "code": _failure_code(e), "error": str(e)})
 
     result = BulkActionResponse(action=body.action, succeeded=succeeded, failed=failed)
     if succeeded:
