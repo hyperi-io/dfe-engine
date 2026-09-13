@@ -72,8 +72,28 @@ class MatchConflictErrorResponse(BaseModel):
     context: MatchConflictContext
 
 
+class CoreResourceConflictContext(BaseModel):
+    """Structured context for a write that named an engine-owned resource."""
+
+    source: str = Field(description="The engine-owned source the write named")
+
+
+class CoreResourceConflictErrorResponse(BaseModel):
+    """409 when a write names a resource the engine owns and reconciles itself."""
+
+    code: Literal["conflict"] = "conflict"
+    message: str = Field(description="Human-readable explanation")
+    errors: list[FieldError] = Field(default_factory=list)
+    context: CoreResourceConflictContext
+
+
 SourceCreateConflictResponse = Annotated[
     SourceNameConflictErrorResponse | MatchConflictErrorResponse,
+    Field(discriminator="code"),
+]
+
+SourceWriteConflictResponse = Annotated[
+    MatchConflictErrorResponse | CoreResourceConflictErrorResponse,
     Field(discriminator="code"),
 ]
 

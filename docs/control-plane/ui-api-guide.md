@@ -164,6 +164,10 @@ accepts repeated `schema_type` (top-level path segment, e.g. `meta`).
 | POST | `/sources/bulk` | Bulk action (`enable` / `disable` / `dormant` / `delete`) on named sources |
 | POST | `/sources/seed` | Seed defaults |
 
+The landing source is engine-owned: it reads as `resource_type: core`, and POST,
+PUT, PATCH and DELETE all answer `409 conflict`. Bulk reports it under `failed`
+with that same code and carries on with the other sources in the call.
+
 Artifact files: `source-builds/{name}.yaml` and `source-deploys/{name}.yaml` (per-version maps like `sources/{name}.yaml`). Plans are not persisted.
 
 ### Services (`/api/v1/services`)

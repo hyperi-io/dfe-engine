@@ -3847,11 +3847,26 @@
             }
           },
           "409": {
-            "description": "Receiver match duplicates another enabled source",
+            "description": "Receiver match duplicates another enabled source (code match_conflict), or the source is engine-owned and no write path may change it (code conflict)",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MatchConflictErrorResponse"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MatchConflictErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CoreResourceConflictErrorResponse"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "match_conflict": "#/components/schemas/MatchConflictErrorResponse",
+                      "conflict": "#/components/schemas/CoreResourceConflictErrorResponse"
+                    }
+                  },
+                  "title": "Response 409 Update Source Api V1 Sources  Name  Put"
                 }
               }
             }
@@ -3913,11 +3928,26 @@
             }
           },
           "409": {
-            "description": "Enabling would duplicate another enabled source's receiver match",
+            "description": "Enabling would duplicate another enabled source's receiver match (code match_conflict), or the source is engine-owned and no write path may change it (code conflict)",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MatchConflictErrorResponse"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MatchConflictErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CoreResourceConflictErrorResponse"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "match_conflict": "#/components/schemas/MatchConflictErrorResponse",
+                      "conflict": "#/components/schemas/CoreResourceConflictErrorResponse"
+                    }
+                  },
+                  "title": "Response 409 Patch Source Enabled Api V1 Sources  Name  Patch"
                 }
               }
             }
@@ -3944,7 +3974,7 @@
           "Sources"
         ],
         "summary": "Delete Source",
-        "description": "Delete a source by name. Its fetcher instance and receiver rule go with it.",
+        "description": "Delete a source by name. Its fetcher instance and receiver rule go with it.\n\nAn engine-owned source -- the landing table's own -- is refused with 409\n``conflict``, the same answer PUT and PATCH give.",
         "operationId": "delete_source_api_v1_sources__name__delete",
         "parameters": [
           {
@@ -3960,6 +3990,16 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "409": {
+            "description": "The source is engine-owned and no write path may delete it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoreResourceConflictErrorResponse"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -17210,7 +17250,8 @@
               "type": "object"
             },
             "type": "array",
-            "title": "Failed"
+            "title": "Failed",
+            "description": "One entry per source left untouched: its name, the same code the single-source route answers with, and the message"
           }
         },
         "type": "object",
@@ -18150,6 +18191,53 @@
           "changed"
         ],
         "title": "CopyFilesResult"
+      },
+      "CoreResourceConflictContext": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "The engine-owned source the write named"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "title": "CoreResourceConflictContext",
+        "description": "Structured context for a write that named an engine-owned resource."
+      },
+      "CoreResourceConflictErrorResponse": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "conflict",
+            "title": "Code",
+            "default": "conflict"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable explanation"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/FieldError"
+            },
+            "type": "array",
+            "title": "Errors"
+          },
+          "context": {
+            "$ref": "#/components/schemas/CoreResourceConflictContext"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message",
+          "context"
+        ],
+        "title": "CoreResourceConflictErrorResponse",
+        "description": "409 when a write names a resource the engine owns and reconciles itself."
       },
       "CostEstimate": {
         "properties": {
