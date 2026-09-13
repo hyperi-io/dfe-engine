@@ -287,7 +287,7 @@ es.addEventListener('complete', (e) => {
 | GET | `/service-surfaces` | Schema-less service discovery |
 | POST | `/transforms/compile` | Compile VRL/CEL transform |
 | POST | `/transforms/test` | Test transform against sample data |
-| GET | `/system/version` | Stack, engine and ui versions (the console footer) |
+| GET | `/system/version` | Stack, engine, ui and every pinned app's version (the console footer) |
 | GET | `/system/deployment` | Profile, transports, mesh, whether compiled routing reaches the running apps, and versions -- what a pane must not guess |
 | GET | `/sources/{name}/signals` | Records a minute and last arrival for one source |
 | GET | `/system/settings` | Current settings |

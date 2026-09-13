@@ -74,6 +74,13 @@ class VersionResponse(BaseModel):
     ui: str | None = Field(
         description="dfe-ui version when the deploy repo pins one off the certified stack."
     )
+    apps: dict[str, str] = Field(
+        description=(
+            "Every component the deploy repo pins off the certified stack, name to "
+            "version tag; empty when the deploy repo carries no pins. Includes "
+            "dfe-ui, which then matches the ui field above."
+        )
+    )
     source: Literal["deploy-repo", "deployment", "engine"] = Field(
         description=(
             "deploy-repo when the stack version came from pins.yaml, deployment when it "
@@ -136,6 +143,13 @@ class DeploymentResponse(BaseModel):
             "the version the chart was rendered with. Null when neither states one."
         )
     )
+    apps: dict[str, str] = Field(
+        description=(
+            "Every component the deploy repo pins off the certified stack, name to "
+            "version tag; empty when the deploy repo carries no pins. Includes "
+            "dfe-ui, which then matches the ui field above."
+        )
+    )
     source: Literal["deploy-repo", "deployment", "engine"] = Field(
         description=(
             "deploy-repo when the stack version came from pins.yaml, deployment when it "
@@ -188,6 +202,7 @@ def deployment_facts(request: Request, settings: Any) -> DeploymentResponse:
             pins = load_pins(gc.repo_path)
     pinned = stack_version(pins)
     stack = pinned or settings.stack_version or None
+    apps = component_overrides(pins)
     transport = settings.transport
     return DeploymentResponse(
         profile=settings.deployment.profile,
@@ -205,7 +220,8 @@ def deployment_facts(request: Request, settings: Any) -> DeploymentResponse:
         ),
         stack=stack,
         engine=__version__,
-        ui=component_overrides(pins).get(UI_COMPONENT) or settings.ui_version or None,
+        ui=apps.get(UI_COMPONENT) or settings.ui_version or None,
+        apps=apps,
         source="deploy-repo" if pinned else ("deployment" if stack else "engine"),
     )
 
@@ -236,6 +252,7 @@ async def get_version(user: CurrentUser, request: Request, settings: Settings) -
         stack=facts.stack,
         engine=facts.engine,
         ui=facts.ui,
+        apps=facts.apps,
         source=facts.source,
         python_version=sys.version.split()[0],
     )
