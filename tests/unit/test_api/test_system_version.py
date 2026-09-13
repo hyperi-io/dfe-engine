@@ -50,6 +50,27 @@ class TestGetVersion:
         body = client.get("/api/v1/system/version", headers=admin_headers).json()
         assert body["ui"] == "v1.20.0@sha256:abc"
 
+    def test_apps_carries_every_pinned_component_and_agrees_with_ui(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(
+            app,
+            tmp_path,
+            PINS
+            + 'overrides:\n  apps:\n    dfe-ui: "v1.20.0@sha256:abc"\n'
+            + '    dfe-receiver: "v2.3.0@sha256:def"\n',
+        )
+        body = client.get("/api/v1/system/version", headers=admin_headers).json()
+        assert body["apps"] == {
+            "dfe-ui": "v1.20.0@sha256:abc",
+            "dfe-receiver": "v2.3.0@sha256:def",
+        }
+        assert body["ui"] == body["apps"]["dfe-ui"]
+
+    def test_apps_is_empty_without_pins(self, client, admin_headers):
+        body = client.get("/api/v1/system/version", headers=admin_headers).json()
+        assert body["apps"] == {}
+
     def test_engine_only_without_a_deploy_repo(self, client, admin_headers):
         resp = client.get("/api/v1/system/version", headers=admin_headers)
         assert resp.status_code == 200, resp.text

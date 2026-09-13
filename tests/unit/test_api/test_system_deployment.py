@@ -161,6 +161,28 @@ class TestDeploymentFacts:
 
         assert client.get("/api/v1/system/deployment", headers=admin_headers).json()["ui"] is None
 
+    def test_apps_carries_every_pinned_component(self, client, app, admin_headers, tmp_path):
+        _wire(
+            app,
+            tmp_path,
+            PINS
+            + 'overrides:\n  apps:\n    dfe-ui: "v1.20.0@sha256:abc"\n'
+            + '    dfe-receiver: "v2.3.0@sha256:def"\n',
+        )
+
+        body = client.get("/api/v1/system/deployment", headers=admin_headers).json()
+
+        assert body["apps"] == {
+            "dfe-ui": "v1.20.0@sha256:abc",
+            "dfe-receiver": "v2.3.0@sha256:def",
+        }
+        assert body["ui"] == body["apps"]["dfe-ui"]
+
+    def test_apps_is_empty_without_pins(self, client, admin_headers):
+        body = client.get("/api/v1/system/deployment", headers=admin_headers).json()
+
+        assert body["apps"] == {}
+
     def test_the_pins_are_read_under_the_publish_lock(
         self, client, app, admin_headers, tmp_path, monkeypatch
     ):
