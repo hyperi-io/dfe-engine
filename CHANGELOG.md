@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.20.4](https://github.com/hyperi-io/dfe-engine/compare/v1.20.3...v1.20.4) (2026-09-13)
+
+### Bug Fixes
+
+* **api:** the version endpoint reports every pinned app ([5bef50d](https://github.com/hyperi-io/dfe-engine/commit/5bef50daa7aa71df84bc7d5ec0056f94983550e6))
+
 ## [1.20.3](https://github.com/hyperi-io/dfe-engine/compare/v1.20.2...v1.20.3) (2026-09-13)
 
 ### Bug Fixes
