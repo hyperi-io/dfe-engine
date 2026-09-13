@@ -365,6 +365,19 @@ class TestMainFlow:
         assert body["transform"] is None
         assert body["archive"] is False
 
+    def test_create_by_the_landing_name_is_refused(self, client: TestClient, admin_headers: dict):
+        resp = client.post(
+            "/api/v1/sources",
+            json={"source": "main", "match": {"field": "tags.collector.type", "value": "main"}},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "conflict"
+        stored = client.get("/api/v1/sources/main", headers=admin_headers).json()
+        assert stored["resource_type"] == "core"
+        assert stored["match"] is None
+
     def test_put_main_is_refused(self, client: TestClient, admin_headers: dict):
         resp = client.put(
             "/api/v1/sources/main",
@@ -376,29 +389,49 @@ class TestMainFlow:
         )
 
         assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "conflict"
         assert "main" in resp.json()["message"]
         stored = client.get("/api/v1/sources/main", headers=admin_headers).json()
         assert stored["description"] != "hijacked"
+
+    def test_patch_main_is_refused(self, client: TestClient, admin_headers: dict):
+        resp = client.patch("/api/v1/sources/main", json={"enabled": False}, headers=admin_headers)
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "conflict"
+        stored = client.get("/api/v1/sources/main", headers=admin_headers).json()
+        assert stored["state"] == "active"
 
     def test_delete_main_is_refused(self, client: TestClient, admin_headers: dict):
         resp = client.delete("/api/v1/sources/main", headers=admin_headers)
 
         assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "conflict"
         assert client.get("/api/v1/sources/main", headers=admin_headers).status_code == 200
 
     def test_bulk_delete_reports_main_as_failed_and_leaves_it(
         self, client: TestClient, admin_headers: dict
     ):
+        client.post(
+            "/api/v1/sources",
+            json={"source": "spare", "match": {"field": "tags.collector.type", "value": "spare"}},
+            headers=admin_headers,
+        )
+
         resp = client.post(
             "/api/v1/sources/bulk",
-            json={"action": "delete", "sources": ["main"]},
+            json={"action": "delete", "sources": ["main", "spare"]},
             headers=admin_headers,
         )
 
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert body["succeeded"] == []
+        # The refusal is per entry: the others in the same call still go.
+        assert body["succeeded"] == ["spare"]
         assert [f["source"] for f in body["failed"]] == ["main"]
+        # The same code the single-source DELETE answers with.
+        assert body["failed"][0]["code"] == "conflict"
+        assert "main" in body["failed"][0]["error"]
         assert client.get("/api/v1/sources/main", headers=admin_headers).status_code == 200
 
     def test_a_clone_of_main_is_refused(self, client: TestClient, admin_headers: dict):
