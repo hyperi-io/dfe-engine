@@ -18847,6 +18847,14 @@
             "title": "Ui",
             "description": "dfe-ui version, from the deploy repo's pins where they name one, else the version the chart was rendered with. Null when neither states one."
           },
+          "apps": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Apps",
+            "description": "Every component the deploy repo pins off the certified stack, name to version tag; empty when the deploy repo carries no pins. Includes dfe-ui, which then matches the ui field above."
+          },
           "source": {
             "type": "string",
             "enum": [
@@ -18867,6 +18875,7 @@
           "stack",
           "engine",
           "ui",
+          "apps",
           "source"
         ],
         "title": "DeploymentResponse",
@@ -30494,6 +30503,14 @@
             "title": "Ui",
             "description": "dfe-ui version when the deploy repo pins one off the certified stack."
           },
+          "apps": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Apps",
+            "description": "Every component the deploy repo pins off the certified stack, name to version tag; empty when the deploy repo carries no pins. Includes dfe-ui, which then matches the ui field above."
+          },
           "source": {
             "type": "string",
             "enum": [
@@ -30515,6 +30532,7 @@
           "stack",
           "engine",
           "ui",
+          "apps",
           "source",
           "python_version"
         ],
