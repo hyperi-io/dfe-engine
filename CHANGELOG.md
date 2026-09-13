@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.20.3](https://github.com/hyperi-io/dfe-engine/compare/v1.20.2...v1.20.3) (2026-09-13)
+
+### Bug Fixes
+
+* **api:** the core landing refuses every verb the same way ([5698410](https://github.com/hyperi-io/dfe-engine/commit/5698410dbdc186fe8069d8f438d429cbd4dd52df))
+
 ## [1.20.2](https://github.com/hyperi-io/dfe-engine/compare/v1.20.1...v1.20.2) (2026-09-12)
 
 ### Bug Fixes
