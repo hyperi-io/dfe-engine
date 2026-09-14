@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.19.37"
+    "version": "1.20.4"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -12619,6 +12619,63 @@
         ]
       }
     },
+    "/api/v1/apps/{service}/{instance}/config": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Get App Config",
+        "description": "Every option the app declares, with this instance's value and where it comes from.\n\nThe overlay alone cannot answer this: it holds only what was written, so an\noption nobody has touched is invisible in it. The app's own contract supplies\nthe rest, which is what lets the console show an untouched option with the\ndefault it would run rather than an empty box.",
+        "operationId": "get_app_config_api_v1_apps__service___instance__config_get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppConfigResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/apps/{service}/{instance}/scaling": {
       "get": {
         "tags": [
@@ -13801,6 +13858,54 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ResourceSeriesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/app-contracts/{service}": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Get App Contract",
+        "description": "One app's config schema and capability catalogue, or that none is mounted.",
+        "operationId": "get_app_contract_api_v1_app_contracts__service__get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppContractResponse"
                 }
               }
             }
@@ -16775,6 +16880,115 @@
         ],
         "title": "AlertDestinationSummary"
       },
+      "AppConfigResponse": {
+        "properties": {
+          "etag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etag",
+            "description": "The deploy repo's revision when this was read. Send it back as the If-Match header on a write to have the write refused with a 409 if anything has been committed since. Repo-wide, not per resource."
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available",
+            "description": "False when this deployment has mounted no contract for the app"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigFieldModel"
+            },
+            "type": "array",
+            "title": "Fields"
+          },
+          "unknown": {
+            "items": {
+              "$ref": "#/components/schemas/UnknownFieldModel"
+            },
+            "type": "array",
+            "title": "Unknown"
+          }
+        },
+        "type": "object",
+        "required": [
+          "available"
+        ],
+        "title": "AppConfigResponse",
+        "description": "Every option an instance has, and the overlay keys none of them explain."
+      },
+      "AppContractResponse": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available",
+            "description": "False when this deployment has mounted no contract for the app"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Where the contract came from: `mount` or `absent`"
+          },
+          "pinned_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinned Ref",
+            "description": "The image digest that emitted it, when the emit step recorded one"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Version",
+            "description": "The JSON Schema dialect the app emitted"
+          },
+          "schema": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Schema",
+            "description": "The app's own config schema"
+          },
+          "capabilities": {
+            "items": {},
+            "type": "array",
+            "title": "Capabilities",
+            "description": "The sources, sinks and transforms the app ships"
+          },
+          "dials": {
+            "items": {},
+            "type": "array",
+            "title": "Dials",
+            "description": "Which options an operator is steered towards; not resolved yet"
+          }
+        },
+        "type": "object",
+        "required": [
+          "service",
+          "available",
+          "source"
+        ],
+        "title": "AppContractResponse",
+        "description": "One app's contract, as the pinned image wrote it."
+      },
       "AppSummary": {
         "properties": {
           "service": {
@@ -18034,6 +18248,93 @@
           "wasm_bytes"
         ],
         "title": "CompileResponse"
+      },
+      "ConfigFieldModel": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "The overlay path a write addresses, `config.` rooted"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "default": ""
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "secret": {
+            "type": "boolean",
+            "title": "Secret",
+            "description": "Credential material: neither its value nor its default is returned"
+          },
+          "enum": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enum",
+            "description": "The values it accepts, where the app declares a closed set"
+          },
+          "default": {
+            "title": "Default",
+            "description": "The app's own default, null for a secret"
+          },
+          "value": {
+            "title": "Value",
+            "description": "What this instance would run, null for a secret"
+          },
+          "provenance": {
+            "type": "string",
+            "title": "Provenance",
+            "description": "Where the value comes from: `overlay`, `default`, `chart` or `unset`"
+          },
+          "dial": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dial",
+            "description": "Not resolved yet; always null"
+          },
+          "protected": {
+            "type": "boolean",
+            "title": "Protected",
+            "description": "Whether the protected-var policy covers this path"
+          },
+          "set": {
+            "type": "boolean",
+            "title": "Set",
+            "description": "Whether this instance has a value at all"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "type",
+          "secret",
+          "provenance",
+          "protected",
+          "set"
+        ],
+        "title": "ConfigFieldModel",
+        "description": "One option the app declares, and what this instance would run for it."
       },
       "ConfigHistoryEntry": {
         "properties": {
@@ -29824,6 +30125,23 @@
         ],
         "title": "TransportFacts",
         "description": "What this deployment can carry a source's records on, between its stages."
+      },
+      "UnknownFieldModel": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "UnknownFieldModel",
+        "description": "An overlay key under `config:` that the app's contract does not declare."
       },
       "UpdateAccountRequest": {
         "properties": {
