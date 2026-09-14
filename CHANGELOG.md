@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.20.5](https://github.com/hyperi-io/dfe-engine/compare/v1.20.4...v1.20.5) (2026-09-14)
+
+### Bug Fixes
+
+* **api:** serve each app's container contract and its per-instance config with provenance ([#382](https://github.com/hyperi-io/dfe-engine/issues/382)) ([43fecae](https://github.com/hyperi-io/dfe-engine/commit/43fecae71f8a20c5fe70ce55cef57b8dd3c14adb))
+
 ## [1.20.4](https://github.com/hyperi-io/dfe-engine/compare/v1.20.3...v1.20.4) (2026-09-13)
 
 ### Bug Fixes
