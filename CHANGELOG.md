@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.20.7](https://github.com/hyperi-io/dfe-engine/compare/v1.20.6...v1.20.7) (2026-09-14)
+
+### Bug Fixes
+
+* **api:** POST /sources documents the core-landing 409, and the archiver's chart-set paths are chart-derived ([fa957b2](https://github.com/hyperi-io/dfe-engine/commit/fa957b2272603013726f0a10e680422c03cda31a)), closes [#381](https://github.com/hyperi-io/dfe-engine/issues/381)
+* **orgs:** seed orgs from config, validate names ([#385](https://github.com/hyperi-io/dfe-engine/issues/385)) ([489e76d](https://github.com/hyperi-io/dfe-engine/commit/489e76da9cc3f7777517f45a8042829019df5efd))
+
 ## [1.20.6](https://github.com/hyperi-io/dfe-engine/compare/v1.20.5...v1.20.6) (2026-09-14)
 
 ### Bug Fixes
