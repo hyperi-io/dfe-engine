@@ -9,7 +9,9 @@
 # The engine resolves it in this order: DFE_APP_CATALOGUE_FILE, then a copy
 # mounted into the engine pod from this file, then the snapshot bundled in the
 # engine image. A deployment that mounts this file picks up a new app without
-# waiting for an engine release.
+# waiting for an engine release. Helm reads only files inside a chart, so the
+# engine chart carries the copy it mounts -- re-render it after editing here:
+#     python3 scripts/composition.py --write-catalogue
 #
 # Multiplicity and replication are INDEPENDENT axes. A transform is both: there
 # may be hundreds of them, one per source, and each one is separately KEDA-scaled.
@@ -284,9 +286,23 @@ apps:
         sources: config.sources
         output: config.output
       scope: instance
-    # The families dfe-fetcher ships, from its docs/capability-catalog.yaml.
-    # Each name is also the config key its stanza sits under in config.sources.
+    # What dfe-fetcher can fetch. Each name is the config key its stanza sits
+    # under in config.sources, and the engine refuses a source whose declared
+    # type is not here.
+    #
+    # The first three are SHAPES, not vendors: each is a keyed map of instances
+    # (sources.rest.<id>, and the same for db and file) driven by a profile or a
+    # connection, so one of them covers many upstreams. They are deliberately
+    # absent from the fetcher's docs/capability-catalog.yaml, which is derived
+    # from its typed per-vendor blocks alone. runZero, for one, is not a family:
+    # it ships as a profile and is configured under sources.rest.
+    #
+    # The rest are the typed per-vendor families, and those DO come from that
+    # capability catalogue.
     source_types:
+      - rest
+      - db
+      - file
       - aws
       - azure
       - m365

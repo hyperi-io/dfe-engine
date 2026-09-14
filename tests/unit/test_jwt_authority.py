@@ -16,6 +16,7 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from jwt.exceptions import InvalidTokenError
 
+from dfe_engine.auth import hyperdx_role
 from dfe_engine.auth.jwt_authority import (
     HYPERDX_AUDIENCE,
     MACHINE_SUBJECT,
@@ -195,6 +196,15 @@ def test_machine_token_wrong_audience_rejected_by_verifier(tmp_path):
             audience=HYPERDX_AUDIENCE,
             issuer=ISS,
         )
+
+
+def test_machine_token_carries_the_team_admin_role_claim(tmp_path):
+    # The engine provisions the shipped dashboards, which the fork refuses to a
+    # token whose role claim is not one it allows (dfe-engine#387).
+    a = _authority(tmp_path)
+    claims = _decode_via_jwks(a, a.mint_machine_token(audience=HYPERDX_AUDIENCE), HYPERDX_AUDIENCE)
+    assert claims[hyperdx_role.CLAIM] == hyperdx_role.TEAM_ADMIN
+    assert claims[hyperdx_role.CLAIM] in hyperdx_role.FORK_ACCEPTS
 
 
 def test_machine_token_source_caches_and_refreshes_near_expiry(tmp_path):

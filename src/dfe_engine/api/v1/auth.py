@@ -24,7 +24,7 @@ from dfe_engine.api.deps import (
     resolve_live_groups_for_user,
     resolve_live_roles_for_user,
 )
-from dfe_engine.auth import account_durability, admin_retirement, breakglass
+from dfe_engine.auth import account_durability, admin_retirement, breakglass, hyperdx_role
 from dfe_engine.auth.audit import (
     audit_account_change,
     audit_breakglass_login,
@@ -132,6 +132,8 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
             "roles": auth_ctx.roles,
             "groups": auth_ctx.groups,
             "org_ids": auth_ctx.org_ids,
+            # dfe-hyperdx gates changing what a team sees on this one value.
+            hyperdx_role.CLAIM: hyperdx_role.role_claim(auth_ctx.roles),
         },
         settings=settings,
     )
@@ -158,6 +160,8 @@ async def refresh_token(user: CurrentUser, request: Request, settings: Settings)
             "roles": roles,
             "groups": groups,
             "org_ids": user.org_ids,
+            # Re-resolved, so a role taken away is gone from the next token too.
+            hyperdx_role.CLAIM: hyperdx_role.role_claim(roles),
         },
         settings=settings,
     )

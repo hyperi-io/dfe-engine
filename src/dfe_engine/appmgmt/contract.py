@@ -591,6 +591,22 @@ def chart_supplier(service: str, path: str) -> str | None:
     return CHART_DERIVED.get(service, {}).get(inner)
 
 
+def chart_env_names(service: str) -> dict[str, str]:
+    """Environment names the chart sets for this app, each with the option it decides.
+
+    A supplier in :data:`CHART_DERIVED` is either an environment name or a chart
+    helper, and only the names are keys here: ``ENV_NAME`` tells the two apart,
+    so what an ``extraEnv`` key is compared against is data rather than prose.
+    Where one variable decides several options the first is reported, which is
+    enough to say what the operator would be shadowing.
+    """
+    out: dict[str, str] = {}
+    for inner, supplier in CHART_DERIVED.get(service, {}).items():
+        if ENV_NAME.match(supplier):
+            out.setdefault(supplier, f"{CONFIG_ROOT}.{inner}")
+    return out
+
+
 # ── resolving one instance's values ───────────────────────────
 
 

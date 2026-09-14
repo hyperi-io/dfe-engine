@@ -44,6 +44,7 @@ from dfe_engine.api.deps import (
     jwt_authority_for,
     resolve_live_roles_for_user,
 )
+from dfe_engine.auth import hyperdx_role
 from dfe_engine.auth.audit import audit_login_denied, audit_login_success
 
 router = APIRouter(prefix="/auth/oidc", tags=["OIDC Login"])
@@ -242,6 +243,9 @@ async def oidc_callback(
         except Exception:
             logger.exception("JIT provisioning failed", user_id=identity.subject)
 
+    # From the group files rather than the IdP token, for the claim and the audit.
+    roles = resolve_live_roles_for_user(request, identity.subject, fallback_groups=identity.groups)
+
     # RE-MINT: the engine's own ES384 identity token is the ONLY token downstream
     # apps ever see. iss/iat/exp are set by the authority.
     token = jwt_authority_for(settings).sign(
@@ -249,6 +253,8 @@ async def oidc_callback(
             "sub": identity.subject,
             "email": identity.email,
             "groups": identity.groups,
+            # dfe-hyperdx gates changing what a team sees on this one value.
+            hyperdx_role.CLAIM: hyperdx_role.role_claim(roles),
         }
     )
 
@@ -261,12 +267,7 @@ async def oidc_callback(
 
     # The IdP code is exchanged for an engine token here, so this is the login
     # the audit trail counts - not the per-request token check in get_current_user.
-    audit_login_success(
-        identity.subject,
-        "oidc",
-        _get_client_ip(request),
-        resolve_live_roles_for_user(request, identity.subject, fallback_groups=identity.groups),
-    )
+    audit_login_success(identity.subject, "oidc", _get_client_ip(request), roles)
 
     payload = OidcCallbackResponse(
         access_token=token,

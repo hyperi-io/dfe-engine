@@ -12672,7 +12672,7 @@
           "App Management"
         ],
         "summary": "Set App Config",
-        "description": "Write options the app declares, and environment keys it does not.\n\nJudged against the app's own contract before anything is committed, so a value\nthe app would refuse at startup leaves the deploy repo where it was rather than\nlanding a commit an operator then has to revert.\n\nA secret is written like any other option: it goes into the overlay as the rest\nof this surface writes one, and the read route still never says what it is.",
+        "description": "Write options the app declares, and environment keys it does not.\n\nJudged against the app's own contract before anything is committed, so a value\nthe app would refuse at startup leaves the deploy repo where it was rather than\nlanding a commit an operator then has to revert.\n\nA secret is written like any other option: it goes into the overlay as the rest\nof this surface writes one, and the read route still never says what it is.\n\n409 where the deployment already decides the value: a config path the chart\nderives, or an `extraEnv` name the chart sets for this app.",
         "operationId": "set_app_config_api_v1_apps__service___instance__config_put",
         "parameters": [
           {

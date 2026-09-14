@@ -94,6 +94,51 @@ def _write_archiver(client, headers, changes: dict, etag: str | None = None):
     return client.put(ARCHIVER_CONFIG, json={"changes": changes}, headers=sent)
 
 
+def _live(client, headers, name: str, body: dict):
+    """Define a source and mark it deployed, as a source deploy leaves it."""
+    from dfe_engine.api.deps import _registries
+
+    assert client.post("/api/v1/sources", json=body, headers=headers).status_code == 201
+    _registries["source"].set_deployed_version(name, "1.0.0")
+
+
+def _deploy_fetcher(client, headers, instance: str):
+    """Stand up a fetcher instance, which is named for a fetcher-based source."""
+    _live(
+        client,
+        headers,
+        instance,
+        {
+            "source": instance,
+            "fetcher": {"source_type": "crates_io", "config": {"crates": ["dfe-fetcher"]}},
+        },
+    )
+    return client.post(
+        "/api/v1/apps/dfe-fetcher/instances",
+        json={"instance": instance},
+        headers=headers,
+    )
+
+
+def _deploy_vrl(client, headers, instance: str):
+    """Stand up a vrl transform instance, which is a source's processing step."""
+    _live(
+        client,
+        headers,
+        instance,
+        {
+            "source": instance,
+            "match": {"field": "tags.collector.type", "value": instance},
+            "transform": {"engine": "vrl"},
+        },
+    )
+    return client.post(
+        "/api/v1/apps/dfe-transform-vrl/instances",
+        json={"instance": instance},
+        headers=headers,
+    )
+
+
 class TestTheContractRoute:
     def test_it_serves_what_the_image_emitted(self, client, admin_headers):
         body = client.get(CONTRACT, headers=admin_headers).json()
@@ -385,6 +430,70 @@ class TestArchiverChartDerivedPaths:
         assert resp.status_code == 409, resp.text
         assert resp.json()["code"] == "chart_derived"
         assert "DLQ_MODE" in resp.json()["message"]
+
+
+class TestCustomEnvCannotShadowAChartSetName:
+    """A chart-set name written under extraEnv never reaches the app -- dfe-infra#314."""
+
+    def _put(self, client, headers, service, instance, name):
+        return client.put(
+            f"/api/v1/apps/{service}/{instance}/config",
+            json={"changes": {f"extraEnv.{name}": "mine"}},
+            headers=headers,
+        )
+
+    def _assert_refused(self, resp, name):
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "chart_set_env"
+        assert name in resp.json()["message"]
+
+    def test_the_loader_chart_s_broker_list_cannot_be_shadowed(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        name = "DFE_LOADER_KAFKA_BROKERS"
+        self._assert_refused(self._put(client, admin_headers, LOADER, "default", name), name)
+
+    def test_the_receiver_chart_s_bind_address_cannot_be_shadowed(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        client.post(
+            "/api/v1/apps/dfe-receiver/instances",
+            json={"instance": "default"},
+            headers=admin_headers,
+        )
+        name = "DFE_RECEIVER_BIND_ADDRESS"
+        self._assert_refused(
+            self._put(client, admin_headers, "dfe-receiver", "default", name), name
+        )
+
+    def test_the_fetcher_chart_s_sasl_user_cannot_be_shadowed(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy_fetcher(client, admin_headers, "alpha")
+        name = "DFE_FETCHER_KAFKA_SASL_USER"
+        self._assert_refused(self._put(client, admin_headers, "dfe-fetcher", "alpha", name), name)
+
+    def test_the_transform_chart_s_source_topics_cannot_be_shadowed(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy_vrl(client, admin_headers, "edge")
+        name = "DFE_TRANSFORM_SOURCE_TOPICS"
+        self._assert_refused(
+            self._put(client, admin_headers, "dfe-transform-vrl", "edge", name), name
+        )
+
+    def test_a_name_no_chart_sets_is_still_the_operator_s(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        resp = self._put(client, admin_headers, LOADER, "default", "DFE_LOADER_HOUSE_KEY")
+        assert resp.status_code == 200, resp.text
 
 
 class TestWritingCustomEnv:
