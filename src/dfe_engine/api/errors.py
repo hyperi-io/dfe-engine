@@ -87,10 +87,12 @@ class CoreResourceConflictErrorResponse(BaseModel):
     context: CoreResourceConflictContext
 
 
-SourceCreateConflictResponse = Annotated[
-    SourceNameConflictErrorResponse | MatchConflictErrorResponse,
-    Field(discriminator="code"),
-]
+# Plain union, not discriminated: SourceNameConflictErrorResponse and
+# CoreResourceConflictErrorResponse both carry code "conflict", which
+# Field(discriminator="code") refuses to build a union over.
+SourceCreateConflictResponse = (
+    SourceNameConflictErrorResponse | CoreResourceConflictErrorResponse | MatchConflictErrorResponse
+)
 
 SourceWriteConflictResponse = Annotated[
     MatchConflictErrorResponse | CoreResourceConflictErrorResponse,

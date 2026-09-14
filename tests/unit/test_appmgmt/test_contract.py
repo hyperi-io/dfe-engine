@@ -266,6 +266,29 @@ class TestProvenance:
             "config.dlq.kafka.routing",
         } == derived
 
+    def test_the_flat_env_families_the_archiver_chart_sets(self):
+        # The archiver reads its own bare KAFKA_*/ARCHIVER_*/S3_*/DLQ_* names,
+        # not the DFE_ARCHIVER_* family the other apps use.
+        view = contract.resolve_config(_contract("dfe-archiver"), {})
+        derived = {f.path for f in view.fields if f.provenance == contract.Provenance.CHART}
+        assert {
+            "config.transport",
+            "config.grpc.listen",
+            "config.kafka.brokers",
+            "config.kafka.security_protocol",
+            "config.kafka.sasl_username",
+            "config.kafka.sasl_password",
+            "config.kafka.sasl_mechanism",
+            "config.kafka.topic_include",
+            "config.archive.destination",
+            "config.archive.s3.endpoint",
+            "config.archive.s3.bucket",
+            "config.dlq.enabled",
+            "config.dlq.mode",
+            "config.dlq.kafka.common_topic",
+            "config.dlq.kafka.routing",
+        } == derived
+
     def test_what_supplies_a_chart_path_is_named(self):
         # A refused write has to say what to change instead of the overlay.
         assert contract.chart_supplier("dfe-receiver", "config.server.bind_address") == (

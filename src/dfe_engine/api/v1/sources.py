@@ -673,8 +673,9 @@ async def list_sources(
         409: {
             "model": SourceCreateConflictResponse,
             "description": (
-                "Source name already exists (code conflict), or receiver match duplicates "
-                "another enabled source (code match_conflict)"
+                "Source name already exists (code conflict), the name is the core "
+                "landing the engine owns and reconciles itself (code conflict), or "
+                "receiver match duplicates another enabled source (code match_conflict)"
             ),
         },
     },
@@ -779,7 +780,10 @@ async def list_catalogue(
     responses={
         409: {
             "model": SourceCreateConflictResponse,
-            "description": "A source of that name already exists, or its match duplicates another",
+            "description": (
+                "A source of that name already exists, the name is the core landing "
+                "the engine owns and reconciles itself, or its match duplicates another"
+            ),
         },
     },
     dependencies=[Depends(require_action(scopes_dict["source_write"]))],
