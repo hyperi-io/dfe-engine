@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.20.5"
+    "version": "1.20.6"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -3185,25 +3185,21 @@
             }
           },
           "409": {
-            "description": "Source name already exists (code conflict), or receiver match duplicates another enabled source (code match_conflict)",
+            "description": "Source name already exists (code conflict), the name is the core landing the engine owns and reconciles itself (code conflict), or receiver match duplicates another enabled source (code match_conflict)",
             "content": {
               "application/json": {
                 "schema": {
-                  "oneOf": [
+                  "anyOf": [
                     {
                       "$ref": "#/components/schemas/SourceNameConflictErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CoreResourceConflictErrorResponse"
                     },
                     {
                       "$ref": "#/components/schemas/MatchConflictErrorResponse"
                     }
                   ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "conflict": "#/components/schemas/SourceNameConflictErrorResponse",
-                      "match_conflict": "#/components/schemas/MatchConflictErrorResponse"
-                    }
-                  },
                   "title": "Response 409 Create Source Api V1 Sources Post"
                 }
               }
@@ -3364,25 +3360,21 @@
             }
           },
           "409": {
-            "description": "A source of that name already exists, or its match duplicates another",
+            "description": "A source of that name already exists, the name is the core landing the engine owns and reconciles itself, or its match duplicates another",
             "content": {
               "application/json": {
                 "schema": {
-                  "oneOf": [
+                  "anyOf": [
                     {
                       "$ref": "#/components/schemas/SourceNameConflictErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CoreResourceConflictErrorResponse"
                     },
                     {
                       "$ref": "#/components/schemas/MatchConflictErrorResponse"
                     }
                   ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "conflict": "#/components/schemas/SourceNameConflictErrorResponse",
-                      "match_conflict": "#/components/schemas/MatchConflictErrorResponse"
-                    }
-                  },
                   "title": "Response 409 Create Source From Catalogue Api V1 Sources From Catalogue  Entry  Post"
                 }
               }

@@ -25,6 +25,9 @@ LOADER = "dfe-loader"
 CONFIG = f"/api/v1/apps/{LOADER}/default/config"
 CONTRACT = f"/api/v1/app-contracts/{LOADER}"
 
+ARCHIVER = "dfe-archiver"
+ARCHIVER_CONFIG = f"/api/v1/apps/{ARCHIVER}/default/config"
+
 
 @pytest.fixture(autouse=True)
 def _mounted(monkeypatch):
@@ -73,6 +76,22 @@ def _write(client, headers, changes: dict, etag: str | None = None):
     if etag is not None:
         sent["If-Match"] = etag
     return client.put(CONFIG, json={"changes": changes}, headers=sent)
+
+
+def _deploy_archiver(client, headers, values: dict | None = None):
+    """Stand up the archiver, which is also a single-instance app named `default`."""
+    return client.post(
+        f"/api/v1/apps/{ARCHIVER}/instances",
+        json={"instance": "default", "values": values or {}},
+        headers=headers,
+    )
+
+
+def _write_archiver(client, headers, changes: dict, etag: str | None = None):
+    sent = dict(headers)
+    if etag is not None:
+        sent["If-Match"] = etag
+    return client.put(ARCHIVER_CONFIG, json={"changes": changes}, headers=sent)
 
 
 class TestTheContractRoute:
@@ -322,6 +341,50 @@ class TestWritingConfig:
         assert resp.status_code == 200, resp.text
         assert resp.json()["changed"] is False
         assert gc.head_revision() == before
+
+
+class TestArchiverChartDerivedPaths:
+    """The archiver reads its own bare env family, not DFE_ARCHIVER_* -- #381."""
+
+    def test_a_kafka_path_is_refused_and_names_the_bare_env_var(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy_archiver(client, admin_headers)
+        resp = _write_archiver(client, admin_headers, {"config.kafka.brokers": ["k:9092"]})
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "chart_derived"
+        assert "KAFKA_BROKERS" in resp.json()["message"]
+
+    def test_a_transport_path_is_refused_and_names_the_bare_env_var(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy_archiver(client, admin_headers)
+        resp = _write_archiver(client, admin_headers, {"config.transport": "grpc"})
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "chart_derived"
+        assert "ARCHIVER_TRANSPORT" in resp.json()["message"]
+
+    def test_an_s3_path_is_refused_and_names_the_bare_env_var(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy_archiver(client, admin_headers)
+        resp = _write_archiver(client, admin_headers, {"config.archive.s3.bucket": "landing"})
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "chart_derived"
+        assert "S3_BUCKET" in resp.json()["message"]
+
+    def test_a_dlq_path_is_refused_and_names_the_bare_env_var(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy_archiver(client, admin_headers)
+        resp = _write_archiver(client, admin_headers, {"config.dlq.mode": "fan_out"})
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "chart_derived"
+        assert "DLQ_MODE" in resp.json()["message"]
 
 
 class TestWritingCustomEnv:
