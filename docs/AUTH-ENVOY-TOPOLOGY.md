@@ -65,7 +65,7 @@ IdP's token never travels past the engine.
    headers before they reach an app, so identity cannot be forged by a caller.
 3. **Route** - single-origin path routing to the three upstreams.
 4. **Forward** - pass the verified JWT upstream; each app re-verifies it
-   (defence in depth) and reads `sub` + `groups`.
+   (defence in depth) and reads the claims below.
 
 Envoy never mints a token. Issuance happens elsewhere (see "Issuance" below).
 
@@ -102,6 +102,26 @@ identity source:
 
 Either way, the token Envoy (and every app) verifies is the **engine's** ES384
 token - one issuer, one JWKS. Merged mode is just both login routes enabled.
+
+## What the token carries
+
+Every token carries `sub`; a login token adds `email` and `groups`, and the local
+login also carries `roles`, `org_id` and `org_ids`. The engine re-resolves roles
+from the group files on every request, so what a token asserts about them never
+decides an engine answer.
+
+One claim exists for a peer rather than for the engine:
+
+| Claim | Value | Read by |
+|---|---|---|
+| `role` | `admin` for an account holding the engine's `admin` or `infra_admin` role, `member` for any other account, and `admin` on the engine's own `svc:dfe-engine` service token | dfe-hyperdx |
+
+dfe-hyperdx gates deleting and restoring the shipped dashboards on `role`: it
+allows `admin` and `owner`, refuses any other value with 403, and falls back to
+plain team membership when there is no claim at all. So the engine always writes
+one - `member` is a refusal where a missing claim would be a pass. `owner` is in
+the fork's accepted set and the engine never mints it, having no team-owner role
+to map onto.
 
 ## Reference config shape (illustrative)
 

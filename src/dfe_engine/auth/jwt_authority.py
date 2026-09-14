@@ -40,6 +40,8 @@ from jwt.exceptions import InvalidTokenError
 from scalo.logger import logger
 from scalo.secrets.exceptions import SecretNotFoundError
 
+from dfe_engine.auth.hyperdx_role import CLAIM as ROLE_CLAIM
+from dfe_engine.auth.hyperdx_role import SERVICE_ROLE
 from dfe_engine.secrets import DfeSecrets
 
 # ES384 = ECDSA P-384 + SHA-384. The feasible CNSA-2.0 signature for JWTs today
@@ -180,6 +182,9 @@ class JwtAuthority:
     ) -> str:
         """Mint a short-lived service token for engine-to-peer control calls.
 
+        Carries the team-admin role claim: this identity provisions the shipped
+        dashboards, which dfe-hyperdx refuses to a token without it.
+
         Args:
             audience: The accepting peer's audience claim (e.g. ``dfe-hyperdx``).
             subject: Service subject identifying the caller.
@@ -196,7 +201,7 @@ class JwtAuthority:
                 f"machine-token TTL must be in (0, {MACHINE_TOKEN_TTL_SECONDS}]s, got {ttl_seconds}"
             )
         return self.sign(
-            {"sub": subject, "aud": audience},
+            {"sub": subject, "aud": audience, ROLE_CLAIM: SERVICE_ROLE},
             expires_delta=timedelta(seconds=ttl_seconds),
         )
 

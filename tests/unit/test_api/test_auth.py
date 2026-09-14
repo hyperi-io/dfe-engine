@@ -1,6 +1,14 @@
 """Tests for auth router — login, me, permissions, 401/403."""
 
+import jwt as pyjwt
 from fastapi.testclient import TestClient
+
+from dfe_engine.auth import hyperdx_role
+
+
+def _claims(token: str) -> dict:
+    """Read a token the way a peer reads it, signature checked elsewhere."""
+    return pyjwt.decode(token, options={"verify_signature": False})
 
 
 class TestLogin:
@@ -250,3 +258,36 @@ class TestPermissions:
         assert data["roles"] == []
         assert "admin" not in data["permissions"]
         assert "*" not in data.get("permissions", [])
+
+
+class TestTheHyperdxRoleClaim:
+    """Every minted token says whether the account may change what a team sees."""
+
+    def test_an_admin_login_carries_a_role_the_fork_allows(self, client: TestClient):
+        resp = client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "test-admin-pw"},
+        )
+        assert resp.status_code == 200
+        claim = _claims(resp.json()["access_token"])[hyperdx_role.CLAIM]
+        assert claim == hyperdx_role.TEAM_ADMIN
+        assert claim in hyperdx_role.FORK_ACCEPTS
+
+    def test_a_read_only_login_carries_a_role_the_fork_refuses(self, client: TestClient):
+        resp = client.post(
+            "/api/v1/auth/login",
+            json={"username": "viewer", "password": "test-viewer-pw"},
+        )
+        assert resp.status_code == 200
+        claim = _claims(resp.json()["access_token"])[hyperdx_role.CLAIM]
+        assert claim == hyperdx_role.MEMBER
+        assert claim not in hyperdx_role.FORK_ACCEPTS
+
+    def test_a_refresh_resolves_the_claim_again_rather_than_copying_it(
+        self, client: TestClient, viewer_headers: dict
+    ):
+        # The viewer's own groups carry no team-admin role, so the refreshed
+        # token refuses whatever the presented one claimed.
+        resp = client.post("/api/v1/auth/refresh", headers=viewer_headers)
+        assert resp.status_code == 200
+        assert _claims(resp.json()["access_token"])[hyperdx_role.CLAIM] == hyperdx_role.MEMBER
