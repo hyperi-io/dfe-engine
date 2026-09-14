@@ -846,6 +846,7 @@ class DeploymentSettings(BaseModel):
     - DFE_DEPLOYMENT_APP_CONFIG_DIR -> deployment.app_config_dir
     - DFE_DEPLOYMENT_APP_CONFIG_BASE_DIR -> deployment.app_config_base_dir
     - DFE_DEPLOYMENT_APP_CONFIG_MOUNT -> deployment.app_config_mount
+    - DFE_DEPLOYMENT_APP_ENV_DIR -> deployment.app_env_dir
     """
 
     config_dir: str = Field(default="", description="YAML directory for deployment configurations")
@@ -906,6 +907,16 @@ class DeploymentSettings(BaseModel):
             "engine and the app mount one directory at their own paths, and a "
             "rendered file names the app's. Empty means they are the same. "
             "DFE_DEPLOYMENT_APP_CONFIG_MOUNT."
+        ),
+    )
+    app_env_dir: str = Field(
+        default="",
+        description=(
+            "Directory the engine writes each app's custom environment into, as "
+            "<service>.custom.env, for a deployer whose containers read env files "
+            "from the host. Empty means something else delivers the overlay's "
+            "extraEnv block, which on Kubernetes is the app's own chart. "
+            "DFE_DEPLOYMENT_APP_ENV_DIR."
         ),
     )
 

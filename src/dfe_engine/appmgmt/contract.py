@@ -13,9 +13,10 @@ once at start to write that pair where the engine reads it. The contract is
 therefore written by the exact binary that will read the config, so there is no
 copy in this repo to drift against it.
 
-Two answers come out of that pair: the contract as the app wrote it, and the
+Three answers come out of that pair: the contract as the app wrote it, the
 contract flattened to one row per option carrying the value this instance would
-run and where that value comes from. A deployment that mounts nothing answers
+run and where that value comes from, and whether a value about to be written is
+one the app accepts. A deployment that mounts nothing answers
 ``available: false`` - the mount is dfe-infra's half of the wiring, and an engine
 that has not been given one still serves every other route.
 """
@@ -23,13 +24,14 @@ that has not been given one still serves every other route.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from dfe_engine.appmgmt.appconfig import CONFIG_ROOT
+from dfe_engine.appmgmt.appconfig import CONFIG_ROOT, ENV_ROOT, custom_env
 from dfe_engine.gitcrud.engine import flatten
 from dfe_engine.manifest import ManifestError, manifest_path
 
@@ -47,6 +49,13 @@ SOURCE_FILE = "source.json"
 SECRET_MARKER = "x-dfe-secret"
 """The schema keyword an app uses to mark a field as credential material."""
 
+ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
+"""What a key under ``extraEnv`` may be called.
+
+The whole point of the block is a name no contract declares, so the name is all
+there is to check; the value is never judged against the app's schema.
+"""
+
 SECRET_NAMES = frozenset({"password", "secret", "token", "api_key", "private_key", "passphrase"})
 """Leaf names treated as secret whatever the schema says.
 
@@ -56,40 +65,76 @@ trusting the marker alone would hand an operator's Kafka password back over the
 API. The rule errs towards hiding.
 """
 
-_TRANSFORM_CHART_PATHS = frozenset(
-    {
-        # dfe-common.transport resolves these from kafka.mode, so the app never
-        # sees what the overlay says about them.
-        "source.transport",
-        "sink.transport",
-        "source.listen",
-        "sink.endpoint",
-        # The flat DFE_TRANSFORM_* env contract, which outranks the config file.
-        "source.brokers",
-        "sink.brokers",
-        "source.topics",
-        "sink.topic",
-        "source.group_id",
-        "source.sasl.username",
-        "source.sasl.password",
-        "sink.sasl.username",
-        "sink.sasl.password",
-    }
-)
-
-CHART_DERIVED: dict[str, frozenset[str]] = {
-    "dfe-transform-vrl": _TRANSFORM_CHART_PATHS,
-    "dfe-transform-vector": _TRANSFORM_CHART_PATHS,
-    # The one key a dfe-infra app chart bakes into its own values; the other five
-    # ship `config: {}`. The pinned ClickHouse client has no TCP row fetch, so the
-    # chart holds this app to http.
-    "dfe-loader": frozenset({"clickhouse.protocol"}),
+_TRANSFORM_CHART_ENV = {
+    # dfe-common.transport resolves these from kafka.mode in the configmap, so the
+    # app never sees what the overlay says about them.
+    "source.transport": "dfe-common.transport",
+    "sink.transport": "dfe-common.transport",
+    "source.listen": "dfe-common.transport",
+    "sink.endpoint": "dfe-common.transport",
+    # The flat DFE_TRANSFORM_* env contract, which outranks the config file.
+    "source.brokers": "DFE_TRANSFORM_SOURCE_BROKERS",
+    "sink.brokers": "DFE_TRANSFORM_SINK_BROKERS",
+    "source.topics": "DFE_TRANSFORM_SOURCE_TOPICS",
+    "sink.topic": "DFE_TRANSFORM_SINK_TOPIC",
+    "source.group_id": "DFE_TRANSFORM_SOURCE_GROUP_ID",
+    "source.sasl.username": "DFE_TRANSFORM_SOURCE_SASL_USERNAME",
+    "source.sasl.password": "DFE_TRANSFORM_SOURCE_SASL_PASSWORD",
+    "sink.sasl.username": "DFE_TRANSFORM_SINK_SASL_USERNAME",
+    "sink.sasl.password": "DFE_TRANSFORM_SINK_SASL_PASSWORD",
 }
-"""Config paths the dfe-infra chart decides, per app.
+
+CHART_DERIVED: dict[str, dict[str, str]] = {
+    "dfe-transform-vrl": _TRANSFORM_CHART_ENV,
+    "dfe-transform-vector": _TRANSFORM_CHART_ENV,
+    "dfe-loader": {
+        "transport": "DFE_LOADER_TRANSPORT",
+        "grpc.listen": "DFE_LOADER_GRPC__LISTEN",
+        "kafka.brokers": "DFE_LOADER_KAFKA_BROKERS",
+        "kafka.sasl.username": "DFE_LOADER_KAFKA_SASL_USERNAME",
+        "kafka.sasl.password": "DFE_LOADER_KAFKA_SASL_PASSWORD",
+        "clickhouse.hosts": "DFE_LOADER_CLICKHOUSE_HOSTS",
+        "clickhouse.database": "DFE_LOADER_CLICKHOUSE_DATABASE",
+        "clickhouse.username": "DFE_LOADER_CLICKHOUSE_USERNAME",
+        "clickhouse.password": "DFE_LOADER_CLICKHOUSE_PASSWORD",
+        # The pinned ClickHouse client has no TCP row fetch, so the chart holds
+        # this app to http.
+        "clickhouse.protocol": "DFE_LOADER_CLICKHOUSE__PROTOCOL",
+        "routing.dlq.topic": "DFE_LOADER_DLQ_TOPIC",
+        "routing.dlq.mode": "DFE_LOADER_DLQ_MODE",
+    },
+    "dfe-receiver": {
+        "kafka.brokers": "DFE_RECEIVER_KAFKA_BROKERS",
+        # The receiver's flat env spells the field USER where the loader spells it
+        # USERNAME; both land on the same config path.
+        "kafka.sasl.username": "DFE_RECEIVER_KAFKA_SASL_USER",
+        "kafka.sasl.password": "DFE_RECEIVER_KAFKA_SASL_PASSWORD",
+        "kafka.sasl.mechanism": "DFE_RECEIVER_KAFKA_SASL_MECHANISM",
+        "server.bind_address": "DFE_RECEIVER_BIND_ADDRESS",
+        "routing.dlq.enabled": "DFE_RECEIVER_DLQ_ENABLED",
+        "routing.dlq.topic": "DFE_RECEIVER_DLQ_TOPIC",
+        "routing.dlq.mode": "DFE_RECEIVER_DLQ_MODE",
+    },
+    "dfe-fetcher": {
+        "kafka.sasl.username": "DFE_FETCHER_KAFKA_SASL_USER",
+        "kafka.sasl.password": "DFE_FETCHER_KAFKA_SASL_PASSWORD",
+        "kafka.sasl.mechanism": "DFE_FETCHER_KAFKA_SASL_MECHANISM",
+        "dlq.enabled": "DFE_FETCHER_DLQ_ENABLED",
+        "dlq.mode": "DFE_FETCHER_DLQ_MODE",
+        # One env var sets both: naming a common topic also pins the routing to it.
+        "dlq.kafka.common_topic": "DFE_FETCHER_DLQ_TOPIC",
+        "dlq.kafka.routing": "DFE_FETCHER_DLQ_TOPIC",
+    },
+}
+"""Config paths the dfe-infra chart decides, per app, and what decides each.
 
 DATA rather than a rule, because which paths a chart derives is a property of the
 charts and moves with them. A path named here that an app's schema does not carry
 simply never matches a field.
+
+The value is what an operator has to change instead - the flat env var the app
+reads, or the chart helper that resolves it - so a refused write names the thing
+that outranks the overlay rather than saying only that something does.
 """
 
 _MAX_DEPTH = 25
@@ -163,12 +208,31 @@ class UnknownEntry:
 
 
 @dataclass(frozen=True)
+class CustomEnvEntry:
+    """An environment key the overlay carries beside the declared options."""
+
+    path: str
+    value: Any
+
+
+@dataclass(frozen=True)
+class DeclaredOption:
+    """One declared option, reduced to what judging a written value needs."""
+
+    path: str
+    type: str
+    enum: list[Any] | None
+    nullable: bool
+
+
+@dataclass(frozen=True)
 class ConfigView:
     """Every option an instance has, plus the overlay keys none of them explain."""
 
     available: bool
     fields: list[ConfigField]
     unknown: list[UnknownEntry]
+    custom: list[CustomEnvEntry] = field(default_factory=list)
 
 
 # ── reading the mount ─────────────────────────────────────────
@@ -345,6 +409,24 @@ def _enum_of(node: dict, root: dict) -> list[Any] | None:
     return None
 
 
+def _nullable(node: dict, root: dict) -> bool:
+    """Whether the app accepts an explicit null here.
+
+    An optional field is spelled ``anyOf: [<the type>, null]``, so refusing every
+    null would refuse clearing a field the app itself declares as clearable.
+    """
+    declared = node.get("type")
+    if isinstance(declared, str):
+        return declared == "null"
+    if isinstance(declared, list):
+        return "null" in declared
+    for keyword in ("anyOf", "oneOf"):
+        for branch in node.get(keyword) or ():
+            if _deref(branch, root).get("type") == "null":
+                return True
+    return False
+
+
 def _is_secret(path: str, node: dict) -> bool:
     return bool(node.get(SECRET_MARKER)) or path.rsplit(".", 1)[-1] in SECRET_NAMES
 
@@ -408,6 +490,87 @@ def catalogue_enums(capabilities: list[Any]) -> dict[str, list[Any]]:
     return out
 
 
+# ── judging a value before it is committed ────────────────────
+
+_JSON_TYPES: dict[str, tuple[type, ...]] = {
+    "string": (str,),
+    "integer": (int,),
+    "number": (int, float),
+    "boolean": (bool,),
+    "array": (list,),
+    "object": (dict,),
+}
+
+
+def _json_type(value: Any) -> str:
+    """The JSON Schema name for a value, so a refusal reads in the schema's words."""
+    # bool first, since Python's bool IS an int and would otherwise read "integer".
+    if isinstance(value, bool):
+        return "boolean"
+    for name, types in _JSON_TYPES.items():
+        if name != "boolean" and isinstance(value, types):
+            return name
+    return "null"
+
+
+def declared_options(app_contract: AppContract) -> dict[str, DeclaredOption]:
+    """Every option the contract declares, keyed by the overlay path a write uses."""
+    enums = catalogue_enums(app_contract.capabilities)
+    out: dict[str, DeclaredOption] = {}
+    for path, node, _inherited in walk_schema(app_contract.schema):
+        if not path:
+            continue
+        out[f"{CONFIG_ROOT}.{path}"] = DeclaredOption(
+            path=f"{CONFIG_ROOT}.{path}",
+            type=_type_of(node, app_contract.schema),
+            enum=enums.get(path) or _enum_of(node, app_contract.schema),
+            nullable=_nullable(node, app_contract.schema),
+        )
+    return out
+
+
+def check_value(option: DeclaredOption, value: Any) -> str:
+    """Why the app would refuse this value, or empty when it accepts it.
+
+    The apps declare a type everywhere and a closed set almost nowhere, so a value
+    that passes here can still be one the app rejects at startup.
+    """
+    if value is None:
+        return "" if option.nullable else f"{option.path} does not accept a null"
+    accepted = _JSON_TYPES.get(option.type)
+    if accepted is not None:
+        # A bool is an int in Python and is not one here: `true` in a chunk-size
+        # field would otherwise be written as 1.
+        wrong = not isinstance(value, accepted) or (
+            isinstance(value, bool) and option.type != "boolean"
+        )
+        if wrong:
+            return f"{option.path} takes {option.type}, not {_json_type(value)}"
+    if option.enum is not None and value not in option.enum:
+        offered = ", ".join(repr(v) for v in option.enum)
+        return f"{option.path} takes one of {offered}, not {value!r}"
+    return ""
+
+
+def check_env_value(value: Any) -> str:
+    """Why this value cannot become an environment entry, or empty when it can."""
+    if isinstance(value, (dict, list)):
+        return "an environment value is one scalar, not a list or a mapping"
+    if isinstance(value, str) and ("\n" in value or "\r" in value):
+        return "an environment value carries no line break: a second line is a second key"
+    return ""
+
+
+def chart_supplier(service: str, path: str) -> str | None:
+    """What the deployment sets this option with, or None where it sets nothing.
+
+    ``path`` is the overlay path, ``config.`` rooted, so a caller compares the
+    request's own keys rather than re-deriving them.
+    """
+    inner = path.split(".", 1)[1] if path.startswith(f"{CONFIG_ROOT}.") else path
+    return CHART_DERIVED.get(service, {}).get(inner)
+
+
 # ── resolving one instance's values ───────────────────────────
 
 
@@ -449,7 +612,7 @@ def resolve_config(
     """
     block = overlay.get(CONFIG_ROOT)
     block = block if isinstance(block, dict) else {}
-    derived = CHART_DERIVED.get(app_contract.service, frozenset())
+    derived = CHART_DERIVED.get(app_contract.service, {})
     enums = catalogue_enums(app_contract.capabilities)
     protected = is_protected or (lambda _path: False)
 
@@ -501,4 +664,12 @@ def resolve_config(
         for path, value in flatten(block).items()
         if not _declares(path, leaves)
     ]
-    return ConfigView(available=app_contract.available, fields=fields, unknown=unknown)
+    # Apart from `unknown`, which is an overlay key that has outrun its contract;
+    # an extraEnv key is outside every contract on purpose.
+    custom = [
+        CustomEnvEntry(path=f"{ENV_ROOT}.{key}", value=value)
+        for key, value in sorted(custom_env(overlay).items())
+    ]
+    return ConfigView(
+        available=app_contract.available, fields=fields, unknown=unknown, custom=custom
+    )

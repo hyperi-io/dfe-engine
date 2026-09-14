@@ -13,6 +13,7 @@ GET    /api/v1/apps/{service}/{instance}              one instance, summarised
 DELETE /api/v1/apps/{service}/{instance}              undeploy an instance
 GET    /api/v1/apps/{service}/{instance}/values       the instance's overlay values
 GET    /api/v1/apps/{service}/{instance}/config       every declared option, with provenance
+PUT    /api/v1/apps/{service}/{instance}/config       write options, and custom env beside them
 GET    /api/v1/apps/{service}/{instance}/scaling      the scaling dials
 PUT    /api/v1/apps/{service}/{instance}/scaling      set the scaling dials
 GET    /api/v1/apps/{service}/{instance}/files/{set}  list the files it consumes
@@ -97,7 +98,7 @@ from dfe_engine.gitcrud.commit_policy import (
     build_message,
     validate_change,
 )
-from dfe_engine.gitcrud.engine import ResourceNotFoundError, flatten, set_path
+from dfe_engine.gitcrud.engine import ResourceNotFoundError, del_path, flatten, set_path
 from dfe_engine.gitcrud.routing import ReviewRequiredError, route_write
 from dfe_engine.governance import PolicyStore, ProtectedVarError
 from dfe_engine.sampling import SampleRequest, SamplerError
@@ -345,6 +346,13 @@ class UnknownFieldModel(BaseModel):
     value: Any = None
 
 
+class CustomEnvModel(BaseModel):
+    """An environment key written under `extraEnv`, which no contract declares."""
+
+    path: str
+    value: Any = None
+
+
 class AppConfigResponse(BaseModel):
     """Every option an instance has, and the overlay keys none of them explain."""
 
@@ -354,6 +362,38 @@ class AppConfigResponse(BaseModel):
     )
     fields: list[ConfigFieldModel] = Field(default_factory=list)
     unknown: list[UnknownFieldModel] = Field(default_factory=list)
+    custom: list[CustomEnvModel] = Field(
+        default_factory=list,
+        description=(
+            "Environment keys written under `extraEnv`. Reported apart from "
+            "`unknown`, which is a config key that has outrun its contract; these "
+            "are outside every contract on purpose."
+        ),
+    )
+
+
+class ConfigWriteRequest(BaseModel):
+    """Changes to one instance's config, each keyed by the path the GET reports."""
+
+    changes: dict[str, Any] = Field(
+        description=(
+            "One entry per option. A `config.*` key is checked against the app's "
+            "own schema before anything is committed; an `extraEnv.<NAME>` key is "
+            "checked as an environment name only, and a null value there removes it."
+        )
+    )
+
+
+class ConfigWriteResult(WriteResult):
+    """A config write, and how any custom environment in it reaches the container."""
+
+    custom_env: str = Field(
+        default="",
+        description=(
+            "How the `extraEnv` keys in this write reach the app. Empty when the "
+            "write carried none."
+        ),
+    )
 
 
 class ScalingResponse(BaseModel):
@@ -1106,6 +1146,163 @@ async def get_app_config(
             for f in view.fields
         ],
         unknown=[UnknownFieldModel(path=u.path, value=u.value) for u in view.unknown],
+        custom=[CustomEnvModel(path=c.path, value=c.value) for c in view.custom],
+    )
+
+
+def _require_fresh(gc: GitCrud, if_match: str | None) -> None:
+    """Refuse a write whose caller read against a revision the repo has moved past.
+
+    412 rather than the 409 a commit-time race answers with, because nothing has
+    been attempted yet. The guard inside the commit still answers 409 for anything
+    landing between this check and the write.
+    """
+    if if_match and if_match != _etag(gc):
+        raise HTTPException(
+            412,
+            detail={
+                "code": "stale_etag",
+                "message": "the deploy repo has moved on since this was read",
+                "head": _etag(gc),
+            },
+        )
+
+
+def _refuse(status: int, code: str, path: str, message: str) -> HTTPException:
+    """One refusal shape, so the console can show the path beside the reason."""
+    return HTTPException(status, detail={"code": code, "path": path, "message": message})
+
+
+def _checked_changes(
+    service: str, found: contract.AppContract, changes: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Split a request into config paths and environment keys, refusing what the app would.
+
+    Every refusal happens here, before the overlay document is touched at all, so
+    a rejected write leaves the deploy repo on the revision the caller read.
+
+    A `config.*` path the contract does not declare is carried through unchecked:
+    there is nothing to check it against, and the read route already reports such
+    a key as unknown rather than pretending it is not there.
+    """
+    options = contract.declared_options(found)
+    config_changes: dict[str, Any] = {}
+    env_changes: dict[str, Any] = {}
+    for path, value in changes.items():
+        if path.startswith(f"{appconfig.ENV_ROOT}."):
+            key = path.split(".", 1)[1]
+            if not contract.ENV_NAME.match(key):
+                raise _refuse(
+                    400,
+                    "invalid_env_name",
+                    path,
+                    f"{key!r} is not an environment name: upper case, digits and "
+                    "underscores, starting with a letter",
+                )
+            reason = contract.check_env_value(value)
+            if reason:
+                raise _refuse(400, "invalid_env_value", path, reason)
+            env_changes[key] = value
+            continue
+        if not path.startswith(f"{appconfig.CONFIG_ROOT}."):
+            raise _refuse(
+                400,
+                "invalid_path",
+                path,
+                f"a change addresses {appconfig.CONFIG_ROOT}.<option> or "
+                f"{appconfig.ENV_ROOT}.<NAME>",
+            )
+        supplier = contract.chart_supplier(service, path)
+        if supplier:
+            raise _refuse(
+                409,
+                "chart_derived",
+                path,
+                f"the deployment sets this through {supplier}, which outranks the "
+                "overlay, so writing it here would change nothing",
+            )
+        option = options.get(path)
+        if option is not None:
+            reason = contract.check_value(option, value)
+            if reason:
+                raise _refuse(400, "invalid_value", path, reason)
+        config_changes[path] = value
+    return config_changes, env_changes
+
+
+def _custom_env_delivery(request: Request, env_changes: dict[str, Any]) -> str:
+    """How the custom environment in this write reaches the app's container."""
+    if not env_changes:
+        return ""
+    if appconfig.custom_env_dir(request.app.state.settings) is None:
+        return "the app's own chart renders extraEnv onto the container"
+    return (
+        "written to this deployment's app environment directory; the command in "
+        "restart_required applies it"
+    )
+
+
+def _reload_mode(request: Request, result: WriteResult) -> str:
+    """How this write reaches the running process, in the response's own vocabulary.
+
+    A chart rolls the pod on any config change. A Compose stack has no controller
+    to do that, so what it reports is whether a command was handed back.
+    """
+    if _deploy_target(request) is DeployTarget.KUBERNETES:
+        return "roll"
+    return "restart" if result.restart_required else "hot"
+
+
+@router.put("/{service}/{instance}/config", response_model=ConfigWriteResult, dependencies=[_WRITE])
+async def set_app_config(
+    service: str,
+    instance: str,
+    body: ConfigWriteRequest,
+    user: CurrentUser,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+) -> ConfigWriteResult:
+    """Write options the app declares, and environment keys it does not.
+
+    Judged against the app's own contract before anything is committed, so a value
+    the app would refuse at startup leaves the deploy repo where it was rather than
+    landing a commit an operator then has to revert.
+
+    A secret is written like any other option: it goes into the overlay as the rest
+    of this surface writes one, and the read route still never says what it is.
+    """
+    app = _resolve(service, instance)
+    gc = _gitcrud(request)
+    doc = _overlay(gc, app)
+    _require_fresh(gc, if_match)
+    config_changes, env_changes = _checked_changes(service, read_contract(service), body.changes)
+    if not config_changes and not env_changes:
+        return ConfigWriteResult(changed=False)
+
+    for path, value in config_changes.items():
+        set_path(doc, path, value)
+    for key, value in env_changes.items():
+        path = f"{appconfig.ENV_ROOT}.{key}"
+        # A null removes the key rather than exporting an empty one.
+        if value is None:
+            del_path(doc, path)
+        else:
+            set_path(doc, path, value)
+
+    protected = _enforce(request, user, app.overlay_name, doc)
+    result = commit_overlay(
+        request,
+        user,
+        app,
+        doc,
+        summary="set config",
+        protected=protected,
+        if_match=if_match,
+    )
+    return ConfigWriteResult(
+        **result.model_dump(exclude={"reload", "validation"}),
+        reload=_reload_mode(request, result),
+        custom_env=_custom_env_delivery(request, env_changes),
     )
 
 

@@ -24,6 +24,11 @@ Two facts make it generic. Which file an app reads is the manifest's
 set's ``dir_setting`` (one directory) or ``entries_path`` (one entry per file),
 so an app joins by being declared rather than by a branch here.
 
+The overlay's ``extraEnv:`` block is rendered the same way, into one env file per
+app that Compose reads as a second ``env_file`` entry. Kubernetes needs neither
+step: there the app's chart turns both blocks into a ConfigMap and container
+environment, and this module does nothing at all.
+
 Nothing restarts a container. A write the app cannot take in place is REPORTED,
 with the command that applies it, because a Compose stack's supervisor is the
 operator and an engine holding the docker socket would be a second one.
@@ -31,6 +36,7 @@ operator and an engine holding the docker socket would be a second one.
 
 from __future__ import annotations
 
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,8 +60,22 @@ so it carries this prefix; the rendered file is the block itself, and the prefix
 comes off on the way in.
 """
 
+ENV_ROOT = "extraEnv"
+"""The overlay key holding environment names no app's contract declares.
+
+A sibling of ``config:`` rather than a branch of it: the app's own schema decides
+what belongs under ``config:``, and this block exists for what it does not know
+about. On Kubernetes the app's chart renders it; here it becomes a file.
+"""
+
+CUSTOM_ENV_SUFFIX = ".custom.env"
+"""One file per app, named apart from the operator's own ``<app>.env``."""
+
 RESTART_HINT = "restart required: docker compose restart {service}"
 """What an operator runs to apply a write the running app cannot take in place."""
+
+RECREATE_HINT = "recreate required: docker compose up -d {service}"
+"""Compose reads env_file at up time, so a restart keeps the old environment."""
 
 
 class AppConfigError(RuntimeError):
@@ -73,10 +93,14 @@ class RenderedApp:
     directory: Path
     changed: bool
     restart_required: bool
+    custom_env_changed: bool = False
 
     @property
     def restart_hint(self) -> str:
         """The command that applies this change, or empty when none is needed."""
+        # An `up` recreates the container, so it applies a config change too.
+        if self.custom_env_changed:
+            return RECREATE_HINT.format(service=self.service)
         if not self.restart_required:
             return ""
         return RESTART_HINT.format(service=self.service)
@@ -134,6 +158,66 @@ def _config_block(doc: dict) -> dict[str, Any]:
     """The overlay's ``config:`` block, which is what the app reads."""
     block = doc.get(CONFIG_ROOT)
     return dict(block) if isinstance(block, dict) else {}
+
+
+def custom_env(doc: dict) -> dict[str, Any]:
+    """The overlay's ``extraEnv:`` block, which becomes container environment."""
+    block = doc.get(ENV_ROOT)
+    return dict(block) if isinstance(block, dict) else {}
+
+
+def custom_env_dir(settings: Any) -> Path | None:
+    """The directory this deployment's containers read their env files from.
+
+    Named only by a deployer that has no chart to render ``extraEnv`` for it, so
+    an unset value is how Kubernetes says the chart does that job instead.
+    """
+    named = str(settings.deployment.app_env_dir or "").strip()
+    return Path(named) if named else None
+
+
+def _env_line(key: str, value: Any) -> str:
+    """One ``KEY=value`` line, with a bool spelled the way an app parses one."""
+    if isinstance(value, bool):
+        return f"{key}={'true' if value else 'false'}\n"
+    if value is None:
+        return f"{key}=\n"
+    return f"{key}={value}\n"
+
+
+def _write_private(path: Path, content: str) -> None:
+    """Replace ``path`` in one step with a file only its owner can read."""
+    tmp = path.with_name(f".{path.name}.tmp")
+    handle = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(handle, "w", encoding="utf-8") as out:
+        out.write(content)
+    tmp.replace(path)
+
+
+def write_custom_env(settings: Any, service: str, env: dict[str, Any]) -> bool:
+    """Write one app's custom environment where its container reads it.
+
+    Returns whether the file changed, because a Compose service takes a new
+    env_file on ``up`` and not on ``restart``, so the operator has to be told
+    which of the two applies.
+
+    Private mode: an operator writes credentials here, and the file sits in their
+    own checkout rather than in the deploy repo.
+    """
+    directory = custom_env_dir(settings)
+    if directory is None:
+        return False
+    target = directory / f"{service}{CUSTOM_ENV_SUFFIX}"
+    rendered = "".join(_env_line(key, value) for key, value in sorted(env.items()))
+    # An app that has never had a custom key gets no file at all, so a fresh stack
+    # does not hand its operator one recreate command per app before it has run.
+    if not rendered and not target.is_file():
+        return False
+    if target.is_file() and target.read_text(encoding="utf-8") == rendered:
+        return False
+    directory.mkdir(parents=True, exist_ok=True)
+    _write_private(target, rendered)
+    return True
 
 
 def _inner_path(path: str) -> str:
@@ -259,6 +343,8 @@ def _render_one(
     mount_dir = f"{mount_root}/{app.service}"
     changed_sets = _apply_file_sets(app, doc, config, app_dir, mount_dir)
 
+    env_changed = write_custom_env(settings, app.service, custom_env(doc))
+
     target = app_dir / app.config_file
     rendered = yaml_dump_string(config)
     config_changed = not target.is_file() or target.read_text(encoding="utf-8") != rendered
@@ -280,8 +366,9 @@ def _render_one(
         service=app.service,
         instance=instance.instance if instance is not None else "",
         directory=app_dir,
-        changed=config_changed or bool(changed_sets),
+        changed=config_changed or bool(changed_sets) or env_changed,
         restart_required=restart,
+        custom_env_changed=env_changed,
     )
 
 
@@ -323,7 +410,7 @@ def render(gc: GitCrud, settings: Any) -> list[RenderedApp]:
 
 def restart_hints(rendered: list[RenderedApp]) -> list[str]:
     """The command per app whose change the running process cannot take in place."""
-    return [r.restart_hint for r in rendered if r.restart_required]
+    return [r.restart_hint for r in rendered if r.restart_hint]
 
 
 def render_and_report(gc: GitCrud | None, settings: Any) -> list[str]:

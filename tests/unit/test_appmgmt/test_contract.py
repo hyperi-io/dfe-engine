@@ -181,11 +181,13 @@ class TestSecrets:
         assert by_path["config.clickhouse.password"].secret is True
 
     def test_a_written_secret_reports_that_it_is_set_without_saying_what(self):
-        overlay = {"config": {"clickhouse": {"password": "hunter2"}}}
+        # A secret the chart does not supply: the loader's warehouse and Kafka
+        # credentials arrive by env, so the overlay never governs those.
+        overlay = {"config": {"geoip": {"auto_download": {"ipinfo_token": "hunter2"}}}}
         by_path = {
             f.path: f for f in contract.resolve_config(_contract("dfe-loader"), overlay).fields
         }
-        written = by_path["config.clickhouse.password"]
+        written = by_path["config.geoip.auto_download.ipinfo_token"]
         assert written.is_set is True
         assert written.value is None
         assert written.provenance == contract.Provenance.OVERLAY
@@ -218,6 +220,59 @@ class TestProvenance:
         by_path = {f.path: f for f in contract.resolve_config(_contract("dfe-loader"), {}).fields}
         assert by_path["config.clickhouse.protocol"].provenance == contract.Provenance.CHART
 
+    def test_the_flat_env_families_the_loader_chart_sets(self):
+        # Every var the loader Deployment sets, mapped to the path it outranks.
+        view = contract.resolve_config(_contract("dfe-loader"), {})
+        derived = {f.path for f in view.fields if f.provenance == contract.Provenance.CHART}
+        assert {
+            "config.transport",
+            "config.grpc.listen",
+            "config.kafka.brokers",
+            "config.kafka.sasl.username",
+            "config.kafka.sasl.password",
+            "config.clickhouse.hosts",
+            "config.clickhouse.database",
+            "config.clickhouse.username",
+            "config.clickhouse.password",
+            "config.clickhouse.protocol",
+            "config.routing.dlq.topic",
+            "config.routing.dlq.mode",
+        } == derived
+
+    def test_the_flat_env_families_the_receiver_chart_sets(self):
+        view = contract.resolve_config(_contract("dfe-receiver"), {})
+        derived = {f.path for f in view.fields if f.provenance == contract.Provenance.CHART}
+        assert {
+            "config.kafka.brokers",
+            "config.kafka.sasl.username",
+            "config.kafka.sasl.password",
+            "config.kafka.sasl.mechanism",
+            "config.server.bind_address",
+            "config.routing.dlq.enabled",
+            "config.routing.dlq.topic",
+            "config.routing.dlq.mode",
+        } == derived
+
+    def test_the_flat_env_families_the_fetcher_chart_sets(self):
+        view = contract.resolve_config(_contract("dfe-fetcher"), {})
+        derived = {f.path for f in view.fields if f.provenance == contract.Provenance.CHART}
+        assert {
+            "config.kafka.sasl.username",
+            "config.kafka.sasl.password",
+            "config.kafka.sasl.mechanism",
+            "config.dlq.enabled",
+            "config.dlq.mode",
+            "config.dlq.kafka.common_topic",
+            "config.dlq.kafka.routing",
+        } == derived
+
+    def test_what_supplies_a_chart_path_is_named(self):
+        # A refused write has to say what to change instead of the overlay.
+        assert contract.chart_supplier("dfe-receiver", "config.server.bind_address") == (
+            "DFE_RECEIVER_BIND_ADDRESS"
+        )
+        assert contract.chart_supplier("dfe-loader", "config.batch_processing.format") is None
+
     def test_the_chart_wins_over_an_overlay_key_it_overrides(self):
         # The deployment decides it, so reporting the overlay would tell the
         # console an operator governs a value the chart replaces.
@@ -247,9 +302,14 @@ class TestProvenance:
             "config.sink.sasl.password",
         } == derived
 
-    def test_an_app_the_chart_derives_nothing_for_has_no_chart_fields(self):
-        view = contract.resolve_config(_contract("dfe-receiver"), {})
-        assert not [f for f in view.fields if f.provenance == contract.Provenance.CHART]
+    def test_a_path_outside_the_table_is_the_overlay_s(self):
+        # The table is data: a path nothing names in it is an operator's to write.
+        overlay = {"config": {"batch_processing": {"max_chunk_size": 5000}}}
+        by_path = {
+            f.path: f for f in contract.resolve_config(_contract("dfe-loader"), overlay).fields
+        }
+        written = by_path["config.batch_processing.max_chunk_size"]
+        assert written.provenance == contract.Provenance.OVERLAY
 
 
 class TestUnknownKeys:
@@ -280,6 +340,86 @@ class TestUnknownKeys:
         assert view.available is False
         assert view.fields == []
         assert [u.path for u in view.unknown] == ["config.clickhouse.database"]
+
+
+class TestCustomEnvKeys:
+    def test_an_extra_env_key_is_reported_apart_from_the_unknown_block(self):
+        overlay = {"extraEnv": {"DFE_LOADER_HOUSE_KEY": "kept"}}
+        view = contract.resolve_config(_contract("dfe-loader"), overlay)
+        assert [(c.path, c.value) for c in view.custom] == [
+            ("extraEnv.DFE_LOADER_HOUSE_KEY", "kept")
+        ]
+        assert view.unknown == []
+
+    def test_an_app_with_no_custom_env_reports_none(self):
+        assert contract.resolve_config(_contract("dfe-loader"), {}).custom == []
+
+    @pytest.mark.parametrize("name", ["DFE_X", "A", "DFE_LOADER_HOUSE_KEY", "X9_Y"])
+    def test_an_environment_name_is_accepted(self, name):
+        assert contract.ENV_NAME.match(name)
+
+    @pytest.mark.parametrize("name", ["lower", "9LEADING", "_LEADING", "HAS-DASH", "HAS.DOT", ""])
+    def test_anything_else_is_not_an_environment_name(self, name):
+        assert not contract.ENV_NAME.match(name)
+
+    def test_an_environment_value_is_one_scalar(self):
+        assert contract.check_env_value("plain") == ""
+        assert contract.check_env_value(7) == ""
+        assert "not a list or a mapping" in contract.check_env_value(["a"])
+        assert "not a list or a mapping" in contract.check_env_value({"a": 1})
+
+    def test_a_line_break_would_be_a_second_key(self):
+        assert "second key" in contract.check_env_value("one\nTWO=smuggled")
+
+
+class TestJudgingAWrite:
+    def _option(self, service: str, path: str) -> contract.DeclaredOption:
+        return contract.declared_options(_contract(service))[path]
+
+    def test_every_declared_option_is_judgeable(self):
+        options = contract.declared_options(_contract("dfe-loader"))
+        assert len(options) == LEAF_COUNTS["dfe-loader"]
+        assert all(path.startswith("config.") for path in options)
+
+    def test_a_value_of_the_declared_type_is_accepted(self):
+        option = self._option("dfe-loader", "config.batch_processing.max_chunk_size")
+        assert contract.check_value(option, 5000) == ""
+
+    def test_a_value_of_the_wrong_type_says_which_type_it_takes(self):
+        option = self._option("dfe-loader", "config.batch_processing.max_chunk_size")
+        reason = contract.check_value(option, "lots")
+        assert "takes integer, not string" in reason
+
+    def test_a_bool_is_not_an_integer(self):
+        # Python's bool is an int, so an unguarded check writes `true` as 1.
+        option = self._option("dfe-loader", "config.batch_processing.max_chunk_size")
+        assert "not boolean" in contract.check_value(option, True)
+
+    def test_a_rust_enum_refuses_a_branch_it_does_not_declare(self):
+        # The apps spell an enum as a oneOf of consts, which is the only closed
+        # set most of them carry.
+        option = self._option("dfe-loader", "config.clickhouse.insert_format")
+        assert contract.check_value(option, "rowbinary") == ""
+        assert "takes one of" in contract.check_value(option, "csv")
+
+    def test_the_catalogue_s_enum_refuses_what_the_schema_would_accept(self):
+        # The schema calls protocol a plain string; only the capability catalogue
+        # says which two values the app actually takes.
+        option = self._option("dfe-loader", "config.clickhouse.protocol")
+        assert contract.check_value(option, "http") == ""
+        assert "takes one of" in contract.check_value(option, "native-ish")
+
+    def test_a_nullable_option_takes_a_null_and_a_plain_one_does_not(self):
+        nullable = self._option("dfe-loader", "config.routing.mapping_file")
+        assert nullable.nullable is True
+        assert contract.check_value(nullable, None) == ""
+        plain = self._option("dfe-loader", "config.batch_processing.max_chunk_size")
+        assert "does not accept a null" in contract.check_value(plain, None)
+
+    def test_an_array_takes_a_list(self):
+        option = self._option("dfe-loader", "config.clickhouse.hosts")
+        assert contract.check_value(option, ["ch-0:8123"]) == ""
+        assert "takes array" in contract.check_value(option, "ch-0:8123")
 
 
 class TestProtectedPaths:
