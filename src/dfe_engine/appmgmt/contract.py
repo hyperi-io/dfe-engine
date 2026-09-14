@@ -125,6 +125,26 @@ CHART_DERIVED: dict[str, dict[str, str]] = {
         "dlq.kafka.common_topic": "DFE_FETCHER_DLQ_TOPIC",
         "dlq.kafka.routing": "DFE_FETCHER_DLQ_TOPIC",
     },
+    "dfe-archiver": {
+        # Bare KAFKA_*/ARCHIVER_*/S3_*/DLQ_*, this app's own flat-env contract
+        # (core config.rs), not the DFE_ARCHIVER_* family the other apps use.
+        "transport": "ARCHIVER_TRANSPORT",
+        "grpc.listen": "ARCHIVER_GRPC_LISTEN",
+        "kafka.brokers": "KAFKA_BROKERS",
+        "kafka.security_protocol": "KAFKA_SECURITY_PROTOCOL",
+        "kafka.sasl_username": "KAFKA_SASL_USER",
+        "kafka.sasl_password": "KAFKA_SASL_PASSWORD",
+        "kafka.sasl_mechanism": "KAFKA_SASL_MECHANISM",
+        "kafka.topic_include": "KAFKA_TOPIC_INCLUDE",
+        "archive.destination": "ARCHIVER_DESTINATION",
+        "archive.s3.endpoint": "S3_ENDPOINT",
+        "archive.s3.bucket": "S3_BUCKET",
+        "dlq.enabled": "DLQ_ENABLED",
+        "dlq.mode": "DLQ_MODE",
+        # One env var sets both: naming a common topic also pins the routing to it.
+        "dlq.kafka.common_topic": "DLQ_TOPIC",
+        "dlq.kafka.routing": "DLQ_TOPIC",
+    },
 }
 """Config paths the dfe-infra chart decides, per app, and what decides each.
 

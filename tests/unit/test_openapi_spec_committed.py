@@ -134,6 +134,25 @@ def test_committed_spec_carries_a_real_version(spec_file):
     )
 
 
+def test_post_sources_409_documents_the_core_landing_conflict(committed):
+    """POST /sources can 409 for the core landing's reserved name, not just a plain dup.
+
+    Regression for #381: the union once named only the plain-duplicate and
+    match-conflict shapes, so a caller reading the spec could not tell the two
+    "code": "conflict" causes apart.
+    """
+    schema = committed["paths"]["/api/v1/sources"]["post"]["responses"]["409"]["content"][
+        "application/json"
+    ]["schema"]
+    refs = {member["$ref"] for member in schema["anyOf"]}
+
+    assert refs == {
+        "#/components/schemas/SourceNameConflictErrorResponse",
+        "#/components/schemas/CoreResourceConflictErrorResponse",
+        "#/components/schemas/MatchConflictErrorResponse",
+    }
+
+
 def test_committed_e2e_spec_matches_its_builder():
     """Synced to dfe-ui by the same workflow, so it goes stale the same way."""
     from dfe_engine.api.e2e_docs import build_e2e_spec
