@@ -54,6 +54,16 @@ class TestCreateOrg:
         assert resp.status_code == 409
         assert resp.json()["code"] == "conflict"
 
+    def test_create_org_path_traversal_name_rejected(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/orgs",
+            headers=admin_headers,
+            json={"name": "../../escape"},
+        )
+        assert resp.status_code == 422
+        listed = client.get("/api/v1/orgs", headers=admin_headers).json()
+        assert listed["items"] == []
+
     def test_create_org_viewer_forbidden(self, client, viewer_headers):
         resp = client.post(
             "/api/v1/orgs",

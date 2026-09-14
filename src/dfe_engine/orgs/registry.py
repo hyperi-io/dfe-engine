@@ -25,10 +25,11 @@ Usage::
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
-from dfe_engine.orgs.models import Org
+from dfe_engine.orgs.models import ORG_NAME_PATTERN, Org
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 
@@ -65,8 +66,11 @@ class OrgRegistry:
             The newly created Org.
 
         Raises:
-            ValueError: If an org with this name already exists.
+            ValueError: If the name is not a valid org name, or an org with this
+                name already exists.
         """
+        if re.fullmatch(ORG_NAME_PATTERN, name) is None:
+            raise ValueError(f"Invalid org name: {name!r}")
         path = self._path(name)
         if path.exists():
             raise ValueError(f"Org already exists: {name}")

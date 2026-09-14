@@ -303,6 +303,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         orgs_dir_str = str(Path("config") / "orgs")
     app.state.org_registry = OrgRegistry(Path(orgs_dir_str))
 
+    # Ahead of the CH RBAC reconcile below, so a seeded org is fenced on this boot.
+    from dfe_engine.orgs.seed import seed_orgs
+
+    try:
+        seed_orgs(registry=app.state.org_registry, seeds=settings.orgs.seed_orgs)
+    except Exception as exc:  # a failed seed must never break startup
+        logger.warning("organisations not seeded at startup", error=str(exc))
+
     # Bootstrap service surface registry (schema-less Rust service discovery)
     from dfe_engine.services.surfaces.registry import SurfaceRegistry
 

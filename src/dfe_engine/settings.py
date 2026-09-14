@@ -130,6 +130,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from .orgs.models import ORG_NAME_PATTERN
 from .transport import SourceTransport
 from .yaml_utils import yaml_load
 
@@ -1430,6 +1431,30 @@ class SecretsSettings(BaseModel):
     role: str = Field(default="", description="openbao AppRole role id")
 
 
+class SeedOrg(BaseModel):
+    """One organisation created at startup when the registry does not already hold it."""
+
+    name: str = Field(description="Org name, the registry identifier", pattern=ORG_NAME_PATTERN)
+    display_name: str = Field(default="", description="Human-readable label")
+    org_ids: list[str] = Field(
+        default_factory=list,
+        description="Tenant IDs for ClickHouse row-level security",
+    )
+
+
+class OrgsSettings(BaseModel):
+    """Organisation bootstrap config."""
+
+    seed_orgs: list[SeedOrg] = Field(
+        default_factory=list,
+        description=(
+            "Orgs created on startup when absent; an existing org is never changed, "
+            "so console edits survive a restart. DFE_ORGS_SEED_ORGS: a JSON list of "
+            "{name, display_name, org_ids}."
+        ),
+    )
+
+
 class DFESettings(BaseModel):
     """Main DFE Engine settings container."""
 
@@ -1459,6 +1484,7 @@ class DFESettings(BaseModel):
     )
     helm: HelmSettings = Field(default_factory=HelmSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
+    orgs: OrgsSettings = Field(default_factory=OrgsSettings)
     hyperdx: HyperDXSettings = Field(default_factory=HyperDXSettings)
     gitops: GitopsSettings = Field(default_factory=GitopsSettings)
     api: APISettings = Field(default_factory=APISettings)
@@ -1571,6 +1597,7 @@ def _get_env_overrides() -> dict:
         "deployment": {},
         "helm": {},
         "auth": {},
+        "orgs": {},
         "hyperdx": {},
         "gitops": {},
         "api": {},
@@ -1953,6 +1980,14 @@ def _get_env_overrides() -> dict:
         except json.JSONDecodeError as exc:
             raise ValueError(f"DFE_AUTH_LOCAL_SEED_ACCOUNTS is not valid JSON: {exc}") from exc
         overrides["auth"].setdefault("local", {})["seed_accounts"] = seed
+    if val := _get_env("DFE_ORGS_SEED_ORGS"):
+        import json
+
+        try:
+            seed = json.loads(val)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"DFE_ORGS_SEED_ORGS is not valid JSON: {exc}") from exc
+        overrides["orgs"]["seed_orgs"] = seed
 
     # OIDC settings (nested under auth.oidc)
     if val := _get_env("DFE_AUTH_OIDC_PROVIDERS_DIR"):

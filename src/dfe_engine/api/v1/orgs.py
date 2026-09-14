@@ -34,6 +34,7 @@ from dfe_engine.api.pagination import (
 )
 from dfe_engine.auth import Scope
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.orgs.models import ORG_NAME_PATTERN
 
 if TYPE_CHECKING:
     from dfe_engine.orgs.models import Org
@@ -45,7 +46,7 @@ router = APIRouter(prefix="/orgs", tags=["Organisations"])
 
 
 class CreateOrgRequest(BaseModel):
-    name: str = Field(description="Unique org name (used as identifier)")
+    name: str = Field(description="Unique org name (used as identifier)", pattern=ORG_NAME_PATTERN)
     display_name: str = Field(default="", description="Human-readable label")
     org_ids: list[str] = Field(
         default_factory=list,

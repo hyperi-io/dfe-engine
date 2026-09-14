@@ -371,6 +371,31 @@ class TestEnvOverrides:
         with pytest.raises(ValueError, match="not valid JSON"):
             load_settings()
 
+    def test_seed_orgs_json_override(self, monkeypatch):
+        monkeypatch.setenv(
+            "DFE_ORGS_SEED_ORGS",
+            '[{"name": "acme", "display_name": "Acme Corp", "org_ids": ["acme"]}]',
+        )
+        settings = load_settings()
+        assert len(settings.orgs.seed_orgs) == 1
+        seed = settings.orgs.seed_orgs[0]
+        assert seed.name == "acme"
+        assert seed.display_name == "Acme Corp"
+        assert seed.org_ids == ["acme"]
+
+    def test_seed_orgs_default_empty(self):
+        assert load_settings().orgs.seed_orgs == []
+
+    def test_seed_orgs_malformed_json_fails_loud(self, monkeypatch):
+        monkeypatch.setenv("DFE_ORGS_SEED_ORGS", "{not-json")
+        with pytest.raises(ValueError, match="not valid JSON"):
+            load_settings()
+
+    def test_seed_orgs_invalid_name_fails_at_startup(self, monkeypatch):
+        monkeypatch.setenv("DFE_ORGS_SEED_ORGS", '[{"name": "../escape"}]')
+        with pytest.raises(ValueError, match="name"):
+            load_settings()
+
     def test_legacy_clickhouse_host_fallback(self, monkeypatch):
         """Legacy env var (no DFE_ prefix) should also work."""
         monkeypatch.setenv("CLICKHOUSE_HOST", "legacy.ch.com")

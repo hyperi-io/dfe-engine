@@ -58,6 +58,16 @@ class TestCreate:
         with pytest.raises(ValueError, match="acme"):
             registry.create("acme")
 
+    @pytest.mark.parametrize("name", ["../escape", "a/b", ".hidden", "", "has space"])
+    def test_create_rejects_name_that_is_not_a_filename_stem(self, name, registry, tmp_path):
+        with pytest.raises(ValueError, match="Invalid org name"):
+            registry.create(name=name)
+        assert list(tmp_path.rglob("*.yaml")) == []
+
+    @pytest.mark.parametrize("name", ["acme", "Acme-Corp_2", "acme.prod", "7eleven"])
+    def test_create_accepts_valid_name(self, name, registry):
+        assert registry.create(name=name).name == name
+
     def test_create_sets_timestamps(self, registry):
         org = registry.create("acme")
         assert org.created_at != ""
