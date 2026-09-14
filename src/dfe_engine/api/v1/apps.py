@@ -12,6 +12,7 @@ POST   /api/v1/apps/{service}/instances               deploy an instance
 GET    /api/v1/apps/{service}/{instance}              one instance, summarised
 DELETE /api/v1/apps/{service}/{instance}              undeploy an instance
 GET    /api/v1/apps/{service}/{instance}/values       the instance's overlay values
+GET    /api/v1/apps/{service}/{instance}/config       every declared option, with provenance
 GET    /api/v1/apps/{service}/{instance}/scaling      the scaling dials
 PUT    /api/v1/apps/{service}/{instance}/scaling      set the scaling dials
 GET    /api/v1/apps/{service}/{instance}/files/{set}  list the files it consumes
@@ -51,7 +52,7 @@ from dataclasses import asdict
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from dfe_engine.api.deps import (
     ClickHouseClient,
@@ -61,6 +62,7 @@ from dfe_engine.api.deps import (
     get_source_registry,
     require_action,
 )
+from dfe_engine.api.v1.app_contracts import read_contract
 from dfe_engine.appmgmt import (
     AppInstance,
     DeployTarget,
@@ -75,6 +77,7 @@ from dfe_engine.appmgmt import (
     ValidationResult,
     appconfig,
     catalogue,
+    contract,
     dryrun,
     files,
     instances,
@@ -307,6 +310,50 @@ class ValuesResponse(BaseModel):
 
     values: dict[str, Any]
     etag: str | None = _etag_field()
+
+
+class ConfigFieldModel(BaseModel):
+    """One option the app declares, and what this instance would run for it."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    path: str = Field(description="The overlay path a write addresses, `config.` rooted")
+    type: str
+    title: str = ""
+    description: str = ""
+    secret: bool = Field(
+        description="Credential material: neither its value nor its default is returned"
+    )
+    enum: list[Any] | None = Field(
+        default=None, description="The values it accepts, where the app declares a closed set"
+    )
+    default: Any = Field(default=None, description="The app's own default, null for a secret")
+    value: Any = Field(default=None, description="What this instance would run, null for a secret")
+    provenance: str = Field(
+        description="Where the value comes from: `overlay`, `default`, `chart` or `unset`"
+    )
+    dial: str | None = Field(default=None, description="Not resolved yet; always null")
+    protected: bool = Field(description="Whether the protected-var policy covers this path")
+    # `set` is the wire name; the attribute is named around the builtin.
+    is_set: bool = Field(alias="set", description="Whether this instance has a value at all")
+
+
+class UnknownFieldModel(BaseModel):
+    """An overlay key under `config:` that the app's contract does not declare."""
+
+    path: str
+    value: Any = None
+
+
+class AppConfigResponse(BaseModel):
+    """Every option an instance has, and the overlay keys none of them explain."""
+
+    etag: str | None = _etag_field()
+    available: bool = Field(
+        description="False when this deployment has mounted no contract for the app"
+    )
+    fields: list[ConfigFieldModel] = Field(default_factory=list)
+    unknown: list[UnknownFieldModel] = Field(default_factory=list)
 
 
 class ScalingResponse(BaseModel):
@@ -1014,6 +1061,52 @@ async def get_values(
     app = _resolve(service, instance)
     gc = _gitcrud(request)
     return ValuesResponse(values=_overlay(gc, app), etag=_etag(gc))
+
+
+@router.get("/{service}/{instance}/config", dependencies=[_READ])
+async def get_app_config(
+    service: str, instance: str, user: CurrentUser, request: Request
+) -> AppConfigResponse:
+    """Every option the app declares, with this instance's value and where it comes from.
+
+    The overlay alone cannot answer this: it holds only what was written, so an
+    option nobody has touched is invisible in it. The app's own contract supplies
+    the rest, which is what lets the console show an untouched option with the
+    default it would run rather than an empty box.
+    """
+    app = _resolve(service, instance)
+    gc = _gitcrud(request)
+    doc = _overlay(gc, app)
+    found = read_contract(service)
+    policy = _policy(request)
+    name = app.overlay_name
+
+    def _protected(path: str) -> bool:
+        return policy.is_protected(_CLASS, name, path) if policy is not None else False
+
+    view = contract.resolve_config(found, doc, is_protected=_protected)
+    return AppConfigResponse(
+        etag=_etag(gc),
+        available=view.available,
+        fields=[
+            ConfigFieldModel(
+                path=f.path,
+                type=f.type,
+                title=f.title,
+                description=f.description,
+                secret=f.secret,
+                enum=f.enum,
+                default=f.default,
+                value=f.value,
+                provenance=str(f.provenance),
+                dial=f.dial,
+                protected=f.protected,
+                is_set=f.is_set,
+            )
+            for f in view.fields
+        ],
+        unknown=[UnknownFieldModel(path=u.path, value=u.value) for u in view.unknown],
+    )
 
 
 # ── scaling ───────────────────────────────────────────────────
