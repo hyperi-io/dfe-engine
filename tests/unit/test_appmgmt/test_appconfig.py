@@ -30,9 +30,16 @@ VRL = "dfe-transform-vrl"
 MOUNT = "/etc/dfe/apps"
 
 
-def _settings(tmp_path, *, target: str = "docker", app_config_dir: str | None = None):
+def _settings(
+    tmp_path,
+    *,
+    target: str = "docker",
+    app_config_dir: str | None = None,
+    app_env_dir: str | None = None,
+):
     """A Compose deployment that renders its apps' config into tmp_path."""
     out = tmp_path / "app-config" if app_config_dir is None else app_config_dir
+    env_out = tmp_path / "app-env" if app_env_dir is None else app_env_dir
     base = tmp_path / "base"
     base.mkdir(exist_ok=True)
     return DFESettings(
@@ -44,8 +51,13 @@ def _settings(tmp_path, *, target: str = "docker", app_config_dir: str | None = 
             "app_config_dir": str(out),
             "app_config_base_dir": str(base),
             "app_config_mount": MOUNT,
+            "app_env_dir": str(env_out),
         },
     )
+
+
+def _env_file(settings, service: str) -> Path:
+    return Path(settings.deployment.app_env_dir) / f"{service}{appconfig.CUSTOM_ENV_SUFFIX}"
 
 
 def _base(settings, service: str, body: str) -> None:
@@ -202,6 +214,64 @@ class TestFileSets:
 
         entries = _rendered(settings, VRL)["enrichment_tables"]
         assert entries == [{"name": "timezones", "path": "/elsewhere.csv", "key_columns": ["zone"]}]
+
+
+class TestCustomEnvironment:
+    def test_the_overlay_block_becomes_one_file_per_app(self, crud, tmp_path):
+        settings = _settings(tmp_path)
+        _deploy(crud, LOADER, extraEnv__SECOND="also", extraEnv__DFE_LOADER_HOUSE_KEY="kept")
+
+        appconfig.render(crud, settings)
+
+        # Sorted, so an unordered overlay does not rewrite the file every render.
+        assert _env_file(settings, LOADER).read_text() == (
+            "DFE_LOADER_HOUSE_KEY=kept\nSECOND=also\n"
+        )
+
+    def test_the_file_is_readable_only_by_its_owner(self, crud, tmp_path):
+        settings = _settings(tmp_path)
+        _deploy(crud, LOADER, extraEnv__DFE_LOADER_TOKEN="hunter2")
+
+        appconfig.render(crud, settings)
+
+        assert _env_file(settings, LOADER).stat().st_mode & 0o777 == 0o600
+
+    def test_a_bool_is_spelled_the_way_an_app_parses_one(self, crud, tmp_path):
+        settings = _settings(tmp_path)
+        _deploy(crud, LOADER, extraEnv__DFE_LOADER_VERBOSE=True)
+
+        appconfig.render(crud, settings)
+
+        assert _env_file(settings, LOADER).read_text() == "DFE_LOADER_VERBOSE=true\n"
+
+    def test_a_deployment_that_names_no_directory_writes_nothing(self, crud, tmp_path):
+        settings = _settings(tmp_path, app_env_dir="")
+        _deploy(crud, LOADER, extraEnv__DFE_LOADER_HOUSE_KEY="kept")
+
+        appconfig.render(crud, settings)
+
+        assert list(tmp_path.glob(f"**/*{appconfig.CUSTOM_ENV_SUFFIX}")) == []
+
+    def test_an_env_change_needs_a_recreate_rather_than_a_restart(self, crud, tmp_path):
+        # Compose reads env_file at up time, so `restart` would keep the old set.
+        settings = _settings(tmp_path)
+        appconfig.render(crud, settings)
+        _deploy(crud, LOADER, extraEnv__DFE_LOADER_HOUSE_KEY="kept")
+
+        rendered = {r.service: r for r in appconfig.render(crud, settings)}
+
+        assert rendered[LOADER].custom_env_changed
+        assert rendered[LOADER].restart_hint == f"recreate required: docker compose up -d {LOADER}"
+
+    def test_an_unchanged_block_asks_for_nothing(self, crud, tmp_path):
+        settings = _settings(tmp_path)
+        _deploy(crud, LOADER, extraEnv__DFE_LOADER_HOUSE_KEY="kept")
+        appconfig.render(crud, settings)
+
+        again = {r.service: r for r in appconfig.render(crud, settings)}
+
+        assert not again[LOADER].custom_env_changed
+        assert again[LOADER].restart_hint == ""
 
 
 class TestWhatTakingTheChangeCosts:

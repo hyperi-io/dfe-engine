@@ -12674,6 +12674,87 @@
             "BearerAuth": []
           }
         ]
+      },
+      "put": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Set App Config",
+        "description": "Write options the app declares, and environment keys it does not.\n\nJudged against the app's own contract before anything is committed, so a value\nthe app would refuse at startup leaves the deploy repo where it was rather than\nlanding a commit an operator then has to revert.\n\nA secret is written like any other option: it goes into the overlay as the rest\nof this surface writes one, and the read route still never says what it is.",
+        "operationId": "set_app_config_api_v1_apps__service___instance__config_put",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigWriteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigWriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/apps/{service}/{instance}/scaling": {
@@ -16912,6 +16993,14 @@
             },
             "type": "array",
             "title": "Unknown"
+          },
+          "custom": {
+            "items": {
+              "$ref": "#/components/schemas/CustomEnvModel"
+            },
+            "type": "array",
+            "title": "Custom",
+            "description": "Environment keys written under `extraEnv`. Reported apart from `unknown`, which is a config key that has outrun its contract; these are outside every contract on purpose."
           }
         },
         "type": "object",
@@ -18384,6 +18473,104 @@
         "title": "ConfigSurfaceEntry",
         "description": "A single configurable setting for a Rust service."
       },
+      "ConfigWriteRequest": {
+        "properties": {
+          "changes": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Changes",
+            "description": "One entry per option. A `config.*` key is checked against the app's own schema before anything is committed; an `extraEnv.<NAME>` key is checked as an environment name only, and a null value there removes it."
+          }
+        },
+        "type": "object",
+        "required": [
+          "changes"
+        ],
+        "title": "ConfigWriteRequest",
+        "description": "Changes to one instance's config, each keyed by the path the GET reports."
+      },
+      "ConfigWriteResult": {
+        "properties": {
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "auto_merged": {
+            "type": "boolean",
+            "title": "Auto Merged",
+            "default": false
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url"
+          },
+          "validation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValidationModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reload": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reload",
+            "description": "How the change reaches the running process: 'hot' applies without a restart, 'roll' needs the pod to roll, 'restart' needs a manual one."
+          },
+          "restart_required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Restart Required",
+            "description": "One command per app whose running process cannot take this change where it stands. Empty where the write was hot, or where a GitOps controller rolls the pod itself."
+          },
+          "custom_env": {
+            "type": "string",
+            "title": "Custom Env",
+            "description": "How the `extraEnv` keys in this write reach the app. Empty when the write carried none.",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "changed"
+        ],
+        "title": "ConfigWriteResult",
+        "description": "A config write, and how any custom environment in it reaches the container."
+      },
       "CopyFilesRequest": {
         "properties": {
           "target_instance": {
@@ -18993,6 +19180,23 @@
           "permissions"
         ],
         "title": "CreateRoleRequest"
+      },
+      "CustomEnvModel": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "CustomEnvModel",
+        "description": "An environment key written under `extraEnv`, which no contract declares."
       },
       "DatabaseInfo": {
         "properties": {
