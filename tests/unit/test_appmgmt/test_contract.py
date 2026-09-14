@@ -296,6 +296,20 @@ class TestProvenance:
         )
         assert contract.chart_supplier("dfe-loader", "config.batch_processing.format") is None
 
+    def test_the_env_names_a_chart_sets_are_available_as_data(self):
+        # What an extraEnv key is compared against, so the name is a key rather
+        # than something to read out of the supplier string.
+        names = contract.chart_env_names("dfe-loader")
+        assert names["DFE_LOADER_KAFKA_BROKERS"] == "config.kafka.brokers"
+        assert "DFE_LOADER_HOUSE_KEY" not in names
+
+    def test_a_chart_helper_is_not_an_env_name(self):
+        # The transforms resolve four paths through dfe-common.transport, which
+        # names no variable an operator could shadow.
+        names = contract.chart_env_names("dfe-transform-vrl")
+        assert "dfe-common.transport" not in names
+        assert names["DFE_TRANSFORM_SOURCE_BROKERS"] == "config.source.brokers"
+
     def test_the_chart_wins_over_an_overlay_key_it_overrides(self):
         # The deployment decides it, so reporting the overlay would tell the
         # console an operator governs a value the chart replaces.

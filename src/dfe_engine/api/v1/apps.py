@@ -1202,6 +1202,15 @@ def _checked_changes(
             reason = contract.check_env_value(value)
             if reason:
                 raise _refuse(400, "invalid_env_value", path, reason)
+            decides = contract.chart_env_names(service).get(key)
+            if decides:
+                raise _refuse(
+                    409,
+                    "chart_set_env",
+                    path,
+                    f"the {service} chart sets {key} itself, for {decides}, and its "
+                    "value is rendered last, so writing it here would change nothing",
+                )
             env_changes[key] = value
             continue
         if not path.startswith(f"{appconfig.CONFIG_ROOT}."):
@@ -1270,6 +1279,9 @@ async def set_app_config(
 
     A secret is written like any other option: it goes into the overlay as the rest
     of this surface writes one, and the read route still never says what it is.
+
+    409 where the deployment already decides the value: a config path the chart
+    derives, or an `extraEnv` name the chart sets for this app.
     """
     app = _resolve(service, instance)
     gc = _gitcrud(request)
