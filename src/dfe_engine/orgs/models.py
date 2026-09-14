@@ -17,6 +17,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+# The name is a filename stem, so it may not carry a path separator or start with a dot.
+ORG_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"
+
 
 class Org(BaseModel):
     """A customer organisation.
