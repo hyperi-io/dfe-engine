@@ -6,6 +6,7 @@ from dfe_engine.api.v1.account_groups import router as account_groups_router
 from dfe_engine.api.v1.accounts import router as accounts_router
 from dfe_engine.api.v1.alerts import router as alerts_router
 from dfe_engine.api.v1.api_keys import router as api_keys_router
+from dfe_engine.api.v1.app_contracts import router as app_contracts_router
 from dfe_engine.api.v1.apps import router as apps_router
 from dfe_engine.api.v1.auth import router as auth_router
 from dfe_engine.api.v1.authoring import router as authoring_router
@@ -114,6 +115,8 @@ v1_router.include_router(helm_router)
 # governed writes in, storage model and modes locked by policy
 v1_router.include_router(backing_services_router)
 v1_router.include_router(apps_router)
+# What each app image says its own config is, emitted by the pinned binary itself
+v1_router.include_router(app_contracts_router)
 # The versioned artefact library an app instance links its consumed files to
 v1_router.include_router(library_router)
 v1_router.include_router(governance_router)
