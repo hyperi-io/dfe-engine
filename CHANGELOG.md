@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.20.6](https://github.com/hyperi-io/dfe-engine/compare/v1.20.5...v1.20.6) (2026-09-14)
+
+### Bug Fixes
+
+* **api:** write an app's config through its contract, and custom env beside it ([4914477](https://github.com/hyperi-io/dfe-engine/commit/491447728607d2f568233ae1e570260c44d2820c))
+
 ## [1.20.5](https://github.com/hyperi-io/dfe-engine/compare/v1.20.4...v1.20.5) (2026-09-14)
 
 ### Bug Fixes
