@@ -187,3 +187,64 @@ class TestFetcherInstancesFollowTheSources:
         _wire(app, tmp_path)
         resp = client.post("/api/v1/sources/reconcile-apps", headers=viewer_headers)
         assert resp.status_code == 403
+
+
+class TestTheReconcileReportsTheRestartsItsOwnWritesNeed:
+    """Where the engine renders the app config, the write that rendered it reports.
+
+    The regression these guard: a Compose stack deployed a transformed source,
+    the engine wrote the instance overlay and rendered the transform's config
+    from it, and the deploy answered no restart - so the runner left the resident
+    container on whatever source it started with and no record ever moved.
+    """
+
+    TRANSFORM = "dfe-transform-elastic"
+    RESTART = f"restart required: docker compose restart {TRANSFORM}"
+
+    def _compose(self, app, tmp_path):
+        """A deploy repo plus the app-config directory a Compose stack mounts."""
+        gc = _wire(app, tmp_path)
+        app.state.settings.deployment.target = "docker"
+        app.state.settings.deployment.app_config_dir = str(tmp_path / "app-config")
+        return gc
+
+    def _deployed_transform_source(self, client, admin_headers, name: str) -> None:
+        from dfe_engine.api.deps import _registries
+
+        body = {
+            "source": name,
+            "match": {"field": "_source", "value": name},
+            "transform": {"engine": "elastic"},
+        }
+        assert client.post("/api/v1/sources", json=body, headers=admin_headers).status_code == 201
+        _registries["source"].set_deployed_version(name, "1.0.0")
+
+    def test_a_new_transform_instance_reports_its_restart(
+        self, client, app, admin_headers, tmp_path
+    ):
+        from dfe_engine.appmgmt import appconfig
+
+        gc = self._compose(app, tmp_path)
+        # The render every deployment does at startup: it creates each app's
+        # directory, and a directory no container has read yet needs no restart.
+        appconfig.render_and_report(gc, app.state.settings)
+        self._deployed_transform_source(client, admin_headers, "elreg")
+
+        resp = client.post("/api/v1/sources/reconcile-apps", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["changes"] == [f"{self.TRANSFORM}/elreg: deploy instance"]
+        assert resp.json()["restart_required"] == [self.RESTART]
+
+    def test_the_deploying_write_reports_it_only_once(self, client, app, admin_headers, tmp_path):
+        from dfe_engine.appmgmt import appconfig
+
+        gc = self._compose(app, tmp_path)
+        appconfig.render_and_report(gc, app.state.settings)
+        self._deployed_transform_source(client, admin_headers, "elreg")
+        client.post("/api/v1/sources/reconcile-apps", headers=admin_headers)
+
+        resp = client.post("/api/v1/sources/reconcile-apps", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"changes": [], "restart_required": []}
