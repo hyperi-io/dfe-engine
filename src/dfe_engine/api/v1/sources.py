@@ -217,35 +217,57 @@ def _source_response(
     )
 
 
+def _one_per_app(hints: list[str]) -> list[str]:
+    """The restart hints in the order first reported, with repeats dropped.
+
+    Every write renders every app, so two overlays written in one reconcile can
+    each report the same app; the caller runs one command per app.
+    """
+    return list(dict.fromkeys(hints))
+
+
 def _reconcile_apps(request: Request, user: Any, registry: Any) -> AppsSync:
     """Apply what the sources imply about the deployed apps. Never raises.
 
     Returns the writes made, why the reconcile could not complete when it did
     not, and the restart each app needs where this deployment renders its config
     files itself. A deployment without a deploy repo has nothing to reconcile.
+
+    The hints are collected from the writes as well as from the render that
+    follows them, because the overlay write renders the app's config on its way
+    through: by the time the reconcile renders again the file is already current,
+    so an app whose config only that write changed would be reported as needing
+    nothing and a Compose stack would leave it on the source it started with.
     """
     gc = getattr(request.app.state, "gitcrud", None)
     if gc is None:
         return AppsSync(changes=[])
     settings = request.app.state.settings
     done: list[str] = []
+    hints: list[str] = []
     try:
         for change in derived.plan(gc, registry, settings):
             if change.action == "remove":
-                remove_overlay(request, user, change.app)
+                written = remove_overlay(request, user, change.app)
             else:
-                commit_overlay(request, user, change.app, change.doc or {}, summary=change.summary)
+                written = commit_overlay(
+                    request, user, change.app, change.doc or {}, summary=change.summary
+                )
+            # Each write renders the app config itself, so its hint is the only
+            # report of that change: the render below finds the file current.
+            hints += written.restart_required
             done.append(change.describe())
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else exc.detail.get("message", "")
         logger.warning(f"apps not reconciled with the sources: {detail}")
-        return AppsSync(changes=done, error=str(detail))
+        return AppsSync(changes=done, error=str(detail), restart_required=_one_per_app(hints))
     except Exception as exc:
         logger.warning(f"apps not reconciled with the sources: {exc}")
-        return AppsSync(changes=done, error=str(exc))
+        return AppsSync(changes=done, error=str(exc), restart_required=_one_per_app(hints))
     # Re-rendered even when the reconcile wrote nothing: a source deploy changes
     # the loader's table map through the same overlay the plan found in step.
-    return AppsSync(changes=done, restart_required=appconfig.render_and_report(gc, settings))
+    hints += appconfig.render_and_report(gc, settings)
+    return AppsSync(changes=done, restart_required=_one_per_app(hints))
 
 
 async def _sync_hyperdx_source(
