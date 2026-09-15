@@ -188,12 +188,24 @@ spec:
             # Kafka topic creation on source deploy
             - name: DFE_KAFKA_BOOTSTRAP_SERVERS
               value: {{ .bootstrap_servers | quote }}
+            {{- if .provider }}
+            - name: DFE_KAFKA_PROVIDER
+              value: {{ .provider | quote }}
+            {{- end }}
             - name: DFE_KAFKA_ENSURE_TOPICS
               value: {{ .ensure_topics | quote }}
             - name: DFE_KAFKA_TOPIC_PARTITIONS
               value: {{ .topic_partitions | quote }}
             - name: DFE_KAFKA_TOPIC_REPLICATION_FACTOR
               value: {{ .topic_replication_factor | quote }}
+            {{- if .topic_retention_ms }}
+            - name: DFE_KAFKA_TOPIC_RETENTION_MS
+              value: {{ .topic_retention_ms | quote }}
+            {{- end }}
+            {{- if .topic_cleanup_policy }}
+            - name: DFE_KAFKA_TOPIC_CLEANUP_POLICY
+              value: {{ .topic_cleanup_policy | quote }}
+            {{- end }}
             {{- else }}
             # No broker address configured, so there is nothing for the deploy hook
             # to reach; left on it would spend the admin timeout on every source

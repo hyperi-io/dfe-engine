@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.20.12"
+    "version": "1.20.14"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -4249,6 +4249,275 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/dfe_engine__api__v1__sources__SeedResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/kafka/topics": {
+      "get": {
+        "tags": [
+          "Kafka Topics"
+        ],
+        "summary": "List Topic Status",
+        "description": "Report each source topic's existence, shape, config and drift.\n\nRead-only: it creates nothing, so a status call against a broker mid-restart\nreports that it could not be read rather than reporting every topic missing.",
+        "operationId": "list_topic_status_api_v1_kafka_topics_get",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Limit to one source's topics; omitted means every source",
+              "title": "Source"
+            },
+            "description": "Limit to one source's topics; omitted means every source"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopicStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/kafka/topics/ensure": {
+      "post": {
+        "tags": [
+          "Kafka Topics"
+        ],
+        "summary": "Ensure Source Topics",
+        "description": "Create every topic the sources in scope need and do not have.\n\nIdempotent, and it never touches a topic that already exists: widening an\nexisting topic is ``update``, deliberately, so a re-ensure cannot reshape a\nlive topic as a side effect.",
+        "operationId": "ensure_source_topics_api_v1_kafka_topics_ensure_post",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Limit to one source's topics; omitted means every source",
+              "title": "Source"
+            },
+            "description": "Limit to one source's topics; omitted means every source"
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Report what would change without changing it",
+              "default": false,
+              "title": "Dry Run"
+            },
+            "description": "Report what would change without changing it"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopicEnsureResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/kafka/topics/update": {
+      "post": {
+        "tags": [
+          "Kafka Topics"
+        ],
+        "summary": "Update Source Topics",
+        "description": "Converge existing topics onto their spec: alter configs, widen partitions.\n\nA topic that does not exist is reported as absent rather than created, so a\nsource that never deployed shows up here instead of being quietly fixed.",
+        "operationId": "update_source_topics_api_v1_kafka_topics_update_post",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Limit to one source's topics; omitted means every source",
+              "title": "Source"
+            },
+            "description": "Limit to one source's topics; omitted means every source"
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Report what would change without changing it",
+              "default": false,
+              "title": "Dry Run"
+            },
+            "description": "Report what would change without changing it"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopicUpdateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/kafka/topics/remove": {
+      "post": {
+        "tags": [
+          "Kafka Topics"
+        ],
+        "summary": "Remove Source Topics",
+        "description": "Delete one source's topics. DESTRUCTIVE - the records on them are gone.\n\nGuarded twice over: a source name is required (there is no remove-everything\ncall), and ``confirm`` must be set. A dry run needs neither the confirmation\nnor a broker write, so it is the safe way to see what would go.",
+        "operationId": "remove_source_topics_api_v1_kafka_topics_remove_post",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The source whose topics go; never every source at once",
+              "title": "Source"
+            },
+            "description": "The source whose topics go; never every source at once"
+          },
+          {
+            "name": "confirm",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Must be true: the topic's records go with it and do not come back",
+              "default": false,
+              "title": "Confirm"
+            },
+            "description": "Must be true: the topic's records go with it and do not come back"
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Report what would change without changing it",
+              "default": false,
+              "title": "Dry Run"
+            },
+            "description": "Report what would change without changing it"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopicRemoveResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -30370,6 +30639,249 @@
           "roles"
         ],
         "title": "TokenResponse"
+      },
+      "TopicEnsureResponse": {
+        "properties": {
+          "created": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Created"
+          },
+          "existing": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Existing"
+          },
+          "failed": {
+            "items": {
+              "$ref": "#/components/schemas/TopicFailure"
+            },
+            "type": "array",
+            "title": "Failed"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "TopicEnsureResponse",
+        "description": "Outcome of an ensure pass: every topic in scope lands in exactly one list."
+      },
+      "TopicFailure": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "error"
+        ],
+        "title": "TopicFailure",
+        "description": "One topic the broker would not do the thing to, and what it said."
+      },
+      "TopicRemoveResponse": {
+        "properties": {
+          "removed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Removed"
+          },
+          "absent": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Absent"
+          },
+          "failed": {
+            "items": {
+              "$ref": "#/components/schemas/TopicFailure"
+            },
+            "type": "array",
+            "title": "Failed"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "TopicRemoveResponse",
+        "description": "Outcome of a remove pass."
+      },
+      "TopicStateResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "exists": {
+            "type": "boolean",
+            "title": "Exists"
+          },
+          "desired_partitions": {
+            "type": "integer",
+            "title": "Desired Partitions"
+          },
+          "desired_replication_factor": {
+            "type": "integer",
+            "title": "Desired Replication Factor"
+          },
+          "partitions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Partitions"
+          },
+          "replication_factor": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replication Factor"
+          },
+          "config": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Config"
+          },
+          "drift": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Drift"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "source",
+          "exists",
+          "desired_partitions",
+          "desired_replication_factor"
+        ],
+        "title": "TopicStateResponse",
+        "description": "What the broker holds for one topic, against what its source asks for."
+      },
+      "TopicStatusResponse": {
+        "properties": {
+          "reachable": {
+            "type": "boolean",
+            "title": "Reachable",
+            "description": "False when the broker could not be read at all"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Why the broker could not be read; null when it could"
+          },
+          "topics": {
+            "items": {
+              "$ref": "#/components/schemas/TopicStateResponse"
+            },
+            "type": "array",
+            "title": "Topics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reachable"
+        ],
+        "title": "TopicStatusResponse",
+        "description": "Status for every topic the sources in scope imply."
+      },
+      "TopicUpdateResponse": {
+        "properties": {
+          "altered": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Altered"
+          },
+          "widened": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Widened"
+          },
+          "unchanged": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unchanged"
+          },
+          "absent": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Absent"
+          },
+          "refused": {
+            "items": {
+              "$ref": "#/components/schemas/TopicFailure"
+            },
+            "type": "array",
+            "title": "Refused"
+          },
+          "failed": {
+            "items": {
+              "$ref": "#/components/schemas/TopicFailure"
+            },
+            "type": "array",
+            "title": "Failed"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "TopicUpdateResponse",
+        "description": "Outcome of a converge pass.\n\n``refused`` is what DFE declined to do (a partition decrease, a replication\nfactor change); ``failed`` is what the broker rejected. They are different\nproblems with different fixes, so they are different lists."
       },
       "TransportFacts": {
         "properties": {

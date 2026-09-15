@@ -75,7 +75,9 @@ class _FakeAdmin:
     def list_topic_names(self, *, timeout: float = 10.0) -> set[str]:
         return set(self.present)
 
-    def create(self, name, *, partitions, replication_factor, timeout: float = 30.0) -> None:
+    def create(
+        self, name, *, partitions, replication_factor, config=None, timeout: float = 30.0
+    ) -> None:
         self.created.append(name)
         self.present.add(name)
 
@@ -106,7 +108,7 @@ class TestRealRun:
         recorded = {}
 
         class _Recording(_FakeAdmin):
-            def create(self, name, *, partitions, replication_factor, timeout=30.0):
+            def create(self, name, *, partitions, replication_factor, config=None, timeout=30.0):
                 recorded[name] = (partitions, replication_factor)
                 super().create(name, partitions=partitions, replication_factor=replication_factor)
 
@@ -132,7 +134,7 @@ class TestRealRun:
         recorded = {}
 
         class _Recording(_FakeAdmin):
-            def create(self, name, *, partitions, replication_factor, timeout=30.0):
+            def create(self, name, *, partitions, replication_factor, config=None, timeout=30.0):
                 recorded[name] = (partitions, replication_factor)
                 super().create(name, partitions=partitions, replication_factor=replication_factor)
 

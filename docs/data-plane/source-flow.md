@@ -93,6 +93,8 @@ The source records bus-versus-direct only. Which bus (Kafka today) and which dir
 
 The engine sets `<source>_load` only when the source has a transform, and the loader's topic discovery suppresses `_land` whenever a `_load` topic for the same source exists. So a `_load` topic left on the broker after a transform is removed starves the source until the topic is deleted; the engine deletes it on the same reconcile. Deployers never type a topic or an endpoint into an app's values file.
 
+Those topics are the engine's for the source's whole life, and nothing depends on the broker's `auto.create.topics.enable`: [topic-contract.md](topic-contract.md) covers ensure, converge, status and remove.
+
 ## What the engine compiles
 
 | Source field | Compiles into |

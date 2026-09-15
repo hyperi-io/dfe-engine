@@ -535,9 +535,11 @@ class KafkaSettings(BaseModel):
         default="",
         description=(
             "Kafka provider; DERIVES security_protocol + sasl_mechanism per the "
-            "contract (strimzi/redpanda/msk/redpanda-cloud -> SCRAM-SHA-512; "
-            "confluent-cloud -> PLAIN; plaintext -> no auth; msk_iam -> quarantined "
-            "IAM path). Never hand-set the mechanism."
+            "contract (strimzi/redpanda/msk/redpanda-cloud -> SASL_SSL + "
+            "SCRAM-SHA-512; strimzi-no-tls/redpanda-no-tls -> SASL_PLAINTEXT + "
+            "SCRAM-SHA-512 for the in-cluster TLS-off listener; confluent-cloud -> "
+            "PLAIN; plaintext -> no auth; msk_iam -> quarantined IAM path). Never "
+            "hand-set the mechanism."
         ),
     )
     bootstrap_servers: str = Field(default="localhost:9092")
@@ -576,6 +578,22 @@ class KafkaSettings(BaseModel):
         description=(
             "Replication factor for topics DFE creates. 1 suits a single-broker "
             "dev cluster; raise it to match a real broker count."
+        ),
+    )
+    topic_retention_ms: int | None = Field(
+        default=None,
+        ge=-1,
+        description=(
+            "``retention.ms`` for topics DFE creates and converges. Unset leaves the "
+            "broker default in place, which is what an untouched deployment already "
+            "has; -1 is Kafka's infinite retention."
+        ),
+    )
+    topic_cleanup_policy: str = Field(
+        default="",
+        description=(
+            "``cleanup.policy`` for topics DFE creates and converges (``delete`` or "
+            "``compact``). Empty leaves the broker default in place."
         ),
     )
 
@@ -1759,6 +1777,10 @@ def _get_env_overrides() -> dict:
         overrides["kafka"]["topic_partitions"] = int(val)
     if val := _get_env("DFE_KAFKA_TOPIC_REPLICATION_FACTOR"):
         overrides["kafka"]["topic_replication_factor"] = int(val)
+    if val := _get_env("DFE_KAFKA_TOPIC_RETENTION_MS"):
+        overrides["kafka"]["topic_retention_ms"] = int(val)
+    if val := _get_env("DFE_KAFKA_TOPIC_CLEANUP_POLICY"):
+        overrides["kafka"]["topic_cleanup_policy"] = val
 
     # Transport: what this deployment can carry a source on. The profile sets
     # both - a brokerless profile is bus_present=false, default=direct.
