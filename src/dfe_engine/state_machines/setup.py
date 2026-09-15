@@ -152,11 +152,7 @@ class SetupContext:
         # The schema builder treats a blank default as MergeTree, so report the same.
         default_engine = getattr(clickhouse, "default_engine", "") or "MergeTree"
         if clickhouse is not None:
-            from dfe_engine.gitcrud.retention import effective_default_ttl_days
-
-            default_ttl_days = effective_default_ttl_days(
-                state.settings, getattr(state, "gitcrud", None)
-            )
+            default_ttl_days = int(getattr(clickhouse, "default_ttl_days", 0) or 0)
         return cls(
             account_store=account_store,
             group_store=getattr(state, "group_store", None),

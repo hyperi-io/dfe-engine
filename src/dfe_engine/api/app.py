@@ -94,15 +94,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as exc:  # the notice must never break startup
             logger.warning("SUPPORT-DRIFT check unavailable", error=str(exc))
 
+    from dfe_engine.api.deps import get_source_registry_optional
     from dfe_engine.clickhouse.bootstrap import bootstrap_clickhouse
 
-    tables_bootstrapped = bootstrap_clickhouse(settings=settings, gitcrud=gitcrud)
+    source_registry = get_source_registry_optional()
+    try:
+        deployed_candidates = source_registry.get_all_sources() if source_registry else []
+    except Exception as exc:  # the core tables still bootstrap without the source list
+        logger.warning("sources unreadable; their TTL is left to the next start", error=str(exc))
+        deployed_candidates = []
+    tables_bootstrapped = bootstrap_clickhouse(settings=settings, sources=deployed_candidates)
 
     # After the bootstrap, which is what makes the landing table exist: the seed records the source as deployed, and that must not be claimed before it is true.
-    from dfe_engine.api.deps import get_source_registry_optional
     from dfe_engine.source.core_sources import seed_core_sources
 
-    source_registry = get_source_registry_optional()
     if source_registry is not None:
         try:
             seed_core_sources(
