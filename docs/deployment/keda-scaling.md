@@ -59,11 +59,15 @@ reads whatever they emit today.
 | App | Default trigger | Opt-in trigger |
 |-----|------------------|-----------------|
 | dfe-receiver / dfe-loader / dfe-archiver | CPU ~70% | scalo ScalingPressure (shim) |
-| dfe-transform-elastic/vector/wasm/vrl/splack | CPU ~70% | scalo ScalingPressure (shim) |
+| dfe-transform-elastic/vector/vrl | CPU ~70% | scalo ScalingPressure (shim) |
 | dfe-ui | CPU ~70% | - |
 | dfe-engine | KEDA disabled by default (control-plane singleton) | CPU (opt-in) |
 | dfe-fetcher | KEDA disabled by default | - |
 | dfe-hunt-runner | no KEDA - one static pod | BETA: due-hunt backlog via the shim (`metrics-api`, `AverageValue`) - see [hunt-runner-scaling](../data-plane/hunt-runner-scaling.md) |
+
+dfe-transform-splack and dfe-transform-wasm are coming: alpha, unpublished, and
+commented out of dfe-infra's `versions.yaml` and KEDA default lists, so neither
+has a default trigger to describe until it ships.
 
 All ScaledObjects default `minReplicaCount: 1` - there is no scale-to-zero on
 the fleet baseline today (`idleReplicaCount` support exists in `_keda.tpl` for
