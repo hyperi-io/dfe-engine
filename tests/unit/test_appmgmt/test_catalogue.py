@@ -73,7 +73,7 @@ class TestShippedManifest:
             "dfe-fetcher": True,
             "dfe-transform-vrl": False,
             "dfe-transform-vector": True,
-            "dfe-transform-elastic": True,
+            "dfe-transform-elastic": False,
             "culvert": False,
             "dfe-engine": False,
             "dfe-ui": False,
@@ -161,14 +161,13 @@ class TestShippedManifest:
     def test_the_apps_nothing_deploys_by_default_are_the_per_source_ones_and_the_door(self):
         # An instance of a per-source app arrives with its source, and the edge
         # door is dialled by an appliance fleet a deployment may not have, so
-        # neither is seeded by a profile. The fetcher and the vrl transform are
-        # the exception: Compose creates no service at run time, so docker-single
-        # starts one of each idle.
+        # neither is seeded by a profile. The fetcher and the vrl and elastic
+        # transforms are the exception: each declares idle_when, so the tiers in
+        # its default_in seed one idle and the source it is later given fills it.
         optional = {name for name, app in catalogue.APP_CATALOGUE.items() if app.optional}
 
         assert optional == {
             "dfe-transform-vector",
-            "dfe-transform-elastic",
             "culvert",
         }
 
@@ -219,6 +218,10 @@ class TestShippedManifest:
                 "config.ingest.enabled",
             ),
             "dfe-transform-vrl": ("config.source.topics",),
+            "dfe-transform-elastic": (
+                "config.source.name",
+                "config.source.topics",
+            ),
         }
 
     def test_only_elastic_selects_a_compiled_in_program_by_name(self):
