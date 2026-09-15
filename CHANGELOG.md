@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.20.9](https://github.com/hyperi-io/dfe-engine/compare/v1.20.8...v1.20.9) (2026-09-15)
+
+### Bug Fixes
+
+* **apps:** re-vendor the catalogue so elastic and vrl follow dfe-infra ([#390](https://github.com/hyperi-io/dfe-engine/issues/390)) ([113bb2f](https://github.com/hyperi-io/dfe-engine/commit/113bb2fa5ba8ef3717e17e2177c7bcd6893c023b)), closes [#318](https://github.com/hyperi-io/dfe-engine/issues/318) [#320](https://github.com/hyperi-io/dfe-engine/issues/320) [#389](https://github.com/hyperi-io/dfe-engine/issues/389)
+
 ## [1.20.8](https://github.com/hyperi-io/dfe-engine/compare/v1.20.7...v1.20.8) (2026-09-15)
 
 ### Bug Fixes
