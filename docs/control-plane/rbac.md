@@ -742,12 +742,10 @@ sequenceDiagram
 
     Note over API: No CH user creation needed<br/>(custom settings pattern)
 
-    API->>HDX: create_team("customer-{name}")
+    API->>HDX: get_team()
     HDX-->>API: team_id (or None on failure)
 
-    alt Team created
-        API->>HDX: create_connection(team_id,<br/>tenant_reader + setting)
-    end
+    Note over API: The team's ClickHouse connection is the<br/>fork's to create, from GET /api/v1/hyperdx/connection
 
     Note over HDX: HyperDX failures are non-fatal<br/>Background retry reconciliation
 ```
@@ -762,8 +760,8 @@ policies handle it. dfe-engine just needs to know the org_ids to inject.
 
 ### 7.1 Strategy
 
-- **Bootstrap:** `generate_default_connections_json()` produces `DEFAULT_CONNECTIONS` env var for HyperDX Helm chart
-- **Runtime:** `HyperDXClient` calls HyperDX internal API for team/connection CRUD
+- **Connections:** the fork asks `GET /api/v1/hyperdx/connection` with the user's own token and seeds that one per-org credential on their team; the engine writes none itself
+- **Runtime:** `HyperDXClient` calls the HyperDX internal API for the team and for per-DFE-source CRUD
 - **Failures:** Non-fatal. First failure sets `_connected=False`, subsequent calls logged as warnings
 
 ### 7.2 Team Mapping

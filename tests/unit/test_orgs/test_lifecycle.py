@@ -22,6 +22,25 @@ from dfe_engine.orgs.lifecycle import OrgLifecycleManager
 from dfe_engine.orgs.registry import OrgRegistry
 
 
+class FakeFork:
+    """A HyperDX team as the fork holds it: an id and its connection list."""
+
+    def __init__(self, team_id: str = "team-1") -> None:
+        self._team_id = team_id
+        self.connections: list[str] = []
+
+    async def get_team(self):
+        return {"_id": self._team_id, "name": "dfe"}
+
+    async def ensure_connection(self, *, name, host, username, password="", port=None):
+        self.connections.append(name)
+        return "conn-1"
+
+    async def create_connection(self, *, name, host, username, password="", port=None):
+        self.connections.append(name)
+        return "conn-1"
+
+
 @pytest.fixture
 def registry(tmp_path):
     return OrgRegistry(tmp_path / "orgs")
@@ -80,3 +99,20 @@ async def test_delete_org(manager, registry):
 async def test_delete_org_not_found_raises(manager):
     with pytest.raises(KeyError):
         await manager.delete_org("nonexistent", admin_id="admin")
+
+
+@pytest.mark.asyncio
+async def test_create_org_leaves_the_team_without_a_connection(registry):
+    """The team must reach the fork's own provisioning holding NO connection.
+
+    The fork seeds exactly one per-org connection plus that team's sources, and it
+    skips a team that already holds any connection - so an engine-written one
+    leaves the first user with no working connection and no sources (#312, #206).
+    """
+    fork = FakeFork()
+    manager = OrgLifecycleManager(registry, hyperdx_client=fork)
+
+    org = await manager.create_org("acme", org_ids=["acme"], admin_id="admin")
+
+    assert fork.connections == []
+    assert org.hyperdx_team_id == "team-1"

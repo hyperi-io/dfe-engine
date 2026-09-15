@@ -6,14 +6,13 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""HyperDX integration — team, connection and per-DFE-source management."""
+"""HyperDX integration — team and per-DFE-source management."""
 
-from dfe_engine.hyperdx.client import HyperDXClient, SyncResult
+from dfe_engine.hyperdx.client import HyperDXClient
 from dfe_engine.hyperdx.sources import ensure_source, list_sources_by_team, remove_source
 
 __all__ = [
     "HyperDXClient",
-    "SyncResult",
     "ensure_source",
     "list_sources_by_team",
     "remove_source",

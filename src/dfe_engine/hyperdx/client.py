@@ -12,18 +12,22 @@ The fork's control API is session-scoped: every call acts on the team of the
 authenticated principal. The engine authenticates as its machine identity
 (``svc:dfe-engine``), which the fork maps to the deployment's default team and
 JIT-creates on first contact. There are NO ``/api/v1/teams`` routes and no team
-create/delete endpoints; the reachable surface is::
+create/delete endpoints; the surface this client reaches is::
 
     GET  /team                    the caller's team (JIT-creates the default team)
     POST /team/invitation         invite an email to the caller's team
-    GET/POST /connections         ClickHouse connections on the caller's team
-    PUT/DELETE /connections/:id
     GET/POST /sources             telemetry sources on the caller's team
     PUT/DELETE /sources/:id
 
-The one exception is the fork's ``/dfe/sources`` routes, which act on every team
-rather than the caller's: the engine's own team has no connection and no humans,
-so a DFE source written there reaches nobody.
+A team's ClickHouse CONNECTION is deliberately absent: the fork creates exactly
+one per team from the per-org material ``GET /api/v1/hyperdx/connection`` serves
+against that user's own token, and an engine-written connection would hand every
+team the same credential and stop the fork provisioning the per-org one
+(dfe-engine#124).
+
+The one exception to session scope is the fork's ``/dfe/sources`` routes, which
+act on every team rather than the caller's: the engine's own team has no
+connection and no humans, so a DFE source written there reaches nobody.
 
 All operations are **non-fatal**: if HyperDX is unreachable, failures are
 logged as warnings and the caller proceeds normally.
@@ -37,27 +41,16 @@ Usage::
         token_provider=machine_token_source.token,
     )
     team = await client.get_team()
-    conn_id = await client.ensure_connection(
-        name="tenant_reader",
-        host="clickhouse",
-        port=8123,
-        username="tenant_reader",
-        password="secret",
-    )
+    written = await client.put_dfe_source("filebeat", spec)
 """
 
 from __future__ import annotations
 
-import json
-import os
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from typing import Any
 
 from scalo.logger import logger
-
-from dfe_engine.connections.config import ConnectionConfig
 
 # This is a non-fatal side channel called inside interactive API requests
 # (org create), so an unreachable fork must cost seconds, not the
@@ -69,34 +62,8 @@ _RETRIES = 1
 _RETRY_AFTER_SECONDS = 60.0
 
 
-def _connection_host_url(host: str, port: int | None) -> str:
-    """Collapse engine host+port into the fork's single URL ``host`` field."""
-    if "://" in host:
-        return host
-    if port:
-        return f"http://{host}:{port}"
-    return f"http://{host}"
-
-
-@dataclass
-class SyncResult:
-    """Result of a HyperDX reconciliation pass.
-
-    Attributes:
-        teams_created: Names of teams confirmed present (JIT-created or existing).
-        teams_failed: Team lookups that failed.
-        connections_created: Number of connections confirmed or created.
-        connections_failed: Number of connections that failed.
-    """
-
-    teams_created: list[str] = field(default_factory=list)
-    teams_failed: list[str] = field(default_factory=list)
-    connections_created: int = 0
-    connections_failed: int = 0
-
-
 class HyperDXClient:
-    """Manage the fork's session-scoped team, connections and sources.
+    """Manage the fork's session-scoped team and sources.
 
     All operations are non-fatal: if HyperDX is unreachable, log a
     warning and return gracefully.  Callers should not depend on success.
@@ -158,113 +125,6 @@ class HyperDXClient:
             return False
         logger.info("HyperDX member invited", email=email)
         return True
-
-    # ------------------------------------------------------------------
-    # Connections (fork ConnectionSchema: name, host URL, username, password)
-    # ------------------------------------------------------------------
-
-    async def list_connections(self) -> list[dict[str, Any]] | None:
-        """List the caller's team connections, or None on failure."""
-        data = await self._request("get", "/connections", op="list_connections")
-        return data if isinstance(data, list) else None
-
-    async def create_connection(
-        self,
-        *,
-        name: str,
-        host: str,
-        username: str,
-        password: str = "",
-        port: int | None = None,
-    ) -> str | None:
-        """Create a ClickHouse connection on the caller's team.
-
-        Args:
-            name: Connection name.
-            host: ClickHouse host (bare hostname or full URL).
-            username: ClickHouse username (the fork field is ``username``, not ``user``).
-            password: ClickHouse password.
-            port: ClickHouse HTTP port, folded into the URL when ``host`` is bare.
-
-        Returns:
-            Connection ID string on success, None on failure.
-        """
-        body = {
-            "name": name,
-            "host": _connection_host_url(host, port),
-            "username": username,
-            "password": password,
-        }
-        data = await self._request(
-            "post",
-            "/connections",
-            json_body=body,
-            op="create_connection",
-            connection=name,
-        )
-        if not isinstance(data, dict):
-            return None
-        conn_id = str(data.get("id", ""))
-        if conn_id:
-            logger.info("HyperDX connection created", connection=name, conn_id=conn_id)
-        return conn_id or None
-
-    async def ensure_connection(
-        self,
-        *,
-        name: str,
-        host: str,
-        username: str,
-        password: str = "",
-        port: int | None = None,
-    ) -> str | None:
-        """Create the named connection unless it already exists (fork does not dedupe).
-
-        Returns:
-            Existing or new connection ID, None on failure.
-        """
-        existing = await self.list_connections()
-        if existing:
-            for conn in existing:
-                if conn.get("name") == name:
-                    return str(conn.get("id") or conn.get("_id") or "") or None
-        return await self.create_connection(
-            name=name, host=host, username=username, password=password, port=port
-        )
-
-    async def update_connection(self, connection_id: str, connection: dict[str, Any]) -> bool:
-        """Update a connection; the fork validates the FULL schema including ``id``.
-
-        Args:
-            connection_id: Connection ID to update.
-            connection: Full connection body (``id`` is injected from the argument).
-
-        Returns:
-            True on success, False on failure.
-        """
-        body = {**connection, "id": connection_id}
-        data = await self._request(
-            "put",
-            f"/connections/{connection_id}",
-            json_body=body,
-            op="update_connection",
-            connection_id=connection_id,
-        )
-        return data is not None
-
-    async def delete_connection(self, connection_id: str) -> bool:
-        """Delete a connection from the caller's team.
-
-        Returns:
-            True on success, False on failure.
-        """
-        data = await self._request(
-            "delete",
-            f"/connections/{connection_id}",
-            op="delete_connection",
-            connection_id=connection_id,
-        )
-        return data is not None
 
     # ------------------------------------------------------------------
     # Sources (fork SourceSchema: kind-discriminated union, passed through)
@@ -387,79 +247,6 @@ class HyperDXClient:
             saved_search_id=saved_search_id,
         )
         return data if isinstance(data, dict) else None
-
-    # ------------------------------------------------------------------
-    # Reconciliation + chart seeding
-    # ------------------------------------------------------------------
-
-    async def sync_connections(self, conn_config: ConnectionConfig) -> SyncResult:
-        """Reconcile the default team: present and holding ``tenant_reader``.
-
-        The fork exposes no multi-team management, so reconciliation is:
-        confirm the caller's (default) team, then ensure the ``tenant_reader``
-        connection exists on it.
-
-        Args:
-            conn_config: Connection configuration with connection definitions.
-
-        Returns:
-            SyncResult summarising what happened.
-        """
-        result = SyncResult()
-
-        tenant_conn = conn_config.connections.get("tenant_reader")
-        if tenant_conn is None:
-            logger.warning("No 'tenant_reader' connection in config, skipping sync")
-            return result
-
-        team = await self.get_team()
-        if not team:
-            result.teams_failed.append("default")
-            return result
-        result.teams_created.append(str(team.get("name", "default")))
-
-        conn_id = await self.ensure_connection(
-            name=tenant_conn.name,
-            host=tenant_conn.host,
-            port=tenant_conn.port,
-            username=tenant_conn.user,
-            password=os.environ.get(tenant_conn.password_env, ""),
-        )
-        if conn_id is None:
-            result.connections_failed += 1
-        else:
-            result.connections_created += 1
-
-        return result
-
-    def generate_default_connections_json(
-        self,
-        conn_config: ConnectionConfig,
-    ) -> str:
-        """Generate DEFAULT_CONNECTIONS env JSON in the fork's Connection shape.
-
-        The fork's ``setupDefaults`` spreads each entry into its Connection
-        model, which knows ``username`` and a single URL ``host`` - emitting
-        ``user`` or separate port/database fields silently drops the credential
-        and falls back to the ClickHouse default user (dfe-engine#145).
-
-        Args:
-            conn_config: Connection configuration.
-
-        Returns:
-            JSON string of connection definitions.
-        """
-        connections = []
-        for name, conn in conn_config.connections.items():
-            connections.append(
-                {
-                    "name": name,
-                    "host": _connection_host_url(conn.host, conn.port),
-                    "username": conn.user,
-                    "password": os.environ.get(conn.password_env, ""),
-                }
-            )
-        return json.dumps(connections)
 
     # ------------------------------------------------------------------
     # Internal helpers

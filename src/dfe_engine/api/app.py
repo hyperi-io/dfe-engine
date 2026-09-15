@@ -393,7 +393,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.org_lifecycle = OrgLifecycleManager(
         registry=app.state.org_registry,
         hyperdx_client=hdx_client,
-        connection_config=conn_config,
     )
 
     # Bootstrap JIT provisioner
