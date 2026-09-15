@@ -146,7 +146,7 @@ Source: filebeat
         └── additional_fields.yaml (enrichment fields)
 ```
 
-The type registry (`type_registry.yaml`) maps primitives to ClickHouse types
+The type registry (dfe-schemas `registries/types.yaml`) maps primitives to ClickHouse types
 and is global, not per-source. The schema section feeds the `SchemaBuilder` /
 `ClickHouseSchema` pipeline; what the Source changed is that create, migrate
 and drop are triggered from the source's state rather than from a standalone

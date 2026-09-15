@@ -40,7 +40,7 @@ dependencies = [
     # importlib.resources; the Dockerfile bakes its seed from the installed
     # wheel. Floor is the release that added sources/, which the engine seeds
     # its core landing source from; uv.lock pins the hash.
-    "dfe-schemas>=0.2.2",
+    "dfe-schemas>=0.2.4",
     # Data processing
     "pandas>=3.0.3",
     "numpy>=2.5.0",

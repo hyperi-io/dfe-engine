@@ -37,6 +37,7 @@ from dfe_engine.core_resources.yaml_resource_type import (
     config_is_core,
 )
 from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file
+from dfe_engine.source.engine_registry import InvalidEngineError
 from dfe_engine.source.models import (
     DEFAULT_LANDING_LABEL,
     RULELESS_OPERATORS,
@@ -46,6 +47,7 @@ from dfe_engine.source.models import (
     SourceWriteRequest,
     apply_source_write_update,
     draft_build_version_to_invalidate,
+    engine_registry,
     source_from_write,
 )
 from dfe_engine.yaml_utils import yaml_dump
@@ -700,6 +702,7 @@ class SourceRegistry:
         if source.state != "disabled":
             self._validate_match_operator(source, candidate_match)
             self._validate_fetcher_routes(source, candidate_version)
+            self._validate_engine_arguments(source, candidate_version)
             self._validate_flow(source)
             self._validate_instance_room(source)
 
@@ -780,6 +783,17 @@ class SourceRegistry:
                     f"source {source.source!r}: a fetcher route names its own source; "
                     "records with no route already land there"
                 )
+
+    @staticmethod
+    def _validate_engine_arguments(source: Source, version: SourceVersion | None) -> None:
+        """A set engine must follow its variant's argument rule; a blank one follows the default."""
+        engine = version.effective_schema().engine if version else ""
+        if not (engine):
+            return
+        try:
+            engine_registry().validate_arguments(engine)
+        except InvalidEngineError as exc:
+            raise SourceValidationError(f"source {source.source!r}: {exc}") from exc
 
     @staticmethod
     def _validate_flow(source: Source) -> None:

@@ -334,10 +334,10 @@ class FieldMapRegistry:
     # -----------------------------------------------------------------
 
     def seed_defaults(self, overwrite: bool = False) -> int:
-        """Seed the field maps directory with built-in default maps.
+        """Seed the field maps directory with the default maps dfe-schemas ships.
 
-        Copies default YAML files from package resources. Non-destructive
-        by default — skips files that already exist.
+        Copies ``registries/field-maps/<standard>/*.yaml``. Non-destructive by
+        default: skips files that already exist.
 
         Args:
             overwrite: If True, overwrite existing maps.
@@ -345,11 +345,11 @@ class FieldMapRegistry:
         Returns:
             Number of maps seeded.
         """
-        import importlib.resources as resources
+        from dfe_engine.schema.schema_loader import SchemaLoadError, resolve_registry_path
 
         try:
-            defaults_dir = resources.files("dfe_engine.fieldmap") / "default_maps"
-        except Exception as e:
+            defaults_dir = resolve_registry_path("field-maps")
+        except SchemaLoadError as e:
             logger.warning(f"Failed to locate default field maps: {e}")
             return 0
 

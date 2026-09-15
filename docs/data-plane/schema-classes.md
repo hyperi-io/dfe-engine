@@ -12,7 +12,8 @@ overview: [schema.md](schema.md).
 |------|-----------------|
 | `src/dfe_engine/source/models.py` | `SchemaColumn`, `SourceSchema`, `SourceHeader`, `Source` Pydantic models |
 | `src/dfe_engine/source/type_registry.py` | `TypeRegistry` class, `ResolvedType` dataclass |
-| `src/dfe_engine/source/type_registry.yaml` | 13 primitives, use_case constraints, attribute constraints, ch_override catalogue |
+| dfe-schemas `registries/types.yaml` | 13 primitives, use_case constraints, attribute constraints, ch_override catalogue |
+| `src/dfe_engine/source/engine_registry.py` | `EngineRegistry` - permitted table engines and their argument rules, from dfe-schemas `registries/engines.yaml` |
 | `src/dfe_engine/schema/schema_loader.py` | `SchemaLoader` - YAML loading, composition, validation |
 | `src/dfe_engine/schema/schema_ddl.py` | `DDLGenerator`, `DDLConfig` - column/index/view DDL generation |
 | `src/dfe_engine/schema/schema_builder_v2.py` | `SchemaBuilderV2`, `SchemaBuildResult` - Source -> DDL orchestration |
@@ -20,7 +21,6 @@ overview: [schema.md](schema.md).
 | `src/dfe_engine/schema/ddl_writer.py` | `DDLFileWriter` - reference SQL file generation |
 | `src/dfe_engine/schema/engine_resolver.py` | table-engine choice (MergeTree / Replicated / cloud) resolved from the CH server |
 | `src/dfe_engine/fieldmap/view_generator.py` | `ViewGenerator` - standard field map -> view DDL |
-| `src/dfe_engine/schema/profiles/*.yaml` | bundled fallback copies of the dfe-schemas common-header profiles |
 
 ## Build pipeline
 
@@ -59,7 +59,7 @@ errors = col.validate_against_registry(TypeRegistry.default())
 ```python
 from dfe_engine.source.type_registry import TypeRegistry
 
-registry = TypeRegistry.default()  # loads type_registry.yaml
+registry = TypeRegistry.default()  # loads dfe-schemas registries/types.yaml
 resolved = registry.resolve("string", attributes=["lowcardinality"])
 # ResolvedType(ch_type='LowCardinality(Nullable(String))', codec='ZSTD(1)')
 registry.validate_use_case("integer", "dimension")  # OK
@@ -193,10 +193,9 @@ written = writer.write_all(Path("out/"))  # writes + returns paths
   engine warns but does not reject.
 - **Shipped schemas are read-only**: `is_shipped_schema()` detects paths
   inside the resolved schemas root (the `dfe-schemas` package, or the image
-  seed) or the bundled profiles - custom schemas live outside those
-  directories (`DFE_SCHEMAS_DIR`).
+  seed) - custom schemas live outside those directories (`DFE_SCHEMAS_DIR`).
 - **Profile name matches the FILENAME**: use `timeseries` / `minimal` /
   `passthrough` in `header.type`, matching the YAML filenames.
-- **type_registry.yaml loads via YAML 1.1** (PyYAML through
+- **registries/types.yaml loads via YAML 1.1** (PyYAML through
   DirectoryConfigStore semantics): `off`/`yes`/`no` become booleans. Meta
   schemas load via ruamel (YAML 1.2) and are unaffected.

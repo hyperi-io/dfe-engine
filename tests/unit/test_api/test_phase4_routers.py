@@ -130,7 +130,7 @@ class TestSchemasRouter:
 
         from dfe_engine.api.app import create_app
         from dfe_engine.api.deps import create_access_token
-        from dfe_engine.schema.schema_loader import _BUNDLED_PROFILES_DIR
+        from dfe_engine.schema.schema_loader import _resolve_package_schemas_root
         from dfe_engine.settings import (
             APISettings,
             AuthSettings,
@@ -148,7 +148,10 @@ class TestSchemasRouter:
         schemas_root.mkdir()
         common_header = schemas_root / "common-header"
         common_header.mkdir()
-        shutil.copy(_BUNDLED_PROFILES_DIR / "minimal.yaml", common_header / "minimal.yaml")
+        shutil.copy(
+            _resolve_package_schemas_root() / "common-header" / "minimal.yaml",
+            common_header / "minimal.yaml",
+        )
         monkeypatch.setenv("DFE_SCHEMAS_DIR", str(schemas_root))
         yaml_dump(
             {
@@ -225,7 +228,7 @@ class TestSchemasRouter:
 
         from dfe_engine.api.app import create_app
         from dfe_engine.api.deps import create_access_token
-        from dfe_engine.schema.schema_loader import _BUNDLED_PROFILES_DIR
+        from dfe_engine.schema.schema_loader import _resolve_package_schemas_root
         from dfe_engine.settings import (
             APISettings,
             AuthSettings,
@@ -243,7 +246,10 @@ class TestSchemasRouter:
         schemas_root.mkdir()
         common_header = schemas_root / "common-header"
         common_header.mkdir()
-        shutil.copy(_BUNDLED_PROFILES_DIR / "minimal.yaml", common_header / "minimal.yaml")
+        shutil.copy(
+            _resolve_package_schemas_root() / "common-header" / "minimal.yaml",
+            common_header / "minimal.yaml",
+        )
         monkeypatch.setenv("DFE_SCHEMAS_DIR", str(schemas_root))
         yaml_dump(
             {
@@ -376,7 +382,7 @@ class TestSchemasRouter:
 
         from dfe_engine.api.app import create_app
         from dfe_engine.api.deps import _registries, create_access_token
-        from dfe_engine.schema.schema_loader import _BUNDLED_PROFILES_DIR
+        from dfe_engine.schema.schema_loader import _resolve_package_schemas_root
         from dfe_engine.settings import (
             APISettings,
             AuthSettings,
@@ -398,7 +404,10 @@ class TestSchemasRouter:
         schemas_root.mkdir()
         common_header = schemas_root / "common-header"
         common_header.mkdir()
-        shutil.copy(_BUNDLED_PROFILES_DIR / "minimal.yaml", common_header / "minimal.yaml")
+        shutil.copy(
+            _resolve_package_schemas_root() / "common-header" / "minimal.yaml",
+            common_header / "minimal.yaml",
+        )
         monkeypatch.setenv("DFE_SCHEMAS_DIR", str(schemas_root))
         yaml_dump(
             {
@@ -512,7 +521,7 @@ class TestSchemasRouter:
 
         from dfe_engine.api.app import create_app
         from dfe_engine.api.deps import _registries, create_access_token, get_clickhouse_client
-        from dfe_engine.schema.schema_loader import _BUNDLED_PROFILES_DIR
+        from dfe_engine.schema.schema_loader import _resolve_package_schemas_root
         from dfe_engine.settings import (
             APISettings,
             AuthSettings,
@@ -539,7 +548,10 @@ class TestSchemasRouter:
         schemas_root.mkdir()
         common_header = schemas_root / "common-header"
         common_header.mkdir()
-        shutil.copy(_BUNDLED_PROFILES_DIR / "minimal.yaml", common_header / "minimal.yaml")
+        shutil.copy(
+            _resolve_package_schemas_root() / "common-header" / "minimal.yaml",
+            common_header / "minimal.yaml",
+        )
         monkeypatch.setenv("DFE_SCHEMAS_DIR", str(schemas_root))
         monkeypatch.setenv("DFE_CONFIG_DIR", str(tmp_path))
         sources_dir = tmp_path / "sources"
