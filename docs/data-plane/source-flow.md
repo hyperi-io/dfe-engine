@@ -51,18 +51,20 @@ flowchart LR
   end
   subgraph OUTPUT
     L[loader pool<br/>scalo Push listener]
+    A[archiver<br/>scalo Push listener]
   end
   R -->|matched destination| T
   F -->|output endpoint| T
   T -->|sink endpoint| L
   R -.->|no transform| L
   F -.->|no transform| L
+  R -.->|archive: true| A
   L --> CH[(ClickHouse<br/>source table, else main)]
 ```
 
-The archiver reads the landing topic, so it keeps the RAW record as it arrived, before any transform, and archive is a bus-form option: a direct source that asks for it is refused at save.
+The archiver keeps the RAW record as it arrived, before any transform. On the bus it reads the landing topic; on direct the receiver fans the record out to it beside the stage that loads it.
 
-The second diagram is the shape a transform takes once it declares `direct`. dfe-transform-vrl and dfe-transform-vector declare it; dfe-transform-elastic does not yet, so a direct source that names it is refused at save. Shipping the listener and adding the `transports` entry is the whole change.
+The second diagram is the shape a transform takes once it declares `direct` - which transforms do, and how one gains it, is under [Adding a transform](#adding-a-transform).
 
 ## Two transports, one per deployment
 
@@ -99,7 +101,7 @@ The engine sets `<source>_load` only when the source has a transform, and the lo
 | `fetcher` (source_type, config, topic, routes) | one fetcher instance overlay; on direct its `output` endpoint, and one `output.routes` entry per data-match route |
 | `transform` (engine, variant, config) | one transform instance overlay: `_land` in and `_load` out on the bus; a Push listener in and the loader's endpoint out on direct |
 | landing label | loader routing, source to table |
-| `archive: true` | the archiver's topic list |
+| `archive: true` | the archiver's topic list on the bus; on direct a second destination on the source's own rule |
 
 Every compiled block lands in the deploy repo under `values/`, Argo CD applies it on Kubernetes, and a hand edit to any of them is reported as drift and re-synced on the next source write. A block carries only the keys the sources derive, so the deployment's own settings survive it. A Compose deployment has no consumer for those blocks yet: its apps read the static config files the stack mounts, so a source written there compiles but does not reach the receiver, and `GET /api/v1/system/deployment` reports `applies_routing: false`. The receiver's destinations are a named set: every transform instance and the loader are destinations, and a rule sends a matched record to one by name. The fetcher carries the same shape as `output.routes` over its default destination, and the transform sinks use the same gRPC sender, so there is one sink implementation in scalo for all three.
 

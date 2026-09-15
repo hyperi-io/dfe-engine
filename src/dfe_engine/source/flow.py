@@ -294,6 +294,18 @@ def loader_endpoint(
     return catalogue.push_endpoint(apps[LOADER_SERVICE], "", _mesh_namespace(settings))
 
 
+def archiver_endpoint(
+    settings: DFESettings, catalogue_apps: dict[str, AppDescriptor] | None = None
+) -> str:
+    """Where a direct-transport sender pushes the raw copy of an archived record.
+
+    Stack-wide like the loader's: one archiver takes every archived source, so the
+    receiver's destination set names it once whatever the source.
+    """
+    apps = catalogue_apps if catalogue_apps is not None else catalogue.APP_CATALOGUE
+    return catalogue.push_endpoint(apps[ARCHIVER_SERVICE], "", _mesh_namespace(settings))
+
+
 def _resolve_loader_output(
     source: Source,
     transport: SourceTransport,

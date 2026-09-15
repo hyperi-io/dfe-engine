@@ -1,18 +1,20 @@
-"""The source-deploy topic hook: it reports, and it never fails the deploy.
+"""The source topic hooks: they report, and they never fail the deploy or the delete.
 
 ``_ensure_source_topics`` is the wiring that makes a deploy create its own
-``_land``/``_load`` topics. The module's own behaviour is covered in
-``tests/unit/test_kafka/test_topics.py``; what is proven here is the contract the
-deploy endpoint depends on - the off switch is honoured, a broker that will not
-answer is reported rather than raised, and the result lands on the response.
+``_land``/``_load`` topics, and ``_remove_source_topics`` is the wiring that takes
+the same pair away when the source is deleted. The module's own behaviour is
+covered in ``tests/unit/test_kafka/test_topics.py``; what is proven here is the
+contract the two endpoints depend on - the off switch is honoured, a broker that
+will not answer is reported rather than raised, and the result lands on the
+response.
 """
 
 from types import SimpleNamespace
 
 import pytest
 
-from dfe_engine.api.v1.sources import _ensure_source_topics
-from dfe_engine.kafka.topics import TopicEnsureResult
+from dfe_engine.api.v1.sources import _ensure_source_topics, _remove_source_topics
+from dfe_engine.kafka.topics import TopicEnsureResult, TopicRemoveResult
 from dfe_engine.settings import KafkaSettings, TransportSettings
 from dfe_engine.source.models import Source, SourceMatch, SourceTransform
 
@@ -126,3 +128,70 @@ class TestDeployIsNeverFailedByTopics:
     def test_no_outcome_raises(self, monkeypatch, outcome):
         monkeypatch.setattr("dfe_engine.kafka.topics.ensure_topics", lambda specs, **kw: outcome)
         _ensure_source_topics(_source(), _settings())
+
+
+class TestTheDeleteHook:
+    """One dial governs both ends, so a topic the engine made it also takes away."""
+
+    def _capture(self, monkeypatch) -> dict:
+        seen: dict = {}
+
+        def _remove(names, **kw):
+            seen["names"] = list(names)
+            return TopicRemoveResult(removed=list(names))
+
+        monkeypatch.setattr("dfe_engine.kafka.topics.remove_topics", _remove)
+        return seen
+
+    def test_it_removes_the_pair_the_deploy_created(self, monkeypatch):
+        seen = self._capture(monkeypatch)
+
+        removed, failed = _remove_source_topics(_source(), _settings())
+
+        assert seen["names"] == ["filebeat_land", "filebeat_load"]
+        assert (removed, failed) == (["filebeat_land", "filebeat_load"], [])
+
+    def test_a_source_that_never_transformed_gives_up_only_its_landing_topic(self, monkeypatch):
+        seen = self._capture(monkeypatch)
+
+        _remove_source_topics(_source("syslog", transform=False), _settings())
+
+        assert seen["names"] == ["syslog_land"]
+
+    def test_the_off_switch_reaches_no_broker_at_all(self, monkeypatch):
+        def _boom(*args, **kwargs):
+            raise AssertionError("remove_topics called while it was switched off")
+
+        monkeypatch.setattr("dfe_engine.kafka.topics.remove_topics", _boom)
+
+        assert _remove_source_topics(_source(), _settings(ensure_topics=False)) == ([], [])
+
+    def test_a_brokerless_deployment_reaches_no_broker_either(self, monkeypatch):
+        def _boom(*args, **kwargs):
+            raise AssertionError("remove_topics called on a deployment with no bus")
+
+        monkeypatch.setattr("dfe_engine.kafka.topics.remove_topics", _boom)
+
+        assert _remove_source_topics(_source(), _settings(bus_present=False)) == ([], [])
+
+    def test_a_failure_is_reported_not_raised(self, monkeypatch):
+        # The source is already gone by the time this runs, so a dead broker must
+        # not turn a completed delete into a 500.
+        monkeypatch.setattr(
+            "dfe_engine.kafka.topics.remove_topics",
+            lambda names, **kw: TopicRemoveResult(
+                failed=[("filebeat_land", "broker unreachable: connection refused")]
+            ),
+        )
+
+        removed, failed = _remove_source_topics(_source(), _settings())
+
+        assert (removed, failed) == ([], ["filebeat_land"])
+
+    def test_a_topic_the_broker_never_had_is_not_reported_as_removed(self, monkeypatch):
+        monkeypatch.setattr(
+            "dfe_engine.kafka.topics.remove_topics",
+            lambda names, **kw: TopicRemoveResult(absent=list(names)),
+        )
+
+        assert _remove_source_topics(_source(), _settings()) == ([], [])

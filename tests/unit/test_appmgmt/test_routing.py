@@ -31,8 +31,11 @@ LOADER = "dfe-loader"
 FETCHER = "dfe-fetcher"
 VRL = "dfe-transform-vrl"
 ARCHIVER = "dfe-archiver"
+# Carries no records at all, so nothing about it is derived from the sources.
+UI = "dfe-ui"
 
 LOADER_ENDPOINT = "http://dfe-loader:6000"
+ARCHIVER_ENDPOINT = "http://dfe-archiver:6000"
 VRL_AUTH_ENDPOINT = "http://dfe-transform-vrl-auth:6000"
 
 
@@ -125,8 +128,15 @@ class TestManifest:
         assert (app.routing_compiler, app.routing_is_per_instance) == ("transform", True)
         assert {"source", "sink"} <= set(app.routing_paths)
 
+    def test_the_archiver_owns_the_topics_it_reads(self):
+        app = catalogue.descriptor(ARCHIVER)
+        assert (app.routing_compiler, app.routing_paths) == (
+            "archiver",
+            {"topics": "config.kafka.topics"},
+        )
+
     def test_an_app_without_derived_routing_says_so(self):
-        assert catalogue.descriptor(ARCHIVER).has_compiled_routing is False
+        assert catalogue.descriptor(UI).has_compiled_routing is False
 
     def test_every_declared_compiler_is_implemented(self):
         # A manifest naming a compiler the engine does not have would fail at
@@ -179,7 +189,7 @@ class TestStatus:
 
     def test_an_app_without_derived_routing_refuses(self, source_registry, settings):
         with pytest.raises(routing.RoutingNotCompiledError):
-            routing.compile_for(catalogue.descriptor(ARCHIVER), source_registry, settings)
+            routing.compile_for(catalogue.descriptor(UI), source_registry, settings)
 
     def test_a_block_the_compile_stops_emitting_is_removed(self, settings, direct_settings):
         # Moving a source between transports must not leave the other
@@ -316,6 +326,119 @@ class TestReceiverOnDirect:
         assert compiled["destinations"]["default"] == "dfe-transform-vrl-default"
         assert compiled["destinations"]["rules"] == []
         assert compiled["routing"]["source_rules"] == []
+
+
+class TestArchivedOnDirect:
+    """Nothing holds the record, so the rule that sends it must name both stages."""
+
+    def test_an_archived_source_reaches_the_archiver_beside_the_loader(self, direct_settings):
+        registry = FakeRegistry([_matched("auth", archive=True)])
+
+        compiled = routing.compile_for(catalogue.descriptor(RECEIVER), registry, direct_settings)
+
+        assert compiled["destinations"] == {
+            "default": "loader",
+            "dfe-archiver": {"grpc": {"endpoint": ARCHIVER_ENDPOINT}},
+            "loader": {"grpc": {"endpoint": LOADER_ENDPOINT}},
+            "rules": [
+                {
+                    "match_field": "_json.app",
+                    "match_value": "auth",
+                    "destination": ["loader", ARCHIVER],
+                }
+            ],
+        }
+
+    def test_the_raw_copy_is_taken_before_the_transform_not_after(
+        self, direct_settings, direct_transforms
+    ):
+        # The archiver sits beside the transform, not behind it: archive keeps the
+        # record as it ARRIVED, so a transformed source must still name both.
+        registry = FakeRegistry([_matched("auth", archive=True, transform={"engine": "vrl"})])
+
+        compiled = routing.compile_for(catalogue.descriptor(RECEIVER), registry, direct_settings)
+
+        assert compiled["destinations"]["rules"][0]["destination"] == [
+            "dfe-transform-vrl-auth",
+            ARCHIVER,
+        ]
+
+    def test_a_source_that_asked_for_none_names_one_destination(self, direct_settings):
+        registry = FakeRegistry([_matched("auth")])
+
+        compiled = routing.compile_for(catalogue.descriptor(RECEIVER), registry, direct_settings)
+
+        assert compiled["destinations"]["rules"][0]["destination"] == "loader"
+        assert ARCHIVER not in compiled["destinations"]
+
+    def test_the_default_flow_fans_out_through_the_default(self, direct_settings):
+        # `always` compiles to the default rather than a rule, so an archived main
+        # flow has to reach the archiver there or not at all.
+        main = _matched("main", archive=True)
+        main.versions["1.0.0"].match.operator = "always"
+        registry = FakeRegistry([main])
+
+        compiled = routing.compile_for(catalogue.descriptor(RECEIVER), registry, direct_settings)
+
+        assert compiled["destinations"]["default"] == ["loader", ARCHIVER]
+        assert compiled["destinations"][ARCHIVER] == {"grpc": {"endpoint": ARCHIVER_ENDPOINT}}
+
+
+class TestArchiverStack:
+    def test_it_reads_the_landing_topic_of_every_source_that_asked(self, settings):
+        registry = FakeRegistry([_matched("auth", archive=True), _matched("filebeat")])
+
+        compiled = routing.compile_for(catalogue.descriptor(ARCHIVER), registry, settings)
+
+        assert compiled == {"topics": ["auth_land"]}
+
+    def test_a_deployment_where_nobody_asked_archives_nothing(self, settings):
+        # An empty list rather than no block: the archiver's own idle_when reads
+        # this path, so the deployment says "no work" instead of falling back to
+        # whatever pattern it started with.
+        compiled = routing.compile_for(
+            catalogue.descriptor(ARCHIVER), FakeRegistry([_matched("filebeat")]), settings
+        )
+
+        assert compiled == {"topics": []}
+
+    def test_a_disabled_source_is_not_archived(self, settings):
+        registry = FakeRegistry([_matched("auth", archive=True, state="disabled")])
+
+        assert routing.compile_for(catalogue.descriptor(ARCHIVER), registry, settings) == {
+            "topics": []
+        }
+
+    def test_on_direct_it_reads_no_topic_at_all(self, direct_settings):
+        # There is no landing topic to read: the receiver is handed the archiver
+        # as a second destination instead.
+        registry = FakeRegistry([_matched("auth", archive=True)])
+
+        assert routing.compile_for(catalogue.descriptor(ARCHIVER), registry, direct_settings) == {
+            "topics": []
+        }
+
+    def test_the_topic_list_lands_where_the_archiver_reads_it(self, settings):
+        doc = instances.initial_overlay(instances.instance_of(ARCHIVER, "default"))
+        registry = FakeRegistry([_matched("auth", archive=True)])
+
+        routing.sync(catalogue.descriptor(ARCHIVER), doc, registry, settings)
+
+        assert doc["config"]["kafka"]["topics"] == ["auth_land"]
+
+    def test_a_hand_edited_topic_list_is_drift(self, settings):
+        # A pattern or an extra topic typed in by hand archives what no source
+        # asked for, which is the drift this block exists to remove.
+        doc = instances.initial_overlay(instances.instance_of(ARCHIVER, "default"))
+        registry = FakeRegistry([_matched("auth", archive=True)])
+        app = catalogue.descriptor(ARCHIVER)
+        routing.sync(app, doc, registry, settings)
+
+        doc["config"]["kafka"]["topics"] = ["auth_land", "filebeat_land"]
+
+        assert routing.status(app, doc, registry, settings).drift is True
+        assert routing.sync(app, doc, registry, settings) is True
+        assert doc["config"]["kafka"]["topics"] == ["auth_land"]
 
 
 class TestLoaderStack:

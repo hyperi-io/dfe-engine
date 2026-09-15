@@ -10,6 +10,8 @@ from dfe_engine.kafka.topics import (
     TopicSpec,
     admin_config,
     ensure_topics,
+    remove_topics,
+    source_topic_names,
     source_topic_specs,
 )
 from dfe_engine.settings import KafkaSettings
@@ -27,6 +29,7 @@ class _FakeAdmin:
         self.present = set(present)
         self.fail_on = set(fail_on)
         self.created: list[tuple[str, int, int]] = []
+        self.deleted: list[str] = []
 
     def list_topic_names(self, *, timeout: float = 10.0) -> set[str]:
         return set(self.present)
@@ -36,6 +39,12 @@ class _FakeAdmin:
             raise RuntimeError("broker said no")
         self.created.append((name, partitions, replication_factor))
         self.present.add(name)
+
+    def delete(self, name, *, timeout: float = 30.0) -> None:
+        if name in self.fail_on:
+            raise RuntimeError("broker said no")
+        self.deleted.append(name)
+        self.present.discard(name)
 
 
 class _UnreachableAdmin:
@@ -150,6 +159,93 @@ class TestEnsureTopics:
 
     def test_no_specs_is_a_no_op(self):
         assert ensure_topics([]).created == []
+
+
+class TestSourceTopicNames:
+    """What a delete removes: everything the source's deploys ever created."""
+
+    def test_a_transforming_source_owns_both(self):
+        assert source_topic_names(_source()) == ["filebeat_land", "filebeat_load"]
+
+    def test_a_source_that_never_transformed_owns_only_its_landing_topic(self):
+        assert source_topic_names(_source("syslog", transform=False)) == ["syslog_land"]
+
+    def test_a_version_that_dropped_its_transform_still_owns_the_load_topic(self):
+        # The _load topic was created when the transform was deployed, and the
+        # version that removed it did not take the topic with it.
+        dt = "2026-01-01T00:00:00Z"
+        source = Source.model_validate(
+            {
+                "source": "syslog",
+                "deployed_version": "2.0.0",
+                "current": "2.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": dt,
+                        "match": {"field": "f", "value": "v"},
+                        "transform": {"engine": "vector"},
+                    },
+                    "2.0.0": {"date_time": dt, "match": {"field": "f", "value": "v"}},
+                },
+            }
+        )
+
+        assert source_topic_names(source) == ["syslog_land", "syslog_load"]
+
+
+class TestRemoveTopics:
+    def test_it_deletes_what_the_broker_lists(self):
+        admin = _FakeAdmin(present=["filebeat_land", "filebeat_load", "other_land"])
+
+        result = remove_topics(source_topic_names(_source()), admin=admin)
+
+        assert result.removed == ["filebeat_land", "filebeat_load"]
+        assert admin.present == {"other_land"}
+        assert result.ok
+
+    def test_a_topic_the_broker_does_not_list_is_absent_not_an_error(self):
+        admin = _FakeAdmin(present=["filebeat_land"])
+
+        result = remove_topics(source_topic_names(_source()), admin=admin)
+
+        assert (result.removed, result.absent) == (["filebeat_land"], ["filebeat_load"])
+        assert result.ok
+
+    def test_it_is_idempotent(self):
+        admin = _FakeAdmin(present=["filebeat_land", "filebeat_load"])
+        names = source_topic_names(_source())
+
+        remove_topics(names, admin=admin)
+        second = remove_topics(names, admin=admin)
+
+        assert second.removed == []
+        assert second.absent == ["filebeat_land", "filebeat_load"]
+
+    def test_a_failed_delete_does_not_stop_the_others(self):
+        admin = _FakeAdmin(present=["filebeat_land", "filebeat_load"], fail_on=["filebeat_land"])
+
+        result = remove_topics(source_topic_names(_source()), admin=admin)
+
+        assert result.removed == ["filebeat_load"]
+        assert [name for name, _ in result.failed] == ["filebeat_land"]
+        assert not result.ok
+
+    def test_an_unreachable_broker_fails_every_name_without_raising(self):
+        result = remove_topics(["filebeat_land"], admin=_UnreachableAdmin())
+
+        assert [name for name, _ in result.failed] == ["filebeat_land"]
+        assert "connection refused" in result.failed[0][1]
+
+    def test_dry_run_deletes_nothing(self):
+        admin = _FakeAdmin(present=["t"])
+
+        result = remove_topics(["t"], admin=admin, dry_run=True)
+
+        assert result.removed == ["t"]
+        assert admin.deleted == []
+
+    def test_no_names_is_a_no_op(self):
+        assert remove_topics([]).removed == []
 
 
 class TestTopicAdminAdapter:

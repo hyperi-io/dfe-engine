@@ -689,8 +689,9 @@ class SourceVersion(BaseModel):
     archive: bool = Field(
         default=False,
         description=(
-            "Keep a copy of every record as it arrived, before any transform. The "
-            "archiver reads the landing topic, so this needs the bus transport"
+            "Keep a copy of every record as it arrived, before any transform. On the "
+            "bus the archiver reads the landing topic; on direct the receiver fans "
+            "the record out to it beside the stage that loads it"
         ),
     )
 
@@ -820,7 +821,7 @@ class SourceWriteRequest(BaseModel):
     )
     archive: bool = Field(
         default=False,
-        description="Keep the raw record as it arrived; needs the bus transport",
+        description="Keep the raw record as it arrived, on either transport",
     )
     views: list[SourceView] | None = Field(
         default=None,

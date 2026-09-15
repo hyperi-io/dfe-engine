@@ -82,7 +82,7 @@ One YAML file per source, managed by `SourceRegistry` over two backends:
 | **Deploy** | Runs the schema DDL, then creates that source's Kafka topics for the version being deployed |
 | **Read** | Definition plus status overlay (topic exists, table exists, transform running) |
 | **Update** | Validates, migrates the schema if fields changed, recompiles receiver and transform config |
-| **Delete** | Removes the definition (one attributed git commit on the gitcrud backend); table and data preserved. To pause instead, set `state: dormant` or `disabled` |
+| **Delete** | Removes the definition (one attributed git commit on the gitcrud backend) and the topics its deploys created; table and data preserved. To pause instead, set `state: dormant` or `disabled` |
 | **List** | All sources with status overlay (healthy, degraded, disabled) |
 
 **Topics are created on deploy.** DFE creates `<source>_land` (and
@@ -95,6 +95,13 @@ could not be created comes back in `topics_failed`. Width comes from
 brokerless profile (`DFE_TRANSPORT_BUS_PRESENT=false`) skips it, since reaching
 for a broker that is not there costs every deploy the admin timeout;
 `DFE_KAFKA_ENSURE_TOPICS=false` turns it off where a broker does exist.
+
+**And removed on delete.** The same dial governs both ends: a deployment whose
+engine creates a source's topics also deletes that pair when the source is
+deleted, because a topic nothing can write to still costs a partition assignment
+in every loader. Deleting a topic destroys what is on it, so the removal is in
+the audit record; turn `DFE_KAFKA_ENSURE_TOPICS` off to keep the topics and reap
+them yourself.
 
 ## The API surface
 

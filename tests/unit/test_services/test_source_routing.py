@@ -20,6 +20,8 @@ import pytest
 
 from dfe_engine.services.models.loader import LoaderConfig, LoaderRoutingConfig
 from dfe_engine.services.models.receiver import (
+    DestinationRule,
+    DestinationsConfig,
     ReceiverRoutingConfig,
     SourceRule,
 )
@@ -355,6 +357,52 @@ class TestReceiverRoutingConfigModel:
         assert config.topic_suffix == "_land"
         assert config.source_to_topic == {}
         assert config.legacy_compat is False
+
+
+class TestDestinationsModel:
+    """The receiver's ``DestinationRef`` is one name or a list (src/config/mod.rs)."""
+
+    ARCHIVER = {"grpc": {"endpoint": "http://dfe-archiver:6000"}}
+
+    def _fanned(self, **extra):
+        return DestinationsConfig(
+            default="loader",
+            rules=[
+                DestinationRule(
+                    match_field="app", match_value="auth", destination=["loader", "dfe-archiver"]
+                )
+            ],
+            **extra,
+        )
+
+    def test_a_rule_may_name_several_destinations(self):
+        config = self._fanned(**{"dfe-archiver": self.ARCHIVER})
+
+        assert config.rules[0].destination == ["loader", "dfe-archiver"]
+
+    def test_a_fan_out_serialises_as_the_list_the_receiver_reads(self):
+        dumped = self._fanned(**{"dfe-archiver": self.ARCHIVER}).model_dump(mode="json")
+
+        assert dumped["rules"][0]["destination"] == ["loader", "dfe-archiver"]
+
+    def test_an_undeclared_name_inside_a_fan_out_is_still_refused(self):
+        # Every name in the list is resolved, so one that is neither built in nor
+        # declared drops the copy it was meant to take.
+        with pytest.raises(ValueError, match="dfe-archiver"):
+            self._fanned()
+
+    def test_the_default_may_fan_out_too(self):
+        config = DestinationsConfig(
+            default=["loader", "dfe-archiver"], **{"dfe-archiver": self.ARCHIVER}
+        )
+
+        assert config.default == ["loader", "dfe-archiver"]
+
+    def test_a_fan_out_naming_nothing_is_refused(self):
+        with pytest.raises(ValueError, match="at least one destination"):
+            DestinationsConfig(
+                rules=[DestinationRule(match_field="app", match_value="auth", destination=[])]
+            )
 
 
 # ---------------------------------------------------------------------------

@@ -25,8 +25,8 @@ state: active                           # active | dormant | disabled (see sourc
 # --- Flow (optional; see source-flow.md) ---
 transport: bus                          # bus (a broker holds records between stages) | direct (gRPC,
                                         # nothing stored). Omit to take the deployment default
-archive: false                          # Keep the raw record as it arrived. Needs the bus transport:
-                                        # the archiver reads the landing topic, and direct has none
+archive: false                          # Keep the raw record as it arrived. On the bus the archiver
+                                        # reads the landing topic; on direct it is sent the record
 
 # --- Header ---
 # Common schema header. A new source starts as JUST this header -- the common
@@ -192,7 +192,7 @@ emits the schema YAML, which the source then names. The mapping table is in
 | match rule | no conflict across non-disabled sources (same field+operator+value); a dormant source HOLDS its match, only disabling releases it |
 | match operator | receiver-evaluable (`equals` or `exists`); `always` only on the reserved `main` source |
 | fetcher route | must not name its own source |
-| flow | runnable here: the deployment offers the transport, the transform app carries it, archive only on the bus |
+| flow | runnable here: the deployment offers the transport, and every app in the flow carries it |
 | transform | engine must be one the app manifest catalogues (`vrl`, `vector`, `elastic`) |
 | catalogue entry | the intake must be one the entry arrives by, the transform one it ships, and the source name a legal label - the entry's own name is used when it is one |
 | schema | files exist and pass SchemaBuilder validation, and carry `_source` as a column (injected if missing) |

@@ -18,6 +18,6 @@ expect:
     topic: flowarchive_land
     load_topic: null
     marker: null
-    # One name because compile_receiver_destinations emits one per rule; the
-    # fan-out to the archiver beside the loader is not compiled yet.
-    destination: loader
+    # Two names: on direct nothing holds the record, so the rule fans it out to
+    # the archiver beside the stage that loads it.
+    destination: [loader, dfe-archiver]

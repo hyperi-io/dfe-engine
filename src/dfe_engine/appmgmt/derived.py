@@ -10,9 +10,10 @@
 Two things in the deploy repo are DERIVED from the source definitions and must
 never be authored by hand:
 
-- The routing block of every stack-scoped app (the receiver's source rules,
-  the loader's table map). A source deploy that does not push it leaves the
-  receiver on built-in defaults, routing every event to the default topic.
+- The routing block of every stack-scoped app (the receiver's source rules, the
+  loader's table map, the archiver's topic list). A source deploy that does not
+  push it leaves the receiver on built-in defaults, routing every event to the
+  default topic.
 - The instances of every instance-scoped app: a fetcher per fetcher-based
   source, a transform per source that names one. An active, deployed source the
   app has something to do for means an instance named for it exists with the
