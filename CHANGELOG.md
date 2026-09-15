@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.20.12](https://github.com/hyperi-io/dfe-engine/compare/v1.20.11...v1.20.12) (2026-09-15)
+
+### Bug Fixes
+
+* compile the source DDL, keep the deployment's routing keys, create the first user ([#398](https://github.com/hyperi-io/dfe-engine/issues/398)) ([d204469](https://github.com/hyperi-io/dfe-engine/commit/d204469a184156ca9f8c59f5d2b260bed6b32b93)), closes [#360](https://github.com/hyperi-io/dfe-engine/issues/360) [#311](https://github.com/hyperi-io/dfe-engine/issues/311) [#369](https://github.com/hyperi-io/dfe-engine/issues/369) [#372](https://github.com/hyperi-io/dfe-engine/issues/372)
+* **deps:** say what the dfe-schemas floor is pinned for ([#394](https://github.com/hyperi-io/dfe-engine/issues/394)) ([9d10e71](https://github.com/hyperi-io/dfe-engine/commit/9d10e715034ba2bf4518dc9d698a2a9f4cecf0f0))
+
 ## [1.20.11](https://github.com/hyperi-io/dfe-engine/compare/v1.20.10...v1.20.11) (2026-09-15)
 
 ### Bug Fixes
