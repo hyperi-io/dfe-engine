@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.20.15](https://github.com/hyperi-io/dfe-engine/compare/v1.20.14...v1.20.15) (2026-09-15)
+
+### Bug Fixes
+
+* name the in-cluster kafka listener, and finish the topic contract ([11b8075](https://github.com/hyperi-io/dfe-engine/commit/11b80756639caf286cb9872b42e284650d02c8f2)), closes [#98](https://github.com/hyperi-io/dfe-engine/issues/98) [#332](https://github.com/hyperi-io/dfe-engine/issues/332) [#97](https://github.com/hyperi-io/dfe-engine/issues/97)
+
 ## [1.20.14](https://github.com/hyperi-io/dfe-engine/compare/v1.20.13...v1.20.14) (2026-09-15)
 
 ### Bug Fixes
