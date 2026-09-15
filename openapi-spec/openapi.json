@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.20.11"
+    "version": "1.20.12"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -4026,7 +4026,7 @@
           "Sources"
         ],
         "summary": "Delete Source",
-        "description": "Delete a source by name. Its fetcher instance and receiver rule go with it.\n\nAn engine-owned source -- the landing table's own -- is refused with 409\n``conflict``, the same answer PUT and PATCH give.",
+        "description": "Delete a source by name. Its fetcher instance, receiver rule and topics go with it.\n\nAn engine-owned source -- the landing table's own -- is refused with 409\n``conflict``, the same answer PUT and PATCH give.",
         "operationId": "delete_source_api_v1_sources__name__delete",
         "parameters": [
           {
@@ -4213,7 +4213,7 @@
           "Sources"
         ],
         "summary": "Reconcile Apps",
-        "description": "Bring the deploy repo's derived app state into step with the sources.\n\nRecompiles every stack-scoped routing block (receiver, loader) and deploys,\nsyncs or removes the instances of every instance-scoped app (a fetcher per\nactive fetcher-based source). Every source write does this on its own; this\nroute is the retry when one reported ``apps_sync_error``.",
+        "description": "Bring the deploy repo's derived app state into step with the sources.\n\nRecompiles every stack-scoped routing block (receiver, loader, archiver) and\ndeploys, syncs or removes the instances of every instance-scoped app (a fetcher\nper active fetcher-based source). Every source write does this on its own; this\nroute is the retry when one reported ``apps_sync_error``.",
         "operationId": "reconcile_apps_api_v1_sources_reconcile_apps_post",
         "responses": {
           "200": {
@@ -29288,7 +29288,7 @@
           "archive": {
             "type": "boolean",
             "title": "Archive",
-            "description": "Keep a copy of every record as it arrived, before any transform. The archiver reads the landing topic, so this needs the bus transport",
+            "description": "Keep a copy of every record as it arrived, before any transform. On the bus the archiver reads the landing topic; on direct the receiver fans the record out to it beside the stage that loads it",
             "default": false
           },
           "source_build": {
@@ -29639,7 +29639,7 @@
           "archive": {
             "type": "boolean",
             "title": "Archive",
-            "description": "Keep the raw record as it arrived; needs the bus transport",
+            "description": "Keep the raw record as it arrived, on either transport",
             "default": false
           },
           "views": {

@@ -207,6 +207,20 @@ LOADER_DESTINATION = "loader"
 BUILT_IN_DESTINATIONS = frozenset({BUS_DESTINATION, LOADER_DESTINATION})
 """The two destinations the receiver resolves without being given an address."""
 
+DestinationRef = str | list[str]
+"""One destination name, or several to fan a matched record out to.
+
+The receiver's own ``DestinationRef`` (``src/config/mod.rs``), an untagged enum of
+a string or a list of them. A fan-out is delivered once EVERY destination has
+accepted the record, which is what lets one rule reach the loader and the
+archiver at the same time.
+"""
+
+
+def destination_names(ref: DestinationRef) -> list[str]:
+    """The names in a reference, one or many."""
+    return [ref] if isinstance(ref, str) else list(ref)
+
 
 class DestinationRule(BaseModel):
     """Destination routing rule."""
@@ -215,7 +229,7 @@ class DestinationRule(BaseModel):
 
     match_field: str
     match_value: str
-    destination: str
+    destination: DestinationRef
 
 
 class DestinationsConfig(BaseModel):
@@ -225,8 +239,11 @@ class DestinationsConfig(BaseModel):
     name is a NAMED endpoint sitting beside these keys as
     ``<name>: {grpc: {endpoint: uri}}``, which is why extras are allowed here: a
     rule sends a matched record to a transform instance by name. The names the
-    engine compiles are ``loader`` and ``dfe-transform-*`` instances, so none of
-    them can collide with ``default`` or ``rules``.
+    engine compiles are ``loader``, ``dfe-archiver`` and ``dfe-transform-*``
+    instances, so none of them can collide with ``default`` or ``rules``.
+
+    A rule may name several at once, which is how an archived source reaches the
+    archiver beside the stage that loads it.
 
     The nesting is the receiver's own ``DestinationSpec`` (``src/config/mod.rs``):
     one transport block per destination, ``grpc: {endpoint}`` or ``kafka: {topic}``.
@@ -236,7 +253,10 @@ class DestinationsConfig(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    default: str = Field(default="kafka", description="kafka, loader, or a named destination")
+    default: DestinationRef = Field(
+        default=BUS_DESTINATION,
+        description="kafka, loader, a named destination, or a list of them to fan out",
+    )
     rules: list[DestinationRule] = []
 
     @model_validator(mode="after")
@@ -250,11 +270,19 @@ class DestinationsConfig(BaseModel):
                     f"grpc.endpoint; the receiver refuses a bare grpc string"
                 )
                 raise ValueError(msg)
+        # An empty fan-out names nowhere to deliver to, so every record the rule
+        # matched is accepted and dropped.
+        for ref in [self.default, *(r.destination for r in self.rules)]:
+            if not destination_names(ref):
+                msg = "A destination reference must name at least one destination"
+                raise ValueError(msg)
         # A destination the receiver cannot resolve silently drops every record
         # the rule matched, so nothing may name one that is neither built in nor
         # declared above.
         known = BUILT_IN_DESTINATIONS | set(named)
-        unknown = {r.destination for r in self.rules} | {self.default}
+        unknown = {n for r in self.rules for n in destination_names(r.destination)} | set(
+            destination_names(self.default)
+        )
         if unknown - known:
             msg = (
                 f"Destinations not declared: {', '.join(sorted(unknown - known))}. "

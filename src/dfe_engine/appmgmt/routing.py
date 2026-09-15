@@ -20,10 +20,10 @@ sources currently compile to against what the overlay carries, and ``sync``
 rewrites the overlay to match. A hand edit is reported as drift instead of being
 mistaken for intent.
 
-Two scopes. A STACK-scoped block (receiver, loader) compiles from every source
-into the one deployment. An INSTANCE-scoped block (the fetcher, each transform)
-compiles from the single source the instance is named for, so each deployment
-carries exactly its own source's stanza.
+Two scopes. A STACK-scoped block (receiver, loader, archiver) compiles from every
+source into the one deployment. An INSTANCE-scoped block (the fetcher, each
+transform) compiles from the single source the instance is named for, so each
+deployment carries exactly its own source's stanza.
 
 An app carries one or more NAMED blocks, each owned whole: the receiver's rules
 and its destination set are separate sections it reads separately, and a block
@@ -210,6 +210,14 @@ def _loader(
     return {"routing": compiled.model_dump(mode="json", exclude_unset=True)}
 
 
+def _archiver(
+    app: AppDescriptor, registry: SourceRegistry, settings: Any, instance: str | None
+) -> dict[str, Any]:
+    from dfe_engine.services.source_routing import compile_archiver_topics
+
+    return {"topics": compile_archiver_topics(registry, settings)}
+
+
 def _fetcher_route(
     flow: SourceFlow, route: Any, registry: SourceRegistry, settings: Any
 ) -> dict[str, Any]:
@@ -317,6 +325,7 @@ LOADER_COMPILER = "loader"
 _COMPILERS: dict[str, Compiler] = {
     "receiver": _receiver,
     LOADER_COMPILER: _loader,
+    "archiver": _archiver,
     "fetcher": _fetcher,
     "transform": _transform,
 }
