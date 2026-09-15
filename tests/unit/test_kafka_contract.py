@@ -22,12 +22,19 @@ from dfe_engine.settings import KafkaSettings, _get_env_overrides
 CANONICAL_TABLE = {
     "strimzi": ("SASL_SSL", "SCRAM-SHA-512"),
     "redpanda": ("SASL_SSL", "SCRAM-SHA-512"),
+    "strimzi-no-tls": ("SASL_PLAINTEXT", "SCRAM-SHA-512"),
+    "redpanda-no-tls": ("SASL_PLAINTEXT", "SCRAM-SHA-512"),
     "msk": ("SASL_SSL", "SCRAM-SHA-512"),
     "redpanda-cloud": ("SASL_SSL", "SCRAM-SHA-512"),
     "confluent-cloud": ("SASL_SSL", "PLAIN"),
     "plaintext": ("PLAINTEXT", ""),
     "msk_iam": ("SASL_SSL", "OAUTHBEARER"),
 }
+
+# The two `-no-tls` keys the charts already use for a DFE-owned broker on its
+# TLS-off in-cluster listener. dfe-infra's own table carries them
+# (helm/library/dfe-common/templates/_kafka.tpl); scalo-rs and scalo-py do not yet.
+NO_TLS_PROVIDERS = ("strimzi-no-tls", "redpanda-no-tls")
 
 
 class TestDerive:
@@ -50,6 +57,36 @@ class TestDerive:
             derive("kinesis")
 
 
+class TestTheInClusterPlaintextListener:
+    """dfe-engine#332: one provider key names one LISTENER, not a cluster.
+
+    The Strimzi the deploy charts stand up runs SASL on a TLS-off listener and
+    every profile points the apps at it. Named `strimzi`, the engine derived
+    SASL_SSL and every topic call came back "Failed to get metadata: Local:
+    Broker transport failure".
+    """
+
+    @pytest.mark.parametrize("provider", NO_TLS_PROVIDERS)
+    def test_it_is_sasl_over_a_plaintext_transport(self, provider):
+        assert derive(provider) == ("SASL_PLAINTEXT", "SCRAM-SHA-512")
+
+    @pytest.mark.parametrize("provider", NO_TLS_PROVIDERS)
+    def test_only_the_transport_moves(self, provider):
+        # A plaintext listener is never an excuse to weaken SCRAM to PLAIN.
+        tls_key = provider.removesuffix("-no-tls")
+        assert derive(provider)[1] == CANONICAL_TABLE[tls_key][1]
+
+    @pytest.mark.parametrize("provider", NO_TLS_PROVIDERS)
+    def test_the_pair_passes_validation(self, provider):
+        protocol, mechanism = derive(provider)
+        validate(security_protocol=protocol, sasl_mechanism=mechanism)
+
+    def test_no_managed_provider_has_a_plaintext_key(self):
+        # These two are the DFE-owned brokers only: a managed platform offers no
+        # plaintext listener, and a key for one would invite a real downgrade.
+        assert set(NO_TLS_PROVIDERS) == {p for p in CANONICAL_TABLE if p.endswith("-no-tls")}
+
+
 class TestValidate:
     def test_plain_over_plaintext_refused(self):
         # The one hard floor: PLAIN creds must never ride a plaintext transport.
@@ -67,6 +104,16 @@ class TestValidate:
 
     def test_plaintext_dev_ok(self):
         validate(security_protocol="PLAINTEXT", sasl_mechanism="")
+
+    def test_a_bearer_token_over_plaintext_is_refused(self):
+        # OAUTHBEARER puts the token itself on the wire, same as PLAIN.
+        with pytest.raises(KafkaContractError, match="SASL_SSL"):
+            validate(security_protocol="SASL_PLAINTEXT", sasl_mechanism="OAUTHBEARER")
+
+    def test_scram_over_a_plaintext_listener_is_allowed(self):
+        # The challenge-response never sends the password, which is what makes the
+        # in-cluster plaintext listener a sanctioned case (dfe-engine#332).
+        validate(security_protocol="SASL_PLAINTEXT", sasl_mechanism="SCRAM-SHA-512")
 
     def test_every_derived_pair_passes_validation(self):
         # Derivation must never emit a config its own validator would reject.
@@ -106,6 +153,37 @@ class TestKafkaSettings:
         s = KafkaSettings(security_protocol="SASL_SSL", sasl_mechanism="SCRAM-SHA-512")
         assert (s.security_protocol, s.sasl_mechanism) == ("SASL_SSL", "SCRAM-SHA-512")
 
+    def test_the_in_cluster_listener_derives_sasl_plaintext(self):
+        # The whole of #332: the :9092 listener every profile points the apps at
+        # derives SASL_PLAINTEXT, not the SASL_SSL that could not connect.
+        s = KafkaSettings(provider="strimzi-no-tls")
+        assert (s.security_protocol, s.sasl_mechanism) == ("SASL_PLAINTEXT", "SCRAM-SHA-512")
+
+
+class TestTopicConfig:
+    """The alterable topic configs DFE asks for, off unless a dial is set."""
+
+    def _config(self, **kafka) -> dict[str, str]:
+        from types import SimpleNamespace
+
+        from dfe_engine.kafka.topics import deployment_topic_config
+
+        return deployment_topic_config(SimpleNamespace(kafka=KafkaSettings(**kafka)))
+
+    def test_nothing_set_asks_for_nothing(self):
+        # An untouched deployment must keep creating topics on the broker's own
+        # retention, which is what every topic it already has carries.
+        assert self._config() == {}
+
+    def test_retention_and_cleanup_reach_the_config(self):
+        assert self._config(topic_retention_ms=86400000, topic_cleanup_policy="compact") == {
+            "retention.ms": "86400000",
+            "cleanup.policy": "compact",
+        }
+
+    def test_infinite_retention_is_expressible(self):
+        assert self._config(topic_retention_ms=-1) == {"retention.ms": "-1"}
+
 
 class TestEnvWiring:
     """DFE_KAFKA_PROVIDER binds to the override (the deploy path): deploys set the
@@ -124,6 +202,12 @@ class TestEnvWiring:
         assert overrides["kafka"]["provider"] == "redpanda"
         # ... and the derivation turns that into SCRAM at construction.
         assert KafkaSettings(**overrides["kafka"]).sasl_mechanism == "SCRAM-SHA-512"
+
+    def test_the_in_cluster_listener_key_binds(self, monkeypatch):
+        # The one env the deploy sets, and the pair it derives (dfe-engine#332).
+        monkeypatch.setenv("DFE_KAFKA_PROVIDER", "strimzi-no-tls")
+        ks = KafkaSettings(**_get_env_overrides()["kafka"])
+        assert (ks.security_protocol, ks.sasl_mechanism) == ("SASL_PLAINTEXT", "SCRAM-SHA-512")
 
 
 class TestTopicEnvWiring:
@@ -160,3 +244,9 @@ class TestTopicEnvWiring:
         monkeypatch.setenv("DFE_KAFKA_TOPIC_REPLICATION_FACTOR", "3")
         ks = KafkaSettings(**_get_env_overrides()["kafka"])
         assert (ks.topic_partitions, ks.topic_replication_factor) == (6, 3)
+
+    def test_retention_and_cleanup_bind(self, monkeypatch):
+        monkeypatch.setenv("DFE_KAFKA_TOPIC_RETENTION_MS", "604800000")
+        monkeypatch.setenv("DFE_KAFKA_TOPIC_CLEANUP_POLICY", "delete")
+        ks = KafkaSettings(**_get_env_overrides()["kafka"])
+        assert (ks.topic_retention_ms, ks.topic_cleanup_policy) == (604800000, "delete")

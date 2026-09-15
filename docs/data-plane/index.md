@@ -21,6 +21,7 @@ flowchart LR
 | [source-registry.md](source-registry.md) | states, storage backends, CRUD, topics on deploy, the API surface |
 | [source-flow.md](source-flow.md) | INPUT, optional TRANSFORM, OUTPUT on the Kafka or gRPC transport; what compiles from a source; how a change reaches a pod |
 | [source-routing.md](source-routing.md) | the exact receiver and loader config a source compiles into |
+| [topic-contract.md](topic-contract.md) | the Kafka topics a source implies: ensure, converge, status, remove, and the dials |
 | [source-detections.md](source-detections.md) | rules, hunts and Sigma views on a source |
 | [schema.md](schema.md) | schema type system: primitives, attributes, use cases, DDL |
 | [schema-classes.md](schema-classes.md) | engine class reference for the schema system (SchemaLoader, SchemaBuilderV2, DDL generation) |

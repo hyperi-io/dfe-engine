@@ -120,9 +120,20 @@ config:
   # covers a broker the engine reaches without auth.
   kafka:
     bootstrap_servers: ""
+    # -- Provider, which DERIVES security.protocol and sasl.mechanism. One key per
+    # LISTENER, not per cluster: strimzi / redpanda / msk / redpanda-cloud are
+    # SASL_SSL + SCRAM-SHA-512, strimzi-no-tls / redpanda-no-tls are the same two
+    # brokers on their TLS-off in-cluster listener (SASL_PLAINTEXT + SCRAM-SHA-512),
+    # confluent-cloud is PLAIN, plaintext is no auth. Empty leaves the engine on its
+    # plaintext dev default.
+    provider: ""
     ensure_topics: true
     topic_partitions: 3
     topic_replication_factor: 1
+    # -- retention.ms and cleanup.policy for the topics DFE creates and converges.
+    # Empty leaves the broker default, which is what existing topics carry.
+    topic_retention_ms: ""
+    topic_cleanup_policy: ""
   # -- Root config directory — maps to DFE_CONFIG_DIR.
   # Auto-resolves sources/, services/, hunts/, etc. subdirectories.
   # Set to the mount path of your config PVC or git-synced volume.

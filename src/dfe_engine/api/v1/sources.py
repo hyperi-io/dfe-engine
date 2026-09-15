@@ -1193,19 +1193,21 @@ def _ensure_source_topics(
     Blocking librdkafka calls run in here, so callers on the event loop hand it to
     a thread. ``version_id`` is the version being deployed, not the deployed one.
     """
-    # Whether a bus is present is the FACT; ensure_topics is the operator's
-    # override on top of it, and unset follows the fact.
-    override = settings.kafka.ensure_topics
-    wanted = settings.transport.bus_present if override is None else override
-    if not wanted:
-        return [], []
+    from dfe_engine.kafka.topics import (
+        deployment_topic_config,
+        ensure_topics,
+        source_topic_specs,
+        topics_managed,
+    )
 
-    from dfe_engine.kafka.topics import ensure_topics, source_topic_specs
+    if not topics_managed(settings):
+        return [], []
 
     specs = source_topic_specs(
         source,
         partitions=settings.kafka.topic_partitions,
         replication_factor=settings.kafka.topic_replication_factor,
+        config=deployment_topic_config(settings),
         version_id=version_id,
     )
     outcome = ensure_topics(specs, settings=settings)
@@ -1227,12 +1229,10 @@ def _remove_source_topics(source: Any, settings: Any) -> tuple[list[str], list[s
     Non-fatal like the ensure, and blocking, so a caller on the event loop hands
     it to a thread. Returns the topics removed and the ones that could not be.
     """
-    override = settings.kafka.ensure_topics
-    wanted = settings.transport.bus_present if override is None else override
-    if not wanted:
-        return [], []
+    from dfe_engine.kafka.topics import remove_topics, source_topic_names, topics_managed
 
-    from dfe_engine.kafka.topics import remove_topics, source_topic_names
+    if not topics_managed(settings):
+        return [], []
 
     outcome = remove_topics(source_topic_names(source), settings=settings)
     if outcome.failed:

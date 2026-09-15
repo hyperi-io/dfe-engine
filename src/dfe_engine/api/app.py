@@ -28,6 +28,7 @@ from dfe_engine.settings import DFESettings, e2e_routes_enabled, is_dev_posture,
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: bootstrap registries on startup, cleanup on shutdown."""
+    import asyncio
     import os
     from pathlib import Path
 
@@ -117,6 +118,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             )
         except Exception as exc:  # a failed seed must never break startup
             logger.warning("core sources not seeded at startup", error=str(exc))
+
+    # Every carried source's topics, at boot rather than at its next deploy: a
+    # deployment restored from its config repo otherwise has topics only for the
+    # sources somebody happens to redeploy, and the rest produce into nothing.
+    if source_registry is not None:
+        from dfe_engine.kafka.topics import ensure_all_source_topics
+
+        try:
+            ensured = await asyncio.to_thread(
+                ensure_all_source_topics, source_registry.get_all_sources(), settings
+            )
+            if ensured.created:
+                logger.info("Kafka topics created at startup", topics=ensured.created)
+            for name, error in ensured.failed:
+                logger.warning("kafka topic not ensured at startup", topic=name, error=error)
+        except Exception as exc:  # a broker still coming up must never break startup
+            logger.warning("kafka topics not ensured at startup", error=str(exc))
 
     # Ahead of the reconcile below because a source's overlay may link a shipped
     # artefact, which has to exist before the link resolves.

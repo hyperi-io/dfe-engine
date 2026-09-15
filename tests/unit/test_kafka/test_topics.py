@@ -9,12 +9,18 @@ from dfe_engine.kafka.topics import (
     TopicAdmin,
     TopicSpec,
     admin_config,
+    ensure_all_source_topics,
     ensure_topics,
     remove_topics,
     source_topic_names,
     source_topic_specs,
+    specs_for_sources,
+    topic_status,
+    topics_managed,
+    topics_managed_at_startup,
+    update_topics,
 )
-from dfe_engine.settings import KafkaSettings
+from dfe_engine.settings import KafkaSettings, TransportSettings
 from dfe_engine.source.models import Source, SourceMatch, SourceTransform
 
 
@@ -22,22 +28,41 @@ def _settings(**kafka) -> SimpleNamespace:
     return SimpleNamespace(kafka=KafkaSettings(**kafka))
 
 
+def _deployment(*, bus=True, **kafka) -> SimpleNamespace:
+    """Settings with both dials the topic hooks read."""
+    return SimpleNamespace(
+        kafka=KafkaSettings(**kafka),
+        transport=TransportSettings(default="bus" if bus else "direct", bus_present=bus),
+    )
+
+
 class _FakeAdmin:
     """Stands in for TopicAdmin so no test needs a broker."""
 
-    def __init__(self, present=(), fail_on=()):
+    def __init__(self, present=(), fail_on=(), shapes=None, configs=None):
         self.present = set(present)
         self.fail_on = set(fail_on)
+        # name -> (partitions, replication_factor) for a topic the broker holds.
+        self.shapes: dict[str, tuple[int, int]] = dict(shapes or {})
+        self.configs: dict[str, dict[str, str]] = dict(configs or {})
         self.created: list[tuple[str, int, int]] = []
+        self.created_config: dict[str, dict[str, str]] = {}
         self.deleted: list[str] = []
+        self.altered: dict[str, dict[str, str]] = {}
+        self.widened: dict[str, int] = {}
 
     def list_topic_names(self, *, timeout: float = 10.0) -> set[str]:
         return set(self.present)
 
-    def create(self, name, *, partitions, replication_factor, timeout: float = 30.0) -> None:
+    def create(
+        self, name, *, partitions, replication_factor, config=None, timeout: float = 30.0
+    ) -> None:
         if name in self.fail_on:
             raise RuntimeError("broker said no")
         self.created.append((name, partitions, replication_factor))
+        self.created_config[name] = dict(config or {})
+        self.shapes[name] = (partitions, replication_factor)
+        self.configs[name] = dict(config or {})
         self.present.add(name)
 
     def delete(self, name, *, timeout: float = 30.0) -> None:
@@ -45,6 +70,29 @@ class _FakeAdmin:
             raise RuntimeError("broker said no")
         self.deleted.append(name)
         self.present.discard(name)
+
+    def describe_shape(self, name, *, timeout: float = 10.0) -> tuple[int, int]:
+        if name in self.fail_on:
+            raise RuntimeError("broker said no")
+        return self.shapes.get(name, (3, 1))
+
+    def describe_config(self, name, *, timeout: float = 30.0) -> dict[str, str]:
+        if name in self.fail_on:
+            raise RuntimeError("broker said no")
+        return dict(self.configs.get(name, {}))
+
+    def alter_config(self, name, changes, *, timeout: float = 30.0) -> None:
+        if name in self.fail_on:
+            raise RuntimeError("broker said no")
+        self.altered[name] = dict(changes)
+        self.configs.setdefault(name, {}).update(changes)
+
+    def widen_partitions(self, name, *, total, timeout: float = 30.0) -> None:
+        if name in self.fail_on:
+            raise RuntimeError("broker said no")
+        self.widened[name] = total
+        partitions, rf = self.shapes.get(name, (3, 1))
+        self.shapes[name] = (total, rf)
 
 
 class _UnreachableAdmin:
@@ -160,6 +208,94 @@ class TestEnsureTopics:
     def test_no_specs_is_a_no_op(self):
         assert ensure_topics([]).created == []
 
+    def test_the_spec_config_reaches_the_new_topic(self):
+        """Retention set on the deployment has to land AT creation.
+
+        Creating the topic bare and altering it afterwards leaves a window where
+        the broker default applies to whatever already arrived.
+        """
+        admin = _FakeAdmin()
+        ensure_topics([TopicSpec("t", 3, 1, {"retention.ms": "86400000"})], admin=admin)
+        assert admin.created_config["t"] == {"retention.ms": "86400000"}
+
+
+class TestTopicsManaged:
+    """One reader for "does this deployment manage its topics", four callers."""
+
+    def test_a_bus_deployment_manages_them(self):
+        assert topics_managed(_deployment())
+
+    def test_a_brokerless_deployment_does_not(self):
+        assert not topics_managed(_deployment(bus=False))
+
+    def test_the_operator_override_wins_either_way(self):
+        assert not topics_managed(_deployment(ensure_topics=False))
+        assert topics_managed(_deployment(bus=False, ensure_topics=True))
+
+    def test_the_startup_pass_needs_the_dial_set_explicitly(self):
+        assert not topics_managed_at_startup(_deployment())
+        assert not topics_managed_at_startup(_deployment(ensure_topics=False))
+        assert topics_managed_at_startup(_deployment(ensure_topics=True))
+
+
+class TestSpecsForSources:
+    def test_it_names_the_owner_of_every_topic(self):
+        specs, owners = specs_for_sources(
+            [_source(), _source("syslog", transform=False)], _deployment()
+        )
+
+        assert [s.name for s in specs] == ["filebeat_land", "filebeat_load", "syslog_land"]
+        assert owners == {
+            "filebeat_land": "filebeat",
+            "filebeat_load": "filebeat",
+            "syslog_land": "syslog",
+        }
+
+    def test_the_deployment_topic_config_rides_every_spec(self):
+        specs, _ = specs_for_sources([_source()], _deployment(topic_cleanup_policy="compact"))
+
+        assert all(s.config == {"cleanup.policy": "compact"} for s in specs)
+
+
+class TestEnsureAllSourceTopics:
+    """The startup pass: every source's topics, not only the ones redeployed."""
+
+    def test_it_covers_every_source(self):
+        admin = _FakeAdmin()
+
+        result = ensure_all_source_topics(
+            [_source(), _source("syslog", transform=False)],
+            _deployment(ensure_topics=True),
+            admin=admin,
+        )
+
+        assert result.created == ["filebeat_land", "filebeat_load", "syslog_land"]
+
+    def test_an_unset_dial_reaches_no_broker(self):
+        """Boot-time, so it runs only where an operator turned it on.
+
+        Following ``transport.bus_present`` here would make every boot of a
+        deployment that was never told its broker address spend the admin
+        timeout before giving up.
+        """
+        admin = _FakeAdmin()
+
+        result = ensure_all_source_topics([_source()], _deployment(), admin=admin)
+
+        assert (result.created, admin.created) == ([], [])
+
+    def test_the_off_switch_reaches_no_broker_either(self):
+        admin = _FakeAdmin()
+
+        result = ensure_all_source_topics(
+            [_source()], _deployment(ensure_topics=False), admin=admin
+        )
+
+        assert (result.created, admin.created) == ([], [])
+
+    def test_no_sources_is_a_no_op(self):
+        assert ensure_all_source_topics([], _deployment(ensure_topics=True)).created == []
+
 
 class TestSourceTopicNames:
     """What a delete removes: everything the source's deploys ever created."""
@@ -248,6 +384,172 @@ class TestRemoveTopics:
         assert remove_topics([]).removed == []
 
 
+class TestTopicStatus:
+    """A read that changes nothing and says what differs."""
+
+    def test_a_missing_topic_reads_as_drift_not_an_error(self):
+        result = topic_status([TopicSpec("filebeat_land", 3, 1)], admin=_FakeAdmin())
+
+        assert result.reachable
+        state = result.topics[0]
+        assert (state.exists, state.drift) == (False, ["topic does not exist"])
+
+    def test_a_matching_topic_has_no_drift(self):
+        admin = _FakeAdmin(present=["filebeat_land"], shapes={"filebeat_land": (3, 1)})
+
+        result = topic_status([TopicSpec("filebeat_land", 3, 1)], admin=admin)
+
+        assert result.topics[0].drift == []
+        assert (result.topics[0].partitions, result.topics[0].replication_factor) == (3, 1)
+
+    def test_it_names_every_kind_of_drift(self):
+        admin = _FakeAdmin(
+            present=["filebeat_land"],
+            shapes={"filebeat_land": (3, 1)},
+            configs={"filebeat_land": {"retention.ms": "604800000"}},
+        )
+
+        result = topic_status(
+            [TopicSpec("filebeat_land", 6, 3, {"retention.ms": "86400000"})], admin=admin
+        )
+
+        drift = result.topics[0].drift
+        assert any("partitions 3, wanted 6" in line for line in drift)
+        assert any("replication factor 1, wanted 3" in line for line in drift)
+        assert any("retention.ms 604800000, wanted 86400000" in line for line in drift)
+
+    def test_a_config_the_spec_says_nothing_about_is_not_drift(self):
+        # An operator's own tuning must not read as something to converge away.
+        admin = _FakeAdmin(
+            present=["filebeat_land"],
+            shapes={"filebeat_land": (3, 1)},
+            configs={"filebeat_land": {"max.message.bytes": "2097152"}},
+        )
+
+        result = topic_status([TopicSpec("filebeat_land", 3, 1)], admin=admin)
+
+        assert result.topics[0].drift == []
+
+    def test_an_unreachable_broker_is_not_reported_as_missing_topics(self):
+        """ "Absent" and "could not look" are different answers to different problems."""
+        result = topic_status([TopicSpec("filebeat_land", 3, 1)], admin=_UnreachableAdmin())
+
+        assert not result.reachable
+        assert "connection refused" in result.error
+        assert result.topics == []
+
+    def test_it_carries_the_owning_source(self):
+        specs, owners = specs_for_sources([_source()], _deployment())
+
+        result = topic_status(specs, sources=owners, admin=_FakeAdmin())
+
+        assert {state.source for state in result.topics} == {"filebeat"}
+
+    def test_no_specs_is_a_no_op(self):
+        assert topic_status([]).topics == []
+
+
+class TestUpdateTopics:
+    """Converge: alter the configs the spec names, widen partitions, refuse the rest."""
+
+    def test_a_drifted_config_is_altered(self):
+        admin = _FakeAdmin(
+            present=["t"], shapes={"t": (3, 1)}, configs={"t": {"retention.ms": "604800000"}}
+        )
+
+        result = update_topics([TopicSpec("t", 3, 1, {"retention.ms": "86400000"})], admin=admin)
+
+        assert result.altered == ["t"]
+        assert admin.altered == {"t": {"retention.ms": "86400000"}}
+
+    def test_only_the_drifted_keys_are_sent(self):
+        admin = _FakeAdmin(
+            present=["t"],
+            shapes={"t": (3, 1)},
+            configs={"t": {"retention.ms": "86400000", "cleanup.policy": "delete"}},
+        )
+
+        update_topics(
+            [TopicSpec("t", 3, 1, {"retention.ms": "86400000", "cleanup.policy": "compact"})],
+            admin=admin,
+        )
+
+        assert admin.altered == {"t": {"cleanup.policy": "compact"}}
+
+    def test_a_partition_increase_is_applied(self):
+        admin = _FakeAdmin(present=["t"], shapes={"t": (3, 1)})
+
+        result = update_topics([TopicSpec("t", 6, 1)], admin=admin)
+
+        assert result.widened == ["t"]
+        assert admin.widened == {"t": 6}
+
+    def test_a_partition_decrease_is_refused_not_attempted(self):
+        # Kafka has no shrink, and the records on the partitions it would drop
+        # have nowhere to go.
+        admin = _FakeAdmin(present=["t"], shapes={"t": (6, 1)})
+
+        result = update_topics([TopicSpec("t", 3, 1)], admin=admin)
+
+        assert [name for name, _ in result.refused] == ["t"]
+        assert "cannot drop a partition" in result.refused[0][1]
+        assert admin.widened == {}
+
+    def test_a_replication_factor_change_is_refused(self):
+        admin = _FakeAdmin(present=["t"], shapes={"t": (3, 1)})
+
+        result = update_topics([TopicSpec("t", 3, 3)], admin=admin)
+
+        assert "partition reassignment" in result.refused[0][1]
+
+    def test_a_topic_that_does_not_exist_is_absent_not_created(self):
+        admin = _FakeAdmin()
+
+        result = update_topics([TopicSpec("t", 3, 1)], admin=admin)
+
+        assert (result.absent, admin.created) == (["t"], [])
+
+    def test_a_matching_topic_is_unchanged(self):
+        admin = _FakeAdmin(present=["t"], shapes={"t": (3, 1)})
+
+        result = update_topics([TopicSpec("t", 3, 1)], admin=admin)
+
+        assert result.unchanged == ["t"]
+        assert (admin.altered, admin.widened) == ({}, {})
+
+    def test_it_is_idempotent(self):
+        admin = _FakeAdmin(
+            present=["t"], shapes={"t": (3, 1)}, configs={"t": {"retention.ms": "1"}}
+        )
+        spec = TopicSpec("t", 6, 1, {"retention.ms": "86400000"})
+
+        update_topics([spec], admin=admin)
+        second = update_topics([spec], admin=admin)
+
+        assert second.unchanged == ["t"]
+
+    def test_dry_run_reports_without_touching_the_broker(self):
+        admin = _FakeAdmin(
+            present=["t"], shapes={"t": (3, 1)}, configs={"t": {"retention.ms": "1"}}
+        )
+
+        result = update_topics(
+            [TopicSpec("t", 6, 1, {"retention.ms": "86400000"})], admin=admin, dry_run=True
+        )
+
+        assert (result.altered, result.widened) == (["t"], ["t"])
+        assert (admin.altered, admin.widened) == ({}, {})
+
+    def test_an_unreachable_broker_fails_every_spec_without_raising(self):
+        result = update_topics([TopicSpec("t", 3, 1)], admin=_UnreachableAdmin())
+
+        assert [name for name, _ in result.failed] == ["t"]
+        assert "broker unreachable" in result.failed[0][1]
+
+    def test_no_specs_is_a_no_op(self):
+        assert update_topics([]).unchanged == []
+
+
 class TestTopicAdminAdapter:
     """The one place our code meets confluent_kafka.
 
@@ -262,6 +564,13 @@ class TestTopicAdminAdapter:
 
         def list_topics(self, **kw):
             self.calls.append(("list_topics", (), kw))
+            topic = kw.get("topic")
+            if topic is not None:
+                partitions = {
+                    0: SimpleNamespace(replicas=[1, 2]),
+                    1: SimpleNamespace(replicas=[2, 1]),
+                }
+                return SimpleNamespace(topics={topic: SimpleNamespace(partitions=partitions)})
             return SimpleNamespace(topics={"a": object(), "b": object()})
 
         def create_topics(self, new_topics, **kw):
@@ -271,6 +580,24 @@ class TestTopicAdminAdapter:
         def delete_topics(self, topics, **kw):
             self.calls.append(("delete_topics", tuple(topics), kw))
             return {name: _DoneFuture() for name in topics}
+
+        def describe_configs(self, resources, **kw):
+            self.calls.append(("describe_configs", tuple(resources), kw))
+            from confluent_kafka.admin import ConfigEntry
+
+            entries = {
+                "retention.ms": ConfigEntry("retention.ms", "604800000"),
+                "compression.type": ConfigEntry("compression.type", None),
+            }
+            return {resources[0]: _DoneFuture(entries)}
+
+        def incremental_alter_configs(self, resources, **kw):
+            self.calls.append(("incremental_alter_configs", tuple(resources), kw))
+            return {resources[0]: _DoneFuture()}
+
+        def create_partitions(self, new_partitions, **kw):
+            self.calls.append(("create_partitions", tuple(new_partitions), kw))
+            return {p.topic: _DoneFuture() for p in new_partitions}
 
     def _admin(self, monkeypatch):
         created = {}
@@ -314,10 +641,55 @@ class TestTopicAdminAdapter:
         with pytest.raises(TypeError):
             NewTopic("t", partitions=6)
 
+    def test_create_passes_the_config_through(self, monkeypatch):
+        admin, created = self._admin(monkeypatch)
+        admin.create("t", partitions=3, replication_factor=1, config={"retention.ms": "1"})
+        _, topics, _ = created["client"].calls[0]
+        assert topics[0].config == {"retention.ms": "1"}
+
+    def test_describe_shape_counts_partitions_and_replicas(self, monkeypatch):
+        admin, created = self._admin(monkeypatch)
+        assert admin.describe_shape("t") == (2, 2)
+        assert created["client"].calls[0] == ("list_topics", (), {"topic": "t", "timeout": 10.0})
+
+    def test_describe_config_renders_a_null_value_as_empty(self, monkeypatch):
+        """librdkafka reports an unset config with value None; str(None) is a lie."""
+        admin, _ = self._admin(monkeypatch)
+        assert admin.describe_config("t") == {
+            "retention.ms": "604800000",
+            "compression.type": "",
+        }
+
+    def test_alter_config_uses_the_incremental_call(self, monkeypatch):
+        """A whole-resource alter resets every config it is not given."""
+        admin, created = self._admin(monkeypatch)
+        admin.alter_config("t", {"retention.ms": "1"})
+        name, resources, kwargs = created["client"].calls[0]
+        assert name == "incremental_alter_configs"
+        assert kwargs == {"request_timeout": 30.0}
+        assert resources[0].name == "t"
+
+    def test_widen_partitions_sends_the_new_total(self, monkeypatch):
+        admin, created = self._admin(monkeypatch)
+        admin.widen_partitions("t", total=6)
+        name, partitions, kwargs = created["client"].calls[0]
+        assert name == "create_partitions"
+        assert kwargs == {"request_timeout": 30.0}
+        assert partitions[0].topic == "t"
+
+    def test_the_real_newpartitions_takes_the_total(self):
+        """Pure constructor, no broker. Catches a NewPartitions signature change."""
+        from confluent_kafka.admin import NewPartitions
+
+        assert NewPartitions("t", 6).topic == "t"
+
 
 class _DoneFuture:
+    def __init__(self, value=None):
+        self._value = value
+
     def result(self, *_a, **_kw):
-        return None
+        return self._value
 
 
 class TestAdminConfig:
@@ -331,6 +703,15 @@ class TestAdminConfig:
     def test_plaintext_carries_no_sasl_keys(self):
         conf = admin_config(bootstrap="b:9092", provider="plaintext", username="", password="")
         assert conf == {"bootstrap.servers": "b:9092"}
+
+    def test_the_in_cluster_listener_keeps_scram_and_drops_the_tls(self):
+        """dfe-engine#332: the :9092 listener the deploy charts stand up."""
+        conf = admin_config(
+            bootstrap="b:9092", provider="strimzi-no-tls", username="u", password="p"
+        )
+        assert conf["security.protocol"] == "SASL_PLAINTEXT"
+        assert conf["sasl.mechanisms"] == "SCRAM-SHA-512"
+        assert conf["sasl.password"] == "p"
 
     def test_a_mechanism_without_a_sasl_transport_is_refused(self):
         """librdkafka would warn and connect UNAUTHENTICATED; that must not pass silently."""
