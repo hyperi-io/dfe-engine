@@ -100,6 +100,13 @@ class TestWhetherItRunsAtAll:
         assert "dfe-ui" not in rendered
         assert "hyperdx" not in rendered
 
+    def test_the_elastic_transform_is_rendered_on_docker_single(self, tmp_path):
+        # It reads config.yaml and the profile seeds it idle, so the stack writes
+        # the file the app exits without rather than leaving the directory absent.
+        rendered = {a.service for a in appconfig.renderable(_settings(tmp_path))}
+
+        assert "dfe-transform-elastic" in rendered
+
 
 class TestWhatTheContainerReads:
     def test_the_deployment_base_survives_and_the_overlay_wins(self, crud, tmp_path):
