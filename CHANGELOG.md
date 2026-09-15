@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.20.16](https://github.com/hyperi-io/dfe-engine/compare/v1.20.15...v1.20.16) (2026-09-15)
+
+### Bug Fixes
+
+* stop listing two coming transforms as KEDA scaling members ([8e25a41](https://github.com/hyperi-io/dfe-engine/commit/8e25a41d65e9bbd477459c5653b7dbacbac0e774)), closes [#338](https://github.com/hyperi-io/dfe-engine/issues/338)
+
 ## [1.20.15](https://github.com/hyperi-io/dfe-engine/compare/v1.20.14...v1.20.15) (2026-09-15)
 
 ### Bug Fixes
