@@ -15,18 +15,20 @@ startup continues rather than crash-looping the app. A deployment that wants the
 schema to be a GATE runs ``dfe-schema apply`` in a wave ahead of the app, where a
 failure is meant to stop things.
 
+After the core tables, every deployed source's table is brought to the
+deployment default TTL, so a changed ``DFE_CLICKHOUSE_DEFAULT_TTL_DAYS`` reaches
+every table on restart.
+
 Disable with ``DFE_CLICKHOUSE_BOOTSTRAP_TABLES=false``.
 """
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from scalo.logger import logger
 
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
-from dfe_engine.gitcrud.retention import effective_default_ttl_days
 from dfe_engine.schema.applier import log_report
 from dfe_engine.schema.core_schema import (
     CoreSchemaTargets,
@@ -36,11 +38,28 @@ from dfe_engine.schema.core_schema import (
 from dfe_engine.settings import DFESettings, get_clickhouse_config
 
 if TYPE_CHECKING:
-    from dfe_engine.gitcrud import GitCrud
+    from dfe_engine.source.models import Source
 
 
-def bootstrap_clickhouse(*, settings: DFESettings, gitcrud: GitCrud | None = None) -> bool:
-    """Create or reconcile the core tables if the deployment asks for it.
+def _reconcile_sources(*, client: object, settings: DFESettings, sources: list[Source]) -> None:
+    """Bring deployed source tables to the default TTL; a failure here never fails the bootstrap."""
+    from dfe_engine.schema.retention import reconcile_source_ttls
+
+    try:
+        outcome = reconcile_source_ttls(client, settings=settings, sources=sources)
+    except Exception as exc:
+        logger.error(f"source TTL reconcile failed: {exc}")
+        return
+    log_report(outcome.report, prefix="bootstrap sources")
+    if outcome.sources_skipped:
+        logger.warning(
+            "source TTL reconcile left sources to their next deploy",
+            count=outcome.sources_skipped,
+        )
+
+
+def bootstrap_clickhouse(*, settings: DFESettings, sources: list[Source] | None = None) -> bool:
+    """Create or reconcile the core tables, then the deployed source tables' TTL.
 
     Returns whether the core tables are now known to exist. False covers both a
     deployment that switched the bootstrap off and one whose ClickHouse could not
@@ -50,11 +69,7 @@ def bootstrap_clickhouse(*, settings: DFESettings, gitcrud: GitCrud | None = Non
         logger.info("ClickHouse table bootstrap disabled; skipping")
         return False
 
-    # The console override in the deploy repo wins over the env default.
-    targets = replace(
-        CoreSchemaTargets.from_settings(settings),
-        default_ttl_days=effective_default_ttl_days(settings, gitcrud),
-    )
+    targets = CoreSchemaTargets.from_settings(settings)
 
     try:
         manager = ClickHouseManager.get_instance(get_clickhouse_config(settings=settings))
@@ -69,4 +84,6 @@ def bootstrap_clickhouse(*, settings: DFESettings, gitcrud: GitCrud | None = Non
     # materialises system.query_log, and nothing in DFE fails without the cost
     # leaderboard, so it carries its own guard.
     apply_query_log_archive(client, targets)
+    if sources:
+        _reconcile_sources(client=client, settings=settings, sources=sources)
     return True
