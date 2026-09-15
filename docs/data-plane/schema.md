@@ -532,18 +532,7 @@ a changed default on the next apply (`ALTER TABLE ... MODIFY TTL`), and an
 undeclared TTL never removes a live one. Shortening a TTL expires the rows
 older than the new value.
 
-**Console override:** an operator can change the deployment default without a
-redeploy through `PUT /api/v1/system/retention` (`system:write`), and
-`GET /api/v1/system/retention` reports the stored value, the effective value
-and which one wins. The override is committed to the deploy repo at
-`governance/settings/retention.yaml` (`default_ttl_days`), so it survives the
-loss of the engine and every change is an audited commit. Full precedence is
-the source's `schema.ttl_days`, then the table's dfe-schemas definition, then
-the console override, then the deployment env default. A PUT reconciles the
-core tables and every deployed source's table in the same request, and the
-engine's own startup apply uses the override too. The deploy-time `dfe-schema`
-CLI has no gitops access and applies the env default only, so `dfe-schema
-check` reports an active override as TTL drift.
+**Changing the default:** the environment is the only place the default is set; the console reads it through `GET /api/v1/system/retention` and cannot change it. Precedence is the source's `schema.ttl_days`, then the table's dfe-schemas definition, then `DFE_CLICKHOUSE_DEFAULT_TTL_DAYS`. On every start the engine applies the core tables and then every deployed source's table under the default, so a changed value reaches them all on the next restart; a source whose table is absent or will not build is logged and left to its next deploy. A deploy repo's old `governance/settings/retention.yaml` is no longer read.
 
 ---
 
