@@ -73,6 +73,17 @@ component is unchanged.
   KEDA / ScalingPressure). Traces to HyperDX.
 - Metric names use the `dfe_*` prefix (per #59 `metric_prefix=dfe`).
 
+### The hunt runner pushes rather than being scraped
+
+The runner has no HTTP listener, so nothing scrapes it. It pushes on the OTLP
+endpoint the chart already wires and reports `dfe_hunt_runs_total`
+(`hunt_id`, `outcome`), `dfe_hunt_run_duration_seconds`,
+`dfe_hunt_rows_written_total`, `dfe_hunt_overruns_total`, `dfe_hunt_claims_total`
+(`hunt_id`, `outcome`), `dfe_hunt_backlog` and `dfe_hunt_tick_duration_seconds`.
+The backlog gauge runs the SAME due-count SQL the KEDA shim scales on, so a
+dashboard and the autoscaler cannot disagree about the queue. Each fire also logs
+one INFO line carrying the hunt, the rows it wrote and how long it took.
+
 ## 4. Identity
 
 - Every component sets `OTEL_SERVICE_NAME` (`dfe-engine`, `dfe-ui`, `dfe-receiver`,

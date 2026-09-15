@@ -25,6 +25,7 @@ anything.
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from scalo.logger import logger
@@ -33,6 +34,7 @@ from dfe_engine.clickhouse.attribution import DfeQueryTags
 
 from .ch_coordinator import ChCoordinator
 from .checkpoint import predicate, window
+from .metrics import HuntRunnerMetrics
 from .models import HuntSpec
 
 WINDOW_TOKEN = "{window}"
@@ -76,12 +78,20 @@ def query_settings(hunt_id: str, workload: str = "") -> dict[str, str]:
 class HuntWorker:
     """Runs a hunt's windowed query and advances its watermark on success."""
 
-    def __init__(self, ch: Any, coordinator: ChCoordinator, workload: str = "") -> None:
+    def __init__(
+        self,
+        ch: Any,
+        coordinator: ChCoordinator,
+        workload: str = "",
+        metrics: HuntRunnerMetrics | None = None,
+    ) -> None:
         self._ch = ch
         self._coord = coordinator
         # Optional CH WORKLOAD name for server-side fair-share; empty = do not set it
         # (an undefined workload errors). Provisioned later (the v2 smoothing backstop).
         self._workload = workload
+        # No manager wired records nothing, which is what the unit suite runs on.
+        self._metrics = metrics or HuntRunnerMetrics()
 
     def run(self, spec: HuntSpec, scheduled_start: int) -> int:
         """Execute the incremental window; return the new watermark (= window end).
@@ -102,6 +112,7 @@ class HuntWorker:
         start, end = window(last, scheduled_start, spec.interval_seconds)
         pred = predicate(start, end, spec.timestamp_field)
         settings = query_settings(spec.hunt_id, self._workload)
+        began = time.monotonic()
         written = 0
         for sql in statements:
             # INSERT INTO <target> SELECT ... WHERE {window}. log_comment attributes
@@ -112,4 +123,14 @@ class HuntWorker:
         # Advance ONLY after every statement committed (crash-safe resume).
         self._coord.set_watermark(spec.hunt_id, end)
         self._coord.record_run(spec.hunt_id, scheduled_start, written)
+        # The ONE line a fire leaves behind: without it a hunt that stops finding
+        # anything is indistinguishable from a hunt that stopped running (#357).
+        logger.info(
+            "hunt fire complete",
+            hunt_id=spec.hunt_id,
+            fire=scheduled_start,
+            rows_written=written,
+            duration_seconds=round(time.monotonic() - began, 3),
+        )
+        self._metrics.rows_written(spec.hunt_id, written)
         return end

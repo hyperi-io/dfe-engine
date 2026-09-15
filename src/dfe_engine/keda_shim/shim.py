@@ -30,6 +30,7 @@ from typing import Any
 import clickhouse_connect
 from scalo.logger import logger
 
+from dfe_engine import scaling_pressure
 from dfe_engine.settings import DFESettings
 from dfe_engine.yaml_utils import deep_merge, yaml_load
 
@@ -112,7 +113,7 @@ class QueryShim:
             from dfe_engine.hunt_runner.schedule import due_query
 
             return due_query(db), {}
-        sql = str(cfg["sql"]).replace("__DB__", db)
+        sql = scaling_pressure.apply(str(cfg["sql"]).replace("__DB__", db))
         ch_params: dict[str, Any] = dict(cfg.get("binds", {}))
         for name in cfg.get("params", []):
             value = params.get(name)

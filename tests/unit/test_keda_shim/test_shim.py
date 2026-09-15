@@ -54,6 +54,31 @@ def test_pressure_clamped_to_band():
     assert shim.run("pressure", {"service": "dfe-receiver"}) == 100  # clamp_max 100
 
 
+def test_pressure_matches_the_gauge_under_any_namespace_prefix():
+    """One pinned name read one app and left the trigger inert everywhere else."""
+    client = _FakeClient(rows=[[42]])
+    shim = _shim(client)
+
+    shim.run("pressure", {"service": "dfe-archiver"})
+
+    sql = client.calls[0][0]
+    assert "dfe_scaling_pressure" not in sql
+    assert "MetricName = 'scaling_pressure'" in sql
+    assert "endsWith(MetricName, '_scaling_pressure')" in sql
+
+
+def test_pressure_reduces_each_series_before_taking_the_max():
+    """An app that tags some rows and not others must not average itself down."""
+    client = _FakeClient(rows=[[90]])
+    shim = _shim(client)
+
+    assert shim.run("pressure", {"service": "dfe-fetcher"}) == 90
+
+    sql = client.calls[0][0]
+    assert "GROUP BY MetricName, cityHash64(Attributes)" in sql
+    assert "max(series)" in sql
+
+
 def test_failsafe_holds_last_good():
     client = _FakeClient(rows=[[42]])
     shim = QueryShim(DFESettings(env="test"), client_factory=lambda: client)

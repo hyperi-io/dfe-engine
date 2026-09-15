@@ -24,12 +24,35 @@ flowchart LR
     ms["metrics-server\n(pod CPU)"] -->|utilization| cpuTrig["cpu trigger\nDEFAULT, ~70%"]
     subgraph shimPath["opt-in per app: keda.pressure.enabled"]
         direction LR
-        gauge[("dfe.otel_metrics_gauge\ndfe_scaling_pressure")] --> shim["dfe-keda-shim\nGET /keda/pressure?service=X"]
+        gauge[("dfe.otel_metrics_gauge\n*_scaling_pressure")] --> shim["dfe-keda-shim\nGET /keda/pressure?service=X"]
     end
     cpuTrig --> so["ScaledObject\n(per app)"]
     shim -->|"metrics-api\n(fail-safe cache)"| so
     so --> dep["app Deployment"]
 ```
+
+### Which gauge rows the shim reads
+
+scalo registers the composite as a bare `scaling_pressure` gauge and each app
+chooses whether to put its own metrics namespace in front of it, so the same
+signal arrives as `scaling_pressure` (dfe-archiver, dfe-transform-vrl),
+`dfe_scaling_pressure` (dfe-receiver), `dfe_loader_scaling_pressure` or
+`dfe_fetcher_scaling_pressure`. The matching rule is therefore:
+
+- **Name:** the bare `scaling_pressure`, plus any `<prefix>_scaling_pressure`.
+  Nothing else matches, so a metric that merely ends in the words does not.
+- **Service:** `ServiceName` is the app instance, matched exactly.
+- **Reduction:** each series - one metric name with one attribute set - is
+  averaged over the 60s window, then the MAX across series is returned.
+  dfe-fetcher tags its rows `name="fetch"` and the others tag nothing, so
+  averaging across attribute sets would report a busy series and an idle one as
+  one lukewarm number.
+
+The rule lives in `src/dfe_engine/scaling_pressure.py` and is substituted into
+both query catalogues (the shim's and the app-management reader's), so the
+autoscaler and the console can never disagree about what pressure an app is
+under. Converging the apps on one wire name is tracked in dfe-infra#302; this
+reads whatever they emit today.
 
 ## Per-app defaults
 
