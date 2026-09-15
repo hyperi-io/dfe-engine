@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.20.10](https://github.com/hyperi-io/dfe-engine/compare/v1.20.9...v1.20.10) (2026-09-15)
+
+### Bug Fixes
+
+* **sources:** report the restarts the app-overlay writes call for ([dd005c2](https://github.com/hyperi-io/dfe-engine/commit/dd005c296c529edbd448379f2c45b34aedb44827))
+
 ## [1.20.9](https://github.com/hyperi-io/dfe-engine/compare/v1.20.8...v1.20.9) (2026-09-15)
 
 ### Bug Fixes
