@@ -32,8 +32,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from scalo.logger import logger
-
 from dfe_engine.auth.audit import (
     audit_org_change,
     audit_org_hyperdx_failed,
@@ -43,7 +41,6 @@ from dfe_engine.orgs.models import Org
 from dfe_engine.orgs.registry import OrgRegistry
 
 if TYPE_CHECKING:
-    from dfe_engine.connections.config import ConnectionConfig
     from dfe_engine.hyperdx.client import HyperDXClient
 
 
@@ -60,11 +57,9 @@ class OrgLifecycleManager:
         self,
         registry: OrgRegistry,
         hyperdx_client: HyperDXClient | None = None,
-        connection_config: ConnectionConfig | None = None,
     ) -> None:
         self._registry = registry
         self._hdx = hyperdx_client
-        self._conn_config = connection_config
 
     # ------------------------------------------------------------------
     # Public API
@@ -127,12 +122,18 @@ class OrgLifecycleManager:
     # ------------------------------------------------------------------
 
     async def _provision_hyperdx(self, org: Org) -> Org:
-        """Confirm the fork's default team and persist its ID on the org.
+        """Confirm the deployment's HyperDX team and persist its ID on the org.
 
-        The fork exposes no per-org team creation; every org shares the
-        deployment's default team (JIT-created on first contact) until the
-        per-team credential seam (dfe-engine#124) lands. Non-fatal: if HyperDX
-        is unavailable, the org record is unchanged.
+        The engine authenticates as its own machine identity, so the team the fork
+        returns is the deployment's DEFAULT team rather than one of the org's own -
+        a user's team is resolved from their OIDC group, not from this record.
+
+        A team's ClickHouse connection is the fork's to create, from the material
+        ``GET /api/v1/hyperdx/connection`` serves against the caller's own token.
+        The engine writing one here hands every team the same credential and stops
+        the fork provisioning the per-org one at all (dfe-engine#124, #312).
+
+        Non-fatal: if HyperDX is unavailable, the org record is unchanged.
 
         Args:
             org: The org to provision.
@@ -152,29 +153,6 @@ class OrgLifecycleManager:
         team_id = str(team.get("_id", "")) if team else ""
         if team_id:
             audit_org_hyperdx_provisioned(org_name=org.name, team_id=team_id)
-
-            # Ensure the tenant_reader ClickHouse connection exists on the team
-            # (idempotent - the fork does not dedupe connections by name).
-            if self._conn_config is not None:
-                conn = self._conn_config.connections.get("tenant_reader")
-                if conn is not None:
-                    import os
-
-                    try:
-                        await self._hdx.ensure_connection(
-                            name="tenant_reader",
-                            host=conn.host,
-                            port=conn.port,
-                            username=conn.user,
-                            password=os.environ.get(conn.password_env, ""),
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            "HyperDX connection create failed",
-                            org_name=org.name,
-                            error=str(exc),
-                        )
-
             return self._registry.update(org.name, hyperdx_team_id=team_id)
 
         audit_org_hyperdx_failed(org_name=org.name, error="get_team returned no team")
