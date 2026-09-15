@@ -67,18 +67,22 @@ def render_envoy_oidc_values(
 def build_oidc_providers(registry: Any) -> list[dict[str, str]]:
     """Read enabled providers from an OIDCProviderRegistry into render dicts.
 
-    The literal client ID (non-secret) is resolved from the provider's
-    ``client_id_env`` at render time; empty if that env var is unset.
+    The literal client ID (non-secret) comes from the provider's ``client_id``
+    field, falling back to the env var named in ``client_id_env``; empty when
+    neither is set.
     """
     providers: list[dict[str, str]] = []
     for name, prov in registry.list():
         if not getattr(prov, "enabled", True):
             continue
+        client_id = getattr(prov, "client_id", "") or os.environ.get(
+            getattr(prov, "client_id_env", ""), ""
+        )
         providers.append(
             {
                 "name": name,
                 "issuer": getattr(prov, "issuer", ""),
-                "client_id": os.environ.get(getattr(prov, "client_id_env", ""), ""),
+                "client_id": client_id,
             }
         )
     return providers

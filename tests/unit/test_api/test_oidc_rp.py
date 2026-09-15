@@ -22,7 +22,7 @@ import jwt as pyjwt
 from dfe_engine.auth.jwt_authority import JwtAuthority
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
-from dfe_engine.auth.oidc.rp import NormalizedIdentity, extract_identity
+from dfe_engine.auth.oidc.rp import NormalizedIdentity, build_relying_party, extract_identity
 from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import SecretsSettings
 
@@ -203,7 +203,73 @@ def test_provider_config_defaults():
     """New RP fields default to sensible values (no secret in config)."""
     provider = OIDCProvider(type="generic", issuer="https://idp.example")
     assert provider.client_secret_env == ""
+    assert provider.client_secret_path == ""
     assert provider.scopes == "openid email profile groups"
+
+
+# ── credential resolution at registration: store before env ──────
+
+
+def _registry_with(tmp_path, **provider_fields) -> OIDCProviderRegistry:
+    registry = OIDCProviderRegistry(tmp_path / "oidc-providers")
+    registry.create(
+        "acme", OIDCProvider(type="generic", issuer="https://idp.example", **provider_fields)
+    )
+    return registry
+
+
+def _registered_client(rp, name: str):
+    """The Authlib client the RP registered for a provider."""
+    return rp._oauth.create_client(name)
+
+
+def test_rp_prefers_the_stored_secret_over_the_env(tmp_path, monkeypatch):
+    """A secret written through the API beats a stale env var of the same name."""
+    store = build_secrets(SecretsSettings(provider="file", path=str(tmp_path / "secrets")))
+    store.put("oidc/acme/client_secret", "from-store")
+    monkeypatch.setenv("DFE_OIDC_CLIENT_SECRET", "from-env")
+    registry = _registry_with(
+        tmp_path,
+        client_id="acme-client",
+        client_secret_path="oidc/acme/client_secret",
+        client_secret_env="DFE_OIDC_CLIENT_SECRET",
+    )
+
+    rp = build_relying_party(registry, secrets=store)
+
+    assert rp is not None
+    client = _registered_client(rp, "acme")
+    assert client.client_id == "acme-client"
+    assert client.client_secret == "from-store"
+
+
+def test_rp_falls_back_to_the_env_when_nothing_is_stored(tmp_path, monkeypatch):
+    """An ESO-mounted env var keeps serving a provider with no stored secret."""
+    store = build_secrets(SecretsSettings(provider="file", path=str(tmp_path / "secrets")))
+    monkeypatch.setenv("DFE_OIDC_CLIENT_ID", "env-client")
+    monkeypatch.setenv("DFE_OIDC_CLIENT_SECRET", "from-env")
+    registry = _registry_with(
+        tmp_path,
+        client_id_env="DFE_OIDC_CLIENT_ID",
+        client_secret_path="oidc/acme/client_secret",
+        client_secret_env="DFE_OIDC_CLIENT_SECRET",
+    )
+
+    rp = build_relying_party(registry, secrets=store)
+
+    assert rp is not None
+    client = _registered_client(rp, "acme")
+    assert client.client_id == "env-client"
+    assert client.client_secret == "from-env"
+
+
+def test_rp_registers_a_provider_with_no_credentials_at_all(tmp_path):
+    """A half-configured provider still registers, so the login path can report it."""
+    registry = _registry_with(tmp_path)
+    rp = build_relying_party(registry, secrets=None)
+    assert rp is not None
+    assert rp.has_provider("acme")
+    assert _registered_client(rp, "acme").client_secret is None
 
 
 # ── router wiring (real app, no live IdP) ────────────────────────
