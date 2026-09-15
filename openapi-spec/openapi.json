@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.20.9"
+    "version": "1.20.10"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -2294,7 +2294,7 @@
           "OIDC Providers"
         ],
         "summary": "Create Provider",
-        "description": "Create a new OIDC provider configuration (admin only).",
+        "description": "Create a new OIDC provider configuration (admin only).\n\nSecret values in the body are written to the secret store before the YAML is\nwritten, so nothing is stored against a name that already belongs to someone\nelse's provider.",
         "operationId": "create_provider_api_v1_auth_oidc_providers_post",
         "requestBody": {
           "required": true,
@@ -2493,7 +2493,7 @@
           "OIDC Providers"
         ],
         "summary": "Update Provider",
-        "description": "Update an OIDC provider configuration (admin only).",
+        "description": "Update an OIDC provider configuration (admin only).\n\nA secret the body omits keeps the path the provider already holds, so an\nupdate that only flips ``enabled`` does not strand a stored credential.",
         "operationId": "update_provider_api_v1_auth_oidc_providers__name__put",
         "parameters": [
           {
@@ -2549,7 +2549,7 @@
           "OIDC Providers"
         ],
         "summary": "Delete Provider",
-        "description": "Detach an OIDC provider and report orphaned groups (admin only).\n\nDoes NOT delete groups \u2014 they become orphaned with their source_provider\nstill set to the deleted provider name.",
+        "description": "Detach an OIDC provider and report orphaned groups (admin only).\n\nDoes NOT delete groups \u2014 they become orphaned with their source_provider\nstill set to the deleted provider name. The provider's stored credentials\nARE removed: nothing is left that can authenticate as a detached provider.",
         "operationId": "delete_provider_api_v1_auth_oidc_providers__name__delete",
         "parameters": [
           {
@@ -2693,7 +2693,7 @@
           "OIDC Providers"
         ],
         "summary": "Verify Login Config",
-        "description": "Verify a provider's OIDC LOGIN config (admin only).\n\nAnswers \"are the login creds real and is the IdP reachable\" WITHOUT\nattempting an interactive login - the gap ``/{name}/test`` leaves for\ngeneric providers. Checks: the client_id env var resolves, the\nclient_secret env var resolves, and the issuer's discovery document is\nreachable and well-formed.",
+        "description": "Verify a provider's OIDC LOGIN config (admin only).\n\nAnswers \"are the login creds real and is the IdP reachable\" WITHOUT\nattempting an interactive login - the gap ``/{name}/test`` leaves for\ngeneric providers. Checks: the client_id resolves, the client_secret\nresolves, and the issuer's discovery document is reachable and well-formed.",
         "operationId": "verify_login_config_api_v1_auth_oidc_providers__name__verify_login_get",
         "parameters": [
           {
@@ -19143,10 +19143,22 @@
             "description": "OIDC issuer URL",
             "default": ""
           },
+          "client_id": {
+            "type": "string",
+            "title": "Client Id",
+            "description": "OIDC client ID. Not a secret, so it is stored in config.",
+            "default": ""
+          },
           "client_id_env": {
             "type": "string",
             "title": "Client Id Env",
             "description": "Env var name for OIDC client ID",
+            "default": ""
+          },
+          "client_secret": {
+            "type": "string",
+            "title": "Client Secret",
+            "description": "RP client secret used in the auth-code exchange. Write-only: it goes to the secret store and only its path is kept in config.",
             "default": ""
           },
           "client_secret_env": {
@@ -20392,6 +20404,11 @@
             "title": "Service Account Json Env",
             "default": ""
           },
+          "service_account_json_path": {
+            "type": "string",
+            "title": "Service Account Json Path",
+            "default": ""
+          },
           "admin_email": {
             "type": "string",
             "title": "Admin Email",
@@ -20412,9 +20429,19 @@
             "title": "Client Secret Env",
             "default": ""
           },
+          "client_secret_path": {
+            "type": "string",
+            "title": "Client Secret Path",
+            "default": ""
+          },
           "api_token_env": {
             "type": "string",
             "title": "Api Token Env",
+            "default": ""
+          },
+          "api_token_path": {
+            "type": "string",
+            "title": "Api Token Path",
             "default": ""
           },
           "okta_domain": {
@@ -20458,6 +20485,12 @@
             "description": "Fetch the user's groups from the directory API at each login (needed by providers with no groups claim, e.g. Google Workspace)",
             "default": false
           },
+          "service_account_json": {
+            "type": "string",
+            "title": "Service Account Json",
+            "description": "Google service account JSON. Write-only: it goes to the secret store and only its path is kept in config.",
+            "default": ""
+          },
           "service_account_json_env": {
             "type": "string",
             "title": "Service Account Json Env",
@@ -20482,10 +20515,22 @@
             "description": "Env var for Entra ID tenant ID",
             "default": ""
           },
+          "client_secret": {
+            "type": "string",
+            "title": "Client Secret",
+            "description": "Entra ID application client secret. Write-only: it goes to the secret store and only its path is kept in config.",
+            "default": ""
+          },
           "client_secret_env": {
             "type": "string",
             "title": "Client Secret Env",
             "description": "Env var for Entra ID client secret",
+            "default": ""
+          },
+          "api_token": {
+            "type": "string",
+            "title": "Api Token",
+            "description": "Okta API token. Write-only: it goes to the secret store and only its path is kept in config.",
             "default": ""
           },
           "api_token_env": {
@@ -20526,6 +20571,10 @@
             "type": "string",
             "title": "Service Account Json Env"
           },
+          "service_account_json_path": {
+            "type": "string",
+            "title": "Service Account Json Path"
+          },
           "admin_email": {
             "type": "string",
             "title": "Admin Email"
@@ -20542,9 +20591,17 @@
             "type": "string",
             "title": "Client Secret Env"
           },
+          "client_secret_path": {
+            "type": "string",
+            "title": "Client Secret Path"
+          },
           "api_token_env": {
             "type": "string",
             "title": "Api Token Env"
+          },
+          "api_token_path": {
+            "type": "string",
+            "title": "Api Token Path"
           },
           "okta_domain": {
             "type": "string",
@@ -20558,11 +20615,14 @@
           "sync_interval",
           "enrich_on_login",
           "service_account_json_env",
+          "service_account_json_path",
           "admin_email",
           "domain",
           "tenant_id_env",
           "client_secret_env",
+          "client_secret_path",
           "api_token_env",
+          "api_token_path",
           "okta_domain"
         ],
         "title": "GroupResolutionResponse"
@@ -22819,6 +22879,11 @@
             "title": "Issuer",
             "default": ""
           },
+          "client_id": {
+            "type": "string",
+            "title": "Client Id",
+            "default": ""
+          },
           "client_id_env": {
             "type": "string",
             "title": "Client Id Env",
@@ -22827,6 +22892,11 @@
           "client_secret_env": {
             "type": "string",
             "title": "Client Secret Env",
+            "default": ""
+          },
+          "client_secret_path": {
+            "type": "string",
+            "title": "Client Secret Path",
             "default": ""
           },
           "scopes": {
@@ -25271,6 +25341,10 @@
             "type": "string",
             "title": "Issuer"
           },
+          "client_id": {
+            "type": "string",
+            "title": "Client Id"
+          },
           "client_id_env": {
             "type": "string",
             "title": "Client Id Env"
@@ -25278,6 +25352,10 @@
           "client_secret_env": {
             "type": "string",
             "title": "Client Secret Env"
+          },
+          "client_secret_path": {
+            "type": "string",
+            "title": "Client Secret Path"
           },
           "groups": {
             "$ref": "#/components/schemas/GroupResolutionResponse"
@@ -25306,8 +25384,10 @@
           "enabled",
           "display_name",
           "issuer",
+          "client_id",
           "client_id_env",
           "client_secret_env",
+          "client_secret_path",
           "groups",
           "created_at",
           "last_sync_at",
@@ -25315,7 +25395,7 @@
           "sync_error"
         ],
         "title": "ProviderResponse",
-        "description": "Provider config \u2014 env var names are shown, never actual secret values."
+        "description": "Provider config \u2014 env var names and secret paths, never a secret value."
       },
       "PublishVersionRequest": {
         "properties": {
@@ -30743,6 +30823,42 @@
             ],
             "title": "Display Name",
             "description": "Human-readable label"
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id",
+            "description": "OIDC client ID (not a secret)"
+          },
+          "client_id_env": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id Env",
+            "description": "Env var name for OIDC client ID"
+          },
+          "client_secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Secret",
+            "description": "Rotate the RP client secret. Write-only: it goes to the secret store and only its path is kept in config."
           },
           "client_secret_env": {
             "anyOf": [

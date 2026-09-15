@@ -54,6 +54,7 @@ from dfe_engine.auth.oidc.models import GroupInfo
 
 if TYPE_CHECKING:
     from dfe_engine.auth.oidc.models import OIDCProvider
+    from dfe_engine.secrets import DfeSecrets
 
 
 class MockDirectoryAdapter(OIDCGroupAdapter):
@@ -65,8 +66,8 @@ class MockDirectoryAdapter(OIDCGroupAdapter):
     ``test_connection`` that reports the loaded fixture size.
     """
 
-    def __init__(self, provider: OIDCProvider) -> None:
-        super().__init__(provider)
+    def __init__(self, provider: OIDCProvider, *, secrets: DfeSecrets | None = None) -> None:
+        super().__init__(provider, secrets=secrets)
         self._groups: list[GroupInfo] = []
         self._by_id: dict[str, GroupInfo] = {}
         self._members: dict[str, list[str]] = {}

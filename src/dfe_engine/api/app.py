@@ -252,6 +252,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     app.state.jwt_authority = jwt_authority_for(settings)
 
+    # The one seam for secrets the engine mints - OIDC provider credentials and
+    # sigma provider tokens resolve through it, never through a backend SDK.
+    from dfe_engine.secrets import build_secrets
+
+    app.state.dfe_secrets = build_secrets(settings.secrets)
+
     from dfe_engine.governance import PolicyStore
 
     if gitcrud is not None:
@@ -274,7 +280,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # registry changes, so a new provider can serve logins without a restart.
     from dfe_engine.auth.oidc.rp import build_relying_party
 
-    app.state.oidc_rp = build_relying_party(app.state.oidc_provider_registry)
+    app.state.oidc_rp = build_relying_party(
+        app.state.oidc_provider_registry, secrets=app.state.dfe_secrets
+    )
 
     # Bootstrap connection registry for multi-tenant ClickHouse
     from dfe_engine.connections.config import ConnectionConfigLoader

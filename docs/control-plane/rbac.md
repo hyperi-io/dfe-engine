@@ -543,18 +543,22 @@ type: "google"           # generic | google | entra_id | okta
 enabled: true
 display_name: "Google Workspace"
 issuer: "https://accounts.google.com"
-client_id_env: "GOOGLE_CLIENT_ID"
+client_id: "1234.apps.googleusercontent.com"   # not secret
+client_secret_path: "oidc/google-workspace/client_secret"
 groups:
   mode: "api"            # manual | token_claim | api
   sync_interval: 3600
   # Google-specific
-  service_account_json_env: "GOOGLE_SA_JSON"
+  service_account_json_path: "oidc/google-workspace/groups_service_account_json"
   admin_email: "admin@example.com"
   domain: "example.com"
 ```
 
-Credential env var *names* are stored in config (not values) — secrets stay
-in the deployment's secrets backend.
+Config holds a secret PATH into the `DfeSecrets` seam, or the NAME of an env var
+(`client_id_env`, `client_secret_env`, `service_account_json_env`) — never a
+secret value. Resolution reads the store first, so a credential sent to
+`POST /api/v1/auth/oidc-providers` takes effect without a restart, then the
+environment, so an ESO-mounted variable keeps working.
 
 ### 4.3 Adapter Implementations
 

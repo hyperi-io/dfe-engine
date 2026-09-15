@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from dfe_engine.auth.groups import GroupStore
     from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
     from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+    from dfe_engine.secrets import DfeSecrets
 
 
 def _safe_name(value: str) -> str:
@@ -52,6 +53,7 @@ async def sync_provider(
     provider_registry: OIDCProviderRegistry,
     group_store: GroupStore,
     adapter: OIDCGroupAdapter | None = None,
+    secrets: DfeSecrets | None = None,
 ) -> dict:
     """Run group sync for a single OIDC provider.
 
@@ -66,6 +68,8 @@ async def sync_provider(
         group_store: Store to upsert group records into.
         adapter: Optional adapter override, primarily for testing.  When
             ``None`` the adapter is resolved via ``get_adapter(provider)``.
+        secrets: The DfeSecrets seam the directory credential resolves through
+            when the adapter is built here.
 
     Returns:
         A dict with keys:
@@ -118,7 +122,7 @@ async def sync_provider(
     if adapter is None:
         from dfe_engine.auth.oidc.adapters import get_adapter
 
-        adapter = get_adapter(provider)
+        adapter = get_adapter(provider, secrets=secrets)
 
     try:
         remote_groups = await adapter.list_all_groups()

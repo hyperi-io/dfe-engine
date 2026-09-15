@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from dfe_engine.auth.oidc.adapters.okta import OktaAdapter
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+from dfe_engine.secrets import build_secrets
+from dfe_engine.settings import SecretsSettings
 
 
 def _okta_provider(*, mode: str = "token_claim") -> OIDCProvider:
@@ -45,3 +47,35 @@ class TestOktaAdapterTestConnection:
         ok, message = await adapter.test_connection()
         assert ok is False
         assert "OKTA_API_TOKEN" in message
+
+
+class TestOktaApiTokenResolution:
+    """The Groups API token resolves through the secret store before the env."""
+
+    def _store(self, tmp_path):
+        return build_secrets(SecretsSettings(provider="file", path=str(tmp_path / "secrets")))
+
+    def test_stored_token_beats_the_env(self, tmp_path, monkeypatch):
+        store = self._store(tmp_path)
+        store.put("oidc/acme/groups_api_token", "from-store")
+        monkeypatch.setenv("OKTA_API_TOKEN", "from-env")
+        provider = _okta_provider(mode="api")
+        provider.groups.okta_domain = "example.okta.com"
+        provider.groups.api_token_path = "oidc/acme/groups_api_token"
+        provider.groups.api_token_env = "OKTA_API_TOKEN"
+
+        _, headers = OktaAdapter(provider, secrets=store)._api_base_and_headers()
+
+        assert headers["Authorization"] == "SSWS from-store"
+
+    def test_env_serves_when_nothing_is_stored(self, tmp_path, monkeypatch):
+        store = self._store(tmp_path)
+        monkeypatch.setenv("OKTA_API_TOKEN", "from-env")
+        provider = _okta_provider(mode="api")
+        provider.groups.okta_domain = "example.okta.com"
+        provider.groups.api_token_path = "oidc/acme/groups_api_token"
+        provider.groups.api_token_env = "OKTA_API_TOKEN"
+
+        _, headers = OktaAdapter(provider, secrets=store)._api_base_and_headers()
+
+        assert headers["Authorization"] == "SSWS from-env"

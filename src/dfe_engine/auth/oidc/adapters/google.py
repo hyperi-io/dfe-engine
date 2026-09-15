@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from typing import Any
 
 from scalo.logger import logger
 
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
-from dfe_engine.auth.oidc.models import GroupInfo, OIDCProvider
+from dfe_engine.auth.oidc.credential_env import resolve_credential
+from dfe_engine.auth.oidc.models import GroupInfo
 
 # Google Admin SDK scope for read-only group directory access.
 _DIRECTORY_SCOPE = "https://www.googleapis.com/auth/admin.directory.group.readonly"
@@ -26,15 +26,13 @@ class GoogleAdapter(OIDCGroupAdapter):
     """Resolves Google Workspace group IDs/emails to display names via Admin SDK.
 
     Requires a service account with domain-wide delegation configured for the
-    admin.directory.group.readonly scope. The service account JSON is read from
-    the environment variable named in provider.groups.service_account_json_env.
+    admin.directory.group.readonly scope. The service account JSON resolves from
+    provider.groups.service_account_json_path in the DfeSecrets seam, falling
+    back to the env var named in service_account_json_env.
 
     Falls back gracefully when credentials are missing or the API is unavailable —
     all public methods return safe empty/identity values rather than raising.
     """
-
-    def __init__(self, provider: OIDCProvider) -> None:
-        super().__init__(provider)
 
     # ------------------------------------------------------------------
     # Public async interface
@@ -153,12 +151,13 @@ class GoogleAdapter(OIDCGroupAdapter):
         """
         service = self._get_service()
         if service is None:
-            env_var = self._provider.groups.service_account_json_env
-            if env_var is None:
-                return False, "Service account not configured (service_account_json_env is unset)"
-            if not os.environ.get(env_var):
-                return False, f"Service account credentials not found in env var '{env_var}'"
-            return False, f"Failed to build service from credentials in '{env_var}'"
+            if not self._service_account_json():
+                return False, (
+                    "Service account not configured (send it as "
+                    "'groups.service_account_json' to the provider API, or set "
+                    "groups.service_account_json_env)"
+                )
+            return False, "Failed to build service from the configured service account JSON"
 
         try:
             await asyncio.to_thread(self._probe_sync, service)
@@ -175,22 +174,25 @@ class GoogleAdapter(OIDCGroupAdapter):
     # Service construction
     # ------------------------------------------------------------------
 
+    def _service_account_json(self) -> str:
+        """The service account JSON: the secret store first, then the env var."""
+        return resolve_credential(
+            secret_path=self._provider.groups.service_account_json_path,
+            env_name=self._provider.groups.service_account_json_env,
+            secrets=self._secrets,
+        )
+
     def _get_service(self) -> Any | None:
         """Build a Google Admin SDK service resource from service account credentials.
 
-        Reads service account JSON from the environment variable named in
-        provider.groups.service_account_json_env. Applies domain-wide delegation
-        via with_subject() when provider.groups.admin_email is configured.
+        Applies domain-wide delegation via with_subject() when
+        provider.groups.admin_email is configured.
 
         Returns:
             A googleapiclient Resource object, or None if credentials are
             unavailable or invalid.
         """
-        env_var = self._provider.groups.service_account_json_env
-        if not env_var:
-            return None
-
-        raw_json = os.environ.get(env_var)
+        raw_json = self._service_account_json()
         if not raw_json:
             return None
 
@@ -200,7 +202,7 @@ class GoogleAdapter(OIDCGroupAdapter):
         except (json.JSONDecodeError, ValueError) as exc:
             logger.warning(
                 "Could not parse service account JSON",
-                env_var=env_var,
+                provider=self._provider.issuer,
                 error=str(exc),
             )
             return None
@@ -208,7 +210,7 @@ class GoogleAdapter(OIDCGroupAdapter):
         if not isinstance(sa_info, dict):
             logger.warning(
                 "Service account JSON must be an object, got unexpected type",
-                env_var=env_var,
+                provider=self._provider.issuer,
                 type=type(sa_info).__name__,
             )
             return None

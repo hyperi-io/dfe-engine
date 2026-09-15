@@ -97,10 +97,15 @@ Two principles:
 
 Providers are YAML files (one per provider, filename stem = name) managed by
 `OIDCProviderRegistry`. The model (`auth/oidc/models.py`, the SSoT) carries:
-`type` (generic|google|entra_id|okta), `enabled`, `issuer`, `client_id_env`,
-`client_secret_env`, `scopes`, and a `groups` block (mode + claim_name +
-per-provider directory fields). Credentials are stored as env-var NAMES, never
-values.
+`type` (generic|google|entra_id|okta), `enabled`, `issuer`, `client_id`,
+`client_id_env`, `client_secret_path`, `client_secret_env`, `scopes`, and a
+`groups` block (mode + claim_name + per-provider directory fields).
+
+A secret is never stored in config: the client id is not secret and is held in
+the clear, every other credential is a PATH into the `DfeSecrets` seam or the
+NAME of an env var. Resolution reads the store before the environment, so a
+secret sent to the API works immediately while an ESO-mounted env var keeps
+serving a provider configured that way.
 
 ### Group resolution modes
 
@@ -178,15 +183,20 @@ create / list / get / update / delete (delete reports orphaned groups) /
 `{name}/sync` / `{name}/test` / `{name}/verify-login`. RBAC scopes
 `oidc_read|write|delete`, audit on every mutation, pagination on list. The `dfe`
 CLI gets these for free - generated from `openapi.json` - so UI and CLI share one
-CRUD surface. Create/update carry `client_secret_env` (the RP secret), so a
-provider configured purely through the API can actually complete a login.
+CRUD surface. Create/update take the credential VALUES (`client_secret`, the
+Okta API token, the Entra client secret, the Google SA JSON), write them to the
+secret store and record only the path, then re-register the provider with the
+relying party - so a provider configured purely through the API completes a
+login without an env edit or a restart. A `*_env` field takes an environment
+variable NAME; a credential pasted there is a 422 naming the field. Detach
+deletes the provider's stored secrets.
 
 Verification for a thorough onboard/offboard workflow:
-- **Login-config check - DONE.** `GET /{name}/verify-login` checks the client_id
-  and client_secret env vars resolve (value never returned) and the issuer's
-  discovery document is reachable and well-formed. This is the login half that
-  `{name}/test` (group-DIRECTORY creds only, a no-op for generic providers) never
-  covered.
+- **Login-config check - DONE.** `GET /{name}/verify-login` reports whether the
+  client_id and client_secret resolve (value never returned) and whether the
+  issuer's discovery document is reachable and well-formed. This is the login
+  half that `{name}/test` (group-DIRECTORY creds only, a no-op for generic
+  providers) never covered.
 - **Consolidated introspection.** No single endpoint returns raw claims +
   normalized groups + resolved roles + org_ids for a login. Assemble from the
   callback JSON (`{subject,email,groups}`) + `GET /auth/me` (roles + org_ids,
@@ -260,8 +270,9 @@ Done since this doc landed:
 - **id -> role resolution** across name and `source_id`, so GUID-emitting
   providers (Entra) resolve. Verified against the live Entra tenant: 12 fixture
   users deliver exactly their expected group claims.
-- **Login-config verification** (`GET /{name}/verify-login`) and the RP
-  `client_secret_env` in the onboarding CRUD.
+- **Login-config verification** (`GET /{name}/verify-login`) and the RP client
+  secret in the onboarding CRUD, written to the `DfeSecrets` seam and live on
+  the login routes without a restart.
 - **`/auth/me` returns org_ids**, so the UI can render data-plane scope.
 - **Transitive membership SETTLED by measurement**: Entra emits the full
   closure in-token, so honour it; transitivity is a per-provider fact
