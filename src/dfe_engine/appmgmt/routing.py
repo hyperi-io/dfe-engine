@@ -204,7 +204,10 @@ def _loader(
     from dfe_engine.services.source_routing import compile_loader_routing
 
     db = settings.clickhouse.effective_data_database
-    return {"routing": compile_loader_routing(registry, db=db).model_dump(mode="json")}
+    # Only the keys the sources derive: the block is written whole, so a model
+    # default in it would overwrite the deployment's own setting for that key.
+    compiled = compile_loader_routing(registry, db=db)
+    return {"routing": compiled.model_dump(mode="json", exclude_unset=True)}
 
 
 def _fetcher_route(

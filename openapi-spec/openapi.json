@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.20.10"
+    "version": "1.20.11"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -18890,9 +18890,9 @@
           },
           "email": {
             "type": "string",
-            "minLength": 1,
             "title": "Email",
-            "description": "Contact email"
+            "description": "Contact email",
+            "default": ""
           },
           "groups": {
             "items": {
@@ -18918,10 +18918,10 @@
         "type": "object",
         "required": [
           "username",
-          "password",
-          "email"
+          "password"
         ],
-        "title": "CreateAccountRequest"
+        "title": "CreateAccountRequest",
+        "description": "What a console sends to create an account.\n\nOnly the credentials are required. The setup wizard creates the first user\nfrom a form that collects no contact details, so a required field here is a\ndeployment that cannot get into its own console."
       },
       "CreateArtifactRequest": {
         "properties": {

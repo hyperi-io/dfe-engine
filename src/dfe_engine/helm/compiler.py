@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import SecretStr
+from scalo.logger import logger
 
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.deployment.registry import DeploymentConfigRegistry
@@ -312,7 +313,7 @@ class HelmValuesCompiler:
 
             ch = get_settings().clickhouse
             builder = SchemaBuilderV2(
-                registry=TypeRegistry(),
+                registry=TypeRegistry.default(),
                 default_engine=ch.default_engine,
                 default_ttl_days=ch.default_ttl_days,
             )
@@ -321,8 +322,12 @@ class HelmValuesCompiler:
                     result = builder.build(source)
                     if result.create_table_ddl:
                         statements.append(result.create_table_ddl)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # One source that cannot build must not take the rest with it,
+                    # but a table silently missing from the compile is worse.
+                    logger.warning(
+                        "no DDL compiled for this source", source=source.source, error=str(exc)
+                    )
         except ImportError:
             pass
 
@@ -553,9 +558,15 @@ class HelmValuesCompiler:
         """Inject source routing and ClickHouse hosts into loader config."""
         from dfe_engine.services.source_routing import compile_loader_routing
 
-        data_db = self._env.clickhouse.effective_data_database
+        # The environment names one database, and it is the one DFE tables live in.
+        data_db = self._env.clickhouse.database
         routing = compile_loader_routing(self._source, db=data_db)
-        config["routing"] = routing.model_dump(mode="json")
+        # Only the keys the sources derive are stamped; a model default emitted
+        # here would overwrite the deployment's own setting for the same key.
+        config["routing"] = {
+            **(config.get("routing") or {}),
+            **routing.model_dump(mode="json", exclude_unset=True),
+        }
 
         # Inject ClickHouse hosts from environment
         if "clickhouse" in config:

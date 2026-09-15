@@ -93,9 +93,16 @@ PASSWORD_REUSE_WINDOW = 5
 
 
 class CreateAccountRequest(BaseModel):
+    """What a console sends to create an account.
+
+    Only the credentials are required. The setup wizard creates the first user
+    from a form that collects no contact details, so a required field here is a
+    deployment that cannot get into its own console.
+    """
+
     username: str = Field(description="Unique account name")
     password: str = Field(description="Plaintext password (bcrypt-hashed before storage)")
-    email: str = Field(min_length=1, description="Contact email")
+    email: str = Field(default="", description="Contact email")
     groups: list[str] = Field(default_factory=list, description="Group memberships")
     phone: str = Field(default="", description="Contact phone")
     name: str = Field(default="", description="Display name")

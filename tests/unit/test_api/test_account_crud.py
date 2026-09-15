@@ -64,21 +64,25 @@ class TestCreateAccount:
         assert got.json()["phone"] == "+15551212"
         assert got.json()["name"] == "With Contact"
 
-    def test_create_without_email_returns_422(self, client, admin_headers):
+    def test_create_without_an_email(self, client, admin_headers):
         resp = client.post(
             "/api/v1/auth/accounts",
             json={"username": "no-email", "password": "pw"},
             headers=admin_headers,
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 201
+        assert resp.json()["email"] == ""
 
-    def test_create_empty_email_returns_422(self, client, admin_headers):
+    def test_create_with_an_empty_email(self, client, admin_headers):
+        # An optional field nobody filled in posts as the empty string, which
+        # says what leaving the key out says.
         resp = client.post(
             "/api/v1/auth/accounts",
             json={"username": "empty-email", "password": "pw", "email": ""},
             headers=admin_headers,
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 201
+        assert resp.json()["email"] == ""
 
     def test_create_with_email_only(self, client, admin_headers):
         resp = client.post(
@@ -125,6 +129,36 @@ class TestCreateAccount:
             headers=admin_headers,
         )
         assert resp.status_code == 422
+
+
+# What the console's CreateAccountForm posts. The setup wizard creates the first
+# user with it, so a field required beyond these leaves a fresh deployment with
+# no way into its own console.
+CONSOLE_CREATE_FIELDS = {"username", "password", "groups"}
+
+
+class TestConsoleCreatePayload:
+    """The console's payload and the engine's model, held together by a test.
+
+    Nothing else notices the two drifting apart: the console is released from
+    another repo, and the engine sees only the 422 it answers with.
+    """
+
+    def test_the_console_payload_creates_an_account(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "wizard-first-user", "password": "s3cret", "groups": []},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+
+    def test_no_field_outside_that_payload_is_required(self):
+        from dfe_engine.api.v1.accounts import CreateAccountRequest
+
+        required = {
+            name for name, field in CreateAccountRequest.model_fields.items() if field.is_required()
+        }
+        assert required <= CONSOLE_CREATE_FIELDS
 
 
 class TestListAccounts:

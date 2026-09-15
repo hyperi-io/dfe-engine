@@ -251,6 +251,67 @@ class TestCompileKafkaTopics:
 
 
 # ---------------------------------------------------------------------------
+# Source DDL and loader routing
+# ---------------------------------------------------------------------------
+
+
+class _DeployStub:
+    """A compile with no deployment configs still has to reach the source DDL."""
+
+    def list_configs(self):
+        return []
+
+
+class TestCompileDdl:
+    def test_compile_all_renders_the_ddl_for_each_source(self, environment):
+        """The DDL is built inside compile_all, so a builder that raises loses it.
+
+        The surrounding guard catches an ImportError alone, which is why the
+        registry is built the way every other builder site builds it.
+        """
+        from dfe_engine.source.models import Source
+
+        src = Source.model_validate(
+            {
+                "source": "syslog",
+                "match": {"field": "f", "value": "v"},
+                "header": {"type": "timeseries", "version": "1.0.0"},
+            }
+        )
+        compiler = HelmValuesCompiler(_DeployStub(), None, _SourceStub([src]), environment)
+
+        result = compiler.compile_all()
+
+        assert len(result.ddl_statements) == 1
+        assert "CREATE TABLE IF NOT EXISTS" in result.ddl_statements[0]
+        assert "syslog" in result.ddl_statements[0]
+
+
+class TestLoaderRoutingInjection:
+    def _compiler(self, sources, environment):
+        compiler = HelmValuesCompiler.__new__(HelmValuesCompiler)
+        compiler._env = environment
+        compiler._source = _SourceStub(sources)
+        return compiler
+
+    def test_the_deployments_own_routing_setting_survives(self, environment):
+        from dfe_engine.source.models import Source, SourceMatch
+
+        src = Source(source="syslog", match=SourceMatch(field="f", value="v"))
+        config = self._compiler([src], environment)._inject_loader_routing(
+            {"routing": {"dlq": {"enabled": False}}}
+        )
+
+        assert config["routing"]["dlq"] == {"enabled": False}
+        assert config["routing"]["source_to_table"] == {"syslog": "syslog"}
+
+    def test_only_the_derived_keys_are_stamped(self, environment):
+        config = self._compiler([], environment)._inject_loader_routing({})
+
+        assert set(config["routing"]) == {"default_db", "source_to_table"}
+
+
+# ---------------------------------------------------------------------------
 # KEDA wiring
 # ---------------------------------------------------------------------------
 
