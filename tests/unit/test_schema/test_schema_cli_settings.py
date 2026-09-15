@@ -104,9 +104,20 @@ def test_the_default_ttl_env_reaches_the_targets(monkeypatch):
     monkeypatch.setenv("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS", "30")
     assert CoreSchemaTargets.from_clickhouse(load_clickhouse_settings()).default_ttl_days == 30
 
-    # 0 switches the default off rather than declaring a zero-day TTL.
+    # 0 is carried through, so the tables that follow it have their TTL removed.
     monkeypatch.setenv("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS", "0")
-    assert CoreSchemaTargets.from_clickhouse(load_clickhouse_settings()).default_ttl_days is None
+    assert CoreSchemaTargets.from_clickhouse(load_clickhouse_settings()).default_ttl_days == 0
+
+
+def test_a_zero_default_declares_no_ttl_on_the_time_series_tables_only(monkeypatch):
+    monkeypatch.setenv("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS", "0")
+
+    targets = CoreSchemaTargets.from_clickhouse(load_clickhouse_settings())
+    specs = {spec.name: spec for spec in core_table_specs(targets)}
+
+    assert specs[targets.landing_table].config.ttl_days == 0
+    assert specs["detection"].config.ttl_days == 0
+    assert specs["detection_checkpoint"].config.ttl_days == 30
 
 
 def test_the_default_ttl_reaches_the_time_series_tables_that_declare_none(monkeypatch):

@@ -27936,6 +27936,12 @@
             "title": "Default Ttl Days",
             "description": "Retention in days a source gets when it sets none; 0 = none."
           },
+          "default_engine": {
+            "type": "string",
+            "title": "Default Engine",
+            "description": "MergeTree-family engine variant a source's table gets when its schema names none (DFE_CLICKHOUSE_DEFAULT_ENGINE). The topology prefix (Replicated, Shared) is resolved against the server at DDL time, not here.",
+            "default": "MergeTree"
+          },
           "admin_username": {
             "type": "string",
             "title": "Admin Username",
@@ -28808,14 +28814,15 @@
           "ttl_days": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "minimum": 0.0
               },
               {
                 "type": "null"
               }
             ],
             "title": "Ttl Days",
-            "description": "Data retention in days"
+            "description": "Data retention in days. Unset follows the deployment default; 0 keeps rows forever (no TTL)."
           },
           "engine": {
             "type": "string",

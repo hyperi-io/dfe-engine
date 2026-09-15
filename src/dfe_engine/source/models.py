@@ -310,7 +310,10 @@ class SourceSchema(BaseModel):
     )
     ttl_days: int | None = Field(
         default=None,
-        description="Data retention in days",
+        description=(
+            "Data retention in days. Unset follows the deployment default; 0 keeps rows forever (no TTL)."
+        ),
+        ge=0,
     )
     engine: str = Field(
         default="",

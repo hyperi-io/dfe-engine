@@ -127,6 +127,27 @@ def test_an_undeclared_ttl_never_removes_the_live_one():
     assert change.ttl == ""
 
 
+@pytest.mark.parametrize("live_ttl_days", [30, 0])
+def test_a_declared_zero_removes_the_live_ttl(live_ttl_days: int):
+    client = _FakeClient(columns=["_timestamp_load", "message"], live_ttl_days=live_ttl_days)
+
+    _, change = _apply(client, wanted=0)
+
+    assert client.statements == [f"ALTER TABLE `{DB}`.`{TABLE}` REMOVE TTL"]
+    assert change.action == "altered"
+    assert change.ttl == f"{live_ttl_days} -> none"
+
+
+def test_a_declared_zero_leaves_a_table_with_no_ttl_alone():
+    client = _FakeClient(columns=["_timestamp_load", "message"], live_ttl_days=None)
+
+    _, change = _apply(client, wanted=0)
+
+    assert client.statements == []
+    assert change.action == "unchanged"
+    assert change.ttl == ""
+
+
 def test_a_shorter_ttl_is_still_applied():
     client = _FakeClient(columns=["_timestamp_load", "message"], live_ttl_days=90)
 

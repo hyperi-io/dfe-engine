@@ -39,6 +39,20 @@ class _FakeClient:
         self.statements.append(sql)
 
 
+@dataclass
+class _LiveTablesClient(_FakeClient):
+    """A server where every table already exists with a 90-day TTL."""
+
+    def query(self, sql: str, parameters: dict[str, Any] | None = None) -> _Result:
+        if "engine_full" in sql:
+            return _Result(
+                [["MergeTree ORDER BY _timestamp_load TTL _timestamp_load + toIntervalDay(90)"]]
+            )
+        if ("FROM system.databases" in sql) or ("SELECT 1 FROM system.tables" in sql):
+            return _Result([[1]])
+        return _Result([])
+
+
 def _wire(app, tmp_path, ch: Any = None) -> GitCrud:
     repo = GitopsRepo(local_path=str(tmp_path / "deploy"), push=False)
     gc = GitCrud(repo, default_registry())
@@ -101,6 +115,22 @@ class TestPutRetention:
         got = client.get("/api/v1/system/retention", headers=admin_headers).json()
         assert got["origin"] == "override"
         assert got["effective"] == 30
+
+    def test_put_zero_removes_the_ttl_from_tables_that_follow_the_default(
+        self, admin_headers, app, client, tmp_path
+    ):
+        fake = _LiveTablesClient()
+        _wire(app=app, ch=fake, tmp_path=tmp_path)
+
+        resp = client.put(
+            "/api/v1/system/retention", json={"default_ttl_days": 0}, headers=admin_headers
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert "ALTER TABLE `dfe`.`main` REMOVE TTL" in fake.statements
+        assert "ALTER TABLE `dfe`.`detection` REMOVE TTL" in fake.statements
+        assert not any("detection_checkpoint` REMOVE TTL" in s for s in fake.statements)
+        assert "dfe.main" in resp.json()["reconcile"]["tables_altered"]
 
     def test_put_null_clears(self, client, app, admin_headers, tmp_path):
         gc = _wire(app, tmp_path)
