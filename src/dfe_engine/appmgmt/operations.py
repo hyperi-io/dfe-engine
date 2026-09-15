@@ -26,6 +26,7 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
+from dfe_engine import scaling_pressure
 from dfe_engine.yaml_utils import yaml_load
 
 _QUERIES = Path(__file__).parent / "queries.yaml"
@@ -42,7 +43,9 @@ SATURATION = "worker_pool_saturation"
 ACTIVE_THREADS = "worker_pool_active_threads"
 OPEN_FDS = "process_open_fds"
 START_TIME = "process_start_time_seconds"
-SCALING_PRESSURE = "dfe_scaling_pressure"
+# The canonical bare name. An app may emit the composite under its own namespace,
+# so the query matches by rule and reports every spelling under this one name.
+SCALING_PRESSURE = scaling_pressure.GAUGE
 # scalo registers this through `gauge!`, so it lands in otel_metrics_gauge and
 # holds a CPU percentage rather than cumulative seconds despite the name.
 CPU_SECONDS = "process_cpu_seconds_total"
@@ -159,7 +162,7 @@ class OperationalReader:
 
     def _run(self, name: str, params: dict[str, Any]) -> list[tuple]:
         cfg = self._queries[name]
-        sql = str(cfg["sql"]).replace("__DB__", self._database)
+        sql = scaling_pressure.apply(str(cfg["sql"]).replace("__DB__", self._database))
         binds: dict[str, Any] = dict(cfg.get("binds", {}))
         binds.setdefault("window_seconds", self._window)
         binds.update(params)

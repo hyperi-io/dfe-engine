@@ -10,7 +10,10 @@
 #                    one database. The sentinel __DB__ in `sql` is replaced with the
 #                    resolved, validated database identifier.
 #   sql              ClickHouse SQL. `params` + `binds` become CH-native bind
-#                    placeholders ({name:Type}) - safe against injection.
+#                    placeholders ({name:Type}) - safe against injection. The
+#                    sentinel __PRESSURE_MATCH__ is replaced with the one rule that
+#                    matches the scaling-pressure gauge under any namespace prefix
+#                    (dfe_engine/scaling_pressure.py).
 #   builtin          instead of `sql`: a named in-code SQL provider. hunt_backlog ->
 #                    schedule.due_query, the ONE due-count source of truth (no drift).
 #   params           request query params bound into the SQL (validated identifiers).
@@ -21,14 +24,25 @@
 #                    a broken metric can only ever hold or scale DOWN, never up).
 #   timeout_seconds  ClickHouse max_execution_time for the query.
 queries:
+  # The composite reaches ClickHouse under whatever namespace the app chose, so the
+  # match is the bare name plus any <prefix>_scaling_pressure (dfe-infra#302).
+  # Each series - one metric name, one attribute set - is averaged over the window
+  # first and the MAX across series is returned: an app that tags some rows and not
+  # others (dfe-fetcher tags name="fetch") would otherwise dilute a busy series with
+  # an idle one. cityHash64(Attributes) is the attribute-set identity the table's own
+  # ORDER BY uses.
   pressure:
     database: otel
     sql: >
-      SELECT toUInt32(round(coalesce(avg(Value), 0)))
-      FROM __DB__.otel_metrics_gauge
-      WHERE MetricName = 'dfe_scaling_pressure'
-        AND ServiceName = {service:String}
-        AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
+      SELECT toUInt32(round(coalesce(max(series), 0)))
+      FROM (
+        SELECT avg(Value) AS series
+        FROM __DB__.otel_metrics_gauge
+        WHERE ServiceName = {service:String}
+          AND __PRESSURE_MATCH__
+          AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
+        GROUP BY MetricName, cityHash64(Attributes)
+      )
     params: [service]
     binds:
       window_seconds: 60

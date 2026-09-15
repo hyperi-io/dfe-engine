@@ -44,6 +44,7 @@ import typer
 
 from dfe_engine.settings import DFESettings, load_settings
 
+from . import metrics as runner_metrics
 from .ch_coordinator import ChCoordinator
 from .daemon import run_loop
 from .runner import HuntRunner
@@ -138,13 +139,21 @@ def run(
     # The hostname is the pod name under k8s: stable per process, distinct per pod.
     coord = ChCoordinator(ch, database=db, worker_id=socket.gethostname())
     coord.ensure_schema()
-    worker = HuntWorker(ch, coord)
+    # The long-running worker is the only entry point that reports telemetry; the
+    # one-shot materialise publishes and exits before an export interval elapses.
+    obs = runner_metrics.create()
+    worker = HuntWorker(ch, coord, metrics=obs)
     hunt_dir = settings.hunts.hunt_dir
     sources = _spec_sources(settings, db)
 
     def _build_runner() -> HuntRunner:
         return HuntRunner(
-            coord, worker, load_specs(hunt_dir, **sources), cap=cap, poll_seconds=poll_seconds
+            coord,
+            worker,
+            load_specs(hunt_dir, **sources),
+            cap=cap,
+            poll_seconds=poll_seconds,
+            metrics=obs,
         )
 
     # The runner lives in a one-element cell so on_reload can swap in a runner built

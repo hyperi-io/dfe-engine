@@ -252,7 +252,9 @@ shim -> KEDA scale-out/scale-in path actually works, rather than an
 aspirational claim: it forces the path on demand with a disposable target
 instead of waiting for real hunt load - stand up a throwaway Deployment +
 ScaledObject wired to the shim's pressure query for a test `ServiceName`,
-INSERT a high `dfe_scaling_pressure` row into `otel_metrics_gauge`, poll
+INSERT a high `dfe_scaling_pressure` row into `otel_metrics_gauge` (any
+`<prefix>_scaling_pressure` spelling matches - see
+[keda-scaling](../deployment/keda-scaling.md)), poll
 (bounded, 120s) for scale-OUT to >= 2 replicas, drag the rolling average back
 down, poll (bounded, 180s) for scale-IN to 1, then self-clean. It rides the
 SAME shim endpoint and metrics-api mechanism the hunt-runner's

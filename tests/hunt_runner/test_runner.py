@@ -9,9 +9,15 @@
 
 from __future__ import annotations
 
+from scalo.logger import logger
+
 from dfe_engine.hunt_runner import HuntState, decide, next_due, phase_offset
+from dfe_engine.hunt_runner.ch_coordinator import Lease
+from dfe_engine.hunt_runner.metrics import HuntRunnerMetrics
 from dfe_engine.hunt_runner.runner import HuntRunner
 from dfe_engine.hunt_runner.scheduler import mark_deferred
+
+from .conftest import Observation
 
 
 def test_phase_offset_is_stable_and_within_window():
@@ -99,16 +105,24 @@ def test_mark_deferred_flags_too_aggressive():
 class _RecordingCoordinator:
     """A coordinator that records call order and grants every claim."""
 
-    def __init__(self, *, heartbeat_raises: bool = False) -> None:
+    def __init__(self, *, heartbeat_raises: bool = False, backlog_raises: bool = False) -> None:
         self.calls: list[str] = []
         self.beats: list[tuple[int, float]] = []
+        self.backlog = 0
         self._heartbeat_raises = heartbeat_raises
+        self._backlog_raises = backlog_raises
 
     def heartbeat(self, now: int, poll_seconds: float) -> None:
         self.calls.append("heartbeat")
         if self._heartbeat_raises:
             raise RuntimeError("clickhouse is down")
         self.beats.append((now, poll_seconds))
+
+    def backlog_count(self) -> int:
+        self.calls.append("backlog_count")
+        if self._backlog_raises:
+            raise RuntimeError("clickhouse is down")
+        return self.backlog
 
     def active_count(self, now: int) -> int:
         self.calls.append("active_count")
@@ -148,6 +162,24 @@ class _WatermarkCoordinator(_RecordingCoordinator):
         return True
 
 
+class _LeasedCoordinator(_RecordingCoordinator):
+    """A coordinator whose hunt is already running under a live lease."""
+
+    def current_lease(self, hunt_id: str) -> Lease:
+        return Lease(hunt_id=hunt_id, owner="another-pod", fire=0, lease_until=2**40)
+
+    def record_overrun(self, hunt_id: str) -> None:
+        self.calls.append("record_overrun")
+
+
+class _LosingCoordinator(_RecordingCoordinator):
+    """A coordinator that loses every settle-window race to another worker."""
+
+    def try_claim(self, hunt_id: str, fire: int, now: int) -> bool:
+        self.calls.append("try_claim")
+        return False
+
+
 class _CountingWorker:
     """A worker that runs nothing and only counts."""
 
@@ -158,7 +190,9 @@ class _CountingWorker:
         self.runs += 1
 
 
-def _due_runner(coord, worker, *, poll_seconds: float = 15.0) -> tuple[HuntRunner, int]:
+def _due_runner(
+    coord, worker, *, poll_seconds: float = 15.0, metrics=None
+) -> tuple[HuntRunner, int]:
     """A runner holding one hunt, plus a *now* at which that hunt is due."""
     from dfe_engine.hunt_runner.models import HuntSpec
 
@@ -166,7 +200,9 @@ def _due_runner(coord, worker, *, poll_seconds: float = 15.0) -> tuple[HuntRunne
     # The fire is the interval boundary plus the hunt's stable offset, so a now on
     # that instant is due without any dependence on the real clock.
     now = 600_000 + phase_offset("h", 600)
-    runner = HuntRunner(coord, worker, {"h": spec}, cap=8, poll_seconds=poll_seconds)
+    runner = HuntRunner(
+        coord, worker, {"h": spec}, cap=8, poll_seconds=poll_seconds, metrics=metrics
+    )
     return runner, now
 
 
@@ -194,3 +230,97 @@ def test_a_failed_beat_does_not_cost_the_runs():
     runner, now = _due_runner(coord, worker)
     assert runner.tick(now) == 1
     assert worker.runs == 1
+
+
+class _FailingWorker:
+    """A worker whose hunt raises, as a bad statement or a dropped table would."""
+
+    def run(self, spec, fire: int) -> None:
+        raise RuntimeError("clickhouse rejected the insert")
+
+
+def test_a_tick_publishes_the_backlog_the_shim_scales_on(manager):
+    coord = _RecordingCoordinator()
+    coord.backlog = 4
+    runner = HuntRunner(coord, _CountingWorker(), {}, cap=8, metrics=HuntRunnerMetrics(manager))
+
+    runner.tick(1000)
+
+    assert manager.observed("hunt_backlog") == [Observation("hunt_backlog", {}, "set", 4)]
+
+
+def test_a_runner_with_no_metrics_backend_does_not_query_the_backlog():
+    """The backlog is another ClickHouse round trip per tick; nothing reads it here."""
+    coord = _RecordingCoordinator()
+    runner = HuntRunner(coord, _CountingWorker(), {}, cap=8)
+
+    runner.tick(1000)
+
+    assert "backlog_count" not in coord.calls
+
+
+def test_a_failed_backlog_read_costs_the_gauge_not_the_runs(manager):
+    coord = _RecordingCoordinator(backlog_raises=True)
+    worker = _CountingWorker()
+    runner, now = _due_runner(coord, worker, metrics=HuntRunnerMetrics(manager))
+
+    assert runner.tick(now) == 1
+    assert worker.runs == 1
+    assert manager.observed("hunt_backlog") == []
+
+
+def test_a_claimed_fire_counts_a_won_claim_a_success_and_a_tick(manager):
+    coord = _WatermarkCoordinator()
+    runner, now = _due_runner(coord, _CountingWorker(), metrics=HuntRunnerMetrics(manager))
+
+    assert runner.tick(now) == 1
+
+    assert [o.labels for o in manager.observed("hunt_claims_total")] == [
+        {"hunt_id": "h", "outcome": "won"}
+    ]
+    assert [o.labels["outcome"] for o in manager.observed("hunt_runs_total")] == ["success"]
+    assert len(manager.observed("hunt_run_duration_seconds")) == 1
+    assert len(manager.observed("hunt_tick_duration_seconds")) == 1
+
+
+def test_a_failed_fire_counts_a_failure_and_logs_the_error(manager):
+    coord = _RecordingCoordinator()
+    runner, now = _due_runner(coord, _FailingWorker(), metrics=HuntRunnerMetrics(manager))
+    captured: list = []
+    handler_id = logger.add(captured.append, level="ERROR")
+    try:
+        assert runner.tick(now) == 0
+    finally:
+        logger.remove(handler_id)
+
+    lines = [m for m in captured if "hunt fire failed" in m]
+    assert len(lines) == 1
+    extra = lines[0].record["extra"]
+    assert extra["hunt_id"] == "h"
+    assert "clickhouse rejected the insert" in extra["error"]
+    assert [o.labels["outcome"] for o in manager.observed("hunt_runs_total")] == ["failure"]
+    # The lease is still released, so the next tick can retry the fire.
+    assert coord.calls.count("release") == 1
+
+
+def test_a_deferred_fire_counts_an_overrun(manager):
+    coord = _LeasedCoordinator()
+    runner, now = _due_runner(coord, _CountingWorker(), metrics=HuntRunnerMetrics(manager))
+
+    assert runner.tick(now) == 0
+
+    assert manager.observed("hunt_overruns_total") == [
+        Observation("hunt_overruns_total", {"hunt_id": "h"}, "inc", 1)
+    ]
+
+
+def test_a_lost_claim_is_recorded_as_lease_churn(manager):
+    coord = _LosingCoordinator()
+    runner, now = _due_runner(coord, _CountingWorker(), metrics=HuntRunnerMetrics(manager))
+
+    assert runner.tick(now) == 0
+
+    assert [o.labels for o in manager.observed("hunt_claims_total")] == [
+        {"hunt_id": "h", "outcome": "lost"}
+    ]
+    assert manager.observed("hunt_runs_total") == []
