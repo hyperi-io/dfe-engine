@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 from datetime import date
+from functools import cache
 from typing import Any, Literal
 
 from pydantic import (
@@ -121,9 +122,10 @@ def materialisation_action(state: SourceState) -> Literal["create", "leave", "re
     return actions[state]
 
 
-# Single permitted-engine registry, shared by every SourceSchema validation so the
-# allow-list cannot drift from the DDL path. Loaded once (the YAML is packaged).
-_ENGINE_REGISTRY = EngineRegistry.default()
+@cache
+def engine_registry() -> EngineRegistry:
+    """The permitted-engine registry, loaded on first use rather than at import."""
+    return EngineRegistry.default()
 
 
 # ---------------------------------------------------------------------------
@@ -310,7 +312,10 @@ class SourceSchema(BaseModel):
     )
     ttl_days: int | None = Field(
         default=None,
-        description="Data retention in days",
+        description=(
+            "Data retention in days. Unset follows the deployment default; 0 keeps rows forever (no TTL)."
+        ),
+        ge=0,
     )
     engine: str = Field(
         default="",
@@ -335,7 +340,7 @@ class SourceSchema(BaseModel):
         if not v:
             return v
         try:
-            _ENGINE_REGISTRY.validate(v)
+            engine_registry().validate(v)
         except InvalidEngineError as e:
             raise ValueError(str(e)) from e
         return v

@@ -56,7 +56,7 @@ class InvalidChOverrideError(TypeRegistryError):
 class TypeRegistry:
     """Canonical registry mapping primitives to ClickHouse types.
 
-    Loaded from type_registry.yaml. Provides:
+    Loaded from dfe-schemas ``registries/types.yaml``. Provides:
     - resolve(): primitive → full CH type with wrapping + codec
     - validate_use_case(): enforce 1:M use_case↔primitive constraint
     - validate_attribute(): enforce 1:M attribute↔primitive constraint
@@ -64,6 +64,8 @@ class TypeRegistry:
     """
 
     def __init__(self, data: dict[str, Any]) -> None:
+        if not (isinstance(data, dict)) or not (isinstance(data.get("primitives"), dict)):
+            raise TypeRegistryError("type registry must map its primitives under 'primitives'")
         self._primitives: dict[str, dict[str, Any]] = data["primitives"]
         self._use_cases: dict[str, dict[str, Any]] = data.get("use_cases", {})
         self._attributes: dict[str, dict[str, Any]] = data.get("attributes", {})
@@ -77,10 +79,10 @@ class TypeRegistry:
 
     @classmethod
     def default(cls) -> TypeRegistry:
-        """Load the default type registry from the package resource."""
-        yaml_path = Path(__file__).parent / "type_registry.yaml"
-        data = yaml_load(yaml_path)
-        return cls(data)
+        """Load the type registry dfe-schemas ships as ``registries/types.yaml``."""
+        from dfe_engine.schema.schema_loader import resolve_registry_path
+
+        return cls(yaml_load(resolve_registry_path("types.yaml")))
 
     @classmethod
     def from_file(cls, path: str | Path) -> TypeRegistry:

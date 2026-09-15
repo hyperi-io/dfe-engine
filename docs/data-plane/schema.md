@@ -2,8 +2,7 @@
 
 **Status:** Shipped (`schema_builder_v2.py` is the live path). Since this
 design landed, the schema YAML SSoT moved to the dfe-schemas repo (the
-version-pinned `dfe-schemas` wheel) - the engine keeps bundled fallback copies under
-`src/dfe_engine/schema/profiles/`. Class-level lookup:
+version-pinned `dfe-schemas` wheel), registries included, and the engine keeps no copies. Class-level lookup:
 [schema-classes.md](schema-classes.md).
 
 ---
@@ -282,7 +281,7 @@ to the engine (data SMEs don't edit it), but it's documented here for
 completeness.
 
 ```yaml
-# type_registry.yaml -- maintained by the engine, NOT by users
+# dfe-schemas registries/types.yaml -- NOT edited by schema authors
 primitives:
   string:
     ch_type: String

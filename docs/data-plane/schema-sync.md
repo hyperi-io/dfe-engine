@@ -58,22 +58,17 @@ the original draft of this doc, which had the engine owning it):
 
 - Common header profile YAML files (`common-header/`)
 - Source meta schemas (`meta/`) and hunt output schemas (`hunts/`)
+- The registries (`registries/`): table engines, the type system (primitive -> ClickHouse mapping) and the default field maps
 - Loader directive syntax examples (documented, not parsed by engine)
 
-The engine owns the **type system** (primitive -> ClickHouse mapping in
-`source/type_registry.yaml`) and the DDL generation. dfe-engine consumes
-dfe-schemas as the version-pinned `dfe-schemas` wheel, resolved through
-`importlib.resources`; dfe-loader still consumes it as a `schemas/` git
-submodule. Each ships bundled fallback copies (engine:
-`src/dfe_engine/schema/profiles/`) for the case where neither the package
-nor `DFE_SCHEMAS_DIR` resolves.
+The engine owns the DDL generation. dfe-engine consumes dfe-schemas as the version-pinned `dfe-schemas` wheel, resolved through `importlib.resources`, and keeps no copies of its own: with neither the package nor `DFE_SCHEMAS_DIR` resolving, loading fails with an error naming what was searched. dfe-loader still consumes it as a `schemas/` git submodule.
 
 ```
 dfe-schemas (source of truth)
   |
   |  common-header/{timeseries,minimal,passthrough}.yaml
   |
-  |--> dfe-engine (dfe-schemas wheel + bundled fallback) - generates DDL
+  |--> dfe-engine (dfe-schemas wheel) - generates DDL
   |
   '--> dfe-loader (submodule + bundled fallback) - auto-init tables
 ```
