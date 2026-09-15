@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.20.13](https://github.com/hyperi-io/dfe-engine/compare/v1.20.12...v1.20.13) (2026-09-15)
+
+### Bug Fixes
+
+* give the archiver its inputs from the sources, and clear a deleted source's topics ([de7febb](https://github.com/hyperi-io/dfe-engine/commit/de7febb23a60ef89334ea88bd071def086f2b3cd)), closes [#365](https://github.com/hyperi-io/dfe-engine/issues/365) [#331](https://github.com/hyperi-io/dfe-engine/issues/331) [#362](https://github.com/hyperi-io/dfe-engine/issues/362)
+
 ## [1.20.12](https://github.com/hyperi-io/dfe-engine/compare/v1.20.11...v1.20.12) (2026-09-15)
 
 ### Bug Fixes
