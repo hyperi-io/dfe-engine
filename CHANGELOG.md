@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.20.14](https://github.com/hyperi-io/dfe-engine/compare/v1.20.13...v1.20.14) (2026-09-15)
+
+### Bug Fixes
+
+* read the pressure gauge under any prefix and make the hunt runner speak ([#403](https://github.com/hyperi-io/dfe-engine/issues/403)) ([5ae74c6](https://github.com/hyperi-io/dfe-engine/commit/5ae74c651fa0a0418f8a03718f92ba6ead2baeb7)), closes [dfe-infra#302](https://github.com/hyperi-io/dfe-infra/issues/302) [#379](https://github.com/hyperi-io/dfe-engine/issues/379) [#108](https://github.com/hyperi-io/dfe-engine/issues/108) [#357](https://github.com/hyperi-io/dfe-engine/issues/357)
+
 ## [1.20.13](https://github.com/hyperi-io/dfe-engine/compare/v1.20.12...v1.20.13) (2026-09-15)
 
 ### Bug Fixes
