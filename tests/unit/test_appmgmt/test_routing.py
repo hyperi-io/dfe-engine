@@ -318,6 +318,24 @@ class TestReceiverOnDirect:
         assert compiled["routing"]["source_rules"] == []
 
 
+class TestLoaderStack:
+    def test_the_block_carries_only_the_keys_the_sources_derive(self, source_registry, settings):
+        """A model default here would land on a key the deployment set itself.
+
+        The block is written whole, and the loader's own struct defaults every
+        field, so a key nobody derived belongs to the deployment - its
+        dead-letter switch, its topic suffixes - and must not appear here.
+        """
+        compiled = routing.compile_for(catalogue.descriptor(LOADER), source_registry, settings)
+
+        assert compiled == {
+            "routing": {
+                "default_db": settings.clickhouse.effective_data_database,
+                "source_to_table": {"filebeat": "filebeat"},
+            }
+        }
+
+
 class TestFetcherInstance:
     def test_on_the_bus_it_lands_on_its_own_topic(self, fetched_registry, settings):
         compiled = routing.compile_for(

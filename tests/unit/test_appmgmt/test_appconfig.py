@@ -16,11 +16,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dfe_engine.appmgmt import appconfig, files, instances
+from dfe_engine.appmgmt import appconfig, files, instances, routing
 from dfe_engine.appmgmt.catalogue import descriptor, file_set
 from dfe_engine.gitcrud.engine import set_path
 from dfe_engine.settings import DFESettings
+from dfe_engine.source.models import Source
 from dfe_engine.yaml_utils import yaml_load
+
+from .conftest import FakeRegistry
 
 ACTOR = "test"
 RECEIVER = "dfe-receiver"
@@ -53,6 +56,17 @@ def _settings(
             "app_config_mount": MOUNT,
             "app_env_dir": str(env_out),
         },
+    )
+
+
+def _source(name: str) -> Source:
+    """One receiver-matched active source, which is all the loader compile reads."""
+    return Source.model_validate(
+        {
+            "source": name,
+            "state": "active",
+            "match": {"field": "_json.app", "operator": "equals", "value": name},
+        }
     )
 
 
@@ -132,6 +146,22 @@ class TestWhatTheContainerReads:
         appconfig.render(crud, settings)
 
         assert _rendered(settings, RECEIVER)["routing"]["source_rules"] == [{"field": "app"}]
+
+    def test_a_setting_the_sources_do_not_derive_survives_a_source_deploy(self, crud, tmp_path):
+        # The deployment turns the loader's dead letter off in its base config;
+        # the compiled block owns the table map and must leave that switch alone.
+        settings = _settings(tmp_path)
+        _base(settings, LOADER, "routing:\n  dlq:\n    enabled: false\n")
+        app = instances.instance_of(LOADER, "default")
+        doc = instances.initial_overlay(app)
+        routing.sync(app.descriptor, doc, FakeRegistry([_source("filebeat")]), settings)
+        _put(crud, app, doc)
+
+        appconfig.render(crud, settings)
+
+        config = _rendered(settings, LOADER)
+        assert config["routing"]["dlq"] == {"enabled": False}
+        assert config["routing"]["source_to_table"] == {"filebeat": "filebeat"}
 
     def test_an_app_with_no_overlay_still_gets_the_deployment_base(self, crud, tmp_path):
         # The resident container is started before any source exists, so it needs
