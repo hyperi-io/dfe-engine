@@ -21,6 +21,9 @@ from dfe_engine.governance import PolicyStore
 VRL = "dfe-transform-vrl"
 BASE = f"/api/v1/apps/{VRL}/edge"
 
+# Carries no records, so nothing about it is derived from the sources.
+UNROUTED = "dfe-ui"
+
 VRL_SOURCE = ". = parse_json!(.message)\n.ts = to_timestamp!(.timestamp)\n"
 
 
@@ -114,7 +117,7 @@ class TestCatalogue:
     ):
         _wire(app, tmp_path)
         client.post(
-            "/api/v1/apps/dfe-archiver/instances",
+            f"/api/v1/apps/{UNROUTED}/instances",
             json={"instance": "default"},
             headers=admin_headers,
         )
@@ -122,8 +125,8 @@ class TestCatalogue:
             e["service"]: e["has_compiled_routing"]
             for e in client.get("/api/v1/apps", headers=admin_headers).json()
         }
-        assert flagged["dfe-archiver"] is False
-        probe = client.get("/api/v1/apps/dfe-archiver/default/routing", headers=admin_headers)
+        assert flagged[UNROUTED] is False
+        probe = client.get(f"/api/v1/apps/{UNROUTED}/default/routing", headers=admin_headers)
         assert probe.status_code == 400
         assert probe.json()["code"] == "routing_not_compiled"
 
@@ -779,11 +782,11 @@ class TestRouting:
     def test_an_app_without_derived_routing_is_400(self, client, app, admin_headers, tmp_path):
         _wire(app, tmp_path)
         client.post(
-            "/api/v1/apps/dfe-archiver/instances",
+            f"/api/v1/apps/{UNROUTED}/instances",
             json={"instance": "default"},
             headers=admin_headers,
         )
-        resp = client.get("/api/v1/apps/dfe-archiver/default/routing", headers=admin_headers)
+        resp = client.get(f"/api/v1/apps/{UNROUTED}/default/routing", headers=admin_headers)
         assert resp.status_code == 400
         assert resp.json()["code"] == "routing_not_compiled"
 

@@ -1217,6 +1217,32 @@ def _ensure_source_topics(
     return outcome.created + outcome.existing, [name for name, _ in outcome.failed]
 
 
+def _remove_source_topics(source: Any, settings: Any) -> tuple[list[str], list[str]]:
+    """Delete the ``_land``/``_load`` topics this source's deploys created.
+
+    The same dial that creates them removes them: an engine that manages a
+    source's topics manages them for the source's whole life, and leaving them
+    costs a partition assignment in the loader for a source nothing can write to.
+
+    Non-fatal like the ensure, and blocking, so a caller on the event loop hands
+    it to a thread. Returns the topics removed and the ones that could not be.
+    """
+    override = settings.kafka.ensure_topics
+    wanted = settings.transport.bus_present if override is None else override
+    if not wanted:
+        return [], []
+
+    from dfe_engine.kafka.topics import remove_topics, source_topic_names
+
+    outcome = remove_topics(source_topic_names(source), settings=settings)
+    if outcome.failed:
+        logger.warning(
+            f"Kafka topics not removed for source '{source.source}': "
+            f"{', '.join(f'{n} ({e})' for n, e in outcome.failed)}"
+        )
+    return outcome.removed, [name for name, _ in outcome.failed]
+
+
 @router.post(
     "/{name}/deploy",
     response_model=SchemaDeployResult,
@@ -1671,25 +1697,40 @@ async def patch_source_enabled(
     },
     dependencies=[Depends(require_action(scopes_dict["source_delete"]))],
 )
-async def delete_source(name: str, user: CurrentUser, registry: SourceReg, request: Request):
-    """Delete a source by name. Its fetcher instance and receiver rule go with it.
+async def delete_source(
+    name: str, user: CurrentUser, registry: SourceReg, settings: Settings, request: Request
+):
+    """Delete a source by name. Its fetcher instance, receiver rule and topics go with it.
 
     An engine-owned source -- the landing table's own -- is refused with 409
     ``conflict``, the same answer PUT and PATCH give.
     """
-    if not registry.source_exists(name):
+    try:
+        source = registry.get_source(name)
+    except SourceNotFoundError:
         raise HTTPException(
             status_code=404,
             detail={
                 "code": "not_found",
                 "message": f"Source {name!r} not found",
             },
-        )
+        ) from None
     try:
         registry.delete_source(name, created_by=git_author(user))
     except SourceValidationError as e:
         _raise_save_validation_http(e)
-    audit_resource_change(user.user_id, "source", name, "deleted")
+    # Off the event loop: the admin calls block for their full timeout when no
+    # broker answers, which is the norm on the Kafka-less profile.
+    topics_removed, topics_failed = await asyncio.to_thread(_remove_source_topics, source, settings)
+    # Deleting a topic destroys what is on it, so it is attributable and belongs
+    # in the audit record rather than only in a log line.
+    audit_resource_change(
+        user.user_id,
+        "source",
+        name,
+        "deleted",
+        details={"topics_removed": topics_removed, "topics_failed": topics_failed},
+    )
     _reconcile_apps(request, user, registry)
     await _remove_hyperdx_source(request, name)
 
@@ -1703,6 +1744,7 @@ async def bulk_action(
     body: BulkActionRequest,
     user: CurrentUser,
     registry: SourceReg,
+    settings: Settings,
     request: Request,
 ):
     """Perform a bulk action (enable, disable, dormant, delete) on multiple sources."""
@@ -1720,11 +1762,17 @@ async def bulk_action(
 
     succeeded: list[str] = []
     failed: list[dict[str, str]] = []
+    deleted: list[Source] = []
 
     for name in body.sources:
         try:
             if body.action == "delete":
+                # Read before the delete, for the topics it owns. A name with no
+                # stored source still deletes, as it did before it had topics.
+                stored = registry.get_source(name) if registry.source_exists(name) else None
                 registry.delete_source(name, created_by=git_author(user))
+                if stored is not None:
+                    deleted.append(stored)
             else:
                 source = registry.get_source(name)
                 updated = source.model_copy(update={"state": action_to_state[body.action]})
@@ -1737,6 +1785,10 @@ async def bulk_action(
     if succeeded:
         audit_resource_change(user.user_id, "source", ",".join(succeeded), body.action)
         _reconcile_apps(request, user, registry)
+        for source in deleted:
+            # One pass per source: the delete is already done, and a broker that
+            # cannot be reached must not cost the next source its cleanup.
+            await asyncio.to_thread(_remove_source_topics, source, settings)
         if body.action == "delete":
             for name in succeeded:
                 await _remove_hyperdx_source(request, name)
@@ -1751,9 +1803,9 @@ async def bulk_action(
 async def reconcile_apps(user: CurrentUser, registry: SourceReg, request: Request):
     """Bring the deploy repo's derived app state into step with the sources.
 
-    Recompiles every stack-scoped routing block (receiver, loader) and deploys,
-    syncs or removes the instances of every instance-scoped app (a fetcher per
-    active fetcher-based source). Every source write does this on its own; this
+    Recompiles every stack-scoped routing block (receiver, loader, archiver) and
+    deploys, syncs or removes the instances of every instance-scoped app (a fetcher
+    per active fetcher-based source). Every source write does this on its own; this
     route is the retry when one reported ``apps_sync_error``.
     """
     if getattr(request.app.state, "gitcrud", None) is None:

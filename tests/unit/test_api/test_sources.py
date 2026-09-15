@@ -6,7 +6,14 @@ from fastapi.testclient import TestClient
 
 from dfe_engine.api.deps import _registries
 from dfe_engine.api.v1.sources import _raise_save_validation_http
+from dfe_engine.kafka.topics import TopicRemoveResult
 from dfe_engine.source.registry import SourceValidationError
+
+
+def _removed(seen: list[str], names: list[str]) -> TopicRemoveResult:
+    """Record what a delete asked the broker to remove, and report it as done."""
+    seen.extend(names)
+    return TopicRemoveResult(removed=list(names))
 
 
 class TestListSources:
@@ -784,6 +791,53 @@ class TestDeleteSource:
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.delete("/api/v1/sources/test-source", headers=viewer_headers)
         assert resp.status_code == 403
+
+    def test_delete_takes_the_source_topics_with_it(
+        self, client: TestClient, admin_headers: dict, app, sample_source: dict, monkeypatch
+    ):
+        # Left behind, the pair costs a partition assignment in every loader for a
+        # source nothing can write to, and the loader keeps resolving the name.
+        removed: list[str] = []
+        monkeypatch.setattr(
+            "dfe_engine.kafka.topics.remove_topics",
+            lambda names, **kw: _removed(removed, names),
+        )
+        app.state.settings = app.state.settings.model_copy(
+            update={"kafka": app.state.settings.kafka.model_copy(update={"ensure_topics": True})}
+        )
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+
+        assert (
+            client.delete("/api/v1/sources/test-source", headers=admin_headers).status_code == 204
+        )
+        assert removed == ["test-source_land"]
+
+    def test_bulk_delete_takes_each_source_topics_with_it(
+        self, client: TestClient, admin_headers: dict, app, monkeypatch
+    ):
+        removed: list[str] = []
+        monkeypatch.setattr(
+            "dfe_engine.kafka.topics.remove_topics",
+            lambda names, **kw: _removed(removed, names),
+        )
+        app.state.settings = app.state.settings.model_copy(
+            update={"kafka": app.state.settings.kafka.model_copy(update={"ensure_topics": True})}
+        )
+        for name in ("bulk-x", "bulk-y"):
+            client.post(
+                "/api/v1/sources",
+                json={"source": name, "match": {"field": "tags.collector.type", "value": name}},
+                headers=admin_headers,
+            )
+
+        resp = client.post(
+            "/api/v1/sources/bulk",
+            json={"action": "delete", "sources": ["bulk-x", "bulk-y"]},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200
+        assert removed == ["bulk-x_land", "bulk-y_land"]
 
 
 class TestPatchSourceEnabled:

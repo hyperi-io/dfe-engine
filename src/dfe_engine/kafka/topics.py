@@ -18,6 +18,10 @@ transform also needs ``<source>_load`` (transformed, transform -> loader). That
 ``_land``/``_load`` convention is shared with scalo-rs and computed by
 ``Source.topic_land`` / ``Source.topic_load``.
 
+Deleting a source removes the same pair. Left behind they cost a partition
+assignment in every loader forever, and a record that still lands on one has no
+table to go to.
+
 The admin config is built from the credential contract (``kafka.contract``), so
 the provider DERIVES security.protocol and sasl.mechanism. Building it any other
 way loses SASL and fails against every DFE-owned broker, which is SCRAM by
@@ -67,6 +71,19 @@ class TopicEnsureResult:
 
     created: list[str] = field(default_factory=list)
     existing: list[str] = field(default_factory=list)
+    failed: list[tuple[str, str]] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return not self.failed
+
+
+@dataclass
+class TopicRemoveResult:
+    """Outcome of a remove pass: every requested topic lands in exactly one list."""
+
+    removed: list[str] = field(default_factory=list)
+    absent: list[str] = field(default_factory=list)
     failed: list[tuple[str, str]] = field(default_factory=list)
 
     @property
@@ -203,6 +220,20 @@ def source_topic_specs(
     return specs
 
 
+def source_topic_names(source: Source) -> list[str]:
+    """Every topic the engine ensured for this source, over all its versions.
+
+    The inverse of ``source_topic_specs``, and it walks the versions rather than
+    one of them: a version that added a transform had its ``_load`` topic created
+    at its deploy, and a later version dropping the transform does not take the
+    topic with it.
+    """
+    names = [source.topic_land]
+    if any(version.transform for version in source.versions.values()):
+        names.append(transformed_topic(source.source))
+    return names
+
+
 def ensure_topics(
     specs: list[TopicSpec],
     *,
@@ -259,5 +290,55 @@ def ensure_topics(
         except Exception as exc:
             result.failed.append((spec.name, str(exc)))
             logger.error(f"Kafka topic creation failed: {spec.name} - {exc}")
+
+    return result
+
+
+def remove_topics(
+    names: list[str],
+    *,
+    admin: TopicAdmin | None = None,
+    settings: DFESettings | None = None,
+    bootstrap: str | None = None,
+    dry_run: bool = False,
+) -> TopicRemoveResult:
+    """Delete every named topic that the broker still lists. Idempotent.
+
+    DESTRUCTIVE: whatever is on the topic goes with it. Callers pass only the
+    topics the engine itself created for a source it is deleting - a topic the
+    broker does not list is reported as ``absent``, never as an error, so a
+    re-run of a partly finished delete is a no-op.
+    """
+    result = TopicRemoveResult()
+    if not names:
+        return result
+
+    if dry_run:
+        result.removed = list(names)
+        return result
+
+    from dfe_engine.kafka.contract import KafkaContractError
+
+    try:
+        admin = admin or build_admin(bootstrap=bootstrap, settings=settings)
+        present = admin.list_topic_names()
+    except KafkaContractError as exc:
+        result.failed = [(name, f"kafka config rejected: {exc}") for name in names]
+        return result
+    except Exception as exc:
+        result.failed = [(name, f"broker unreachable: {exc}") for name in names]
+        return result
+
+    for name in names:
+        if name not in present:
+            result.absent.append(name)
+            continue
+        try:
+            admin.delete(name)
+            result.removed.append(name)
+            logger.info(f"Kafka topic deleted: {name}")
+        except Exception as exc:
+            result.failed.append((name, str(exc)))
+            logger.error(f"Kafka topic deletion failed: {name} - {exc}")
 
     return result

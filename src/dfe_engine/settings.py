@@ -552,11 +552,11 @@ class KafkaSettings(BaseModel):
     ensure_topics: bool | None = Field(
         default=None,
         description=(
-            "Create a source's _land/_load topics when it deploys. Unset follows "
-            "``transport.bus_present``, so a brokerless profile asks for nothing "
-            "without a second dial being set to match. True or false is the "
-            "operator's override on top of that fact. A deploy never fails on the "
-            "topic step either way."
+            "Manage a source's _land/_load topics: created when it deploys, deleted "
+            "when the source is. Unset follows ``transport.bus_present``, so a "
+            "brokerless profile asks for nothing without a second dial being set to "
+            "match. True or false is the operator's override on top of that fact. "
+            "Neither a deploy nor a delete fails on the topic step either way."
         ),
     )
     topic_partitions: int = Field(

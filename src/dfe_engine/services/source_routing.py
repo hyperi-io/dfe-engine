@@ -1,7 +1,7 @@
 """Source routing config generator.
 
-Compiles Source definitions from SourceRegistry into receiver/loader
-routing configuration.
+Compiles Source definitions from SourceRegistry into receiver, loader and
+archiver routing configuration.
 
 The receiver emit targets the REAL dfe-receiver ``routing`` contract
 (``src/config/mod.rs`` SourceRule/RoutingConfig): ``source_rules`` stamp
@@ -32,13 +32,21 @@ from dfe_engine.services.models.loader import LoaderRoutingConfig
 from dfe_engine.services.models.receiver import (
     BUS_DESTINATION,
     LOADER_DESTINATION,
+    DestinationRef,
     DestinationRule,
     DestinationsConfig,
     ReceiverMatchMode,
     ReceiverRoutingConfig,
     SourceRule,
+    destination_names,
 )
-from dfe_engine.source.flow import FlowError, loader_endpoint, resolve_flow
+from dfe_engine.source.flow import (
+    ARCHIVER_SERVICE,
+    FlowError,
+    archiver_endpoint,
+    loader_endpoint,
+    resolve_flow,
+)
 from dfe_engine.source.models import (
     DEFAULT_LANDING_LABEL,
     RULELESS_OPERATORS,
@@ -200,8 +208,14 @@ def compile_receiver_destinations(registry: SourceRegistry, settings: Any) -> De
     carries a transform, in which case that transform IS the destination for
     everything unmatched, exactly as ``always`` compiles to ``default_source``
     rather than to a rule.
+
+    An archived source names TWO: there is no landing topic for the archiver to
+    read on direct, so the sender fans the record out to it beside the stage that
+    handles it, and the raw copy is kept before any transform sees it.
     """
-    default = LOADER_DESTINATION if settings.transport.default == "direct" else BUS_DESTINATION
+    default: DestinationRef = (
+        LOADER_DESTINATION if settings.transport.default == "direct" else BUS_DESTINATION
+    )
     rules: list[DestinationRule] = []
     endpoints: dict[str, str] = {}
 
@@ -223,11 +237,16 @@ def compile_receiver_destinations(registry: SourceRegistry, settings: Any) -> De
             name, endpoint = LOADER_DESTINATION, flow.outputs.loader
         endpoints[name] = endpoint
 
+        destination: DestinationRef = name
+        if flow.outputs.archive:
+            endpoints[ARCHIVER_SERVICE] = archiver_endpoint(settings)
+            destination = [name, ARCHIVER_SERVICE]
+
         match = receiver_match(source)
         if match is None:
             # The default flow: everything unmatched already arrives here.
             if source.match is not None and source.match.operator in RULELESS_OPERATORS:
-                default = name
+                default = destination
             continue
         if match.value is None:
             # A destination is picked on field AND value, so this source falls to
@@ -239,16 +258,48 @@ def compile_receiver_destinations(registry: SourceRegistry, settings: Any) -> De
             )
             continue
         rules.append(
-            DestinationRule(match_field=match.field, match_value=match.value, destination=name)
+            DestinationRule(
+                match_field=match.field, match_value=match.value, destination=destination
+            )
         )
 
-    if default == LOADER_DESTINATION:
+    if LOADER_DESTINATION in destination_names(default):
         endpoints.setdefault(LOADER_DESTINATION, loader_endpoint(settings))
     return DestinationsConfig(
         default=default,
         rules=rules,
         **{name: {"grpc": {"endpoint": endpoint}} for name, endpoint in sorted(endpoints.items())},
     )
+
+
+def compile_archiver_topics(registry: SourceRegistry, settings: Any) -> list[str]:
+    """The landing topics the archiver reads, from the sources that asked for it.
+
+    On the bus the archiver keeps the raw record by consuming the landing topic,
+    so archiving one source and not another is this list and nothing else. An
+    archiver left to a discovery pattern instead keeps every source's records
+    whether it was asked to or not, which is the drift this compile removes.
+
+    Direct sources are absent by construction: nothing holds their records, so
+    the receiver fans them out to the archiver's listener instead
+    (``compile_receiver_destinations``). The bucket and the path an object lands
+    under stay the deployment's, so only the topics are derived here.
+    """
+    topics: list[str] = []
+    for source in registry.get_all_sources(states=("active",)):
+        if not source.archive:
+            continue
+        try:
+            flow = resolve_flow(source, settings)
+        except FlowError as exc:
+            logger.warning(
+                f"Source {source.source!r} cannot run on this deployment ({exc}) - skipping "
+                f"it in the archiver topics compile"
+            )
+            continue
+        if flow.transport == "bus":
+            topics.append(source.topic_land)
+    return sorted(topics)
 
 
 def compile_loader_routing(

@@ -80,8 +80,12 @@ class FlowExpectation:
     marker: str | None
     """A column only the transform sets, so a pass-through row cannot satisfy the check."""
 
-    destination: str | None
-    """Direct only: the receiver destination the compiled routing must name."""
+    destination: str | list[str] | None
+    """Direct only: the receiver destination the compiled routing must name.
+
+    A list where the record is fanned out to several at once, which is how an
+    archived source reaches the archiver beside the stage that loads it.
+    """
 
     def substitute(self, **values: str) -> FlowExpectation:
         """The same expectation with its placeholders filled in.
@@ -99,13 +103,16 @@ class FlowExpectation:
                 value = value.replace("{" + name + "}", replacement)
             return value
 
+        def fill_ref(value: str | list[str] | None) -> str | list[str] | None:
+            return [str(fill(v)) for v in value] if isinstance(value, list) else fill(value)
+
         return FlowExpectation(
             source=str(fill(self.source)),
             table=str(fill(self.table)),
             topic=fill(self.topic),
             load_topic=fill(self.load_topic),
             marker=fill(self.marker),
-            destination=fill(self.destination),
+            destination=fill_ref(self.destination),
         )
 
 
