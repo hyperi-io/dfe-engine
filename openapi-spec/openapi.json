@@ -22938,7 +22938,7 @@
           "name"
         ],
         "title": "OIDCProviderSummary",
-        "description": "A registry OIDC provider, with its registry name folded in.\n\n``OIDCProvider`` holds env var *names* rather than secret values, so the\nwhole model is safe to return."
+        "description": "A registry OIDC provider, with its registry name folded in.\n\n``OIDCProvider`` holds secret-store paths and env var *names* rather than\nsecret values, and the client id is public by design (the browser carries it\nto the IdP authorize endpoint), so the whole model is safe to return."
       },
       "ObjectEntry": {
         "properties": {
