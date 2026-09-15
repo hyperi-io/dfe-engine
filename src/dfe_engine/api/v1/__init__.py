@@ -21,6 +21,7 @@ from dfe_engine.api.v1.governance import router as governance_router
 from dfe_engine.api.v1.helm import router as helm_router
 from dfe_engine.api.v1.hunts import router as hunts_router
 from dfe_engine.api.v1.hyperdx import router as hyperdx_router
+from dfe_engine.api.v1.kafka_topics import router as kafka_topics_router
 from dfe_engine.api.v1.library import router as library_router
 from dfe_engine.api.v1.lifecycle import router as lifecycle_router
 from dfe_engine.api.v1.oidc_login import router as oidc_login_router
@@ -89,6 +90,8 @@ v1_router.include_router(_auth_sub)
 
 v1_router.include_router(orgs_router)
 v1_router.include_router(sources_router)
+# The Kafka topics those sources imply: ensure, converge, status, remove
+v1_router.include_router(kafka_topics_router)
 v1_router.include_router(services_router)
 v1_router.include_router(deployments_router)
 v1_router.include_router(fieldmaps_router)

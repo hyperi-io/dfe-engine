@@ -54,6 +54,14 @@ Impacts on our implementation:
 - **Mechanism is tier-independent** for Confluent (always API-key PLAIN) and
   Redpanda Cloud (always SCRAM). So `provider=confluent-cloud`/`redpanda-cloud`
   derives correctly regardless of tier; tier only shifts cost + always-on profile.
+- **A provider key names one LISTENER, not a cluster.** Every managed provider
+  above offers TLS only, so each has a single key. The DFE-owned brokers have two:
+  `strimzi` and `redpanda` are the TLS listener, `strimzi-no-tls` and
+  `redpanda-no-tls` are the same brokers on the TLS-off listener the deploy charts
+  stand up in-cluster and point the apps at (`SASL_PLAINTEXT` + SCRAM-SHA-512).
+  SCRAM is a challenge-response, so the password never reaches the wire, which is
+  what makes that pair sanctioned - there is deliberately no plaintext key for a
+  PLAIN or OAUTHBEARER provider, and `validate` refuses the pair anyway.
 - **The lifecycle up/down/status branches on this axis:** serverless create is fast
   and needs no broker sizing; provisioned create gates on provider-ready (tens of
   minutes for MSK) and teardown reclaims sized capacity. The cred-persistence

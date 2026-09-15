@@ -29,11 +29,14 @@ Confluent Cloud); we never hand-set them. Creds come from the configured secrets
 source (``.env`` / OpenBao via settings) unless passed explicitly.
 
 The emitters live in ``scalo.kafka.toolconfig`` (one source of provider truth, many
-tools). ``dfe kafka topics`` (below) is explicit topic CRUD - DFE creates the
-topics its sources need rather than relying on broker
-``auto.create.topics.enable``. ``dfe kafka lifecycle`` (mounted at the bottom of
-this module from ``cli/kafka_lifecycle.py``) is the managed-cluster up/down/
-status seam (WS-C, dfe-engine#99) - see that module for detail.
+tools). ``dfe kafka lifecycle`` (mounted at the bottom of this module from
+``cli/kafka_lifecycle.py``) is the managed-cluster up/down/status seam (WS-C,
+dfe-engine#99) - see that module for detail.
+
+``dfe kafka topics`` is NOT here: topic CRUD is the governed engine surface
+(``api/v1/kafka_topics.py``, dfe-engine#97), so it is generated from the spec
+like every other API family and carries that surface's RBAC and audit. The
+commands here are the local ones that reach no engine at all.
 """
 
 from __future__ import annotations
@@ -44,8 +47,6 @@ import stat
 import tempfile
 
 import click
-
-from dfe_engine.kafka.topics import build_admin, source_topic_specs
 
 
 def _emitters():
@@ -81,7 +82,7 @@ def _write_600(body: str, path: str) -> str:
 
 @click.group(name="kafka", no_args_is_help=True)
 def kafka_group() -> None:
-    """Kafka provider tooling: emit client config, manage topics, (soon) clusters."""
+    """Kafka provider tooling: emit client config, manage a managed cluster."""
 
 
 @kafka_group.command("client-config")
@@ -160,196 +161,6 @@ def client_config_cmd(
 
 
 # =============================================================================
-# `dfe kafka topics` - explicit topic CRUD, no broker auto-create
-# =============================================================================
-#
-# DFE creates the topics its sources need EXPLICITLY rather than relying on
-# `auto.create.topics.enable` (a broker default that silently creates
-# mis-partitioned, unmanaged topics on first produce - the anti-pattern this
-# group exists to replace). dfe-engine#97.
-#
-# The admin surface itself lives in `dfe_engine.kafka.topics`, shared with the
-# Helm compiler and the source deploy hook so all three create topics the same
-# way. See that module for why it wraps confluent_kafka directly rather than
-# scalo.kafka.admin.KafkaAdmin.
-
-
-def _derive_source_topics() -> list[str]:
-    """Topics DFE's defined (enabled) sources need.
-
-    Empty when ``DFE_SOURCES_DIR`` is unset or no sources are defined yet -
-    callers fall back to requiring ``--topic``.
-    """
-    from dfe_engine.settings import get_settings
-    from dfe_engine.source.registry import SourceRegistry
-
-    settings = get_settings()
-    sources_dir = settings.source.sources_dir
-    if not sources_dir:
-        return []
-
-    registry = SourceRegistry(sources_directory=sources_dir, refresh_interval=0)
-    try:
-        sources = registry.get_all_sources(enabled_only=True)
-    finally:
-        registry.close()
-
-    topics: list[str] = []
-    for source in sources:
-        for spec in source_topic_specs(
-            source,
-            partitions=settings.kafka.topic_partitions,
-            replication_factor=settings.kafka.topic_replication_factor,
-        ):
-            topics.append(spec.name)
-    return topics
-
-
-def _admin_options(f):
-    """The four broker/cred options every topics subcommand shares."""
-    f = click.option(
-        "--bootstrap", default=None, help="Bootstrap servers (else from settings/.env)."
-    )(f)
-    f = click.option(
-        "--provider",
-        default=None,
-        help="Kafka provider for the credential contract (else DFE_KAFKA_PROVIDER).",
-    )(f)
-    f = click.option("--username", default=None, help="SASL username (else from settings/.env).")(f)
-    f = click.option("--password", default=None, help="SASL password (else from settings/.env).")(f)
-    return f
-
-
-@kafka_group.group(name="topics", no_args_is_help=True)
-def topics_group() -> None:
-    """Explicit Kafka topic CRUD - create the topics DFE needs, never rely on
-    broker ``auto.create.topics.enable``."""
-
-
-@topics_group.command("list")
-@click.option("--internal", is_flag=True, help="Include internal topics (e.g. __consumer_offsets).")
-@_admin_options
-def topics_list_cmd(
-    internal: bool,
-    bootstrap: str | None,
-    provider: str | None,
-    username: str | None,
-    password: str | None,
-) -> None:
-    """List topics on the configured broker."""
-    admin = build_admin(
-        bootstrap=bootstrap, provider=provider, username=username, password=password
-    )
-    names = sorted(admin.list_topic_names())
-    if not internal:
-        names = [n for n in names if not n.startswith("__")]
-    if not names:
-        click.echo("(no topics)")
-        return
-    for name in names:
-        click.echo(name)
-
-
-@topics_group.command("ensure")
-@click.option(
-    "--topic",
-    "topics",
-    multiple=True,
-    metavar="NAME",
-    help=(
-        "Explicit topic (repeatable). Overrides the source-derived set - required "
-        "when no sources are configured (source->topic mapping unavailable)."
-    ),
-)
-@click.option(
-    "--partitions", default=3, show_default=True, help="Partitions for newly created topics."
-)
-@click.option(
-    "--replication-factor",
-    default=1,
-    show_default=True,
-    help="Replication factor for newly created topics (raise for a multi-broker HA cluster).",
-)
-@click.option("--dry-run", is_flag=True, help="Show what would be created; create nothing.")
-@_admin_options
-def topics_ensure_cmd(
-    topics: tuple[str, ...],
-    partitions: int,
-    replication_factor: int,
-    dry_run: bool,
-    bootstrap: str | None,
-    provider: str | None,
-    username: str | None,
-    password: str | None,
-) -> None:
-    """Ensure the topics DFE's defined sources need exist, creating any that
-    are missing (anti-"broker auto-create" - DFE decides partitions/RF, not
-    the broker's first-produce default).
-
-    Derives the topic set from the sources directory (``<source>_land``
-    always, ``<source>_load`` when the source has a transform). Pass
-    ``--topic`` (repeatable) to override when no sources are configured yet.
-    """
-    wanted = list(dict.fromkeys(topics)) if topics else _derive_source_topics()
-    if not wanted:
-        raise click.ClickException(
-            "no topics to ensure: no sources are configured (DFE_SOURCES_DIR unset "
-            "or empty), so the source->topic mapping is unavailable. Pass explicit "
-            "--topic NAME (repeatable)."
-        )
-
-    admin = build_admin(
-        bootstrap=bootstrap, provider=provider, username=username, password=password
-    )
-    existing = admin.list_topic_names()
-    missing = [t for t in wanted if t not in existing]
-    already = [t for t in wanted if t in existing]
-
-    for t in already:
-        click.echo(f"exists       {t}")
-
-    if not missing:
-        click.echo("all topics already exist; nothing to create.")
-        return
-
-    if dry_run:
-        for t in missing:
-            click.echo(
-                f"would create {t} (partitions={partitions}, replication_factor={replication_factor})"
-            )
-        return
-
-    for t in missing:
-        admin.create(t, partitions=partitions, replication_factor=replication_factor)
-        click.echo(f"created      {t}")
-
-
-@topics_group.command("delete")
-@click.argument("topic")
-@click.option("-y", "--yes", is_flag=True, help="Skip the confirm prompt.")
-@_admin_options
-def topics_delete_cmd(
-    topic: str,
-    yes: bool,
-    bootstrap: str | None,
-    provider: str | None,
-    username: str | None,
-    password: str | None,
-) -> None:
-    """Delete TOPIC. Destructive - the topic's data is gone, not recoverable."""
-    if not yes:
-        click.confirm(
-            f"Delete Kafka topic {topic!r}? This is destructive and cannot be undone.",
-            abort=True,
-        )
-    admin = build_admin(
-        bootstrap=bootstrap, provider=provider, username=username, password=password
-    )
-    admin.delete(topic)
-    click.echo(f"deleted      {topic}")
-
-
-# =============================================================================
 # `dfe kafka lifecycle` - managed-cluster up/down/status (mounted scalo Typer)
 # =============================================================================
 
@@ -378,5 +189,16 @@ _mount_lifecycle()
 
 
 def attach_kafka(root: click.Group) -> None:
-    """Mount the ``kafka`` group onto the root ``dfe`` command."""
+    """Mount the local ``kafka`` commands beside whatever the spec generated.
+
+    ``dfe kafka topics`` comes from the API spec, so this must ADD to that group
+    rather than replace it: a plain ``add_command`` would drop the whole governed
+    topic surface on the floor. A name the generated group already holds is left
+    alone - the governed route wins over a local duplicate.
+    """
+    generated = root.commands.get(kafka_group.name)
+    if isinstance(generated, click.Group):
+        for name, command in kafka_group.commands.items():
+            generated.commands.setdefault(name, command)
+        return
     root.add_command(kafka_group)
