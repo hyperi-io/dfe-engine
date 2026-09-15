@@ -49,7 +49,7 @@ class CoreSchemaTargets:
     database: str
     landing_table: str = "main"
     profile: str = "timeseries"
-    # Retention for a time-series table that declares none; None = no default.
+    # Retention for a time-series table that declares none; 0 removes its TTL, None leaves it alone.
     default_ttl_days: int | None = None
 
     @classmethod
@@ -68,7 +68,7 @@ class CoreSchemaTargets:
             database=ch.effective_data_database,
             landing_table=ch.landing_table,
             profile=ch.default_table_profile,
-            default_ttl_days=ch.default_ttl_days or None,
+            default_ttl_days=ch.default_ttl_days,
         )
 
 

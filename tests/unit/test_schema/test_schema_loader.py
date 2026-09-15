@@ -405,13 +405,12 @@ class TestGetOrderByColumns:
 
 @requires_schemas
 class TestPackageResolution:
-    """Test profile resolution chain: env var → dfe-schemas package → bundled."""
+    """Test profile resolution chain: env var -> dfe-schemas package -> image seed."""
 
     def test_resolve_profiles_dir_finds_the_package(self):
         """With the package installed, resolution returns its common-header."""
 
         resolved = _resolve_profiles_dir()
-        # Should end with common-header (either the package or bundled)
         assert resolved.is_dir()
         # Should contain timeseries.yaml
         assert (resolved / "timeseries.yaml").exists()
@@ -462,24 +461,18 @@ class TestPackageResolution:
         columns = SchemaLoader.load_profile("test", profiles_dir=tmp_path)
         assert columns[0].name == "explicit"
 
-    def test_package_profiles_identical_to_bundled(self):
-        """Packaged and bundled profiles should have the same columns."""
-        from pathlib import Path
+    def test_no_schemas_tree_is_an_error_not_a_fallback(self, monkeypatch, tmp_path):
+        def no_package_root():
+            return None
 
-        bundled_dir = (
-            Path(__file__).resolve().parents[3] / "src" / "dfe_engine" / "schema" / "profiles"
+        monkeypatch.delenv("DFE_SCHEMAS_DIR", raising=False)
+        monkeypatch.setenv("DFE_SCHEMAS_SEED_DIR", str(tmp_path / "no-seed"))
+        monkeypatch.setattr(
+            "dfe_engine.schema.schema_loader._resolve_package_schemas_root", no_package_root
         )
-        package_root = _resolve_package_schemas_root()
-        if package_root is None:
-            pytest.skip("dfe-schemas package not installed")
-        package_dir = package_root / "common-header"
 
-        for profile in ("timeseries", "minimal", "passthrough"):
-            bundled = SchemaLoader.load_profile(profile, profiles_dir=bundled_dir)
-            packaged = SchemaLoader.load_profile(profile, profiles_dir=package_dir)
-            bundled_names = [c.name for c in bundled]
-            packaged_names = [c.name for c in packaged]
-            assert bundled_names == packaged_names, f"Mismatch in {profile} profile"
+        with pytest.raises(SchemaLoadError, match="common-header"):
+            _resolve_profiles_dir()
 
 
 # ── is_shipped_schema ────────────────────────────────────────────
@@ -487,20 +480,6 @@ class TestPackageResolution:
 
 class TestIsShippedSchema:
     """Test read-only shipped schema detection."""
-
-    def test_bundled_profile_is_shipped(self):
-        """Bundled profile files should be identified as shipped."""
-        from pathlib import Path
-
-        bundled = (
-            Path(__file__).resolve().parents[3]
-            / "src"
-            / "dfe_engine"
-            / "schema"
-            / "profiles"
-            / "timeseries.yaml"
-        )
-        assert is_shipped_schema(bundled) is True
 
     def test_package_file_is_shipped(self):
         """Files inside the dfe-schemas package should be identified as shipped."""

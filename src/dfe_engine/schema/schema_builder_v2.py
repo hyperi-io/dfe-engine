@@ -98,8 +98,8 @@ class SchemaBuilderV2:
                                 falls back to plain MergeTree.
             default_ttl_days: Retention for a source whose schema leaves ``ttl_days``
                                 unset. Pass the deployment value
-                                (``settings.clickhouse.default_ttl_days``); None or 0
-                                emits no TTL clause for such a source.
+                                (``settings.clickhouse.default_ttl_days``); 0 declares
+                                no TTL, which removes a live one, and None leaves it alone.
             resolver: Engine resolver for the table engine and ``ON CLUSTER``. A
                                 path that applies DDL to a live server passes one
                                 built with that server's client, so a multi-node
@@ -114,7 +114,7 @@ class SchemaBuilderV2:
         )
         self._field_map_registry = field_map_registry
         self._default_engine = default_engine or "MergeTree"
-        self._default_ttl_days = default_ttl_days or None
+        self._default_ttl_days = default_ttl_days
 
     # ── Main entry points ───────────────────────────────────────────
 

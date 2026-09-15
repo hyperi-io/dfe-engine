@@ -33,7 +33,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, NoReturn
+from typing import Any, Literal, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -81,6 +81,7 @@ from dfe_engine.source.models import (
     SourceVersion,
     SourceVersionGetResponse,
     SourceWriteRequest,
+    engine_registry,
 )
 from dfe_engine.source.registry import (
     SourceCoreResourceError,
@@ -406,6 +407,19 @@ class SeedResponse(BaseModel):
     """Result of seeding built-in sources."""
 
     seeded: int = Field(description="Number of sources seeded")
+
+
+class TableEngineObject(BaseModel):
+    """One table engine a source may select, as the console offers it."""
+
+    name: str = Field(description="MergeTree-family variant, e.g. ReplacingMergeTree")
+    description: str = Field(description="What the engine does with rows")
+    arguments: Literal["none", "optional", "required"] = Field(
+        description="Whether the variant takes arguments inside its parentheses"
+    )
+    argument_hint: str = Field(
+        description="What goes inside the parentheses; empty when arguments is none"
+    )
 
 
 class CatalogueEntryObject(BaseModel):
@@ -792,6 +806,28 @@ async def list_catalogue(
             or needle in row.data_stream.lower()
         ]
     rows.sort(key=lambda row: row.name)
+    return PaginatedResponse.from_list(rows, pagination.page, pagination.per_page)
+
+
+@router.get(
+    "/engines",
+    response_model=PaginatedResponse[TableEngineObject],
+    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
+)
+async def list_table_engines(
+    user: CurrentUser,
+    pagination: PaginationParams = Depends(),
+) -> PaginatedResponse[TableEngineObject]:
+    """List the table engines a source may select, from dfe-schemas ``registries/engines.yaml``."""
+    rows = [
+        TableEngineObject(
+            argument_hint=option.argument_hint,
+            arguments=option.arguments,
+            description=option.description,
+            name=option.name,
+        )
+        for option in engine_registry().options
+    ]
     return PaginatedResponse.from_list(rows, pagination.page, pagination.per_page)
 
 

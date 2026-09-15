@@ -108,7 +108,7 @@ class DDLConfig:
     topology: str = "single"
     # Retention is DECLARED, in dfe-schemas or a source's config, never defaulted
     # here: a default no operator can see is how a table ends up keeping
-    # everything or dropping what it should not.
+    # everything or dropping what it should not. None is undeclared; 0 declares no TTL.
     ttl_days: int | None = None
     # TTL rides the partition column alone: ttl_only_drop_parts drops a part only
     # once every row in it has expired, so a second rule over event time can only
@@ -159,11 +159,11 @@ class TableSpec:
 def with_default_ttl(spec: TableSpec, days: int | None) -> TableSpec:
     """*spec* with the deployment default retention, unless it declares its own.
 
-    A declared ``ttl_days`` always wins; ``days`` of 0 or None leaves the spec
-    as it is. The config is copied, never mutated in place.
+    A declared ``ttl_days`` always wins; ``days`` of None leaves the spec as it
+    is, and 0 declares no TTL. The config is copied, never mutated in place.
     """
     # A table with no ttl_columns cannot carry a TTL, and a default over none fails the CREATE.
-    if not days or spec.config.ttl_days is not None or not spec.config.ttl_columns:
+    if (days is None) or (spec.config.ttl_days is not None) or not (spec.config.ttl_columns):
         return spec
     return replace(spec, config=replace(spec.config, ttl_days=days))
 
@@ -740,7 +740,7 @@ class DDLGenerator:
                 not carry, which would otherwise render as a table that silently
                 keeps everything forever.
         """
-        if cfg.ttl_days is None:
+        if not (cfg.ttl_days):
             return None
         if not cfg.ttl_columns:
             raise DDLGenerationError(

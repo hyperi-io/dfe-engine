@@ -171,8 +171,8 @@ class SchemaApplier:
         """Create *table*, or add whatever columns it is missing and reconcile its TTL.
 
         A declared ``config.ttl_days`` that differs from the live TTL is applied
-        with ``MODIFY TTL``; an undeclared one leaves the live TTL alone, so an
-        apply never removes retention.
+        with ``MODIFY TTL``, a declared 0 with ``REMOVE TTL``; an undeclared one
+        leaves the live TTL alone.
 
         Args:
             database: Target database. Must be the REAL name -- the resolver
@@ -241,7 +241,7 @@ class SchemaApplier:
     ) -> str:
         """Bring the live TTL to ``cfg.ttl_days``. Returns the move, or "" for none.
 
-        Never removes a TTL: an undeclared ``ttl_days`` leaves the table alone.
+        An undeclared ``ttl_days`` leaves the table alone; only a declared 0 removes the TTL.
         A declared TTL over a column the table lacks is logged and skipped rather
         than failing the apply, since the columns are the gate's real job.
         """
@@ -249,6 +249,14 @@ class SchemaApplier:
         if wanted is None:
             return ""
         live = self._table_ttl_days(database, table)
+        target = f"{quote_ident(database, what='database')}.{quote_ident(table, what='table name')}"
+        # A live 0-day TTL expires every row, so it is removed rather than matched.
+        if wanted == 0:
+            if live is None:
+                return ""
+            logger.info(f"{database}.{table}: TTL {live} -> none; rows are kept forever")
+            self._run(f"ALTER TABLE {target}{on_cluster} REMOVE TTL")
+            return f"{live} -> none"
         if live == wanted:
             return ""
         try:
@@ -266,7 +274,6 @@ class SchemaApplier:
             )
         else:
             logger.info(f"{database}.{table}: TTL {move} days")
-        target = f"{quote_ident(database, what='database')}.{quote_ident(table, what='table name')}"
         self._run(f"ALTER TABLE {target}{on_cluster} MODIFY {clause}")
         return move
 

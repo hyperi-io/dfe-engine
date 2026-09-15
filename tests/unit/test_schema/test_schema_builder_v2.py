@@ -257,6 +257,16 @@ class TestBuild:
         assert "INTERVAL 365 DAY" in result.create_table_ddl
         assert "INTERVAL 90 DAY" not in result.create_table_ddl
 
+    def test_build_ttl_source_zero_overrides_the_default_with_no_ttl(self, registry, schemas_dir):
+        builder = SchemaBuilderV2(
+            registry=registry, schemas_base_dir=schemas_dir, default_ttl_days=90
+        )
+        source = _make_source(meta_schema="meta.yaml", ttl_days=0)
+        result = builder.build(source)
+        assert "TTL" not in result.create_table_ddl
+        cfg = builder.build_ddl_config_for_version(source, source.runtime_version_id())
+        assert cfg.ttl_days == 0
+
     def test_build_ttl_default_zero_emits_no_ttl(self, registry, schemas_dir):
         builder = SchemaBuilderV2(
             registry=registry, schemas_base_dir=schemas_dir, default_ttl_days=0

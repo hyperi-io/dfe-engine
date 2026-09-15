@@ -214,6 +214,11 @@ class TestSchemaRegistryPathSafety:
         with pytest.raises(SchemaValidationError, match="segment"):
             registry.save_schema(_minimal_meta("../../../etc/passwd"))
 
+    @pytest.mark.parametrize("path", ["registries/engines", "registries\\types"])
+    def test_yaml_path_rejects_the_registries_tree(self, path, registry):
+        with pytest.raises(SchemaValidationError, match="registries/"):
+            registry._yaml_path(path)
+
 
 class TestSchemaRegistrySingleton:
     def test_get_instance_requires_directory_first_call(self):

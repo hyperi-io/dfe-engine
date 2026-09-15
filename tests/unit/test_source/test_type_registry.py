@@ -8,6 +8,7 @@ from dfe_engine.source.type_registry import (
     InvalidUseCaseError,
     ResolvedType,
     TypeRegistry,
+    TypeRegistryError,
     UnknownPrimitiveError,
 )
 
@@ -26,6 +27,11 @@ def registry() -> TypeRegistry:
 class TestTypeRegistryLoading:
     def test_loads_default(self, registry: TypeRegistry):
         assert len(registry.primitives) == 13
+
+    @pytest.mark.parametrize("data", [{}, {"primitives": []}, []])
+    def test_a_registry_without_a_primitives_map_is_refused(self, data):
+        with pytest.raises(TypeRegistryError, match="under 'primitives'"):
+            TypeRegistry(data)
 
     def test_all_primitives_present(self, registry: TypeRegistry):
         expected = {

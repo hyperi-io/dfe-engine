@@ -211,6 +211,12 @@ class TestGenerateCreateTable:
         ddl = gen.generate_create_table("t", _basic_columns(), cfg)
         assert "TTL" not in ddl
 
+    def test_ttl_zero_keeps_rows_forever(self, gen: DDLGenerator):
+        cfg = DDLConfig(ttl_days=0)
+        ddl = gen.generate_create_table("t", _basic_columns(), cfg)
+        assert "TTL" not in ddl
+        assert "INTERVAL 0 DAY" not in ddl
+
     def test_ttl_over_absent_column_raises(self, gen: DDLGenerator):
         """A declared retention that renders no clause would keep every row forever."""
         cfg = DDLConfig(ttl_days=30, ttl_columns=["query_checkpoint_time"])

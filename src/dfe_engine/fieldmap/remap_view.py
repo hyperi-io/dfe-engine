@@ -20,7 +20,7 @@ column (``json_path``, extracted with the dynamic-subcolumn idiom
 One engine now serves every standard, so an ECS or CIM view gets the same
 json-path + cast capability Sigma had - the importer stays PHYSICAL and the
 standard naming is a read-time view (see the elastic importer + the ECS/CIM/Sigma
-default maps under ``fieldmap/default_maps/``).
+default maps under dfe-schemas ``registries/field-maps/``).
 """
 
 from __future__ import annotations

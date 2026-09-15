@@ -3,6 +3,7 @@
 from typing import get_args
 
 import pytest
+from pydantic import ValidationError
 
 from dfe_engine.appmgmt.catalogue import transform_engines
 from dfe_engine.source.models import (
@@ -174,6 +175,11 @@ class TestSourceSchema:
         assert s.ttl_days == 90
         assert s.engine == ""  # empty = inherit the deployment default at DDL time
         assert s.meta_schema is None
+
+    def test_zero_ttl_is_accepted_and_negative_refused(self):
+        assert SourceSchema(ttl_days=0).ttl_days == 0
+        with pytest.raises(ValidationError):
+            SourceSchema(ttl_days=-1)
 
     def test_full(self):
         s = SourceSchema(

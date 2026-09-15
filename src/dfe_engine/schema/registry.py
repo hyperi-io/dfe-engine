@@ -36,6 +36,7 @@ from scalo.logger import logger
 
 from dfe_engine.git_identity import commit_file
 from dfe_engine.schema.models import MetaSchema
+from dfe_engine.schema.schema_loader import REGISTRIES_SUBDIR
 from dfe_engine.yaml_utils import yaml_dump
 
 
@@ -187,6 +188,9 @@ class SchemaRegistry:
                 raise SchemaValidationError(f"Invalid schema path segment: {segment!r}")
             if "\x00" in segment:
                 raise SchemaValidationError("Invalid schema path: null byte in segment")
+        # registries/ holds the engine's allow-lists, which a schema write must not replace.
+        if parts[0] == REGISTRIES_SUBDIR:
+            raise SchemaValidationError(f"Schema path must not be under {REGISTRIES_SUBDIR}/")
         if len(parts) == 1:
             candidate = self._directory / f"{parts[0]}.yaml"
         else:
@@ -226,40 +230,6 @@ class SchemaRegistry:
         if cls._instance:
             cls._instance.close()
         cls._instance = None
-
-    # -----------------------------------------------------------------
-    # Key Convention
-    # -----------------------------------------------------------------
-
-    @staticmethod
-    def _table_name(path: str) -> str:
-        """Map path to a DirectoryConfigStore table name."""
-        return f"{path}"
-
-    def _yaml_path(self, table: str) -> Path:
-        """Filesystem path for a schema table key (e.g. ``aws/cloudtrail`` → ``.../aws/cloudtrail.yaml``).
-
-        Slashes (and backslashes, normalized to slashes) separate nested directories so keys like
-        ``acme/cloudtrail`` and ``contoso/cloudtrail`` map to different files.
-        """
-        parts = [p for p in table.replace("\\", "/").split("/") if p]
-        if not parts:
-            raise SchemaValidationError("Invalid empty schema path")
-        for seg in parts:
-            if seg in (".", ".."):
-                raise SchemaValidationError(f"Invalid schema path segment: {seg!r}")
-            if "\x00" in seg:
-                raise SchemaValidationError("Invalid schema path: null byte in segment")
-        if len(parts) == 1:
-            candidate = self._directory / f"{parts[0]}.yaml"
-        else:
-            candidate = self._directory.joinpath(*parts[:-1]) / f"{parts[-1]}.yaml"
-
-        base = self._directory.resolve(strict=False)
-        resolved = candidate.resolve(strict=False)
-        if not resolved.is_relative_to(base):
-            raise SchemaValidationError("Schema path escapes schemas directory")
-        return candidate
 
     def _parse_meta_schema(self, table: str, config_data: dict[str, Any]) -> MetaSchema:
         return MetaSchema.model_validate(coerce_common_header_legacy_versions(table, config_data))

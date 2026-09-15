@@ -50,7 +50,7 @@ def reconcile_default_ttl(
     Raises:
         SchemaApplyError: ClickHouse rejected a statement or could not be read.
     """
-    targets = replace(CoreSchemaTargets.from_settings(settings), default_ttl_days=days or None)
+    targets = replace(CoreSchemaTargets.from_settings(settings), default_ttl_days=days)
     resolver = EngineResolver(client=client, topology_setting=settings.clickhouse.topology)
     report = apply_core_schema(client, targets, resolver=resolver)
     outcome = RetentionReconcile(report=report)

@@ -246,6 +246,29 @@ class TestList:
         with pytest.raises(SourceValidationError, match="names its own source"):
             registry.save_source(looping)
 
+    def test_an_engine_missing_required_arguments_is_refused(self, registry: SourceRegistry):
+        bare = Source.model_validate(
+            {
+                "source": "collapsing",
+                "match": {"field": "f", "value": "v"},
+                "schema": {"engine": "CollapsingMergeTree"},
+            }
+        )
+        with pytest.raises(SourceValidationError, match="requires arguments"):
+            registry.save_source(bare)
+
+    def test_an_engine_that_follows_its_argument_rule_saves(self, registry: SourceRegistry):
+        registry.save_source(
+            Source.model_validate(
+                {
+                    "source": "collapsing",
+                    "match": {"field": "f", "value": "v"},
+                    "schema": {"engine": "CollapsingMergeTree(sign)"},
+                }
+            )
+        )
+        assert registry.get_source("collapsing").schema_config.engine == "CollapsingMergeTree(sign)"
+
     def test_a_route_to_another_source_saves_before_that_source_exists(
         self, registry: SourceRegistry
     ):

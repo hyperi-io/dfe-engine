@@ -53,7 +53,7 @@ def bootstrap_clickhouse(*, settings: DFESettings, gitcrud: GitCrud | None = Non
     # The console override in the deploy repo wins over the env default.
     targets = replace(
         CoreSchemaTargets.from_settings(settings),
-        default_ttl_days=effective_default_ttl_days(settings, gitcrud) or None,
+        default_ttl_days=effective_default_ttl_days(settings, gitcrud),
     )
 
     try:

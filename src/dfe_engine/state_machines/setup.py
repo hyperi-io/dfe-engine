@@ -122,6 +122,8 @@ class SetupContext:
     credential_fetch_command: str = ""
     # Effective retention a source gets when it sets none (override else env); 0 = none.
     default_ttl_days: int = 90
+    # MergeTree-family variant a source's table gets when it names no engine.
+    default_engine: str = "MergeTree"
     # The deploy repo says the bootstrap admin is retired: not seeded, stays disabled.
     admin_retired: bool = False
     # A deploy repo is configured, so a retirement has somewhere durable to be recorded.
@@ -146,7 +148,10 @@ class SetupContext:
         deployment = _attr_path(state, "settings", "deployment")
         kind = detect_deploy_kind(getattr(deployment, "target", "") or "")
         default_ttl_days = 90
-        if _attr_path(state, "settings", "clickhouse") is not None:
+        clickhouse = _attr_path(state, "settings", "clickhouse")
+        # The schema builder treats a blank default as MergeTree, so report the same.
+        default_engine = getattr(clickhouse, "default_engine", "") or "MergeTree"
+        if clickhouse is not None:
             from dfe_engine.gitcrud.retention import effective_default_ttl_days
 
             default_ttl_days = effective_default_ttl_days(
@@ -169,6 +174,7 @@ class SetupContext:
                 secret_name=getattr(local, "admin_secret_name", "") or "",
                 secret_key=getattr(local, "admin_secret_key", "") or "",
             ),
+            default_engine=default_engine,
             default_ttl_days=default_ttl_days,
             admin_retired=admin_retirement.is_retired(getattr(state, "gitcrud", None)),
             gitops_enabled=getattr(state, "gitcrud", None) is not None,
@@ -315,6 +321,12 @@ class SetupStatus(BaseModel):
     )
     default_ttl_days: int = Field(
         description="Retention in days a source gets when it sets none; 0 = none.",
+    )
+    default_engine: str = Field(
+        default="MergeTree",
+        description="MergeTree-family engine variant a source's table gets when its "
+        "schema names none (DFE_CLICKHOUSE_DEFAULT_ENGINE). The topology prefix "
+        "(Replicated, Shared) is resolved against the server at DDL time, not here.",
     )
     admin_username: str = Field(
         default="",
@@ -528,6 +540,7 @@ class SetupStateMachine:
             default_credentials=default_credentials(ctx),
             deploy_kind=ctx.deploy_kind,
             credential_fetch_command=ctx.credential_fetch_command,
+            default_engine=ctx.default_engine,
             default_ttl_days=ctx.default_ttl_days,
             admin_username=ctx.bootstrap_admin_name,
             admin_retired=ctx.admin_retired,
