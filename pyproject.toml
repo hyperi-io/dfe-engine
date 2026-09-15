@@ -38,8 +38,9 @@ dependencies = [
     # The DFE schema trees as package data under dfe_schemas/data/, replacing
     # the `schemas` git submodule. schema_loader resolves them through
     # importlib.resources; the Dockerfile bakes its seed from the installed
-    # wheel. Floor is the release that added sources/, which the engine seeds
-    # its core landing source from; uv.lock pins the hash.
+    # wheel. Floor is the release that moved the registries into the package,
+    # which the engine reads instead of bundling its own copies; uv.lock pins
+    # the hash.
     "dfe-schemas>=0.2.4",
     # Data processing
     "pandas>=3.0.3",
