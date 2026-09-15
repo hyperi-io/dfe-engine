@@ -88,6 +88,9 @@ class GroupResolutionConfig(BaseModel):
     service_account_json_env: str = ""
     """Env var name holding the Google service account JSON credentials."""
 
+    service_account_json_path: str = ""
+    """DfeSecrets path holding the Google service account JSON - a path, never the JSON."""
+
     admin_email: str = ""
     """Google Workspace admin email used for domain-wide delegation."""
 
@@ -101,9 +104,15 @@ class GroupResolutionConfig(BaseModel):
     client_secret_env: str = ""
     """Env var name holding the Entra ID application client secret."""
 
+    client_secret_path: str = ""
+    """DfeSecrets path holding the Entra ID application client secret."""
+
     # -- Okta (api mode) --
     api_token_env: str = ""
     """Env var name holding the Okta API token."""
+
+    api_token_path: str = ""
+    """DfeSecrets path holding the Okta API token."""
 
     okta_domain: str = ""
     """Okta organisation domain (e.g. 'example.okta.com')."""
@@ -118,8 +127,8 @@ class OIDCProvider(BaseModel):
     """An OIDC identity provider configuration.
 
     The provider name is the filename stem of the YAML file — it is NOT
-    stored as a field here.  All credential material is stored as env var
-    names (strings), never as secrets directly.
+    stored as a field here.  Secret material is stored as a PATH into the
+    DfeSecrets seam or as the NAME of an env var, never as the value itself.
     """
 
     type: _ProviderType = "generic"
@@ -134,6 +143,12 @@ class OIDCProvider(BaseModel):
     issuer: str = ""
     """OIDC issuer URL (e.g. 'https://accounts.google.com')."""
 
+    client_id: str = ""
+    """The OIDC client ID itself - it is not secret, so it is held in the clear.
+
+    ``client_id_env`` still resolves it when this is empty, so a deployment that
+    injects the id through the environment keeps working."""
+
     client_id_env: str = ""
     """Env var name holding the OIDC client ID."""
 
@@ -144,6 +159,9 @@ class OIDCProvider(BaseModel):
     Entra Graph API sync). This one is the confidential-client secret the engine
     presents to the IdP token endpoint when terminating the login flow.
     """
+
+    client_secret_path: str = ""
+    """DfeSecrets path holding the RP client secret - a path, never the secret."""
 
     scopes: str = "openid email profile groups"
     """Space-separated OAuth scopes requested at login. ``openid`` is mandatory."""

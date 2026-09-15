@@ -16,7 +16,6 @@ this adapter lists and resolves groups using the Okta Management API
 
 from __future__ import annotations
 
-import os
 import re
 from typing import Any
 from urllib.parse import urlparse
@@ -24,14 +23,12 @@ from urllib.parse import urlparse
 from scalo.logger import logger
 
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
-from dfe_engine.auth.oidc.models import GroupInfo, OIDCProvider
+from dfe_engine.auth.oidc.credential_env import resolve_credential
+from dfe_engine.auth.oidc.models import GroupInfo
 
 
 class OktaAdapter(OIDCGroupAdapter):
     """Okta Groups API adapter."""
-
-    def __init__(self, provider: OIDCProvider) -> None:
-        super().__init__(provider)
 
     async def resolve_groups(self, group_ids: list[str]) -> dict[str, str]:
         """Resolve Okta group IDs to display names."""
@@ -140,7 +137,10 @@ class OktaAdapter(OIDCGroupAdapter):
             return False, "Okta domain not configured (groups.okta_domain)"
         if headers is None:
             env = self._provider.groups.api_token_env or "groups.api_token_env"
-            return False, f"Okta API token not configured (set env var '{env}')"
+            return False, (
+                "Okta API token not configured (send it as 'groups.api_token' to the "
+                f"provider API, or set env var '{env}')"
+            )
 
         from scalo.http import AsyncHttpClient
 
@@ -164,10 +164,11 @@ class OktaAdapter(OIDCGroupAdapter):
         if not base:
             return None, None
 
-        env = self._provider.groups.api_token_env
-        if not env:
-            return base, None
-        token = os.environ.get(env)
+        token = resolve_credential(
+            secret_path=self._provider.groups.api_token_path,
+            env_name=self._provider.groups.api_token_env,
+            secrets=self._secrets,
+        )
         if not token:
             return base, None
         return base, {"Authorization": f"SSWS {token}", "Accept": "application/json"}

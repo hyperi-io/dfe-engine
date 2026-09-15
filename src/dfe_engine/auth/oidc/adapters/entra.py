@@ -12,17 +12,16 @@ Resolves group GUIDs to display names via the Microsoft Graph API.
 Requires an Entra app registration with the ``Group.Read.All`` application
 permission and admin consent granted.
 
-Credential env vars are referenced by name from ``OIDCProvider.client_id_env``
-and ``GroupResolutionConfig.tenant_id_env`` / ``client_secret_env``.  If any
-credential is missing the adapter fails open — all methods return unfriendly
-fallbacks rather than raising.
+The client secret resolves from ``GroupResolutionConfig.client_secret_path`` in
+the DfeSecrets seam before ``client_secret_env``; the tenant id comes from
+``tenant_id_env``.  If any credential is missing the adapter fails open — all
+methods return unfriendly fallbacks rather than raising.
 
 Usage::
 
     from dfe_engine.auth.oidc.adapters.entra import EntraAdapter
-    from dfe_engine.auth.oidc.models import OIDCProvider
 
-    adapter = EntraAdapter(provider)
+    adapter = EntraAdapter(provider, secrets=store)
     groups = await adapter.list_all_groups()
     display_names = await adapter.resolve_groups(group_ids)
 """
@@ -30,16 +29,13 @@ Usage::
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
 
 import msal
 from scalo.logger import logger
 
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
+from dfe_engine.auth.oidc.credential_env import resolve_credential
 from dfe_engine.auth.oidc.models import GroupInfo
-
-if TYPE_CHECKING:
-    from dfe_engine.auth.oidc.models import OIDCProvider
 
 
 class EntraAdapter(OIDCGroupAdapter):
@@ -54,9 +50,6 @@ class EntraAdapter(OIDCGroupAdapter):
     GRAPH_BASE = "https://graph.microsoft.com/v1.0"
     _GRAPH_SCOPE = "https://graph.microsoft.com/.default"
     _PAGE_SIZE = 999  # Maximum $top value accepted by Graph API
-
-    def __init__(self, provider: OIDCProvider) -> None:
-        super().__init__(provider)
 
     # ------------------------------------------------------------------
     # Public interface
@@ -270,22 +263,25 @@ class EntraAdapter(OIDCGroupAdapter):
     def _get_token(self) -> str | None:
         """Acquire an OAuth2 access token via MSAL client credentials flow.
 
-        Reads credential values from the env vars whose *names* are stored in
-        the provider configuration.  Returns None if any credential is missing
-        or if MSAL fails to acquire a token.
+        The client secret resolves through the DfeSecrets seam before the env
+        var named in config; the tenant id is not secret and stays an env read.
+        Returns None if any credential is missing or if MSAL fails.
 
         Returns:
             Access token string, or None if credentials are unavailable.
         """
-        # Read env var names from provider config
         tenant_id_env = self._provider.groups.tenant_id_env
-        client_secret_env = self._provider.groups.client_secret_env
-        client_id_env = self._provider.client_id_env
-
-        # Resolve actual values from environment
         tenant_id = os.environ.get(tenant_id_env) if tenant_id_env else None
-        client_id = os.environ.get(client_id_env) if client_id_env else None
-        client_secret = os.environ.get(client_secret_env) if client_secret_env else None
+        client_id = resolve_credential(
+            value=self._provider.client_id,
+            env_name=self._provider.client_id_env,
+            secrets=self._secrets,
+        )
+        client_secret = resolve_credential(
+            secret_path=self._provider.groups.client_secret_path,
+            env_name=self._provider.groups.client_secret_env,
+            secrets=self._secrets,
+        )
 
         if not tenant_id or not client_id or not client_secret:
             return None

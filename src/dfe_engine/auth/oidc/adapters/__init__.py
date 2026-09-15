@@ -12,7 +12,7 @@ Usage::
 
     from dfe_engine.auth.oidc.adapters import get_adapter
 
-    adapter = get_adapter(provider)
+    adapter = get_adapter(provider, secrets=store)
     groups = await adapter.list_all_groups()
 """
 
@@ -23,9 +23,10 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
     from dfe_engine.auth.oidc.models import OIDCProvider
+    from dfe_engine.secrets import DfeSecrets
 
 
-def get_adapter(provider: OIDCProvider) -> OIDCGroupAdapter:
+def get_adapter(provider: OIDCProvider, *, secrets: DfeSecrets | None = None) -> OIDCGroupAdapter:
     """Return the appropriate OIDCGroupAdapter for *provider*.
 
     Imports are lazy inside each branch so that optional provider-specific
@@ -34,6 +35,8 @@ def get_adapter(provider: OIDCProvider) -> OIDCGroupAdapter:
 
     Args:
         provider: The OIDCProvider configuration instance.
+        secrets: The DfeSecrets seam the directory credential resolves through,
+            ahead of the env var named in the provider config.
 
     Returns:
         An OIDCGroupAdapter implementation for the given provider type.
@@ -47,24 +50,24 @@ def get_adapter(provider: OIDCProvider) -> OIDCGroupAdapter:
     if provider.groups.directory_backend == "mock":
         from dfe_engine.auth.oidc.adapters.mock import MockDirectoryAdapter
 
-        return MockDirectoryAdapter(provider)
+        return MockDirectoryAdapter(provider, secrets=secrets)
 
     match provider.type:
         case "generic":
             from dfe_engine.auth.oidc.adapters.generic import GenericAdapter
 
-            return GenericAdapter(provider)
+            return GenericAdapter(provider, secrets=secrets)
         case "google":
             from dfe_engine.auth.oidc.adapters.google import GoogleAdapter
 
-            return GoogleAdapter(provider)
+            return GoogleAdapter(provider, secrets=secrets)
         case "entra_id":
             from dfe_engine.auth.oidc.adapters.entra import EntraAdapter
 
-            return EntraAdapter(provider)
+            return EntraAdapter(provider, secrets=secrets)
         case "okta":
             from dfe_engine.auth.oidc.adapters.okta import OktaAdapter
 
-            return OktaAdapter(provider)
+            return OktaAdapter(provider, secrets=secrets)
         case _:
             raise ValueError(f"Unsupported OIDC provider type: {provider.type!r}")

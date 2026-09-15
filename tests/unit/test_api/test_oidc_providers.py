@@ -10,6 +10,20 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
+
+def _provider_yaml(api_settings, name: str) -> Path:
+    """The YAML file the registry persists a provider to."""
+    return Path(api_settings.auth.auth_dir) / "oidc-providers" / f"{name}.yaml"
+
+
+def _field_errors(response) -> list[str]:
+    """The field names a 422 named, so a form can point at the offending input."""
+    return [err["field"] for err in response.json()["errors"]]
+
 
 def _create_provider(client, admin_headers, name="test-provider", **overrides):
     """Helper to create a provider and return the response."""
@@ -309,13 +323,21 @@ class TestVerifyLoginConfig:
         client_id = next(c for c in data["checks"] if c["name"] == "client_id")
         assert client_id["ok"] is False
 
-    def test_reports_literal_client_id_as_misconfiguration(self, client, admin_headers):
-        """YAML that stores the client id value instead of an env var name is flagged."""
-        _create_provider(
-            client,
-            admin_headers,
-            name="vl-literal-id",
-            client_id_env="0oa15mxzztuHEzwr7698",
+    def test_reports_literal_client_id_as_misconfiguration(self, client, app, admin_headers):
+        """YAML that stores the client id value instead of an env var name is flagged.
+
+        The API refuses that shape now, so the only way in is a file written out
+        of band (a gitops sync, an operator editing the YAML).
+        """
+        from dfe_engine.auth.oidc.models import OIDCProvider
+
+        app.state.oidc_provider_registry.create(
+            "vl-literal-id",
+            OIDCProvider(
+                type="generic",
+                issuer="https://accounts.example.com",
+                client_id_env="0oa15mxzztuHEzwr7698",
+            ),
         )
         resp = client.get(
             "/api/v1/auth/oidc-providers/vl-literal-id/verify-login", headers=admin_headers
@@ -325,6 +347,17 @@ class TestVerifyLoginConfig:
         assert client_id["ok"] is False
         assert "environment variable name" in client_id["detail"]
         assert "0oa" not in client_id["detail"]
+
+    def test_reports_a_stored_client_secret_as_present(self, client, admin_headers):
+        """A secret written through the API satisfies the check without any env var."""
+        _create_provider(client, admin_headers, name="vl-stored", client_secret="rp-secret-value")
+        resp = client.get(
+            "/api/v1/auth/oidc-providers/vl-stored/verify-login", headers=admin_headers
+        )
+        assert resp.status_code == 200
+        check = next(c for c in resp.json()["checks"] if c["name"] == "client_secret")
+        assert check["ok"] is True
+        assert "rp-secret-value" not in resp.text
 
     def test_reports_present_client_id(self, client, admin_headers, monkeypatch):
         """A resolvable client_id env var passes its check (value never returned)."""
@@ -377,6 +410,28 @@ class TestRelyingPartyStaysInSync:
         _create_provider(client, admin_headers, name="fresh")
         assert app.state.oidc_rp.has_provider("fresh")
 
+    def test_created_credentials_reach_the_rp_without_a_restart(self, client, app, admin_headers):
+        """The whole point of dfe-engine#392: no env edit, no restart, just a login."""
+        _create_provider(
+            client,
+            admin_headers,
+            name="live",
+            client_id="live-client",
+            client_secret="live-secret",
+        )
+        registered = app.state.oidc_rp._oauth.create_client("live")
+        assert registered.client_id == "live-client"
+        assert registered.client_secret == "live-secret"
+
+    def test_a_rotated_secret_reaches_the_rp_without_a_restart(self, client, app, admin_headers):
+        _create_provider(client, admin_headers, name="rot", client_id="c", client_secret="first")
+        client.put(
+            "/api/v1/auth/oidc-providers/rot",
+            json={"client_secret": "second"},
+            headers=admin_headers,
+        )
+        assert app.state.oidc_rp._oauth.create_client("rot").client_secret == "second"
+
     def test_disable_stops_serving_logins(self, client, app, admin_headers):
         _create_provider(client, admin_headers, name="toggled")
         assert app.state.oidc_rp.has_provider("toggled")
@@ -405,3 +460,149 @@ class TestRelyingPartyStaysInSync:
         assert resp.status_code == 201
         assert app.state.oidc_rp.has_provider("good")
         assert not app.state.oidc_rp.has_provider("no-issuer")
+
+
+class TestCredentialsGoToTheSecretStore:
+    """A credential sent to the API is written to the store; config keeps a path.
+
+    The old shape only accepted the NAME of an env var, so a provider created in
+    a running engine had no credentials until someone edited the deployment env
+    and restarted it.
+    """
+
+    def test_client_secret_lands_in_the_store_not_the_yaml(
+        self, client, app, api_settings, admin_headers
+    ):
+        resp = _create_provider(
+            client, admin_headers, name="stored", client_secret="rp-client-secret"
+        )
+        assert resp.status_code == 201
+        assert resp.json()["client_secret_path"] == "oidc/stored/client_secret"
+        assert app.state.dfe_secrets.get("oidc/stored/client_secret") == "rp-client-secret"
+        assert "rp-client-secret" not in _provider_yaml(api_settings, "stored").read_text()
+
+    def test_a_secret_is_never_echoed_back(self, client, admin_headers):
+        resp = _create_provider(
+            client, admin_headers, name="no-echo", client_secret="rp-client-secret"
+        )
+        assert "rp-client-secret" not in resp.text
+        got = client.get("/api/v1/auth/oidc-providers/no-echo", headers=admin_headers)
+        assert "rp-client-secret" not in got.text
+
+    def test_client_id_stays_a_plain_field(self, client, api_settings, admin_headers):
+        """The client id is not secret, so it is readable in config and in the API."""
+        resp = _create_provider(client, admin_headers, name="plain-id", client_id="0oa15mxz")
+        assert resp.json()["client_id"] == "0oa15mxz"
+        assert "0oa15mxz" in _provider_yaml(api_settings, "plain-id").read_text()
+
+    def test_group_api_secrets_land_in_the_store(self, client, app, api_settings, admin_headers):
+        resp = _create_provider(
+            client,
+            admin_headers,
+            name="okta-groups",
+            type="okta",
+            groups={"mode": "api", "okta_domain": "acme.okta.com", "api_token": "okta-ssws-token"},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["groups"]["api_token_path"] == "oidc/okta-groups/groups_api_token"
+        assert app.state.dfe_secrets.get("oidc/okta-groups/groups_api_token") == "okta-ssws-token"
+        assert "okta-ssws-token" not in _provider_yaml(api_settings, "okta-groups").read_text()
+
+    def test_rotation_replaces_the_stored_secret(self, client, app, admin_headers):
+        _create_provider(client, admin_headers, name="rotated", client_secret="first")
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/rotated",
+            json={"client_secret": "second"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert app.state.dfe_secrets.get("oidc/rotated/client_secret") == "second"
+
+    def test_an_unrelated_update_keeps_the_stored_secret(self, client, app, admin_headers):
+        """Flipping enabled must not strand the credential the provider logs in with."""
+        _create_provider(client, admin_headers, name="kept", client_secret="keep-me")
+        client.put(
+            "/api/v1/auth/oidc-providers/kept", json={"enabled": False}, headers=admin_headers
+        )
+        resp = client.get("/api/v1/auth/oidc-providers/kept", headers=admin_headers)
+        assert resp.json()["client_secret_path"] == "oidc/kept/client_secret"
+        assert app.state.dfe_secrets.get("oidc/kept/client_secret") == "keep-me"
+
+    def test_a_groups_edit_keeps_a_stored_directory_token(self, client, app, admin_headers):
+        _create_provider(
+            client,
+            admin_headers,
+            name="okta-edit",
+            type="okta",
+            groups={"mode": "api", "okta_domain": "acme.okta.com", "api_token": "okta-ssws-token"},
+        )
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/okta-edit",
+            json={"groups": {"mode": "api", "okta_domain": "acme.okta.com", "sync_interval": 900}},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["groups"]["api_token_path"] == "oidc/okta-edit/groups_api_token"
+        assert app.state.dfe_secrets.get("oidc/okta-edit/groups_api_token") == "okta-ssws-token"
+
+    def test_detach_removes_the_stored_secrets(self, client, app, admin_headers):
+        """Nothing is left in the store that can authenticate as a detached provider."""
+        _create_provider(client, admin_headers, name="gone", client_secret="rp-client-secret")
+        assert app.state.dfe_secrets.exists("oidc/gone/client_secret")
+
+        client.delete("/api/v1/auth/oidc-providers/gone", headers=admin_headers)
+        assert not app.state.dfe_secrets.exists("oidc/gone/client_secret")
+
+
+class TestEnvNameFieldsRejectPastedSecrets:
+    """A ``*_env`` field takes the NAME of an env var; anything else is a 422.
+
+    The form invited pasting the secret itself, and the API used to accept it and
+    write the literal into the provider YAML.
+    """
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("client_secret_env", "sUpEr-s3cret-value"),
+            ("client_id_env", "0oa15mxzztuHEzwr7698"),
+        ],
+    )
+    def test_create_rejects_a_literal(self, client, admin_headers, field, value):
+        resp = _create_provider(client, admin_headers, name="bad-env", **{field: value})
+        assert resp.status_code == 422
+        assert _field_errors(resp) == [field]
+        assert value not in resp.text
+
+    def test_update_rejects_a_literal(self, client, admin_headers):
+        _create_provider(client, admin_headers, name="upd-bad-env")
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/upd-bad-env",
+            json={"client_secret_env": "sUpEr-s3cret-value"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert _field_errors(resp) == ["client_secret_env"]
+
+    def test_group_env_fields_reject_a_literal(self, client, admin_headers):
+        resp = _create_provider(
+            client,
+            admin_headers,
+            name="bad-group-env",
+            groups={"mode": "api", "api_token_env": "00abcSSWStokenvalue-xyz"},
+        )
+        assert resp.status_code == 422
+        assert _field_errors(resp) == ["groups.api_token_env"]
+
+    def test_a_real_env_name_is_still_accepted(self, client, admin_headers):
+        resp = _create_provider(
+            client, admin_headers, name="good-env", client_secret_env="OIDC_RP_SECRET"
+        )
+        assert resp.status_code == 201
+        assert resp.json()["client_secret_env"] == "OIDC_RP_SECRET"
+
+    @pytest.mark.parametrize("name", ["../escape", "with/slash", "-leading-dash", ""])
+    def test_a_name_that_is_not_a_safe_path_segment_is_rejected(self, client, admin_headers, name):
+        """The name is a filename stem and a secret-store path segment."""
+        resp = _create_provider(client, admin_headers, name=name)
+        assert resp.status_code == 422

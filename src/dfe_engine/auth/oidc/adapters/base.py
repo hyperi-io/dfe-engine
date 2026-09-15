@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from dfe_engine.auth.oidc.models import GroupInfo, OIDCProvider
+    from dfe_engine.secrets import DfeSecrets
 
 
 class OIDCGroupAdapter(ABC):
@@ -28,8 +29,10 @@ class OIDCGroupAdapter(ABC):
     from a specific identity provider.
     """
 
-    def __init__(self, provider: OIDCProvider) -> None:
+    def __init__(self, provider: OIDCProvider, *, secrets: DfeSecrets | None = None) -> None:
         self._provider = provider
+        # The directory-API credential resolves through this seam before the env.
+        self._secrets = secrets
 
     @abstractmethod
     async def resolve_groups(self, subject: str) -> list[GroupInfo]:

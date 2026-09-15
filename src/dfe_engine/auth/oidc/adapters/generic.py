@@ -18,7 +18,7 @@ Gateway or the token validator).  No admin API calls are made.
 from __future__ import annotations
 
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
-from dfe_engine.auth.oidc.models import GroupInfo, OIDCProvider
+from dfe_engine.auth.oidc.models import GroupInfo
 
 
 class GenericAdapter(OIDCGroupAdapter):
@@ -32,9 +32,6 @@ class GenericAdapter(OIDCGroupAdapter):
 
     ``test_connection`` always succeeds — there is no connection to test.
     """
-
-    def __init__(self, provider: OIDCProvider) -> None:
-        super().__init__(provider)
 
     async def resolve_groups(self, subject: str) -> list[GroupInfo]:
         """Return an empty list — group identifiers are not known without a claim.

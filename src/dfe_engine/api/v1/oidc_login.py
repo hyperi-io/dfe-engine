@@ -134,7 +134,9 @@ def _reload_rp_if_provider_known(request: Request, provider: str):
     from dfe_engine.auth.oidc.rp import build_relying_party
 
     logger.info("OIDC RP stale - rebuilding for a provider added since startup", provider=provider)
-    request.app.state.oidc_rp = build_relying_party(registry)
+    request.app.state.oidc_rp = build_relying_party(
+        registry, secrets=getattr(request.app.state, "dfe_secrets", None)
+    )
     return request.app.state.oidc_rp
 
 

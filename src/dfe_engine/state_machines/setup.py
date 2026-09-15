@@ -262,8 +262,9 @@ class OIDCProviderLoginOption(BaseModel):
 class OIDCProviderSummary(OIDCProvider):
     """A registry OIDC provider, with its registry name folded in.
 
-    ``OIDCProvider`` holds env var *names* rather than secret values, so the
-    whole model is safe to return.
+    ``OIDCProvider`` holds secret-store paths and env var *names* rather than
+    secret values, and the client id is public by design (the browser carries it
+    to the IdP authorize endpoint), so the whole model is safe to return.
     """
 
     name: str = Field(description="Registry name (the provider YAML filename stem).")

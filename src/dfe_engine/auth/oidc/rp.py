@@ -16,9 +16,10 @@ identity (sub/email/groups), and then RE-MINTS its own ES384 engine token via
 ``JwtAuthority``. Downstream apps only ever see the engine-issued token - the
 external IdP's RS256 token never leaves the engine<->IdP leg.
 
-Credentials are stored in config as ENV VAR NAMES (never secrets in config);
-the RP resolves the actual client_id/client_secret from the environment at
-registration time.
+Config never holds a secret: it holds the client_id in the clear, a PATH into
+the DfeSecrets seam, and the NAME of an env var. The RP resolves the real
+client_id/client_secret at registration time, store before env, so a secret
+written through the provider API takes effect without a restart.
 
 Claim extraction is a PURE function (``extract_identity``) kept separate from
 the Authlib redirect plumbing so it is unit-testable without a live IdP.
@@ -26,18 +27,20 @@ the Authlib redirect plumbing so it is unit-testable without a live IdP.
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING, Any
 
 from authlib.integrations.starlette_client import OAuth
 from pydantic import BaseModel
 from scalo.logger import logger
 
+from dfe_engine.auth.oidc.credential_env import resolve_credential
+
 if TYPE_CHECKING:
     from starlette.requests import Request
 
     from dfe_engine.auth.oidc.models import OIDCProvider
     from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+    from dfe_engine.secrets import DfeSecrets
 
 
 class NormalizedIdentity(BaseModel):
@@ -125,15 +128,19 @@ class OidcRelyingParty:
 
     Builds one Authlib ``OAuth`` registry from the ENABLED providers in the
     OIDC provider registry. Each provider registers with client_id/client_secret
-    resolved from the env vars named in its config and an OIDC discovery URL, so
-    Authlib validates the id_token against the IdP JWKS on callback.
+    resolved through ``resolve_credential`` (store before env) and an OIDC
+    discovery URL, so Authlib validates the id_token against the IdP JWKS on
+    callback.
 
     Zero enabled providers is a valid state: the RP holds an empty registry and
     every lookup reports the provider unknown (the router turns that into a 404).
     """
 
-    def __init__(self, registry: OIDCProviderRegistry) -> None:
+    def __init__(
+        self, registry: OIDCProviderRegistry, *, secrets: DfeSecrets | None = None
+    ) -> None:
         self._oauth = OAuth()
+        self._secrets = secrets
         # Only providers we actually registered (enabled + non-empty issuer).
         self._providers: dict[str, OIDCProvider] = {}
         for name, provider in registry.list():
@@ -142,14 +149,21 @@ class OidcRelyingParty:
             if not provider.issuer:
                 logger.warning("OIDC RP: skipping provider with empty issuer", provider=name)
                 continue
-            client_id = os.environ.get(provider.client_id_env) if provider.client_id_env else None
-            client_secret = (
-                os.environ.get(provider.client_secret_env) if provider.client_secret_env else None
+            client_id = resolve_credential(
+                value=provider.client_id,
+                env_name=provider.client_id_env,
+                secrets=secrets,
+            )
+            client_secret = resolve_credential(
+                secret_path=provider.client_secret_path,
+                env_name=provider.client_secret_env,
+                secrets=secrets,
             )
             self._oauth.register(
                 name=name,
-                client_id=client_id,
-                client_secret=client_secret,
+                # Authlib treats an unset credential as None, not as an empty string.
+                client_id=client_id or None,
+                client_secret=client_secret or None,
                 server_metadata_url=(
                     f"{provider.issuer.rstrip('/')}/.well-known/openid-configuration"
                 ),
@@ -256,7 +270,8 @@ class OidcRelyingParty:
 
         directory_id = str(userinfo.get("oid") or identity.email or identity.subject)
         try:
-            fetched = await get_adapter(provider).resolve_user_groups(directory_id)
+            adapter = get_adapter(provider, secrets=self._secrets)
+            fetched = await adapter.resolve_user_groups(directory_id)
         except Exception as exc:  # pragma: no cover - defensive; adapters fail open
             logger.warning(
                 "OIDC RP: directory group enrichment failed",
@@ -276,7 +291,9 @@ class OidcRelyingParty:
         return identity
 
 
-def build_relying_party(registry: OIDCProviderRegistry) -> OidcRelyingParty | None:
+def build_relying_party(
+    registry: OIDCProviderRegistry, *, secrets: DfeSecrets | None = None
+) -> OidcRelyingParty | None:
     """Build an RP over the registry's CURRENT contents, or None if it cannot be built.
 
     An RP SNAPSHOTS the enabled providers at construction - both its own
@@ -292,7 +309,7 @@ def build_relying_party(registry: OIDCProviderRegistry) -> OidcRelyingParty | No
     with malformed config must not take a CRUD write down with it.
     """
     try:
-        return OidcRelyingParty(registry)
+        return OidcRelyingParty(registry, secrets=secrets)
     except Exception as exc:
         logger.warning("OIDC relying party unavailable", error=str(exc))
         return None
