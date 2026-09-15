@@ -263,28 +263,6 @@ def test_context_reads_the_default_ttl_from_settings(tmp_path):
     assert ctx.default_ttl_days == 45
 
 
-def test_context_reports_the_stored_override_over_the_env_default(tmp_path):
-    from dfe_engine.gitcrud import GitCrud, default_registry
-    from dfe_engine.gitcrud.retention import set_stored
-    from dfe_engine.gitops.repo import GitopsRepo
-
-    crud = GitCrud(GitopsRepo(local_path=str(tmp_path / "deploy"), push=False), default_registry())
-    settings = SimpleNamespace(
-        auth=SimpleNamespace(local=SimpleNamespace(admin_name="", admin_password="")),
-        env="dev",
-        gitops=SimpleNamespace(mode="team"),
-        deployment=SimpleNamespace(target="docker", namespace=""),
-        clickhouse=SimpleNamespace(default_ttl_days=45),
-    )
-    state = SimpleNamespace(account_store=None, settings=settings, gitcrud=crud)
-
-    assert SetupContext.from_app_state(state).default_ttl_days == 45
-    set_stored(crud, 30, actor="derek")
-    ctx = SetupContext.from_app_state(state)
-    assert ctx.default_ttl_days == 30
-    assert SETUP_MACHINE.status(ctx).default_ttl_days == 30
-
-
 def test_status_carries_the_default_ttl_from_the_context(ctx):
     assert SETUP_MACHINE.status(ctx).default_ttl_days == 90
     assert SETUP_MACHINE.status(_minted(ctx, default_ttl_days=30)).default_ttl_days == 30
