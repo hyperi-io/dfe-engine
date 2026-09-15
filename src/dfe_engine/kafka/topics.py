@@ -127,6 +127,7 @@ class TopicUpdateResult:
 
     @property
     def ok(self) -> bool:
+        """True when the broker rejected nothing; a refusal is not a failure."""
         return not self.failed
 
 
@@ -154,6 +155,7 @@ class TopicStatusResult:
 
     @property
     def reachable(self) -> bool:
+        """True when the broker answered; the topic list is only meaningful then."""
         return self.error is None
 
 
