@@ -10,22 +10,34 @@
 # Per-query keys:
 #   database         otel | data | <literal db>
 #   table            the otel table to read
-#   sql              ClickHouse SQL; __DB__ is the resolved database
+#   sql              ClickHouse SQL; __DB__ is the resolved database.
+#                    __PRESSURE_MATCH__ and __PRESSURE_NAME__ are replaced with the
+#                    one rule that matches the scaling-pressure gauge under any
+#                    namespace prefix (dfe_engine/scaling_pressure.py).
 #   params           request params bound into the SQL (validated identifiers)
 #   binds            fixed CH bind params
 #   timeout_seconds  ClickHouse max_execution_time
 queries:
   # One row per gauge carrying its most recent reading, so the whole gauge set
   # costs one round trip rather than one per metric.
+  # Scaling pressure is matched by rule rather than by name and reported under the
+  # canonical bare name, so an app that prefixes its gauge still reports a reading.
+  # Each series - one metric name, one attribute set - is read at its own latest
+  # timestamp and the MAX across series is returned; every other gauge here carries
+  # one attribute set, so only pressure has more than one series to reduce.
   latest_gauges:
     database: otel
     sql: >
-      SELECT MetricName, argMax(Value, TimeUnix) AS value
-      FROM __DB__.otel_metrics_gauge
-      WHERE ServiceName = {service:String}
-        AND MetricName IN {names:Array(String)}
-        AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
-      GROUP BY MetricName
+      SELECT metric, max(value) AS value
+      FROM (
+        SELECT __PRESSURE_NAME__ AS metric, argMax(Value, TimeUnix) AS value
+        FROM __DB__.otel_metrics_gauge
+        WHERE ServiceName = {service:String}
+          AND (MetricName IN {names:Array(String)} OR __PRESSURE_MATCH__)
+          AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
+        GROUP BY MetricName, cityHash64(Attributes)
+      )
+      GROUP BY metric
     params: [service]
     binds:
       window_seconds: 300
@@ -66,12 +78,14 @@ queries:
   # as its own service name, so querying one instance already scopes to one config.
   # p95 rides alongside min/max/avg because a ceiling set from the average
   # under-provisions anything with a spiky profile.
+  # Scaling pressure buckets under its canonical bare name whatever prefix the app
+  # emitted, so one series is graphed rather than one per namespace.
   resource_series:
     database: otel
     sql: >
       SELECT
         toStartOfInterval(TimeUnix, INTERVAL {bucket_seconds:UInt32} SECOND) AS bucket,
-        MetricName,
+        __PRESSURE_NAME__ AS metric,
         min(Value) AS min_value,
         max(Value) AS max_value,
         avg(Value) AS avg_value,
@@ -79,9 +93,9 @@ queries:
         count() AS samples
       FROM __DB__.otel_metrics_gauge
       WHERE ServiceName = {service:String}
-        AND MetricName IN {names:Array(String)}
+        AND (MetricName IN {names:Array(String)} OR __PRESSURE_MATCH__)
         AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
-      GROUP BY bucket, MetricName
+      GROUP BY bucket, metric
       ORDER BY bucket
     params: [service]
     binds:

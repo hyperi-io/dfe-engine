@@ -47,6 +47,8 @@ from dfe_engine.schema.applier import SchemaApplier
 from dfe_engine.schema.engine_resolver import EngineResolver
 from dfe_engine.schema.internal_tables import hunt_coordination_specs
 
+from .schedule import due_count
+
 
 @dataclass(frozen=True, slots=True)
 class Lease:
@@ -190,6 +192,14 @@ class ChCoordinator:
             parameters={"now": now},
         ).result_rows
         return int(rows[0][0]) if rows else 0
+
+    def backlog_count(self) -> int:
+        """Hunts due and unclaimed right now - the same SQL the KEDA shim reads.
+
+        One due-count source of truth: the runner's backlog gauge and the shim's
+        scaler answer cannot disagree, because both run ``schedule.due_query``.
+        """
+        return due_count(self._ch, self._db)
 
     # ---- watermark (incremental resume) -------------------------------
 

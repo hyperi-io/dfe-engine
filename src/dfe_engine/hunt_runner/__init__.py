@@ -26,6 +26,7 @@ from .interval import (
     is_irregular,
     parse_interval,
 )
+from .metrics import HuntRunnerMetrics
 from .models import HuntSpec, HuntState
 from .rule_compiler import compile_hunt_queries
 from .run_status import RunStatus, read_run_status
@@ -42,6 +43,7 @@ __all__ = [
     "Decision",
     "EmptyHuntQuery",
     "HuntRunner",
+    "HuntRunnerMetrics",
     "HuntSpec",
     "HuntState",
     "HuntStateRow",
