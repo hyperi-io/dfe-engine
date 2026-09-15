@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.20.8](https://github.com/hyperi-io/dfe-engine/compare/v1.20.7...v1.20.8) (2026-09-15)
+
+### Bug Fixes
+
+* **auth:** role claim for HyperDX, no chart-set names in custom env, catalogue follows infra ([f6e31a5](https://github.com/hyperi-io/dfe-engine/commit/f6e31a5ff01ef6969982d152254101bab6ada2b0))
+
 ## [1.20.7](https://github.com/hyperi-io/dfe-engine/compare/v1.20.6...v1.20.7) (2026-09-14)
 
 ### Bug Fixes
