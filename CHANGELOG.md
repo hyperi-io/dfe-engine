@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.20.18](https://github.com/hyperi-io/dfe-engine/compare/v1.20.17...v1.20.18) (2026-09-16)
+
+### Bug Fixes
+
+* re-vendor apps.yaml from the dfe-infra ssot ([b3245e5](https://github.com/hyperi-io/dfe-engine/commit/b3245e54885db089e0d2895d5f82e9d0efc3923f))
+
 ## [1.20.17](https://github.com/hyperi-io/dfe-engine/compare/v1.20.16...v1.20.17) (2026-09-16)
 
 ### Bug Fixes
