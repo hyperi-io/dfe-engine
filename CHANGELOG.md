@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.20.19](https://github.com/hyperi-io/dfe-engine/compare/v1.20.18...v1.20.19) (2026-09-16)
+
+### Bug Fixes
+
+* one connector type per source, on the write and on the compose ([9b5e0ee](https://github.com/hyperi-io/dfe-engine/commit/9b5e0ee4ee1ecf81ae5e2f328ed5eef12f1c268d)), closes [#412](https://github.com/hyperi-io/dfe-engine/issues/412)
+
 ## [1.20.18](https://github.com/hyperi-io/dfe-engine/compare/v1.20.17...v1.20.18) (2026-09-16)
 
 ### Bug Fixes
