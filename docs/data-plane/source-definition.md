@@ -52,6 +52,9 @@ match:
 # A fetcher-based source has no match rule. The engine deploys one dfe-fetcher
 # instance named for the source, with this stanza compiled into it, when the
 # source is active and deployed, and removes it when the source is not.
+# A source is ONE connector type across as many connections as it likes -- one
+# schema per source is what keeps its table one shape -- so a second type is
+# refused on the write and again when the fetcher config is composed.
 # fetcher:
 #   source_type: okta                   # A family the deployed fetcher ships (apps.yaml source_types)
 #   topic: own                          # own: this source's topic and table | main: the shared main topic and table
@@ -192,7 +195,16 @@ emits the schema YAML, which the source then names. The mapping table is in
 | match rule | no conflict across non-disabled sources (same field+operator+value); a dormant source HOLDS its match, only disabling releases it |
 | match operator | receiver-evaluable (`equals` or `exists`); `always` only on the reserved `main` source |
 | fetcher route | must not name its own source |
+| fetcher connector type | one type per source, however many connections it polls; the refusal names the source and the types |
 | flow | runnable here: the deployment offers the transport, and every app in the flow carries it |
 | transform | engine must be one the app manifest catalogues (`vrl`, `vector`, `elastic`) |
 | catalogue entry | the intake must be one the entry arrives by, the transform one it ships, and the source name a legal label - the entry's own name is used when it is one |
 | schema | files exist and pass SchemaBuilder validation, and carry `_source` as a column (injected if missing) |
+
+The connector-type rule is the source-schema alignment, enforced: one source is
+one schema, so it is one type, and the many connections of that type - accounts,
+tenants, regions, each with its own credential - all land in the one table.
+`DFE_SOURCE_ALLOW_MIXED_FETCHER_TYPES=true` (`source.allow_mixed_fetcher_types`)
+turns the enforcement off for a deployment that knowingly wants a mixed fetcher,
+and past that dial you are on your own: no suite support, no schema alignment,
+and dfe-fetcher's own many-to-many semantics apply to what lands in the table.
