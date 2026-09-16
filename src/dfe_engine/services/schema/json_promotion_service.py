@@ -228,20 +228,26 @@ def _json_subcolumn(path: str) -> str:
 
 
 def _match_accessor(match_field: str) -> str:
-    """SQL accessor for a source match field.
+    """SQL accessor for a source match field, in the receiver router's spelling.
 
-    A field prefixed with ``_json.`` names a path *inside* the JSON column and
-    resolves to a subcolumn (the ``_json.`` is the column, not part of the
-    path). Any other field names a real top-level table column and is referenced
-    directly, so a match can target a column that lives outside the JSON object
-    (e.g. ``_org_id``). Rejects backticks either way to keep it injection-safe.
+    The router walks the raw payload by splitting the field on ``.``, so a source
+    writes a nested match bare (``tags.collector.type``) and that is the spelling
+    this resolves: a bare field is a path inside the JSON column. Only the DFE
+    header columns are real columns here -- a match is compared against the shared
+    landing table, whose every non-payload column is ``_``-prefixed -- so those
+    are referenced directly and a match can still target ``_org_id``.
+
+    ``_json.<path>`` stays accepted for the same path, since the JSON column is
+    itself ``_``-prefixed. Rejects backticks either way to keep it injection-safe.
     """
     prefix = f"{JSON_COLUMN}."
     if match_field.startswith(prefix):
         return _json_subcolumn(match_field[len(prefix) :])
     if "`" in match_field:
         raise JsonPromotionError(f"Illegal match field: {match_field!r}")
-    return f"`{match_field}`"
+    if match_field.startswith("_"):
+        return f"`{match_field}`"
+    return _json_subcolumn(match_field)
 
 
 def _match_condition(
@@ -256,8 +262,9 @@ def _match_condition(
     table). Otherwise compares ``match_field`` using ``match_operator`` --
     used when discovering against the shared catch-all landing table, where a
     source's rows are identified by its match. ``match_field`` is resolved by
-    ``_match_accessor``: ``_json.<path>`` targets a JSON subcolumn, a bare name
-    targets a real column. Operands are parameterised (injection-safe); the
+    ``_match_accessor``: a bare name targets a JSON subcolumn, the way the
+    receiver router reads it, and a ``_``-prefixed name a header column.
+    Operands are parameterised (injection-safe); the
     field goes through ``_match_accessor`` which rejects backticks.
     """
     if not match_field:

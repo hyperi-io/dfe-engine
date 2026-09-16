@@ -15,7 +15,7 @@ kafka:
 
 archive:
   destination: "file:///tmp/dfe-archive"
-  path_template: "{topic}/{year}/{month}/{day}/{hour}"
+  path_template: "{year}/{month}/{day}/{hour}"
   file_extension: jsonl
   roll_size_bytes: 1073741824  # 1 GB
   roll_interval_secs: 3600

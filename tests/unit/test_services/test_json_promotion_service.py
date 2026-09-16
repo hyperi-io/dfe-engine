@@ -558,7 +558,7 @@ class TestDiscoverPaths:
         )
         assert params == {"match_value": "syslog"}
 
-    def test_bare_match_field_targets_real_column(self):
+    def test_bare_header_field_targets_real_column(self):
         client = _RecordingClient(discover_rows=[("a", "String")])
         discover_paths(
             client,
@@ -572,6 +572,81 @@ class TestDiscoverPaths:
         assert "WHERE toString(`_org_id`) = {match_value:String}" in sql
         assert "assumeNotNull(_json)" not in sql.split("WHERE", 1)[1]
         assert params == {"match_value": "acme"}
+
+    def test_a_bare_dotted_path_is_the_payload_path_the_router_reads(self):
+        # dfe-engine#335: the receiver splits match.field on '.' and walks the raw
+        # payload, so a source written for routing has to discover as well.
+        client = _RecordingClient(discover_rows=[("a", "String")])
+        discover_paths(
+            client,
+            db="dfe",
+            source="main",
+            existing_columns=[],
+            match_field="tags.collector.type",
+            match_value="syslog",
+        )
+        sql, params = client.calls[0]
+        assert (
+            "WHERE toString(assumeNotNull(_json).`tags.collector.type`) = {match_value:String}"
+            in sql
+        )
+        assert params == {"match_value": "syslog"}
+
+    def test_the_routers_spelling_and_the_json_prefix_resolve_the_same(self):
+        bare = _RecordingClient(discover_rows=[("a", "String")])
+        prefixed = _RecordingClient(discover_rows=[("a", "String")])
+        for client, field in (
+            (bare, "tags.collector.type"),
+            (prefixed, "_json.tags.collector.type"),
+        ):
+            discover_paths(
+                client,
+                db="dfe",
+                source="main",
+                existing_columns=[],
+                match_field=field,
+                match_value="syslog",
+            )
+        assert bare.calls[0] == prefixed.calls[0]
+
+    def test_a_bare_top_level_payload_key_is_a_subcolumn_too(self):
+        client = _RecordingClient(discover_rows=[("a", "String")])
+        discover_paths(
+            client,
+            db="dfe",
+            source="main",
+            existing_columns=[],
+            match_field="ingest_type",
+            match_value="beats",
+        )
+        sql, _ = client.calls[0]
+        assert "WHERE toString(assumeNotNull(_json).`ingest_type`) = {match_value:String}" in sql
+
+    def test_one_nested_match_field_works_for_routing_and_for_discovery(self):
+        # The same string through both readers: the receiver rule the routing
+        # compiles, and the SQL the discovery endpoint builds.
+        from dfe_engine.services.source_routing import receiver_match
+        from dfe_engine.source.models import Source, SourceMatch
+
+        source = Source(
+            source="filebeat",
+            match=SourceMatch(field="tags.collector.type", value="syslog"),
+        )
+        rule = receiver_match(source)
+        assert rule is not None
+        assert rule.field == "tags.collector.type"
+
+        client = _RecordingClient(discover_rows=[("a", "String")])
+        discover_paths(
+            client,
+            db="dfe",
+            source="main",
+            existing_columns=[],
+            match_field=rule.field,
+            match_value=rule.value,
+        )
+        sql, _ = client.calls[0]
+        assert "assumeNotNull(_json).`tags.collector.type`" in sql
 
     def test_paths_filter_adds_having(self):
         client = _RecordingClient(discover_rows=[("a", "String")])

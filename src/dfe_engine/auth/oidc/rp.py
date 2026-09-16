@@ -100,9 +100,13 @@ def extract_identity(
 ) -> NormalizedIdentity:
     """Pure claim-extraction: map validated id_token claims to a NormalizedIdentity.
 
-    ``sub`` and ``email`` are read from their standard OIDC claims. Groups come
-    from the claim named by ``provider.groups.claim_name`` (default ``groups``),
-    matching the token_claim resolution mode used across the DFE auth paths.
+    ``sub`` is read from its standard OIDC claim. ``email`` falls back to
+    ``preferred_username`` and then ``upn``: Entra emits no ``email`` for a
+    cloud-only user with no mailbox, and the UPN is the identifier an operator
+    recognises, so without the fallback such a user lands with a blank email.
+    Groups come from the claim named by ``provider.groups.claim_name`` (default
+    ``groups``), matching the token_claim resolution mode used across the DFE
+    auth paths.
 
     No network calls, no Authlib state - safe to unit-test with a plain dict.
 
@@ -114,7 +118,11 @@ def extract_identity(
         A NormalizedIdentity with subject, email, and groups.
     """
     subject = str(userinfo_claims.get("sub") or "")
-    email = str(userinfo_claims.get("email") or "")
+    email = ""
+    for claim in ("email", "preferred_username", "upn"):
+        email = str(userinfo_claims.get(claim) or "")
+        if email:
+            break
     claim_name = provider.groups.claim_name or "groups"
     groups = _coerce_groups(userinfo_claims.get(claim_name))
     overflowed = _has_group_overage(userinfo_claims, claim_name)

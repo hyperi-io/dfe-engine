@@ -269,3 +269,74 @@ class TestDeleteOrg:
         )
         resp = client.delete("/api/v1/orgs/acme", headers=viewer_headers)
         assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/orgs/available-ids
+# ---------------------------------------------------------------------------
+
+
+class _FakeClickHouse:
+    def __init__(self, tables: list[str], ids: list[str]) -> None:
+        self.tables = tables
+        self.ids = ids
+
+    def execute(self, sql: str, parameters=None, settings=None):
+        if "system.columns" in sql:
+            return [(t,) for t in self.tables]
+        return [(i,) for i in self.ids]
+
+
+def _use(app, ch) -> None:
+    from dfe_engine.api.deps import get_clickhouse_client
+
+    app.dependency_overrides[get_clickhouse_client] = lambda: ch
+
+
+class TestAvailableOrgIds:
+    def test_the_ids_the_data_carries_are_offered(self, client, app, admin_headers):
+        _use(app, _FakeClickHouse(["filebeat"], ["acme", "globex"]))
+
+        resp = client.get("/api/v1/orgs/available-ids", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["org_ids"] == ["acme", "globex"]
+
+    def test_a_deployment_with_no_ingested_data_offers_nothing(self, client, app, admin_headers):
+        _use(app, _FakeClickHouse([], []))
+
+        resp = client.get("/api/v1/orgs/available-ids", headers=admin_headers)
+
+        assert resp.status_code == 200
+        assert resp.json()["org_ids"] == []
+
+    def test_the_literal_path_wins_over_the_org_name_route(self, client, app, admin_headers):
+        # Declared above /{name}, so this is not read as an org called available-ids.
+        _use(app, _FakeClickHouse(["filebeat"], ["acme"]))
+
+        resp = client.get("/api/v1/orgs/available-ids", headers=admin_headers)
+
+        assert resp.status_code == 200
+        assert "org_ids" in resp.json()
+        assert "display_name" not in resp.json()
+
+    def test_a_viewer_is_refused(self, client, app, viewer_headers):
+        _use(app, _FakeClickHouse(["filebeat"], ["acme"]))
+
+        resp = client.get("/api/v1/orgs/available-ids", headers=viewer_headers)
+
+        assert resp.status_code == 403
+
+    def test_a_clickhouse_failure_is_reported_rather_than_read_as_no_ids(
+        self, client, app, admin_headers
+    ):
+        class Broken:
+            def execute(self, sql, parameters=None, settings=None):
+                raise RuntimeError("clickhouse is down")
+
+        _use(app, Broken())
+
+        resp = client.get("/api/v1/orgs/available-ids", headers=admin_headers)
+
+        assert resp.status_code == 503
+        assert resp.json()["code"] == "discovery_failed"

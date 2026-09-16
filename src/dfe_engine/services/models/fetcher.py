@@ -15,7 +15,6 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from dfe_engine.services.models.base import BaseServiceConfig
 from dfe_engine.services.models.common import (
-    DlqConfig,
     KafkaTlsConfig,
     MemoryConfig,
     SaslConfig,
@@ -79,7 +78,13 @@ class FetcherSourceConfig(BaseSourceConfig):
 
 
 class FetcherRoutingConfig(BaseModel):
-    """Message routing configuration for the fetcher."""
+    """Message routing configuration for the fetcher.
+
+    No DLQ block: dfe-fetcher embeds scalo's DlqConfig, which keys the topic at
+    ``dlq.kafka.common_topic``, so a ``dlq.topic`` written here was read by
+    nothing. The DLQ topic is set by the deploy layer's env (see
+    ``appmgmt/contract.py`` ``DFE_FETCHER_DLQ_TOPIC``), which is its one owner.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -89,7 +94,6 @@ class FetcherRoutingConfig(BaseModel):
     default_topic: str = "unmatched"
     topic_suffix: str = "_land"
     category_to_topic: dict[str, str] = Field(default_factory=dict)
-    dlq: DlqConfig = Field(default_factory=DlqConfig)
 
 
 # ---------------------------------------------------------------------------
