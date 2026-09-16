@@ -103,6 +103,26 @@ class TestCatalogue:
         assert by_service[VRL]["file_sets"][0]["language"] == "vrl"
         assert by_service["dfe-transform-elastic"]["file_sets"] == []
 
+    def test_the_catalogue_marks_which_apps_are_transform_engines(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # dfe-ui #290 reproduced the dfe-transform- prefix rule to build its engine
+        # picker; this field is what lets it drop that rule.
+        _wire(app, tmp_path)
+        listed = client.get("/api/v1/apps", headers=admin_headers).json()
+        engines = {e["service"]: e["transform_engine"] for e in listed}
+        assert engines[VRL] == "vrl"
+        assert engines["dfe-transform-elastic"] == "elastic"
+        assert engines["dfe-loader"] is None
+
+    def test_the_marked_engines_are_the_ones_a_source_may_name(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        listed = client.get("/api/v1/apps", headers=admin_headers).json()
+        marked = {e["transform_engine"] for e in listed if e["transform_engine"]}
+        assert marked == catalogue.transform_engines()
+
     def test_the_routing_flag_matches_the_manifest(self, client, app, admin_headers, tmp_path):
         # Without it the UI can only find out by probing /routing for a 400.
         _wire(app, tmp_path)

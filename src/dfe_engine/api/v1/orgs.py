@@ -10,6 +10,7 @@
 
 POST   /api/v1/orgs                → Create org
 GET    /api/v1/orgs                → List orgs
+GET    /api/v1/orgs/available-ids  → Tenant ids the data carries
 GET    /api/v1/orgs/{name}         → Get org
 PUT    /api/v1/orgs/{name}         → Update org
 DELETE /api/v1/orgs/{name}         → Delete org
@@ -25,7 +26,14 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from dfe_engine.api.deps import CurrentUser, check_action, is_action_allowed, require_action
+from dfe_engine.api.deps import (
+    ClickHouseClient,
+    CurrentUser,
+    Settings,
+    check_action,
+    is_action_allowed,
+    require_action,
+)
 from dfe_engine.api.pagination import (
     PaginatedResponse,
     PaginationParams,
@@ -34,6 +42,8 @@ from dfe_engine.api.pagination import (
 )
 from dfe_engine.auth import Scope
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.orgs.available_ids import DEFAULT_LIMIT, OrgIdDiscoveryError
+from dfe_engine.orgs.available_ids import available_org_ids as discover_available_org_ids
 from dfe_engine.orgs.models import ORG_NAME_PATTERN
 
 if TYPE_CHECKING:
@@ -67,6 +77,14 @@ class OrgResponse(BaseModel):
     enabled: bool
     created_at: str
     updated_at: str
+
+
+class AvailableOrgIdsResponse(BaseModel):
+    database: str = Field(description="Data database the ids were read from")
+    org_ids: list[str] = Field(
+        default_factory=list,
+        description="Distinct _org_id values present across that database's tables",
+    )
 
 
 # -- Endpoints ---------------------------------------------------------------
@@ -145,6 +163,39 @@ async def list_orgs(
     rows = apply_sort(rows, sort_by, sort_order)
     summaries = [OrgResponse.model_validate(row) for row in rows]
     return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
+
+
+@router.get(
+    "/available-ids",
+    response_model=AvailableOrgIdsResponse,
+    dependencies=[Depends(require_action(scopes_dict["org_write"]))],
+)
+async def available_org_ids(
+    user: CurrentUser,
+    ch: ClickHouseClient,
+    settings: Settings,
+    limit: int = Query(
+        default=DEFAULT_LIMIT,
+        ge=1,
+        le=1000,
+        description="Most tenant ids to return -- a suggestion list, not an export",
+    ),
+) -> AvailableOrgIdsResponse:
+    """Tenant ids the deployment's data actually carries (admin only).
+
+    Suggestions for the org form's Organisation IDs field, so an operator picks
+    an id that matches rows rather than typing one that matches none. Declared
+    above ``/{name}`` so the literal path wins the match.
+    """
+    database = settings.clickhouse.effective_data_database
+    try:
+        org_ids = discover_available_org_ids(ch, database=database, limit=limit)
+    except OrgIdDiscoveryError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "discovery_failed", "message": str(exc)},
+        ) from exc
+    return AvailableOrgIdsResponse(database=database, org_ids=org_ids)
 
 
 @router.get(

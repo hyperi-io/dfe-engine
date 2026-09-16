@@ -29,13 +29,15 @@ kafka:
     enabled: true
     ca_file: /etc/tls/kafka-ca.crt
 
+# http on the 8123 port, never native on 9000: the loader's pinned ClickHouse
+# client has no TCP row fetch, so every message stalls pending schema (#115).
 clickhouse:
   hosts:
-    - clickhouse.clickhouse.svc.cluster.local:9000
+    - clickhouse.clickhouse.svc.cluster.local:8123
   database: default
   username: default
   password: ""
-  protocol: native
+  protocol: http
 
 payload:
   format: auto

@@ -97,6 +97,37 @@ def test_extract_identity_missing_optional_fields():
     assert identity.groups_overflowed is False
 
 
+def test_extract_identity_falls_back_to_preferred_username():
+    """Entra emits no email for a cloud-only user, so the UPN is the identity."""
+    provider = OIDCProvider(type="entra_id", issuer="https://login.microsoftonline.com/tid/v2.0")
+    claims = {"sub": "guid-123", "preferred_username": "dfe-admin@ms.hyperi.io"}
+    assert extract_identity(provider, claims).email == "dfe-admin@ms.hyperi.io"
+
+
+def test_extract_identity_falls_back_to_upn_when_preferred_username_is_absent():
+    provider = OIDCProvider(type="entra_id", issuer="https://login.microsoftonline.com/tid/v2.0")
+    claims = {"sub": "guid-123", "upn": "dfe-admin@ms.hyperi.io"}
+    assert extract_identity(provider, claims).email == "dfe-admin@ms.hyperi.io"
+
+
+def test_extract_identity_prefers_email_over_the_fallbacks():
+    provider = OIDCProvider(type="entra_id", issuer="https://login.microsoftonline.com/tid/v2.0")
+    claims = {
+        "sub": "guid-123",
+        "email": "real@acme.com",
+        "preferred_username": "upn@ms.hyperi.io",
+        "upn": "upn@ms.hyperi.io",
+    }
+    assert extract_identity(provider, claims).email == "real@acme.com"
+
+
+def test_extract_identity_skips_an_empty_email_claim():
+    """Entra sends email as "" rather than omitting it, so falsy has to fall through."""
+    provider = OIDCProvider(type="entra_id", issuer="https://login.microsoftonline.com/tid/v2.0")
+    claims = {"sub": "guid-123", "email": "", "preferred_username": "dfe-admin@ms.hyperi.io"}
+    assert extract_identity(provider, claims).email == "dfe-admin@ms.hyperi.io"
+
+
 # ── group-claim overage detection (Entra >200 groups) ───────────
 
 

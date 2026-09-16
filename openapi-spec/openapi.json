@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.20.14"
+    "version": "1.20.18"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -2866,6 +2866,59 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PaginatedResponse_OrgResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/orgs/available-ids": {
+      "get": {
+        "tags": [
+          "Organisations"
+        ],
+        "summary": "Available Org Ids",
+        "description": "Tenant ids the deployment's data actually carries (admin only).\n\nSuggestions for the org form's Organisation IDs field, so an operator picks\nan id that matches rows rather than typing one that matches none. Declared\nabove ``/{name}`` so the literal path wins the match.",
+        "operationId": "available_org_ids_api_v1_orgs_available_ids_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "description": "Most tenant ids to return -- a suggestion list, not an export",
+              "default": 200,
+              "title": "Limit"
+            },
+            "description": "Most tenant ids to return -- a suggestion list, not an export"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AvailableOrgIdsResponse"
                 }
               }
             }
@@ -17590,6 +17643,28 @@
         ],
         "title": "AutoMergeStatus"
       },
+      "AvailableOrgIdsResponse": {
+        "properties": {
+          "database": {
+            "type": "string",
+            "title": "Database",
+            "description": "Data database the ids were read from"
+          },
+          "org_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Org Ids",
+            "description": "Distinct _org_id values present across that database's tables"
+          }
+        },
+        "type": "object",
+        "required": [
+          "database"
+        ],
+        "title": "AvailableOrgIdsResponse"
+      },
       "BackingServiceConfig": {
         "properties": {
           "service": {
@@ -18089,6 +18164,18 @@
             "type": "array",
             "title": "Source Types",
             "description": "The source families a source-bound instance of this app can poll; a fetcher-based source's fetcher.source_type must be one of them"
+          },
+          "transform_engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transform Engine",
+            "description": "The engine name a source writes in transform.engine to select this app, or null when the app is not a transform. Derived from the same catalogue rule the write path validates against, so a picker reading this field and the validator cannot disagree."
           },
           "file_sets": {
             "items": {

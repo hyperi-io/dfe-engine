@@ -447,9 +447,9 @@ class DDLGenerator:
         column: SchemaColumn,
         config: DDLConfig | None = None,
     ) -> str | None:
-        """Generate ALTER TABLE ADD INDEX for a column's use_case, or None.
+        """Generate ALTER TABLE ADD INDEX for a column's declared index or use_case.
 
-        Returns None when the column has no indexable use_case.
+        Returns None when the column declares neither.
         """
         cfg = config or DDLConfig()
         idx = self._index_def(column)
@@ -674,12 +674,21 @@ class DDLGenerator:
     # ── Internal: index definition ──────────────────────────────────
 
     def _index_def(self, col: SchemaColumn) -> str | None:
-        """Generate an INDEX definition for a column, or None."""
+        """Generate an INDEX definition for a column, or None.
+
+        A column declaring its own ``index`` is emitted verbatim: the common
+        header asks ``_raw`` for ``text(tokenizer = 'default') GRANULARITY 64``,
+        which no use_case template expresses, and a template rendered instead
+        drifts the table away from the schema it was generated from.
+        """
+        index_name = f"idx_{col.name}"
+        if col.index:
+            return f"INDEX {index_name} `{col.name}` TYPE {col.index}"
+
         if not col.use_case or col.use_case not in self._index_templates:
             return None
 
         template = self._index_templates[col.use_case]
-        index_name = f"idx_{col.name}"
         return template.format(name=index_name, col=f"`{col.name}`")
 
     # ── Internal: ORDER BY ──────────────────────────────────────────

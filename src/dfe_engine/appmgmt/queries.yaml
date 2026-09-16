@@ -129,12 +129,15 @@ queries:
     timeout_seconds: 10
 
   # Every scalo app emits `info`, so a recent row means the app is reporting.
+  # `samples` is what decides that, not max(TimeUnix): ClickHouse answers max()
+  # over no matching rows with one row carrying the type's default (the epoch),
+  # never NULL, so a name that has never emitted would otherwise read reporting.
   # Replica count is deliberately absent: the OTel resource carries no pod
   # identity, so every replica of one instance is indistinguishable here.
   liveness:
     database: otel
     sql: >
-      SELECT max(TimeUnix) AS last_seen
+      SELECT max(TimeUnix) AS last_seen, count() AS samples
       FROM __DB__.otel_metrics_gauge
       WHERE ServiceName = {service:String}
         AND MetricName = 'info'

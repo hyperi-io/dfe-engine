@@ -147,3 +147,39 @@ def test_the_series_query_buckets_pressure_under_that_same_one_name():
     sql = ch.calls[0][0]
     assert "endsWith(MetricName, '_scaling_pressure')" in sql
     assert "GROUP BY bucket, metric" in sql
+
+
+# ── liveness: max() over no rows is the epoch, not NULL ─────────
+
+
+class PerQueryClickHouse:
+    """Answers each query with rows chosen by a fragment of its SQL."""
+
+    def __init__(self, by_fragment: dict[str, list[tuple]]) -> None:
+        self.by_fragment = by_fragment
+
+    def execute(self, sql: str, parameters=None, settings=None):
+        for fragment, rows in self.by_fragment.items():
+            if fragment in sql:
+                return rows
+        return []
+
+
+def test_an_instance_that_never_emitted_is_not_reporting():
+    # ClickHouse answers max() over an empty match with one row carrying the
+    # type's default, so the epoch plus a zero count is what "never emitted" is.
+    ch = PerQueryClickHouse({"AS last_seen": [(0.0, 0)]})
+
+    status = OperationalReader(ch, "dfe").status("dfe-transform-elastic-nosuchinstance")
+
+    assert status.reporting is False
+    assert status.last_seen_epoch is None
+
+
+def test_an_instance_with_telemetry_is_reporting():
+    ch = PerQueryClickHouse({"AS last_seen": [(1757000000.0, 12)]})
+
+    status = OperationalReader(ch, "dfe").status("dfe-loader")
+
+    assert status.reporting is True
+    assert status.last_seen_epoch == 1757000000.0

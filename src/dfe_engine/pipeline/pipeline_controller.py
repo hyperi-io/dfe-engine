@@ -14,6 +14,27 @@ from .pipeline_builder import PipelineBuilder
 from .pipeline_util import merge_configs
 
 
+def reject_escaping_members(names: list[str], output_path: str | Path) -> None:
+    """Refuse an archive carrying a member that resolves outside *output_path*.
+
+    ``zipfile`` silently rewrites such a member -- it drops the leading separator
+    and every ``..`` component and writes the remainder into the destination -- so
+    a tampered archive extracts quietly under a name nobody asked for. A rewritten
+    path means the archive is not what was published, so it is refused here before
+    anything is written.
+
+    Raises:
+        RuntimeError: when a member resolves outside the destination directory.
+    """
+    destination = Path(output_path).resolve()
+    for name in names:
+        resolved = (destination / name).resolve()
+        if resolved != destination and destination not in resolved.parents:
+            raise RuntimeError(
+                f"Archive member {name!r} resolves outside the destination {destination}"
+            )
+
+
 def _load_yaml_config(config_file_path: str | None = None, require: bool = True) -> dict:
     """Load a YAML config file with environment variable substitution."""
     path = Path(config_file_path) if config_file_path else Path.cwd() / "dfe_package.yaml"
@@ -251,6 +272,7 @@ class PipelineBuilderController:
         logger.info(f"Extracting templates to {output_path}...")
         try:
             with ZipFile(output_filename, "r") as zip_ref:
+                reject_escaping_members(zip_ref.namelist(), output_path)
                 zip_ref.extractall(output_path)
             # Remove the zip file after extraction
             os.remove(output_filename)

@@ -16,13 +16,15 @@ kafka:
     - events
   client_id: clickhouse-loader
 
+# http on the 8123 port, never native on 9000: the loader's pinned ClickHouse
+# client has no TCP row fetch, so every message stalls pending schema (#115).
 clickhouse:
   hosts:
-    - localhost:9000
+    - localhost:8123
   database: default
   username: default
   password: ""
-  protocol: native
+  protocol: http
 
 payload:
   format: auto
