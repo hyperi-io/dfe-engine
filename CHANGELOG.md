@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.20.17](https://github.com/hyperi-io/dfe-engine/compare/v1.20.16...v1.20.17) (2026-09-16)
+
+### Bug Fixes
+
+* stop writing a hyperdx connection so the fork can seed the per-org one ([471f85d](https://github.com/hyperi-io/dfe-engine/commit/471f85d2b011a432c1829aedd430887ab124d149)), closes [#312](https://github.com/hyperi-io/dfe-engine/issues/312) [#206](https://github.com/hyperi-io/dfe-engine/issues/206) [#124](https://github.com/hyperi-io/dfe-engine/issues/124)
+
 ## [1.20.16](https://github.com/hyperi-io/dfe-engine/compare/v1.20.15...v1.20.16) (2026-09-15)
 
 ### Bug Fixes
