@@ -686,7 +686,11 @@ async def list_sources(
     ),
     sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
-    """List sources with pagination, search, filtering, and a full object tree."""
+    """List sources with pagination, search, filtering, and a full object tree.
+
+    The landing source (``main``) is always the first item when it is in the
+    result set; remaining sources keep the requested sort.
+    """
     raw_sources = registry.list_sources(enabled_only=bool(enabled))
 
     if enabled is False:
@@ -694,6 +698,7 @@ async def list_sources(
 
     raw_sources = apply_search(raw_sources, search, ["source", "display_name", "description"])
     raw_sources = apply_sort(raw_sources, sort_by, sort_order)
+    raw_sources = _pin_landing_source_first(raw_sources)
 
     summaries = [_to_summary(row) for row in raw_sources]
     return PaginatedSourceSummaryResponse.from_summaries(
@@ -1982,6 +1987,13 @@ def _plan_to_response(plan: SourcePlanArtifact) -> SourcePlanResponse:
         ready=plan.ready,
         ready_reason=plan.ready_reason,
     )
+
+
+def _pin_landing_source_first(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep the landing source (``main``) first; other rows keep their order."""
+    landing = [row for row in rows if row.get("source") == DEFAULT_LANDING_LABEL]
+    rest = [row for row in rows if row.get("source") != DEFAULT_LANDING_LABEL]
+    return landing + rest
 
 
 def _to_summary(raw: dict[str, Any]) -> SourceSummaryObject:
