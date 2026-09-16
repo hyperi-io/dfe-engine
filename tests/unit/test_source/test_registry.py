@@ -246,6 +246,83 @@ class TestList:
         with pytest.raises(SourceValidationError, match="names its own source"):
             registry.save_source(looping)
 
+    def test_a_source_spanning_two_connector_types_is_refused(self, registry: SourceRegistry):
+        """One source is one schema, so it is one type however many accounts it polls."""
+        mixed = Source.model_validate(
+            {
+                "source": "okta-audit",
+                "fetcher": {
+                    "source_type": "okta",
+                    "config": {
+                        "connections": [
+                            {"id": "tenant-a"},
+                            {"id": "falcon", "type": "crowdstrike"},
+                        ]
+                    },
+                },
+            }
+        )
+        with pytest.raises(SourceValidationError, match="crowdstrike, okta") as refusal:
+            registry.save_source(mixed)
+        assert "'okta-audit'" in str(refusal.value)
+
+    def test_one_type_across_several_connections_is_the_supported_shape(
+        self, registry: SourceRegistry
+    ):
+        """Many accounts of one type land in the one table, which is the point."""
+        many = Source.model_validate(
+            {
+                "source": "okta-audit",
+                "fetcher": {
+                    "source_type": "okta",
+                    "config": {
+                        "connections": [
+                            {"id": "tenant-a", "credential_secret": "vault:kv/data/a:token"},
+                            {"id": "tenant-b", "credential_secret": "vault:kv/data/b:token"},
+                            {"id": "tenant-c", "credential_secret": "vault:kv/data/c:token"},
+                        ]
+                    },
+                },
+            }
+        )
+        registry.save_source(many)
+
+        assert len(registry.get_source("okta-audit").fetcher.config["connections"]) == 3
+
+    def test_the_override_dial_lets_a_mixed_source_through(
+        self, registry: SourceRegistry, monkeypatch
+    ):
+        """A deployment that knowingly wants a mixed fetcher gets one, and a warning."""
+        from dfe_engine.settings import DFESettings
+        from dfe_engine.source import alignment
+
+        settings = DFESettings(env="dev", source={"allow_mixed_fetcher_types": True})
+        monkeypatch.setattr("dfe_engine.settings.get_settings", lambda: settings)
+        warnings: list[dict] = []
+        monkeypatch.setattr(
+            alignment.logger, "warning", lambda message, **fields: warnings.append(fields)
+        )
+
+        mixed = Source.model_validate(
+            {
+                "source": "okta-audit",
+                "fetcher": {
+                    "source_type": "okta",
+                    "config": {"connections": [{"id": "falcon", "type": "crowdstrike"}]},
+                },
+            }
+        )
+        registry.save_source(mixed)
+
+        assert registry.get_source("okta-audit").fetcher.source_type == "okta"
+        assert warnings == [
+            {
+                "source": "okta-audit",
+                "types": ["crowdstrike", "okta"],
+                "setting": alignment.MIXED_TYPES_SETTING,
+            }
+        ]
+
     def test_an_engine_missing_required_arguments_is_refused(self, registry: SourceRegistry):
         bare = Source.model_validate(
             {

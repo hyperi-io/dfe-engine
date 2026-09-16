@@ -37,6 +37,7 @@ from dfe_engine.core_resources.yaml_resource_type import (
     config_is_core,
 )
 from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file
+from dfe_engine.source.alignment import MixedConnectorTypesError, require_one_type
 from dfe_engine.source.engine_registry import InvalidEngineError
 from dfe_engine.source.models import (
     DEFAULT_LANDING_LABEL,
@@ -702,6 +703,7 @@ class SourceRegistry:
         if source.state != "disabled":
             self._validate_match_operator(source, candidate_match)
             self._validate_fetcher_routes(source, candidate_version)
+            self._validate_fetcher_types(source, candidate_version)
             self._validate_engine_arguments(source, candidate_version)
             self._validate_flow(source)
             self._validate_instance_room(source)
@@ -783,6 +785,23 @@ class SourceRegistry:
                     f"source {source.source!r}: a fetcher route names its own source; "
                     "records with no route already land there"
                 )
+
+    @staticmethod
+    def _validate_fetcher_types(source: Source, version: SourceVersion | None) -> None:
+        """A source is one connector type, however many connections it polls.
+
+        One schema per source is what keeps its table one shape, so the write is
+        refused here; dfe-fetcher takes any mix and is never asked to.
+        """
+        from dfe_engine.settings import get_settings
+
+        fetcher = version.fetcher if version else None
+        if fetcher is None:
+            return
+        try:
+            require_one_type(source.source, {fetcher.source_type: fetcher.config}, get_settings())
+        except MixedConnectorTypesError as exc:
+            raise SourceValidationError(str(exc)) from exc
 
     @staticmethod
     def _validate_engine_arguments(source: Source, version: SourceVersion | None) -> None:

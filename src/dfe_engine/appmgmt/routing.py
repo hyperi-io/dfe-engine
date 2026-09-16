@@ -43,6 +43,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from dfe_engine.gitcrud.engine import del_path, get_path, set_path
+from dfe_engine.source.alignment import require_one_type
 from dfe_engine.source.models import Source
 from dfe_engine.source.registry import SourceNotFoundError, SourceRegistry
 
@@ -220,12 +221,17 @@ def _archiver(
 
 def _fetcher_route(
     flow: SourceFlow, route: Any, registry: SourceRegistry, settings: Any
-) -> dict[str, Any]:
+) -> tuple[str, dict[str, Any], dict[str, Any]]:
     """One route: which fetched records go to ANOTHER source's landing, and where.
 
     The target has to exist and be live, because a route to a source with no
     table sends records nowhere; and it has to be on the same transport, because
     a fetcher delivers over one.
+
+    Returns the destination's name, the transport block the fetcher builds a
+    sender from, and the rule naming it. The fetcher reaches a route target
+    through ``output.destinations`` and matches on the name (``config/mod.rs``
+    ``OutputRoute``), so a rule carrying the address itself is refused at load.
     """
     try:
         target = registry.get_source(route.source)
@@ -242,18 +248,29 @@ def _fetcher_route(
             f"source {flow.source!r} routes to {route.source!r}, which is on the other "
             "transport; a fetcher delivers over one"
         )
-    key = "topic" if flow.transport == "bus" else "endpoint"
-    return {
+    landing = _landing(target, settings)
+    spec: dict[str, Any] = (
+        {BUS_TRANSPORT: {"topic": landing}}
+        if flow.transport == "bus"
+        else {DIRECT_TRANSPORT: {"endpoint": landing}}
+    )
+    rule = {
         "match_field": route.match.field,
         "match_value": route.match.value,
-        key: _landing(target, settings),
+        "destination": route.source,
     }
+    return route.source, spec, rule
 
 
 def _fetcher(
     app: AppDescriptor, registry: SourceRegistry, settings: Any, instance: str | None
 ) -> dict[str, Any]:
-    """What this fetcher instance polls, and where the records it pulls are sent."""
+    """What this fetcher instance polls, and where the records it pulls are sent.
+
+    A source is one connector type, so the composed block carries one; a stored
+    source that spans two is refused here rather than deployed, which is the
+    second place the rule holds (the first is the save path).
+    """
     source = _bound_source(registry, instance)
     fetcher = source.fetcher
     if fetcher is None:
@@ -266,6 +283,8 @@ def _fetcher(
         "topic": fetcher.landing_label(source.source),
     }
     stanza.update(fetcher.config)
+    polls = {fetcher.source_type: stanza}
+    require_one_type(source.source, polls, settings)
 
     output: dict[str, Any] = {"type": BUS_TRANSPORT}
     if flow.transport == "direct":
@@ -273,11 +292,17 @@ def _fetcher(
             "type": DIRECT_TRANSPORT,
             DIRECT_TRANSPORT: {"endpoint": _landing(source, settings)},
         }
-    routes = [_fetcher_route(flow, r, registry, settings) for r in fetcher.routes]
-    if routes:
-        output["routes"] = routes
+    destinations: dict[str, Any] = {}
+    rules: list[dict[str, Any]] = []
+    for route in fetcher.routes:
+        name, spec, rule = _fetcher_route(flow, route, registry, settings)
+        destinations[name] = spec
+        rules.append(rule)
+    if rules:
+        output["destinations"] = destinations
+        output["routes"] = rules
 
-    return {"sources": {fetcher.source_type: stanza}, "output": output}
+    return {"sources": polls, "output": output}
 
 
 def _transform(

@@ -996,6 +996,7 @@ class SourceSettings(BaseModel):
     - DFE_SOURCE_BUILDS_DIR -> source.builds_dir
     - DFE_SOURCE_PLANS_DIR -> source.plans_dir
     - DFE_SOURCE_DEPLOYS_DIR -> source.deploys_dir
+    - DFE_SOURCE_ALLOW_MIXED_FETCHER_TYPES -> source.allow_mixed_fetcher_types
     """
 
     sources_dir: str = Field(default="", description="YAML directory for Source definitions (SSoT)")
@@ -1010,6 +1011,13 @@ class SourceSettings(BaseModel):
     deploys_dir: str = Field(
         default="",
         description="ClickHouse deploy run results (source-deploys)",
+    )
+    allow_mixed_fetcher_types: bool = Field(
+        default=False,
+        description=(
+            "Let one source, and the fetcher composed for it, carry more than one "
+            "connector type. Unsupported: the records no longer share a schema"
+        ),
     )
 
 
@@ -1912,6 +1920,8 @@ def _get_env_overrides() -> dict:
         overrides["source"]["plans_dir"] = val
     if val := _get_env("DFE_SOURCE_DEPLOYS_DIR"):
         overrides["source"]["deploys_dir"] = val
+    if val := _get_env("DFE_SOURCE_ALLOW_MIXED_FETCHER_TYPES"):
+        overrides["source"]["allow_mixed_fetcher_types"] = val.lower() in ("true", "1", "yes")
 
     # FieldMap settings
     if val := _get_env("DFE_FIELDMAPS_DIR"):

@@ -23,6 +23,7 @@ from dataclasses import replace
 import pytest
 
 from dfe_engine.appmgmt import catalogue, instances, routing
+from dfe_engine.source.alignment import MixedConnectorTypesError
 
 from .conftest import FakeRegistry
 
@@ -502,6 +503,74 @@ class TestFetcherInstance:
             "endpoint": "http://dfe-transform-vrl-okta-audit:6000"
         }
 
+    def test_two_connector_types_in_one_fetcher_are_refused(self, settings):
+        """The composer is the second gate: a stored source that spans two is not deployed."""
+        registry = FakeRegistry(
+            [
+                _fetched(
+                    fetcher={
+                        "config": {
+                            "connections": [
+                                {"id": "tenant-a"},
+                                {"id": "falcon", "type": "crowdstrike"},
+                            ]
+                        }
+                    }
+                )
+            ]
+        )
+
+        with pytest.raises(MixedConnectorTypesError, match="crowdstrike, okta") as refusal:
+            routing.compile_for(
+                catalogue.descriptor(FETCHER), registry, settings, instance="okta-audit"
+            )
+        assert "'okta-audit'" in str(refusal.value)
+
+    def test_one_type_across_several_connections_compiles(self, settings):
+        """Many accounts, one type, one stanza - the shape the suite supports."""
+        connections = [{"id": "tenant-a"}, {"id": "tenant-b"}, {"id": "tenant-c"}]
+        registry = FakeRegistry([_fetched(fetcher={"config": {"connections": connections}})])
+
+        compiled = routing.compile_for(
+            catalogue.descriptor(FETCHER), registry, settings, instance="okta-audit"
+        )
+
+        assert compiled["sources"] == {
+            "okta": {"enabled": True, "topic": "okta-audit", "connections": connections}
+        }
+
+    def test_the_override_dial_compiles_a_mixed_fetcher_with_a_warning(self, monkeypatch):
+        from dfe_engine.settings import DFESettings
+        from dfe_engine.source import alignment
+
+        warnings: list[dict] = []
+        monkeypatch.setattr(
+            alignment.logger, "warning", lambda message, **fields: warnings.append(fields)
+        )
+        registry = FakeRegistry(
+            [
+                _fetched(
+                    fetcher={"config": {"connections": [{"id": "falcon", "type": "crowdstrike"}]}}
+                )
+            ]
+        )
+
+        compiled = routing.compile_for(
+            catalogue.descriptor(FETCHER),
+            registry,
+            DFESettings(env="dev", source={"allow_mixed_fetcher_types": True}),
+            instance="okta-audit",
+        )
+
+        assert set(compiled["sources"]) == {"okta"}
+        assert warnings == [
+            {
+                "source": "okta-audit",
+                "types": ["crowdstrike", "okta"],
+                "setting": alignment.MIXED_TYPES_SETTING,
+            }
+        ]
+
     def test_a_route_sends_matched_records_to_another_sources_landing(self, settings):
         registry = FakeRegistry(
             [
@@ -523,8 +592,11 @@ class TestFetcherInstance:
             catalogue.descriptor(FETCHER), registry, settings, instance="okta-audit"
         )
 
+        assert compiled["output"]["destinations"] == {
+            "okta-alerts": {"kafka": {"topic": "okta-alerts"}}
+        }
         assert compiled["output"]["routes"] == [
-            {"match_field": "event.kind", "match_value": "alert", "topic": "okta-alerts"}
+            {"match_field": "event.kind", "match_value": "alert", "destination": "okta-alerts"}
         ]
 
     def test_a_route_on_direct_carries_an_endpoint(self, direct_settings, direct_transforms):
@@ -548,12 +620,11 @@ class TestFetcherInstance:
             catalogue.descriptor(FETCHER), registry, direct_settings, instance="okta-audit"
         )
 
+        assert compiled["output"]["destinations"] == {
+            "okta-alerts": {"grpc": {"endpoint": "http://dfe-transform-vrl-okta-alerts:6000"}}
+        }
         assert compiled["output"]["routes"] == [
-            {
-                "match_field": "event.kind",
-                "match_value": "alert",
-                "endpoint": "http://dfe-transform-vrl-okta-alerts:6000",
-            }
+            {"match_field": "event.kind", "match_value": "alert", "destination": "okta-alerts"}
         ]
 
     @pytest.mark.parametrize(

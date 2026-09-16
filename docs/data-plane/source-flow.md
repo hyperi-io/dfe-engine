@@ -100,10 +100,12 @@ Those topics are the engine's for the source's whole life, and nothing depends o
 | Source field | Compiles into |
 |---|---|
 | `match` (field, operator, value) | the receiver `routing.source_rules` entry; on direct also a `destinations.rules` entry sending the match to the source's transform instance, else to the loader |
-| `fetcher` (source_type, config, topic, routes) | one fetcher instance overlay; on direct its `output` endpoint, and one `output.routes` entry per data-match route |
+| `fetcher` (source_type, config, topic, routes) | one fetcher instance overlay; on direct its `output` endpoint, and one `output.destinations` entry plus the `output.routes` rule naming it per data-match route |
 | `transform` (engine, variant, config) | one transform instance overlay: `_land` in and `_load` out on the bus; a Push listener in and the loader's endpoint out on direct |
 | landing label | loader routing, source to table |
 | `archive: true` | the archiver's topic list on the bus; on direct a second destination on the source's own rule |
+
+A fetcher's composed config carries ONE connector type, because its source does: the composition refuses a second type, naming the source and the types, unless `DFE_SOURCE_ALLOW_MIXED_FETCHER_TYPES` says otherwise (see [source-definition.md](source-definition.md)).
 
 Every compiled block lands in the deploy repo under `values/`, Argo CD applies it on Kubernetes, and a hand edit to any of them is reported as drift and re-synced on the next source write. A block carries only the keys the sources derive, so the deployment's own settings survive it. A Compose deployment has no consumer for those blocks yet: its apps read the static config files the stack mounts, so a source written there compiles but does not reach the receiver, and `GET /api/v1/system/deployment` reports `applies_routing: false`. The receiver's destinations are a named set: every transform instance and the loader are destinations, and a rule sends a matched record to one by name. The fetcher carries the same shape as `output.routes` over its default destination, and the transform sinks use the same gRPC sender, so there is one sink implementation in scalo for all three.
 
