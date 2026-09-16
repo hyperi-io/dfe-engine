@@ -95,14 +95,26 @@ class MinioConfig(BaseModel):
     use_ssl: bool = False
 
 
+PATH_TEMPLATE_PLACEHOLDERS = frozenset(
+    {"{year}", "{month}", "{day}", "{hour}", "{minute}", "{timestamp}", "{seq}"}
+)
+"""What dfe-archiver substitutes in ``archive.path_template``.
+
+Mirrors ``PATH_TEMPLATE_PLACEHOLDERS`` in dfe-archiver
+``crates/core/src/archive/writer.rs``. The archiver refuses to start on a
+template carrying any other token, so a config the engine authors is bounded
+by this list.
+"""
+
+
 class ArchiveConfig(BaseModel):
     """Archive output configuration."""
 
     model_config = ConfigDict(extra="forbid")
 
     destination: str = "file:///var/data/archive"
-    # No {topic}: the archiver's per-topic writers already prepend it, so a
-    # template carrying it lands every object under a doubled topic path.
+    # No {topic}: it is not a placeholder the archiver substitutes, and the
+    # routed destination already carries the topic segment.
     path_template: str = "{year}/{month}/{day}/{hour}"
     file_extension: str = "jsonl"
     roll_size_bytes: int = Field(

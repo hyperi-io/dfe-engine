@@ -481,6 +481,64 @@ class TestUseCaseIndexes:
         assert "ngrambf_v1(3, 256, 2, 0)" in ddl
 
 
+class TestDeclaredIndexes:
+    """A column carrying its own index shape, which no use_case template expresses."""
+
+    def test_the_declared_index_is_emitted_verbatim(self, gen: DDLGenerator):
+        cols = [
+            _col(
+                name="_raw",
+                type="text",
+                use_case="text_search",
+                index="text(tokenizer = 'default') GRANULARITY 64",
+            )
+        ]
+        ddl = gen.generate_create_table("t", cols)
+        assert "INDEX idx__raw `_raw` TYPE text(tokenizer = 'default') GRANULARITY 64" in ddl
+
+    def test_the_declared_index_wins_over_the_use_case_template(self, gen: DDLGenerator):
+        cols = [
+            _col(
+                name="_raw",
+                type="text",
+                use_case="text_search",
+                index="text(tokenizer = 'default') GRANULARITY 64",
+            )
+        ]
+        ddl = gen.generate_create_table("t", cols)
+        assert "ngrams(3)" not in ddl
+
+    def test_a_declared_index_reaches_the_alter_as_well(self, gen: DDLGenerator):
+        col = _col(
+            name="_raw",
+            type="text",
+            use_case="text_search",
+            index="text(tokenizer = 'default') GRANULARITY 64",
+        )
+        ddl = gen.generate_alter_add_index("filebeat", col)
+        assert "TYPE text(tokenizer = 'default') GRANULARITY 64" in ddl
+
+    def test_a_column_declaring_no_index_still_takes_the_template(self, gen: DDLGenerator):
+        cols = [_col(name="body", type="text", use_case="text_search")]
+        ddl = gen.generate_create_table("t", cols)
+        assert "INDEX idx_body `body` TYPE text(tokenizer=ngrams(3)) GRANULARITY 1" in ddl
+
+
+class TestCommonHeaderIndexFidelity:
+    """The rendered header has to match the dfe-schemas YAML it is rendered from."""
+
+    def test_the_raw_index_is_the_one_the_common_header_declares(self, gen: DDLGenerator):
+        from dfe_engine.schema.schema_loader import SchemaLoader
+
+        columns = SchemaLoader.load_profile(profile_name="timeseries")
+        raw = next(c for c in columns if c.name == "_raw")
+        assert raw.index == "text(tokenizer = 'default') GRANULARITY 64"
+
+        ddl = gen.generate_create_table("t", columns)
+        assert "INDEX idx__raw `_raw` TYPE text(tokenizer = 'default') GRANULARITY 64" in ddl
+        assert "ngrams(3)" not in ddl
+
+
 # ── ALTER TABLE ─────────────────────────────────────────────────────
 
 

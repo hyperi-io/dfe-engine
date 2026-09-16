@@ -297,6 +297,15 @@ class CatalogueEntry(BaseModel):
             "fetcher-based source's fetcher.source_type must be one of them"
         ),
     )
+    transform_engine: str | None = Field(
+        default=None,
+        description=(
+            "The engine name a source writes in transform.engine to select this app, "
+            "or null when the app is not a transform. Derived from the same catalogue "
+            "rule the write path validates against, so a picker reading this field and "
+            "the validator cannot disagree."
+        ),
+    )
     file_sets: list[FileSetSummary]
     instances: list[str]
 
@@ -895,6 +904,7 @@ async def list_apps(
                 default_in=None if desc.default_in is None else sorted(desc.default_in),
                 offered=desc.offered_in(judged_against),
                 source_types=list(desc.source_types),
+                transform_engine=desc.transform_engine or None,
                 file_sets=_file_sets(service),
                 instances=[i.instance for i in deployed if i.service == service],
             )

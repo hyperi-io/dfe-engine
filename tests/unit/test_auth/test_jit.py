@@ -239,3 +239,22 @@ class TestResolveHyperdxTeam:
         _, groups = stores
         jit = JitProvisioner(account_store=None, group_store=groups)
         assert jit.resolve_hyperdx_team(["nonexistent-group"]) == ""
+
+    def test_an_entra_group_guid_resolves_through_the_source_id(self, stores):
+        """Entra sends object GUIDs, so the team has to resolve the same way roles do."""
+        _, groups = stores
+        groups.update("dfe-admins", source_id="0295f72c-e3f8-4962-9183-f95ef939e3b8")
+        jit = JitProvisioner(account_store=None, group_store=groups)
+        assert jit.resolve_hyperdx_team(["0295f72c-e3f8-4962-9183-f95ef939e3b8"]) == "dfe-admin"
+
+
+class TestOrgIdsFromGroupGuids:
+    def test_org_ids_resolve_through_the_source_id(self, stores):
+        accounts, groups = stores
+        groups.update("acme-viewers", source_id="7b1d0f3e-0000-4000-8000-000000000001")
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with patch("dfe_engine.auth.jit.audit_jit_account_created") as audit:
+            jit.ensure_account("guid-123", ["7b1d0f3e-0000-4000-8000-000000000001"], "entra")
+
+        assert audit.call_args.args[3] == ["acme"]

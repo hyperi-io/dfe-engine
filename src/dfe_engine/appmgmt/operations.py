@@ -179,7 +179,10 @@ class OperationalReader:
         """Whether the instance is reporting telemetry, and its replica count."""
         service = self._safe_identifier(telemetry_name)
         rows = self._run("liveness", {"service": service})
-        last_seen = _epoch(rows[0][0]) if rows and rows[0][0] is not None else None
+        # The row count decides it: max() over no matching rows answers the epoch,
+        # not NULL, so an instance that never emitted would otherwise read reporting.
+        matched = bool(rows) and int(rows[0][1] or 0) > 0
+        last_seen = _epoch(rows[0][0]) if matched else None
         started = self._gauges(service).get(START_TIME)
         return AppStatus(
             telemetry_name=telemetry_name,

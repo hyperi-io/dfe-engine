@@ -23,7 +23,7 @@ from dfe_engine.auth.audit import (
     audit_jit_hdx_invited,
     audit_jit_team_assigned,
 )
-from dfe_engine.auth.groups import GroupStore
+from dfe_engine.auth.groups import Group, GroupStore
 
 # Broadest-wins precedence (highest first)
 _BROAD_ROLES = {"admin", "infra_admin", "data_analyst"}
@@ -101,7 +101,7 @@ class JitProvisioner:
         # Resolve org_ids from groups
         org_ids = []
         for gname in oidc_groups:
-            group = self._groups.get(gname)
+            group = self._resolve_group(gname)
             if group and group.org_ids:
                 org_ids.extend(group.org_ids)
 
@@ -135,12 +135,25 @@ class JitProvisioner:
 
         return self._accounts.get(safe_name)
 
+    def _resolve_group(self, identifier: str) -> Group | None:
+        """A group by name, else by the provider identifier the sync recorded.
+
+        Entra sends object GUIDs and Google sends group keys, so the token's
+        value is not the group's name. Same two-step the role resolution uses
+        (``api/deps.py`` ``_resolve_group_grants``), so org_ids and the HyperDX
+        team cannot see a different group set from the roles.
+        """
+        group = self._groups.get(identifier)
+        if group is not None:
+            return group
+        return self._groups.by_source_id().get(identifier)
+
     def resolve_hyperdx_team(self, oidc_groups: list[str]) -> str:
         """Determine HyperDX team. Broadest role wins."""
         all_roles: set[str] = set()
         all_org_ids: list[str] = []
         for gname in oidc_groups:
-            group = self._groups.get(gname)
+            group = self._resolve_group(gname)
             if group:
                 all_roles.update(group.roles)
                 all_org_ids.extend(group.org_ids)

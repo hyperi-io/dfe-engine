@@ -370,6 +370,19 @@ class AppDescriptor:
         """Whether an instance of this app IS a source's processing step."""
         return bool(self.source_binding)
 
+    @property
+    def transform_engine(self) -> str:
+        """The engine a source names to select this app, or "" when it is not one.
+
+        A transform app is source-bound and named for the engine it runs, so the
+        name is derived here once: ``transform_engines`` is the set of these and
+        the API reports this field, which is why a console picker and the write
+        path cannot disagree about what a transform app is.
+        """
+        if not (self.source_bound and self.service.startswith(TRANSFORM_SERVICE_PREFIX)):
+            return ""
+        return self.service.removeprefix(TRANSFORM_SERVICE_PREFIX)
+
 
 class Encoding(StrEnum):
     """How an artefact's content travels through the API and sits in the overlay."""
@@ -943,8 +956,4 @@ def transform_engines() -> set[str]:
     A transform app is a source-bound app, so the set is the catalogue's, and an
     engine it does not list has nothing to deploy.
     """
-    return {
-        service.removeprefix(TRANSFORM_SERVICE_PREFIX)
-        for service, app in APP_CATALOGUE.items()
-        if app.source_bound and service.startswith(TRANSFORM_SERVICE_PREFIX)
-    }
+    return {app.transform_engine for app in APP_CATALOGUE.values() if app.transform_engine}

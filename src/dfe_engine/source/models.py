@@ -191,6 +191,14 @@ class SchemaColumn(BaseModel):
             "JSON(max_dynamic_paths=N); ClickHouse's own default is 1024."
         ),
     )
+    index: str | None = Field(
+        default=None,
+        description=(
+            "Exact index TYPE and GRANULARITY, emitted verbatim after the index "
+            "name and column -- for a shape the use_case template cannot express. "
+            "Wins over use_case, which still drives type validation."
+        ),
+    )
 
     @field_validator("attribute", mode="before")
     @classmethod

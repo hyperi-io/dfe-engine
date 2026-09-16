@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API \u2014 E2E",
     "description": "Playwright helpers for `make e2e-server`. Unauthenticated. Mounted and documented only in that mode \u2014 not in the product spec.",
-    "version": "1.20.14"
+    "version": "1.20.18"
   },
   "paths": {
     "/api/e2e/status": {

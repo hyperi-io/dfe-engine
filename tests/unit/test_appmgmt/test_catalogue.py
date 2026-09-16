@@ -515,6 +515,22 @@ class TestNaming:
         for engine in catalogue.transform_engines():
             assert catalogue.transform_service(engine) in catalogue.APP_CATALOGUE
 
+    def test_a_transform_app_carries_the_engine_a_source_names(self):
+        assert catalogue.descriptor("dfe-transform-vrl").transform_engine == "vrl"
+        assert catalogue.descriptor("dfe-transform-vector").transform_engine == "vector"
+        assert catalogue.descriptor("dfe-transform-elastic").transform_engine == "elastic"
+
+    def test_an_app_that_is_not_a_transform_carries_no_engine(self):
+        for service in ("dfe-receiver", "dfe-loader", "dfe-archiver", "dfe-fetcher"):
+            assert catalogue.descriptor(service).transform_engine == ""
+
+    def test_the_engine_set_is_exactly_what_the_descriptors_carry(self):
+        # One derivation: a picker reading the per-app field and the write-path
+        # validator reading the set cannot disagree about what a transform is.
+        assert catalogue.transform_engines() == {
+            app.transform_engine for app in catalogue.APP_CATALOGUE.values() if app.transform_engine
+        }
+
 
 class TestMeshAddressing:
     """A deployment whose pools sit behind listeners, addressed by the same rule."""

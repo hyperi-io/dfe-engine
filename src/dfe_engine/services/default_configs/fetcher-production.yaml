@@ -25,9 +25,6 @@ routing:
   default_topic: unmatched
   topic_suffix: _land
   category_to_topic: {}
-  dlq:
-    enabled: true
-    topic: dlq_land
 
 extra_env: {}
 
