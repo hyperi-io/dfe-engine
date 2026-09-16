@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.20.20](https://github.com/hyperi-io/dfe-engine/compare/v1.20.19...v1.20.20) (2026-09-16)
+
+### Bug Fixes
+
+* ten small correctness fixes across the engine's written and served config ([be79770](https://github.com/hyperi-io/dfe-engine/commit/be797705ed99f37cf9719f30d664168b1278af2f)), closes [#253](https://github.com/hyperi-io/dfe-engine/issues/253) [#374](https://github.com/hyperi-io/dfe-engine/issues/374) [#335](https://github.com/hyperi-io/dfe-engine/issues/335) [#194](https://github.com/hyperi-io/dfe-engine/issues/194) [#307](https://github.com/hyperi-io/dfe-engine/issues/307) [#159](https://github.com/hyperi-io/dfe-engine/issues/159) [#155](https://github.com/hyperi-io/dfe-engine/issues/155) [#405](https://github.com/hyperi-io/dfe-engine/issues/405)
+
 ## [1.20.19](https://github.com/hyperi-io/dfe-engine/compare/v1.20.18...v1.20.19) (2026-09-16)
 
 ### Bug Fixes
