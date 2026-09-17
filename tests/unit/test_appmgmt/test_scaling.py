@@ -30,10 +30,10 @@ def test_a_per_config_app_cannot_be_run_on_docker_without_a_writer():
     assert scaling.instance_ceiling(VRL, DeployTarget.DOCKER) == 0
 
 
-def test_a_docker_target_that_renders_its_app_config_holds_one():
-    # One, not unbounded: the resident container takes the first source and the
-    # second needs a service Compose cannot create at run time.
-    assert scaling.instance_ceiling(VRL, DeployTarget.DOCKER, writes_app_config=True) == 1
+def test_a_docker_target_that_renders_its_app_config_is_unbounded():
+    # Each instance gets its own rendered directory and its name reaches the
+    # deployer's instance index, so Compose declares a container per source.
+    assert scaling.instance_ceiling(VRL, DeployTarget.DOCKER, writes_app_config=True) is None
 
 
 def test_a_single_deployment_app_is_one_everywhere():

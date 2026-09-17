@@ -92,9 +92,19 @@ def _deploy(crud, service: str, instance: str = "default", **values):
     return app
 
 
-def _rendered(settings, service: str):
+def _app_dir(settings, service: str, instance: str = "") -> Path:
+    """Where this app's container reads from: per instance for a per-config app."""
+    root = Path(settings.deployment.app_config_dir) / service
+    return root / instance if instance else root
+
+
+def _rendered(settings, service: str, instance: str = ""):
     app = descriptor(service)
-    return yaml_load(Path(settings.deployment.app_config_dir) / service / app.config_file)
+    return yaml_load(_app_dir(settings, service, instance) / app.config_file)
+
+
+def _index(settings, service: str) -> Path:
+    return Path(settings.deployment.app_env_dir) / f"{service}{appconfig.INSTANCE_INDEX_SUFFIX}"
 
 
 class TestWhetherItRunsAtAll:
@@ -175,6 +185,8 @@ class TestWhatTheContainerReads:
 
 
 class TestFileSets:
+    """A per-config app's file sets sit under its own instance directory."""
+
     def test_a_program_reaches_the_directory_the_config_names(self, crud, tmp_path):
         settings = _settings(tmp_path)
         app = _deploy(crud, VRL, "filebeat")
@@ -184,9 +196,9 @@ class TestFileSets:
 
         appconfig.render(crud, settings)
 
-        config = _rendered(settings, VRL)
-        assert config["transforms"]["dir"] == f"{MOUNT}/{VRL}/transforms"
-        written = Path(settings.deployment.app_config_dir, VRL, "transforms", "100_filebeat.vrl")
+        config = _rendered(settings, VRL, "filebeat")
+        assert config["transforms"]["dir"] == f"{MOUNT}/{VRL}/filebeat/transforms"
+        written = _app_dir(settings, VRL, "filebeat") / "transforms" / "100_filebeat.vrl"
         assert written.read_text(encoding="utf-8") == ".marked = true\n"
 
     def test_a_removed_program_leaves_the_directory(self, crud, tmp_path):
@@ -201,7 +213,7 @@ class TestFileSets:
         _put(crud, app, doc)
         appconfig.render(crud, settings)
 
-        directory = Path(settings.deployment.app_config_dir, VRL, "transforms")
+        directory = _app_dir(settings, VRL, "filebeat") / "transforms"
         assert list(directory.iterdir()) == []
 
     def test_a_new_program_rewrites_the_config_the_app_watches(self, crud, tmp_path):
@@ -210,7 +222,7 @@ class TestFileSets:
         settings = _settings(tmp_path)
         app = _deploy(crud, VRL, "filebeat")
         appconfig.render(crud, settings)
-        target = Path(settings.deployment.app_config_dir, VRL, "config.yaml")
+        target = _app_dir(settings, VRL, "filebeat") / "config.yaml"
         before = target.stat().st_mtime_ns
 
         doc = instances.read_overlay(crud, app)
@@ -229,8 +241,8 @@ class TestFileSets:
 
         appconfig.render(crud, settings)
 
-        assert _rendered(settings, VRL)["enrichment_tables"] == [
-            {"name": "timezones", "path": f"{MOUNT}/{VRL}/enrichment/timezones.csv"}
+        assert _rendered(settings, VRL, "filebeat")["enrichment_tables"] == [
+            {"name": "timezones", "path": f"{MOUNT}/{VRL}/filebeat/enrichment/timezones.csv"}
         ]
 
     def test_an_entry_the_config_already_names_is_left_alone(self, crud, tmp_path):
@@ -249,8 +261,75 @@ class TestFileSets:
 
         appconfig.render(crud, settings)
 
-        entries = _rendered(settings, VRL)["enrichment_tables"]
+        entries = _rendered(settings, VRL, "filebeat")["enrichment_tables"]
         assert entries == [{"name": "timezones", "path": "/elsewhere.csv", "key_columns": ["zone"]}]
+
+
+class TestOneContainerPerInstance:
+    """A per-config app runs one container per source, so it renders one config each."""
+
+    def test_two_instances_of_one_app_read_their_own_config(self, crud, tmp_path):
+        settings = _settings(tmp_path)
+        _deploy(crud, VRL, "crowdstrike-eu", config__sink__topic="crowdstrike-eu_load")
+        _deploy(crud, VRL, "crowdstrike-us", config__sink__topic="crowdstrike-us_load")
+
+        appconfig.render(crud, settings)
+
+        assert _rendered(settings, VRL, "crowdstrike-eu")["sink"]["topic"] == "crowdstrike-eu_load"
+        assert _rendered(settings, VRL, "crowdstrike-us")["sink"]["topic"] == "crowdstrike-us_load"
+
+    def test_each_instance_is_reported_against_its_own_container(self, crud, tmp_path):
+        settings = _settings(tmp_path)
+        _deploy(crud, VRL, "crowdstrike-eu")
+        _deploy(crud, VRL, "crowdstrike-us")
+
+        rendered = [r for r in appconfig.render(crud, settings) if r.service == VRL]
+
+        assert [r.container for r in rendered] == [
+            f"{VRL}-crowdstrike-eu",
+            f"{VRL}-crowdstrike-us",
+        ]
+
+    def test_the_deployer_is_told_which_containers_to_declare(self, crud, tmp_path):
+        settings = _settings(tmp_path)
+        _deploy(crud, VRL, "crowdstrike-eu")
+        _deploy(crud, VRL, "crowdstrike-us")
+
+        appconfig.render(crud, settings)
+
+        assert _index(settings, VRL).read_text() == "crowdstrike-eu\ncrowdstrike-us\n"
+
+    def test_an_app_with_no_source_declares_no_container(self, crud, tmp_path):
+        # A deployment that never adds a fetcher source starts with none running,
+        # rather than with one container holding an empty config.
+        settings = _settings(tmp_path)
+
+        appconfig.render(crud, settings)
+
+        assert _index(settings, "dfe-fetcher").read_text() == ""
+
+    def test_a_deleted_source_takes_its_container_and_its_config_with_it(self, crud, tmp_path):
+        settings = _settings(tmp_path)
+        _deploy(crud, VRL, "crowdstrike-eu")
+        gone = _deploy(crud, VRL, "crowdstrike-us")
+        appconfig.render(crud, settings)
+
+        crud.delete(instances.HELMVARS_CLASS, gone.overlay_name, ACTOR, message="test: rm")
+        appconfig.render(crud, settings)
+
+        assert _index(settings, VRL).read_text() == "crowdstrike-eu\n"
+        assert not _app_dir(settings, VRL, "crowdstrike-us").exists()
+
+    def test_a_stack_wide_app_keeps_its_one_directory(self, crud, tmp_path):
+        # The loader is one deployment for the whole stack, so its config stays
+        # where its committed container already mounts it.
+        settings = _settings(tmp_path)
+        _deploy(crud, LOADER)
+
+        appconfig.render(crud, settings)
+
+        assert (_app_dir(settings, LOADER) / "loader.yaml").is_file()
+        assert not _index(settings, LOADER).exists()
 
 
 class TestCustomEnvironment:
@@ -334,25 +413,43 @@ class TestWhatTakingTheChangeCosts:
 
     def test_a_startup_bound_app_names_the_command_that_applies_it(self, crud, tmp_path):
         settings = _settings(tmp_path)
+        app = _deploy(crud, VRL, "filebeat")
         appconfig.render(crud, settings)
-        _deploy(crud, VRL, "filebeat")
+        doc = instances.read_overlay(crud, app)
+        set_path(doc, "config.sink.topic", "elsewhere")
+        _put(crud, app, doc)
 
         rendered = {r.service: r for r in appconfig.render(crud, settings)}
 
         assert rendered[VRL].restart_required
-        assert rendered[VRL].restart_hint == f"restart required: docker compose restart {VRL}"
+        # The container carrying this instance, not the app: a per-config app has
+        # one per source, so the app's own name would restart the wrong one.
+        assert rendered[VRL].restart_hint == (
+            f"restart required: docker compose restart {VRL}-filebeat"
+        )
         assert appconfig.restart_hints(list(rendered.values())) == [rendered[VRL].restart_hint]
 
     def test_the_first_render_of_a_stack_asks_for_no_restart(self, crud, tmp_path):
         # Nothing is reading a directory this render created, so a fresh stack
         # must not hand its operator five restart commands before it has started.
         settings = _settings(tmp_path)
-        _deploy(crud, VRL, "filebeat")
 
         rendered = appconfig.render(crud, settings)
 
         assert [r.service for r in rendered if r.changed]
         assert appconfig.restart_hints(rendered) == []
+
+    def test_a_new_instance_names_the_container_to_bring_up(self, crud, tmp_path):
+        # There is no container for it yet, so a restart would apply to nothing.
+        settings = _settings(tmp_path)
+        appconfig.render(crud, settings)
+        _deploy(crud, VRL, "filebeat")
+
+        rendered = {r.container: r for r in appconfig.render(crud, settings)}
+
+        assert rendered[f"{VRL}-filebeat"].restart_hint == (
+            f"recreate required: docker compose up -d {VRL}-filebeat"
+        )
 
     def test_a_rolled_file_set_needs_a_restart_even_on_a_hot_app(self, crud, tmp_path):
         # dfe-transform-vector reloads its config in place and still compiles its
