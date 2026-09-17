@@ -57,15 +57,18 @@ class JitProvisioner:
         oidc_groups: list[str],
         source_provider: str,
         email: str = "",
+        name: str = "",
     ) -> Account:
         """Create or update shadow account. Non-fatal on HyperDX failures.
 
-        ``email`` is the IdP-asserted address (OIDC ``email`` claim / ``X-Oidc-Email``).
-        It is written on first create and reconciled on later logins when present.
+        ``email`` is the IdP-asserted address (OIDC ``email`` claim / ``X-Oidc-Email``)
+        and ``name`` the IdP-asserted display name. Each is written on first create
+        and reconciled on later logins when present.
         """
         safe_name = self.sanitise_username(user_id)
         now = datetime.now(UTC).isoformat()
         wanted_email = email.strip()
+        wanted_name = name.strip()
 
         existing = self._accounts.get(safe_name)
         if existing is not None:
@@ -78,12 +81,20 @@ class JitProvisioner:
                 audit_jit_groups_updated(user_id, added, removed)
             if wanted_email and existing.email != wanted_email:
                 updates["email"] = wanted_email
+            if wanted_name and existing.name != wanted_name:
+                updates["name"] = wanted_name
             self._accounts.update(safe_name, **updates)
             return self._accounts.get(safe_name)
 
         # First login — create shadow account
         try:
-            self._accounts.create(safe_name, "", groups=oidc_groups, email=wanted_email)
+            self._accounts.create(
+                email=wanted_email,
+                groups=oidc_groups,
+                name=wanted_name,
+                password="",
+                username=safe_name,
+            )
             self._accounts.update(
                 safe_name,
                 external=True,
@@ -95,6 +106,8 @@ class JitProvisioner:
             race_updates: dict[str, object] = {"groups": oidc_groups, "last_login_at": now}
             if wanted_email:
                 race_updates["email"] = wanted_email
+            if wanted_name:
+                race_updates["name"] = wanted_name
             self._accounts.update(safe_name, **race_updates)
             return self._accounts.get(safe_name)
 

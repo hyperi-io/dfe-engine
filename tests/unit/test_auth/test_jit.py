@@ -69,6 +69,47 @@ class TestEnsureAccount:
         jit.ensure_account("guid-123", ["acme-viewers"], "entra", email="jane@corp.com")
         assert accounts.get("guid-123").email == "jane@corp.com"
 
+    def test_first_login_stores_oidc_name(self, stores):
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+        account = jit.ensure_account(
+            name="Jane Citizen",
+            oidc_groups=["acme-viewers"],
+            source_provider="okta",
+            user_id="00u15mxs3ecygt7oj698",
+        )
+        assert account.name == "Jane Citizen"
+
+    def test_subsequent_login_backfills_oidc_name(self, stores):
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+        jit.ensure_account(
+            oidc_groups=["acme-viewers"], source_provider="okta", user_id="00u15mxs3ecygt7oj698"
+        )
+        assert accounts.get("00u15mxs3ecygt7oj698").name == ""
+
+        jit.ensure_account(
+            name="Jane Citizen",
+            oidc_groups=["acme-viewers"],
+            source_provider="okta",
+            user_id="00u15mxs3ecygt7oj698",
+        )
+        assert accounts.get("00u15mxs3ecygt7oj698").name == "Jane Citizen"
+
+    def test_login_without_name_keeps_stored_name(self, stores):
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+        jit.ensure_account(
+            name="Jane Citizen",
+            oidc_groups=["acme-viewers"],
+            source_provider="okta",
+            user_id="00u15mxs3ecygt7oj698",
+        )
+        jit.ensure_account(
+            oidc_groups=["acme-viewers"], source_provider="okta", user_id="00u15mxs3ecygt7oj698"
+        )
+        assert accounts.get("00u15mxs3ecygt7oj698").name == "Jane Citizen"
+
     def test_subsequent_login_updates_timestamp(self, stores):
         accounts, groups = stores
         jit = JitProvisioner(account_store=accounts, group_store=groups)
