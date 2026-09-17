@@ -159,6 +159,7 @@ def _renderer(
     default_ttl_days: int | None,
     cluster: str,
     broker_count: int,
+    kafka_tiered_storage: bool = False,
 ) -> Renderer:
     return Renderer(
         manifest,
@@ -167,6 +168,7 @@ def _renderer(
         default_ttl_days=default_ttl_days,
         cluster=cluster or "dfe_cluster",
         broker_count=broker_count,
+        kafka_tiered_storage=kafka_tiered_storage,
     )
 
 
@@ -187,6 +189,7 @@ def build_plan(
     settings: DFESettings,
     client: Any | None = None,
     broker_count: int = 1,
+    kafka_tiered_storage: bool = False,
 ) -> SchemaPlan:
     """Read the manifest, sense the topology, render every object.
 
@@ -196,7 +199,10 @@ def build_plan(
         client: A live ClickHouse client to sense the topology on. None renders
             for the configured fallback, which never emits ``ON CLUSTER``.
         broker_count: Brokers the deployment has, so the topic set's replication
-            factor is clamped to what the bus can actually place.
+            factor is clamped to what the bus can actually place. Ask the bus for
+            this; the configured factor clamped against itself never reduces.
+        kafka_tiered_storage: Whether this deployment's brokers tier to object
+            storage, which puts ``remote.storage.enable`` on the landing topic.
 
     Raises:
         SchemaPlanError: The manifest is missing or malformed, or an object in it
@@ -220,6 +226,7 @@ def build_plan(
         default_ttl_days=default_ttl,
         cluster=cluster,
         broker_count=broker_count,
+        kafka_tiered_storage=kafka_tiered_storage,
     )
     objects = _render_all(renderer, manifest.objects, source="core")
 
@@ -236,6 +243,7 @@ def build_plan(
                 default_ttl_days=default_ttl,
                 cluster=cluster,
                 broker_count=broker_count,
+                kafka_tiered_storage=kafka_tiered_storage,
             )
         )
 
@@ -259,6 +267,7 @@ def _overlay_objects(
     default_ttl_days: int | None,
     cluster: str,
     broker_count: int,
+    kafka_tiered_storage: bool = False,
 ) -> list[RenderedObject]:
     """The overlay's own objects, minus anything that redefines a core one.
 
@@ -289,6 +298,7 @@ def _overlay_objects(
         default_ttl_days=default_ttl_days,
         cluster=cluster,
         broker_count=broker_count,
+        kafka_tiered_storage=kafka_tiered_storage,
     )
     try:
         rendered = _render_all(renderer, tuple(keep), source="overlay")
@@ -331,6 +341,7 @@ def render_one(
         data_database=data_database,
         default_ttl_days=default_ttl_days,
         cluster="",
+        # Renders a statement, never a topic, so the replication clamp is unused.
         broker_count=1,
     )
     for obj in manifest.objects:
@@ -377,6 +388,7 @@ def _all_object_names(root: Path, data_database: str) -> dict[str, str]:
         data_database=data_database,
         default_ttl_days=None,
         cluster="",
+        # Renders names only, which no clamp touches; a topic path needs the real count.
         broker_count=1,
     )
     return {obj.id: renderer.render(obj).name for obj in manifest.objects}
