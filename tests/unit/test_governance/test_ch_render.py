@@ -439,12 +439,10 @@ class TestDefaultServiceRoles:
 
 
 class TestRenderMaterialise:
-    def test_creates_meta_db_and_replacing_tables(self):
+    def test_projects_without_creating_anything(self):
+        """The two tables are manifest objects; the reconciler only writes rows."""
         s = _joined(render_materialise([], []))
-        assert "CREATE DATABASE IF NOT EXISTS dfe_meta" in s
-        assert "CREATE TABLE IF NOT EXISTS dfe_meta.orgs" in s
-        assert "CREATE TABLE IF NOT EXISTS dfe_meta.ch_tiers" in s
-        assert "ReplacingMergeTree(updated_at)" in s
+        assert "CREATE" not in s
         # full refresh each run so removed orgs/tiers drop out of the projection
         assert "TRUNCATE TABLE dfe_meta.orgs" in s
         assert "TRUNCATE TABLE dfe_meta.ch_tiers" in s

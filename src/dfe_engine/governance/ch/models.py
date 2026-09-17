@@ -13,26 +13,45 @@ GROUP BINDING ties an RBAC group's CH user to one tier axis + at most one org
 axis. The tenant axis is one SHARED role plus a per-user pinned setting; per-org
 users are derived from the Org registry by the reconciler.
 
+The seed CATALOGUE -- the six tiers, the four service roles, the tenant axis, the
+system-table grant lists and the naming rules -- is data in dfe-schemas
+(``roles/clickhouse.yaml``) and is read from there. The models here are the shape
+an operator's own governed-ops edits take.
+
 CH object naming (spec 5.1): a tier ``analyst_tier_2`` yields role
 ``dfe_analyst_tier_2_role``, profile ``dfe_analyst_tier_2_profile``, quota
-``dfe_analyst_tier_2_quota``. The catalogue is config, never a hardcoded list.
+``dfe_analyst_tier_2_quota``, from the naming rules the catalogue declares.
 """
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any
 
+from dfe_schemas import schemas_root
+from dfe_schemas.loader import load_version_entry
 from pydantic import BaseModel, Field
 
-# ---- CH object naming (deterministic, so drops are computable) ------------
+# ---- The seed catalogue, read from dfe-schemas ----------------------------
 
-_GiB = 1024**3
+CATALOGUE_REF = "roles/clickhouse"
+
+
+@lru_cache(maxsize=1)
+def catalogue() -> dict[str, Any]:
+    """The ClickHouse role, tier and grant catalogue, as dfe-schemas declares it."""
+    return load_version_entry(schemas_root() / f"{CATALOGUE_REF}.yaml", require_columns=False)
+
+
+def _naming(key: str) -> str:
+    return str(catalogue()["naming"][key])
+
 
 # ---- Data-scoping databases + grants (tenant isolation, spec 5.2) ----------
 #
 # Seed values an operator can edit. They name no database: see DB below.
 
-DB = "{db}"
+DB = str(catalogue()["database_placeholder"])
 """Placeholder for THE DFE database, resolved at reconcile time.
 
 Every table DFE writes lives in one database - the landing table, per-source
@@ -65,35 +84,8 @@ BROAD_DATA_GRANT = f"SELECT ON {DB}.*"
 #
 # `merge('system', '^metric_log')` SKIPS a table the user cannot read, so a
 # ClickHouse upgrade that rotates metric_log to metric_log_0 drops the older
-# history out of the charts until that name is added here.
-CH_SYSTEM_TABLES = (
-    "asynchronous_metric_log",
-    "asynchronous_metrics",
-    "clusters",
-    "columns",
-    "dashboards",
-    "data_skipping_indices",
-    "databases",
-    "detached_parts",
-    "disks",
-    "error_log",
-    "errors",
-    "events",
-    "merges",
-    "metric_log",
-    "metrics",
-    "mutations",
-    "part_log",
-    "parts",
-    "processes",
-    "query_log",
-    "replicas",
-    "replication_queue",
-    "settings",
-    "table_engines",
-    "tables",
-    "text_log",
-)
+# history out of the charts until that name is added to the catalogue.
+CH_SYSTEM_TABLES = tuple(catalogue()["system_introspection_tables"])
 
 SYSTEM_INTROSPECTION_GRANTS = [f"SELECT ON system.{table}" for table in CH_SYSTEM_TABLES]
 
@@ -101,30 +93,20 @@ SYSTEM_INTROSPECTION_GRANTS = [f"SELECT ON system.{table}" for table in CH_SYSTE
 # The only system tables a TENANT reaches. HyperDX builds its field list from
 # system.columns and detects server capabilities from the other three, so a
 # tenant that cannot read these renders an empty source rather than its data.
-#
-# Deliberately a fraction of CH_SYSTEM_TABLES: nothing here describes the
-# deployment, the cluster, other tenants, or query history. ClickHouse filters
-# columns/tables rows by the caller's own grants, so a tenant sees metadata only
-# for tables its tier already grants SELECT on.
-TENANT_SYSTEM_TABLES = (
-    "columns",
-    "settings",
-    "table_engines",
-    "tables",
-)
+TENANT_SYSTEM_TABLES = tuple(catalogue()["tenant"]["system_tables"])
 
 TENANT_SYSTEM_GRANTS = [f"SELECT ON system.{table}" for table in TENANT_SYSTEM_TABLES]
 
 
-TENANT_ROLE = "dfe_tenant_role"
+TENANT_ROLE = str(catalogue()["tenant"]["role"])
 """The ONE shared role the tenant row policies target.
 
 Held by every org-pinned user and by nothing else. A user holding it reads only
-the ``_org_id`` values named by its own pinned ``SQL_current_tenant_id`` setting;
-a user without it is targeted by no policy and reads unrestricted.
+the ``_org_id`` values named by its own pinned tenant setting; a user without it
+is targeted by no policy and reads unrestricted.
 """
 
-TENANT_SETTING = "SQL_current_tenant_id"
+TENANT_SETTING = str(catalogue()["tenant"]["setting"])
 """Custom setting carrying a user's tenant ids (comma-joined), pinned READONLY.
 
 The pin is the enforcement: a READONLY user setting rejects any override -
@@ -133,15 +115,29 @@ SETTING_CONSTRAINT_VIOLATION (code 452). The server must allow the ``SQL_``
 custom-settings prefix (the clickhouse-cluster chart does).
 """
 
+# The governance projection's database and tables, by manifest id. The engine's
+# schema phase creates them; the reconciler only writes rows into them.
+META_DATABASE_ID = "db.meta"
+META_ORGS_ID = "meta.orgs"
+META_TIERS_ID = "meta.ch_tiers"
+
+
+def meta_projection() -> tuple[str, str, str]:
+    """``(database, orgs table, tiers table)`` as the manifest declares them."""
+    from dfe_engine.schema.plan import object_names
+
+    names = object_names(META_DATABASE_ID, META_ORGS_ID, META_TIERS_ID)
+    return names[META_DATABASE_ID], names[META_ORGS_ID], names[META_TIERS_ID]
+
 
 def tenant_policy_name(db: str, table: str) -> str:
     """Deterministic name for the shared tenant policy on one table."""
-    return f"dfe_rowpol_tenant_{db}_{table}"
+    return _naming("row_policy").format(database=db, table=table)
 
 
 def org_user_name(org: str) -> str:
     """The org's pinned CH user - the identity a hyperdx team connects as."""
-    return f"dfe_org_{org}"
+    return _naming("org_user").format(org=org)
 
 
 # ---- Config models --------------------------------------------------------
@@ -163,13 +159,13 @@ class ChTier(BaseModel):
     quota: dict[str, Any] = Field(default_factory=dict)
 
     def role(self) -> str:
-        return f"dfe_{self.name}_role"
+        return _naming("role").format(name=self.name)
 
     def profile(self) -> str:
-        return f"dfe_{self.name}_profile"
+        return _naming("settings_profile").format(name=self.name)
 
     def quota_name(self) -> str:
-        return f"dfe_{self.name}_quota"
+        return _naming("quota").format(name=self.name)
 
     def quota_interval(self) -> str:
         return str(self.quota.get("interval", "1 hour"))
@@ -192,10 +188,10 @@ class ChServiceRole(BaseModel):
     settings: dict[str, int] = Field(default_factory=dict)
 
     def role(self) -> str:
-        return f"dfe_{self.name}_role"
+        return _naming("role").format(name=self.name)
 
     def profile(self) -> str:
-        return f"dfe_{self.name}_profile"
+        return _naming("settings_profile").format(name=self.name)
 
     def user(self) -> str:
         """The minted user name (used when ``mint_user`` is set)."""
@@ -222,125 +218,41 @@ class GroupChBinding(BaseModel):
         return self.ch_user or f"dfe_grp_{self.group}"
 
 
-# ---- Seeded defaults (opinionated, non-destructive seeds) ------------------
+# ---- Seeded defaults, read from the dfe-schemas catalogue ------------------
 #
-# Three tiers per family. Operators edit/delete/extend these as ordinary
-# governed-ops edits; seeding skips any file that already exists so edits are
-# never clobbered. Memory + timeouts are the spec's locked numbers (section 4);
-# quota maxima are reasonable starting points (per-interval caps), fully tunable.
+# The tiers, their memory and timeout envelopes, their quotas and the service
+# roles are DATA in ``roles/clickhouse.yaml``. Operators edit, delete and extend
+# them as ordinary governed-ops edits; seeding skips any file that already
+# exists, so an edit is never clobbered.
 
 
-def _analyst_tier(name: str, mem: int, secs: int, queries: int, *, default: bool = False) -> ChTier:
+def _tier(entry: dict[str, Any]) -> ChTier:
     return ChTier(
-        name=name,
-        kind="analyst",
-        # Row-policy tenant isolation (spec 5.2, D9): the analyst tier ROLE grants
-        # the WHOLE data db `dfe.*` for EVERY user, org and platform alike, so a
-        # new source table is visible automatically with no admin action. A fenced
-        # org user is confined by the RESTRICTIVE `_org_id` row policy plus the
-        # `USING 0` deny policy on the non-`_org_id` tables (dfe.otel_*, meta) -
-        # grant scope is broad, the row policies are the isolation control.
-        default=default,
-        grants=[BROAD_DATA_GRANT],
-        settings={
-            # readonly=2: queries only, but per-query output settings stay
-            # changeable -- BI clients (hyperdx) send those with every query.
-            # Pinned settings keep their own READONLY constraint regardless.
-            "readonly": 2,
-            "max_memory_usage": mem,
-            "max_execution_time": secs,
-            "max_rows_to_read": 0,  # 0 = unset
-        },
-        quota={
-            "interval": "1 hour",
-            "queries": queries,
-            # BI clients probe speculatively and bad user SQL is routine; a
-            # tight errors cap locks the whole org out for the interval.
-            "errors": 1000,
-            "result_rows": 1_000_000_000,
-        },
+        name=entry["name"],
+        kind=entry.get("kind", "analyst"),
+        default=bool(entry.get("default", False)),
+        grants=list(entry.get("grants") or []),
+        settings=dict(entry.get("settings") or {}),
+        quota=dict(entry.get("quota") or {}),
     )
 
 
-def _hunt_tier(name: str, mem: int, secs: int, queries: int, *, default: bool = False) -> ChTier:
-    return ChTier(
-        name=name,
-        kind="hunt",
-        default=default,
-        # Hunts read the data and write detections; no readonly.
-        grants=[f"SELECT ON {DB}.*", f"INSERT ON {DB}.*"],
-        settings={"max_memory_usage": mem, "max_execution_time": secs},
-        quota={
-            "interval": "1 hour",
-            "queries": queries,
-            "result_rows": 10_000_000_000,
-            "errors": 500,
-        },
+def _service_role(entry: dict[str, Any]) -> ChServiceRole:
+    """One service role; ``system_introspection`` expands to the declared grant list."""
+    grants = list(entry.get("grants") or [])
+    if entry.get("system_introspection"):
+        grants += SYSTEM_INTROSPECTION_GRANTS
+    return ChServiceRole(
+        name=entry["name"],
+        mint_user=bool(entry.get("mint_user", False)),
+        grants=grants,
+        settings=dict(entry.get("settings") or {}),
     )
 
 
-DEFAULT_TIERS: list[ChTier] = [
-    # A whole org shares ONE pinned CH user, and a BI page fires several
-    # queries per view -- size the hourly caps for that, not for one human.
-    _analyst_tier("analyst_tier_1", 16 * _GiB, 600, 50_000),
-    _analyst_tier("analyst_tier_2", 4 * _GiB, 300, 20_000, default=True),
-    _analyst_tier("analyst_tier_3", 1 * _GiB, 2, 2_000),
-    _hunt_tier("hunt_tier_1", 16 * _GiB, 600, 10000),
-    _hunt_tier("hunt_tier_2", 4 * _GiB, 120, 5000, default=True),
-    _hunt_tier("hunt_tier_3", 1 * _GiB, 15, 1000),
-]
+DEFAULT_TIERS: list[ChTier] = [_tier(entry) for entry in catalogue()["tiers"]]
 
-# Fixed service identities (spec 5.3) - single, not tiered. Seeded like the
-# tiers: non-destructive, operator-editable.
+# Fixed service identities (spec 5.3) - single, not tiered.
 DEFAULT_SERVICE_ROLES: list[ChServiceRole] = [
-    # dfe-loader: async-insert profile + INSERT on the DFE database.
-    ChServiceRole(
-        name="loader",
-        mint_user=True,
-        grants=[f"INSERT ON {DB}.*"],
-        settings={
-            "async_insert": 1,
-            "wait_for_async_insert": 1,
-            "wait_for_async_insert_timeout": 120,
-            "async_insert_busy_timeout_max_ms": 1000,
-            "async_insert_max_data_size": 134217728,
-        },
-    ),
-    # The restricted engine reader - folds the old query/ddl.py dfe_query_reader
-    # into ONE definition. readonly, no DDL, bounded per query.
-    ChServiceRole(
-        name="query_reader",
-        mint_user=True,
-        # Also reads ClickHouse's own system tables: this is the identity the
-        # platform team's HyperDX connection uses, and the ClickHouse dashboards
-        # are raw SQL over `system`.
-        grants=[f"SELECT ON {DB}.*", *SYSTEM_INTROSPECTION_GRANTS],
-        settings={
-            # readonly=2, not 1: queries only, but per-query output settings stay
-            # changeable -- hyperdx sends date_time_output_format with every query
-            # and readonly=1 rejects the whole request. allow_ddl=0 still bars DDL.
-            "readonly": 2,
-            "allow_ddl": 0,
-            "max_execution_time": 30,
-            "max_rows_to_read": 10_000_000,
-            "max_memory_usage": 2 * _GiB,
-        },
-    ),
-    # Hunt-runner coordination role: read/write on the hunt_lease/watermark/state
-    # tables. Granted alongside a hunt tier at bind time; global (no org role), so
-    # not a minted user of its own.
-    ChServiceRole(
-        name="hunt_runner",
-        mint_user=False,
-        grants=[f"SELECT ON {DB}.*", f"INSERT ON {DB}.*"],
-    ),
-    # Observability telemetry is platform-internal: composed onto admin and
-    # infra-admin group users at bind time, never part of an analyst tier.
-    # ClickHouse GRANT has no table-name wildcard, so the read is db-wide rather
-    # than a `dfe.otel_*` prefix.
-    ChServiceRole(
-        name="otel_reader",
-        mint_user=False,
-        grants=[f"SELECT ON {DB}.*"],
-    ),
+    _service_role(entry) for entry in catalogue()["service_roles"]
 ]

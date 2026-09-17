@@ -40,12 +40,12 @@ from datetime import UTC, datetime, timedelta
 from pydantic import BaseModel, Field, field_validator
 from scalo.logger import logger
 
-from dfe_engine.schema.applier import SchemaApplier
-from dfe_engine.schema.engine_resolver import EngineResolver
-from dfe_engine.schema.internal_tables import alert_state_spec
-from dfe_engine.schema.schema_ddl import DDLGenerator, quote_ident
+from dfe_engine.schema.require import require_objects
+from dfe_engine.schema.schema_ddl import quote_ident
 from dfe_engine.settings import default_data_database
-from dfe_engine.source.type_registry import TypeRegistry
+
+# The cooldown table, by manifest id. The engine's schema phase creates it.
+_ALERT_STATE_ID = "data.alert_state"
 
 # ── Duration Parser ──────────────────────────────────────────────
 
@@ -241,7 +241,7 @@ class AlertStateManager:
         self._table_ensured = False
 
     def ensure_table_exists(self, ch_client) -> None:
-        """Create or reconcile the alert_state table (idempotent).
+        """Assert the alert_state table exists. The engine's schema phase makes it.
 
         Best-effort: a cooldown check that cannot reach ClickHouse must not stop
         a hunt firing, so the failure is logged and the caller carries on.
@@ -249,14 +249,15 @@ class AlertStateManager:
         if self._table_ensured:
             return
         try:
-            spec = alert_state_spec(self._db)
-            applier = SchemaApplier(ch_client, EngineResolver(client=ch_client))
-            applier.ensure_database(self._db)
-            change = applier.ensure_table(self._db, spec.name, spec.columns, spec.config)
+            require_objects(
+                ch_client,
+                database=self._db,
+                object_ids=(_ALERT_STATE_ID,),
+                what="alert cooldown state",
+            )
             self._table_ensured = True
-            logger.debug(f"AlertStateManager: {change.describe()}")
         except Exception as e:
-            logger.warning(f"AlertStateManager: failed to ensure table: {e}")
+            logger.warning(f"AlertStateManager: alert_state is not present: {e}")
 
     def check_cooldown(
         self,
@@ -337,13 +338,13 @@ class AlertStateManager:
         except Exception as e:
             logger.warning(f"AlertStateManager: failed to record fire: {e}")
 
-    def get_ddl(self, resolver: EngineResolver | None = None) -> str:
-        """Render the table's CREATE, for reference output.
+    def get_ddl(self) -> str:
+        """The table's CREATE as the schema phase applies it, for reference output.
 
-        Without a *resolver* this is the single-node form: sensing needs a live
-        client, and this path has none. The applied DDL comes from
-        ``ensure_table_exists``, which senses the target.
+        Rendered from the manifest in the single-node form: sensing needs a live
+        client and this path has none, and the topology token is the only part
+        that differs.
         """
-        spec = alert_state_spec(self._db)
-        generator = DDLGenerator(TypeRegistry.default(), resolver=resolver)
-        return generator.generate_create_table(spec.name, spec.columns, spec.config)
+        from dfe_engine.schema.plan import single_node_statement
+
+        return single_node_statement(_ALERT_STATE_ID, data_database=self._db)

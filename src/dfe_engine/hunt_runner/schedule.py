@@ -32,25 +32,26 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from dfe_engine.schema.require import require_objects
+
 from .models import HuntSpec
 from .spread import phase_offset
 
 _COLUMNS = ["hunt_id", "interval_seconds", "phase_offset", "enabled"]
 
+# The schedule table, by manifest id. The engine's schema phase creates it.
+_SCHEDULE_ID = "data.hunt_schedule"
+
 
 def ensure_schedule_schema(ch: Any, database: str) -> None:
-    """Create the materialised schedule table if absent (idempotent).
+    """Assert the materialised schedule table exists. The engine's schema phase makes it.
 
-    ReplacingMergeTree keyed by hunt_id: one logical row per hunt after merge, with
-    ``enabled`` as a soft tombstone so a removed hunt stops waking KEDA without a
-    delete. ``updated`` is the replacing version (latest write wins per hunt_id).
+    A read, not an apply. The literal CREATE that used to live here pinned
+    ``ReplacingMergeTree`` with no ``ON CLUSTER``, which is correct on a single
+    node and lands on one replica of a cluster -- the exact failure
+    ``tables/internal/hunt_schedule.yaml`` warns against in its own header.
     """
-    ch.command(
-        f"CREATE TABLE IF NOT EXISTS `{database}`.hunt_schedule ("
-        "hunt_id String, interval_seconds Int64, phase_offset Int64, "
-        "enabled UInt8 DEFAULT 1, updated DateTime64(3) DEFAULT now64(3)) "
-        "ENGINE = ReplacingMergeTree(updated) ORDER BY hunt_id"
-    )
+    require_objects(ch, database=database, object_ids=(_SCHEDULE_ID,), what="the hunt schedule")
 
 
 def _enabled_ids(ch: Any, database: str) -> set[str]:

@@ -41,7 +41,7 @@ def _deterministic_clock(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture
 def ch() -> FakeRepositoryCH:
-    return FakeRepositoryCH()
+    return FakeRepositoryCH(applied={("dfe", "repository"), ("custom_db", "repository")})
 
 
 @pytest.fixture
@@ -50,25 +50,33 @@ def store(ch: FakeRepositoryCH) -> RepositoryStore:
 
 
 class TestEnsureSchema:
-    def test_runs_ddl_once_per_process(self, ch: FakeRepositoryCH, store: RepositoryStore):
+    def test_asserts_presence_once_per_process(self, ch: FakeRepositoryCH, store: RepositoryStore):
+        """A read, never a create: the engine's schema phase makes the table."""
         store.ensure_schema()
-        assert len(ch.ddl) == 2
-        assert ch.ddl[0].startswith("CREATE DATABASE IF NOT EXISTS dfe")
-        # The rendered CREATE leads with its generated comment header.
-        assert "CREATE TABLE IF NOT EXISTS `dfe`.`repository`" in ch.ddl[1]
-        # Second store instance in the same process: no re-run
+        assert ch.ddl == []
+        assert len(ch.presence_reads) == 1
+        assert ch.presence_reads[0]["db"] == "dfe"
+        assert ch.presence_reads[0]["names"] == ["repository"]
+        # Second store instance in the same process: no re-read
         RepositoryStore(ch).ensure_schema()
-        assert len(ch.ddl) == 2
+        assert len(ch.presence_reads) == 1
 
-    def test_database_override_substitutes_name(self, ch: FakeRepositoryCH):
+    def test_database_override_is_the_one_checked(self, ch: FakeRepositoryCH):
         RepositoryStore(ch, database="custom_db").ensure_schema()
-        assert "`custom_db`.`repository`" in ch.ddl[1]
-        assert "custom_db" in ch.ddl[0]
+        assert ch.presence_reads[0]["db"] == "custom_db"
+
+    def test_an_absent_table_fails_loud(self, store: RepositoryStore):
+        """A missing table means the phase has not converged, and that must not be hidden."""
+        from dfe_engine.schema.require import SchemaNotAppliedError
+
+        empty = FakeRepositoryCH()
+        with pytest.raises(SchemaNotAppliedError, match="schema phase"):
+            RepositoryStore(empty).ensure_schema()
 
     def test_lazy_on_first_read(self, ch: FakeRepositoryCH, store: RepositoryStore):
-        assert ch.ddl == []
+        assert ch.presence_reads == []
         store.get("user", "alice", "preferences", "default")
-        assert len(ch.ddl) == 2
+        assert len(ch.presence_reads) == 1
 
 
 class TestPutGet:

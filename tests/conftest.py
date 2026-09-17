@@ -349,11 +349,14 @@ def _no_clickhouse_bootstrap_hang(request):
         return
 
     import dfe_engine.clickhouse.bootstrap as _chb
+    from dfe_engine.schema.phase import SchemaBootstrapState
 
     original = _chb.bootstrap_clickhouse
     # lifespan does `from ...bootstrap import bootstrap_clickhouse` at call time,
-    # so patching the module attribute is picked up when the app starts up.
-    _chb.bootstrap_clickhouse = lambda *a, **k: None
+    # so patching the module attribute is picked up when the app starts up. The
+    # stand-in returns the phase's own state shape, unknown, which is what a
+    # deployment with the bootstrap switched off reports.
+    _chb.bootstrap_clickhouse = lambda *a, **k: SchemaBootstrapState()
     try:
         yield
     finally:

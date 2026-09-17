@@ -1,7 +1,8 @@
 """System router — deployment facts, settings summary, default retention.
 
 GET /api/v1/system/deployment  → What this deployment IS: profile, transports, mesh, routing, versions
-GET /api/v1/system/version     → What this deployment runs: stack, engine, ui
+GET /api/v1/system/version     → What this deployment runs: stack, engine, schemas, ui
+GET /api/v1/system/schema      → What the last schema bootstrap pass did, object by object
 GET /api/v1/system/settings    → Redacted settings summary
 GET /api/v1/system/retention   → The deployment default TTL
 """
@@ -11,6 +12,7 @@ from __future__ import annotations
 import sys
 from typing import Any, Literal
 
+from dfe_schemas import __version__ as schemas_version
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from scalo.logger import logger
@@ -47,6 +49,12 @@ class VersionResponse(BaseModel):
         description="Certified stack version this deployment runs; null when nothing states one."
     )
     engine: str = Field(description="dfe-engine package version")
+    schemas: str = Field(
+        description=(
+            "dfe-schemas release the engine applies its schema from. The wheel rides "
+            "inside the engine image, so this is the schema version this deployment is on."
+        )
+    )
     ui: str | None = Field(
         description="dfe-ui version when the deploy repo pins one off the certified stack."
     )
@@ -64,6 +72,58 @@ class VersionResponse(BaseModel):
         )
     )
     python_version: str = Field(description="Python interpreter version")
+
+
+class SchemaObjectStatus(BaseModel):
+    """What the last pass did to one manifest object."""
+
+    id: str = Field(description="The object's manifest id, e.g. data.main")
+    kind: str = Field(description="database, table, materialized_view, view, role or topic")
+    object: str = Field(description="Database-qualified name, or topic:<name>")
+    action: str = Field(description="created, altered, unchanged, refused or skipped")
+    checksum: str = Field(description="sha256 of the normalised rendered statement")
+    columns_added: list[str] = Field(default_factory=list)
+    drift: list[str] = Field(
+        default_factory=list,
+        description="Non-additive differences found; each one is why the change was refused.",
+    )
+    extra_columns: list[str] = Field(
+        default_factory=list,
+        description="Live columns the schema no longer declares. Reported, never actioned.",
+    )
+
+
+class SchemaStatusResponse(BaseModel):
+    """The schema bootstrap phase's record of its last pass."""
+
+    state: str = Field(description="unknown, running, converged, observed or failed")
+    ready: bool = Field(description="Whether readiness may be reported on the schema check.")
+    converged: bool = Field(
+        description="Whether the manifest's objects are known to exist on this deployment."
+    )
+    schemas_version: str = Field(description="dfe-schemas release the plan was rendered from")
+    engine_version: str = Field(description="dfe-engine release that ran the pass")
+    topology: str = Field(description="single, replicated or replicated_on_cluster")
+    database: str = Field(description="The one database every DFE object lands in")
+    holder: str = Field(description="Who held the bootstrap lease for this pass")
+    started_at: str
+    finished_at: str
+    duration_seconds: float
+    error: str = Field(description="Why the pass failed; empty when it did not.")
+    counts: dict[str, int] = Field(default_factory=dict, description="One count per action")
+    objects: list[SchemaObjectStatus] = Field(default_factory=list)
+    refused: list[str] = Field(
+        default_factory=list,
+        description="Objects whose change was declined as drift, each named with the reason.",
+    )
+    overlay_refused: list[str] = Field(
+        default_factory=list,
+        description="Overlay objects refused for redefining a core path.",
+    )
+    topics_created: list[str] = Field(default_factory=list)
+    topics_skipped: str = Field(
+        description="Why the topic set was skipped; empty when it was applied."
+    )
 
 
 class TransportFacts(BaseModel):
@@ -227,11 +287,26 @@ async def get_version(user: CurrentUser, request: Request, settings: Settings) -
     return VersionResponse(
         stack=facts.stack,
         engine=facts.engine,
+        schemas=schemas_version,
         ui=facts.ui,
         apps=facts.apps,
         source=facts.source,
         python_version=sys.version.split()[0],
     )
+
+
+@router.get("/schema", response_model=SchemaStatusResponse)
+async def get_schema_status(user: CurrentUser, settings: Settings) -> SchemaStatusResponse:
+    """What the last schema bootstrap pass did, object by object.
+
+    This is the operator's record of the schema apply, replacing the completed
+    ArgoCD Job the engine took over from. ``state`` is what readiness follows:
+    converged or observed is ready, failed leaves the pod up and NotReady with
+    the cause here.
+    """
+    from dfe_engine.schema.phase import current_state
+
+    return SchemaStatusResponse.model_validate(current_state().as_dict())
 
 
 @router.get(

@@ -6,28 +6,27 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Guards for ``dfe_internal.repository``, rendered from its spec.
+"""Guards for the repository table, rendered from its dfe-schemas definition.
 
-The spec in :mod:`dfe_engine.schema.internal_tables` is the source of truth --
-there is no bundled ``.sql`` and no canonical copy in dfe-schemas to drift from,
-because the engine clause is not knowable until the target server is sensed.
-
-What is asserted here are the invariants a rendering must never break: the dedup
-key, the absence of a partition, and the topology forms the resolver produces.
+The definition is ``tables/internal/repository.yaml`` and the engine clause is
+not knowable until the target server is sensed, so what is asserted here are the
+invariants a rendering must never break: the dedup key, the absence of a
+partition, and the topology forms the resolver produces.
 """
 
 from __future__ import annotations
 
 from dfe_engine.schema.engine_resolver import EngineResolver
-from dfe_engine.schema.internal_tables import repository_spec
 from dfe_engine.schema.schema_ddl import DDLGenerator
+from dfe_engine.schema.table_loader import load_table_spec
 from dfe_engine.source.type_registry import TypeRegistry
 
 _DB = "dfe_internal"
+_REF = "tables/internal/repository"
 
 
 def _render(resolver: EngineResolver | None = None) -> str:
-    spec = repository_spec(_DB)
+    spec = load_table_spec(_REF, _DB)
     generator = DDLGenerator(TypeRegistry.default(), resolver=resolver)
     return generator.generate_create_table(
         table_name=spec.name, columns=spec.columns, config=spec.config
@@ -36,7 +35,7 @@ def _render(resolver: EngineResolver | None = None) -> str:
 
 def test_no_org_id_column() -> None:
     """No _org_id by design - keeps ChRbacReconciler _org_id discovery away."""
-    assert not any(col.name == "_org_id" for col in repository_spec(_DB).columns)
+    assert not any(col.name == "_org_id" for col in load_table_spec(_REF, _DB).columns)
 
 
 def test_no_partition_by() -> None:

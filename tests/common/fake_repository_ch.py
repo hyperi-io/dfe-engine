@@ -8,15 +8,14 @@
 
 """In-memory stand-in for ClickHouseClientWrapper covering RepositoryStore SQL.
 
-Implements exactly what the store issues: the schema applier's ``command`` /
-``query`` pair, the INSERT-with-data path, and the two SELECT shapes (get by key
-vs list a namespace). SELECT honours ReplacingMergeTree(updated_at, is_deleted)
-FINAL semantics: latest updated_at wins per key (last insert wins on ties,
-matching ClickHouse merge behaviour), tombstones hide the row.
+Implements exactly what the store issues: the presence read ``ensure_schema``
+makes, the INSERT-with-data path, and the two SELECT shapes (get by key vs list
+a namespace). SELECT honours ReplacingMergeTree(updated_at, is_deleted) FINAL
+semantics: latest updated_at wins per key (last insert wins on ties, matching
+ClickHouse merge behaviour), tombstones hide the row.
 
-The applier's state reads are answered from what ``command`` has created, so a
-second ``ensure_schema`` sees the table and reports it unchanged rather than
-issuing the DDL twice.
+The store no longer creates its own table -- the engine's schema phase does --
+so the fake is constructed with the tables that phase has already applied.
 """
 
 from __future__ import annotations
@@ -42,14 +41,14 @@ _ROW_COLS = (
 class FakeRepositoryCH:
     """Fake ClickHouse client wrapper for the repository table."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, applied: set[tuple[str, str]] | None = None) -> None:
         self.rows: list[dict[str, Any]] = []
         self.ddl: list[str] = []
         self.select_params: list[dict[str, Any]] = []
-        # What the store's schema apply has already created, so a second
-        # ensure_schema sees them and reports no change.
-        self.databases: set[str] = set()
-        self.tables: set[tuple[str, str]] = set()
+        self.presence_reads: list[dict[str, Any]] = []
+        # What the engine's schema phase has already applied on this server.
+        self.databases: set[str] = {db for db, _ in (applied or set())}
+        self.tables: set[tuple[str, str]] = set(applied or set())
 
     # ── the applier's surface: command + query ────────────────
 
@@ -65,7 +64,7 @@ class FakeRepositoryCH:
         return []
 
     def query(self, sql: str, *args: Any, parameters: Any = None, **kwargs: Any):
-        """The applier's state reads, returning a QueryResult-shaped object."""
+        """The state reads, returning a QueryResult-shaped object."""
         params = parameters or {}
         # The engine resolver's sensing probes: no cloud_mode and no cluster
         # macros, so it classifies this fake as a single node.
@@ -75,12 +74,21 @@ class FakeRepositoryCH:
             return SimpleNamespace(result_rows=[])
         if "system.databases" in sql:
             rows = [(1,)] if params.get("db") in self.databases else []
+        elif "system.tables" in sql and "names" in params:
+            # The presence read: which of the named objects this server carries.
+            self.presence_reads.append(dict(params))
+            wanted = set(params["names"])
+            rows = [
+                (name,)
+                for db, name in sorted(self.tables)
+                if db == params.get("db") and name in wanted
+            ]
         elif "system.tables" in sql:
             rows = [(1,)] if (params.get("db"), params.get("tbl")) in self.tables else []
         elif "system.columns" in sql:
             rows = [(name,) for name in _ROW_COLS]
         else:
-            raise AssertionError(f"unexpected applier query: {sql}")
+            raise AssertionError(f"unexpected query: {sql}")
         return SimpleNamespace(result_rows=rows)
 
     def execute(self, query: str, *args: Any, parameters: Any = None, **kwargs: Any):
