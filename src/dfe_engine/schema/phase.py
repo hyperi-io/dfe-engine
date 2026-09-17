@@ -246,6 +246,35 @@ def _flush_query_log(client: Any, *, dry_run: bool) -> None:
         logger.debug("system.query_log could not be flushed", error=str(exc))
 
 
+def _broker_count(settings: DFESettings) -> int:
+    """Brokers to clamp the topic set's replication factor against.
+
+    Only asked where the topic set is actually going to be created, so a
+    deployment with no bus gains no broker round trip.
+    """
+    if _topics_skipped(settings):
+        return 1
+    from dfe_engine.kafka.topics import broker_count
+
+    return broker_count(settings=settings)
+
+
+def _topics_skipped(settings: DFESettings) -> str:
+    """Why the bootstrap topic set will not be created, or "" when it will be.
+
+    One reader for the gate, because the plan is rendered for a broker count read
+    off the bus and that read must not happen on a deployment the apply is going
+    to skip -- a brokerless tier would spend the admin timeout on every boot.
+    """
+    if not settings.kafka.bootstrap_topics:
+        return "the topic bootstrap is switched off"
+    if not settings.transport.bus_present:
+        return "this deployment carries no bus"
+    if not settings.kafka.bootstrap_servers:
+        return "no broker is configured"
+    return ""
+
+
 def _apply_topics(plan: SchemaPlan, settings: DFESettings) -> tuple[list[str], str]:
     """Create the declared bootstrap topics. Create only, never delete.
 
@@ -255,12 +284,9 @@ def _apply_topics(plan: SchemaPlan, settings: DFESettings) -> tuple[list[str], s
     """
     from dfe_engine.kafka.topics import TopicSpec, ensure_topics
 
-    if not settings.kafka.bootstrap_topics:
-        return [], "the topic bootstrap is switched off"
-    if not settings.transport.bus_present:
-        return [], "this deployment carries no bus"
-    if not settings.kafka.bootstrap_servers:
-        return [], "no broker is configured"
+    skipped = _topics_skipped(settings)
+    if skipped:
+        return [], skipped
 
     specs = [
         TopicSpec(
@@ -311,7 +337,10 @@ def run_bootstrap(
     try:
         client = _connect(settings, wait_seconds=wait)
         plan = build_plan(
-            settings=settings, client=client, broker_count=settings.kafka.topic_replication_factor
+            settings=settings,
+            client=client,
+            broker_count=_broker_count(settings),
+            kafka_tiered_storage=settings.kafka.tiered_storage,
         )
         state.schemas_version = plan.schemas_version
         state.topology = plan.topology
