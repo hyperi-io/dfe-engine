@@ -85,8 +85,9 @@ One YAML file per source, managed by `SourceRegistry` over two backends:
 | **Delete** | Removes the definition (one attributed git commit on the gitcrud backend) and the topics its deploys created; table and data preserved. To pause instead, set `state: dormant` or `disabled` |
 | **List** | All sources with status overlay (healthy, degraded, disabled) |
 
-**Topics are created on deploy.** DFE creates `<source>_land` (and
-`<source>_load` when that version has a transform) rather than leaving them to
+**Topics are created on deploy.** DFE creates `<source>_land` (unless the source
+lands on the shared topic, which the landing source owns) and
+`<source>_load` when that version has a transform, rather than leaving them to
 the broker's `auto.create.topics.enable`, which yields mis-partitioned
 unmanaged topics and on Confluent Cloud non-Dedicated is not available at all.
 The step never fails a deploy: the schema is already live, and a topic that

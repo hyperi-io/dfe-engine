@@ -19,10 +19,14 @@ and one pass over every enabled source at startup. A partition DECREASE is
 refused rather than attempted - Kafka has no such operation, and the records
 already assigned to the partitions it would drop have nowhere to go.
 
-Every source needs ``<source>_land`` (raw, receiver -> Kafka); a source with a
+Every source needs ``<label>_land`` (raw, receiver -> Kafka); a source with a
 transform also needs ``<source>_load`` (transformed, transform -> loader). That
 ``_land``/``_load`` convention is shared with scalo-rs and computed by
 ``Source.topic_land`` / ``Source.topic_load``.
+
+A source landing on the shared topic is the exception to both: ``Source.owns_landing_topic``
+is false for it, so it neither creates nor deletes a ``_land`` topic - the landing
+source owns that one.
 
 Deleting a source removes the same pair. Left behind they cost a partition
 assignment in every loader forever, and a record that still lands on one has no
@@ -339,7 +343,10 @@ def source_topic_specs(
             config=dict(config or {}),
         )
 
-    specs = [_spec(source.topic_land)]
+    # A source landing on the shared topic shares one the landing source already
+    # owns, so it contributes no spec of its own rather than claiming that topic
+    # and its partition settings.
+    specs = [_spec(source.topic_land)] if source.owns_landing_topic else []
     transform = source.version(version_id).transform if version_id else source.transform
     if transform:
         # Resolved against the CHOSEN version rather than whichever one happens
@@ -440,7 +447,10 @@ def source_topic_names(source: Source) -> list[str]:
     at its deploy, and a later version dropping the transform does not take the
     topic with it.
     """
-    names = [source.topic_land]
+    # Never the shared landing topic: removing one source that lands on it would
+    # take the topic out from under the receiver's default flow and every other
+    # source landing there.
+    names = [source.topic_land] if source.owns_landing_topic else []
     if any(version.transform for version in source.versions.values()):
         names.append(transformed_topic(source.source))
     return names

@@ -85,7 +85,7 @@ The source records bus-versus-direct only. Which bus (Kafka today) and which dir
 
 | Thing | Name | Source |
 |---|---|---|
-| landing topic | `<source>_land` | apps.yaml `source_binding` |
+| landing topic | `<label>_land` on the landing label, so `main_land` for a main-pushing fetcher | apps.yaml `source_binding` |
 | transformed topic | `<source>_load` | apps.yaml `source_binding` |
 | app instance (per-source apps only) | `dfe-<component>-<source>`, for example `dfe-transform-vrl-auth` | the app's chart `component`; stack-wide apps such as the receiver carry no suffix |
 | Service and port per app | manifest `endpoints` | apps.yaml |
