@@ -320,9 +320,7 @@ class TestOneContainerPerInstance:
         assert _index(settings, VRL).read_text() == "crowdstrike-eu\n"
         assert not _app_dir(settings, VRL, "crowdstrike-us").exists()
 
-    def test_an_unwritable_env_directory_does_not_cost_the_apps_their_config(
-        self, crud, tmp_path
-    ):
+    def test_an_unwritable_env_directory_does_not_cost_the_apps_their_config(self, crud, tmp_path):
         # That directory is the operator's own checkout, so its mode is theirs to
         # fix; the containers still have to get the config they read.
         settings = _settings(tmp_path)
