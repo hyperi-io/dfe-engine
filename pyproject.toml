@@ -41,7 +41,7 @@ dependencies = [
     # wheel. Floor is the release that added the apply manifest, the renderer
     # and the views, roles and topic set the bootstrap iterates; uv.lock pins
     # the hash.
-    "dfe-schemas>=0.2.6",
+    "dfe-schemas>=0.2.7",
     # Data processing
     "pandas>=3.0.3",
     "numpy>=2.5.0",

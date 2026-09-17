@@ -230,6 +230,11 @@ class TopicAdmin:
         metadata = self._admin.list_topics(timeout=timeout)
         return set(metadata.topics.keys())
 
+    def node_count(self, *, timeout: float = 10.0) -> int:
+        """Brokers the cluster reports, for clamping a topic's replication factor."""
+        description = self._admin.describe_cluster(request_timeout=timeout).result()
+        return len(description.nodes)
+
     def create(
         self,
         name: str,
@@ -369,6 +374,38 @@ def topics_managed_at_startup(settings: DFESettings) -> bool:
     that out. The chart sets the dial whenever a broker address is configured.
     """
     return settings.kafka.ensure_topics is True
+
+
+def broker_count(
+    *,
+    settings: DFESettings | None = None,
+    admin: TopicAdmin | None = None,
+) -> int:
+    """Brokers the configured bus reports, or 1 when it cannot be asked.
+
+    The replication clamp needs the bus's real size, and only the bus knows it --
+    the configured factor compared against itself never reduces anything.
+
+    1 on any fault, never the configured factor: a topic created asking for more
+    replicas than the cluster can place is accepted and then never becomes Ready,
+    which is a worse failure than running one replica.
+    """
+    from dfe_engine.kafka.contract import KafkaContractError
+
+    try:
+        admin = admin or build_admin(settings=settings)
+        nodes = admin.node_count()
+    except KafkaContractError as exc:
+        logger.warning("kafka config rejected; clamping replication to one broker", error=str(exc))
+        return 1
+    except Exception as exc:
+        logger.warning("broker unreachable; clamping replication to one broker", error=str(exc))
+        return 1
+    if nodes < 1:
+        logger.warning("the bus reported no brokers; clamping replication to one")
+        return 1
+    logger.info("kafka broker count read for the replication clamp", brokers=nodes)
+    return nodes
 
 
 def deployment_topic_config(settings: DFESettings) -> dict[str, str]:

@@ -240,10 +240,10 @@ def test_every_qualified_object_reference_is_declared(manifest_names: frozenset[
 
 @pytest.mark.xfail(
     reason=(
-        "dfe-schemas 0.2.6's renderer drops a column's declared `index` and renders the "
+        "dfe-schemas 0.2.7's renderer drops a column's declared `index` and renders the "
         "use_case template instead, so the manifest gives dfe.main and dfe.detection "
         "TYPE text(tokenizer=ngrams(3)) GRANULARITY 1 where the header asks for "
-        "text(tokenizer = 'default') GRANULARITY 64. Fixed by teaching dfe_schemas."
+        "text(tokenizer = 'splitByNonAlpha') GRANULARITY 64. Fixed by teaching dfe_schemas."
         "loader.Column to carry `index` and render.Renderer._index_def to emit it, the "
         "way dfe_engine.schema.schema_ddl.DDLGenerator._index_def already does"
     ),
