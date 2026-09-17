@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.21.0](https://github.com/hyperi-io/dfe-engine/compare/v1.20.20...v1.21.0) (2026-09-17)
+
+### Features
+
+* **schema:** dfe-engine bootstraps every schema object from the dfe-schemas manifest ([eda7a52](https://github.com/hyperi-io/dfe-engine/commit/eda7a5273ef31f2cef2abf6a31463f8c699ac61c))
+
 ## [1.20.20](https://github.com/hyperi-io/dfe-engine/compare/v1.20.19...v1.20.20) (2026-09-16)
 
 ### Bug Fixes
