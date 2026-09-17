@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import pytest
 
+from dfe_engine.bootstrap import _seed_stamp, ensure_storage
 from dfe_engine.schema.ddl_writer import DDLFileWriter
 from dfe_engine.schema.schema_loader import (
     SEED_DIR_ENV_VAR,
@@ -25,15 +26,39 @@ from dfe_engine.schema.schema_loader import (
     _resolve_schemas_root,
     resolve_registry_path,
 )
+from dfe_engine.settings import DFESettings, SchemasSettings
 
 
 def _make_schemas_tree(root, *, hunts: bool = True):
-    """A directory shaped enough to pass the common-header test."""
+    """A directory shaped enough to read as a complete dfe-schemas tree."""
     (root / "common-header").mkdir(parents=True)
+    (root / "manifest.yaml").write_text("objects: []\n", encoding="utf-8")
     if hunts:
         (root / "hunts").mkdir(parents=True)
         (root / "hunts" / "results.yaml").write_text("columns: []\n", encoding="utf-8")
     return root
+
+
+def _package_root_is(*, monkeypatch, root):
+    def packaged_root():
+        return root
+
+    monkeypatch.setattr(
+        "dfe_engine.schema.schema_loader._resolve_package_schemas_root", packaged_root
+    )
+
+
+def _settings_for(*, schemas_dir, tmp_path):
+    """Settings pointing the schemas bootstrap at one directory.
+
+    ``env="test"``: DFESettings is a plain BaseModel, so a direct construction
+    never reads DFE_ENV and the "production" default would demand a jwt_secret.
+    """
+    return DFESettings(
+        env="test",
+        config_dir=str(tmp_path / "config"),
+        schemas=SchemasSettings(schemas_dir=str(schemas_dir)),
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -103,6 +128,82 @@ def test_an_empty_dir_never_shadows_a_real_tree(monkeypatch, tmp_path):
     assert _resolve_schemas_root() == seed
 
 
+def _make_partial_volume(root, *, seeded_by: str):
+    """A schemas volume shaped as an engine predating the manifest left it.
+
+    Every tree that engine shipped, the ``.seeded`` marker it stamped, and none
+    of what came later: no ``manifest.yaml``, no ``topics/``, ``views/`` or
+    ``roles/``. The marker is written so the resolution is shown to ignore it --
+    an upgrade has to work from any earlier version, not a listed set of them.
+    """
+    for tree in ("common-header", "hunts", "meta", "registries", "sources", "tables", "additional"):
+        (root / tree).mkdir(parents=True)
+    (root / ".seeded").write_text(f"{seeded_by}\n", encoding="utf-8")
+    return root
+
+
+def _make_seed_with_topic_policy(root):
+    """A complete seed, carrying the file the upgrade died on."""
+    _make_schemas_tree(root)
+    (root / "topics").mkdir(parents=True)
+    (root / "topics" / "kafka.yaml").write_text("naming: {}\n", encoding="utf-8")
+    return root
+
+
+@pytest.mark.parametrize("seeded_by", ["dfe-engine 1.20.20", "dfe-engine 1.19.3"])
+def test_a_volume_an_older_engine_seeded_never_shadows_the_seed(monkeypatch, seeded_by, tmp_path):
+    """The upgrade regression: v1.21.1 crash-looped over a v1.20.x schemas volume.
+
+    ``DFE_SCHEMAS_DIR`` is the volume, so the partial tree got first refusal and
+    won on ``common-header/`` alone. ``ensure_storage`` repairs that tree, but it
+    runs in the FastAPI lifespan and the topic policy resolves during app
+    construction, so the repair lands after the process has already died.
+    """
+    volume = _make_partial_volume(tmp_path / "app-schemas", seeded_by=seeded_by)
+    seed = _make_seed_with_topic_policy(tmp_path / "app-schemas-seed")
+    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(volume))
+    monkeypatch.setenv(SEED_DIR_ENV_VAR, str(seed))
+
+    resolved = _resolve_schemas_root()
+
+    assert resolved == seed
+    assert (resolved / "topics" / "kafka.yaml").is_file(), (
+        "the resolved root must carry the topic policy the engine reads at import"
+    )
+
+
+def test_a_volume_an_older_engine_seeded_never_shadows_the_package(monkeypatch, tmp_path):
+    """Same tree, resolved against the installed wheel rather than the image seed.
+
+    A deployment that sets no seed directory still has the packaged trees, and
+    the partial volume must not win there either.
+    """
+    volume = _make_partial_volume(tmp_path / "app-schemas", seeded_by="dfe-engine 1.20.20")
+    packaged = _make_seed_with_topic_policy(tmp_path / "site-packages" / "dfe_schemas" / "data")
+    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(volume))
+    _package_root_is(monkeypatch=monkeypatch, root=packaged)
+
+    assert _resolve_schemas_root() == packaged
+
+
+def test_a_repaired_volume_resolves_again(monkeypatch, tmp_path):
+    """Once ``ensure_storage`` has copied the seed over it, the volume wins back.
+
+    The fix must reject a partial tree, not the deployment's own tree -- an
+    operator's ``DFE_SCHEMAS_DIR`` still beats the shipped seed.
+    """
+    volume = _make_partial_volume(tmp_path / "app-schemas", seeded_by="dfe-engine 1.20.20")
+    seed = _make_seed_with_topic_policy(tmp_path / "app-schemas-seed")
+    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(volume))
+    monkeypatch.setenv(SEED_DIR_ENV_VAR, str(seed))
+    assert _resolve_schemas_root() == seed
+
+    ensure_storage(settings=_settings_for(schemas_dir=volume, tmp_path=tmp_path))
+
+    assert _resolve_schemas_root() == volume
+    assert (volume / ".seeded").read_text().strip() == _seed_stamp()
+
+
 def test_an_explicit_dir_wins_over_the_seed(monkeypatch, tmp_path):
     """A real checkout must beat whatever the image happens to carry."""
     explicit = _make_schemas_tree(tmp_path / "explicit")
@@ -129,15 +230,6 @@ def test_the_real_package_ships_every_registry():
     assert root is not None
     for entry in ("engines.yaml", "types.yaml", "field-maps"):
         assert (root / "registries" / entry).exists(), f"registries/{entry} missing under {root}"
-
-
-def _package_root_is(*, monkeypatch, root):
-    def packaged_root():
-        return root
-
-    monkeypatch.setattr(
-        "dfe_engine.schema.schema_loader._resolve_package_schemas_root", packaged_root
-    )
 
 
 def _write_registry_file(*, relative: str, root, text: str = "engines: []\n"):
