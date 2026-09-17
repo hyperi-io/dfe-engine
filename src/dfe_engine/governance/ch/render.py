@@ -29,6 +29,7 @@ from .models import (
     TENANT_SYSTEM_GRANTS,
     ChServiceRole,
     ChTier,
+    meta_projection,
     tenant_policy_name,
 )
 
@@ -237,41 +238,32 @@ def render_pinned_user(
 
 
 def render_materialise(orgs: list[Any], tiers: list[Any]) -> list[str]:
-    """DDL+DML projecting the gitops SoT into read-only CH meta tables (spec 9).
+    """DML projecting the gitops SoT into the read-only CH meta tables (spec 9).
 
-    ``dfe_meta.orgs`` + ``dfe_meta.ch_tiers`` are ReplacingMergeTree projections;
-    gitops stays the source of truth. Each reconcile TRUNCATEs + re-INSERTs so the
-    projection exactly reflects current config (drops of removed orgs/tiers
-    included) - idempotent and always current.
+    The two tables are declared in dfe-schemas and created by the engine's schema
+    phase, which is the only path that issues DDL. What is left here is the
+    PROJECTION: each reconcile TRUNCATEs and re-INSERTs so it exactly reflects
+    current config, removed orgs and tiers included.
+
+    The literal CREATEs that used to open this list pinned
+    ``ReplacingMergeTree(updated)`` with no ``ON CLUSTER``, so on a cluster the
+    tables landed on whichever replica the connection reached.
     """
-    stmts: list[str] = [
-        "CREATE DATABASE IF NOT EXISTS dfe_meta",
-        (
-            "CREATE TABLE IF NOT EXISTS dfe_meta.orgs "
-            "(name String, org_ids Array(String), display_name String, "
-            "enabled UInt8, updated_at DateTime DEFAULT now()) "
-            "ENGINE = ReplacingMergeTree(updated_at) ORDER BY name"
-        ),
-        (
-            "CREATE TABLE IF NOT EXISTS dfe_meta.ch_tiers "
-            "(name String, kind String, is_default UInt8, "
-            "updated_at DateTime DEFAULT now()) "
-            "ENGINE = ReplacingMergeTree(updated_at) ORDER BY name"
-        ),
-        "TRUNCATE TABLE dfe_meta.orgs",
-        "TRUNCATE TABLE dfe_meta.ch_tiers",
-    ]
+    database, orgs_name, tiers_name = meta_projection()
+    orgs_table = f"{database}.{orgs_name}"
+    tiers_table = f"{database}.{tiers_name}"
+    stmts: list[str] = [f"TRUNCATE TABLE {orgs_table}", f"TRUNCATE TABLE {tiers_table}"]
     for o in orgs:
         ids = ", ".join(_sq(i) for i in (o.org_ids or []))
         display = getattr(o, "display_name", "") or ""
         enabled = 1 if getattr(o, "enabled", True) else 0
         stmts.append(
-            "INSERT INTO dfe_meta.orgs (name, org_ids, display_name, enabled) VALUES "
+            f"INSERT INTO {orgs_table} (name, org_ids, display_name, enabled) VALUES "
             f"({_sq(o.name)}, [{ids}], {_sq(display)}, {enabled})"
         )
     for t in tiers:
         stmts.append(
-            "INSERT INTO dfe_meta.ch_tiers (name, kind, is_default) VALUES "
+            f"INSERT INTO {tiers_table} (name, kind, is_default) VALUES "
             f"({_sq(t.name)}, {_sq(t.kind)}, {1 if t.default else 0})"
         )
     return stmts

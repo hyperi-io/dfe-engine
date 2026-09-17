@@ -43,7 +43,9 @@ def _reset_schema_flag():
 
 @pytest.fixture
 def fake_ch(app) -> FakeRepositoryCH:
-    ch = FakeRepositoryCH()
+    # A server the engine's schema phase has already converged, which is what
+    # every repository read now asserts before it runs.
+    ch = FakeRepositoryCH(applied={("dfe", "repository")})
     app.dependency_overrides[get_clickhouse_client] = lambda: ch
     yield ch
     app.dependency_overrides.pop(get_clickhouse_client, None)

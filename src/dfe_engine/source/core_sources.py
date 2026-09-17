@@ -100,7 +100,7 @@ def _record_built_and_deployed(source: Source, settings: Any, *, tables_bootstra
     confirmed the table, because a deployment with ``bootstrap_tables`` off, or one
     whose ClickHouse was unreachable, has no such table to have deployed to.
     """
-    from dfe_engine.schema.core_schema import CoreSchemaTargets, landing_table_ddl
+    from dfe_engine.schema.core_schema import landing_table_ddl
     from dfe_engine.source.deployment import (
         SchemaDeployResult,
         SourceDeploymentStore,
@@ -126,7 +126,7 @@ def _record_built_and_deployed(source: Source, settings: Any, *, tables_bootstra
     # table differently, and the record has to say what was actually applied.
     result = SchemaDeployResult(
         applied=True,
-        create_table=landing_table_ddl(CoreSchemaTargets.from_settings(settings)),
+        create_table=landing_table_ddl(settings),
         dry_run=False,
         source_name=source.source,
         statements_applied=1,

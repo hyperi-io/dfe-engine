@@ -27,6 +27,7 @@ from .build import GlobalOptions, HelpGroup, build_command_tree
 from .config import Store
 from .kafka import attach_kafka
 from .local import attach_local
+from .schema import attach_schema
 from .spec import iter_operations, load_live_spec
 
 _FORMATS = ("json", "yaml", "table", "value", "text")
@@ -124,6 +125,9 @@ def build_root(
     # `dfe kafka` - emit client config for a provider (kcat / confluent / librdkafka),
     # so a CLI "just works" against the DFE brokers. Local; no HTTP to the engine.
     attach_kafka(root)
+    # `dfe schema` - plan, apply and read the schema against the local ClickHouse.
+    # Takes the same lease the boot phase does, so it serialises rather than races.
+    attach_schema(root)
 
     if obj is not None:
         # Stash the injected object as the group's default context object.

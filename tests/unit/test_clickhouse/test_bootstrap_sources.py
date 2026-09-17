@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""The bootstrap reconciles source TTLs after the core tables, and never fails on them."""
+"""The bootstrap reconciles source TTLs after the schema phase, and never fails on them."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ import pytest
 import dfe_engine.clickhouse.bootstrap as bootstrap_module
 import dfe_engine.schema.retention as retention_module
 from dfe_engine.clickhouse.bootstrap import bootstrap_clickhouse
+from dfe_engine.schema.phase import STATE_CONVERGED, SchemaBootstrapState
 from dfe_engine.schema.retention import reconcile_source_ttls
 from dfe_engine.source.models import Source
 
@@ -66,7 +67,7 @@ def _source(*, name: str, resource_type: str = "custom") -> Source:
 
 @pytest.fixture
 def boot(monkeypatch):
-    """A bootstrap whose core apply succeeds without a server; records what it reconciled."""
+    """A bootstrap whose schema phase converges without a server; records the reconcile."""
 
     def ignore(*args, **kwargs):
         return None
@@ -77,9 +78,10 @@ def boot(monkeypatch):
     def unreachable():
         return _UnreachableClient()
 
-    monkeypatch.setattr(bootstrap_module, "apply_core_schema", ignore)
-    monkeypatch.setattr(bootstrap_module, "apply_query_log_archive", ignore)
-    monkeypatch.setattr(bootstrap_module, "log_report", ignore)
+    def converged(*args, **kwargs):
+        return SchemaBootstrapState(state=STATE_CONVERGED)
+
+    monkeypatch.setattr(bootstrap_module, "run_bootstrap", converged)
     monkeypatch.setattr(bootstrap_module, "get_clickhouse_config", ignore)
     monkeypatch.setattr(
         bootstrap_module.ClickHouseManager, "get_instance", staticmethod(fake_client_manager)
@@ -93,7 +95,8 @@ def test_a_failing_source_reconcile_never_fails_the_bootstrap(boot):
 
     boot.setattr(retention_module, "reconcile_source_ttls", exploding_reconcile)
 
-    assert bootstrap_clickhouse(settings=_settings(), sources=[_source(name="okta")]) is True
+    state = bootstrap_clickhouse(settings=_settings(), sources=[_source(name="okta")])
+    assert state.converged is True
 
 
 def test_the_bootstrap_hands_every_source_to_the_reconcile(boot):

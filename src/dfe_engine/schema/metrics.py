@@ -1,0 +1,91 @@
+#  Project:      dfe-engine
+#  File:         schema/metrics.py
+#  Purpose:      What the schema bootstrap phase reports about itself
+#  Language:     Python
+#
+#  License:      BUSL-1.1
+#  Copyright:    (c) 2026 HYPERI PTY LIMITED
+"""The schema phase's instruments, as scalo metrics.
+
+A completed ArgoCD Job used to be the operator's record that the schema had been
+applied. Once the apply moved inside the engine's lifespan that record went with
+it, so the state, the duration and the schemas version are reported here and on
+``GET /api/v1/system/schema``.
+
+The instruments are created through scalo's manager, which applies the ``dfe``
+namespace from the deployment contract, so they land as ``dfe_schema_*``. With no
+backend wired every record call returns without doing anything, which is the
+state the unit suite runs in.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+BOOTSTRAP_STATE = "schema_bootstrap_state"
+BOOTSTRAP_DURATION = "schema_bootstrap_duration_seconds"
+VERSION_INFO = "schema_version_info"
+REFUSED = "schema_objects_refused"
+
+
+class SchemaMetrics:
+    """The phase's instruments, or a no-op set when no backend is wired."""
+
+    def __init__(self, manager: Any | None = None) -> None:
+        self._manager = manager
+        if manager is None:
+            return
+        self._state = manager.gauge(
+            BOOTSTRAP_STATE, "0 unknown, 1 converged, 2 failed, 3 running, 4 observed"
+        )
+        self._duration = manager.gauge(
+            BOOTSTRAP_DURATION, "Seconds the last schema bootstrap pass took"
+        )
+        self._version = manager.gauge(
+            VERSION_INFO, "Always 1; the dfe-schemas release is the label", ["schemas_version"]
+        )
+        self._refused = manager.gauge(
+            REFUSED, "Objects whose change the last pass declined as drift"
+        )
+
+    @property
+    def enabled(self) -> bool:
+        """Whether a backend is wired, so a caller can skip work nothing reads."""
+        return self._manager is not None
+
+    def report(
+        self, *, state: int, duration_seconds: float, schemas_version: str, refused: int
+    ) -> None:
+        """Record the outcome of one pass."""
+        if self._manager is None:
+            return
+        self._state.set(state)
+        self._duration.set(duration_seconds)
+        self._refused.set(refused)
+        if schemas_version:
+            self._version.labels(schemas_version=schemas_version).set(1)
+
+
+def create(app_name: str = "dfe-engine") -> SchemaMetrics:
+    """Build the instrument set on scalo's metrics backend.
+
+    The namespace comes from the deployment contract rather than a literal, so
+    these carry the same ``dfe`` prefix as the rest of the product.
+    """
+    from scalo.metrics import create_metrics
+
+    from dfe_engine.deployment_contract import engine_deployment_contract
+
+    return SchemaMetrics(
+        create_metrics(app_name, metric_prefix=engine_deployment_contract().metric_prefix)
+    )
+
+
+__all__ = [
+    "BOOTSTRAP_DURATION",
+    "BOOTSTRAP_STATE",
+    "REFUSED",
+    "VERSION_INFO",
+    "SchemaMetrics",
+    "create",
+]

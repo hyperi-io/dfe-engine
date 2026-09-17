@@ -1379,7 +1379,11 @@ async def deploy_source_schema(
     )
     applied = 0
     try:
-        ch.execute(f"CREATE DATABASE IF NOT EXISTS {db}")
+        # Through the applier on the sensed resolver: a bare CREATE DATABASE lands
+        # on one replica, leaving the ON CLUSTER table DDL nowhere to go.
+        from dfe_engine.schema.applier import SchemaApplier
+
+        SchemaApplier(ch, resolver).ensure_database(db)
         for stmt in statements:
             ch.execute(stmt)
             applied += 1

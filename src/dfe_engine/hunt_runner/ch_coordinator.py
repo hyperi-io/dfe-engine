@@ -43,11 +43,20 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from dfe_engine.schema.applier import SchemaApplier
-from dfe_engine.schema.engine_resolver import EngineResolver
-from dfe_engine.schema.internal_tables import hunt_coordination_specs
+from dfe_engine.schema.require import require_objects
 
 from .schedule import due_count
+
+# The coordination objects this worker reads and writes, by manifest id. The
+# engine's schema phase creates them; nothing here does.
+_COORDINATION_IDS = (
+    "data.hunt_lease",
+    "data.hunt_watermark",
+    "data.hunt_state",
+    "data.hunt_schedule",
+    "data.hunt_run",
+    "data.hunt_runner_heartbeat",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,17 +125,20 @@ class ChCoordinator:
     # ---- schema -------------------------------------------------------
 
     def ensure_schema(self) -> None:
-        """Create or reconcile the three coordination tables (idempotent).
+        """Assert the coordination tables exist. The engine's schema phase makes them.
 
-        Through the shared applier so the engine is sensed, not pinned. A pinned
-        ``ReplacingMergeTree`` puts these on one replica only, and this worker
-        connects through a headless Service: a restart that lands elsewhere finds
-        no lease and no watermark, and silently re-runs a window already done.
+        A read, not an apply. This worker is a separate pod and used to create the
+        same tables through its own applier, which races an engine replica on
+        ``ALTER TABLE ADD COLUMN`` and is a second answer to when an object comes
+        into existence. Absent means the phase has not converged here, and that is
+        worth failing loudly rather than papering over with a create.
         """
-        applier = SchemaApplier(self._ch, EngineResolver(client=self._ch))
-        applier.ensure_database(self._db)
-        for spec in hunt_coordination_specs(self._db):
-            applier.ensure_table(self._db, spec.name, spec.columns, spec.config)
+        require_objects(
+            self._ch,
+            database=self._db,
+            object_ids=_COORDINATION_IDS,
+            what="hunt-runner coordination",
+        )
 
     # ---- lease (claim) ------------------------------------------------
 

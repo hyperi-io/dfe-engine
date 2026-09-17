@@ -21,10 +21,16 @@ from ..source.type_registry import TypeRegistry
 from .engine_resolver import EngineResolver
 from .schema_ddl import DDLConfig, DDLGenerator, TableSpec
 from .schema_loader import SchemaLoader, _resolve_profiles_dir, _resolve_schemas_root
-from .table_loader import load_table_config
+from .table_loader import load_table_config, load_table_name
 
 _PROFILES = ("timeseries", "minimal", "passthrough")
 _DEFAULT_PROFILE = "timeseries"
+
+# The core definitions, by their dfe-schemas reference. Each one NAMES its own
+# table; nothing here restates a name.
+LANDING_REF = "tables/core/main"
+DETECTION_REF = "tables/core/detection"
+DETECTION_CHECKPOINT_REF = "tables/core/detection_checkpoint"
 
 
 class DDLFileWriter:
@@ -161,7 +167,7 @@ class DDLFileWriter:
             profile_name=profile_name,
             profile_version=profile_version,
             description="Default ingestion table (profile columns only)",
-            config_ref="tables/core/default",
+            config_ref=LANDING_REF,
         )
 
     def generate_default_table(
@@ -195,13 +201,15 @@ class DDLFileWriter:
         )
 
         config = self._core_config(
-            "tables/core/detection_checkpoint",
+            DETECTION_CHECKPOINT_REF,
             schema_version=detection_checkpoint_version,
             description="Hunt execution checkpoint tracking",
             topology=self._topology,
         )
         return TableSpec(
-            name="detection_checkpoint", columns=detection_checkpoint_columns, config=config
+            name=load_table_name(DETECTION_CHECKPOINT_REF),
+            columns=detection_checkpoint_columns,
+            config=config,
         )
 
     def generate_detection_checkpoint_table(
@@ -224,9 +232,9 @@ class DDLFileWriter:
     ) -> TableSpec:
         """Describe the hunt detection table.
 
-        The table is ``detection`` and lives in the hunts database; the columns
-        come from ``hunts/results.yaml`` composed onto the common header, minus
-        whatever that schema's ``profile_exclude`` drops.
+        The name comes from ``tables/core/detection.yaml``; the columns come from
+        ``hunts/results.yaml`` composed onto the common header, minus whatever
+        that schema's ``profile_exclude`` drops.
         """
         # Resolve so the table comment records the profile version it was built
         # from, the same as every other profile-composed table.
@@ -246,14 +254,14 @@ class DDLFileWriter:
         )
 
         config = self._core_config(
-            "tables/core/detection",
+            DETECTION_REF,
             profile_name=profile_name,
             profile_version=profile_version,
             schema_version=hunt_results_version,
             description="Hunt detection results (profile and hunts.results columns)",
             topology=self._topology,
         )
-        return TableSpec(name="detection", columns=all_columns, config=config)
+        return TableSpec(name=load_table_name(DETECTION_REF), columns=all_columns, config=config)
 
     def generate_detection_table(
         self,

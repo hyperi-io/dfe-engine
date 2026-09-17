@@ -38,10 +38,10 @@ dependencies = [
     # The DFE schema trees as package data under dfe_schemas/data/, replacing
     # the `schemas` git submodule. schema_loader resolves them through
     # importlib.resources; the Dockerfile bakes its seed from the installed
-    # wheel. Floor is the release that moved the registries into the package,
-    # which the engine reads instead of bundling its own copies; uv.lock pins
+    # wheel. Floor is the release that added the apply manifest, the renderer
+    # and the views, roles and topic set the bootstrap iterates; uv.lock pins
     # the hash.
-    "dfe-schemas>=0.2.4",
+    "dfe-schemas>=0.2.6",
     # Data processing
     "pandas>=3.0.3",
     "numpy>=2.5.0",
@@ -277,7 +277,6 @@ dfe-engine = "dfe_engine.api:run_dev_server"
 dfe = "dfe_engine.cli.auto.main:main"
 dfe-hunt-runner = "dfe_engine.hunt_runner.cli:main"
 dfe-keda-shim = "dfe_engine.keda_shim.cli:main"
-dfe-schema = "dfe_engine.schema.cli:main"
 
 [project.entry-points."dfe_engine.services"]
 receiver = "dfe_engine.services.plugins_builtin.receiver:plugin"

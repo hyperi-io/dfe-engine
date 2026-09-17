@@ -1,38 +1,27 @@
-"""Tests for the built-in dfe-alerts Source definition."""
+"""Tests for the built-in dfe-alerts Source definition, shipped in dfe-schemas."""
 
-import importlib.resources as resources
-
+from dfe_engine.schema.plan import core_schemas_root
 from dfe_engine.source.models import Source
 from dfe_engine.source.registry import SourceRegistry
 
+_NAME = "dfe-alerts"
+
 
 class TestBuiltinAlertsSource:
-    """Test that dfe-alerts.yaml is a valid Source definition."""
+    """The definition dfe-schemas ships is a valid Source once it is named."""
 
-    def test_yaml_exists_as_package_resource(self):
-        """The dfe-alerts.yaml file exists in builtin_sources."""
-        builtins = resources.files("dfe_engine.source") / "builtin_sources"
-        alerts_file = builtins / "dfe-alerts.yaml"
-        assert alerts_file.is_file()
+    def test_yaml_exists_in_the_pinned_package(self):
+        assert (core_schemas_root() / "sources" / f"{_NAME}.yaml").is_file()
 
     def test_parses_as_valid_source(self):
-        """dfe-alerts.yaml parses into a valid Source model."""
-        builtins = resources.files("dfe_engine.source") / "builtin_sources"
-        alerts_file = builtins / "dfe-alerts.yaml"
-        content = alerts_file.read_text()
+        source = Source.model_validate(_load_builtin(_NAME))
 
-        from dfe_engine.yaml_utils import yaml_load_string
-
-        data = yaml_load_string(content)
-        source = Source.model_validate(data)
-
-        assert source.source == "dfe-alerts"
+        assert source.source == _NAME
         assert source.display_name == "DFE Alerts"
         assert source.enabled is True
         assert source.header.type == "timeseries"
-        assert source.current == "1.0.0"
-        assert source.deployed_version == "1.0.0"
-        assert "1.0.0" in source.versions
+        assert source.current in source.versions
+        assert source.deployed_version == source.current
 
     def test_every_builtin_header_profile_resolves_to_a_real_file(self):
         """A header type is a filename in dfe-schemas, and nothing normalises it.
@@ -44,12 +33,14 @@ class TestBuiltinAlertsSource:
         from dfe_engine.schema.schema_loader import SchemaLoader
         from dfe_engine.yaml_utils import yaml_load_string
 
-        builtins = resources.files("dfe_engine.source") / "builtin_sources"
+        builtins = core_schemas_root() / "sources"
         seen = 0
         for entry in builtins.iterdir():
             if not entry.name.endswith(".yaml"):
                 continue
-            source = Source.model_validate(yaml_load_string(entry.read_text()))
+            doc = yaml_load_string(entry.read_text()) or {}
+            doc.setdefault("source", entry.name.removesuffix(".yaml"))
+            source = Source.model_validate(doc)
             for snap in source.versions.values():
                 if snap.header is None:
                     continue
@@ -66,25 +57,28 @@ class TestBuiltinAlertsSource:
         SchemaLoader.load_profile(SourceHeader().type)
 
     def test_builtin_yaml_uses_version_tree(self):
-        data = _load_builtin("dfe-alerts")
-        assert data["current"] == "1.0.0"
-        assert data["deployed_version"] == "1.0.0"
-        assert "1.0.0" in data["versions"]
+        data = _load_builtin(_NAME)
+        current = data["current"]
+        assert data["deployed_version"] == current
+        assert current in data["versions"]
         assert "header" not in data
         assert "schema" not in data
-        assert data["versions"]["1.0.0"]["views"] == [{"standard": "sigma"}]
+        assert data["versions"][current]["views"] == [{"standard": "sigma"}]
 
     def test_has_sigma_view(self):
         """dfe-alerts declares a sigma naming-standard view."""
-        data = _load_builtin("dfe-alerts")
-        source = Source.model_validate(data)
-        assert source.view_for("sigma") is not None
+        assert Source.model_validate(_load_builtin(_NAME)).view_for("sigma") is not None
 
-    def test_references_detection_columns(self):
-        """dfe-alerts references the hunt-results/detection.yaml additional fields."""
-        data = _load_builtin("dfe-alerts")
-        source = Source.model_validate(data)
-        assert source.schema_config.additional_fields == "hunt-results/detection.yaml"
+    def test_references_a_detection_schema_the_package_ships(self):
+        """The referenced additional_fields must resolve, not merely be a string.
+
+        The engine's own copy pointed at ``hunt-results/detection.yaml``, a path
+        no dfe-schemas release has ever carried.
+        """
+        source = Source.model_validate(_load_builtin(_NAME))
+        reference = source.schema_config.additional_fields
+        assert reference
+        assert (core_schemas_root() / reference).is_file()
 
 
 class TestSeedBuiltinSources:
@@ -122,9 +116,10 @@ class TestSeedBuiltinSources:
 
 
 def _load_builtin(name: str) -> dict:
-    """Load a built-in source YAML as a dict."""
+    """A shipped source definition as a dict, named the way the seed names it."""
     from dfe_engine.yaml_utils import yaml_load_string
 
-    builtins = resources.files("dfe_engine.source") / "builtin_sources"
-    content = (builtins / f"{name}.yaml").read_text()
-    return yaml_load_string(content)
+    path = core_schemas_root() / "sources" / f"{name}.yaml"
+    doc = yaml_load_string(path.read_text()) or {}
+    doc.setdefault("source", name)
+    return doc

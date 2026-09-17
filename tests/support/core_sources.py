@@ -30,14 +30,19 @@ LANDING_DEFINITION = {
     "resource_type": "core",
     "description": "Where the loader puts a record it has nowhere else to send",
     "state": "active",
-    "deployed_version": "1.0.0",
-    "current": "1.0.0",
+    "deployed_version": "1.0.1",
+    "current": "1.0.1",
     "versions": {
+        "1.0.1": {
+            "date_time": "2026-09-15",
+            "header": {"type": "timeseries", "version": "1.0.1"},
+            "schema": {},
+        },
         "1.0.0": {
             "date_time": "2026-09-11",
             "header": {"type": "timeseries", "version": "1.0.0"},
             "schema": {},
-        }
+        },
     },
 }
 

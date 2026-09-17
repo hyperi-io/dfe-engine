@@ -31,6 +31,10 @@ ClickHouse:
 - DFE_CLICKHOUSE_CONNECTIONS_MAX -> clickhouse.connections_max
 - DFE_CLICKHOUSE_TOPOLOGY -> clickhouse.topology
 - DFE_CLICKHOUSE_DEFAULT_TTL_DAYS -> clickhouse.default_ttl_days (0 = no default TTL)
+- DFE_CLICKHOUSE_BOOTSTRAP_TABLES -> clickhouse.bootstrap_tables (true/false)
+- DFE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS -> clickhouse.bootstrap_wait_seconds
+- DFE_KAFKA_BOOTSTRAP_TOPICS -> kafka.bootstrap_topics (true/false)
+- DFE_SCHEMAS_OVERLAY_DIR -> the deployment's additive schema overlay directory
 
 ClickHouse Cloud (control plane; opt-in, billable):
 - DFE_CLICKHOUSE_CLOUD_API_KEY_ID -> clickhouse.cloud.api_key_id
@@ -246,7 +250,21 @@ class ClickHouseSettings(BaseModel):
     )
     bootstrap_tables: bool = Field(
         default=True,
-        description="Create the DFE databases, landing table, and hunt detection table on startup",
+        description=(
+            "Apply the dfe-schemas manifest at startup (DFE_CLICKHOUSE_BOOTSTRAP_TABLES). "
+            "Off means the engine reports the schema state as unknown and gates nothing; "
+            "it does not bring a separate bootstrapper back."
+        ),
+    )
+    bootstrap_wait_seconds: float = Field(
+        default=180.0,
+        ge=0.0,
+        description=(
+            "How long the schema phase keeps retrying an unreachable ClickHouse before "
+            "reporting the pass failed (DFE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS). The "
+            "datastore can be in the same deploy wave as the engine, so not-up-yet and "
+            "broken are different answers."
+        ),
     )
     secure: bool = Field(default=True)
     verify: bool | None = Field(
@@ -559,6 +577,16 @@ class KafkaSettings(BaseModel):
             "brokerless profile asks for nothing without a second dial being set to "
             "match. True or false is the operator's override on top of that fact. "
             "Neither a deploy nor a delete fails on the topic step either way."
+        ),
+    )
+    bootstrap_topics: bool = Field(
+        default=True,
+        description=(
+            "Create the dfe-schemas bootstrap topic set at startup, create-only "
+            "(DFE_KAFKA_BOOTSTRAP_TOPICS). Separate from the ClickHouse dial because "
+            "the two fail for different reasons and a deployment with an external "
+            "broker wants one off and the other on. A deployment with no bus skips "
+            "the set and still converges."
         ),
     )
     topic_partitions: int = Field(
@@ -1649,6 +1677,8 @@ def _get_env_overrides() -> dict:
         overrides["clickhouse"]["default_table_profile"] = val
     if val := _get_env("DFE_CLICKHOUSE_BOOTSTRAP_TABLES"):
         overrides["clickhouse"]["bootstrap_tables"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS"):
+        overrides["clickhouse"]["bootstrap_wait_seconds"] = float(val)
     if val := _get_env("DFE_CLICKHOUSE_SECURE", "CLICKHOUSE_SECURE"):
         overrides["clickhouse"]["secure"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_CLICKHOUSE_VERIFY", "CLICKHOUSE_VERIFY"):
@@ -1781,6 +1811,8 @@ def _get_env_overrides() -> dict:
     # already declares.
     if val := _get_env("DFE_KAFKA_ENSURE_TOPICS"):
         overrides["kafka"]["ensure_topics"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_KAFKA_BOOTSTRAP_TOPICS"):
+        overrides["kafka"]["bootstrap_topics"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_KAFKA_TOPIC_PARTITIONS"):
         overrides["kafka"]["topic_partitions"] = int(val)
     if val := _get_env("DFE_KAFKA_TOPIC_REPLICATION_FACTOR"):

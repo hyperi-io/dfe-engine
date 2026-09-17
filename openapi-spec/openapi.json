@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.20.18"
+    "version": "1.20.19"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -6839,6 +6839,33 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/VersionResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/system/schema": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Get Schema Status",
+        "description": "What the last schema bootstrap pass did, object by object.\n\nThis is the operator's record of the schema apply, replacing the completed\nArgoCD Job the engine took over from. ``state`` is what readiness follows:\nconverged or observed is ready, failed leaves the pod up and NotReady with\nthe cause here.",
+        "operationId": "get_schema_status_api_v1_system_schema_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemaStatusResponse"
                 }
               }
             }
@@ -27865,6 +27892,190 @@
         "title": "SchemaDiff",
         "description": "Proposed schema change returned by ``?dry_run=true``."
       },
+      "SchemaObjectStatus": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "The object's manifest id, e.g. data.main"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "description": "database, table, materialized_view, view, role or topic"
+          },
+          "object": {
+            "type": "string",
+            "title": "Object",
+            "description": "Database-qualified name, or topic:<name>"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action",
+            "description": "created, altered, unchanged, refused or skipped"
+          },
+          "checksum": {
+            "type": "string",
+            "title": "Checksum",
+            "description": "sha256 of the normalised rendered statement"
+          },
+          "columns_added": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Columns Added"
+          },
+          "drift": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Drift",
+            "description": "Non-additive differences found; each one is why the change was refused."
+          },
+          "extra_columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Extra Columns",
+            "description": "Live columns the schema no longer declares. Reported, never actioned."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "object",
+          "action",
+          "checksum"
+        ],
+        "title": "SchemaObjectStatus",
+        "description": "What the last pass did to one manifest object."
+      },
+      "SchemaStatusResponse": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "title": "State",
+            "description": "unknown, running, converged, observed or failed"
+          },
+          "ready": {
+            "type": "boolean",
+            "title": "Ready",
+            "description": "Whether readiness may be reported on the schema check."
+          },
+          "converged": {
+            "type": "boolean",
+            "title": "Converged",
+            "description": "Whether the manifest's objects are known to exist on this deployment."
+          },
+          "schemas_version": {
+            "type": "string",
+            "title": "Schemas Version",
+            "description": "dfe-schemas release the plan was rendered from"
+          },
+          "engine_version": {
+            "type": "string",
+            "title": "Engine Version",
+            "description": "dfe-engine release that ran the pass"
+          },
+          "topology": {
+            "type": "string",
+            "title": "Topology",
+            "description": "single, replicated or replicated_on_cluster"
+          },
+          "database": {
+            "type": "string",
+            "title": "Database",
+            "description": "The one database every DFE object lands in"
+          },
+          "holder": {
+            "type": "string",
+            "title": "Holder",
+            "description": "Who held the bootstrap lease for this pass"
+          },
+          "started_at": {
+            "type": "string",
+            "title": "Started At"
+          },
+          "finished_at": {
+            "type": "string",
+            "title": "Finished At"
+          },
+          "duration_seconds": {
+            "type": "number",
+            "title": "Duration Seconds"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "description": "Why the pass failed; empty when it did not."
+          },
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Counts",
+            "description": "One count per action"
+          },
+          "objects": {
+            "items": {
+              "$ref": "#/components/schemas/SchemaObjectStatus"
+            },
+            "type": "array",
+            "title": "Objects"
+          },
+          "refused": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Refused",
+            "description": "Objects whose change was declined as drift, each named with the reason."
+          },
+          "overlay_refused": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Overlay Refused",
+            "description": "Overlay objects refused for redefining a core path."
+          },
+          "topics_created": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Topics Created"
+          },
+          "topics_skipped": {
+            "type": "string",
+            "title": "Topics Skipped",
+            "description": "Why the topic set was skipped; empty when it was applied."
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "ready",
+          "converged",
+          "schemas_version",
+          "engine_version",
+          "topology",
+          "database",
+          "holder",
+          "started_at",
+          "finished_at",
+          "duration_seconds",
+          "error",
+          "topics_skipped"
+        ],
+        "title": "SchemaStatusResponse",
+        "description": "The schema bootstrap phase's record of its last pass."
+      },
       "SchemaSuggestRequest": {
         "properties": {
           "source_name": {
@@ -31713,6 +31924,11 @@
             "title": "Engine",
             "description": "dfe-engine package version"
           },
+          "schemas": {
+            "type": "string",
+            "title": "Schemas",
+            "description": "dfe-schemas release the engine applies its schema from. The wheel rides inside the engine image, so this is the schema version this deployment is on."
+          },
           "ui": {
             "anyOf": [
               {
@@ -31753,6 +31969,7 @@
         "required": [
           "stack",
           "engine",
+          "schemas",
           "ui",
           "apps",
           "source",

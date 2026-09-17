@@ -816,6 +816,10 @@ class TestEverySettingIsRead:
         # its viewer twin are routed and land nowhere -- no such account is made.
         ("LocalAuthSettings", "operator_password"),
         ("LocalAuthSettings", "viewer_password"),
+        # No reader: the query_reader profile takes its limits from the CH role
+        # catalogue in dfe-schemas, not from these.
+        ("QueryViewSettings", "max_memory_usage"),
+        ("QueryViewSettings", "max_rows_to_read"),
     }
 
     def test_no_new_setting_lands_without_a_reader(self):

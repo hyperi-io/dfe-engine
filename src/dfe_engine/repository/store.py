@@ -28,12 +28,14 @@ from typing import Any
 
 from scalo.logger import logger
 
-from dfe_engine.schema.applier import SchemaApplier
-from dfe_engine.schema.engine_resolver import EngineResolver
-from dfe_engine.schema.internal_tables import repository_spec
+from dfe_engine.schema.require import require_objects
 from dfe_engine.settings import default_data_database
 
 DEFAULT_DATABASE = default_data_database()
+
+# The small-object store's table, by manifest id. The engine's schema phase
+# creates it; nothing here does.
+_REPOSITORY_ID = "data.repository"
 
 # Record/metadata shapes returned by the store. Named because the
 # ``list`` method shadows the builtin inside the class body.
@@ -129,21 +131,22 @@ class RepositoryStore:
     # ── Schema ────────────────────────────────────────────────
 
     def ensure_schema(self) -> None:
-        """Create or reconcile database + table (idempotent).
+        """Assert the table exists. The engine's schema phase makes it.
 
-        Through the shared applier, so the engine clause is sensed from the
-        server rather than pinned: on a cluster the table is created ON CLUSTER
-        as ``ReplicatedReplacingMergeTree``, and a column added to the spec is
-        added to an existing table rather than silently skipped.
+        A read, not an apply: the phase is the only path that issues DDL for a
+        declared object, and a store that created its own copy would hide a phase
+        that never converged.
         """
         if self._db in RepositoryStore._ensured_databases:
             return
-        spec = repository_spec(self._db)
-        applier = SchemaApplier(self._client, EngineResolver(client=self._client))
-        applier.ensure_database(self._db)
-        change = applier.ensure_table(self._db, spec.name, spec.columns, spec.config)
+        require_objects(
+            self._client,
+            database=self._db,
+            object_ids=(_REPOSITORY_ID,),
+            what="the repository store",
+        )
         RepositoryStore._ensured_databases.add(self._db)
-        logger.debug(f"RepositoryStore: {change.describe()}")
+        logger.debug(f"RepositoryStore: {self._db} carries the repository table")
 
     # ── CRUD ──────────────────────────────────────────────────
 

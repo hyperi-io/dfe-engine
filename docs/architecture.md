@@ -54,7 +54,7 @@ flowchart TB
 | dfe-infra | charts, ApplicationSets, bootstrap | consumes engine-authored overlays via the deploy repo |
 | dfe-ui | web UI | consumes the engine API only |
 | dfe-hyperdx | extended HyperDX fork - explore UI + telemetry sink | embedded in dfe-ui; reads ClickHouse |
-| dfe-schemas | core table/view DDL + source meta-schemas | SSoT the engine deploys from |
+| dfe-schemas | every table, view, role and bootstrap topic, plus the apply manifest | the only place they are defined; the engine applies the manifest at boot ([schema bootstrap](data-plane/schema-bootstrap.md)) |
 | scalo-py / scalo-rs | shared libraries (neutral-identity OSS) | engine imports scalo-py; Rust services import scalo-rs |
 | dfe-receiver/loader/archiver/fetcher/transform-* | Rust runtime services | read YAML config the engine writes |
 | dfe-deploy | example deploy/overlay repo | the GitOps hand-off surface |

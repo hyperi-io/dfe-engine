@@ -319,16 +319,29 @@ class TestAlertStateManager:
         ddl = mgr.get_ddl()
         assert "`custom_db`.`alert_state`" in ddl
 
-    def test_ensure_table_exists_idempotent(self):
+    def test_ensure_table_exists_reads_and_never_creates(self):
+        """A read, not an apply: the engine's schema phase makes alert_state."""
         mgr = AlertStateManager()
         ch_client = MagicMock()
-        # Nothing exists yet, so the applier creates both.
+        ch_client.query.return_value.result_rows = [("alert_state",)]
+
+        mgr.ensure_table_exists(ch_client)
+
+        assert ch_client.command.call_count == 0
+        assert ch_client.query.call_count == 1
+        # Cached once present, so a cooldown check costs no further round trip.
+        mgr.ensure_table_exists(ch_client)
+        assert ch_client.query.call_count == 1
+
+    def test_an_absent_alert_state_is_reported_and_never_created(self):
+        mgr = AlertStateManager()
+        ch_client = MagicMock()
         ch_client.query.return_value.result_rows = []
+
         mgr.ensure_table_exists(ch_client)
-        first = ch_client.command.call_count
-        assert first == 2  # CREATE DATABASE + CREATE TABLE
-        mgr.ensure_table_exists(ch_client)
-        assert ch_client.command.call_count == first  # cached, no re-run
+
+        assert ch_client.command.call_count == 0
+        assert mgr._table_ensured is False
 
     def test_check_cooldown_no_prior_fire(self):
         mgr = AlertStateManager()
