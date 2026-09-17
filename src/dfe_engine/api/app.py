@@ -104,7 +104,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:  # the core tables still bootstrap without the source list
         logger.warning("sources unreadable; their TTL is left to the next start", error=str(exc))
         deployed_candidates = []
-    tables_bootstrapped = bootstrap_clickhouse(settings=settings, sources=deployed_candidates)
+    schema_state = bootstrap_clickhouse(settings=settings, sources=deployed_candidates)
+    tables_bootstrapped = schema_state.converged
 
     # After the bootstrap, which is what makes the landing table exist: the seed records the source as deployed, and that must not be claimed before it is true.
     from dfe_engine.source.core_sources import seed_core_sources
@@ -445,6 +446,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         }
     )
     health.register_ready_check("clickhouse", ch_manager.ping)
+
+    # The schema half of readiness: ready means the last bootstrap pass converged,
+    # so every app downstream has ONE thing to wait on. A failed apply leaves the
+    # pod up and NotReady with the cause on GET /api/v1/system/schema; liveness is
+    # untouched, so it is never restarted out from under an operator reading it.
+    from dfe_engine.schema.phase import schema_ready
+
+    health.register_ready_check("schema", schema_ready)
 
     health.set_started()
     health.set_ready()

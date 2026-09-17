@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from dfe_engine.schema.core_schema import CoreSchemaTargets, landing_table_ddl
+from dfe_engine.schema.core_schema import landing_table_ddl
 from dfe_engine.source.core_sources import (
     LANDING_SOURCE_FILE,
     SOURCES_SUBDIR,
@@ -162,7 +162,7 @@ class TestSeeding:
         )
 
         assert deploy is not None
-        assert deploy.create_table == landing_table_ddl(CoreSchemaTargets.from_settings(settings))
+        assert deploy.create_table == landing_table_ddl(settings)
 
     def test_no_deploy_is_recorded_when_the_table_bootstrap_did_not_run(self, registry, tmp_path):
         # bootstrap_tables off, or an unreachable ClickHouse: there is no table to
@@ -188,10 +188,11 @@ class TestSeeding:
         seed_core_sources(registry=registry, settings=settings, tables_bootstrapped=True)
 
         store = SourceDeploymentStore.from_settings(settings)
+        current = LANDING_DEFINITION["current"]
 
-        assert store.load_build("main", "1.0.0") is None
-        assert store.load_deploy("main", "1.0.0") is None
-        assert store.load_deploy("landing", "1.0.0") is not None
+        assert store.load_build("main", current) is None
+        assert store.load_deploy("main", current) is None
+        assert store.load_deploy("landing", current) is not None
 
     def test_a_changed_definition_replaces_the_stored_one(self, registry, tmp_path):
         # An engine upgrade re-seeds the schemas tree; a stored core source that never

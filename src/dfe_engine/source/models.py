@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 from datetime import date
-from functools import cache
+from functools import cache, lru_cache
 from typing import Any, Literal
 
 from pydantic import (
@@ -400,18 +400,46 @@ A source can have NO origin, and then it is None. That is the catch-all table th
 # Literal takes no constant, so DEFAULT_LANDING_LABEL is restated here and tested.
 FetcherTopic = Literal["own", "main"]
 
-TOPIC_LAND_SUFFIX = "_land"
-TOPIC_LOAD_SUFFIX = "_load"
+
+@lru_cache(maxsize=1)
+def _topic_policy():
+    """The declared Kafka naming rule, read from dfe-schemas.
+
+    One definition, shared with scalo-rs, which derives the same names on the
+    consumer side -- two implementations of the rule is two answers about which
+    topic a message is on.
+    """
+    from dfe_schemas.topics import load_topic_policy
+
+    from dfe_engine.schema.plan import core_schemas_root
+
+    return load_topic_policy(root=core_schemas_root())
+
+
+# Resolved on first access rather than at import: the schema package reaches back
+# into this module, so reading the policy here at import time is a cycle.
+_POLICY_ATTRS = {
+    "TOPIC_LAND_SUFFIX": "land_suffix",
+    "TOPIC_LOAD_SUFFIX": "load_suffix",
+    "DEFAULT_LANDING_LABEL": "default_landing_label",
+}
+
+
+def __getattr__(name: str) -> Any:
+    field = _POLICY_ATTRS.get(name)
+    if field is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    return getattr(_topic_policy(), field)
 
 
 def landing_topic(source_name: str) -> str:
     """The topic a source's records arrive on, before any transform."""
-    return f"{source_name}{TOPIC_LAND_SUFFIX}"
+    return _topic_policy().landing_topic(source_name)
 
 
 def transformed_topic(source_name: str) -> str:
     """The topic a source's transform writes, and the loader then reads."""
-    return f"{source_name}{TOPIC_LOAD_SUFFIX}"
+    return _topic_policy().transformed_topic(source_name)
 
 
 SOURCE_LABEL_FIELD = "_source"
@@ -421,15 +449,14 @@ The receiver, the fetcher and each transform all read and write it, so a rule
 that tests which source a record is has this as its field.
 """
 
-DEFAULT_LANDING_LABEL = "main"
-"""The ``_source`` label of the platform's landing table, ``main``.
-
-Also the reserved name of the engine-owned landing source, which carries no match
-rule at all: an unmatched record already reaches this table through the receiver's
-``default_source`` and the loader's ``default_table``, so a rule would only shadow
-every rule after it. Every producer's fallback label, every landing topic stem and
-the loader's fallback table resolve from this one name.
-"""
+# DEFAULT_LANDING_LABEL, TOPIC_LAND_SUFFIX and TOPIC_LOAD_SUFFIX resolve through
+# the module __getattr__ above, from topics/kafka.yaml in dfe-schemas.
+#
+# The label is the ``_source`` every producer stamps when no rule matches, and it
+# is also the reserved name of the engine-owned landing source, which carries no
+# match rule at all: an unmatched record already reaches that table through the
+# receiver's default_source and the loader's default_table, so a rule would only
+# shadow every rule after it.
 
 # Keys the engine sets on the compiled fetcher stanza; a source may not carry them.
 _FETCHER_ENGINE_KEYS = frozenset({"enabled", "topic"})
@@ -571,7 +598,7 @@ class SourceFetcher(BaseModel):
 
     def landing_label(self, source_name: str) -> str:
         """The ``_source`` label and topic stem this source's records carry."""
-        return source_name if self.topic == "own" else DEFAULT_LANDING_LABEL
+        return source_name if self.topic == "own" else _topic_policy().default_landing_label
 
 
 class SourceView(BaseModel):

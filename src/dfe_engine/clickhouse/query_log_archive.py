@@ -1,141 +1,57 @@
 #  Project:      dfe-engine
 #  File:         clickhouse/query_log_archive.py
-#  Purpose:      system.query_log -> a DFE cost/attribution archive (cost leaderboard)
+#  Purpose:      Read the query-cost archive the schema phase stands up
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""Persist ``system.query_log`` into a DFE archive, parsed by attribution.
+"""Read ``query_log_archive``, the attribution-parsed copy of ``system.query_log``.
 
-Every DFE query already carries a ``log_comment`` JSON of :class:`DfeQueryTags`
-(tenant / user / feature / kind / id). ClickHouse records that verbatim in
-``system.query_log`` alongside the real cost columns (read rows/bytes, duration,
-memory). A materialised view lifts those rows - the moment CH flushes them - into
-``dfe.query_log_archive``, exploding the ``log_comment`` JSON into typed,
-queryable columns. That table is the SSoT the cost views read: it DIRECTLY
-unblocks the parked hunt-cost leaderboard (which was blocked on
-"a worker-written real table"; see [[project_clickhouse_cloud_portability]]).
+Every DFE query carries a ``log_comment`` JSON of :class:`DfeQueryTags` (tenant /
+user / feature / kind / id). ClickHouse records that verbatim in
+``system.query_log`` alongside the real cost columns, and a materialised view
+lifts those rows into the archive with the JSON exploded into typed columns. That
+table is the SSoT the cost views read, and it unblocks the hunt-cost leaderboard.
 
-``system.query_log`` is per-node and append-only, so the MV reads each node's
-local log and writes to the (topology-resolved) target - the engine form comes
-from the sensing resolver, never a hardcoded literal. Attribution pattern +
-the query_log_archive idea are from PostHog (MIT) - see THIRD-PARTY-NOTICES.
+The table and its view are declared in dfe-schemas and applied by the engine's
+schema phase like every other object. They are marked OPTIONAL there: a server
+with query logging disabled never materialises ``system.query_log``, and no part
+of DFE fails without the cost leaderboard.
+
+Attribution pattern + the query_log_archive idea are from PostHog (MIT) -- see
+THIRD-PARTY-NOTICES.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from dfe_engine.schema.engine_resolver import EngineResolver, EngineSpec, ResolvedEngine
-from dfe_engine.settings import default_data_database, load_clickhouse_settings
+from dfe_engine.settings import default_data_database
 
-# The fallback for the no-settings render path; live callers pass
+# The fallback for a caller with no settings; live callers pass
 # clickhouse.effective_data_database, which is the SSoT for this name.
 DFE_DATABASE = default_data_database()
-QUERY_LOG_ARCHIVE = "query_log_archive"
 
-_ARCHIVE_MV = f"{QUERY_LOG_ARCHIVE}_mv"
-_DEFAULT_TTL_DAYS = 30
+# The archive table, by manifest id. The NAME comes off the rendered object.
+ARCHIVE_ID = "data.query_log_archive"
 
 
-def render_ddl(
-    engine: ResolvedEngine | None = None,
-    *,
-    ttl_days: int = _DEFAULT_TTL_DAYS,
-    database: str = DFE_DATABASE,
-) -> list[str]:
-    """DDL to create the archive DB + table + the MV over ``system.query_log``.
+def archive_table(database: str = DFE_DATABASE) -> str:
+    """The archive table's name, as the manifest declares it."""
+    from dfe_engine.schema.plan import object_names
 
-    ``engine`` is a :class:`ResolvedEngine` from the sensing resolver (single ->
-    MergeTree, cluster -> ReplicatedMergeTree + ON CLUSTER, Cloud -> Shared auto).
-    None yields the single-node plain form (the resolver's own terminal default),
-    for the no-client render path. ``database`` defaults to ``dfe``; live callers
-    pass ``clickhouse.effective_data_database``. Idempotent (``IF NOT EXISTS``).
+    return object_names(ARCHIVE_ID, data_database=database)[ARCHIVE_ID]
+
+
+def flush_logs(wrapper: Any) -> None:
+    """Materialise ``system.query_log`` so the archive's view has a source.
+
+    ClickHouse creates that table LAZILY, on the first log flush, so on a freshly
+    started server the view's source does not exist yet and the CREATE fails with
+    code 60. The engine has already run sensing and ping queries by the time the
+    schema phase runs, so there is something to flush.
     """
-    on_cluster = engine.on_cluster if engine is not None else ""
-    clause = engine.clause if engine is not None else "MergeTree()"
-    tbl = f"{database}.{QUERY_LOG_ARCHIVE}"
-    mv = f"{database}.{_ARCHIVE_MV}"
-    return [
-        f"CREATE DATABASE IF NOT EXISTS {database}{on_cluster}",
-        (
-            f"CREATE TABLE IF NOT EXISTS {tbl}{on_cluster} (\n"
-            "    event_time DateTime,\n"
-            "    query_id String,\n"
-            "    query_duration_ms UInt64,\n"
-            "    read_rows UInt64,\n"
-            "    read_bytes UInt64,\n"
-            "    result_rows UInt64,\n"
-            "    memory_usage UInt64,\n"
-            "    query_kind LowCardinality(String),\n"
-            "    ch_user LowCardinality(String),\n"
-            "    service LowCardinality(String),\n"
-            "    tenant_id String,\n"
-            "    feature LowCardinality(String),\n"
-            "    kind LowCardinality(String),\n"
-            "    dfe_id String,\n"
-            "    trace_id String,\n"
-            "    log_comment String\n"
-            f") ENGINE = {clause}\n"
-            "ORDER BY (event_time, query_id)\n"
-            f"TTL event_time + INTERVAL {ttl_days} DAY"
-        ),
-        (
-            f"CREATE MATERIALIZED VIEW IF NOT EXISTS {mv}{on_cluster} TO {tbl} AS\n"
-            "SELECT\n"
-            "    event_time,\n"
-            "    query_id,\n"
-            "    query_duration_ms,\n"
-            "    read_rows,\n"
-            "    read_bytes,\n"
-            "    result_rows,\n"
-            "    memory_usage,\n"
-            "    query_kind,\n"
-            "    user AS ch_user,\n"
-            "    JSONExtractString(log_comment, 'service') AS service,\n"
-            "    JSONExtractString(log_comment, 'tenant_id') AS tenant_id,\n"
-            "    JSONExtractString(log_comment, 'feature') AS feature,\n"
-            "    JSONExtractString(log_comment, 'kind') AS kind,\n"
-            "    JSONExtractString(log_comment, 'id') AS dfe_id,\n"
-            "    JSONExtractString(log_comment, 'trace_id') AS trace_id,\n"
-            "    log_comment\n"
-            "FROM system.query_log\n"
-            # Only finished, DFE-tagged, valid-JSON rows - keeps the archive small
-            # and relevant (untagged CH-internal queries are skipped).
-            "WHERE type = 'QueryFinish' AND log_comment != '' AND isValidJSON(log_comment)"
-        ),
-    ]
-
-
-def ensure(
-    wrapper: Any, *, ttl_days: int = _DEFAULT_TTL_DAYS, database: str = DFE_DATABASE
-) -> None:
-    """Create the archive DB + table + MV if absent (idempotent).
-
-    ``wrapper`` is a :class:`ClickHouseClientWrapper`. The engine is SENSED from it,
-    exactly as the data-table bootstrap does: on a clustered Atomic-db deployment
-    that yields ``ReplicatedMergeTree`` + ``ON CLUSTER``, so the archive table + MV
-    exist on every node rather than only the one the connection landed on. The
-    configured ``settings.clickhouse.topology`` remains the fallback for when
-    sensing fails. Safe to call every startup.
-
-    ``system.query_log`` is created LAZILY - the server only materialises it on the
-    first log flush - so on a freshly-started server the MV's source table does not
-    exist yet and ``CREATE MATERIALIZED VIEW ... FROM system.query_log`` would fail
-    (code 60). Flush first to materialise it (the engine has already run sensing /
-    ping queries, so there is something to flush). If query logging is DISABLED in
-    the server (``log_queries=0``) the source never appears and the create surfaces
-    that as a real error - the archive genuinely cannot work without query logging.
-    """
-    engine = EngineResolver(
-        # The narrow load: this runs from `dfe-schema` too, where the full
-        # settings model's API validators have no API to validate.
-        client=wrapper,
-        topology_setting=load_clickhouse_settings().topology,
-    ).resolve(EngineSpec("MergeTree"), database)
     wrapper.command("SYSTEM FLUSH LOGS")
-    for stmt in render_ddl(engine, ttl_days=ttl_days, database=database):
-        wrapper.command(stmt)
 
 
 def cost_leaderboard(
@@ -156,7 +72,7 @@ def cost_leaderboard(
         "SELECT dfe_id AS id, feature, tenant_id, "
         "count() AS queries, sum(read_rows) AS read_rows, sum(read_bytes) AS read_bytes, "
         "sum(query_duration_ms) AS duration_ms, max(memory_usage) AS peak_memory "
-        f"FROM {database}.{QUERY_LOG_ARCHIVE} "
+        f"FROM {database}.{archive_table(database)} "
         "WHERE event_time >= now() - toIntervalDay({days:UInt32}) "
         "AND feature = {feature:String} AND dfe_id != '' "
         "GROUP BY id, feature, tenant_id "

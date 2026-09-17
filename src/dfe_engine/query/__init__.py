@@ -6,7 +6,6 @@ Clients reference views by label (e.g. "analytics/user_activity") — never raw 
 
 from dfe_engine.query.catalog import ViewCatalog
 from dfe_engine.query.client import QueryClient
-from dfe_engine.query.ddl import DDLManager
 from dfe_engine.query.executor import ViewExecutionError, ViewExecutor
 from dfe_engine.query.models import (
     AuthorizationError,
@@ -28,7 +27,6 @@ __all__ = [
     "ViewCatalog",
     "ViewExecutor",
     "ViewExecutionError",
-    "DDLManager",
     "ViewDefinition",
     "ViewParameter",
     "ViewExecuteRequest",

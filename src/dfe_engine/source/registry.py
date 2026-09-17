@@ -924,12 +924,12 @@ class SourceRegistry:
     # -----------------------------------------------------------------
 
     def seed_builtin_sources(self, overwrite: bool = False) -> int:
-        """Seed the sources directory with built-in source definitions.
+        """Seed the sources directory with the built-in source definitions.
 
-        Copy-on-adopt: built-ins ship in-engine and are copied into the
-        deployment's sources store. Non-destructive by default — skips
-        sources that already exist. On the gitcrud backend all seeds land
-        in ONE commit.
+        Copy-on-adopt: the definitions are data in dfe-schemas' ``sources/`` and
+        are copied into the deployment's sources store. Non-destructive by
+        default — skips sources that already exist. On the gitcrud backend all
+        seeds land in ONE commit.
 
         Args:
             overwrite: If True, overwrite existing source definitions.
@@ -937,17 +937,19 @@ class SourceRegistry:
         Returns:
             Number of sources seeded.
         """
-        import importlib.resources as resources
+        from dfe_engine.schema.plan import core_schemas_root
+        from dfe_engine.source.core_sources import LANDING_SOURCE_FILE
 
-        try:
-            builtins_dir = resources.files("dfe_engine.source") / "builtin_sources"
-        except Exception as e:
-            logger.warning(f"Failed to locate built-in sources: {e}")
+        builtins_dir = core_schemas_root() / "sources"
+        if not builtins_dir.is_dir():
+            logger.warning(f"dfe-schemas ships no sources directory at {builtins_dir}")
             return 0
 
         items: list[tuple[str, str]] = []
-        for resource in builtins_dir.iterdir():
-            if not resource.name.endswith(".yaml"):
+        for resource in sorted(builtins_dir.iterdir()):
+            # The landing definition is the engine's own: seed_core_sources fills
+            # its name from clickhouse.landing_table, which this path cannot.
+            if not resource.name.endswith(".yaml") or resource.name == LANDING_SOURCE_FILE:
                 continue
 
             source_name = resource.name.removesuffix(".yaml")
@@ -956,7 +958,7 @@ class SourceRegistry:
                 continue
 
             try:
-                items.append((source_name, resource.read_text()))
+                items.append((source_name, self._named(resource, source_name)))
                 logger.info(f"Seeded built-in source: {source_name}")
             except Exception as e:
                 logger.warning(f"Failed to seed source {source_name!r}: {e}")
@@ -967,6 +969,20 @@ class SourceRegistry:
             message="source: seed built-in sources",
         )
         return len(items)
+
+    @staticmethod
+    def _named(resource: Path, source_name: str) -> str:
+        """The shipped definition with its ``source`` name filled from the filename.
+
+        dfe-schemas names a source by its file so one definition can be adopted
+        under whatever name a deployment gives it; the stored copy carries the
+        name, because every read path validates a Source model.
+        """
+        from dfe_engine.yaml_utils import yaml_dump_string, yaml_load_string
+
+        doc = yaml_load_string(resource.read_text(encoding="utf-8")) or {}
+        doc.setdefault("source", source_name)
+        return yaml_dump_string(doc)
 
     # -----------------------------------------------------------------
     # Lifecycle
