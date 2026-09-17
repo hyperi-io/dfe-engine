@@ -43,6 +43,11 @@ _COMMON_HEADER_SUBDIR = "common-header"
 _HUNTS_SUBDIR = "hunts"
 REGISTRIES_SUBDIR = "registries"
 
+# The apply manifest at the root of a dfe-schemas tree. Named here rather than
+# imported so this module still loads when dfe-schemas is absent; a rename
+# upstream fails test_the_real_package_maps_to_its_data_directory.
+_MANIFEST_FILE = "manifest.yaml"
+
 # The dfe-schemas distribution and the package-data directory its wheel
 # force-includes the schema trees under.
 _SCHEMAS_PACKAGE = "dfe_schemas"
@@ -59,8 +64,18 @@ def _looks_like_schemas_root(candidate: Path) -> bool:
 
     Requiring ``common-header/`` stops a partial tree such as ``config/schemas``
     -- or the empty directory the image seeds INTO -- shadowing a real checkout.
+    The manifest is required on top of it because a schemas volume an earlier
+    engine seeded carries ``common-header/`` but none of what came later: no
+    ``topics/``, no ``views/``, no manifest. On the header alone such a tree
+    shadowed the image's complete seed and the engine died on the first file it
+    never carried. Completeness is the test, not a version -- the manifest is
+    what every whole tree has and every partial one lacks.
     """
-    return candidate.is_dir() and (candidate / _COMMON_HEADER_SUBDIR).is_dir()
+    return (
+        candidate.is_dir()
+        and (candidate / _COMMON_HEADER_SUBDIR).is_dir()
+        and (candidate / _MANIFEST_FILE).is_file()
+    )
 
 
 def _resolve_package_schemas_root() -> Path | None:

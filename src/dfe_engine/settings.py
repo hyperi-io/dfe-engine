@@ -34,6 +34,7 @@ ClickHouse:
 - DFE_CLICKHOUSE_BOOTSTRAP_TABLES -> clickhouse.bootstrap_tables (true/false)
 - DFE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS -> clickhouse.bootstrap_wait_seconds
 - DFE_KAFKA_BOOTSTRAP_TOPICS -> kafka.bootstrap_topics (true/false)
+- DFE_KAFKA_TIERED_STORAGE -> kafka.tiered_storage (true/false)
 - DFE_SCHEMAS_OVERLAY_DIR -> the deployment's additive schema overlay directory
 
 ClickHouse Cloud (control plane; opt-in, billable):
@@ -587,6 +588,18 @@ class KafkaSettings(BaseModel):
             "the two fail for different reasons and a deployment with an external "
             "broker wants one off and the other on. A deployment with no bus skips "
             "the set and still converges."
+        ),
+    )
+    tiered_storage: bool = Field(
+        default=False,
+        description=(
+            "Whether this deployment's brokers tier to object storage "
+            "(DFE_KAFKA_TIERED_STORAGE). On, the landing topic is created with "
+            "``remote.storage.enable``; off, the key is absent rather than set "
+            "false, so a broker-level setting is left to decide. Tiering is a "
+            "per-topic switch as well as a per-broker one: with the broker "
+            "plugin on and the topic key missing, every segment stays on local "
+            "disk until the volume fills."
         ),
     )
     topic_partitions: int = Field(
@@ -1813,6 +1826,8 @@ def _get_env_overrides() -> dict:
         overrides["kafka"]["ensure_topics"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_KAFKA_BOOTSTRAP_TOPICS"):
         overrides["kafka"]["bootstrap_topics"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_KAFKA_TIERED_STORAGE"):
+        overrides["kafka"]["tiered_storage"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_KAFKA_TOPIC_PARTITIONS"):
         overrides["kafka"]["topic_partitions"] = int(val)
     if val := _get_env("DFE_KAFKA_TOPIC_REPLICATION_FACTOR"):

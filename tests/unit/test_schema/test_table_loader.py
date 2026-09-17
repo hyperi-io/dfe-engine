@@ -68,15 +68,26 @@ versions:
 """
 
 
+def _schemas_tree(tmp_path, monkeypatch):
+    """An empty tree complete enough to resolve, with ``tables/`` to write into.
+
+    The manifest is what marks a tree whole; without it the loader reads past
+    this one to the installed package.
+    """
+    (tmp_path / "common-header").mkdir()
+    (tmp_path / "manifest.yaml").write_text("objects: []\n", encoding="utf-8")
+    tables = tmp_path / "tables"
+    tables.mkdir()
+    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(tmp_path))
+    return tables
+
+
 @pytest.fixture
 def schemas_root(tmp_path, monkeypatch):
     """A schemas tree holding the two definitions above."""
-    (tmp_path / "common-header").mkdir()
-    tables = tmp_path / "tables"
-    tables.mkdir()
+    tables = _schemas_tree(tmp_path, monkeypatch)
     (tables / "widget.yaml").write_text(TABLE_YAML, encoding="utf-8")
     (tables / "view.yaml").write_text(VIEW_YAML, encoding="utf-8")
-    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(tmp_path))
     return tmp_path
 
 
@@ -107,9 +118,7 @@ class TestColumns:
         assert col.max_dynamic_paths > 0
 
     def test_both_default_and_materialized_is_an_error(self, tmp_path, monkeypatch):
-        (tmp_path / "common-header").mkdir()
-        tables = tmp_path / "tables"
-        tables.mkdir()
+        tables = _schemas_tree(tmp_path, monkeypatch)
         (tables / "bad.yaml").write_text(
             'current: "1.0.0"\nversions:\n  "1.0.0":\n'
             '    table:\n      name: "bad"\n'
@@ -117,7 +126,6 @@ class TestColumns:
             '        default: "1"\n        materialized: "2"\n',
             encoding="utf-8",
         )
-        monkeypatch.setenv("DFE_SCHEMAS_DIR", str(tmp_path))
         with pytest.raises(SchemaLoadError, match="both 'default' and 'materialized'"):
             load_table_spec("tables/bad", "dfe")
 
@@ -149,16 +157,13 @@ class TestResolution:
         assert load_table_spec("tables/widget", "dfe").name == "widget"
 
     def test_a_definition_that_names_no_table_is_an_error(self, tmp_path, monkeypatch):
-        (tmp_path / "common-header").mkdir()
-        tables = tmp_path / "tables"
-        tables.mkdir()
+        tables = _schemas_tree(tmp_path, monkeypatch)
         (tables / "anon.yaml").write_text(
             'current: "1.0.0"\nversions:\n  "1.0.0":\n'
             '    table:\n      engine: "MergeTree"\n'
             '    columns:\n      - name: "a"\n        ch_type: "String"\n',
             encoding="utf-8",
         )
-        monkeypatch.setenv("DFE_SCHEMAS_DIR", str(tmp_path))
         with pytest.raises(SchemaLoadError, match="does not name its table"):
             load_table_spec("tables/anon", "dfe")
 

@@ -87,10 +87,11 @@ install with no deploy repo boots core-only.
 | `DFE_CLICKHOUSE_BOOTSTRAP_TABLES` | `true` | Apply the manifest at startup. Off reports the schema state as unknown and gates nothing. |
 | `DFE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS` | `180` | How long to keep retrying an unreachable ClickHouse before reporting the pass failed. |
 | `DFE_KAFKA_BOOTSTRAP_TOPICS` | `true` | Create the declared topic set at startup, create-only. |
+| `DFE_KAFKA_TIERED_STORAGE` | `false` | The brokers tier to object storage, so the landing topic is created with `remote.storage.enable`. Off leaves the key unset rather than false, which is what a broker-level setting needs. |
 | `DFE_SCHEMAS_OVERLAY_DIR` | unset | The deployment's additive overlay tree. |
 
-Two dials rather than one: they fail for different reasons, and a deployment with
-an external broker wants one off and the other on.
+The two bootstrap dials are separate rather than one: they fail for different
+reasons, and a deployment with an external broker wants one off and the other on.
 
 A stack that writes to ClickHouse with the engine switched off is unsupported. No
 engine, no tables.
