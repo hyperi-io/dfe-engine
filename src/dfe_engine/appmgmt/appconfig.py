@@ -221,6 +221,21 @@ def _write_private(path: Path, content: str) -> None:
     tmp.replace(path)
 
 
+def _report_unwritable(what: str, directory: Path, error: OSError) -> None:
+    """Report a directory the deployer named and this engine cannot write.
+
+    The config render is what the containers read and must survive it: the env
+    directory is the operator's own checkout, so a mode or an owner there is
+    theirs to fix and must not cost every app its config.
+    """
+    logger.warning(
+        "the directory this deployment names for its app env files cannot be written",
+        wrote=what,
+        directory=str(directory),
+        error=str(error),
+    )
+
+
 def write_custom_env(settings: Any, service: str, env: dict[str, Any]) -> bool:
     """Write one app's custom environment where its container reads it.
 
@@ -242,8 +257,12 @@ def write_custom_env(settings: Any, service: str, env: dict[str, Any]) -> bool:
         return False
     if target.is_file() and target.read_text(encoding="utf-8") == rendered:
         return False
-    directory.mkdir(parents=True, exist_ok=True)
-    _write_private(target, rendered)
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        _write_private(target, rendered)
+    except OSError as exc:
+        _report_unwritable(target.name, directory, exc)
+        return False
     return True
 
 
@@ -371,8 +390,11 @@ def write_instance_index(settings: Any, service: str, names: list[str]) -> None:
     rendered = "".join(f"{name}\n" for name in names)
     if target.is_file() and target.read_text(encoding="utf-8") == rendered:
         return
-    directory.mkdir(parents=True, exist_ok=True)
-    target.write_text(rendered, encoding="utf-8")
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        target.write_text(rendered, encoding="utf-8")
+    except OSError as exc:
+        _report_unwritable(target.name, directory, exc)
 
 
 def _render_one(

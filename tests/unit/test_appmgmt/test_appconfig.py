@@ -320,6 +320,24 @@ class TestOneContainerPerInstance:
         assert _index(settings, VRL).read_text() == "crowdstrike-eu\n"
         assert not _app_dir(settings, VRL, "crowdstrike-us").exists()
 
+    def test_an_unwritable_env_directory_does_not_cost_the_apps_their_config(
+        self, crud, tmp_path
+    ):
+        # That directory is the operator's own checkout, so its mode is theirs to
+        # fix; the containers still have to get the config they read.
+        settings = _settings(tmp_path)
+        _deploy(crud, VRL, "crowdstrike-eu")
+        env_dir = Path(settings.deployment.app_env_dir)
+        env_dir.mkdir(parents=True, exist_ok=True)
+        env_dir.chmod(0o500)
+
+        try:
+            appconfig.render(crud, settings)
+        finally:
+            env_dir.chmod(0o700)
+
+        assert _rendered(settings, VRL, "crowdstrike-eu") is not None
+
     def test_a_stack_wide_app_keeps_its_one_directory(self, crud, tmp_path):
         # The loader is one deployment for the whole stack, so its config stays
         # where its committed container already mounts it.
