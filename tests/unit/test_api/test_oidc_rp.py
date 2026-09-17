@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         tests/unit/test_api/test_oidc_rp.py
-#  Purpose:      OIDC relying-party claim extraction + engine token re-mint (no mocks)
+#  Purpose:      OIDC relying-party engine token re-mint, credentials and routes (no mocks)
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -8,8 +8,9 @@
 
 """OIDC RP unit tests.
 
-Covers the pure claim-extraction + normalization and the engine token re-mint
-against a REAL JwtAuthority over a real scalo.secrets file backend. The live
+Covers the engine token re-mint against a REAL JwtAuthority over a real
+scalo.secrets file backend; claim extraction is tested in
+tests/unit/test_auth/test_oidc/test_rp.py. The live
 redirect flow (Authlib authorize_redirect / authorize_access_token against an
 IdP) is out of scope here and validated against a real dex in integration - no
 Authlib network calls are mocked.
@@ -20,9 +21,9 @@ from __future__ import annotations
 import jwt as pyjwt
 
 from dfe_engine.auth.jwt_authority import JwtAuthority
-from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
-from dfe_engine.auth.oidc.rp import NormalizedIdentity, build_relying_party, extract_identity
+from dfe_engine.auth.oidc.rp import NormalizedIdentity, build_relying_party
 from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import SecretsSettings
 
@@ -32,137 +33,6 @@ ISS = "https://dfe.test/api"
 def _authority(path) -> JwtAuthority:
     secrets = build_secrets(SecretsSettings(provider="file", path=str(path)))
     return JwtAuthority(secrets, issuer=ISS)
-
-
-# ── extract_identity (pure) ──────────────────────────────────────
-
-
-def test_extract_identity_generic_default_claim():
-    """Generic provider: sub/email/groups read from standard + default claim."""
-    provider = OIDCProvider(type="generic", issuer="https://idp.example")
-    claims = {
-        "sub": "alice@example.com",
-        "email": "alice@example.com",
-        "groups": ["soc", "admins"],
-        "aud": "dfe",
-    }
-    identity = extract_identity(provider, claims)
-    assert identity.subject == "alice@example.com"
-    assert identity.email == "alice@example.com"
-    assert identity.groups == ["soc", "admins"]
-
-
-def test_extract_identity_okta_default_claim():
-    """Okta natively emits a 'groups' array claim - extracted the same way."""
-    provider = OIDCProvider(type="okta", issuer="https://acme.okta.com")
-    claims = {
-        "sub": "00u1abc",
-        "email": "bob@acme.com",
-        "groups": ["Everyone", "dfe-analysts"],
-    }
-    identity = extract_identity(provider, claims)
-    assert identity.subject == "00u1abc"
-    assert identity.email == "bob@acme.com"
-    assert identity.groups == ["Everyone", "dfe-analysts"]
-
-
-def test_extract_identity_custom_claim_name():
-    """A provider can point the groups resolution at a non-default claim name."""
-    provider = OIDCProvider(
-        type="entra_id",
-        issuer="https://login.microsoftonline.com/tid/v2.0",
-        groups=GroupResolutionConfig(mode="token_claim", claim_name="roles"),
-    )
-    claims = {"sub": "guid-123", "email": "carol@acme.com", "roles": ["group-guid-a"]}
-    identity = extract_identity(provider, claims)
-    assert identity.subject == "guid-123"
-    assert identity.groups == ["group-guid-a"]
-
-
-def test_extract_identity_string_groups_comma_split():
-    """A comma-separated string groups claim is normalized to a list."""
-    provider = OIDCProvider(type="generic", issuer="https://idp.example")
-    claims = {"sub": "x", "email": "x@y.z", "groups": " soc , admins "}
-    identity = extract_identity(provider, claims)
-    assert identity.groups == ["soc", "admins"]
-
-
-def test_extract_identity_missing_optional_fields():
-    """Missing email/groups yield empty defaults, not errors."""
-    provider = OIDCProvider(type="generic", issuer="https://idp.example")
-    identity = extract_identity(provider, {"sub": "only-sub"})
-    assert identity.subject == "only-sub"
-    assert identity.email == ""
-    assert identity.groups == []
-    assert identity.groups_overflowed is False
-
-
-def test_extract_identity_falls_back_to_preferred_username():
-    """Entra emits no email for a cloud-only user, so the UPN is the identity."""
-    provider = OIDCProvider(type="entra_id", issuer="https://login.microsoftonline.com/tid/v2.0")
-    claims = {"sub": "guid-123", "preferred_username": "dfe-admin@ms.hyperi.io"}
-    assert extract_identity(provider, claims).email == "dfe-admin@ms.hyperi.io"
-
-
-def test_extract_identity_falls_back_to_upn_when_preferred_username_is_absent():
-    provider = OIDCProvider(type="entra_id", issuer="https://login.microsoftonline.com/tid/v2.0")
-    claims = {"sub": "guid-123", "upn": "dfe-admin@ms.hyperi.io"}
-    assert extract_identity(provider, claims).email == "dfe-admin@ms.hyperi.io"
-
-
-def test_extract_identity_prefers_email_over_the_fallbacks():
-    provider = OIDCProvider(type="entra_id", issuer="https://login.microsoftonline.com/tid/v2.0")
-    claims = {
-        "sub": "guid-123",
-        "email": "real@acme.com",
-        "preferred_username": "upn@ms.hyperi.io",
-        "upn": "upn@ms.hyperi.io",
-    }
-    assert extract_identity(provider, claims).email == "real@acme.com"
-
-
-def test_extract_identity_skips_an_empty_email_claim():
-    """Entra sends email as "" rather than omitting it, so falsy has to fall through."""
-    provider = OIDCProvider(type="entra_id", issuer="https://login.microsoftonline.com/tid/v2.0")
-    claims = {"sub": "guid-123", "email": "", "preferred_username": "dfe-admin@ms.hyperi.io"}
-    assert extract_identity(provider, claims).email == "dfe-admin@ms.hyperi.io"
-
-
-# ── group-claim overage detection (Entra >200 groups) ───────────
-
-
-def test_extract_identity_detects_group_overage():
-    """An Entra >200-group overage marker sets the flag and leaves groups empty.
-
-    When a user is in too many groups Entra omits the ``groups`` array and emits
-    a ``_claim_names``/``_claim_sources`` pointer instead. extract_identity must
-    notice that so the RP knows to fetch membership out-of-band, rather than
-    silently treating the user as belonging to no groups.
-    """
-    provider = OIDCProvider(type="entra_id", issuer="https://login.microsoftonline.com/tid/v2.0")
-    claims = {
-        "sub": "pairwise-sub",
-        "oid": "00000000-user-oid",
-        "email": "big@acme.com",
-        "_claim_names": {"groups": "src1"},
-        "_claim_sources": {
-            "src1": {
-                "endpoint": "https://graph.microsoft.com/v1.0/users/00000000-user-oid/getMemberObjects"
-            }
-        },
-    }
-    identity = extract_identity(provider, claims)
-    assert identity.groups == []
-    assert identity.groups_overflowed is True
-
-
-def test_extract_identity_no_overage_when_groups_present():
-    """A normal groups array is not mistaken for an overage."""
-    provider = OIDCProvider(type="entra_id", issuer="https://login.microsoftonline.com/tid/v2.0")
-    claims = {"sub": "s", "email": "a@b.c", "groups": ["guid-a", "guid-b"]}
-    identity = extract_identity(provider, claims)
-    assert identity.groups == ["guid-a", "guid-b"]
-    assert identity.groups_overflowed is False
 
 
 # ── re-mint: NormalizedIdentity -> engine ES384 token ────────────
@@ -339,7 +209,9 @@ class _FakeOidcRp:
         return "https://idp.example/authorize?state=test"
 
     async def handle_callback(self, provider: str, request) -> NormalizedIdentity:
-        return NormalizedIdentity(subject="stub-user", email="stub@example.test", groups=["g1"])
+        return NormalizedIdentity(
+            email="stub@example.test", groups=["g1"], name="Stub User", subject="stub-user"
+        )
 
 
 def test_login_redirect_mode_302(client, app):
@@ -525,3 +397,10 @@ def test_callback_jit_provisions_account_with_oidc_email(client, app):
     assert account is not None
     assert account.email == "stub@example.test"
     assert account.external is True
+
+
+def test_callback_jit_provisions_account_with_oidc_name(client, app):
+    app.state.oidc_rp = _FakeOidcRp()
+    resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+    assert resp.status_code == 200
+    assert app.state.account_store.get("stub-user").name == "Stub User"

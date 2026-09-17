@@ -241,6 +241,7 @@ async def oidc_callback(
                 identity.groups,
                 provider,
                 email=identity.email,
+                name=identity.name,
             )
         except Exception:
             logger.exception("JIT provisioning failed", user_id=identity.subject)

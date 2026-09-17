@@ -12,7 +12,7 @@ The engine is the RP and the SINGLE token issuer. An external IdP (Google,
 Okta, Entra, or any OIDC-compliant provider) performs the interactive login;
 the engine terminates the OIDC auth-code flow, validates the IdP's id_token
 (signature/nonce/aud/exp against the IdP JWKS, done by Authlib), extracts the
-identity (sub/email/groups), and then RE-MINTS its own ES384 engine token via
+identity (sub/email/name/groups), and then RE-MINTS its own ES384 engine token via
 ``JwtAuthority``. Downstream apps only ever see the engine-issued token - the
 external IdP's RS256 token never leaves the engine<->IdP leg.
 
@@ -42,6 +42,13 @@ if TYPE_CHECKING:
     from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
     from dfe_engine.secrets import DfeSecrets
 
+# Claims a userinfo response may fill; groups stay ID-token-only because they decide roles.
+_USERINFO_FILL_CLAIMS = ("email", "name", "preferred_username")
+
+
+class UserinfoSubjectMismatchError(ValueError):
+    """The userinfo response names a different subject from the ID token."""
+
 
 class NormalizedIdentity(BaseModel):
     """The identity extracted from an IdP id_token, before engine re-mint."""
@@ -51,6 +58,9 @@ class NormalizedIdentity(BaseModel):
 
     email: str = ""
     """The user's email (``email`` claim), empty if the IdP did not assert one."""
+
+    name: str = ""
+    """The display name: the ``name`` claim, else ``preferred_username``, else empty."""
 
     groups: list[str] = []
     """Group identifiers pulled from the provider's configured groups claim."""
@@ -94,6 +104,19 @@ def _coerce_groups(raw: Any) -> list[str]:
     return []
 
 
+def _claim_text(*, claims: dict[str, Any], name: str) -> str:
+    """The claim value with surrounding whitespace removed, or empty when absent or not a string."""
+    value = claims.get(name)
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _display_name(*, claims: dict[str, Any]) -> str:
+    """The ``name`` claim, else ``preferred_username``, else empty."""
+    return (_claim_text(claims=claims, name="name")) or (
+        _claim_text(claims=claims, name="preferred_username")
+    )
+
+
 def extract_identity(
     provider: OIDCProvider,
     userinfo_claims: dict[str, Any],
@@ -104,7 +127,8 @@ def extract_identity(
     ``preferred_username`` and then ``upn``: Entra emits no ``email`` for a
     cloud-only user with no mailbox, and the UPN is the identifier an operator
     recognises, so without the fallback such a user lands with a blank email.
-    Groups come from the claim named by ``provider.groups.claim_name`` (default
+    The display name is ``name``, falling back to ``preferred_username``. Groups
+    come from the claim named by ``provider.groups.claim_name`` (default
     ``groups``), matching the token_claim resolution mode used across the DFE
     auth paths.
 
@@ -123,12 +147,52 @@ def extract_identity(
         email = str(userinfo_claims.get(claim) or "")
         if email:
             break
+    name = _display_name(claims=userinfo_claims)
     claim_name = provider.groups.claim_name or "groups"
     groups = _coerce_groups(userinfo_claims.get(claim_name))
     overflowed = _has_group_overage(userinfo_claims, claim_name)
     return NormalizedIdentity(
-        subject=subject, email=email, groups=groups, groups_overflowed=overflowed
+        email=email, groups=groups, groups_overflowed=overflowed, name=name, subject=subject
     )
+
+
+def merge_userinfo_claims(
+    *, id_token_claims: dict[str, Any], userinfo_claims: dict[str, Any]
+) -> dict[str, Any]:
+    """Fill the profile claims the ID token left blank from the userinfo response.
+
+    Only ``email``, ``name`` and ``preferred_username`` are filled, and only where
+    the ID token has no non-blank value. A userinfo response for another subject
+    raises UserinfoSubjectMismatchError, because OIDC Core 5.3.4 forbids using it.
+    """
+    if userinfo_claims.get("sub") != id_token_claims.get("sub"):
+        raise UserinfoSubjectMismatchError("userinfo response subject does not match the ID token")
+    merged = dict(id_token_claims)
+    for claim in _USERINFO_FILL_CLAIMS:
+        value = _claim_text(claims=userinfo_claims, name=claim)
+        if value and not (_claim_text(claims=id_token_claims, name=claim)):
+            merged[claim] = value
+    return merged
+
+
+async def fill_from_userinfo_endpoint(
+    *, claims: dict[str, Any], client: Any, issuer: str, token: dict[str, Any]
+) -> dict[str, Any]:
+    """Fill a thin ID token's profile claims from the provider's userinfo endpoint.
+
+    Okta's authorization-code flow is the common case: its ID token carries no
+    profile or email claims. Any failure keeps the ID token claims unchanged, so
+    the login still completes.
+    """
+    try:
+        metadata = await client.load_server_metadata()
+        if not (metadata.get("userinfo_endpoint")):
+            return claims
+        fetched = await client.userinfo(token=token)
+        return merge_userinfo_claims(id_token_claims=claims, userinfo_claims=dict(fetched))
+    except Exception as exc:
+        logger.warning("OIDC RP: userinfo claims not used", error=str(exc), issuer=issuer)
+        return claims
 
 
 class OidcRelyingParty:
@@ -235,13 +299,17 @@ class OidcRelyingParty:
         ``authorize_access_token`` exchanges the code, then validates the
         id_token signature/nonce/aud/exp against the IdP JWKS. The parsed claims
         arrive under ``token['userinfo']``; we run them through the pure
-        ``extract_identity`` to get sub/email/groups.
+        ``extract_identity`` to get sub/email/name/groups.
         """
         provider = self._providers[provider_name]  # KeyError if unknown - caller guards
         client = self._client(provider_name)
         token = await client.authorize_access_token(request)
         # Authlib parses + validates the id_token and exposes its claims here.
         userinfo = dict(token.get("userinfo") or {})
+        if not (_display_name(claims=userinfo)):
+            userinfo = await fill_from_userinfo_endpoint(
+                claims=userinfo, client=client, issuer=provider.issuer, token=token
+            )
         identity = extract_identity(provider, userinfo)
         # Enrich from the directory API in two cases: an Entra >200 overage (the
         # token dropped the groups array), or a provider that never puts groups
