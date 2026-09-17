@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.21.2](https://github.com/hyperi-io/dfe-engine/compare/v1.21.1...v1.21.2) (2026-09-17)
+
+### Bug Fixes
+
+* **schema:** a partial schemas volume no longer shadows the seed ([#435](https://github.com/hyperi-io/dfe-engine/issues/435)) ([90de9a3](https://github.com/hyperi-io/dfe-engine/commit/90de9a3dc3b96bb15e3700840d4d36ac485429d2)), closes [#434](https://github.com/hyperi-io/dfe-engine/issues/434)
+
 ## [1.21.1](https://github.com/hyperi-io/dfe-engine/compare/v1.21.0...v1.21.1) (2026-09-17)
 
 ### Bug Fixes
