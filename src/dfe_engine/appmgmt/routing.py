@@ -193,9 +193,13 @@ def _receiver(
         compile_receiver_routing,
     )
 
+    # Only the keys the sources derive: the block is written whole, so a model
+    # default in it would overwrite the deployment's own setting for that key.
+    routing = compile_receiver_routing(registry)
+    destinations = compile_receiver_destinations(registry, settings)
     return {
-        "routing": compile_receiver_routing(registry).model_dump(mode="json"),
-        "destinations": compile_receiver_destinations(registry, settings).model_dump(mode="json"),
+        "routing": routing.model_dump(mode="json", exclude_unset=True),
+        "destinations": destinations.model_dump(mode="json", exclude_unset=True),
     }
 
 

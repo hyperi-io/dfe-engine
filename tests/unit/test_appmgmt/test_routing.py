@@ -253,7 +253,6 @@ class TestReceiverOnDirect:
 
         assert compiled["destinations"] == {
             "default": "loader",
-            "loader": {"grpc": {"endpoint": LOADER_ENDPOINT}},
             "rules": [
                 {"match_field": "_json.app", "match_value": "auth", "destination": "loader"},
                 {"match_field": "_source", "match_value": "okta-audit", "destination": "loader"},
@@ -270,7 +269,6 @@ class TestReceiverOnDirect:
         assert compiled["destinations"] == {
             "default": "loader",
             "dfe-transform-vrl-auth": {"grpc": {"endpoint": VRL_AUTH_ENDPOINT}},
-            "loader": {"grpc": {"endpoint": LOADER_ENDPOINT}},
             "rules": [
                 {
                     "match_field": "_json.app",
@@ -282,7 +280,7 @@ class TestReceiverOnDirect:
         }
 
     def test_a_named_destination_is_addressed_the_way_the_fetcher_addresses_one(
-        self, direct_settings
+        self, direct_settings, direct_transforms
     ):
         """Both compilers hand the receiver and the fetcher the same gRPC block.
 
@@ -291,15 +289,39 @@ class TestReceiverOnDirect:
         a URI. Emitting the bare string made receiver v1.15.30 refuse the whole
         config file, and a receiver that will not start takes the direct
         transport with it - which no assertion on the rules would have caught.
+
+        Read on a transform instance, because the loader is the one destination
+        the receiver addresses itself.
         """
-        registry = FakeRegistry([_matched("auth"), _fetched()])
+        registry = FakeRegistry([_fetched(transform={"engine": "vrl"})])
 
         receiver = routing.compile_for(catalogue.descriptor(RECEIVER), registry, direct_settings)
         fetcher = routing.compile_for(
             catalogue.descriptor(FETCHER), registry, direct_settings, instance="okta-audit"
         )
 
-        assert receiver["destinations"]["loader"]["grpc"] == fetcher["output"]["grpc"]
+        named = receiver["destinations"]["dfe-transform-vrl-okta-audit"]
+        assert named["grpc"] == fetcher["output"]["grpc"]
+
+    def test_the_loader_destination_is_named_but_never_addressed(self, direct_settings):
+        """#436: an endpoint here wins over the address the loader is deployed on.
+
+        The receiver synthesises its built-in ``loader`` destination from
+        ``loader.grpc_endpoint``, and only while the destination set has not
+        declared one (``src/config/mod.rs`` ``resolved_destinations``). Rendering
+        an endpoint here short-circuits that, which sent every record on the
+        no-bus tier to a port the loader does not listen on.
+        """
+        registry = FakeRegistry([_matched("auth"), _fetched()])
+
+        compiled = routing.compile_for(catalogue.descriptor(RECEIVER), registry, direct_settings)
+
+        assert "loader" not in compiled["destinations"]
+        assert compiled["destinations"]["default"] == "loader"
+        assert [r["destination"] for r in compiled["destinations"]["rules"]] == [
+            "loader",
+            "loader",
+        ]
 
     def test_the_labelling_rule_and_the_destination_rule_read_one_match(self, direct_settings):
         registry = FakeRegistry([_matched("auth")])
@@ -340,7 +362,6 @@ class TestArchivedOnDirect:
         assert compiled["destinations"] == {
             "default": "loader",
             "dfe-archiver": {"grpc": {"endpoint": ARCHIVER_ENDPOINT}},
-            "loader": {"grpc": {"endpoint": LOADER_ENDPOINT}},
             "rules": [
                 {
                     "match_field": "_json.app",
@@ -440,6 +461,20 @@ class TestArchiverStack:
         assert routing.status(app, doc, registry, settings).drift is True
         assert routing.sync(app, doc, registry, settings) is True
         assert doc["config"]["kafka"]["topics"] == ["auth_land"]
+
+
+class TestReceiverStack:
+    def test_the_block_carries_only_the_keys_the_sources_derive(self, source_registry, settings):
+        """#401: the deployment's own dead-letter settings must survive a sync.
+
+        ``ReceiverRoutingConfig.dlq`` and ``legacy_compat`` are model defaults the
+        compile never sets, and the block is written whole, so emitting them
+        stamps the deployment's own values back to the default every time.
+        """
+        compiled = routing.compile_for(catalogue.descriptor(RECEIVER), source_registry, settings)
+
+        assert "dlq" not in compiled["routing"]
+        assert "legacy_compat" not in compiled["routing"]
 
 
 class TestLoaderStack:
