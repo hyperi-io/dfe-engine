@@ -92,9 +92,11 @@ def _make_source(
     data = {
         "source": "test-source",
         "match": {"field": "tags.collector.type", "value": "test-source"},
-        "header": {"type": header_type, "version": "1.0.0"},
         "schema": schema_config,
     }
+    # header_type None authors no header at all, the shape #400 is about.
+    if header_type is not None:
+        data["header"] = {"type": header_type, "version": "1.0.0"}
     if views:
         data["views"] = views
 
@@ -281,6 +283,56 @@ class TestBuild:
         result = builder.build(source)
         assert "@profile: timeseries" in result.create_table_ddl
         assert "@profile_version: 1.0.0" in result.create_table_ddl
+
+
+# ── Sources that author no header ───────────────────────────────────
+
+
+class TestUnauthoredHeader:
+    """An absent header means the default profile everywhere, not a profile in one
+    half and none in the other."""
+
+    def test_a_source_with_no_header_gets_the_columns_its_ddl_config_declares(
+        self, registry, schemas_dir
+    ):
+        builder = SchemaBuilderV2(
+            registry=registry, schemas_base_dir=schemas_dir, default_ttl_days=90
+        )
+        source = _make_source(meta_schema="meta.yaml", header_type=None, ttl_days=None)
+
+        cfg = builder.build_ddl_config_for_version(source, source.runtime_version_id())
+        result = builder.build(source)
+        names = [c.name for c in result.columns]
+
+        assert cfg.profile_name == "timeseries"
+        # The retention the config declares rides a column the table now carries.
+        assert cfg.ttl_columns == ["_timestamp_load"]
+        assert "_timestamp_load" in names
+        assert "_org_id" in names
+        assert "user_name" in names
+        assert "INTERVAL 90 DAY" in result.create_table_ddl
+
+    def test_a_source_with_no_header_renders_as_one_that_writes_the_default(
+        self, registry, schemas_dir
+    ):
+        builder = SchemaBuilderV2(
+            registry=registry, schemas_base_dir=schemas_dir, default_ttl_days=90
+        )
+        unauthored = builder.build(
+            _make_source(meta_schema="meta.yaml", header_type=None, ttl_days=None)
+        )
+        explicit = builder.build(
+            _make_source(meta_schema="meta.yaml", header_type="timeseries", ttl_days=None)
+        )
+
+        assert [c.name for c in unauthored.columns] == [c.name for c in explicit.columns]
+        for clause in (
+            "PARTITION BY toYYYYMMDD(_timestamp_load)",
+            "ORDER BY (`_timestamp_load`, `_timestamp`, `_org_id`)",
+            "@profile: timeseries",
+        ):
+            assert clause in unauthored.create_table_ddl
+            assert clause in explicit.create_table_ddl
 
 
 # ── Sigma View ──────────────────────────────────────────────────────
