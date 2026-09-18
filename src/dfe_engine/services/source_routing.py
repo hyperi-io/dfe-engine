@@ -38,13 +38,11 @@ from dfe_engine.services.models.receiver import (
     ReceiverMatchMode,
     ReceiverRoutingConfig,
     SourceRule,
-    destination_names,
 )
 from dfe_engine.source.flow import (
     ARCHIVER_SERVICE,
     FlowError,
     archiver_endpoint,
-    loader_endpoint,
     resolve_flow,
 )
 from dfe_engine.source.models import (
@@ -205,6 +203,12 @@ def compile_receiver_destinations(registry: SourceRegistry, settings: Any) -> De
     be handed to a stage by address - its source's transform when it has one,
     else the loader.
 
+    The loader is the exception that carries no address: the receiver resolves
+    its own built-in ``loader`` destination from ``loader.grpc_endpoint``, and
+    only while the destination set has not declared one. Naming it here would
+    take precedence over the endpoint the loader is deployed on, so it is
+    referenced and left for the receiver to resolve.
+
     The default destination follows the DEPLOYMENT, not a source, because it is
     what an unmatched record takes. Unless the default flow itself is direct and
     carries a transform, in which case that transform IS the destination for
@@ -234,10 +238,13 @@ def compile_receiver_destinations(registry: SourceRegistry, settings: Any) -> De
             continue
 
         if flow.transform is not None and flow.transform.endpoint:
-            name, endpoint = flow.transform.instance, flow.transform.endpoint
+            name = flow.transform.instance
+            endpoints[name] = flow.transform.endpoint
         else:
-            name, endpoint = LOADER_DESTINATION, flow.outputs.loader
-        endpoints[name] = endpoint
+            # Referenced by name and given no endpoint: an entry here would win
+            # over the receiver's own loader.grpc_endpoint, which is the address
+            # the loader is actually deployed on.
+            name = LOADER_DESTINATION
 
         destination: DestinationRef = name
         if flow.outputs.archive:
@@ -265,8 +272,6 @@ def compile_receiver_destinations(registry: SourceRegistry, settings: Any) -> De
             )
         )
 
-    if LOADER_DESTINATION in destination_names(default):
-        endpoints.setdefault(LOADER_DESTINATION, loader_endpoint(settings))
     return DestinationsConfig(
         default=default,
         rules=rules,

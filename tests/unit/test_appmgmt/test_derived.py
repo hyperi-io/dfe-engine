@@ -85,8 +85,10 @@ class TestReconcile:
         receiver = instances.instance_of(RECEIVER, "default")
         doc = instances.read_overlay(crud, receiver)
         assert get_path(doc, "config.routing.default_source") == "main"
-        default = get_path(doc, "config.destinations.default")
-        assert get_path(doc, f"config.destinations.{default}.grpc.endpoint")
+        # The loader is referenced and left unaddressed: the receiver resolves it
+        # from its own loader.grpc_endpoint.
+        assert get_path(doc, "config.destinations.default") == "loader"
+        assert get_path(doc, "config.destinations.loader") is None
         assert instances.history(crud, receiver)[0].actor == derived.ENGINE_ACTOR
 
     def test_a_reconciled_repo_is_left_alone(self, crud, settings):
