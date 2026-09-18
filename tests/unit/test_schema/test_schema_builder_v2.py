@@ -223,8 +223,8 @@ class TestBuild:
         assert "_org_id" in names
         assert "user_name" not in names
 
-    def test_build_without_header_uses_only_source_columns(self, registry, schemas_dir):
-        """Omitted header is not a timeseries profile and must not resolve to '.yaml'."""
+    def test_build_without_header_uses_the_default_profile(self, registry, schemas_dir):
+        """Omitted header takes timeseries; it must not resolve to ``.yaml``."""
         builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
         source = Source.model_validate(
             {
@@ -236,7 +236,7 @@ class TestBuild:
         result = builder.build(source)
         names = [c.name for c in result.columns]
         assert "user_name" in names
-        assert "_timestamp_load" not in names
+        assert "_timestamp_load" in names
 
     @pytest.mark.parametrize(
         "header_type", ["", "   ", "common-header", "common-header/", ".yml", ".yaml"]

@@ -43,9 +43,15 @@ class SchemaBuildError(Exception):
 
 
 def _authored_header_profile(snap: SourceVersion) -> tuple[str, str] | None:
-    """Return ``(type, version)`` when the snapshot names a real profile file."""
+    """Return ``(type, version)`` when the snapshot names a real profile file.
+
+    An omitted header is unauthored: runtime still uses
+    :meth:`SourceVersion.effective_header` (timeseries). An authored empty
+    type names no file and must not become ``.yaml``.
+    """
     if snap.header is None:
-        return None
+        header = snap.effective_header()
+        return header.type, header.version
     raw = snap.header.type or ""
     if _profile_file_stem(raw) is None:
         return None

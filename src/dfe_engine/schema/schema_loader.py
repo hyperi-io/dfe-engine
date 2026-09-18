@@ -266,13 +266,27 @@ def _resolve_profile_yaml_path(
     # Traversal is already rejected in _profile_file_stem; keep the same
     # guard on this join path so a future edit cannot skip it.
     _reject_traversal(profile_name, normalized.strip("/"))
+
+    def candidate_under(root: Path) -> Path:
+        if normalized.startswith(_COMMON_HEADER_PREFIX) or "/" in normalized:
+            parts = [p for p in normalized.split("/") if p]
+            if len(parts) == 1:
+                return _profile_yaml_path(root, parts[0])
+            return _profile_yaml_path(root.joinpath(*parts[:-1]), parts[-1])
+        return _profile_yaml_path(root / _COMMON_HEADER_SUBDIR, stem)
+
+    # Same as ``_resolve_subdir``: DFE_SCHEMAS_DIR may be a partial tree
+    # (common-header only, no manifest.yaml). ``_resolve_schemas_root``
+    # would skip it and the packaged timeseries profile would win.
+    env_dir = os.getenv("DFE_SCHEMAS_DIR")
+    if env_dir:
+        env_candidate = candidate_under(Path(env_dir))
+        if env_candidate.is_file():
+            return env_candidate
+
     schemas_root = _resolve_schemas_root()
     if schemas_root and (normalized.startswith(_COMMON_HEADER_PREFIX) or "/" in normalized):
-        parts = [p for p in normalized.split("/") if p]
-        if len(parts) == 1:
-            candidate = _profile_yaml_path(schemas_root, parts[0])
-        else:
-            candidate = _profile_yaml_path(schemas_root.joinpath(*parts[:-1]), parts[-1])
+        candidate = candidate_under(schemas_root)
         if candidate.exists():
             return candidate
 
