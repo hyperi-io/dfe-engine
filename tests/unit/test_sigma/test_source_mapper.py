@@ -116,6 +116,8 @@ def source_registry(windows_sigma, linux_sigma, empty_sigma):
         _make_source("network-flow", sigma=empty_sigma),
         _make_source("raw-passthrough"),  # no sigma at all
         _make_source("disabled-source", sigma=windows_sigma, enabled=False),
+        # A meta_schema that resolves to nothing, so the build really does raise.
+        _make_source("broken-schema", meta_schema="does/not/exist.yaml"),
     ]
     return FakeSourceRegistry(sources)
 
@@ -185,9 +187,25 @@ class TestGetFieldMappings:
 class TestGetSchemaMetadata:
     def test_returns_empty_when_build_fails(self, mapper):
         """When SchemaBuilderV2.build raises, returns empty dict."""
-        # raw-passthrough has no meta_schema, so build will fail
-        metadata = mapper.get_schema_metadata("raw-passthrough")
+        metadata = mapper.get_schema_metadata("broken-schema")
         assert metadata == {}
+
+    def test_a_source_with_no_schema_files_still_reports_its_header_columns(self, mapper):
+        """A source that authors neither a header nor a meta_schema takes the
+        default profile, so its metadata is that profile's columns."""
+        metadata = mapper.get_schema_metadata("raw-passthrough")
+
+        assert set(metadata) == {
+            "_timestamp_load",
+            "_timestamp",
+            "_timestamp_received",
+            "_uuid",
+            "_org_id",
+            "_source",
+            "_raw",
+            "_json",
+            "_tags",
+        }
 
     def test_missing_source_raises(self, mapper):
         with pytest.raises(SourceNotFoundError):

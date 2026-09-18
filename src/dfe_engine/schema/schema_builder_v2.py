@@ -311,15 +311,14 @@ class SchemaBuilderV2:
         self, source_name: str, snap: SourceVersion
     ) -> list[SchemaColumn]:
         """Load the common header profile from a source version snapshot."""
-        if snap.header is None:
-            return []
-        profile_name = snap.header.type
-        profile_version = snap.header.version
+        # The same derivation _build_ddl_config_for_snapshot uses, so the columns
+        # loaded are the ones the DDL config declares a profile and a TTL over.
+        header = snap.effective_header()
         try:
-            return SchemaLoader.load_profile(profile_name, profile_version=profile_version)
+            return SchemaLoader.load_profile(header.type, profile_version=header.version)
         except SchemaLoadError as e:
             raise SchemaBuildError(
-                f"Failed to load profile {profile_name!r} for source {source_name!r}: {e}"
+                f"Failed to load profile {header.type!r} for source {source_name!r}: {e}"
             ) from e
 
     def _load_source_columns(self, source: Source) -> list[SchemaColumn]:
@@ -376,6 +375,6 @@ class SchemaBuilderV2:
             ttl_days=schema_cfg.ttl_days
             if schema_cfg.ttl_days is not None
             else self._default_ttl_days,
-            profile_name=header.type if header else None,
-            profile_version=header.version if header else None,
+            profile_name=header.type,
+            profile_version=header.version,
         )
