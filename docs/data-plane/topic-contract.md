@@ -1,6 +1,6 @@
 # The topic contract
 
-A defined source implies Kafka topics: `<source>_land` always, and `<source>_load`
+A defined source implies Kafka topics: `<source>_land` unless it lands on the shared topic, and `<source>_load`
 when the source has a transform. Those topics are the engine's for the source's
 whole life, so nothing here depends on the broker's `auto.create.topics.enable` -
 which creates a mis-partitioned, unmanaged topic on first produce, and is
@@ -8,6 +8,8 @@ unavailable on Confluent Cloud's non-Dedicated tiers anyway.
 
 The deploy creates a source's topics and the delete removes them. Everything else
 is `/api/v1/kafka/topics`.
+
+A fetcher source pushing to the main topic is the exception at both ends: it arrives on the landing source's `main_land`, so it creates no landing topic on deploy and removes none on delete. Deleting it otherwise takes `main_land` out from under the receiver's default flow and every other source landing there.
 
 ## The surface
 

@@ -157,8 +157,10 @@ def compile_receiver_routing(
       ``default_source`` already sends an unmatched record to it
 
     ``source_to_topic`` is emitted only where a source's landing topic
-    deviates from ``{_source}{topic_suffix}`` (none do today - the Source
-    model derives ``topic_land`` by that same rule).
+    deviates from ``{_source}{topic_suffix}``, which is the rule the receiver
+    itself applies to the label it stamped - so the baseline is the landing
+    LABEL, never the source name. A source landing on the shared topic is not a
+    deviation: label and topic move together.
 
     A stored source whose match operator has no receiver mode is SKIPPED with
     a loud warning rather than raised on: the registry save path rejects new
@@ -182,7 +184,7 @@ def compile_receiver_routing(
                 source=source.landing_label(),
             )
         )
-        expected_topic = f"{source.source}{topic_suffix}"
+        expected_topic = f"{source.landing_label()}{topic_suffix}"
         if source.topic_land != expected_topic:
             source_to_topic[source.source] = source.topic_land
 
@@ -285,7 +287,9 @@ def compile_archiver_topics(registry: SourceRegistry, settings: Any) -> list[str
     (``compile_receiver_destinations``). The bucket and the path an object lands
     under stay the deployment's, so only the topics are derived here.
     """
-    topics: list[str] = []
+    # A set because several sources can land on the shared topic, and subscribing
+    # to it once per source would consume every record that many times.
+    topics: set[str] = set()
     for source in registry.get_all_sources(states=("active",)):
         if not source.archive:
             continue
@@ -298,7 +302,7 @@ def compile_archiver_topics(registry: SourceRegistry, settings: Any) -> list[str
             )
             continue
         if flow.transport == "bus":
-            topics.append(source.topic_land)
+            topics.add(source.topic_land)
     return sorted(topics)
 
 

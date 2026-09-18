@@ -13,7 +13,7 @@ import pytest
 
 from dfe_engine.appmgmt import derived, instances
 from dfe_engine.gitcrud.engine import get_path
-from dfe_engine.source.models import Source
+from dfe_engine.source.models import Source, SourceWriteRequest, source_from_write
 
 from .conftest import FakeRegistry as _Registry
 
@@ -230,6 +230,25 @@ class TestFetcherInstances:
         registry = _Registry([_fetcher_source(), _receiver_source()])
         _apply(crud, derived.plan(crud, registry, settings))
         assert derived.plan(crud, registry, settings) == []
+
+    def test_a_main_landing_source_gets_its_instance_straight_off_the_create(self, crud, settings):
+        write = SourceWriteRequest.model_validate(
+            {
+                "source": "crates-main",
+                "fetcher": {
+                    "source_type": "crates_io",
+                    "topic": "main",
+                    "config": {"crates": ["dfe-fetcher"]},
+                },
+            }
+        )
+        source = source_from_write(write, source_name="crates-main")
+
+        changes = derived.plan(crud, _Registry([source]), settings)
+
+        assert [(c.app.service, c.app.instance, c.action) for c in changes] == [
+            (FETCHER, "crates-main", "deploy")
+        ]
 
 
 class TestTransformInstances:

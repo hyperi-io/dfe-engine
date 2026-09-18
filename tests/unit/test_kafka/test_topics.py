@@ -21,7 +21,7 @@ from dfe_engine.kafka.topics import (
     update_topics,
 )
 from dfe_engine.settings import KafkaSettings, TransportSettings
-from dfe_engine.source.models import Source, SourceMatch, SourceTransform
+from dfe_engine.source.models import Source, SourceFetcher, SourceMatch, SourceTransform
 
 
 def _settings(**kafka) -> SimpleNamespace:
@@ -100,6 +100,15 @@ class _UnreachableAdmin:
         raise RuntimeError("connection refused")
 
 
+def _main_lander(name="aws-cloudtrail", *, transform=False) -> Source:
+    """A fetcher source whose records land on the shared topic it does not own."""
+    return Source(
+        source=name,
+        fetcher=SourceFetcher(source_type="aws", topic="main"),
+        transform=SourceTransform(engine="vector") if transform else None,
+    )
+
+
 def _source(name="filebeat", *, transform=True) -> Source:
     return Source(
         source=name,
@@ -119,6 +128,16 @@ class TestSourceTopicSpecs:
             _source("syslog", transform=False), partitions=3, replication_factor=1
         )
         assert [s.name for s in specs] == ["syslog_land"]
+
+    def test_a_main_landing_source_claims_no_landing_topic(self):
+        # The landing source owns main_land; claiming it here would render it
+        # with this source's partition count instead.
+        specs = source_topic_specs(_main_lander(), partitions=3, replication_factor=1)
+        assert specs == []
+
+    def test_a_main_landing_source_still_gets_its_own_load_topic(self):
+        specs = source_topic_specs(_main_lander(transform=True), partitions=3, replication_factor=1)
+        assert [s.name for s in specs] == ["aws-cloudtrail_load"]
 
     def test_the_version_being_deployed_decides_the_load_topic(self):
         """A release that ADDS a transform must get its _load topic.
@@ -305,6 +324,14 @@ class TestSourceTopicNames:
 
     def test_a_source_that_never_transformed_owns_only_its_landing_topic(self):
         assert source_topic_names(_source("syslog", transform=False)) == ["syslog_land"]
+
+    def test_removing_a_main_landing_source_leaves_the_shared_topic(self):
+        # Deleting main_land here would take the receiver's default flow and
+        # every other source landing on it down with this one source.
+        assert source_topic_names(_main_lander()) == []
+
+    def test_removing_a_main_landing_source_still_removes_its_load_topic(self):
+        assert source_topic_names(_main_lander(transform=True)) == ["aws-cloudtrail_load"]
 
     def test_a_version_that_dropped_its_transform_still_owns_the_load_topic(self):
         # The _load topic was created when the transform was deployed, and the

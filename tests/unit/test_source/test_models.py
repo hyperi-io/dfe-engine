@@ -1175,6 +1175,177 @@ class TestSourceWriteRequest:
         assert source_version_bump_required(added, same) is False
 
 
+class TestDeployedVersionOnWrite:
+    """A source landing on the shared main table with no meta_schema owns no table to deploy."""
+
+    def test_a_main_landing_fetcher_is_deployed_from_creation(self):
+        write = SourceWriteRequest.model_validate(
+            {"source": "okta-main", "fetcher": {"source_type": "okta", "topic": "main"}}
+        )
+
+        src = source_from_write(write, source_name="okta-main")
+
+        assert src.current == "1.0.0"
+        assert src.deployed_version == "1.0.0"
+
+    def test_an_own_topic_fetcher_is_not_deployed_on_creation(self):
+        write = SourceWriteRequest.model_validate(
+            {"source": "okta-audit", "fetcher": {"source_type": "okta", "topic": "own"}}
+        )
+
+        assert source_from_write(write, source_name="okta-audit").deployed_version is None
+
+    def test_a_main_landing_fetcher_with_a_meta_schema_is_not_deployed(self):
+        write = SourceWriteRequest.model_validate(
+            {
+                "source": "okta-schema",
+                "fetcher": {"source_type": "okta", "topic": "main"},
+                "schema": {"meta_schema": "meta/okta/system", "meta_schema_version": "1.0.0"},
+            }
+        )
+
+        assert source_from_write(write, source_name="okta-schema").deployed_version is None
+
+    def test_a_receiver_source_is_not_deployed_on_creation(self):
+        write = SourceWriteRequest.model_validate(
+            {"source": "syslog", "match": {"field": "_source", "value": "syslog"}}
+        )
+
+        assert source_from_write(write, source_name="syslog").deployed_version is None
+
+    def test_a_bumped_main_landing_source_tracks_the_new_current(self):
+        existing = Source.model_validate(
+            {
+                "source": "okta-main",
+                "deployed_version": "1.0.0",
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "fetcher": {"source_type": "okta", "topic": "main"},
+                        "schema": {},
+                    }
+                },
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {
+                "fetcher": {"source_type": "okta", "topic": "main"},
+                "views": [{"standard": "sigma", "taxonomy": "okta"}],
+            }
+        )
+
+        updated = apply_source_write_update(existing, write)
+
+        assert updated.current == "2.0.0"
+        assert updated.deployed_version == "2.0.0"
+
+    def test_moving_a_main_landing_source_to_its_own_topic_keeps_the_deployed_version(self):
+        existing = Source.model_validate(
+            {
+                "source": "okta-main",
+                "deployed_version": "1.0.0",
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "fetcher": {"source_type": "okta", "topic": "main"},
+                        "schema": {},
+                    }
+                },
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {"fetcher": {"source_type": "okta", "topic": "own"}}
+        )
+
+        updated = apply_source_write_update(existing, write)
+
+        assert updated.current == "1.0.0"
+        assert updated.deployed_version == "1.0.0"
+
+    def test_an_undeployed_main_landing_source_picks_up_its_current_on_the_next_save(self):
+        existing = Source.model_validate(
+            {
+                "source": "okta-main",
+                "deployed_version": None,
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "fetcher": {"source_type": "okta", "topic": "main"},
+                        "schema": {},
+                    }
+                },
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {"description": "doc-only edit", "fetcher": {"source_type": "okta", "topic": "main"}}
+        )
+
+        updated = apply_source_write_update(existing, write)
+
+        assert updated.current == "1.0.0"
+        assert updated.deployed_version == "1.0.0"
+
+    def test_an_undeployed_own_table_source_stays_undeployed(self):
+        existing = Source.model_validate(
+            {
+                "source": "okta-audit",
+                "deployed_version": None,
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "fetcher": {"source_type": "okta", "topic": "own"},
+                        "schema": {},
+                    }
+                },
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {"description": "doc-only edit", "fetcher": {"source_type": "okta", "topic": "own"}}
+        )
+
+        updated = apply_source_write_update(existing, write)
+
+        assert updated.deployed_version is None
+
+
+class TestLandingTopic:
+    """A source landing on the shared topic arrives there but never owns it."""
+
+    def test_a_main_landing_fetcher_arrives_on_the_shared_topic(self):
+        s = Source(source="aws-cloudtrail", fetcher=SourceFetcher(source_type="aws", topic="main"))
+
+        assert s.topic_land == "main_land"
+
+    def test_a_main_landing_fetcher_owns_no_landing_topic(self):
+        s = Source(source="aws-cloudtrail", fetcher=SourceFetcher(source_type="aws", topic="main"))
+
+        assert s.owns_landing_topic is False
+
+    def test_an_own_topic_fetcher_arrives_on_its_own_topic(self):
+        s = Source(source="okta-audit", fetcher=SourceFetcher(source_type="okta", topic="own"))
+
+        assert s.topic_land == "okta-audit_land"
+        assert s.owns_landing_topic is True
+
+    def test_a_receiver_source_owns_its_landing_topic(self):
+        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))
+
+        assert s.topic_land == "syslog_land"
+        assert s.owns_landing_topic is True
+
+    def test_the_landing_source_owns_the_shared_topic(self):
+        # The core `main` source is named for the landing table, so the shared
+        # topic has an owner and the sources landing on it do not need one.
+        s = Source(source=DEFAULT_LANDING_LABEL, match=SourceMatch(field="f", value="v"))
+
+        assert s.topic_land == "main_land"
+        assert s.owns_landing_topic is True
+
+
 class TestFlowFieldsDoNotBump:
     """A version id pins the shape of a table, so routing changes must not bump it."""
 

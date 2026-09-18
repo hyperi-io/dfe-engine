@@ -773,10 +773,19 @@ class SourceVersion(BaseModel):
 
 
 def _derive_deployed_version(
-    *, existing_deployed: str | None, snapshot: SourceVersion, version_id: str
+    *,
+    existing_deployed: str | None,
+    snapshot: SourceVersion,
+    source_name: str,
+    version_id: str,
 ) -> str | None:
-    """Track current_version unless the version owns a meta_schema table to deploy."""
-    if snapshot.effective_schema().meta_schema:
+    """Track version_id when records land on the shared table and no meta_schema owns one."""
+    fetcher = snapshot.fetcher
+    lands_on_main = (
+        fetcher is not None
+        and fetcher.landing_label(source_name=source_name) == _topic_policy().default_landing_label
+    )
+    if not (lands_on_main) or (snapshot.effective_schema().meta_schema):
         return existing_deployed
     return version_id
 
@@ -925,7 +934,12 @@ def source_from_write(write: SourceWriteRequest, *, source_name: str) -> Source:
         "display_name": write.display_name,
         "description": write.description,
         "state": write.effective_state(),
-        "deployed_version": None,
+        "deployed_version": _derive_deployed_version(
+            existing_deployed=None,
+            snapshot=snapshot,
+            source_name=source_name,
+            version_id=version_id,
+        ),
         "current": version_id,
         "versions": {version_id: snapshot.model_dump(mode="json", by_alias=True)},
     }
@@ -1051,7 +1065,12 @@ def apply_source_write_update(existing: Source, write: SourceWriteRequest) -> So
         else existing.display_name,
         "description": write.description if write.description is not None else existing.description,
         "state": write.effective_state(existing.state),
-        "deployed_version": existing.deployed_version,
+        "deployed_version": _derive_deployed_version(
+            existing_deployed=existing.deployed_version,
+            snapshot=snapshot,
+            source_name=existing.source,
+            version_id=target_current,
+        ),
         "current": target_current,
         "versions": {
             vid: ver.model_dump(mode="json", by_alias=True) for vid, ver in merged_versions.items()
@@ -1288,8 +1307,19 @@ class Source(BaseModel):
 
     @property
     def topic_land(self) -> str:
-        """Kafka topic for raw data from receiver."""
-        return landing_topic(self.source)
+        """Kafka topic this source's records arrive on, before any transform.
+
+        Derived from the landing LABEL, not the source name: a fetcher pushing to
+        the main topic arrives on the platform's landing topic rather than one of
+        its own name, exactly as it lands in the shared table. Whether that topic
+        is this source's to manage is ``owns_landing_topic``.
+        """
+        return landing_topic(self.landing_label())
+
+    @property
+    def owns_landing_topic(self) -> bool:
+        """Whether this source's landing topic is its own to create and delete."""
+        return self.landing_label() == self.source
 
     @property
     def topic_load(self) -> str | None:
