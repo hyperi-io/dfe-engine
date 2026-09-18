@@ -149,6 +149,29 @@ class TestBuild:
         result = builder.build(source)
         assert "event_name" in [c.name for c in result.columns]
 
+    def test_build_meta_schema_when_unsuffixed_path_is_a_directory(self, registry, tmp_path):
+        dest_dir = tmp_path / "meta" / "test" / "test"
+        dest_dir.mkdir(parents=True)
+        yaml_dump(
+            {
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "columns": [{"name": "tags_marker", "type": "string"}],
+                    }
+                },
+            },
+            tmp_path / "meta" / "test" / "test.yaml",
+        )
+        builder = SchemaBuilderV2(registry=registry, schemas_base_dir=tmp_path)
+        source = _make_source(
+            meta_schema="meta/test/test",
+            header_type="minimal",
+            ttl_days=0,
+        )
+        result = builder.build(source)
+        assert "tags_marker" in [c.name for c in result.columns]
+
     def test_build_with_derived_and_additional(self, registry, schemas_dir):
         builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
         source = _make_source(
@@ -199,6 +222,35 @@ class TestBuild:
         assert "_timestamp_load" in names
         assert "_org_id" in names
         assert "user_name" not in names
+
+    def test_build_without_header_uses_only_source_columns(self, registry, schemas_dir):
+        """Omitted header is not a timeseries profile and must not resolve to '.yaml'."""
+        builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
+        source = Source.model_validate(
+            {
+                "source": "test-source",
+                "match": {"field": "tags.collector.type", "value": "test-source"},
+                "schema": {"meta_schema": "meta.yaml", "ttl_days": 0, "engine": ""},
+            }
+        )
+        result = builder.build(source)
+        names = [c.name for c in result.columns]
+        assert "user_name" in names
+        assert "_timestamp_load" not in names
+
+    @pytest.mark.parametrize(
+        "header_type", ["", "   ", "common-header", "common-header/", ".yml", ".yaml"]
+    )
+    def test_build_with_blank_header_type_does_not_look_for_dot_yaml(
+        self, registry, schemas_dir, header_type
+    ):
+        """A source added with no profile name must not load common-header/.yaml."""
+        builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
+        source = _make_source(meta_schema="meta.yaml", header_type=header_type, ttl_days=0)
+        result = builder.build(source)
+        names = [c.name for c in result.columns]
+        assert "user_name" in names
+        assert "_timestamp_load" not in names
 
     def test_build_engine_config(self, registry, schemas_dir):
         # A per-source engine pin selects any permitted MergeTree-family VARIANT

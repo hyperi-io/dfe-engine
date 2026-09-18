@@ -25,7 +25,12 @@ from scalo.logger import logger
 
 from dfe_engine.schema.engine_resolver import EngineResolver
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
-from dfe_engine.schema.schema_loader import SchemaLoader, SchemaLoadError, resolve_schema_yaml_path
+from dfe_engine.schema.schema_loader import (
+    SchemaLoader,
+    SchemaLoadError,
+    _profile_file_stem,
+    resolve_schema_yaml_path,
+)
 from dfe_engine.source.models import SchemaColumn, Source, SourceVersion, SourceView
 from dfe_engine.source.type_registry import TypeRegistry
 
@@ -35,6 +40,16 @@ if TYPE_CHECKING:
 
 class SchemaBuildError(Exception):
     """Error during schema build."""
+
+
+def _authored_header_profile(snap: SourceVersion) -> tuple[str, str] | None:
+    """Return ``(type, version)`` when the snapshot names a real profile file."""
+    if snap.header is None:
+        return None
+    raw = snap.header.type or ""
+    if _profile_file_stem(raw) is None:
+        return None
+    return raw, snap.header.version
 
 
 @dataclass
@@ -313,12 +328,15 @@ class SchemaBuilderV2:
         """Load the common header profile from a source version snapshot."""
         # The same derivation _build_ddl_config_for_snapshot uses, so the columns
         # loaded are the ones the DDL config declares a profile and a TTL over.
-        header = snap.effective_header()
+        profile_ref = _authored_header_profile(snap)
+        if profile_ref is None:
+            return []
+        profile_name, profile_version = profile_ref
         try:
-            return SchemaLoader.load_profile(header.type, profile_version=header.version)
+            return SchemaLoader.load_profile(profile_name, profile_version=profile_version)
         except SchemaLoadError as e:
             raise SchemaBuildError(
-                f"Failed to load profile {header.type!r} for source {source_name!r}: {e}"
+                f"Failed to load profile {profile_name!r} for source {source_name!r}: {e}"
             ) from e
 
     def _load_source_columns(self, source: Source) -> list[SchemaColumn]:
@@ -368,13 +386,13 @@ class SchemaBuilderV2:
     def _build_ddl_config_for_snapshot(self, snap: SourceVersion) -> DDLConfig:
         """Build DDLConfig from a source version snapshot."""
         schema_cfg = snap.effective_schema()
-        header = snap.effective_header()
+        authored = _authored_header_profile(snap)
         # Empty engine or unset ttl_days = inherit the deployment default; a per-source pin wins.
         return DDLConfig(
             engine=schema_cfg.engine or self._default_engine,
             ttl_days=schema_cfg.ttl_days
             if schema_cfg.ttl_days is not None
             else self._default_ttl_days,
-            profile_name=header.type,
-            profile_version=header.version,
+            profile_name=authored[0] if authored else None,
+            profile_version=authored[1] if authored else None,
         )
