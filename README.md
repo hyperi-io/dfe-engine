@@ -63,6 +63,9 @@ control - is a versioned YAML change in a git repo, made through one
 governed path, then reconciled to the cluster by Argo CD. The engine never
 deploys backing services and never touches the cluster directly.
 
+**Working here** -- entry points, the commands that prove a change, and what
+tends to bite: [CONTEXT.md](CONTEXT.md).
+
 Full system map, invariants, and the docs tree:
 [docs/architecture.md](docs/architecture.md).
 
@@ -101,24 +104,108 @@ All configuration is environment variables with the `DFE_` prefix
 Backing-service connection settings (ClickHouse, Kafka) follow the same
 `DFE_` pattern - see `settings.py` for the full set and defaults.
 
-## Code standards
-
-- Logging: `from scalo.logger import logger` - never stdlib `logging`.
-- HTTP: `scalo.http` `HttpClient`/`AsyncHttpClient` - never raw httpx.
-- YAML: `dfe_engine.yaml_utils` (ruamel, YAML 1.2).
-- Settings: `from dfe_engine.settings import get_settings`.
-
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev workflow, commit format,
 and DCO.
-
-## Related repos
-
-- [dfe-infra](https://github.com/hyperi-io/dfe-infra) - charts, ApplicationSets, bootstrap (the deployment vehicle)
-- [dfe-ui](https://github.com/hyperi-io/dfe-ui) - web UI (consumes this API)
-- [dfe-schemas](https://github.com/hyperi-io/dfe-schemas) - schema + DDL SSoT (the `dfe-schemas` wheel)
-- [dfe-hyperdx](https://github.com/hyperi-io/dfe-hyperdx) - extended HyperDX fork (explore UI + telemetry sink)
-- [scalo-py](https://github.com/hyperi-io/scalo-py) - shared Python library (`scalo` on PyPI)
 
 ## License
 
 Licensed under BUSL-1.1 - see [LICENSE](LICENSE).
+
+## Context
+
+### What this is
+
+The control plane for a DFE deployment: a Python library plus an API server that
+owns configuration, schema and app lifecycle. It is NOT the data path -- records
+never flow through here. They go receiver -> Kafka or gRPC -> loader ->
+ClickHouse, and this engine decides what those components are configured to do.
+
+System design and why it is shaped this way:
+[docs/architecture.md](docs/architecture.md).
+
+### Where things live
+
+| path | what |
+|---|---|
+| `src/dfe_engine/api/` | FastAPI routers, four auth paths, RBAC |
+| `src/dfe_engine/appmgmt/` | one generic per-app surface; the catalogue is DATA |
+| `src/dfe_engine/schema/` | ClickHouse DDL planning and apply |
+| `src/dfe_engine/source/` | Source definitions; receiver and loader routing is COMPILED from these |
+| `src/dfe_engine/gitops/` | every mutation is a git commit; the deploy repo is the authority |
+| `docs/superpowers/` | specs and plans, including designs that are NOT built yet |
+
+### Commands that prove a change
+
+```
+uv sync                       # deps, from the committed uv.lock
+uv run pytest                 # the suite
+uv run ruff check src tests   # lint
+hyperi-ci check --quick       # what CI will say, faster
+```
+
+`ruff format` is available but the repo has not adopted it; there is no `black`.
+
+**`uv run pytest` does not run everything.** The default `addopts` deselects the
+`integration`, `live` and `upstream` markers, so a green local run has not
+touched a backing service. Pass `-m integration` to include them.
+
+Green locally is not green in CI. **A CI run is not atomic against hyperi-ci**:
+reusable workflows resolve `@main` per JOB, so a push-event run reports success
+with every real job SKIPPED. Read the `pull_request` run, per job, and check the
+durations -- a test job that "passed" in 0s did not run.
+
+### What tends to bite
+
+| Don't | Do | Why |
+|---|---|---|
+| Hardcode an app name in engine code | Add it to `dfe-infra/apps.yaml` | What an app IS is DATA. Adding one is a manifest edit plus a chart, never an engine release. |
+| Treat this as an internal tool | Code to the injected seam | It is a PRODUCT other organisations deploy. Env-specifics -- cluster refs, cred paths, our fleet -- belong in private config repos, never here. |
+| Hand-edit compiled routing | Change the Source | Receiver and loader routing is derived; the API reports a hand edit as DRIFT and re-syncs over it. |
+| Mock a backing service | testcontainers, a real one | No mocks as proof. `pass` and `TODO` are not functionality. |
+| `from typing import List, Dict, Optional` | `list[str]`, `str \| None` | Built-in generics; `requires-python = ">=3.12"`. |
+| `datetime.utcnow()` | `datetime.now(UTC)` | Deprecated since 3.12. |
+| stdlib `logging` | `from scalo.logger import logger` | House rule, so every service emits one structured JSON shape. |
+| Raw `httpx` with hand-rolled retry | `scalo.http.HttpClient` | House rule. Importing httpx for its exception and response TYPES is correct and expected. |
+| `yaml.safe_load` | `dfe_engine.yaml_utils` | ruamel, YAML 1.2. YAML 1.1 reads `no` as boolean false. |
+| `except Exception:` then a silent fallback | Catch the specific error, log with context, re-raise | 12 sites already return `False`/`None`/`[]` with no trace, out of 251 `except Exception:` sites in `src/`. An operator cannot tell failure from empty. |
+| Assume a config key does something | Grep for its consumer | Config that parses and is never read is a recurring defect here. |
+| Trust `gh issue list` | `gh issue view <n>` | It caps at 30 without `--limit`; absence is not evidence of closure. |
+
+Two traps that are not style:
+
+**`rg` and `fd` respect `.gitignore`**, so `.env` and `CLAUDE.md` are invisible
+to a default search. Pass `--no-ignore` or you will conclude they do not exist.
+
+**Every container this repo starts comes down the same session.** Stray
+containers caused a host OOM. Only ever stop what you started.
+
+### Where this sits
+
+Membership and every edge below are declared in `dfe-infra/suite.yaml`. Read it
+rather than trusting this table, and regenerate any claim from
+`dfe-stack suite --consumer dfe-engine` (inbound) or `--producer dfe-engine`
+(outbound). Both print the interaction kind and what to re-run when the edge
+moves.
+
+**What dfe-engine depends on:**
+
+| repo | how it interacts |
+|---|---|
+| dfe-infra | Deploys this engine, and owns `apps.yaml` -- a byte copy is vendored here at `appmgmt/apps.yaml` as the last resort in the resolution order. Lockstep: a catalogue entry the engine does not carry is not reflected by its management API. |
+| dfe-schemas | Ships the schema and DDL trees as a PACKAGE, not a submodule. Read out of the installed wheel unless `DFE_SCHEMAS_DIR` points elsewhere. |
+| scalo-py | The shared Python library, plus a contract guard: this repo overrides scalo's runtime base image with its own literal, and its own test fails when the committed Dockerfile stops matching. |
+| dfe-loader, dfe-receiver | Their config validation is MIRRORED by hand in `services/plugins_builtin/`. Nothing is copied, so no script can check it -- re-read the producer whenever their config schema changes. |
+| logreducer | Imported at runtime and deliberately NOT declared; the sampler degrades with a message when it is absent. |
+
+**What depends on dfe-engine:**
+
+| repo | how it interacts |
+|---|---|
+| dfe-infra | Pins this engine's image in THREE places -- the dfe-engine chart, the dfe-schema chart (which runs an engine entry point), and the hyperdx chart (which runs the engine image as its dashboards init container). All three move together. |
+| dfe-ui | Vendors this repo's OpenAPI spec and generates its scope types from an engine module. A workflow here re-vendors it by PR on a push to main. |
+
+**The consequence, and it is the reason this section exists:** dfe-engine is the
+ONLY controller of ClickHouse objects and Kafka topics. A change to schema,
+source compilation or topic naming is a SUITE-WIDE move, not a local one --
+every Rust service reads configuration this engine writes, and infra and docker
+wait on it. A one-line change here can land in five other repositories.
