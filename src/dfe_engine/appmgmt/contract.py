@@ -59,10 +59,14 @@ there is to check; the value is never judged against the app's schema.
 SECRET_NAMES = frozenset({"password", "secret", "token", "api_key", "private_key", "passphrase"})
 """Leaf names treated as secret whatever the schema says.
 
-Half the fleet ships no ``x-dfe-secret`` at all - dfe-receiver, dfe-transform-vrl
-and dfe-transform-vector carry none, including four plain-string passwords - so
-trusting the marker alone would hand an operator's Kafka password back over the
-API. The rule errs towards hiding.
+Part of the fleet ships no ``x-dfe-secret`` at all - dfe-receiver and
+dfe-transform-vector carry none, including plain-string passwords - so trusting
+the marker alone would hand an operator's Kafka password back over the API. The
+rule errs towards hiding.
+
+dfe-transform-vrl now marks its SASL password (its PR #61, 2026-09-16), so the
+list shrinks as apps adopt the marker. The rule stays regardless: it has to hold
+for the app that has not adopted it yet.
 """
 
 _TRANSFORM_CHART_ENV = {

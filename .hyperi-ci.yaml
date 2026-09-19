@@ -10,13 +10,11 @@
 build:
   type: app
 
-publish:
+release:
   enabled: true
   channel: release
   # Private service: ship only the GHCR container image, not a Python wheel.
-  # (Legacy `target` is ignored since hyperi-ci 2.1.4 removed internal
-  # publishing; destinations_oss is the real control. Requires hyperi-ci
-  # >= 2.6.17 for the falsy opt-out.)
+  # destinations_oss is the control; hyperi-ci >= 2.6.17 for the falsy opt-out.
   destinations_oss:
     python: false
 
