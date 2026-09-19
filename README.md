@@ -181,29 +181,31 @@ containers caused a host OOM. Only ever stop what you started.
 
 ### Where this sits
 
-Membership is declared in `dfe-infra/suite.yaml` -- read it rather than trusting
-a list, and generate any dependency claim from
-`dfe-stack suite --consumer dfe-engine`.
+Membership and every edge below are declared in `dfe-infra/suite.yaml`. Read it
+rather than trusting this table, and regenerate any claim from
+`dfe-stack suite --consumer dfe-engine` (inbound) or `--producer dfe-engine`
+(outbound). Both print the interaction kind and what to re-run when the edge
+moves.
 
-The repo-by-repo map is in
-[docs/architecture.md](docs/architecture.md#where-this-repo-sits-in-the-suite).
-What belongs here is the consequence for someone about to change something:
+**What dfe-engine depends on:**
 
-**dfe-engine is the ONLY controller of ClickHouse objects and Kafka topics.** So
-a change to schema, source compilation or topic naming is a SUITE-WIDE move, not
-a local one -- every Rust service reads configuration this engine writes, and
-infra and docker wait on it. Check `dfe-stack suite --producer dfe-engine`
-before assuming a change stops at this repo.
+| repo | how it interacts |
+|---|---|
+| dfe-infra | Deploys this engine, and owns `apps.yaml` -- a byte copy is vendored here at `appmgmt/apps.yaml` as the last resort in the resolution order. Lockstep: a catalogue entry the engine does not carry is not reflected by its management API. |
+| dfe-schemas | Ships the schema and DDL trees as a PACKAGE, not a submodule. Read out of the installed wheel unless `DFE_SCHEMAS_DIR` points elsewhere. |
+| scalo-py | The shared Python library, plus a contract guard: this repo overrides scalo's runtime base image with its own literal, and its own test fails when the committed Dockerfile stops matching. |
+| dfe-loader, dfe-receiver | Their config validation is MIRRORED by hand in `services/plugins_builtin/`. Nothing is copied, so no script can check it -- re-read the producer whenever their config schema changes. |
+| logreducer | Imported at runtime and deliberately NOT declared; the sampler degrades with a message when it is absent. |
 
-Closest neighbours: [dfe-infra](https://github.com/hyperi-io/dfe-infra) (charts
-and bootstrap, the deployment vehicle),
-[dfe-ui](https://github.com/hyperi-io/dfe-ui) (consumes this API),
-[dfe-schemas](https://github.com/hyperi-io/dfe-schemas) (schema and DDL SSoT),
-[dfe-hyperdx](https://github.com/hyperi-io/dfe-hyperdx) (explore UI and
-telemetry sink), [scalo-py](https://github.com/hyperi-io/scalo-py) (the shared
-Python library).
+**What depends on dfe-engine:**
 
-**Declared dependencies** are in `pyproject.toml`; read them there rather than
-trusting a list. Two that surprise people: `dfe-schemas` is a PACKAGE, not a
-submodule, and `logreducer` is NOT a dependency -- it is a commented intention
-pending a SHA pin.
+| repo | how it interacts |
+|---|---|
+| dfe-infra | Pins this engine's image in THREE places -- the dfe-engine chart, the dfe-schema chart (which runs an engine entry point), and the hyperdx chart (which runs the engine image as its dashboards init container). All three move together. |
+| dfe-ui | Vendors this repo's OpenAPI spec and generates its scope types from an engine module. A workflow here re-vendors it by PR on a push to main. |
+
+**The consequence, and it is the reason this section exists:** dfe-engine is the
+ONLY controller of ClickHouse objects and Kafka topics. A change to schema,
+source compilation or topic naming is a SUITE-WIDE move, not a local one --
+every Rust service reads configuration this engine writes, and infra and docker
+wait on it. A one-line change here can land in five other repositories.
