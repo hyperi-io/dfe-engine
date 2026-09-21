@@ -73,7 +73,7 @@ def _map_es_type(
         case "keyword" | "wildcard" | "constant_keyword" | "version":
             return "string", ["lowcardinality"], "dimension"
         case "text" | "match_only_text":
-            return "text", [], "fulltext"
+            return "text", [], "word_search"
         case "long" | "integer" | "short" | "byte" | "unsigned_long":
             return "integer", [], "range"
         case "double" | "float" | "half_float" | "scaled_float":

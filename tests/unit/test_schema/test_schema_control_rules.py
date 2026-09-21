@@ -244,8 +244,8 @@ def test_every_qualified_object_reference_is_declared(manifest_names: frozenset[
         "use_case template instead, so the manifest gives dfe.main and dfe.detection "
         "TYPE text(tokenizer=ngrams(3)) GRANULARITY 1 where the header asks for "
         "text(tokenizer = 'splitByNonAlpha') GRANULARITY 64. Fixed by teaching dfe_schemas."
-        "loader.Column to carry `index` and render.Renderer._index_def to emit it, the "
-        "way dfe_engine.schema.schema_ddl.DDLGenerator._index_def already does"
+        "loader.Column to carry `index` and render.Renderer._index_defs to emit it, the "
+        "way dfe_engine.schema.schema_ddl.DDLGenerator._index_defs already does"
     ),
     strict=False,
 )

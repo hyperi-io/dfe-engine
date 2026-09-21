@@ -53,6 +53,28 @@ class InvalidChOverrideError(TypeRegistryError):
     """ch_override value is not in the supported ClickHouse types catalogue."""
 
 
+# A use case is a name, optionally carrying one integer argument.
+_USE_CASE_RE = re.compile(r"^(?P<name>[a-z_]+)(?:\((?P<arg>\d+)\))?$")
+
+
+def split_use_case(declared: str | None) -> tuple[str | None, int | None]:
+    """Split a declared use case into its name and its optional integer argument.
+
+    ``similarity_search(768)`` is the only shape that carries one, because
+    ClickHouse cannot infer a vector's dimension count from the column.
+    """
+    if not declared:
+        return None, None
+    match = _USE_CASE_RE.match(declared.strip())
+    if match is None:
+        raise InvalidUseCaseError(
+            f"use case {declared!r} is not a name, optionally with an integer "
+            f"argument -- for example 'word_search' or 'similarity_search(768)'"
+        )
+    arg = match.group("arg")
+    return match.group("name"), int(arg) if arg else None
+
+
 class TypeRegistry:
     """Canonical registry mapping primitives to ClickHouse types.
 
@@ -186,6 +208,10 @@ class TypeRegistry:
     def validate_use_case(self, primitive: str, use_case: str) -> None:
         """Validate that a use case is valid for a primitive.
 
+        Accepts the declared form, argument and all: a use case the registry
+        marks as taking parameters must carry one, and one that does not must
+        not.
+
         Raises:
             UnknownPrimitiveError: Unknown primitive.
             InvalidUseCaseError: Use case not valid for primitive.
@@ -195,16 +221,26 @@ class TypeRegistry:
                 f"Unknown primitive '{primitive}'. Valid: {', '.join(sorted(self._primitives))}"
             )
 
-        if use_case not in self._use_cases:
+        name, argument = split_use_case(use_case)
+
+        if name not in self._use_cases:
             raise InvalidUseCaseError(
                 f"Unknown use case '{use_case}'. Valid: {', '.join(sorted(self._use_cases))}"
             )
 
-        valid = self._use_cases[use_case]["valid_primitives"]
+        parameters = self._use_cases[name].get("parameters") or []
+        if parameters and argument is None:
+            raise InvalidUseCaseError(
+                f"Use case '{name}' needs its {parameters[0]}, as '{name}(<{parameters[0]}>)'"
+            )
+        if argument is not None and not parameters:
+            raise InvalidUseCaseError(f"Use case '{name}' takes no argument")
+
+        valid = self._use_cases[name]["valid_primitives"]
         if primitive not in valid:
             raise InvalidUseCaseError(
-                f"Use case '{use_case}' is not valid for primitive '{primitive}'. "
-                f"Valid primitives for '{use_case}': {', '.join(valid)}"
+                f"Use case '{name}' is not valid for primitive '{primitive}'. "
+                f"Valid primitives for '{name}': {', '.join(valid)}"
             )
 
     def validate_attribute(self, primitive: str, attribute: str) -> None:
@@ -275,9 +311,10 @@ class TypeRegistry:
 
     def valid_primitives_for_use_case(self, use_case: str) -> list[str]:
         """Get the list of valid primitives for a use case."""
-        if use_case not in self._use_cases:
+        name, _ = split_use_case(use_case)
+        if name not in self._use_cases:
             raise InvalidUseCaseError(f"Unknown use case '{use_case}'")
-        return list(self._use_cases[use_case]["valid_primitives"])
+        return list(self._use_cases[name]["valid_primitives"])
 
     def valid_primitives_for_attribute(self, attribute: str) -> list[str] | str:
         """Get the list of valid primitives for an attribute (or 'all')."""
