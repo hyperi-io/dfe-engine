@@ -4,7 +4,7 @@ import pytest
 
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerationError, DDLGenerator
 from dfe_engine.source.models import SchemaColumn
-from dfe_engine.source.type_registry import TypeRegistry
+from dfe_engine.source.type_registry import InvalidUseCaseError, TypeRegistry
 
 
 @pytest.fixture
@@ -43,7 +43,7 @@ def _basic_columns() -> list[SchemaColumn]:
             order=2,
         ),
         _col(name="user_name", type="string", use_case="dimension"),
-        _col(name="message", type="text", use_case="fulltext"),
+        _col(name="message", type="text", use_case="word_search"),
     ]
 
 
@@ -345,7 +345,7 @@ class TestColumnTypes:
         assert "TYPE minmax GRANULARITY 4" in ddl
 
     def test_uuid_type(self, gen: DDLGenerator):
-        cols = [_col(name="trace_id", type="uuid", use_case="bloom")]
+        cols = [_col(name="trace_id", type="uuid", use_case="exact_match")]
         ddl = gen.generate_create_table("t", cols)
         assert "Nullable(UUID)" in ddl
         assert "INDEX idx_trace_id" in ddl
@@ -445,13 +445,13 @@ class TestUseCaseIndexes:
         ddl = gen.generate_create_table("t", cols)
         assert "INDEX idx_cat `cat` TYPE set(0) GRANULARITY 4" in ddl
 
-    def test_fulltext_index(self, gen: DDLGenerator):
-        cols = [_col(name="msg", type="text", use_case="fulltext")]
+    def test_word_search_index(self, gen: DDLGenerator):
+        cols = [_col(name="msg", type="text", use_case="word_search")]
         ddl = gen.generate_create_table("t", cols)
         assert "INDEX idx_msg `msg` TYPE text(tokenizer=splitByNonAlpha) GRANULARITY 1" in ddl
 
-    def test_text_search_index(self, gen: DDLGenerator):
-        cols = [_col(name="body", type="text", use_case="text_search")]
+    def test_substring_search_index(self, gen: DDLGenerator):
+        cols = [_col(name="body", type="text", use_case="substring_search")]
         ddl = gen.generate_create_table("t", cols)
         assert "INDEX idx_body `body` TYPE text(tokenizer=ngrams(3)) GRANULARITY 1" in ddl
 
@@ -460,25 +460,62 @@ class TestUseCaseIndexes:
         ddl = gen.generate_create_table("t", cols)
         assert "INDEX idx_latency `latency` TYPE minmax GRANULARITY 4" in ddl
 
-    def test_bloom_index(self, gen: DDLGenerator):
-        cols = [_col(name="req_id", type="string", use_case="bloom")]
+    def test_exact_match_index(self, gen: DDLGenerator):
+        cols = [_col(name="req_id", type="string", use_case="exact_match")]
         ddl = gen.generate_create_table("t", cols)
         assert "INDEX idx_req_id `req_id` TYPE bloom_filter GRANULARITY 4" in ddl
+
+    def test_exact_match_on_a_low_cardinality_column_holds_every_value(self, gen: DDLGenerator):
+        cols = [
+            _col(name="code", type="string", use_case="exact_match", attribute=["lowcardinality"])
+        ]
+        ddl = gen.generate_create_table("t", cols)
+        assert "INDEX idx_code `code` TYPE set(0) GRANULARITY 4" in ddl
+
+    def test_key_search_indexes_the_keys_and_the_values_apart(self, gen: DDLGenerator):
+        cols = [_col(name="attrs", type="map", use_case="key_search")]
+        ddl = gen.generate_create_table("t", cols)
+        assert (
+            "INDEX idx_attrs_key mapKeys(`attrs`) TYPE text(tokenizer=array) GRANULARITY 1" in ddl
+        )
+        assert (
+            "INDEX idx_attrs_value mapValues(`attrs`) TYPE text(tokenizer=array) GRANULARITY 1"
+            in ddl
+        )
+
+    def test_similarity_search_carries_the_declared_dimension_count(self, gen: DDLGenerator):
+        cols = [_col(name="embedding", type="vector", use_case="similarity_search(768)")]
+        ddl = gen.generate_create_table("t", cols)
+        assert (
+            "INDEX idx_embedding `embedding` TYPE "
+            "vector_similarity('hnsw', 'cosineDistance', 768) GRANULARITY 1" in ddl
+        )
+
+    def test_similarity_search_without_a_dimension_count_is_refused(self, gen: DDLGenerator):
+        cols = [_col(name="embedding", type="vector", use_case="similarity_search")]
+        with pytest.raises(InvalidUseCaseError, match="dimension count"):
+            gen.generate_create_table("t", cols)
 
     def test_no_use_case_no_index(self, gen: DDLGenerator):
         cols = [_col(name="payload", type="string")]
         ddl = gen.generate_create_table("t", cols)
         assert "INDEX idx_payload" not in ddl
 
-    def test_legacy_fulltext(self, gen_legacy: DDLGenerator):
-        cols = [_col(name="msg", type="text", use_case="fulltext")]
+    def test_legacy_word_search(self, gen_legacy: DDLGenerator):
+        cols = [_col(name="msg", type="text", use_case="word_search")]
         ddl = gen_legacy.generate_create_table("t", cols)
         assert "tokenbf_v1(8192, 4, 0)" in ddl
 
-    def test_legacy_text_search(self, gen_legacy: DDLGenerator):
-        cols = [_col(name="body", type="text", use_case="text_search")]
+    def test_legacy_substring_search(self, gen_legacy: DDLGenerator):
+        cols = [_col(name="body", type="text", use_case="substring_search")]
         ddl = gen_legacy.generate_create_table("t", cols)
         assert "ngrambf_v1(3, 256, 2, 0)" in ddl
+
+    def test_legacy_key_search_falls_back_to_a_bloom_filter(self, gen_legacy: DDLGenerator):
+        """The array tokenizer arrived with the GA text index, so it is unavailable here."""
+        cols = [_col(name="attrs", type="map", use_case="key_search")]
+        ddl = gen_legacy.generate_create_table("t", cols)
+        assert "INDEX idx_attrs_key mapKeys(`attrs`) TYPE bloom_filter(0.01) GRANULARITY 1" in ddl
 
 
 class TestDeclaredIndexes:
@@ -489,7 +526,7 @@ class TestDeclaredIndexes:
             _col(
                 name="_raw",
                 type="text",
-                use_case="text_search",
+                use_case="substring_search",
                 index="text(tokenizer = 'default') GRANULARITY 64",
             )
         ]
@@ -501,7 +538,7 @@ class TestDeclaredIndexes:
             _col(
                 name="_raw",
                 type="text",
-                use_case="text_search",
+                use_case="substring_search",
                 index="text(tokenizer = 'default') GRANULARITY 64",
             )
         ]
@@ -512,14 +549,14 @@ class TestDeclaredIndexes:
         col = _col(
             name="_raw",
             type="text",
-            use_case="text_search",
+            use_case="substring_search",
             index="text(tokenizer = 'default') GRANULARITY 64",
         )
-        ddl = gen.generate_alter_add_index("filebeat", col)
-        assert "TYPE text(tokenizer = 'default') GRANULARITY 64" in ddl
+        statements = gen.generate_alter_add_indexes("filebeat", col)
+        assert "TYPE text(tokenizer = 'default') GRANULARITY 64" in statements[0]
 
     def test_a_column_declaring_no_index_still_takes_the_template(self, gen: DDLGenerator):
-        cols = [_col(name="body", type="text", use_case="text_search")]
+        cols = [_col(name="body", type="text", use_case="substring_search")]
         ddl = gen.generate_create_table("t", cols)
         assert "INDEX idx_body `body` TYPE text(tokenizer=ngrams(3)) GRANULARITY 1" in ddl
 

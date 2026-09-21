@@ -167,7 +167,7 @@ columns:
     use_case: range
   - name: message
     type: text
-    use_case: fulltext
+    use_case: word_search
 ```
 
 Loader directives in `comment` survive into the ClickHouse column comment. The

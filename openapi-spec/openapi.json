@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.20.19"
+    "version": "1.21.2"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -19902,7 +19902,7 @@
               }
             ],
             "title": "Use Case",
-            "description": "Index use case to generate for the column (dimension, range, bloom, fulltext, text_search), or null for no index. Always null on a discovered draft -- set it in the editor if you want an index."
+            "description": "The question the column is asked, which decides the index generated for it (dimension, exact_match, range, word_search, substring_search, key_search, similarity_search(<dims>)), or null for no index. The full vocabulary is the type registry's, in dfe-schemas registries/types.yaml. Always null on a discovered draft -- set it in the editor if you want an index."
           },
           "expr": {
             "type": "string",
@@ -25195,24 +25195,17 @@
             "title": "Data Type",
             "description": "DFE primitive override; auto-derived from the JSON type when omitted"
           },
-          "index_type": {
+          "use_case": {
             "anyOf": [
               {
-                "type": "string",
-                "enum": [
-                  "minmax",
-                  "set",
-                  "bloom_filter",
-                  "tokenbf_v1",
-                  "ngrambf_v1"
-                ]
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Index Type",
-            "description": "Optional ClickHouse secondary index family"
+            "title": "Use Case",
+            "description": "The question the promoted column is asked, which decides the index generated for it (dimension, exact_match, range, word_search, substring_search, key_search, similarity_search(<dims>)), or null for no index. Validated against the type registry dfe-schemas ships as registries/types.yaml, so it follows the registry rather than a list held here."
           },
           "atomic": {
             "type": "boolean",
@@ -25321,7 +25314,7 @@
             ],
             "title": "Data Type"
           },
-          "index_type": {
+          "use_case": {
             "anyOf": [
               {
                 "type": "string"
@@ -25330,7 +25323,7 @@
                 "type": "null"
               }
             ],
-            "title": "Index Type"
+            "title": "Use Case"
           },
           "copy_cel": {
             "anyOf": [
