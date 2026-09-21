@@ -21,7 +21,11 @@ from scalo.logger import logger
 
 from dfe_engine.schema.engine_resolver import EngineResolver, ResolvedEngine, parse_engine
 from dfe_engine.source.models import SchemaColumn
-from dfe_engine.source.type_registry import TypeRegistry
+from dfe_engine.source.type_registry import (
+    InvalidUseCaseError,
+    TypeRegistry,
+    split_use_case,
+)
 
 
 class DDLGenerationError(Exception):
@@ -169,23 +173,50 @@ def with_default_ttl(spec: TableSpec, days: int | None) -> TableSpec:
 
 
 # ── Index templates ─────────────────────────────────────────────────
+# A use case names the question a column is asked; the template is the engine's
+# answer, and changes without the vocabulary changing.
 # GA text index (v26.2+) — deterministic inverted index, row-level filtering
 _INDEX_TEMPLATES: dict[str, str] = {
     "dimension": "INDEX {name} {col} TYPE set(0) GRANULARITY 4",
-    "fulltext": "INDEX {name} {col} TYPE text(tokenizer=splitByNonAlpha) GRANULARITY 1",
-    "text_search": "INDEX {name} {col} TYPE text(tokenizer=ngrams(3)) GRANULARITY 1",
     "range": "INDEX {name} {col} TYPE minmax GRANULARITY 4",
-    "bloom": "INDEX {name} {col} TYPE bloom_filter GRANULARITY 4",
+    "word_search": "INDEX {name} {col} TYPE text(tokenizer=splitByNonAlpha) GRANULARITY 1",
+    "substring_search": "INDEX {name} {col} TYPE text(tokenizer=ngrams(3)) GRANULARITY 1",
 }
 
 # Legacy fallback (pre-v25.10) — bloom-filter based indexes
 _INDEX_TEMPLATES_LEGACY: dict[str, str] = {
     "dimension": "INDEX {name} {col} TYPE set(0) GRANULARITY 4",
-    "fulltext": "INDEX {name} {col} TYPE tokenbf_v1(8192, 4, 0) GRANULARITY 4",
-    "text_search": "INDEX {name} {col} TYPE ngrambf_v1(3, 256, 2, 0) GRANULARITY 4",
     "range": "INDEX {name} {col} TYPE minmax GRANULARITY 4",
-    "bloom": "INDEX {name} {col} TYPE bloom_filter GRANULARITY 4",
+    "word_search": "INDEX {name} {col} TYPE tokenbf_v1(8192, 4, 0) GRANULARITY 4",
+    "substring_search": "INDEX {name} {col} TYPE ngrambf_v1(3, 256, 2, 0) GRANULARITY 4",
 }
+
+# exact_match picks on declared cardinality: set(0) holds every distinct value
+# of a LowCardinality column exactly, bloom_filter stays bounded on the rest.
+# Neither changed at v25.10, so the legacy fallback shares them.
+_EXACT_MATCH_LOW_CARDINALITY = "INDEX {name} {col} TYPE set(0) GRANULARITY 4"
+_EXACT_MATCH_HIGH_CARDINALITY = "INDEX {name} {col} TYPE bloom_filter GRANULARITY 4"
+
+# A text index refuses a Map column outright ("Text index must be created on
+# columns of type with base type of String or FixedString"), so key_search
+# indexes the keys and the values apart -- the shape the shipped otel tables use.
+_KEY_SEARCH_TEMPLATES: tuple[tuple[str, str], ...] = (
+    ("key", "INDEX {name} mapKeys({col}) TYPE text(tokenizer=array) GRANULARITY 1"),
+    ("value", "INDEX {name} mapValues({col}) TYPE text(tokenizer=array) GRANULARITY 1"),
+)
+
+# The array tokenizer arrived with the GA text index, so a server old enough to
+# need the legacy fallback cannot answer key_search at all.
+_KEY_SEARCH_TEMPLATES_LEGACY: tuple[tuple[str, str], ...] = (
+    ("key", "INDEX {name} mapKeys({col}) TYPE bloom_filter(0.01) GRANULARITY 1"),
+    ("value", "INDEX {name} mapValues({col}) TYPE bloom_filter(0.01) GRANULARITY 1"),
+)
+
+# hnsw is the only method ClickHouse 26.3 implements and the index will not
+# build without a dimension count, which is the one thing only the user knows.
+_SIMILARITY_SEARCH_TEMPLATE = (
+    "INDEX {name} {col} TYPE vector_similarity('hnsw', 'cosineDistance', {dims}) GRANULARITY 1"
+)
 
 
 def _with_max_dynamic_paths(ch_type: str, max_dynamic_paths: int | None) -> str:
@@ -241,6 +272,9 @@ class DDLGenerator:
         """
         self._registry = registry
         self._index_templates = _INDEX_TEMPLATES_LEGACY if use_legacy_indexes else _INDEX_TEMPLATES
+        self._key_search_templates = (
+            _KEY_SEARCH_TEMPLATES_LEGACY if use_legacy_indexes else _KEY_SEARCH_TEMPLATES
+        )
         self._resolver = resolver
 
     # ── engine resolution ───────────────────────────────────────────
@@ -441,24 +475,23 @@ class DDLGenerator:
             f"{self._on_cluster(cfg)} MODIFY COLUMN {col_def};\n"
         )
 
-    def generate_alter_add_index(
+    def generate_alter_add_indexes(
         self,
         table_name: str,
         column: SchemaColumn,
         config: DDLConfig | None = None,
-    ) -> str | None:
+    ) -> list[str]:
         """Generate ALTER TABLE ADD INDEX for a column's declared index or use_case.
 
-        Returns None when the column declares neither.
+        Empty when the column declares neither, and two statements for a
+        ``key_search`` column, which is indexed on its keys and its values apart.
         """
         cfg = config or DDLConfig()
-        idx = self._index_def(column)
-        if not idx:
-            return None
-        return (
-            f"ALTER TABLE {_qualified(cfg.db, table_name, what='table name')}"
-            f"{self._on_cluster(cfg)} ADD {idx};\n"
-        )
+        qualified = _qualified(cfg.db, table_name, what="table name")
+        on_cluster = self._on_cluster(cfg)
+        return [
+            f"ALTER TABLE {qualified}{on_cluster} ADD {idx};\n" for idx in self._index_defs(column)
+        ]
 
     # ── Standard Views ─────────────────────────────────────────────
 
@@ -570,9 +603,7 @@ class DDLGenerator:
 
         # Index definitions
         for col in columns:
-            idx = self._index_def(col)
-            if idx:
-                body.append(f"    {idx}")
+            body.extend(f"    {idx}" for idx in self._index_defs(col))
 
         # Raw index definitions, for shapes the use_case templates cannot express.
         for idx_def in cfg.extra_indexes:
@@ -673,8 +704,8 @@ class DDLGenerator:
 
     # ── Internal: index definition ──────────────────────────────────
 
-    def _index_def(self, col: SchemaColumn) -> str | None:
-        """Generate an INDEX definition for a column, or None.
+    def _index_defs(self, col: SchemaColumn) -> list[str]:
+        """The INDEX definitions a column asks for -- none, one, or two.
 
         A column declaring its own ``index`` is emitted verbatim: the common
         header asks ``_raw`` for ``text(tokenizer = 'default') GRANULARITY 64``,
@@ -682,14 +713,40 @@ class DDLGenerator:
         drifts the table away from the schema it was generated from.
         """
         index_name = f"idx_{col.name}"
+        quoted = f"`{col.name}`"
         if col.index:
-            return f"INDEX {index_name} `{col.name}` TYPE {col.index}"
+            return [f"INDEX {index_name} {quoted} TYPE {col.index}"]
 
-        if not col.use_case or col.use_case not in self._index_templates:
-            return None
+        use_case, dims = split_use_case(col.use_case)
+        if use_case is None:
+            return []
 
-        template = self._index_templates[col.use_case]
-        return template.format(name=index_name, col=f"`{col.name}`")
+        if use_case == "key_search":
+            return [
+                template.format(name=f"idx_{col.name}_{suffix}", col=quoted)
+                for suffix, template in self._key_search_templates
+            ]
+
+        if use_case == "similarity_search":
+            if dims is None:
+                raise InvalidUseCaseError(
+                    f"column {col.name!r}: similarity_search needs the vector "
+                    f"dimension count, as similarity_search(<dims>)"
+                )
+            return [_SIMILARITY_SEARCH_TEMPLATE.format(name=index_name, col=quoted, dims=dims)]
+
+        if use_case == "exact_match":
+            template = (
+                _EXACT_MATCH_LOW_CARDINALITY
+                if "lowcardinality" in col.attribute
+                else _EXACT_MATCH_HIGH_CARDINALITY
+            )
+            return [template.format(name=index_name, col=quoted)]
+
+        template = self._index_templates.get(use_case)
+        if template is None:
+            return []
+        return [template.format(name=index_name, col=quoted)]
 
     # ── Internal: ORDER BY ──────────────────────────────────────────
 
