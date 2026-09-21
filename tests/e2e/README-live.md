@@ -88,6 +88,12 @@ over.
 receiver restarted onto the new source's routing. A deploy does neither, and the
 API reports `restart_required: []` while the receiver still needs one.
 
+Each 1.3 run leaves a forked schema behind. `meta/syslog` is core, so promote
+forks it to `<source>_syslog` before adding the column; teardown removes the
+source and drops its table, and deliberately leaves the fork, because deleting a
+schema some other version may reference is not a test's call. On a long-lived
+stack they accumulate one per run and are cleared by hand.
+
 ## test_filebeat_pipeline.py -- the transform layer on real data
 
 The whole source path with a transform in it: receiver -> `filebeat_land` ->
