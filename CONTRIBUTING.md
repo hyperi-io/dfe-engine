@@ -152,6 +152,15 @@ dfe-hyperdx / dfe-ui / a local dfe-deploy clone -- see [docs/LOCAL-DEV.md](docs/
 - [ ] Tests pass (if applicable)
 - [ ] Documentation is updated (if applicable)
 
+### Stacked pull requests
+
+Open every pull request against `main`. `.github/workflows/ci.yml` fires `pull_request` only for a base of `main`, so a PR based on another branch gets the branch `push` run instead, which plans `run-checks=false`. Quality, Test, Build and Commit messages then all report `skipped`, the run still concludes `success`, and a skipped required check counts as satisfied - the PR reads green with nothing run. The `PR base` check from `.github/workflows/pr-base-guard.yml` fails on those PRs so the state is visible rather than silent.
+
+If you stack anyway, two things will bite:
+
+- Retarget every child to `main` BEFORE merging its parent, then push the child so the `pull_request` run fires. Merging a parent with `--delete-branch` deletes the child's base and GitHub closes the child. The two states deadlock: you cannot reopen a PR whose base branch is gone, and you cannot retarget a closed PR. Recovery is to recreate the base ref at any commit, reopen, retarget to `main`, then delete the ref again.
+- A squash merge rewrites the history the child sits on, so replay only the child's own commits: `git rebase --onto main <old-base-head> <child-branch>`.
+
 ## Testing your branch in a full stack (branch previews)
 
 > Status: in development. This section describes the intended contributor
