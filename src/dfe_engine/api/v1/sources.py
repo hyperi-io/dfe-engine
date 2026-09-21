@@ -73,6 +73,7 @@ from dfe_engine.exchange.schemas import ExchangeError
 from dfe_engine.exchange.sources import apply_source_bundle, build_source_bundle
 from dfe_engine.git_identity import git_author
 from dfe_engine.manifest import ManifestError
+from dfe_engine.schema.derived_registry import derived_reference_root
 from dfe_engine.settings import get_settings
 from dfe_engine.source import catalogue as source_catalogue_module
 from dfe_engine.source.deployment import (
@@ -1031,6 +1032,7 @@ async def get_source_schema_columns(
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
+        derived_base_dir=derived_reference_root(settings),
         default_engine=settings.clickhouse.default_engine,
         default_ttl_days=settings.clickhouse.default_ttl_days,
     )
@@ -1189,6 +1191,7 @@ async def plan_source_deploy(
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
+        derived_base_dir=derived_reference_root(settings),
         default_engine=settings.clickhouse.default_engine,
         default_ttl_days=settings.clickhouse.default_ttl_days,
         resolver=resolver,
@@ -1355,6 +1358,7 @@ async def deploy_source_schema(
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
+        derived_base_dir=derived_reference_root(settings),
         default_engine=settings.clickhouse.default_engine,
         default_ttl_days=settings.clickhouse.default_ttl_days,
         resolver=resolver,

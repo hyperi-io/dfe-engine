@@ -60,10 +60,10 @@ def default_registry() -> ResourceClassRegistry:
     `helmvars` (overlays), the `governance` class (rbac + actions + policies),
     `library` (versioned artefacts an instance links its consumed files to),
     `sources` (the all-in-one source-definition doc under config/sources - the
-    first datamodel class to land in the deploy repo), and `hunts` + `rules`
-    (what the hunt runner executes). The remaining datamodel types
-    (schemas/fieldmaps) and hunt alert-destinations arrive with the multi-repo
-    work (option A).
+    first datamodel class to land in the deploy repo), `derived_schemas` (the
+    column selections those sources name), and `hunts` + `rules` (what the hunt
+    runner executes). Meta schemas and fieldmaps stay in the dfe-schemas tree;
+    hunt alert-destinations arrive with the multi-repo work (option A).
     """
     return ResourceClassRegistry(
         [
@@ -80,6 +80,17 @@ def default_registry() -> ResourceClassRegistry:
             # model owns its own semver version envelope (current/versions/
             # deployed_version), which is what versioned=True declares here.
             ResourceClass("sources", "config/sources", rbac_prefix="sources", versioned=True),
+            # datamodel class - a deployment's own column selections over a meta
+            # schema, versioned and audited beside the sources that name them.
+            # nested: the registry key carries a group (beats/filebeat_auth).
+            # versioned: the doc owns a semver envelope, as the Source model does.
+            ResourceClass(
+                "derived_schemas",
+                "config/schemas/derived",
+                rbac_prefix="schema",
+                versioned=True,
+                nested=True,
+            ),
             # hunt classes - the hunt definitions and the detection rules they
             # name. The hunt runner reads both directories off a git-sync of
             # this repo (dfe-infra#212), so they are unversioned and the stored

@@ -234,6 +234,10 @@ apps:
       compiler: loader
       values_paths:
         routing: config.routing
+        # Per-table _json/_raw capture, compiled from each source's derived
+        # schema. Its own path, not the whole metadata block, because the rest
+        # of that block is the deployment's.
+        capture: config.metadata.table_capture_modes
     # No idle_when: a bound listener always has work, and on the bus an empty
     # topic list is auto-discovery, so a topic appearing gives the loader work
     # with no config change for the gate to wake on.

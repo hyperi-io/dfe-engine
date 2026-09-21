@@ -48,6 +48,7 @@ from dfe_engine.exchange.schemas import (
 )
 from dfe_engine.git_identity import git_author
 from dfe_engine.schema.column_query import filter_columns
+from dfe_engine.schema.derived_registry import derived_reference_root
 from dfe_engine.schema.models import (
     MetaSchema,
     MetaSchemaAddVersionRequest,
@@ -1235,6 +1236,7 @@ async def get_schema_columns(
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
+        derived_base_dir=derived_reference_root(settings),
         default_engine=settings.clickhouse.default_engine,
         default_ttl_days=settings.clickhouse.default_ttl_days,
     )
@@ -1313,6 +1315,7 @@ async def build_schema(
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
+        derived_base_dir=derived_reference_root(settings),
         default_engine=settings.clickhouse.default_engine,
         default_ttl_days=settings.clickhouse.default_ttl_days,
     )
