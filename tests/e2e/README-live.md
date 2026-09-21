@@ -6,13 +6,17 @@ suite. Marked `@pytest.mark.live` and EXCLUDED from the default run
 `DFE_E2E_*` env vars point at a deployment. No mocks -- every step hits a real
 endpoint.
 
-Three files and a directory. `test_live_pipeline.py` proves the deployment works
+Four files and a directory. `test_live_pipeline.py` proves the deployment works
 at all; `test_filebeat_pipeline.py` proves the transform layer works on real
-data; `test_governed_ops_live.py` drives
+data; `test_data_evolution.py` walks the data-evolution path step by step,
+below; `test_governed_ops_live.py` drives
 `POST /api/v1/governance/ch-rbac/reconcile` and asserts the seeded quota-tier and
 service roles actually materialise as ClickHouse objects -- the two-axis RBAC
 model end to end. It needs `DFE_E2E_ENGINE_URL`/`_TOKEN`, plus the `_CH_*` vars
 for its CH assertions. `flows/` is the flow suite, below.
+
+`engine_api.py` is the authenticated engine-API client both the flow suite and
+the evolution suite drive the control plane with.
 
 ## flows/ -- every source shape, landing or refused
 
@@ -58,6 +62,31 @@ dfe-docker for a compose stack. Neither carries a copy of the fixtures.
 4. **dfe-ui schema change via git** (`test_ui_deploys_schema_change_via_git`)
    Create a source/meta-schema via the engine API, publish, and assert the
    generated DDL (`ddl/<table>.sql`) reached the deploy repo with the new column.
+
+## test_data_evolution.py -- the acceptance path, step by step
+
+One test per step of `docs/data-evolution-acceptance.md`, named for its number,
+in the order the path runs: a record lands with nothing declared, a nested
+`_json` path answers, a shipped schema refuses a write, a field promotes, a
+source gets its own routing and typed table, an index moves on the live table,
+and a transform parses a syslog line into columns.
+
+A step the product cannot do yet is `xfail(strict=True)` naming its open issue,
+so the run goes red when the fix lands rather than staying quietly green. 1.3 is
+dfe-engine#459 and 2.7 is dfe-loader#184. Nothing here is softened to make a run
+green.
+
+The steps share one source and one table, so run this file in ONE worker --
+`-o addopts=""` drops the suite's `-n 4`, which would otherwise split the
+sequence across processes that fight over it. Two waits are the product's, not
+the harness's: a new source's first record waits on dfe-loader's 60 s topic
+refresh, and a promoted column cannot be judged inside the loader's 300 s
+directive cache, so 1.3 sends a fresh record each poll until the cache turns
+over.
+
+2.7 additionally needs the per-source transform instance RUNNING and the
+receiver restarted onto the new source's routing. A deploy does neither, and the
+API reports `restart_required: []` while the receiver still needs one.
 
 ## test_filebeat_pipeline.py -- the transform layer on real data
 
@@ -111,3 +140,8 @@ Of the events a run posts, roughly a third can satisfy it, so a green result
 says the umbrella path transformed -- not that all three corpus modules did.
 
 `test_live_pipeline.py` has NOT been run green end to end.
+
+`test_data_evolution.py` carries nine steps proved by hand against a live
+compose stack -- seven pass, 1.3 and 2.7 are the two xfails -- but the pytest
+file itself has NOT yet been run against a deployment. Until it has, a failure
+in it is as likely to be the harness as the product.
