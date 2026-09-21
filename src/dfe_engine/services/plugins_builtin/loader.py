@@ -30,6 +30,29 @@ descriptor = ServiceDescriptor(
 )
 
 
+def _check_listen_port(listen: str, errors: list[str]) -> None:
+    """Refuse a listen port the receiver will not dial.
+
+    The engine compiles the receiver's destination from ``extra_ports["grpc"]``
+    but takes ``grpc.listen`` from whatever the base config says, so the two
+    ends of one connection had different authors and could disagree. They did,
+    for three days: the receiver answered HTTP 202 and every record was dropped
+    into a closed port with nothing logged.
+    """
+    expected = descriptor.extra_ports["grpc"]
+    _, _, port = listen.rpartition(":")
+    if not port.isdigit():
+        errors.append(f"grpc.listen {listen!r} must end in a port number")
+        return
+    if int(port) != expected:
+        errors.append(
+            f"grpc.listen is on port {port}, but dfe-receiver is told to dial "
+            f"{expected} -- the engine compiles that endpoint from this app's "
+            f"declared grpc port, so a different listen port drops every record "
+            f"behind an HTTP 202."
+        )
+
+
 def _validate_loader(config: Any, errors: list[str], warnings: list[str]) -> None:
     """Cross-field validation for dfe-loader config.
 
@@ -76,6 +99,8 @@ def _validate_loader(config: Any, errors: list[str], warnings: list[str]) -> Non
     elif transport == "grpc":
         if not config.grpc.listen:
             errors.append("grpc.listen is required when transport is 'grpc'")
+        else:
+            _check_listen_port(config.grpc.listen, errors)
 
     if not config.clickhouse.hosts:
         errors.append("At least one ClickHouse host must be configured")
