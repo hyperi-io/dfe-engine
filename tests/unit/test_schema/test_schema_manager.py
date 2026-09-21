@@ -28,7 +28,7 @@ def versioned_schema(tmp_path):
                 "columns": [
                     {"name": "event_time", "type": "datetime", "use_case": "range", "order": 0},
                     {"name": "org_id", "type": "string", "attribute": ["lowcardinality"]},
-                    {"name": "message", "type": "text", "use_case": "text_search"},
+                    {"name": "message", "type": "text", "use_case": "substring_search"},
                 ],
             }
         },
@@ -138,7 +138,7 @@ class TestAddVersion:
         new_cols = [
             {"name": "event_time", "type": "datetime", "use_case": "range", "order": 0},
             {"name": "org_id", "type": "string", "attribute": ["lowcardinality"]},
-            {"name": "message", "type": "text", "use_case": "text_search"},
+            {"name": "message", "type": "text", "use_case": "substring_search"},
             {"name": "severity", "type": "string", "attribute": ["lowcardinality"]},
         ]
         SchemaManager.add_version(

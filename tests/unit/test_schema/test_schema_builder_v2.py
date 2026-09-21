@@ -32,18 +32,18 @@ def schemas_dir(tmp_path):
         {
             "columns": [
                 {"name": "user_name", "type": "string", "use_case": "dimension"},
-                {"name": "message", "type": "text", "use_case": "fulltext"},
+                {"name": "message", "type": "text", "use_case": "word_search"},
                 {"name": "event_id", "type": "integer"},
             ]
         },
         tmp_path / "meta.yaml",
     )
 
-    # derived_schema (override message to text_search)
+    # derived_schema (override message to substring_search)
     yaml_dump(
         {
             "columns": [
-                {"name": "message", "type": "text", "use_case": "text_search"},
+                {"name": "message", "type": "text", "use_case": "substring_search"},
             ]
         },
         tmp_path / "derived.yaml",
@@ -159,14 +159,14 @@ class TestBuild:
         result = builder.build(source)
 
         names = [c.name for c in result.columns]
-        # derived overrides message use_case to text_search
+        # derived overrides message use_case to substring_search
         msg_col = next(c for c in result.columns if c.name == "message")
-        assert msg_col.use_case == "text_search"
+        assert msg_col.use_case == "substring_search"
 
         # additional adds severity
         assert "severity" in names
 
-        # DDL should have text_search index
+        # DDL should have the substring_search index
         assert "ngrams(3)" in result.create_table_ddl
 
     def test_build_minimal_profile(self, registry, schemas_dir):
@@ -374,7 +374,7 @@ class TestValidation:
         yaml_dump(
             {
                 "columns": [
-                    {"name": "x", "type": "integer", "use_case": "fulltext"},
+                    {"name": "x", "type": "integer", "use_case": "word_search"},
                 ]
             },
             tmp_path / "bad_meta.yaml",

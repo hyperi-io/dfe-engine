@@ -26,7 +26,7 @@ def registry() -> TypeRegistry:
 
 class TestTypeRegistryLoading:
     def test_loads_default(self, registry: TypeRegistry):
-        assert len(registry.primitives) == 13
+        assert len(registry.primitives) == 15
 
     @pytest.mark.parametrize("data", [{}, {"primitives": []}, []])
     def test_a_registry_without_a_primitives_map_is_refused(self, data):
@@ -48,11 +48,21 @@ class TestTypeRegistryLoading:
             "json",
             "geo_point",
             "enum",
+            "map",
+            "vector",
         }
         assert set(registry.primitives) == expected
 
     def test_all_use_cases_present(self, registry: TypeRegistry):
-        expected = {"dimension", "fulltext", "text_search", "range", "bloom"}
+        expected = {
+            "dimension",
+            "exact_match",
+            "range",
+            "word_search",
+            "substring_search",
+            "key_search",
+            "similarity_search",
+        }
         assert set(registry.use_cases) == expected
 
     def test_all_attributes_present(self, registry: TypeRegistry):
@@ -191,8 +201,8 @@ class TestResolveUseCase:
         assert r.ch_type == "Nullable(String)"
 
     def test_invalid_use_case_rejected(self, registry: TypeRegistry):
-        with pytest.raises(InvalidUseCaseError, match=r"fulltext.*not valid.*integer"):
-            registry.resolve("integer", use_case="fulltext")
+        with pytest.raises(InvalidUseCaseError, match=r"word_search.*not valid.*integer"):
+            registry.resolve("integer", use_case="word_search")
 
 
 # ---------------------------------------------------------------------------
@@ -213,13 +223,33 @@ class TestValidateUseCase:
             registry.validate_use_case(primitive, "dimension")
 
     @pytest.mark.parametrize("primitive", ["string", "text"])
-    def test_fulltext_valid(self, registry: TypeRegistry, primitive: str):
-        registry.validate_use_case(primitive, "fulltext")
+    def test_word_search_valid(self, registry: TypeRegistry, primitive: str):
+        registry.validate_use_case(primitive, "word_search")
 
     @pytest.mark.parametrize("primitive", ["integer", "float", "boolean"])
-    def test_fulltext_invalid(self, registry: TypeRegistry, primitive: str):
+    def test_word_search_invalid(self, registry: TypeRegistry, primitive: str):
         with pytest.raises(InvalidUseCaseError):
-            registry.validate_use_case(primitive, "fulltext")
+            registry.validate_use_case(primitive, "word_search")
+
+    def test_key_search_is_only_valid_on_a_map(self, registry: TypeRegistry):
+        registry.validate_use_case("map", "key_search")
+        with pytest.raises(InvalidUseCaseError):
+            registry.validate_use_case("string", "key_search")
+
+    def test_similarity_search_carries_its_dimension_count(self, registry: TypeRegistry):
+        registry.validate_use_case("vector", "similarity_search(768)")
+
+    def test_similarity_search_without_its_dimension_count_is_refused(self, registry: TypeRegistry):
+        with pytest.raises(InvalidUseCaseError, match="needs its dims"):
+            registry.validate_use_case("vector", "similarity_search")
+
+    def test_a_use_case_that_takes_no_argument_is_refused_one(self, registry: TypeRegistry):
+        with pytest.raises(InvalidUseCaseError, match="takes no argument"):
+            registry.validate_use_case("string", "word_search(3)")
+
+    def test_a_malformed_use_case_is_refused(self, registry: TypeRegistry):
+        with pytest.raises(InvalidUseCaseError, match="integer"):
+            registry.validate_use_case("vector", "similarity_search(large)")
 
     @pytest.mark.parametrize(
         "primitive", ["integer", "float", "datetime", "timestamp", "date", "ip"]
@@ -233,8 +263,8 @@ class TestValidateUseCase:
             registry.validate_use_case(primitive, "range")
 
     @pytest.mark.parametrize("primitive", ["string", "uuid"])
-    def test_bloom_valid(self, registry: TypeRegistry, primitive: str):
-        registry.validate_use_case(primitive, "bloom")
+    def test_exact_match_valid(self, registry: TypeRegistry, primitive: str):
+        registry.validate_use_case(primitive, "exact_match")
 
     def test_unknown_primitive(self, registry: TypeRegistry):
         with pytest.raises(UnknownPrimitiveError):

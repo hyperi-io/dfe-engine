@@ -224,7 +224,7 @@ def _project(outcomes: list[Any]) -> list[dict[str, Any]]:
             "status": o.status,
             "column_name": o.column_name,
             "data_type": o.data_type,
-            "index_type": o.index_type,
+            "use_case": o.use_case,
             "copy_cel": o.copy_cel,
             "error": o.error,
         }
@@ -252,7 +252,7 @@ BUILD_CASES: list[BuildCase] = [
                 "status": "ok",
                 "column_name": "user_email",
                 "data_type": "string",
-                "index_type": None,
+                "use_case": None,
                 "copy_cel": "_json.user.email",
                 "error": None,
             }
@@ -269,7 +269,7 @@ BUILD_CASES: list[BuildCase] = [
                 "status": "ok",
                 "column_name": "user_score",
                 "data_type": "integer",
-                "index_type": None,
+                "use_case": None,
                 "copy_cel": "_json.user.score",
                 "error": None,
             }
@@ -286,16 +286,16 @@ BUILD_CASES: list[BuildCase] = [
                 "status": "ok",
                 "column_name": "email",
                 "data_type": "string",
-                "index_type": None,
+                "use_case": None,
                 "copy_cel": "_json.user.email",
                 "error": None,
             }
         ],
     },
     {
-        "id": "with_index_type",
+        "id": "with_use_case",
         "existing": [_JSON_COL],
-        "requests": [make_promotion_request("user.email", index_type="bloom_filter")],
+        "requests": [make_promotion_request("user.email", use_case="exact_match")],
         "path_types": {"user.email": ["String"]},
         "expected": [
             {
@@ -303,7 +303,7 @@ BUILD_CASES: list[BuildCase] = [
                 "status": "ok",
                 "column_name": "user_email",
                 "data_type": "string",
-                "index_type": "bloom_filter",
+                "use_case": "exact_match",
                 "copy_cel": "_json.user.email",
                 "error": None,
             }
@@ -323,7 +323,7 @@ BUILD_CASES: list[BuildCase] = [
                 "status": "error",
                 "column_name": None,
                 "data_type": None,
-                "index_type": None,
+                "use_case": None,
                 "copy_cel": None,
                 "error": "path already promoted to column 'user_email'",
             }
@@ -340,7 +340,7 @@ BUILD_CASES: list[BuildCase] = [
                 "status": "error",
                 "column_name": None,
                 "data_type": None,
-                "index_type": None,
+                "use_case": None,
                 "copy_cel": None,
                 "error": "column name 'email' already exists",
             }
@@ -357,7 +357,7 @@ BUILD_CASES: list[BuildCase] = [
                 "status": "error",
                 "column_name": None,
                 "data_type": None,
-                "index_type": None,
+                "use_case": None,
                 "copy_cel": None,
                 "error": "type conflict: String | Int64 -- declare data_type explicitly",
             }
@@ -374,16 +374,16 @@ BUILD_CASES: list[BuildCase] = [
                 "status": "error",
                 "column_name": None,
                 "data_type": None,
-                "index_type": None,
+                "use_case": None,
                 "copy_cel": None,
                 "error": "path 'ghost' not found in _json",
             }
         ],
     },
     {
-        "id": "unknown_index_type",
+        "id": "unknown_use_case",
         "existing": [_JSON_COL],
-        "requests": [make_promotion_request("user.email", index_type="zzz")],
+        "requests": [make_promotion_request("user.email", use_case="zzz")],
         "path_types": {"user.email": ["String"]},
         "expected": [
             {
@@ -391,11 +391,12 @@ BUILD_CASES: list[BuildCase] = [
                 "status": "error",
                 "column_name": None,
                 "data_type": None,
-                "index_type": None,
+                "use_case": None,
                 "copy_cel": None,
                 "error": (
-                    "unknown index_type 'zzz'. Valid: "
-                    "bloom_filter, minmax, ngrambf_v1, set, tokenbf_v1"
+                    "Column 'user_email': Unknown use case 'zzz'. Valid: "
+                    "dimension, exact_match, key_search, range, similarity_search, "
+                    "substring_search, word_search"
                 ),
             }
         ],
@@ -414,7 +415,7 @@ BUILD_CASES: list[BuildCase] = [
                 "status": "ok",
                 "column_name": "user_email",
                 "data_type": "string",
-                "index_type": None,
+                "use_case": None,
                 "copy_cel": "_json.user.email",
                 "error": None,
             },
@@ -423,7 +424,7 @@ BUILD_CASES: list[BuildCase] = [
                 "status": "error",
                 "column_name": None,
                 "data_type": None,
-                "index_type": None,
+                "use_case": None,
                 "copy_cel": None,
                 "error": "path 'ghost' not found in _json",
             },
@@ -446,22 +447,22 @@ class TestBuildPromotionColumns:
     def test_ok_column_carries_copy_directive_and_index_use_case(self):
         outcomes = build_promotion_columns(
             [_JSON_COL],
-            [make_promotion_request("user.email", index_type="bloom_filter")],
+            [make_promotion_request("user.email", use_case="exact_match")],
             type_registry=TypeRegistry.default(),
             path_types={"user.email": ["String"]},
         )
         column = outcomes[0].column
         assert column.expr == "@copy: _json.user.email"
-        assert column.use_case == "bloom"
+        assert column.use_case == "exact_match"
         assert column.type == "string"
         assert column.comment == "Promoted from _json.user.email"
         assert column.field_type == "promoted"
 
     def test_index_use_case_invalid_for_primitive_errors(self):
-        # minmax -> range use_case, which is not valid for a string primitive.
+        # range is not a question a string column can be asked.
         outcomes = build_promotion_columns(
             [_JSON_COL],
-            [make_promotion_request("user.email", index_type="minmax")],
+            [make_promotion_request("user.email", use_case="range")],
             type_registry=TypeRegistry.default(),
             path_types={"user.email": ["String"]},
         )
@@ -476,7 +477,7 @@ class TestPromotionPreviewDdl:
     def test_emits_add_column_and_index(self):
         outcomes = build_promotion_columns(
             [_JSON_COL],
-            [make_promotion_request("user.email", index_type="bloom_filter")],
+            [make_promotion_request("user.email", use_case="exact_match")],
             type_registry=TypeRegistry.default(),
             path_types={"user.email": ["String"]},
         )

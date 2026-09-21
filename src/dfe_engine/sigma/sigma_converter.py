@@ -343,7 +343,10 @@ class SigmaRuleConverter:
         for field, info in schema_metadata.items():
             if info.get("use_case") == "dimension" and info["type"] == "string":
                 optimized_info["field_hints"][field] = {"matching": "exact", "index_priority": 1}
-            elif info["type"] == "text" and info.get("use_case") in ("fulltext", "text_search"):
+            elif info["type"] == "text" and info.get("use_case") in (
+                "word_search",
+                "substring_search",
+            ):
                 optimized_info["field_hints"][field] = {
                     "matching": "text_search",
                     "index_priority": 2,

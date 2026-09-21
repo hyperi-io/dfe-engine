@@ -91,10 +91,10 @@ class TestSchemaColumn:
         col = SchemaColumn(name="x", type="string", use_case="dimension")
         errors = col.validate_against_registry(registry)
         assert errors == []
-        col = SchemaColumn(name="x", type="integer", use_case="fulltext")
+        col = SchemaColumn(name="x", type="integer", use_case="word_search")
         errors = col.validate_against_registry(registry)
         assert len(errors) == 1
-        assert "fulltext" in errors[0]
+        assert "word_search" in errors[0]
 
     def test_validate_invalid_attribute(self, registry: TypeRegistry):
         col = SchemaColumn(name="x", type="json", attribute=["lowcardinality"])

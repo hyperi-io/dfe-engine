@@ -211,8 +211,7 @@ class SchemaApplier:
         missing = [col for col in columns if col.name not in existing]
         for col in missing:
             self._run(self._ddl_gen.generate_alter_add_column(table, col, cfg))
-            index_stmt = self._ddl_gen.generate_alter_add_index(table, col, cfg)
-            if index_stmt:
+            for index_stmt in self._ddl_gen.generate_alter_add_indexes(table, col, cfg):
                 self._run(index_stmt)
 
         # After the column adds: the TTL column may be one of them.

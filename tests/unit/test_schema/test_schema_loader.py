@@ -47,7 +47,7 @@ class TestLoadColumns:
         path = tmp_schema(
             [
                 {"name": "user_name", "type": "string", "use_case": "dimension"},
-                {"name": "message", "type": "text", "use_case": "fulltext"},
+                {"name": "message", "type": "text", "use_case": "word_search"},
             ]
         )
         columns = SchemaLoader.load_columns(path)
@@ -272,7 +272,7 @@ class TestApplyAdditional:
         base = [SchemaColumn(name="x", type="string")]
         additional_path = tmp_schema(
             [
-                {"name": "x", "type": "text", "use_case": "fulltext"},
+                {"name": "x", "type": "text", "use_case": "word_search"},
             ],
             filename="additional.yaml",
         )
@@ -280,7 +280,7 @@ class TestApplyAdditional:
         result = SchemaLoader.apply_additional_fields(base, additional_path)
         assert len(result) == 1
         assert result[0].type == "text"
-        assert result[0].use_case == "fulltext"
+        assert result[0].use_case == "word_search"
 
     def test_missing_additional_returns_base(self, tmp_path):
         base = [SchemaColumn(name="x", type="string")]
@@ -371,7 +371,7 @@ class TestValidateColumns:
 
         registry = TypeRegistry.default()
         columns = [
-            SchemaColumn(name="x", type="integer", use_case="fulltext"),
+            SchemaColumn(name="x", type="integer", use_case="word_search"),
         ]
         errors = SchemaLoader.validate_columns(columns, registry)
         assert len(errors) > 0
@@ -601,7 +601,7 @@ class TestVersionTree:
                         "date": "2026-01-15",
                         "type": "model",
                         "columns": [
-                            {"name": "_raw", "type": "text", "use_case": "text_search"},
+                            {"name": "_raw", "type": "text", "use_case": "substring_search"},
                         ],
                     },
                     "2.0.0": {
@@ -616,7 +616,7 @@ class TestVersionTree:
         )
         v1 = SchemaLoader.load_columns(path, version="1.0.0")
         assert v1[0].type == "text"
-        assert v1[0].use_case == "text_search"
+        assert v1[0].use_case == "substring_search"
 
         v2 = SchemaLoader.load_columns(path, version="2.0.0")
         assert v2[0].type == "string"

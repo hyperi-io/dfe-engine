@@ -576,7 +576,7 @@ class TestPromoteField:
         resp = _promote(
             client,
             admin_headers,
-            {"json_path": "user.email", "data_type": "string", "index_type": "bloom_filter"},
+            {"json_path": "user.email", "data_type": "string", "use_case": "exact_match"},
             dry_run=True,
         )
         assert resp.status_code == 200
@@ -586,6 +586,29 @@ class TestPromoteField:
         assert any("ADD COLUMN" in stmt for stmt in body["diff"]["ddl"])
         # No new version was written.
         assert _schema_versions(client, admin_headers, "1.0.0") == ["1.0.0"]
+
+    def test_an_unknown_use_case_is_refused_at_the_boundary(
+        self, client: TestClient, admin_headers
+    ):
+        """One use case covers every path in the request, so it fails the request."""
+        resp = _promote(
+            client,
+            admin_headers,
+            {"json_path": "user.email", "data_type": "string", "use_case": "bloom"},
+        )
+        assert resp.status_code == 422
+        assert "unknown use_case" in resp.text
+
+    def test_a_use_case_the_registry_knows_is_accepted(self, client: TestClient, admin_headers):
+        """The vocabulary follows the type registry, not a list held in the router."""
+        resp = _promote(
+            client,
+            admin_headers,
+            {"json_path": "user.email", "data_type": "string", "use_case": "word_search"},
+            dry_run=True,
+        )
+        assert resp.status_code == 200
+        assert any("tokenizer=splitByNonAlpha" in stmt for stmt in resp.json()["diff"]["ddl"])
 
     def test_atomic_failure_commits_nothing(self, client: TestClient, admin_headers):
         # Promote once so user.email is already promoted.
