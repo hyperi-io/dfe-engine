@@ -283,8 +283,7 @@ def deploy_statements_for_build(
                 continue
             add_stmt = ddl_gen.generate_alter_add_column(table, col, cfg)
             statements.append(add_stmt.strip())
-            index_stmt = ddl_gen.generate_alter_add_index(table, col, cfg)
-            if index_stmt:
+            for index_stmt in ddl_gen.generate_alter_add_indexes(table, col, cfg):
                 statements.append(index_stmt.strip())
 
     for view_ddl in (result.view_ddls or {}).values():

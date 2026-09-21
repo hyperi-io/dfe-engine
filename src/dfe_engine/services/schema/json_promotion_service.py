@@ -35,17 +35,6 @@ from dfe_engine.source.models import SchemaColumn
 JSON_COLUMN = "_json"
 PROMOTED_FIELD_TYPE = "promoted"
 
-# Requested CH index family -> schema use_case (drives DDL index generation via
-# DDLGenerator._index_def). The use_case is validated against the column's
-# primitive by TypeRegistry, so an illegal pairing surfaces as a per-path error.
-INDEX_TYPE_TO_USE_CASE: dict[str, str] = {
-    "set": "dimension",
-    "minmax": "range",
-    "bloom_filter": "bloom",
-    "tokenbf_v1": "fulltext",
-    "ngrambf_v1": "text_search",
-}
-
 _WRAPPER_RE = re.compile(r"^(?:Nullable|LowCardinality)\((.*)\)$")
 _CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _NON_IDENT_RE = re.compile(r"[^0-9a-zA-Z]+")
@@ -82,7 +71,7 @@ class PromotionRequest:
     json_path: str
     column_name: str | None = None
     data_type: str | None = None
-    index_type: str | None = None
+    use_case: str | None = None
 
 
 @dataclass
@@ -93,7 +82,7 @@ class PromotionOutcome:
     status: str  # "ok" | "error"
     column_name: str | None = None
     data_type: str | None = None
-    index_type: str | None = None
+    use_case: str | None = None
     copy_cel: str | None = None
     error: str | None = None
     column: SchemaColumn | None = field(default=None)
@@ -548,23 +537,6 @@ def build_promotion_columns(
                 continue
             primitive, attributes = ch_dynamic_type_to_primitive(types[0])
 
-        # Resolve the index use_case (optional).
-        use_case: str | None = None
-        if req.index_type:
-            use_case = INDEX_TYPE_TO_USE_CASE.get(req.index_type)
-            if use_case is None:
-                outcomes.append(
-                    PromotionOutcome(
-                        json_path=path,
-                        status="error",
-                        error=(
-                            f"unknown index_type '{req.index_type}'. Valid: "
-                            f"{', '.join(sorted(INDEX_TYPE_TO_USE_CASE))}"
-                        ),
-                    )
-                )
-                continue
-
         # Resolve the column name (explicit names must not collide; suggested
         # names auto-suffix).
         if req.column_name:
@@ -586,7 +558,7 @@ def build_promotion_columns(
             name=column_name,
             type=primitive,
             attribute=attributes,
-            use_case=use_case,
+            use_case=req.use_case,
             expr=ExpressionBuilder.copy(copy_cel),
             comment=f"Promoted from {JSON_COLUMN}.{path}",
             _field_type=PROMOTED_FIELD_TYPE,
@@ -610,7 +582,7 @@ def build_promotion_columns(
                 status="ok",
                 column_name=column_name,
                 data_type=primitive,
-                index_type=req.index_type,
+                use_case=req.use_case,
                 copy_cel=copy_cel,
                 column=column,
             )
@@ -639,7 +611,6 @@ def promotion_preview_ddl(
     statements: list[str] = []
     for column in columns:
         statements.append(generator.generate_alter_add_column(table_name, column, config).strip())
-        index_stmt = generator.generate_alter_add_index(table_name, column, config)
-        if index_stmt:
+        for index_stmt in generator.generate_alter_add_indexes(table_name, column, config):
             statements.append(index_stmt.strip())
     return statements
