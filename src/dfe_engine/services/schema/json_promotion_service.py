@@ -36,14 +36,16 @@ JSON_COLUMN = "_json"
 PROMOTED_FIELD_TYPE = "promoted"
 
 # Requested CH index family -> schema use_case (drives DDL index generation via
-# DDLGenerator._index_def). The use_case is validated against the column's
+# DDLGenerator._index_defs). The use_case is validated against the column's
 # primitive by TypeRegistry, so an illegal pairing surfaces as a per-path error.
+# The caller names an index family because that is what the promotion API has
+# always taken; the use case it maps to is what the schema records.
 INDEX_TYPE_TO_USE_CASE: dict[str, str] = {
     "set": "dimension",
     "minmax": "range",
-    "bloom_filter": "bloom",
-    "tokenbf_v1": "fulltext",
-    "ngrambf_v1": "text_search",
+    "bloom_filter": "exact_match",
+    "tokenbf_v1": "word_search",
+    "ngrambf_v1": "substring_search",
 }
 
 _WRAPPER_RE = re.compile(r"^(?:Nullable|LowCardinality)\((.*)\)$")
@@ -639,7 +641,6 @@ def promotion_preview_ddl(
     statements: list[str] = []
     for column in columns:
         statements.append(generator.generate_alter_add_column(table_name, column, config).strip())
-        index_stmt = generator.generate_alter_add_index(table_name, column, config)
-        if index_stmt:
+        for index_stmt in generator.generate_alter_add_indexes(table_name, column, config):
             statements.append(index_stmt.strip())
     return statements

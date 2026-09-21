@@ -63,7 +63,7 @@ registry = TypeRegistry.default()  # loads dfe-schemas registries/types.yaml
 resolved = registry.resolve("string", attributes=["lowcardinality"])
 # ResolvedType(ch_type='LowCardinality(Nullable(String))', codec='ZSTD(1)')
 registry.validate_use_case("integer", "dimension")  # OK
-registry.validate_use_case("integer", "fulltext")  # raises ValueError
+registry.validate_use_case("integer", "word_search")  # raises ValueError
 registry.validate_attribute("json", "lowcardinality")  # raises ValueError
 ```
 
@@ -165,8 +165,8 @@ written = writer.write_all(Path("out/"))  # writes + returns paths
 
 ## Validation rules
 
-1. Primitive must exist in TypeRegistry (one of 13 values).
-2. Use case must be valid for the primitive (e.g. `fulltext` is not valid
+1. Primitive must exist in TypeRegistry (one of 15 values).
+2. Use case must be valid for the primitive (e.g. `word_search` is not valid
    for `integer`).
 3. Attributes must be valid for the primitive (e.g. `lowcardinality` is not
    valid for `json`).

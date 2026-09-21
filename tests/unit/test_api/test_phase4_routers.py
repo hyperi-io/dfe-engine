@@ -417,7 +417,7 @@ class TestSchemasRouter:
                         "columns": [
                             {"name": "alpha", "type": "string", "use_case": "dimension"},
                             {"name": "beta", "type": "integer"},
-                            {"name": "gamma", "type": "text", "use_case": "fulltext"},
+                            {"name": "gamma", "type": "text", "use_case": "word_search"},
                         ]
                     }
                 },

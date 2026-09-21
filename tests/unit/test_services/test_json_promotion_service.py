@@ -452,7 +452,7 @@ class TestBuildPromotionColumns:
         )
         column = outcomes[0].column
         assert column.expr == "@copy: _json.user.email"
-        assert column.use_case == "bloom"
+        assert column.use_case == "exact_match"
         assert column.type == "string"
         assert column.comment == "Promoted from _json.user.email"
         assert column.field_type == "promoted"

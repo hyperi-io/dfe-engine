@@ -155,7 +155,7 @@ columns:
 
   - name: _raw
     type: text
-    use_case: text_search
+    use_case: substring_search
     comment: "@captured: raw_payload"
 
   - name: _json
@@ -183,7 +183,7 @@ columns:
 
   - name: message
     type: text
-    use_case: fulltext
+    use_case: word_search
 
   - name: event_id
     type: integer
@@ -468,14 +468,24 @@ your query pattern.
 
 ### Use Cases
 
-| Use Case | When to Use | Example Columns |
+A use case names the question you ask the column, never the ClickHouse index
+that answers it. You declare the question; the engine picks the primitive, and
+can pick a different one on a later ClickHouse without your schema changing.
+
+| Use Case | The question | Example Columns |
 |----------|------------|-----------------|
-| `dimension` | Filter by exact value: `WHERE status = 'error'` | status, severity, region, org_id, category |
-| `fulltext` | Search words in log messages: `WHERE hasToken(message, 'error')` | message, log_body, description |
-| `text_search` | Substring search: `WHERE message LIKE '%connection refused%'` | syslog_message, windows_event_data |
-| `range` | Numeric/time ranges: `WHERE latency > 100` | latency_ms, timestamp, bytes, risk_score |
-| `bloom` | Find specific IDs in high-cardinality columns | trace_id, request_id, span_id |
-| _(empty)_ | No special query optimisation needed | raw payload, metadata |
+| `dimension` | I filter and group by this: `WHERE status = 'error'` | status, severity, region, org_id, category |
+| `exact_match` | I look up specific values | trace_id, request_id, span_id |
+| `range` | I query ranges, between, time windows: `WHERE latency > 100` | latency_ms, timestamp, bytes, risk_score |
+| `word_search` | I search for whole words: `WHERE hasToken(message, 'error')` | message, log_body, description |
+| `substring_search` | I search for fragments inside words: `WHERE message LIKE '%connection refused%'` | syslog_message, windows_event_data |
+| `key_search` | I search the keys and values of a map column | attributes, labels |
+| `similarity_search(<dims>)` | I find records similar to this one | embedding |
+| _(empty)_ | No index | raw payload, metadata |
+
+`similarity_search` is the one use case that takes an argument: ClickHouse needs
+the vector's dimension count up front and cannot read it off the column. You
+give it that, and the engine still picks the method and the distance metric.
 
 ### Use Cases Are Tied to Primitives
 
@@ -485,41 +495,47 @@ combinations:
 | Use Case | Valid Primitives | Why |
 |----------|-----------------|-----|
 | `dimension` | `string`, `integer`, `boolean`, `enum`, `ip`, `uuid` | Exact match -- needs discrete values |
-| `fulltext` | `string`, `text` | Token search -- only applies to text |
-| `text_search` | `string`, `text` | Substring matching -- only applies to text |
+| `exact_match` | `string`, `uuid` | Point lookups on high-cardinality identifiers |
 | `range` | `integer`, `float`, `datetime`, `timestamp`, `date`, `ip` | Range queries -- needs orderable values |
-| `bloom` | `string`, `uuid` | Point lookups on high-cardinality identifiers |
+| `word_search` | `string`, `text` | Token search -- only applies to text |
+| `substring_search` | `string`, `text` | Substring matching -- only applies to text |
+| `key_search` | `map` | The keys and values of a map column |
+| `similarity_search` | `vector` | Nearest neighbours in an embedding space |
 
-If you specify `fulltext` on an `integer` column, the engine rejects it
+If you specify `word_search` on an `integer` column, the engine rejects it
 at validation time with a clear error.
 
 ### What the Engine Generates in the DDL
 
 You don't need to know this to use the schema system. This section is for
-engine developers and anyone curious about what happens behind the scenes.
+engine developers and anyone curious about what happens behind the scenes. It
+is what the engine emits today, on ClickHouse 26.3 -- not part of the
+vocabulary.
 
 | Use Case | ClickHouse Index Generated | Granularity | Notes |
 |----------|---------------------------|-------------|-------|
 | `dimension` | `set(0)` | 4 | Exact distinct values per granule |
-| `fulltext` | `text(tokenizer=splitByNonAlpha)` | 1 | Native text index (GA v26.2). Deterministic, no false positives, row-level filtering. 45x faster than without index. |
-| `text_search` | `text(tokenizer=ngrams(3))` | 1 | Character n-gram text index for substring matching |
+| `exact_match` | `set(0)` with the `lowcardinality` attribute, else `bloom_filter` | 4 | The bloom filter is probabilistic -- false positives, no false negatives |
 | `range` | `minmax` | 4 | Stores min/max per granule |
-| `bloom` | `bloom_filter` | 4 | Probabilistic -- has false positives, no false negatives |
+| `word_search` | `text(tokenizer=splitByNonAlpha)` | 1 | Native text index (GA v26.2). Deterministic, no false positives, row-level filtering. 45x faster than without index. |
+| `substring_search` | `text(tokenizer=ngrams(3))` | 1 | Character n-gram text index for substring matching |
+| `key_search` | two indexes, `text(tokenizer=array)` over `mapKeys(col)` and `mapValues(col)` | 1 | A text index refuses a `Map` column itself, so the keys and the values are indexed apart |
+| `similarity_search(<dims>)` | `vector_similarity('hnsw', 'cosineDistance', <dims>)` | 1 | `hnsw` is the only method 26.3 implements |
 | _(empty)_ | No index | -- | |
 
-**Note on text indexes:** The `fulltext` and `text_search` use cases now
-generate the GA text index (inverted index, v26.2+) instead of the older
-bloom-filter based `tokenbf_v1` and `ngrambf_v1`. The text index is
-deterministic (no false positives), provides row-level filtering instead
-of granule-level, and is 10-100x faster for text search workloads. For
-ClickHouse versions before v25.10, the engine falls back to the legacy
-bloom-filter indexes automatically.
+**Note on text indexes:** `word_search` and `substring_search` generate the GA
+text index (inverted index, v26.2+) instead of the older bloom-filter based
+`tokenbf_v1` and `ngrambf_v1`. The text index is deterministic (no false
+positives), provides row-level filtering instead of granule-level, and is
+10-100x faster for text search workloads. For ClickHouse versions before
+v25.10, the engine falls back to the legacy bloom-filter indexes automatically,
+and `key_search` falls back to a bloom filter over the keys and values.
 
-**Note on fulltext vs text_search:** Both use the text index but with
-different tokenizers. `fulltext` uses word-level tokenization
+**Note on word_search vs substring_search:** Both use the text index but with
+different tokenizers. `word_search` uses word-level tokenization
 (`splitByNonAlpha`) -- good for searching whole words in log messages.
-`text_search` uses character n-grams -- good for substring matching like
-partial hostnames or error codes embedded in longer strings.
+`substring_search` uses character n-grams -- good for fragments inside longer
+strings, like partial hostnames or embedded error codes.
 
 **Retention (TTL):** every time-series table gets a TTL, 90 days unless the
 deployment sets `DFE_CLICKHOUSE_DEFAULT_TTL_DAYS` (`clickhouse.default_ttl_days`,
@@ -717,7 +733,7 @@ Attached to a Source definition
 | Elastic Type | Primitive | Use Case | Notes |
 |-------------|-----------|----------|-------|
 | `keyword` | `string` | `dimension` | Exact match filtering |
-| `text` | `text` | `fulltext` | Full-text search |
+| `text` | `text` | `word_search` | Searching for whole words |
 | `long` | `integer` | | Default Int64 matches |
 | `integer` | `integer` | | |
 | `short` | `integer` | | ch_override: Int16 if needed |
@@ -844,16 +860,16 @@ The conversion produces a Rule definition with:
 | `geo_point` | `geo_point` | | |
 | `uuid` | `uuid` | | |
 | `tuple` | _(use ch_override)_ | | `ch_override: Tuple(...)` |
-| `map` | _(use ch_override)_ | | `ch_override: Map(K,V)` |
+| `map` | `map` | | `Map(LowCardinality(String), String)`; `ch_override: Map(K,V)` for another shape |
 
 ### Index Type Mapping
 
 | Old `index_type` | New `use_case` | Notes |
 |-----------------|----------------|-------|
 | `dimension` | `dimension` | Same |
-| `fulltext` | `fulltext` | Now generates text index (was tokenbf_v1) |
-| `text_search` | `text_search` | Now generates ngram text index (was ngrambf_v1) |
-| `hc` | `bloom` | Renamed for clarity |
+| `fulltext` | `word_search` | Named for the question, and now generates the text index (was tokenbf_v1) |
+| `text_search` | `substring_search` | Named for what it matches, and now generates the ngram text index (was ngrambf_v1) |
+| `hc` | `exact_match` | `bloom` in between, which named the ClickHouse index |
 | `range` | `range` | Same |
 | `minmax` | `range` | Merged (both generated minmax) |
 
