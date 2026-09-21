@@ -13,6 +13,7 @@ import json
 import pytest
 
 from dfe_engine.services.schema.elastic_schema_service import (
+    CARDINALITY_NOT_MEASURED,
     ElasticSchemaConversionError,
     ElasticSchemaService,
 )
@@ -47,7 +48,9 @@ def test_template_dict_to_columns_keyword_nested_and_timestamp_name() -> None:
 
     assert by_name["container_name"].type == "string"
     assert by_name["container_name"].expr == "@source: container.name"
-    assert "lowcardinality" in by_name["container_name"].attribute
+    # A template does not carry cardinality, so a plain keyword gets neither.
+    assert by_name["container_name"].attribute is None
+    assert by_name["container_name"].use_case is None
 
     assert by_name["timestamp"].expr == "@source: @timestamp"
 
@@ -223,6 +226,77 @@ def test_malformed_leaf_with_properties_descends() -> None:
     # Keyword + nested properties is treated as container-only; children are emitted.
     assert "odd" not in by_name
     assert by_name["odd_nested_kw"].type == "string"
+
+
+def test_declared_use_cases_are_set_and_guessed_ones_are_not() -> None:
+    """Only the intent the template states: text searches words, numerics and dates
+    range, a constant_keyword is one value. A plain keyword says nothing."""
+    doc = {
+        "mappings": {
+            "properties": {
+                "url_full": {"type": "keyword", "ignore_above": 1024},
+                "wc": {"type": "wildcard"},
+                "ver": {"type": "version"},
+                "ck": {"type": "constant_keyword"},
+                "msg": {"type": "text"},
+                "count": {"type": "long"},
+                "when": {"type": "date"},
+                "flag": {"type": "boolean"},
+                "addr": {"type": "ip"},
+            }
+        }
+    }
+    by_name = {c.name: c for c in ElasticSchemaService.template_dict_to_columns(doc)}
+
+    for undecided in ("url_full", "wc", "ver"):
+        assert by_name[undecided].use_case is None
+        assert by_name[undecided].attribute is None
+        # Blank because nobody measured, not because it was judged to need no index.
+        assert CARDINALITY_NOT_MEASURED in by_name[undecided].comment
+
+    for decided in ("ck", "msg", "count", "when", "flag", "addr"):
+        assert CARDINALITY_NOT_MEASURED not in by_name[decided].comment
+
+    assert by_name["ck"].use_case == "dimension"
+    assert by_name["ck"].attribute == ["lowcardinality"]
+    assert by_name["msg"].use_case == "word_search"
+    assert by_name["count"].use_case == "range"
+    assert by_name["when"].use_case == "range"
+    assert by_name["flag"].use_case == "dimension"
+    # An IP is asked for ranges and CIDR scans, never grouped by as a dimension.
+    assert by_name["addr"].use_case == "range"
+
+
+def test_index_false_drops_the_index_and_keeps_the_column() -> None:
+    """ECS marks event.original `index: false, doc_values: false` - the template
+    saying it is stored but never searched or grouped by."""
+    doc = {
+        "mappings": {
+            "properties": {
+                "event": {
+                    "properties": {
+                        "original": {
+                            "type": "keyword",
+                            "index": False,
+                            "doc_values": False,
+                        },
+                        "kind": {"type": "constant_keyword"},
+                        "seq": {"type": "long", "index": False},
+                    }
+                }
+            }
+        }
+    }
+    by_name = {c.name: c for c in ElasticSchemaService.template_dict_to_columns(doc)}
+
+    assert by_name["event_original"].type == "string"
+    assert by_name["event_original"].use_case is None
+    assert by_name["event_original"].attribute is None
+    # The template answered the question, so the column is decided, not unmeasured.
+    assert CARDINALITY_NOT_MEASURED not in by_name["event_original"].comment
+    # Suppression beats the type default, including where the type is bounded.
+    assert by_name["event_seq"].use_case is None
+    assert by_name["event_kind"].use_case == "dimension"
 
 
 def test_schema_subpackage_reexports() -> None:
