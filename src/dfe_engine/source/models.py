@@ -150,7 +150,11 @@ class SchemaColumn(BaseModel):
     )
     use_case: str | None = Field(
         default=None,
-        description="Query use case (dimension, fulltext, range, etc.)",
+        description=(
+            "The question the column is asked (dimension, exact_match, range, "
+            "word_search, etc.). The vocabulary is the type registry's, in "
+            "dfe-schemas registries/types.yaml"
+        ),
     )
     default: str | None = Field(
         default=None,

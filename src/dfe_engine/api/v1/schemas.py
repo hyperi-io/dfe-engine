@@ -250,9 +250,12 @@ class DraftColumn(BaseModel):
     use_case: str | None = Field(
         default=None,
         description=(
-            "Index use case to generate for the column (dimension, range, bloom, "
-            "fulltext, text_search), or null for no index. Always null on a discovered "
-            "draft -- set it in the editor if you want an index."
+            "The question the column is asked, which decides the index generated "
+            "for it (dimension, exact_match, range, word_search, substring_search, "
+            "key_search, similarity_search(<dims>)), or null for no index. The full "
+            "vocabulary is the type registry's, in dfe-schemas registries/types.yaml. "
+            "Always null on a discovered draft -- set it in the editor if you want "
+            "an index."
         ),
     )
     expr: str = Field(
@@ -411,9 +414,16 @@ class PromoteFieldRequest(BaseModel):
         default=None,
         description="DFE primitive override; auto-derived from the JSON type when omitted",
     )
-    index_type: Literal["minmax", "set", "bloom_filter", "tokenbf_v1", "ngrambf_v1"] | None = Field(
+    use_case: str | None = Field(
         default=None,
-        description="Optional ClickHouse secondary index family",
+        description=(
+            "The question the promoted column is asked, which decides the index "
+            "generated for it (dimension, exact_match, range, word_search, "
+            "substring_search, key_search, similarity_search(<dims>)), or null for "
+            "no index. Validated against the type registry dfe-schemas ships as "
+            "registries/types.yaml, so it follows the registry rather than a list "
+            "held here."
+        ),
     )
     atomic: bool = Field(
         default=True,
@@ -434,6 +444,24 @@ class PromoteFieldRequest(BaseModel):
                 raise ValueError("json_path list must not be empty")
             if self.column_name is not None:
                 raise ValueError("column_name cannot be set for batch promotion")
+        # The use case applies to every path in the request, so an unknown one is
+        # rejected here rather than reported per path.
+        if self.use_case is not None:
+            from dfe_engine.source.type_registry import (
+                InvalidUseCaseError,
+                TypeRegistry,
+                split_use_case,
+            )
+
+            registry = TypeRegistry.default()
+            try:
+                name, _ = split_use_case(self.use_case)
+            except InvalidUseCaseError as exc:
+                raise ValueError(str(exc)) from exc
+            if name not in registry.use_cases:
+                raise ValueError(
+                    f"unknown use_case {self.use_case!r}. Valid: {', '.join(registry.use_cases)}"
+                )
         return self
 
 
@@ -444,7 +472,7 @@ class PromoteResult(BaseModel):
     status: Literal["ok", "error"]
     column_name: str | None = None
     data_type: str | None = None
-    index_type: str | None = None
+    use_case: str | None = None
     copy_cel: str | None = None
     error: str | None = None
 
@@ -1794,7 +1822,7 @@ async def promote_field(
             json_path=p,
             column_name=None if is_batch else body.column_name,
             data_type=body.data_type,
-            index_type=body.index_type,
+            use_case=body.use_case,
         )
         for p in raw_paths
     ]
@@ -1836,7 +1864,7 @@ async def promote_field(
             status=cast('Literal["ok", "error"]', o.status),
             column_name=o.column_name,
             data_type=o.data_type,
-            index_type=o.index_type,
+            use_case=o.use_case,
             copy_cel=o.copy_cel,
             error=o.error,
         )
