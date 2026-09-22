@@ -52,8 +52,8 @@ from tests.e2e.conftest import (
     post_ndjson,
     require,
 )
+from tests.e2e.engine_api import EngineAPI
 from tests.e2e.flows import shapes
-from tests.e2e.flows.conftest import EngineAPI
 
 # Argo polls the deploy repo every 300 s with up to 60 s of jitter, and the pod
 # then rolls on the new ConfigMap checksum, so a routing change is minutes away.
