@@ -39,12 +39,18 @@ def schemas_dir(tmp_path):
         tmp_path / "meta.yaml",
     )
 
-    # derived_schema (override message to substring_search)
+    # derived_schema: selects message out of the three, and re-indexes it
     yaml_dump(
         {
-            "columns": [
-                {"name": "message", "type": "text", "use_case": "substring_search"},
-            ]
+            "base": "meta",
+            "current": "1.0.0",
+            "versions": {
+                "1.0.0": {
+                    "date": "2026-09-21",
+                    "summary": "message only",
+                    "select": [{"name": "message", "index": "substring_search"}],
+                }
+            },
         },
         tmp_path / "derived.yaml",
     )
@@ -159,14 +165,20 @@ class TestBuild:
         result = builder.build(source)
 
         names = [c.name for c in result.columns]
-        # derived overrides message use_case to substring_search
+
+        # The derived schema selects message and drops the rest of the base.
+        assert "message" in names
+        assert "user_name" not in names
+        assert "event_id" not in names
+
+        # It re-indexes what it selected, and nothing else about the column moves.
         msg_col = next(c for c in result.columns if c.name == "message")
         assert msg_col.use_case == "substring_search"
+        assert msg_col.type == "text"
 
-        # additional adds severity
+        # additional_fields still appends -- that layer is unchanged
         assert "severity" in names
 
-        # DDL should have the substring_search index
         assert "ngrams(3)" in result.create_table_ddl
 
     def test_build_minimal_profile(self, registry, schemas_dir):

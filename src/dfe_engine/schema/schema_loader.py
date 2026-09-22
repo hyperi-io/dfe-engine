@@ -563,30 +563,114 @@ class SchemaLoader:
     # -----------------------------------------------------------------
 
     @staticmethod
+    def _derived_version_block(path: Path, version: str | None) -> dict[str, Any]:
+        """Resolve a derived schema's version block, defaulting to ``current``."""
+        try:
+            data = yaml_load(path)
+        except Exception as e:
+            raise SchemaLoadError(f"Failed to parse YAML: {path}: {e}") from e
+        if not data:
+            raise SchemaLoadError(f"Derived schema is empty: {path}")
+
+        versions = data.get("versions")
+        if not isinstance(versions, dict) or not versions:
+            raise SchemaLoadError(f"Derived schema {path} must contain a 'versions' key")
+
+        wanted = version or data.get("current")
+        if wanted is None:
+            raise SchemaLoadError(f"Derived schema {path} declares no 'current' version")
+        block = versions.get(str(wanted))
+        if not isinstance(block, dict):
+            raise SchemaLoadError(f"Version {wanted!r} not found in {path}")
+        return block
+
+    @staticmethod
+    def _derived_select_entries(path: Path, version: str | None) -> list[dict[str, Any]]:
+        """Read and shape-check a derived schema's ``select`` list."""
+        block = SchemaLoader._derived_version_block(path, version)
+        entries = block.get("select")
+        if not isinstance(entries, list) or not entries:
+            raise SchemaLoadError(f"Derived schema {path} must declare a non-empty 'select' list")
+
+        checked: list[dict[str, Any]] = []
+        for entry in entries:
+            if not isinstance(entry, dict) or "name" not in entry:
+                raise SchemaLoadError(f"Each 'select' entry in {path} needs a 'name': {entry!r}")
+            extra = set(entry) - {"name", "index"}
+            if extra:
+                raise SchemaLoadError(
+                    f"Derived schema {path} sets {sorted(extra)} on {entry['name']!r}. "
+                    f"A derived schema selects columns and may override 'index'; every other "
+                    f"field, 'expr' included, resolves from the base."
+                )
+            checked.append(entry)
+        return checked
+
+    @staticmethod
     def apply_derived_schema(
         base_columns: list[SchemaColumn],
         derived_source: str | Path,
+        version: str | None = None,
     ) -> list[SchemaColumn]:
-        """Apply a derived schema (overrides) to base columns.
+        """Narrow base columns to the subset a derived schema selects.
 
-        Derived schema columns override matching base columns by name.
-        Only the fields specified in the derived column are overridden —
-        unspecified fields keep their base values.
+        The result is exactly the ``select`` list, in its order. A selected
+        entry may override ``index`` (the column's index use case) and nothing
+        else -- ``expr`` in particular resolves from the base, because it is the
+        directive dfe-loader reads back out of the ClickHouse column comment.
 
-        Args:
-            base_columns: Base schema columns.
-            derived_source: Path to derived schema YAML.
+        ``index: none`` keeps the column and drops its index.
 
-        Returns:
-            Updated list of SchemaColumn models.
+        Raises:
+            SchemaLoadError: The file is missing, the shape is wrong, or a
+                selected name is absent from the base.
         """
         path = Path(derived_source)
         if not path.exists():
-            logger.warning(f"Derived schema not found, skipping: {path}")
-            return base_columns
+            raise SchemaLoadError(f"Derived schema not found: {path}")
 
-        derived_columns = SchemaLoader.load_columns(path)
-        return SchemaLoader._merge_columns(base_columns, derived_columns)
+        by_name = {column.name: column for column in base_columns}
+        selected: list[SchemaColumn] = []
+
+        for entry in SchemaLoader._derived_select_entries(path, version):
+            name = entry["name"]
+            base = by_name.get(name)
+            if base is None:
+                raise SchemaLoadError(
+                    f"Derived schema {path} selects {name!r}, which its base does not define. "
+                    f"A derived schema narrows its base and never adds to it."
+                )
+            if "index" not in entry:
+                selected.append(base)
+                continue
+            index = entry["index"]
+            use_case = None if index == "none" else index
+            selected.append(base.model_copy(update={"use_case": use_case}))
+
+        return selected
+
+    @staticmethod
+    def load_derived_capture(
+        derived_source: str | Path, version: str | None = None
+    ) -> dict[str, bool]:
+        """Read a derived schema's catch-all switches.
+
+        Stage 3: the table keeps its ``_json`` and ``_raw`` columns and its
+        common header, and dfe-loader is told not to populate them. Both
+        default to True, so omitting them keeps the safety net.
+        """
+        path = Path(derived_source)
+        if not path.exists():
+            raise SchemaLoadError(f"Derived schema not found: {path}")
+
+        block = SchemaLoader._derived_version_block(path, version)
+        capture: dict[str, bool] = {}
+        for key in ("capture_json", "capture_raw"):
+            value = block.get(key, True)
+            if not isinstance(value, bool):
+                raise SchemaLoadError(f"{key} in {path} must be true or false, got {value!r}")
+            capture[key] = value
+        return capture
 
     @staticmethod
     def apply_additional_fields(

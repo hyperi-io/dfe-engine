@@ -267,6 +267,18 @@ class TestValidateLoaderTransport:
         errors, _ = run_loader_validation(config)
         assert errors == []
 
+    def test_a_listen_port_the_receiver_will_not_dial_is_refused(self):
+        # The three-day outage: receiver dialled 6000, loader listened on 50051,
+        # every record dropped behind an HTTP 202 with nothing logged.
+        config = self._make_grpc(listen="0.0.0.0:50051")
+        errors, _ = run_loader_validation(config)
+        assert any("50051" in e and "6000" in e for e in errors)
+
+    def test_a_listen_without_a_port_is_refused(self):
+        config = self._make_grpc(listen="0.0.0.0")
+        errors, _ = run_loader_validation(config)
+        assert any("port number" in e for e in errors)
+
     def test_grpc_still_requires_clickhouse_hosts(self):
         # ClickHouse is the sink on both transports.
         config = self._make_grpc()
