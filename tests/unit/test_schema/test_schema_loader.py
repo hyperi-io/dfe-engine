@@ -210,44 +210,95 @@ class TestLoadProfile:
 # ── apply_derived_schema ────────────────────────────────────────────
 
 
+def _derived(tmp_versioned_schema, select: list[dict], **version_keys):
+    """Write a derived schema selecting ``select`` from its base."""
+    block = {"date": "2026-09-21", "summary": "subset", "select": select, **version_keys}
+    return tmp_versioned_schema(
+        {"base": "meta/example", "current": "1.0.0", "versions": {"1.0.0": block}},
+        filename="derived.yaml",
+    )
+
+
+ABC = [
+    SchemaColumn(name="a", type="string", expr="@source: a.path", use_case="dimension"),
+    SchemaColumn(name="b", type="string"),
+    SchemaColumn(name="c", type="integer"),
+]
+
+
 class TestApplyDerived:
-    def test_override_existing_column(self, tmp_schema):
-        base = [
-            SchemaColumn(name="x", type="string"),
-            SchemaColumn(name="y", type="integer"),
-        ]
-        derived_path = tmp_schema(
-            [
-                {"name": "x", "type": "string", "attribute": ["lowcardinality"]},
-            ],
-            filename="derived.yaml",
+    def test_narrows_the_base_to_the_selection(self, tmp_versioned_schema):
+        path = _derived(tmp_versioned_schema, [{"name": "a"}, {"name": "c"}])
+        result = SchemaLoader.apply_derived_schema(ABC, path)
+        assert [c.name for c in result] == ["a", "c"]
+
+    def test_the_selection_order_wins(self, tmp_versioned_schema):
+        path = _derived(tmp_versioned_schema, [{"name": "c"}, {"name": "a"}])
+        result = SchemaLoader.apply_derived_schema(ABC, path)
+        assert [c.name for c in result] == ["c", "a"]
+
+    def test_index_overrides_the_use_case(self, tmp_versioned_schema):
+        path = _derived(tmp_versioned_schema, [{"name": "a", "index": "exact_match"}])
+        result = SchemaLoader.apply_derived_schema(ABC, path)
+        assert result[0].use_case == "exact_match"
+
+    def test_index_none_keeps_the_column_and_drops_the_index(self, tmp_versioned_schema):
+        path = _derived(tmp_versioned_schema, [{"name": "a", "index": "none"}])
+        result = SchemaLoader.apply_derived_schema(ABC, path)
+        assert result[0].name == "a"
+        assert result[0].use_case is None
+
+    def test_expr_resolves_from_the_base(self, tmp_versioned_schema):
+        # expr is the directive dfe-loader reads out of the column comment, so
+        # a selection must carry it through untouched.
+        path = _derived(tmp_versioned_schema, [{"name": "a", "index": "range"}])
+        result = SchemaLoader.apply_derived_schema(ABC, path)
+        assert result[0].expr == "@source: a.path"
+
+    def test_a_name_the_base_does_not_define_is_refused(self, tmp_versioned_schema):
+        path = _derived(tmp_versioned_schema, [{"name": "nope"}])
+        with pytest.raises(SchemaLoadError, match="does not define"):
+            SchemaLoader.apply_derived_schema(ABC, path)
+
+    def test_overriding_anything_but_index_is_refused(self, tmp_versioned_schema):
+        path = _derived(tmp_versioned_schema, [{"name": "a", "type": "integer"}])
+        with pytest.raises(SchemaLoadError, match="resolves from the base"):
+            SchemaLoader.apply_derived_schema(ABC, path)
+
+    def test_a_missing_file_is_refused(self, tmp_path):
+        with pytest.raises(SchemaLoadError, match="not found"):
+            SchemaLoader.apply_derived_schema(ABC, tmp_path / "missing.yaml")
+
+    def test_an_empty_selection_is_refused(self, tmp_versioned_schema):
+        path = _derived(tmp_versioned_schema, [])
+        with pytest.raises(SchemaLoadError, match="non-empty 'select'"):
+            SchemaLoader.apply_derived_schema(ABC, path)
+
+
+class TestDerivedCapture:
+    def test_the_safety_net_is_on_unless_asked(self, tmp_versioned_schema):
+        path = _derived(tmp_versioned_schema, [{"name": "a"}])
+        assert SchemaLoader.load_derived_capture(path) == {
+            "capture_json": True,
+            "capture_raw": True,
+        }
+
+    def test_stage_three_turns_it_off(self, tmp_versioned_schema):
+        path = _derived(
+            tmp_versioned_schema,
+            [{"name": "a"}],
+            capture_json=False,
+            capture_raw=False,
         )
+        assert SchemaLoader.load_derived_capture(path) == {
+            "capture_json": False,
+            "capture_raw": False,
+        }
 
-        result = SchemaLoader.apply_derived_schema(base, derived_path)
-        assert len(result) == 2
-        x_col = next(c for c in result if c.name == "x")
-        assert x_col.attribute == ["lowcardinality"]
-
-    def test_preserves_order(self, tmp_schema):
-        base = [
-            SchemaColumn(name="a", type="string"),
-            SchemaColumn(name="b", type="string"),
-            SchemaColumn(name="c", type="string"),
-        ]
-        derived_path = tmp_schema(
-            [
-                {"name": "c", "type": "string", "use_case": "dimension"},
-            ],
-            filename="derived.yaml",
-        )
-
-        result = SchemaLoader.apply_derived_schema(base, derived_path)
-        assert [c.name for c in result] == ["a", "b", "c"]
-
-    def test_missing_derived_returns_base(self, tmp_path):
-        base = [SchemaColumn(name="x", type="string")]
-        result = SchemaLoader.apply_derived_schema(base, tmp_path / "missing.yaml")
-        assert result == base
+    def test_a_non_boolean_switch_is_refused(self, tmp_versioned_schema):
+        path = _derived(tmp_versioned_schema, [{"name": "a"}], capture_json="no")
+        with pytest.raises(SchemaLoadError, match="must be true or false"):
+            SchemaLoader.load_derived_capture(path)
 
 
 # ── apply_additional_fields ─────────────────────────────────────────
