@@ -16,7 +16,7 @@
 # ends so glibc(runtime) >= glibc(builder); pinned so neither tag can float and
 # invert that relationship silently. Re-resolve digests on a bump; Renovate
 # maintains them.
-ARG BUILDER_IMAGE=ghcr.io/astral-sh/uv:python3.12-trixie-slim@sha256:36cdfbf910c8b0f651355c013e7ece9678f4ecbf030a9fd9e6779de421189805
+ARG BUILDER_IMAGE=ghcr.io/astral-sh/uv:python3.14-trixie-slim@sha256:63018e7b676ef735eee4da4f9c2e7b5f5e3851fa023745d78ce91d1a099a35fd
 FROM ${BUILDER_IMAGE} AS builder
 
 WORKDIR /app
@@ -60,12 +60,12 @@ RUN /app/.venv/bin/python -c \
     && chown -R 1000:1000 /app/schemas /app/config /app/secrets /app/app-config
 
 # --- Runtime stage (aligned with hyperi-pylib deployment contract) ---
-# Digest-pinned runtime base (#106). python:3.12-slim is already Debian 13
+# Digest-pinned runtime base (#106). python:3.14-slim is already Debian 13
 # trixie. Kept literal (not an ARG) because scalo's validate_dockerfile matches
 # `FROM <base>` by substring, so ARG-parameterising the runtime base needs a
 # scalo-py change (hyperi-io/scalo-py#4) -- tracked, not worked around by deleting
 # the drift test.
-FROM python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea AS runtime
+FROM python:3.14-slim@sha256:caaf356f40667c496d405780745b9ac25771c189a51dfcc42430d531ea09f8a2 AS runtime
 
 # Static OCI labels (from contract)
 LABEL org.opencontainers.image.title="dfe-engine"

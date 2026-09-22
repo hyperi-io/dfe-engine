@@ -70,12 +70,12 @@ def engine_deployment_contract() -> DeploymentContract:
         metric_prefix="dfe",
         config_mount_path="/etc/dfe/config",
         image_registry=os.environ.get("DFE_DEPLOYMENT_IMAGE_REGISTRY") or _DEFAULT_IMAGE_REGISTRY,
-        python_version="3.12",
-        # Digest-pinned runtime base (#106). python:3.12-slim is already
+        python_version="3.14",
+        # Digest-pinned runtime base (#106). python:3.14-slim is already
         # Debian 13 trixie; pinned so the tag cannot float. The committed
         # Dockerfile's runtime FROM must match this literal (validate_dockerfile
         # substring check). Re-resolve on a bump; Renovate maintains it.
-        base_image="python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea",
+        base_image="python:3.14-slim@sha256:caaf356f40667c496d405780745b9ac25771c189a51dfcc42430d531ea09f8a2",
         entrypoint_args=["run"],
         secrets=[
             SecretGroupContract(
