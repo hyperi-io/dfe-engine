@@ -609,3 +609,88 @@ class TestIntegration:
         source_meta = SchemaLoader.load_version_metadata(versioned_schema)
         assert len(clone_meta["versions"]) == 2
         assert len(source_meta["versions"]) == 1
+
+
+class TestRetiredUseCaseWriteBack:
+    """A schema stored before the vocabulary rename saves back under the current name.
+
+    Reads translate a retired name either way. Without the write-back the old word
+    rides forward into every version derived from the one that carried it, so the
+    retired word never leaves a live gitops repo (dfe-engine#468).
+    """
+
+    @pytest.fixture
+    def retired_schema(self, tmp_path):
+        path = tmp_path / "retired.yaml"
+        yaml_dump(
+            {
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date": "2026-01-15",
+                        "type": "model",
+                        "summary": "Stored before the rename",
+                        "columns": [
+                            {"name": "event_time", "type": "datetime", "use_case": "range"},
+                            {"name": "message", "type": "text", "use_case": "fulltext"},
+                            {"name": "trace_id", "type": "uuid", "use_case": "bloom"},
+                        ],
+                    }
+                },
+            },
+            path,
+        )
+        return path
+
+    def test_a_clone_of_a_retired_version_carries_the_current_names(self, retired_schema):
+        SchemaManager.clone_version(retired_schema, "1.1.0", source_version="1.0.0")
+
+        written = yaml_load(retired_schema)["versions"]["1.1.0"]["columns"]
+        by_name = {col["name"]: col for col in written}
+
+        assert by_name["message"]["use_case"] == "word_search"
+        assert by_name["trace_id"]["use_case"] == "exact_match"
+        assert by_name["event_time"]["use_case"] == "range"
+
+    def test_the_version_that_was_stored_is_left_as_it_was(self, retired_schema):
+        """The rewrite lands on the version being written, never on history."""
+        SchemaManager.clone_version(retired_schema, "1.1.0", source_version="1.0.0")
+
+        stored = yaml_load(retired_schema)["versions"]["1.0.0"]["columns"]
+
+        assert [col["name"] for col in stored if col.get("use_case") == "fulltext"] == ["message"]
+
+    def test_a_new_version_written_from_retired_dicts_lands_current(self, retired_schema):
+        SchemaManager.add_version(
+            retired_schema,
+            "2.0.0",
+            [{"name": "body", "type": "text", "use_case": "text_search", "_field_type": "base"}],
+            type="model",
+        )
+
+        written = yaml_load(retired_schema)["versions"]["2.0.0"]["columns"]
+
+        assert written[0]["use_case"] == "substring_search"
+
+    def test_a_column_declaring_no_use_case_does_not_gain_a_null_one(self, tmp_path):
+        path = tmp_path / "plain.yaml"
+        yaml_dump(
+            {
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date": "2026-01-15",
+                        "type": "model",
+                        "summary": "No use cases",
+                        "columns": [{"name": "proc_id", "type": "integer"}],
+                    }
+                },
+            },
+            path,
+        )
+
+        SchemaManager.clone_version(path, "1.1.0", source_version="1.0.0")
+
+        written = yaml_load(path)["versions"]["1.1.0"]["columns"]
+
+        assert "use_case" not in written[0]

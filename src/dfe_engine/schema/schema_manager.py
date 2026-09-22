@@ -63,7 +63,7 @@ from typing import Any, Literal
 from dfe_engine.schema.models import MetaSchema
 from dfe_engine.schema.schema_loader import SchemaLoader, SchemaLoadError
 from dfe_engine.source.models import SchemaColumn
-from dfe_engine.source.type_registry import TypeRegistry
+from dfe_engine.source.type_registry import TypeRegistry, current_use_case
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 
@@ -101,6 +101,20 @@ def next_version_for_type(current: str, version_type: SchemaVersionType) -> str:
 # ── Column normalisation ───────────────────────────────────────────
 
 
+def _with_current_use_cases(columns: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """*columns* with a retired use case rewritten to its current name.
+
+    Reads translate a retired name either way; without this the old word rides
+    forward into every version derived from the one that carried it.
+    """
+    rewritten = []
+    for col in columns:
+        declared = col.get("use_case")
+        current = current_use_case(declared)
+        rewritten.append({**col, "use_case": current} if current != declared else col)
+    return rewritten
+
+
 def _normalise_columns(
     columns: list[dict[str, Any] | SchemaColumn],
 ) -> list[dict[str, Any]]:
@@ -117,7 +131,7 @@ def _normalise_columns(
             raise SchemaVersionError(
                 f"Column must be dict or SchemaColumn, got {type(col).__name__}"
             )
-    return result
+    return _with_current_use_cases(result)
 
 
 def _validate_columns(columns: list[dict[str, Any]]) -> None:
@@ -397,7 +411,7 @@ class SchemaManager:
             )
 
         # Deep-copy source columns
-        source_cols = copy.deepcopy(versions[src_ver].get("columns", []))
+        source_cols = _with_current_use_cases(copy.deepcopy(versions[src_ver].get("columns", [])))
 
         # Apply modifications
         if column_modifications:
