@@ -11,7 +11,20 @@
 Walks ``mappings.properties`` (Beat-style ``template.mappings`` or top-level
 ``mappings``), emits ``SchemaColumn`` rows aligned with YAML conventions such as
 snake_case ``name``, ``@source:`` dotted ``expr``, primitive ``type``,
-and heuristic ``use_case`` / ``attribute``.
+and the ``use_case`` / ``attribute`` the template declares.
+
+CARDINALITY IS NOT IN A TEMPLATE. An index template says a field is a ``keyword``;
+it never says whether that keyword holds three values or three million. So the
+importer sets a ``use_case`` only where the template states the intent - ``text``
+means word search, ``date`` and the numerics mean ranges, ``boolean`` and
+``constant_keyword`` are bounded by definition - and leaves a plain ``keyword``
+with no ``use_case`` and no ``lowcardinality`` for the field picker to decide.
+Guessing them produced ``LowCardinality(String)`` plus a ``set(0)`` index on
+``url.full`` and ``event.original``, which costs more than it saves, and a
+column that already looks decided never gets re-reviewed. Those columns carry
+``cardinality not measured`` in the comment, so a reader can tell an unanswered
+question from a column judged to need no index. Measuring it belongs where the
+data is - promote time and derived selection - not here.
 
 PHYSICAL-ONLY. The importer emits the source's PHYSICAL columns (the raw ES field
 path -> snake_case name, kept as ``@source:``); it does NOT bake in a naming
@@ -43,6 +56,10 @@ from dfe_engine.schema.models import SchemaColumn
 
 ELASTIC_IMPORT_FIELD_TYPE = "elastic_imported"
 
+# Marks a column whose index choice needs a cardinality the template cannot supply,
+# so a reader can tell it apart from one judged not to need an index.
+CARDINALITY_NOT_MEASURED = "cardinality not measured"
+
 
 class ElasticSchemaConversionError(ValueError):
     """Raised when JSON is not a usable Elastic template / mappings document."""
@@ -64,13 +81,26 @@ def _column_name_from_field_path(field_path: str) -> str:
     return "_".join(cleaned)
 
 
+def _index_suppressed(mapping: dict[str, Any]) -> bool:
+    """Elastic's own declaration that a field is not searchable or not aggregatable."""
+
+    return mapping.get("index") is False or mapping.get("doc_values") is False
+
+
 def _map_es_type(
     es_type: str,
 ) -> tuple[str, list[str], str]:
-    """Map Elasticsearch field type to DFE primitive, attributes, and use_case."""
+    """Map Elasticsearch field type to DFE primitive, attributes, and use_case.
+
+    Only the use cases the template actually DECLARES are set. A plain ``keyword``
+    covers both a three-value enum and an unbounded URL, so it gets neither
+    ``lowcardinality`` nor a ``use_case`` - the picker decides those.
+    """
 
     match es_type:
-        case "keyword" | "wildcard" | "constant_keyword" | "version":
+        case "keyword" | "wildcard" | "version":
+            return "string", [], ""
+        case "constant_keyword":
             return "string", ["lowcardinality"], "dimension"
         case "text" | "match_only_text":
             return "text", [], "word_search"
@@ -83,7 +113,7 @@ def _map_es_type(
         case "date" | "date_nanos":
             return "datetime", [], "range"
         case "ip":
-            return "ip", [], "dimension"
+            return "ip", [], "range"
         case "geo_point":
             return "geo_point", [], ""
         case "geo_shape":
@@ -148,6 +178,13 @@ def _walk_mapping(prefix: str, mapping: dict[str, Any], columns: list[SchemaColu
         primitive, attrs, use_case = _map_es_type(es_type)
         fp = prefix
         comment = f"Elasticsearch mapping type: {es_type}"
+        if _index_suppressed(mapping):
+            # `index: false` / `doc_values: false` is the template declaring the
+            # field is not searched or not grouped by - it beats the type default.
+            attrs = [attr for attr in attrs if attr != "lowcardinality"]
+            use_case = ""
+        elif primitive == "string" and not use_case:
+            comment = f"{comment} ({CARDINALITY_NOT_MEASURED})"
         columns.append(
             SchemaColumn(
                 name=_column_name_from_field_path(fp),
