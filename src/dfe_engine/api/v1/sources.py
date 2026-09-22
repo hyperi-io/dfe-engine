@@ -1291,7 +1291,7 @@ async def deploy_source_schema(
     settings: Settings,
     request: Request,
     version: str | None = Query(
-        None, description="Source version id (defaults to deployed_version)"
+        None, description="Source version id (defaults to the source's current version)"
     ),
     dry_run: bool = Query(
         False, description="Plan only: generate + validate the DDL without applying it"
@@ -1308,23 +1308,9 @@ async def deploy_source_schema(
     from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
     from dfe_engine.source.type_registry import TypeRegistry
 
-    try:
-        source = registry.get_source(name)
-    except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Source '{name}' not found"},
-        ) from None
-
-    version_id = version or source.runtime_version_id()
-    if version_id not in source.versions:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Version '{version_id}' not found for source '{name}'",
-            },
-        )
+    # Targets current: defaulting to the deployed version makes an unparameterised
+    # deploy a no-op that can never advance.
+    source, version_id = _resolve_source_version(registry, name, version, default_current=True)
 
     snap = source.versions[version_id]
     if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
