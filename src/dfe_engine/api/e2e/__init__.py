@@ -59,6 +59,7 @@ class SeedRequest(BaseModel):
         "seed_dfe_infra_user",
         "seed_dfe_viewers_user",
         "seed_source_with_transform",
+        "seed_three_transforms",
         "seed_library_artefact",
         "seed_app_scaling_state",
         "reset_all",

@@ -29,6 +29,17 @@ from dfe_engine.gitcrud.engine import set_path
 TRANSFORM_SERVICE = "dfe-transform-vrl"
 """The transform an instance of which IS a source's processing step."""
 
+TRANSFORM_ENGINES = (
+    ("vrl", "dfe-transform-vrl", None),
+    ("vector", "dfe-transform-vector", None),
+    ("elastic", "dfe-transform-elastic", "filebeat.cisco_ios.default"),
+)
+"""Engine name, its catalogued app, and the compiled-in program where it selects one.
+
+dfe-transform-elastic reads no authored files and picks its program by name, so it
+carries a variant while the two file-driven apps take None.
+"""
+
 TRANSFORM_FILE_SET = "transforms"
 """The file set the seeded program and the seeded library link land in."""
 
@@ -79,6 +90,16 @@ class Apps(Seed):
         changed = self._ensure_instance(TRANSFORM_SERVICE, source)
         changed |= self._ensure_transform_program(source)
         changed |= self._ensure_fetcher_instance(fetched)
+        return changed
+
+    def seed_transform_instances(self, sources: dict[str, str]) -> bool:
+        """Deploy one transform instance per entry, mapping source name to its app.
+
+        Returns True when anything was written, False when it was all already there.
+        """
+        changed = False
+        for source, service in sources.items():
+            changed |= self._ensure_instance(service, source)
         return changed
 
     def _ensure_fetcher_instance(self, source: str) -> bool:
