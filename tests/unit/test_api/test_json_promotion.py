@@ -629,6 +629,23 @@ class TestPromoteField:
         columns = {c["name"]: c for c in resp.json()["version"]["columns"]["items"]}
         assert preview.json()["diff"]["copy_directives"] == [columns["user_email"]["expr"]]
 
+    def test_dry_run_new_columns_match_json_paths_draft(
+        self, app, client: TestClient, admin_headers
+    ):
+        ch = _DiscoveryClient([("user.email", "String")])
+        app.dependency_overrides[get_clickhouse_client] = lambda: ch
+        discovered = client.get(f"/api/v1/schemas/{PROMO_SOURCE}/json-paths", headers=admin_headers)
+        assert discovered.status_code == 200
+        draft = next(p["column"] for p in discovered.json()["paths"] if p["path"] == "user.email")
+        preview = _promote(
+            client,
+            admin_headers,
+            {"json_path": "user.email", "data_type": "string"},
+            dry_run=True,
+        )
+        assert preview.status_code == 200
+        assert preview.json()["diff"]["new_columns"] == [draft]
+
     def test_dry_run_does_not_commit(self, client: TestClient, admin_headers):
         resp = _promote(
             client,

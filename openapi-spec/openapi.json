@@ -28523,7 +28523,7 @@
         "properties": {
           "new_columns": {
             "items": {
-              "$ref": "#/components/schemas/dfe_engine__api__v1__schemas__SchemaColumn"
+              "$ref": "#/components/schemas/DraftColumn"
             },
             "type": "array",
             "title": "New Columns"
