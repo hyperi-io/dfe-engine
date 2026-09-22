@@ -73,7 +73,11 @@ class Sources(Seed):
         One per transform app, so a spec can assert the three side by side rather
         than the single vrl instance the other seeds share.
         """
-        return self._ensure_source(name, transform=SourceTransform(engine=engine, variant=variant))
+        return self._ensure_source(
+            name,
+            display_name=f"Filebeat {engine}",
+            transform=SourceTransform(engine=engine, variant=variant),
+        )
 
     def delete_all(self) -> None:
         """Clear every operator source definition. A no-op when no registry is configured.
@@ -91,7 +95,12 @@ class Sources(Seed):
             registry.delete_source(str(entry["source"]), created_by=SEED_ACTOR)
 
     def _ensure_source(
-        self, name: str, *, fetched: bool = False, transform: SourceTransform | None = None
+        self,
+        name: str,
+        *,
+        fetched: bool = False,
+        transform: SourceTransform | None = None,
+        display_name: str = "Seed Source",
     ) -> bool:
         """Create the source when absent. Existing definitions are left alone.
 
@@ -109,7 +118,7 @@ class Sources(Seed):
         registry.create_source_from_write(
             SourceWriteRequest(
                 source=name,
-                display_name="Seed Source",
+                display_name=display_name,
                 description="Playwright fixture source.",
                 match=None
                 if fetched
