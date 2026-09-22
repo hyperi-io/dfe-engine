@@ -16,6 +16,7 @@ from dfe_engine.source.models import (
     SourceHeader,
     SourceMatch,
     SourceSchema,
+    SourceTransform,
     SourceWriteRequest,
 )
 from dfe_engine.source.registry import SourceNotFoundError
@@ -66,6 +67,14 @@ class Sources(Seed):
             )
         return created
 
+    def seed_transform_source(self, name: str, engine: str, variant: str | None = None) -> bool:
+        """Seed a receiver-based source whose processing step is *engine*.
+
+        One per transform app, so a spec can assert the three side by side rather
+        than the single vrl instance the other seeds share.
+        """
+        return self._ensure_source(name, transform=SourceTransform(engine=engine, variant=variant))
+
     def delete_all(self) -> None:
         """Clear every operator source definition. A no-op when no registry is configured.
 
@@ -81,7 +90,9 @@ class Sources(Seed):
                 continue
             registry.delete_source(str(entry["source"]), created_by=SEED_ACTOR)
 
-    def _ensure_source(self, name: str, *, fetched: bool = False) -> bool:
+    def _ensure_source(
+        self, name: str, *, fetched: bool = False, transform: SourceTransform | None = None
+    ) -> bool:
         """Create the source when absent. Existing definitions are left alone.
 
         A source carries a version tree, and rewriting one would bump versions on
@@ -108,6 +119,7 @@ class Sources(Seed):
                 else None,
                 header=SourceHeader(),
                 schema_config=SourceSchema(),
+                transform=transform,
             ),
             created_by=SEED_ACTOR,
             description=f"e2e: seed source {name}",
