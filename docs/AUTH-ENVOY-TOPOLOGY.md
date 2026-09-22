@@ -211,4 +211,5 @@ depth:
 
 - The DFE auth design (JWT authority, RBAC group pivot, local-vs-OIDC merged) -
   auth design notes / `project_dfe_authz_standard` (agent memory).
-- `docs/HYPERDX-FORK-MAINTENANCE.md` - the embedded hyperdx fork.
+- The embedded hyperdx fork - the dfe-hyperdx repo, `docs/fork/` (README,
+  design, sync-cycle, leaving-upstream). It moved there with the fork itself.
