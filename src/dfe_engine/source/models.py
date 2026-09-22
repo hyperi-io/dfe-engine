@@ -33,6 +33,7 @@ from pydantic import (
 from dfe_engine.api.pagination import PaginatedResponseWithObjects, PathTree
 from dfe_engine.core_resources.yaml_resource_type import ResourceType
 from dfe_engine.source.engine_registry import EngineRegistry, InvalidEngineError
+from dfe_engine.source.type_registry import current_use_case
 from dfe_engine.transport import SourceTransport
 
 # _source naming: a Kubernetes DNS-1123 label that starts with a letter. A
@@ -213,6 +214,12 @@ class SchemaColumn(BaseModel):
         if v is None:
             return []
         return list(v)
+
+    @field_validator("use_case", mode="before")
+    @classmethod
+    def _adopt_current_use_case(cls, v: Any) -> Any:
+        """Read a schema stored under the retired vocabulary, and serialise it current."""
+        return current_use_case(v)
 
     def validate_against_registry(self, registry: Any) -> list[str]:
         """Validate this column against a TypeRegistry.

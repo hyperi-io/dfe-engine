@@ -36,6 +36,7 @@ from typing import Any
 from scalo.logger import logger
 
 from dfe_engine.source.models import SchemaColumn
+from dfe_engine.source.type_registry import current_use_case
 from dfe_engine.yaml_utils import yaml_load
 
 # Subdirectories of a dfe-schemas tree, wherever that tree is resolved from.
@@ -644,7 +645,9 @@ class SchemaLoader:
                 selected.append(base)
                 continue
             index = entry["index"]
-            use_case = None if index == "none" else index
+            # model_copy runs no validators, so the retired vocabulary is
+            # translated here rather than on the way into the model.
+            use_case = None if index == "none" else current_use_case(index)
             selected.append(base.model_copy(update={"use_case": use_case}))
 
         return selected
