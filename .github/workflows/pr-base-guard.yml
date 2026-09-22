@@ -1,0 +1,52 @@
+# Project:   DFE Engine
+# File:      .github/workflows/pr-base-guard.yml
+# Purpose:   Fail a pull request whose base is not main, where ci.yml never runs
+#
+# License:   BUSL-1.1
+# Copyright: (c) 2026 HYPERI PTY LIMITED
+
+name: PR base guard
+
+"on":
+  pull_request:
+    branches: ["**"]
+    types: [opened, reopened, synchronize, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-base:
+    name: PR base
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a base of main
+        # ci.yml fires pull_request only for a base of main and a skipped required check counts as satisfied, so a stacked PR reads green with nothing run.
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+
+          if [ "$BASE_REF" = "main" ]; then
+            echo "Base is main -- ci.yml runs Quality, Test, Build and Commit messages for this PR."
+            exit 0
+          fi
+
+          {
+            echo "### This PR has not been checked"
+            echo
+            echo "Base branch: \`$BASE_REF\`."
+            echo
+            echo "\`.github/workflows/ci.yml\` fires \`pull_request\` only for a base of \`main\`."
+            echo "This PR gets the branch \`push\` run instead, which plans \`run-checks=false\`,"
+            echo "so Quality, Test, Build and Commit messages all report \`skipped\` and the run"
+            echo "still concludes \`success\`. A skipped required check also counts as satisfied."
+            echo
+            echo "Retarget to main before review or merge: \`gh pr edit <number> --base main\`,"
+            echo "then push the branch so the \`pull_request\` run actually fires."
+            echo
+            echo "Stacking rules: see \`CONTRIBUTING.md\`, \"Stacked pull requests\"."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "::error title=PR base is not main::This PR targets '$BASE_REF', so ci.yml never ran -- Quality, Test, Build and Commit messages are skipped, not passed. Retarget to main and push before review or merge."
+          exit 1

@@ -11,6 +11,7 @@ name: CI
   push:
     branches: ["**"]
   pull_request:
+    # A PR based on any other branch gets no run here, and pr-base-guard.yml fails it so the absence is visible.
     branches: [main]
   workflow_dispatch:
     inputs:
