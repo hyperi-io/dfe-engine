@@ -25,6 +25,7 @@ from dfe_engine.api.deps import _registries
 from dfe_engine.settings import (
     APISettings,
     AuthSettings,
+    ClickHouseSettings,
     DFESettings,
     LocalAuthSettings,
     SchemasSettings,
@@ -50,6 +51,7 @@ def e2e_settings(tmp_path: Path) -> DFESettings:
         source=SourceSettings(sources_dir=str(tmp_path / "sources")),
         services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
         schemas=SchemasSettings(schemas_dir=str(tmp_path / "schemas")),
+        clickhouse=ClickHouseSettings(bootstrap_tables=False),
         auth=AuthSettings(
             enabled=True,
             auth_dir=str(tmp_path / "auth"),

@@ -325,6 +325,12 @@ def pytest_runtest_logreport(report):
         test_stats["test_files"][test_file]["total"] += 1
 
 
+# Markers whose tests talk to real ClickHouse / Kafka. In-process tests under
+# tests/e2e/ are auto-marked ``e2e`` but use TestClient and must NOT skip the
+# hang guards - a local CH/Redpanda otherwise wedges lifespan startup.
+REAL_INFRA_MARKERS = ("integration", "live")
+
+
 @pytest.fixture(autouse=True)
 def _no_clickhouse_bootstrap_hang(request):
     """Test-session guard 2/2: stop the app lifespan blocking on ClickHouse.
@@ -341,10 +347,10 @@ def _no_clickhouse_bootstrap_hang(request):
     ``ClickHouseSettings(bootstrap_tables=False)``; this is the session-wide
     backstop for any app fixture that forgets (test_alerts, test_services,
     test_deployments, test_fieldmaps, ... build their own settings). Integration
-    / e2e / live tests keep the REAL bootstrap - they run against a real CH
-    fixture and must exercise the true startup path.
+    / live tests keep the REAL bootstrap - they run against a real CH fixture
+    and must exercise the true startup path.
     """
-    if any(request.node.get_closest_marker(m) for m in ("integration", "e2e", "live")):
+    if any(request.node.get_closest_marker(m) for m in REAL_INFRA_MARKERS):
         yield
         return
 
@@ -378,7 +384,7 @@ def _no_kafka_broker_calls(request):
     unreachable. A test wanting the real adapter patches this name itself, and a
     test wanting a specific outcome injects its own ``admin=``.
     """
-    if any(request.node.get_closest_marker(m) for m in ("integration", "e2e", "live")):
+    if any(request.node.get_closest_marker(m) for m in REAL_INFRA_MARKERS):
         yield
         return
 

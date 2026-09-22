@@ -65,6 +65,19 @@ class TestSchemaRegistryCRUD:
         assert loaded.current == "1"
         assert loaded.path == "aws/cloudtrail"
 
+    def test_save_three_level_path_writes_yaml_beside_an_existing_directory(
+        self, registry, schemas_dir
+    ):
+        """Create meta/test/test as a YAML file even if meta/test/test is already a dir."""
+        colliding_dir = schemas_dir / "meta" / "test" / "test"
+        colliding_dir.mkdir(parents=True)
+        registry.save_schema(_minimal_meta("meta/test/test"))
+        yaml_file = schemas_dir / "meta" / "test" / "test.yaml"
+        assert yaml_file.is_file()
+        assert colliding_dir.is_dir()
+        loaded = registry.get_schema("meta/test/test")
+        assert loaded.current == "1"
+
     def test_save_flat_table_key(self, registry):
         ms = _minimal_meta("standalone")
         registry.save_schema(ms)

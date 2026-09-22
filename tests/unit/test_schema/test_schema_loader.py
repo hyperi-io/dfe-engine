@@ -9,6 +9,7 @@ from dfe_engine.schema.schema_loader import (
     _resolve_profiles_dir,
     _resolve_schemas_root,
     is_shipped_schema,
+    resolve_schema_yaml_path,
 )
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.yaml_utils import yaml_dump
@@ -175,6 +176,40 @@ class TestLoadProfile:
         assert "_json" in names
         assert "_uuid" in names
 
+    @pytest.mark.parametrize(
+        "profile_name",
+        [
+            "common-header/timeseries.yml",
+            "common-header/timeseries.yaml",
+            "timeseries.yml",
+        ],
+    )
+    def test_load_profile_strips_yaml_suffix(self, tmp_path, monkeypatch, profile_name):
+        """header.type may be stored as a filename, including .yml.
+
+        The resolver used to append .yaml blindly, so
+        common-header/timeseries.yml looked for timeseries.yml.yaml.
+        """
+        header_dir = tmp_path / "common-header"
+        header_dir.mkdir()
+        yaml_dump(
+            {"columns": [{"name": "_from_yml_ref", "type": "string"}]},
+            header_dir / "timeseries.yaml",
+        )
+        monkeypatch.setenv("DFE_SCHEMAS_DIR", str(tmp_path))
+
+        columns = SchemaLoader.load_profile(profile_name)
+        assert [c.name for c in columns] == ["_from_yml_ref"]
+
+    def test_custom_profiles_dir_strips_yml_suffix(self, tmp_path):
+        yaml_dump(
+            {"columns": [{"name": "x", "type": "string"}]},
+            tmp_path / "custom.yaml",
+        )
+        columns = SchemaLoader.load_profile("custom.yml", profiles_dir=tmp_path)
+        assert len(columns) == 1
+        assert columns[0].name == "x"
+
     def test_load_passthrough(self):
         columns = SchemaLoader.load_profile("passthrough")
         names = [c.name for c in columns]
@@ -191,6 +226,15 @@ class TestLoadProfile:
         with pytest.raises(SchemaLoadError, match="not found"):
             SchemaLoader.load_profile("nonexistent_profile")
 
+    @pytest.mark.parametrize(
+        "profile_name", ["", "   ", "common-header", "common-header/", ".yml", ".yaml"]
+    )
+    def test_blank_profile_name_is_not_resolved_as_dot_yaml(self, profile_name):
+        """An empty header.type must not look for a file named '.yaml'."""
+        with pytest.raises(SchemaLoadError, match="empty") as exc:
+            SchemaLoader.load_profile(profile_name)
+        assert "not found at" not in str(exc.value)
+
     def test_custom_profiles_dir(self, tmp_path):
         yaml_dump(
             {"columns": [{"name": "x", "type": "string"}]},
@@ -205,6 +249,33 @@ class TestLoadProfile:
         order_cols = SchemaLoader.get_order_by_columns(columns)
         assert order_cols[0] == "_timestamp_load"
         assert order_cols[1] == "_timestamp"
+
+
+# ── resolve_schema_yaml_path ────────────────────────────────────────
+
+
+class TestResolveSchemaYamlPath:
+    def test_a_directory_at_the_unsuffixed_path_does_not_shadow_the_yaml_file(self, tmp_path):
+        """meta/test/test can be a directory (parent of nested schemas) AND a file.
+
+        exists() is true for directories, so the resolver used to return the
+        directory and yaml_load failed with 'Is a directory'.
+        """
+        dest_dir = tmp_path / "meta" / "test" / "test"
+        dest_dir.mkdir(parents=True)
+        yaml_file = tmp_path / "meta" / "test" / "test.yaml"
+        yaml_dump({"columns": [{"name": "tags_marker", "type": "string"}]}, yaml_file)
+
+        resolved = resolve_schema_yaml_path(tmp_path, "meta/test/test")
+        assert resolved == yaml_file
+        assert resolved.is_file()
+
+    def test_yaml_suffix_is_appended_when_only_the_file_exists(self, tmp_path):
+        yaml_file = tmp_path / "meta" / "aws" / "cloudtrail.yaml"
+        yaml_file.parent.mkdir(parents=True)
+        yaml_file.write_text("columns: []\n")
+        resolved = resolve_schema_yaml_path(tmp_path, "meta/aws/cloudtrail")
+        assert resolved == yaml_file
 
 
 # ── apply_derived_schema ────────────────────────────────────────────
