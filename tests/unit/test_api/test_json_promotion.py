@@ -128,7 +128,8 @@ def make_api_settings(tmp_path: Path) -> DFESettings:
                         {
                             "name": "cloud_trail_event_tls_details_cipher_suite",
                             "type": "string",
-                            "expr": "@copy: _json.CloudTrailEvent.tlsDetails.cipherSuite",
+                            "expr": "@source: CloudTrailEvent.tlsDetails.cipherSuite",
+                            "_field_type": "promoted",
                         },
                     ],
                 }
@@ -323,7 +324,7 @@ class TestDiscoverJsonPaths:
         # verbatim -- no client-side ClickHouse type mapping.
         assert path0["column"]["name"] == "user_id"
         assert path0["column"]["type"] == "integer"
-        assert path0["column"]["expr"] == "@copy: _json.user.id"
+        assert path0["column"]["expr"] == "@source: user.id"
         assert path0["column"]["_field_type"] == "promoted"
         # Rows restricted to this source via its match rule.
         sql, params = ch.calls[0]
@@ -561,7 +562,7 @@ class TestPromoteField:
         assert src.json()["versions"][cur]["schema"]["meta_schema_version"] == "1.1.0"
         assert src.json()["versions"][cur]["header"]["type"] == "timeseries"
 
-    def test_committed_column_has_copy_directive(self, client: TestClient, admin_headers):
+    def test_committed_column_has_source_directive(self, client: TestClient, admin_headers):
         _promote(client, admin_headers, {"json_path": "user.email", "data_type": "string"})
         resp = client.get(
             f"/api/v1/schemas/definitions/{SCHEMA_PATH}/versions/columns",
@@ -569,8 +570,24 @@ class TestPromoteField:
             headers=admin_headers,
         )
         columns = {c["name"]: c for c in resp.json()["version"]["columns"]["items"]}
-        assert columns["user_email"]["expr"] == "@copy: _json.user.email"
+        assert columns["user_email"]["expr"] == "@source: user.email"
         assert columns["user_email"]["type"] == "string"
+        assert columns["user_email"]["_field_type"] == "promoted"
+
+    def test_preview_and_committed_column_carry_the_same_directive(
+        self, client: TestClient, admin_headers
+    ):
+        preview = _promote(
+            client, admin_headers, {"json_path": "user.email", "data_type": "string"}, dry_run=True
+        )
+        _promote(client, admin_headers, {"json_path": "user.email", "data_type": "string"})
+        resp = client.get(
+            f"/api/v1/schemas/definitions/{SCHEMA_PATH}/versions/columns",
+            params={"version": "1.1.0", "per_page": -1},
+            headers=admin_headers,
+        )
+        columns = {c["name"]: c for c in resp.json()["version"]["columns"]["items"]}
+        assert preview.json()["diff"]["copy_directives"] == [columns["user_email"]["expr"]]
 
     def test_dry_run_does_not_commit(self, client: TestClient, admin_headers):
         resp = _promote(
@@ -582,7 +599,7 @@ class TestPromoteField:
         assert resp.status_code == 200
         body = resp.json()
         assert body["schema_version"] is None
-        assert body["diff"]["copy_directives"] == ["@copy: _json.user.email"]
+        assert body["diff"]["copy_directives"] == ["@source: user.email"]
         assert any("ADD COLUMN" in stmt for stmt in body["diff"]["ddl"])
         # No new version was written.
         assert _schema_versions(client, admin_headers, "1.0.0") == ["1.0.0"]

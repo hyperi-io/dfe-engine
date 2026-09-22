@@ -10,8 +10,8 @@
 
 Discovers the dynamic paths inside a source's ``_json`` ClickHouse column and
 promotes selected paths into dedicated, typed schema columns. Each promoted
-column carries a ``@copy`` directive (see ``dfe_engine.source.expression``) so
-dfe-loader copies the value forward from ``_json`` on subsequent ingest.
+column carries an ``@source`` directive naming the bare record path (see
+``promoted_column_expr``) so dfe-loader fills it from the arriving record.
 
 Two responsibilities, kept separate so the column maths is pure and testable:
 
@@ -61,7 +61,7 @@ class DiscoveredPath:
     # type; check ``is_consistent`` before trusting it for a multi-type path.
     column_type: str | None = None
     column_attributes: list[str] = field(default_factory=list)
-    copy_expr: str = ""
+    column_expr: str = ""
 
 
 @dataclass
@@ -83,6 +83,8 @@ class PromotionOutcome:
     column_name: str | None = None
     data_type: str | None = None
     use_case: str | None = None
+    # Provenance shown in the API response -- the path inside the JSON column, not
+    # the column's directive.
     copy_cel: str | None = None
     error: str | None = None
     column: SchemaColumn | None = field(default=None)
@@ -109,9 +111,59 @@ def clickhouse_table_exists(client: Any, db: str, table: str) -> bool:
         return False
 
 
-def copy_cel_for_path(path: str) -> str:
-    """CEL path expression that reads ``path`` from the JSON column."""
+def json_column_path(path: str) -> str:
+    """Where a promoted path still lands in the JSON column (``_json.<path>``).
+
+    Provenance for humans and API responses only -- never the column's directive,
+    which reads the arriving record and not the stored JSON column.
+    """
     return f"{JSON_COLUMN}.{path}"
+
+
+def promoted_column_expr(path: str) -> str:
+    """The directive a promoted column carries -- ``@source`` on the bare path.
+
+    The single decision point for what a promoted column reads, so the discovery
+    preview and the written column cannot drift apart. ``@source`` is the only
+    fill directive dfe-loader parses for this shape, and the path is bare because
+    the loader reads the arriving record, where the field sits at ``path`` rather
+    than under ``_json``.
+    """
+    return ExpressionBuilder.source(path)
+
+
+def unreadable_path_reason(path: str) -> str | None:
+    """Why the loader would not read ``path`` back out of the column COMMENT.
+
+    The COMMENT is ``@source: <path> - <description>``, so ``" - "`` ends the path
+    and ``|`` splits off a fallback value
+    (dfe-loader/src/column_meta/mod.rs:342,402). Returns None when the path
+    survives the round trip.
+    """
+    if path != path.strip():
+        return "path has leading or trailing whitespace"
+    if "|" in path:
+        return "path contains '|', which the loader reads as a fallback separator"
+    if " - " in path:
+        return "path contains ' - ', which ends the directive in the column comment"
+    return None
+
+
+def promoted_path_from_column(column: MetaSchemaColumn) -> str | None:
+    """The JSON path a promoted column reads, or None when it is not a promotion.
+
+    ``_field_type: promoted`` is the marker, not the directive: a promoted column
+    and an ordinary header column both spell their fill rule ``@source``.
+    """
+    if getattr(column, "field_type", None) != PROMOTED_FIELD_TYPE:
+        return None
+    expr = getattr(column, "expr", None)
+    if not expr:
+        return None
+    result = ExpressionValidator.validate(expr)
+    if not result.valid or result.directive != "source" or not result.source_field:
+        return None
+    return result.source_field
 
 
 def ch_dynamic_type_to_primitive(ch_type: str) -> tuple[str, list[str]]:
@@ -170,22 +222,12 @@ def suggested_column_name(path: str, existing: set[str]) -> str:
 
 
 def promoted_paths(columns: list[MetaSchemaColumn]) -> dict[str, str]:
-    """Map already-promoted JSON paths to their column name.
-
-    Parses each column's ``expr`` for a ``@copy: _json.<path>`` directive.
-    """
+    """Map already-promoted JSON paths to their column name."""
     out: dict[str, str] = {}
-    prefix = f"{JSON_COLUMN}."
     for col in columns:
-        expr = getattr(col, "expr", None)
-        if not expr:
-            continue
-        result = ExpressionValidator.validate(expr)
-        if result.valid and result.directive == "copy" and result.copy_path:
-            json_path = result.copy_path
-            if json_path.startswith(prefix):
-                json_path = json_path[len(prefix) :]
-            out[json_path] = col.name
+        path = promoted_path_from_column(col)
+        if path is not None:
+            out[path] = col.name
     return out
 
 
@@ -194,11 +236,12 @@ def list_promoted_json_fields(
 ) -> list[dict[str, str]]:
     """Promoted columns as ``{name, key}`` entries for API responses.
 
-    ``key`` is the full copy source (e.g. ``_json.user.email``).
+    ``key`` is where the value also sits in the JSON column (e.g.
+    ``_json.user.email``).
     """
     paths = promoted_paths(columns)
     return [
-        {"name": col_name, "key": copy_cel_for_path(json_path)}
+        {"name": col_name, "key": json_column_path(json_path)}
         for json_path, col_name in sorted(paths.items(), key=lambda item: item[1])
     ]
 
@@ -356,7 +399,7 @@ def discover_paths(
             promoted_to=promoted.get(path),
             column_type=primitive,
             column_attributes=attributes,
-            copy_expr=ExpressionBuilder.copy(copy_cel_for_path(path)),
+            column_expr=promoted_column_expr(path),
         )
         if samples:
             item.samples = _fetch_samples(client, table, path, samples, match_sql, match_params)
@@ -510,6 +553,11 @@ def build_promotion_columns(
             )
             continue
 
+        unreadable = unreadable_path_reason(path)
+        if unreadable:
+            outcomes.append(PromotionOutcome(json_path=path, status="error", error=unreadable))
+            continue
+
         # Resolve the primitive type.
         if req.data_type:
             primitive, attributes = req.data_type, []
@@ -553,14 +601,14 @@ def build_promotion_columns(
         else:
             column_name = suggested_column_name(path, reserved)
 
-        copy_cel = copy_cel_for_path(path)
+        copy_cel = json_column_path(path)
         column = SchemaColumn(
             name=column_name,
             type=primitive,
             attribute=attributes,
             use_case=req.use_case,
-            expr=ExpressionBuilder.copy(copy_cel),
-            comment=f"Promoted from {JSON_COLUMN}.{path}",
+            expr=promoted_column_expr(path),
+            comment=f"Promoted from {copy_cel}",
             _field_type=PROMOTED_FIELD_TYPE,
         )
 
@@ -600,7 +648,7 @@ def promotion_preview_ddl(
 ) -> list[str]:
     """ALTER TABLE statements that would realise the promoted columns.
 
-    One ADD COLUMN per column (carrying the ``@copy`` directive in its COMMENT),
+    One ADD COLUMN per column (carrying the ``@source`` directive in its COMMENT),
     plus an ADD INDEX for any column with an index use_case.
     """
     from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator

@@ -17,9 +17,10 @@ from dfe_engine.services.schema.json_promotion_service import (
     PromotionRequest,
     build_promotion_columns,
     ch_dynamic_type_to_primitive,
-    copy_cel_for_path,
     discover_paths,
+    json_column_path,
     list_promoted_json_fields,
+    promoted_column_expr,
     promoted_paths,
     promotion_preview_ddl,
     qualified_table,
@@ -113,25 +114,56 @@ class TestSuggestedColumnName:
         assert suggested_column_name(case["path"], case["existing"]) == case["expected"]
 
 
-# ── copy_cel_for_path / qualified_table ──────────────────────
+# ── json_column_path / promoted_column_expr / qualified_table ─
 
 
-class CopyCelCase(TypedDict):
+class JsonColumnPathCase(TypedDict):
     id: str
     path: str
     expected: str
 
 
-COPY_CEL_CASES: list[CopyCelCase] = [
+JSON_COLUMN_PATH_CASES: list[JsonColumnPathCase] = [
     {"id": "nested", "path": "user.email", "expected": "_json.user.email"},
     {"id": "flat", "path": "id", "expected": "_json.id"},
 ]
 
 
-class TestCopyCelForPath:
-    @pytest.mark.parametrize("case", COPY_CEL_CASES, ids=[c["id"] for c in COPY_CEL_CASES])
-    def test_builds(self, case: CopyCelCase):
-        assert copy_cel_for_path(case["path"]) == case["expected"]
+class TestJsonColumnPath:
+    @pytest.mark.parametrize(
+        "case", JSON_COLUMN_PATH_CASES, ids=[c["id"] for c in JSON_COLUMN_PATH_CASES]
+    )
+    def test_builds(self, case: JsonColumnPathCase):
+        assert json_column_path(case["path"]) == case["expected"]
+
+
+class PromotedExprCase(TypedDict):
+    id: str
+    path: str
+    expected: str
+
+
+PROMOTED_EXPR_CASES: list[PromotedExprCase] = [
+    {"id": "nested", "path": "user.email", "expected": "@source: user.email"},
+    {"id": "flat", "path": "id", "expected": "@source: id"},
+    {
+        "id": "deep_nested_stays_bare",
+        "path": "probe.promote.value",
+        "expected": "@source: probe.promote.value",
+    },
+]
+
+
+class TestPromotedColumnExpr:
+    @pytest.mark.parametrize(
+        "case", PROMOTED_EXPR_CASES, ids=[c["id"] for c in PROMOTED_EXPR_CASES]
+    )
+    def test_builds_bare_source_directive(self, case: PromotedExprCase):
+        assert promoted_column_expr(case["path"]) == case["expected"]
+
+    def test_never_prefixes_the_json_column(self):
+        # The loader reads the arriving record, where the field is not under _json.
+        assert "_json" not in promoted_column_expr("user.email")
 
 
 class QualifiedTableCase(TypedDict):
@@ -164,25 +196,38 @@ class PromotedPathsCase(TypedDict):
     expected: dict[str, str]
 
 
+def make_promoted_column(name: str, path: str, **kwargs: object) -> MetaSchemaColumn:
+    """A promoted meta-schema column, exactly as the promote path writes one."""
+    return make_meta_schema_column(
+        name=name, expr=promoted_column_expr(path), _field_type="promoted", **kwargs
+    )
+
+
 PROMOTED_PATHS_CASES: list[PromotedPathsCase] = [
     {
-        "id": "copy_directive",
-        "columns": [make_meta_schema_column(name="user_email", expr="@copy: _json.user.email")],
+        "id": "promoted_column",
+        "columns": [make_promoted_column("user_email", "user.email")],
         "expected": {"user.email": "user_email"},
     },
     {
-        "id": "copy_without_prefix",
-        "columns": [make_meta_schema_column(name="uid", expr="@copy: user.id")],
+        "id": "flat_path",
+        "columns": [make_promoted_column("uid", "user.id")],
         "expected": {"user.id": "uid"},
     },
     {
-        "id": "non_copy_expr_ignored",
+        # A header column spells its fill rule @source too, so the marker decides.
+        "id": "header_source_column_ignored",
+        "columns": [make_meta_schema_column(name="foo", expr="@source: foo", _field_type="base")],
+        "expected": {},
+    },
+    {
+        "id": "unmarked_source_column_ignored",
         "columns": [make_meta_schema_column(name="foo", expr="@source: foo")],
         "expected": {},
     },
     {
         "id": "no_expr_ignored",
-        "columns": [make_meta_schema_column(name="bar")],
+        "columns": [make_meta_schema_column(name="bar", _field_type="promoted")],
         "expected": {},
     },
 ]
@@ -199,9 +244,9 @@ class TestPromotedPaths:
 class TestListPromotedJsonFields:
     def test_maps_to_name_and_key(self):
         cols = [
-            make_meta_schema_column(
-                name="cloud_trail_event_tls_details_cipher_suite",
-                expr="@copy: _json.CloudTrailEvent.tlsDetails.cipherSuite",
+            make_promoted_column(
+                "cloud_trail_event_tls_details_cipher_suite",
+                "CloudTrailEvent.tlsDetails.cipherSuite",
             )
         ]
         assert list_promoted_json_fields(cols) == [
@@ -313,7 +358,7 @@ BUILD_CASES: list[BuildCase] = [
         "id": "already_promoted",
         "existing": [
             _JSON_COL,
-            make_meta_schema_column(name="user_email", expr="@copy: _json.user.email"),
+            make_promoted_column("user_email", "user.email"),
         ],
         "requests": [make_promotion_request("user.email")],
         "path_types": {"user.email": ["String"]},
@@ -444,7 +489,7 @@ class TestBuildPromotionColumns:
         )
         assert _project(outcomes) == case["expected"]
 
-    def test_ok_column_carries_copy_directive_and_index_use_case(self):
+    def test_ok_column_carries_source_directive_and_index_use_case(self):
         outcomes = build_promotion_columns(
             [_JSON_COL],
             [make_promotion_request("user.email", use_case="exact_match")],
@@ -452,11 +497,30 @@ class TestBuildPromotionColumns:
             path_types={"user.email": ["String"]},
         )
         column = outcomes[0].column
-        assert column.expr == "@copy: _json.user.email"
+        assert column.expr == "@source: user.email"
         assert column.use_case == "exact_match"
         assert column.type == "string"
         assert column.comment == "Promoted from _json.user.email"
         assert column.field_type == "promoted"
+
+    @pytest.mark.parametrize(
+        ("path", "reason"),
+        [
+            ("user.email | now()", "fallback separator"),
+            ("user - email", "ends the directive"),
+            (" user.email", "leading or trailing whitespace"),
+        ],
+        ids=["pipe", "space_hyphen_space", "whitespace"],
+    )
+    def test_path_the_loader_could_not_read_back_is_refused(self, path: str, reason: str):
+        outcomes = build_promotion_columns(
+            [_JSON_COL],
+            [make_promotion_request(path, data_type="string")],
+            type_registry=TypeRegistry.default(),
+            path_types={},
+        )
+        assert outcomes[0].status == "error"
+        assert reason in outcomes[0].error
 
     def test_index_use_case_invalid_for_primitive_errors(self):
         # range is not a question a string column can be asked.
@@ -485,7 +549,7 @@ class TestPromotionPreviewDdl:
         statements = promotion_preview_ddl("filebeat", columns, db="dfe")
         joined = "\n".join(statements)
         assert "ALTER TABLE `dfe`.`filebeat` ADD COLUMN IF NOT EXISTS `user_email`" in joined
-        assert "@copy: _json.user.email" in joined
+        assert "COMMENT '@source: user.email - Promoted from _json.user.email'" in joined
         assert "ADD INDEX idx_user_email `user_email` TYPE bloom_filter" in joined
 
 
@@ -539,7 +603,7 @@ class TestDiscoverPaths:
         assert by_path["user.id"].column_type == "integer"
         assert by_path["user.email"].suggested_column_name == "user_email"
         assert by_path["user.email"].column_type == "string"
-        assert by_path["user.email"].copy_expr == "@copy: _json.user.email"
+        assert by_path["user.email"].column_expr == "@source: user.email"
 
     def test_json_match_field_targets_subcolumn(self):
         client = _RecordingClient(discover_rows=[("a", "String")])

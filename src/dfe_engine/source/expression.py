@@ -13,7 +13,6 @@ Directives:
     @captured: what as TYPE     Captured and cast to type
     @computed: expr             Computed from other fields during data prep
     @config: path               Mapping is configurable at runtime
-    @copy: _json.dotted.path    Copy a value forward from _json into a column
 
 Usage:
     from dfe_engine.source.expression import ExpressionValidator, ExpressionBuilder
@@ -43,7 +42,7 @@ from dataclasses import dataclass, field
 # Directive names
 # ---------------------------------------------------------------------------
 
-DIRECTIVES = frozenset({"source", "generated", "captured", "computed", "config", "copy"})
+DIRECTIVES = frozenset({"source", "generated", "captured", "computed", "config"})
 
 # ---------------------------------------------------------------------------
 # Regex patterns
@@ -72,9 +71,6 @@ _CAPTURED_AS_RE = re.compile(
     r"^(?P<what>.+?)\s+as\s+(?P<cast_type>\w+)$",
     re.IGNORECASE,
 )
-
-# @source nested field: field.nested.path
-_DOTTED_FIELD_RE = re.compile(r"^[\w][\w.]*$")
 
 # ClickHouse function call: func(...) or func()
 _FUNCTION_CALL_RE = re.compile(r"^\w+\s*\(.*\)$", re.DOTALL)
@@ -108,9 +104,6 @@ class ExprValidationResult:
 
     # Config
     config_path: str | None = None
-
-    # Copy (promotion) — dotted path into the _json column
-    copy_path: str | None = None
 
     @property
     def field(self) -> str | None:
@@ -288,26 +281,12 @@ def _validate_config(body: str, result: ExprValidationResult) -> None:
     result.config_path = body
 
 
-def _validate_copy(body: str, result: ExprValidationResult) -> None:
-    """Validate @copy directive body — a dotted path into the _json column."""
-    if not body:
-        result.valid = False
-        result.errors.append("@copy path is empty")
-        return
-    if not _DOTTED_FIELD_RE.match(body):
-        result.valid = False
-        result.errors.append(f"@copy path must be a dotted field reference: {body!r}")
-        return
-    result.copy_path = body
-
-
 _VALIDATORS = {
     "source": _validate_source,
     "generated": _validate_generated,
     "captured": _validate_captured,
     "computed": _validate_computed,
     "config": _validate_config,
-    "copy": _validate_copy,
 }
 
 
@@ -409,18 +388,6 @@ class ExpressionBuilder:
         """
         return f"@config: {path}"
 
-    @staticmethod
-    def copy(json_path: str) -> str:
-        """Build a @copy expression for a promoted JSON field.
-
-        Args:
-            json_path: Dotted path into the _json column (e.g. ``_json.user.email``).
-
-        Returns:
-            Expression string (e.g. ``@copy: _json.user.email``).
-        """
-        return f"@copy: {json_path}"
-
 
 # ---------------------------------------------------------------------------
 # Autocomplete data — for UI typeahead support
@@ -458,10 +425,5 @@ def list_directive_types() -> list[dict[str, str]]:
             "name": "config",
             "description": "Mapping is configurable at runtime",
             "syntax": "@config: path",
-        },
-        {
-            "name": "copy",
-            "description": "Copy a value forward from the _json column into a dedicated column",
-            "syntax": "@copy: _json.dotted.path",
         },
     ]

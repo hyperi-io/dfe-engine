@@ -260,9 +260,9 @@ class DraftColumn(BaseModel):
     )
     expr: str = Field(
         description=(
-            "DFE directive used as the column's expression. A '@copy: _json.<path>' "
-            "directive tells dfe-loader to copy the value forward from the _json column "
-            "on ingest (e.g. '@copy: _json.user.email')."
+            "DFE directive used as the column's expression. A promoted column carries "
+            "'@source: <path>' with the bare record path, which is what dfe-loader reads "
+            "to fill it on ingest (e.g. '@source: user.email')."
         )
     )
     comment: str | None = Field(
@@ -299,10 +299,10 @@ class JsonPathInfo(BaseModel):
     promoted_to: str | None = Field(
         default=None,
         description=(
-            "Name of the existing meta-schema column this path is already copied into (via a "
-            "'@copy' directive), or null if not yet promoted. Only ever populated when "
-            "discovering against a source that already has a meta_schema; always null while "
-            "discovering against the catch-all landing table."
+            "Name of the existing meta-schema column this path is already promoted into, or "
+            "null if not yet promoted. Only ever populated when discovering against a source "
+            "that already has a meta_schema; always null while discovering against the "
+            "catch-all landing table."
         ),
     )
     column: DraftColumn = Field(
@@ -361,7 +361,10 @@ class SampleRowsResponse(BaseModel):
 
         name: str = Field(description="Promoted column name in the meta-schema")
         key: str = Field(
-            description="Copy source path (e.g. ``_json.CloudTrailEvent.tlsDetails.cipherSuite``)"
+            description=(
+                "Where the promoted value also sits in the JSON column "
+                "(e.g. ``_json.CloudTrailEvent.tlsDetails.cipherSuite``)"
+            )
         )
 
     source_name: str = Field(description="The source these rows were sampled for.")
@@ -395,7 +398,7 @@ class SampleRowsResponse(BaseModel):
         default_factory=list,
         description=(
             "JSON paths already promoted on the source version's meta-schema "
-            "(empty when the version has no meta_schema or no @copy columns)"
+            "(empty when the version has no meta_schema or no promoted columns)"
         ),
     )
 
@@ -473,7 +476,10 @@ class PromoteResult(BaseModel):
     column_name: str | None = None
     data_type: str | None = None
     use_case: str | None = None
-    copy_cel: str | None = None
+    copy_cel: str | None = Field(
+        default=None,
+        description="Where the value also sits in the JSON column (e.g. '_json.user.email').",
+    )
     error: str | None = None
 
 
@@ -482,7 +488,13 @@ class SchemaDiff(BaseModel):
 
     new_columns: list[SchemaColumn]
     ddl: list[str] = Field(default_factory=list, description="ALTER statements that would run")
-    copy_directives: list[str] = Field(default_factory=list)
+    copy_directives: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Directive each new column carries in its ClickHouse COMMENT "
+            "(e.g. '@source: user.email')."
+        ),
+    )
 
 
 class PromoteFieldResponse(BaseModel):
@@ -1607,6 +1619,7 @@ async def discover_json_paths(
         JSON_COLUMN,
         JsonPromotionError,
         discover_paths,
+        json_column_path,
     )
 
     try:
@@ -1657,8 +1670,8 @@ async def discover_json_paths(
                     name=d.suggested_column_name,
                     type=d.column_type or "json",
                     attribute=d.column_attributes,
-                    expr=d.copy_expr,
-                    comment=f"Promoted from _json.{d.path}",
+                    expr=d.column_expr,
+                    comment=f"Promoted from {json_column_path(d.path)}",
                     field_type=PROMOTED_FIELD_TYPE,
                 ),
                 coverage_pct=d.coverage_pct,
@@ -1766,8 +1779,9 @@ async def promote_field(
     """Promote JSON path(s) into dedicated typed columns.
 
     Creates a new schema version on the source's meta-schema (or on ``schema_path``
-    when the source has none), adding one column per path with a ``@copy`` directive
-    so dfe-loader copies the value forward. Core meta-schemas are forked to
+    when the source has none), adding one column per path with an ``@source`` directive
+    naming the bare record path, which is what dfe-loader reads to fill the column on
+    the next ingest. Existing rows are not backfilled. Core meta-schemas are forked to
     ``{source_name}_{schema_stem}`` under the same parent path before promoting.
     ``?dry_run=true`` returns the proposed diff and DDL without forking core schemas,
     adding meta-schema versions, or updating the source.

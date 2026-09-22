@@ -9741,7 +9741,7 @@
           "schemas"
         ],
         "summary": "Promote Field",
-        "description": "Promote JSON path(s) into dedicated typed columns.\n\nCreates a new schema version on the source's meta-schema (or on ``schema_path``\nwhen the source has none), adding one column per path with a ``@copy`` directive\nso dfe-loader copies the value forward. Core meta-schemas are forked to\n``{source_name}_{schema_stem}`` under the same parent path before promoting.\n``?dry_run=true`` returns the proposed diff and DDL without forking core schemas,\nadding meta-schema versions, or updating the source.",
+        "description": "Promote JSON path(s) into dedicated typed columns.\n\nCreates a new schema version on the source's meta-schema (or on ``schema_path``\nwhen the source has none), adding one column per path with an ``@source`` directive\nnaming the bare record path, which is what dfe-loader reads to fill the column on\nthe next ingest. Existing rows are not backfilled. Core meta-schemas are forked to\n``{source_name}_{schema_stem}`` under the same parent path before promoting.\n``?dry_run=true`` returns the proposed diff and DDL without forking core schemas,\nadding meta-schema versions, or updating the source.",
         "operationId": "promote_field_api_v1_schemas__source_name__promote_field_post",
         "parameters": [
           {
@@ -19907,7 +19907,7 @@
           "expr": {
             "type": "string",
             "title": "Expr",
-            "description": "DFE directive used as the column's expression. A '@copy: _json.<path>' directive tells dfe-loader to copy the value forward from the _json column on ingest (e.g. '@copy: _json.user.email')."
+            "description": "DFE directive used as the column's expression. A promoted column carries '@source: <path>' with the bare record path, which is what dfe-loader reads to fill it on ingest (e.g. '@source: user.email')."
           },
           "comment": {
             "anyOf": [
@@ -22005,7 +22005,7 @@
               }
             ],
             "title": "Promoted To",
-            "description": "Name of the existing meta-schema column this path is already copied into (via a '@copy' directive), or null if not yet promoted. Only ever populated when discovering against a source that already has a meta_schema; always null while discovering against the catch-all landing table."
+            "description": "Name of the existing meta-schema column this path is already promoted into, or null if not yet promoted. Only ever populated when discovering against a source that already has a meta_schema; always null while discovering against the catch-all landing table."
           },
           "column": {
             "$ref": "#/components/schemas/DraftColumn",
@@ -25334,7 +25334,8 @@
                 "type": "null"
               }
             ],
-            "title": "Copy Cel"
+            "title": "Copy Cel",
+            "description": "Where the value also sits in the JSON column (e.g. '_json.user.email')."
           },
           "error": {
             "anyOf": [
@@ -25366,7 +25367,7 @@
           "key": {
             "type": "string",
             "title": "Key",
-            "description": "Copy source path (e.g. ``_json.CloudTrailEvent.tlsDetails.cipherSuite``)"
+            "description": "Where the promoted value also sits in the JSON column (e.g. ``_json.CloudTrailEvent.tlsDetails.cipherSuite``)"
           }
         },
         "type": "object",
@@ -27284,7 +27285,7 @@
             },
             "type": "array",
             "title": "Promoted",
-            "description": "JSON paths already promoted on the source version's meta-schema (empty when the version has no meta_schema or no @copy columns)"
+            "description": "JSON paths already promoted on the source version's meta-schema (empty when the version has no meta_schema or no promoted columns)"
           }
         },
         "type": "object",
@@ -27875,7 +27876,8 @@
               "type": "string"
             },
             "type": "array",
-            "title": "Copy Directives"
+            "title": "Copy Directives",
+            "description": "Directive each new column carries in its ClickHouse COMMENT (e.g. '@source: user.email')."
           }
         },
         "type": "object",
