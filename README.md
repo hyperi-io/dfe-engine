@@ -5,6 +5,36 @@ Python library plus FastAPI server that turns operator intent into governed
 git commits (YAML config, Helm overlay values, ClickHouse DDL) which Argo CD
 reconciles into the cluster.
 
+## DFE is a data evolution platform, by design
+
+Data lands by default and it just works. You improve and evolve from there.
+
+Elastic and Splunk make you decide the shape before the data arrives, and
+charge you a reindex when you change your mind. Data lakes let you land
+anything and leave the queries slow and the schema work undone. DFE takes the
+landing behaviour of a lake and the query behaviour of a search platform, and
+lets you move between them one field at a time -- no migration, no reindex, no
+reingest.
+
+The path has three stages, and you are never asked to skip ahead:
+
+0. **Ground zero.** Send to dfe-receiver or pull with dfe-fetcher. It lands in
+   `main` as `_json`, sub-field queryable at reasonable performance
+   (`fred.nerk.frog` answers today). No schema, no decision. Many sources never
+   leave here, and that is a correct outcome.
+1. **A meta schema.** Name the fields worth a real column -- what you USE, not
+   everything you receive, because `_json` stays as the slower fallback.
+   Written at the use-case level so the SME who owns the data can write one
+   without being a ClickHouse or Kafka expert.
+2. **A DFE source.** Its own topic, its own table, a routing condition, an
+   optional transform, and usually a derived schema selecting from a large meta
+   schema.
+
+**[docs/data-evolution.md](docs/data-evolution.md) is the core document for this
+repo.** Diagrams of the path, the common header every table is built on, the
+`promote` workflow that grows a schema from data you can actually see, and the
+acceptance path that proves each stage. Read it before the architecture.
+
 ## A product suite, not an internal tool
 
 DFE is a product suite that any organisation deploys to run its own data-fusion
@@ -64,7 +94,7 @@ governed path, then reconciled to the cluster by Argo CD. The engine never
 deploys backing services and never touches the cluster directly.
 
 **Working here** -- entry points, the commands that prove a change, and what
-tends to bite: [CONTEXT.md](CONTEXT.md).
+tends to bite: the [Context](#context) section below.
 
 Full system map, invariants, and the docs tree:
 [docs/architecture.md](docs/architecture.md).
