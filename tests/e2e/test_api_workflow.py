@@ -34,6 +34,7 @@ from dfe_engine.api.deps import _registries
 from dfe_engine.settings import (
     APISettings,
     AuthSettings,
+    ClickHouseSettings,
     DFESettings,
     LocalAuthSettings,
     SchemasSettings,
@@ -76,6 +77,7 @@ ingestion_pipelines: {{}}
         source=SourceSettings(sources_dir=str(sources_dir)),
         services=ServicesSettings(config_yaml_dir=str(services_dir)),
         schemas=SchemasSettings(schemas_dir=str(schemas_dir)),
+        clickhouse=ClickHouseSettings(bootstrap_tables=False),
         auth=AuthSettings(
             enabled=True,
             auth_dir=str(auth_dir),
