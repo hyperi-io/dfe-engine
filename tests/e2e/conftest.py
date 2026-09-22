@@ -304,6 +304,22 @@ def post_ndjson(cfg: E2EConfig, bodies: list[dict]) -> None:
     _post(cfg, ndjson_body(bodies), "application/x-ndjson")
 
 
+def cluster_name(ch_client) -> str:
+    """The cluster this server declares, or empty on a single node.
+
+    Every DDL a test applies has to reach every replica, so this is read rather
+    than configured: a statement without ON CLUSTER lands on the one replica the
+    connection reached and the others never see it.
+    """
+    try:
+        rows = ch_client.query(
+            "SELECT substitution FROM system.macros WHERE macro = 'cluster'"
+        ).result_rows
+    except Exception:
+        return ""
+    return str(rows[0][0]) if rows else ""
+
+
 def drop_table(ch_client, db: str, name: str) -> None:
     """DROP a table on every replica of the cluster the server declares.
 
@@ -311,14 +327,7 @@ def drop_table(ch_client, db: str, name: str) -> None:
     and the next CREATE IF NOT EXISTS ON CLUSTER then makes an orphan with its own
     replication path there, so a third of the writes and reads go to it.
     """
-    cluster = ""
-    try:
-        rows = ch_client.query(
-            "SELECT substitution FROM system.macros WHERE macro = 'cluster'"
-        ).result_rows
-        cluster = str(rows[0][0]) if rows else ""
-    except Exception:
-        cluster = ""
+    cluster = cluster_name(ch_client)
     on_cluster = f" ON CLUSTER {cluster} SYNC" if cluster else ""
     ch_client.command(f"DROP TABLE IF EXISTS {db}.`{name}`{on_cluster}")
 
