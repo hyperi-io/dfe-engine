@@ -26,7 +26,7 @@ from dfe_engine.api.deps import (
     SourceReg,
     require_action,
 )
-from dfe_engine.api.errors import ErrorResponse
+from dfe_engine.api.errors import ErrorResponse, raise_exchange_http
 from dfe_engine.api.pagination import (
     PaginatedResponse,
     PaginationParams,
@@ -39,6 +39,12 @@ from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.core_resources.yaml_resource_type import (
     CORE_RESOURCE_MUTATION_MESSAGE,
     ResourceType,
+)
+from dfe_engine.exchange.models import MetaSchemaExport, MetaSchemaImportResult
+from dfe_engine.exchange.schemas import (
+    ExchangeError,
+    apply_meta_schema_export,
+    build_meta_schema_export,
 )
 from dfe_engine.git_identity import git_author
 from dfe_engine.schema.column_query import filter_columns
@@ -1033,6 +1039,92 @@ async def delete_meta_schema(
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
     audit_resource_change(user.user_id, "meta_schema", schema_path, "deleted")
+
+
+@router.get(
+    "/definitions/{schema_path:path}/export",
+    response_model=MetaSchemaExport,
+    response_model_exclude_none=True,
+    dependencies=[Depends(require_action(scopes_dict["schema_read"]))],
+)
+async def export_meta_schema(
+    schema_path: str,
+    user: CurrentUser,
+    registry: SchemaReg,
+    version: str | None = Query(
+        None,
+        description=(
+            "Single version to export. Omitted exports the whole history of a custom "
+            "schema, and pins a core one at its current version."
+        ),
+    ),
+) -> MetaSchemaExport:
+    """Export one meta schema as a document another deployment can import.
+
+    A ``resource_type: core`` schema exports as a REFERENCE -- its path and the
+    version it was read at -- and never as a copy of its columns: dfe-schemas ships
+    and updates those definitions, so an embedded copy would fork the read-only
+    schema on every import.
+    """
+    from dfe_engine.schema.registry import (
+        SchemaNotFoundError,
+        SchemaValidationError,
+        canonical_schema_path,
+    )
+
+    try:
+        canonical_path = canonical_schema_path(schema_path)
+    except SchemaValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+
+    try:
+        return build_meta_schema_export(registry, canonical_path, version=version)
+    except SchemaNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Schema {schema_path!r} not found"},
+        ) from None
+    except ExchangeError as exc:
+        raise_exchange_http(exc)
+
+
+@router.post(
+    "/import",
+    response_model=MetaSchemaImportResult,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        409: {
+            "model": ErrorResponse,
+            "description": (
+                "A meta schema already exists at the document's path, or that path holds a "
+                "core schema no import may overwrite (code conflict)"
+            ),
+        },
+    },
+    dependencies=[Depends(require_action(scopes_dict["schema_write"]))],
+)
+async def import_meta_schema(
+    body: MetaSchemaExport,
+    user: CurrentUser,
+    registry: SchemaReg,
+) -> MetaSchemaImportResult:
+    """Import a meta-schema document exported from another deployment.
+
+    A custom document is written through the schema registry, which commits it to
+    git. A core document names a schema dfe-schemas already put here: it is
+    RESOLVED against the local registry at its pinned version and nothing is
+    written, so the read-only definition is never forked.
+    """
+    try:
+        result = apply_meta_schema_export(registry, body, created_by=git_author(user))
+    except ExchangeError as exc:
+        raise_exchange_http(exc)
+    if result.action == "created":
+        audit_resource_change(user.user_id, "meta_schema", result.path, "created")
+    return result
 
 
 @router.post(

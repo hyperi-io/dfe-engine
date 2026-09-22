@@ -6,6 +6,8 @@ GET    /api/v1/sources/catalogue        -> The sources a deployed transform alre
 POST   /api/v1/sources/from-catalogue/{entry} -> Create a source from a catalogue entry
 GET    /api/v1/sources/{name}           -> Get source details
 GET    /api/v1/sources/{name}/flow      -> The stages its records travel, resolved
+GET    /api/v1/sources/{name}/export    -> One version as a portable bundle
+POST   /api/v1/sources/import           -> Apply a bundle from another deployment
 GET    /api/v1/sources/{name}/versions/{version}  -> Get one version snapshot
 GET    /api/v1/sources/{name}/columns   -> Composed schema columns for a version
 POST   /api/v1/sources/{name}/build     -> Build DDL from a version snapshot
@@ -39,11 +41,20 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from scalo.logger import logger
 
-from dfe_engine.api.deps import ClickHouseClient, CurrentUser, Settings, SourceReg, require_action
+from dfe_engine.api.deps import (
+    ClickHouseClient,
+    CurrentUser,
+    SchemaReg,
+    Settings,
+    SourceReg,
+    require_action,
+)
 from dfe_engine.api.errors import (
     CoreResourceConflictErrorResponse,
+    ErrorResponse,
     SourceCreateConflictResponse,
     SourceWriteConflictResponse,
+    raise_exchange_http,
 )
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.api.v1.apps import commit_overlay, remove_overlay
@@ -57,6 +68,9 @@ from dfe_engine.appmgmt import (
 )
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.exchange.models import SourceBundle, SourceImportResult
+from dfe_engine.exchange.schemas import ExchangeError
+from dfe_engine.exchange.sources import apply_source_bundle, build_source_bundle
 from dfe_engine.git_identity import git_author
 from dfe_engine.manifest import ManifestError
 from dfe_engine.settings import get_settings
@@ -173,6 +187,23 @@ class SourceResponse(BaseModel):
             "it stands. Empty where every write was hot, or where a GitOps controller "
             "rolls the pod itself."
         ),
+    )
+
+
+class SourceImportResponse(SourceImportResult):
+    """A bundle applied, plus what the apps now need to follow it."""
+
+    apps_synced: list[str] = Field(
+        default_factory=list,
+        description="Deploy-repo writes made so the apps follow the imported source",
+    )
+    apps_sync_error: str | None = Field(
+        default=None,
+        description="Why the apps could not be brought into step; reconcile-apps retries it",
+    )
+    restart_required: list[str] = Field(
+        default_factory=list,
+        description="One command per app whose running process cannot take this change in place",
     )
 
 
@@ -1572,6 +1603,36 @@ async def get_source_signals(
     )
 
 
+@router.get(
+    "/{name}/export",
+    response_model=SourceBundle,
+    response_model_exclude_none=True,
+    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
+)
+async def export_source(
+    name: str,
+    user: CurrentUser,
+    registry: SourceReg,
+    schema_registry: SchemaReg,
+    version: str | None = Query(
+        None, description="Version id to export; omitted takes the source's current"
+    ),
+) -> SourceBundle:
+    """Export one source version as a bundle another deployment can import.
+
+    The bundle carries the version's routing, schema and transform, each only
+    where the source declares it, plus one document per meta schema the schema
+    pins name. A pinned schema with ``resource_type: core`` travels as a
+    REFERENCE and a version pin rather than a copy of its columns, so importing
+    the bundle cannot fork the read-only definition dfe-schemas ships.
+    """
+    _resolve_source(name, registry)
+    try:
+        return build_source_bundle(registry, schema_registry, name, version=version)
+    except ExchangeError as exc:
+        raise_exchange_http(exc)
+
+
 @router.put(
     "/{name}",
     response_model=SourceResponse,
@@ -1836,6 +1897,61 @@ async def seed_sources(user: CurrentUser, registry: SourceReg):
     count = registry.seed_builtin_sources(overwrite=False)
     audit_resource_change(user.user_id, "source", "all", "seeded")
     return SeedResponse(seeded=count)
+
+
+@router.post(
+    "/import",
+    response_model=SourceImportResponse,
+    status_code=201,
+    responses={
+        409: {
+            "model": ErrorResponse,
+            "description": (
+                "The source name already exists here, or a meta schema the bundle carries "
+                "would land on an occupied path (code conflict)"
+            ),
+        },
+    },
+    dependencies=[Depends(require_action(scopes_dict["source_write"]))],
+)
+async def import_source(
+    body: SourceBundle,
+    user: CurrentUser,
+    registry: SourceReg,
+    schema_registry: SchemaReg,
+    request: Request,
+) -> SourceImportResponse:
+    """Import a source bundle exported from another deployment.
+
+    The bundle's meta-schema definitions are written first, then the source, both
+    through the registries that commit to git. A definition marked
+    ``resource_type: core`` is resolved against what dfe-schemas already put here
+    and never written, so the read-only schema is not forked.
+
+    Every check runs before the first write: a bundle applied halfway would leave
+    the source's schema pins with no definitions behind them.
+    """
+    try:
+        result = apply_source_bundle(
+            registry,
+            schema_registry,
+            body,
+            created_by=git_author(user),
+        )
+    except ExchangeError as exc:
+        raise_exchange_http(exc)
+
+    if result.action == "resolved":
+        return SourceImportResponse(**result.model_dump())
+
+    audit_resource_change(user.user_id, "source", result.source, "created")
+    apps = _reconcile_apps(request, user, registry)
+    return SourceImportResponse(
+        **result.model_dump(),
+        apps_synced=apps.changes,
+        apps_sync_error=apps.error,
+        restart_required=apps.restart_required,
+    )
 
 
 # ── Helpers ──────────────────────────────────────────────────

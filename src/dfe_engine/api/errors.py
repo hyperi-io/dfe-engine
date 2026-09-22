@@ -6,7 +6,7 @@ Pydantic 422 errors are reshaped into the same format with field-level detail.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, NoReturn
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -119,6 +119,32 @@ class ErrorCode:
     INVALID_SQL = "invalid_sql"
     INTERNAL_ERROR = "internal_error"
     SERVICE_UNAVAILABLE = "service_unavailable"
+    UNRESOLVED_REFERENCE = "unresolved_reference"
+
+
+def raise_exchange_http(exc: Exception) -> NoReturn:
+    """Map an import/export failure to its HTTP answer.
+
+    A conflict is 409, matching the core-resource guard's answer elsewhere. A
+    reference this deployment cannot resolve is its own code, because the fix is
+    to move dfe-schemas rather than to edit the document.
+    """
+    from dfe_engine.exchange.schemas import ExchangeConflictError, ExchangeUnresolvedError
+
+    if isinstance(exc, ExchangeConflictError):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": ErrorCode.CONFLICT, "message": str(exc)},
+        ) from exc
+    if isinstance(exc, ExchangeUnresolvedError):
+        raise HTTPException(
+            status_code=422,
+            detail={"code": ErrorCode.UNRESOLVED_REFERENCE, "message": str(exc)},
+        ) from exc
+    raise HTTPException(
+        status_code=422,
+        detail={"code": ErrorCode.VALIDATION_ERROR, "message": str(exc)},
+    ) from exc
 
 
 # ── Exception handlers ───────────────────────────────────────
