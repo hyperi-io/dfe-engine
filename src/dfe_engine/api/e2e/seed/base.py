@@ -203,6 +203,29 @@ class Seed:
                 pools=pools,
             )
             return True
+        if script == "seed_three_transforms":
+            # ------------------------------------------------------------
+            # One source per transform app, so a spec can assert all three
+            # side by side. The other seeds share a single vrl instance and
+            # cannot tell a per-app surface from a per-source one.
+            # ------------------------------------------------------------
+            from dfe_engine.api.e2e.seed.apps import TRANSFORM_ENGINES
+
+            bound: dict[str, str] = {}
+            for engine, service, variant in TRANSFORM_ENGINES:
+                name = f"filebeat{engine}"
+                self.sources.seed_transform_source(name, engine, variant)
+                bound[name] = service
+            instances_written = self.apps.seed_transform_instances(bound)
+            pools = self.apps.seed_pools()
+            logger.info(
+                "e2e seed",
+                script=script,
+                sources=sorted(bound),
+                instances_written=instances_written,
+                pools=pools,
+            )
+            return True
         if script == "seed_library_artefact":
             # The link needs a file set to resolve into, so the instance that
             # consumes the artefact is seeded before the artefact itself.

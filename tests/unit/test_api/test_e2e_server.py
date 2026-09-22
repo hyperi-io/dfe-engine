@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
+from dfe_engine.api.e2e.seed.apps import TRANSFORM_ENGINES
 from dfe_engine.settings import (
     APISettings,
     AuthSettings,
@@ -347,6 +348,55 @@ class TestSeedSourceWithTransform:
 
         assert _operator_sources(appmgmt_client, headers) == []
         assert _instances(appmgmt_client, headers, _VRL) == []
+
+
+class TestSeedThreeTransforms:
+    """One source per transform app, which the single-vrl seeds cannot express."""
+
+    def test_each_transform_app_gets_its_own_source_and_instance(self, appmgmt_client):
+        _seed(appmgmt_client, "seed_three_transforms")
+        headers = _admin(appmgmt_client)
+
+        for engine, service, _variant in TRANSFORM_ENGINES:
+            name = f"filebeat{engine}"
+            source = _get(appmgmt_client, f"{_SOURCES}/{name}", headers)
+            version = source["versions"][source["current"]]
+            assert version["transform"]["engine"] == engine
+            assert _instances(appmgmt_client, headers, service) == [name]
+
+    def test_the_file_driven_apps_take_no_variant_and_elastic_does(self, appmgmt_client):
+        _seed(appmgmt_client, "seed_three_transforms")
+        headers = _admin(appmgmt_client)
+
+        def variant_of(engine: str) -> str | None:
+            source = _get(appmgmt_client, f"{_SOURCES}/filebeat{engine}", headers)
+            return source["versions"][source["current"]]["transform"]["variant"]
+
+        # dfe-transform-elastic reads no authored files and selects a compiled-in
+        # program by name, so it is the only one carrying a variant.
+        assert variant_of("vrl") is None
+        assert variant_of("vector") is None
+        assert variant_of("elastic") == "filebeat.cisco_ios.default"
+
+    def test_seeding_twice_duplicates_nothing(self, appmgmt_client):
+        _seed(appmgmt_client, "seed_three_transforms")
+        _seed(appmgmt_client, "seed_three_transforms")
+        headers = _admin(appmgmt_client)
+
+        assert sorted(_operator_sources(appmgmt_client, headers)) == [
+            "filebeatelastic",
+            "filebeatvector",
+            "filebeatvrl",
+        ]
+
+    def test_reset_all_removes_all_three(self, appmgmt_client):
+        _seed(appmgmt_client, "seed_three_transforms")
+        _seed(appmgmt_client, "reset_all")
+        headers = _admin(appmgmt_client)
+
+        assert _operator_sources(appmgmt_client, headers) == []
+        for _engine, service, _variant in TRANSFORM_ENGINES:
+            assert _instances(appmgmt_client, headers, service) == []
         assert _instances(appmgmt_client, headers, "dfe-receiver") == []
         assert appmgmt_client.get(f"{_SOURCES}/{_SOURCE}", headers=headers).status_code == 404
 
