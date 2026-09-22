@@ -1461,6 +1461,41 @@ class TestFlowFields:
         assert updated.transport is None
         assert updated.archive is False
 
+    def test_a_put_that_sends_a_null_transform_releases_the_app(self):
+        """The only way to free a transform app slot short of deleting the source."""
+        existing = Source.model_validate(
+            {
+                "source": "auth",
+                "match": {"field": "_source", "value": "auth"},
+                "transform": {"engine": "vrl", "variant": "okta_system"},
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {"match": {"field": "_source", "value": "auth"}, "transform": None}
+        )
+
+        updated = apply_source_write_update(existing, write)
+
+        assert updated.transform is None
+
+    def test_a_put_that_omits_the_transform_keeps_it(self):
+        """Absence is not a request to unbind the app; only an explicit null is."""
+        existing = Source.model_validate(
+            {
+                "source": "auth",
+                "match": {"field": "_source", "value": "auth"},
+                "transform": {"engine": "vrl", "variant": "okta_system"},
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {"description": "doc-only edit", "match": {"field": "_source", "value": "auth"}}
+        )
+
+        updated = apply_source_write_update(existing, write)
+
+        assert updated.transform is not None
+        assert updated.transform.variant == "okta_system"
+
     def test_a_legacy_flat_document_carries_the_flow_fields_into_its_version(self):
         source = Source.model_validate(
             {
