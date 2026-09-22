@@ -157,7 +157,9 @@ minversion = "6.0"
 log_cli = true
 log_cli_level = "INFO"
 python_files = "test_*.py"
-addopts = "-vv -n 4 --cov=src/dfe_engine --cov-report=term-missing --cov-report=xml:cov.xml -m 'not integration and not live and not upstream'"
+# No worker count here on purpose: hyperi-ci derives it from the host it runs
+# on, and a number pinned here is correct on exactly one machine (hyperi-ci#152).
+addopts = "-vv --cov=src/dfe_engine --cov-report=term-missing --cov-report=xml:cov.xml -m 'not integration and not live and not upstream'"
 testpaths = ["tests"]
 asyncio_mode = "auto"
 # Permanent hang guard (pytest-timeout): fail ANY test running longer than
