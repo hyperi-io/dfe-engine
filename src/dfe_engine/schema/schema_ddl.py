@@ -176,6 +176,8 @@ def with_default_ttl(spec: TableSpec, days: int | None) -> TableSpec:
 # A use case names the question a column is asked; the template is the engine's
 # answer, and changes without the vocabulary changing.
 # GA text index (v26.2+) — deterministic inverted index, row-level filtering
+# ClickHouse rewrites a text index's GRANULARITY to 100000000 whatever is asked
+# for, so a read-back that disagrees with the 1 below is the server, not drift.
 _INDEX_TEMPLATES: dict[str, str] = {
     "dimension": "INDEX {name} {col} TYPE set(0) GRANULARITY 4",
     "range": "INDEX {name} {col} TYPE minmax GRANULARITY 4",
