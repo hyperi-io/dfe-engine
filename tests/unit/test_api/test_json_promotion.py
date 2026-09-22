@@ -592,6 +592,7 @@ class TestPromoteField:
         assert resp.status_code == 200
         body = resp.json()
         assert body["schema_version"] == "1.1.0"
+        assert "diff" not in body
         assert body["results"][0]["status"] == "ok"
         assert body["results"][0]["column_name"] == "user_email"
         assert body["results"][0]["copy_cel"] == "_json.user.email"
@@ -638,6 +639,7 @@ class TestPromoteField:
         assert resp.status_code == 200
         body = resp.json()
         assert body["schema_version"] is None
+        assert "diff" in body
         assert body["diff"]["copy_directives"] == ["@source: user.email"]
         assert any("ADD COLUMN" in stmt for stmt in body["diff"]["ddl"])
         # No new version was written.

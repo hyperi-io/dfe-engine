@@ -18,6 +18,7 @@ from typing import Any, Literal, cast
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 from dfe_engine.api.deps import (
     ClickHouseClient,
@@ -511,7 +512,11 @@ class PromoteFieldResponse(BaseModel):
         default=None, description="New schema version, or null on dry_run / no commit"
     )
     results: list[PromoteResult]
-    diff: SchemaDiff | None = Field(default=None, description="Populated only when dry_run=true")
+    diff: SchemaDiff | SkipJsonSchema[None] = Field(
+        default=None,
+        description="Populated only when dry_run=true",
+        exclude_if=lambda v: v is None,
+    )
 
 
 # ── Endpoints ───────────────────────────────────────────────

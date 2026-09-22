@@ -25769,14 +25769,8 @@
             "title": "Results"
           },
           "diff": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SchemaDiff"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "$ref": "#/components/schemas/SchemaDiff",
+            "title": "Diff",
             "description": "Populated only when dry_run=true"
           }
         },
