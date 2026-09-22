@@ -28,6 +28,7 @@ from pydantic import (
 
 from dfe_engine.api.pagination import PaginatedResponse, PaginatedResponseWithObjects, PathTree
 from dfe_engine.core_resources.yaml_resource_type import ResourceType
+from dfe_engine.source.type_registry import current_use_case
 
 
 def _reject_empty_str(value: Any, info: ValidationInfo) -> Any:
@@ -115,6 +116,12 @@ class SchemaColumn(BaseModel):
         if value == "":
             return None
         return value
+
+    @field_validator("use_case", mode="before")
+    @classmethod
+    def _adopt_current_use_case(cls, value: Any) -> Any:
+        """Read a schema stored under the retired vocabulary, and serve it current."""
+        return current_use_case(value)
 
     def to_yaml_dict(self) -> dict[str, Any]:
         """Serialize for YAML persistence."""

@@ -873,6 +873,12 @@ The conversion produces a Rule definition with:
 | `range` | `range` | Same |
 | `minmax` | `range` | Merged (both generated minmax) |
 
+No migration step is needed for a schema already stored under `fulltext`,
+`text_search` or `bloom`. The engine reads those three as their current names
+and writes the current name into the next version it saves, so the column keeps
+the index it was created with and an edit elsewhere in the schema no longer
+fails validation on a column nobody touched.
+
 ### Format Change
 
 ```

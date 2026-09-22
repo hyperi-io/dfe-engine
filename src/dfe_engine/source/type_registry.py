@@ -75,6 +75,29 @@ def split_use_case(declared: str | None) -> tuple[str | None, int | None]:
     return match.group("name"), int(arg) if arg else None
 
 
+# The names dfe-schemas retired when a use case stopped naming the ClickHouse
+# index and started naming the question. Each maps to the name that renders the
+# same index, so a translated column keeps the index it was created with.
+RETIRED_USE_CASES: dict[str, str] = {
+    "fulltext": "word_search",
+    "text_search": "substring_search",
+    "bloom": "exact_match",
+}
+
+
+def current_use_case(declared: Any) -> Any:
+    """*declared* under its current name, translating a retired one.
+
+    A schema stored before the rename carries the old word and the registry
+    rejects it, so every edit to that schema fails on a column the operator never
+    touched. Refusing an unknown use case stays the registry's job: anything this
+    cannot translate passes through.
+    """
+    if not isinstance(declared, str):
+        return declared
+    return RETIRED_USE_CASES.get(declared.strip(), declared)
+
+
 class TypeRegistry:
     """Canonical registry mapping primitives to ClickHouse types.
 
