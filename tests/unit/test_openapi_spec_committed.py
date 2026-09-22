@@ -7,9 +7,9 @@ contract the server does not implement. The workflow triggers on CHANGES to the
 file, so a spec that is never regenerated never fires the sync either: the drift
 is silent at both ends.
 
-``dfe-api`` is built from this file too (``dfe_engine/cli/auto/spec.py``), so a
-stale spec costs the CLI every command added since -- and a missing subcommand
-looks exactly like one nobody wrote.
+``dfe-api`` is NOT a consumer: it builds its command tree from
+``create_app().openapi()`` live, so it is immune to this file going stale
+(``dfe_engine/cli/auto/spec.py``). dfe-ui is the one that inherits the drift.
 
 ``info.version`` is dropped from the STRUCTURAL comparison deliberately. It comes
 from package metadata, which is the release version in a built artefact and
@@ -149,11 +149,7 @@ def test_committed_spec_carries_a_real_version(spec_file):
 
 @pytest.mark.parametrize("spec_file", [SPEC_FILE, E2E_SPEC_FILE], ids=["product", "e2e"])
 def test_committed_spec_version_matches_the_repo(spec_file):
-    """A spec left behind at an older version takes dfe-ui and the CLI with it.
-
-    The CLI is BUILT from this file (``dfe_engine/cli/auto/spec.py``), so a stale
-    copy costs it every command added since -- silently, because a missing
-    subcommand looks the same as one that was never written.
+    """A spec left behind at an older version takes dfe-ui's generated types with it.
 
     Compared against the VERSION file rather than package metadata, which reads
     0.0.0 in an editable install and would fail every local run.
