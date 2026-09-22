@@ -180,22 +180,16 @@ class TestInstanceCountFollowsMultiplicity:
         assert allowed is True
         assert reason == ""
 
-    def test_a_target_that_holds_one_takes_the_first_and_refuses_the_second(self, crud):
-        # Compose runs one container per app, so the first source binds it and
-        # the second would be stored and never run.
-        first = instances.additional_instance_allowed(
-            crud, instances.instance_of(FETCHER, "alpha"), 1
-        )
-        assert first == (True, "")
-
-        self._deploy(crud, FETCHER, "alpha")
+    def test_a_target_that_runs_none_refuses_the_first(self, crud):
+        # A Compose deployment whose engine renders no app config runs only the
+        # containers its committed file declares, so an instance written here
+        # would be stored and never run.
         allowed, reason = instances.additional_instance_allowed(
-            crud, instances.instance_of(FETCHER, "beta"), 1
+            crud, instances.instance_of(FETCHER, "alpha"), 0
         )
 
         assert allowed is False
-        assert "already bound to alpha" in reason
-        assert "needs Kubernetes" in reason
+        assert "runs no dfe-fetcher at all" in reason
 
     def test_rewriting_the_bound_instance_is_not_a_second_one(self, crud):
         self._deploy(crud, FETCHER, "alpha")

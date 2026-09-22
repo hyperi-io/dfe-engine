@@ -19,6 +19,13 @@ mounts read-only into the container. The base is the deployment's - brokers,
 warehouse credentials, the dead-letter spool - and never reaches the deploy repo;
 the overlay is the governed half and wins wherever the two name the same key.
 
+A per-config app gets one directory per INSTANCE - ``<service>/<instance>/`` -
+because it runs one container per source and they must not read each other's
+config. The names are also written to ``<service>.instances`` beside the env
+files, which is the one host-visible thing the engine writes on Compose: the
+deployer reads it to declare a container per instance, the way the layer2-apps
+ApplicationSet reads an Application per overlay on Kubernetes.
+
 Two facts make it generic. Which file an app reads is the manifest's
 ``consumes.config``, and how a rendered file set reaches the app is the file
 set's ``dir_setting`` (one directory) or ``entries_path`` (one entry per file),
@@ -49,7 +56,7 @@ from dfe_engine.gitcrud.engine import ResourceNotFoundError, set_path
 from dfe_engine.yaml_utils import deep_merge, yaml_dump_string, yaml_load
 
 from . import files, instances
-from .catalogue import APP_CATALOGUE, AppDescriptor, ConsumedFileSet, ReloadMode
+from .catalogue import APP_CATALOGUE, AppDescriptor, ConsumedFileSet, Multiplicity, ReloadMode
 from .scaling import DeployTarget
 
 CONFIG_ROOT = "config"
@@ -70,6 +77,13 @@ about. On Kubernetes the app's chart renders it; here it becomes a file.
 
 CUSTOM_ENV_SUFFIX = ".custom.env"
 """One file per app, named apart from the operator's own ``<app>.env``."""
+
+INSTANCE_INDEX_SUFFIX = ".instances"
+"""One file per per-config app, listing the instances it has rendered config for.
+
+The deployer declares a container per line. A file with no lines is an app with
+no source yet, which is a deployment that starts with none of that app running.
+"""
 
 RESTART_HINT = "restart required: docker compose restart {service}"
 """What an operator runs to apply a write the running app cannot take in place."""
@@ -94,16 +108,29 @@ class RenderedApp:
     changed: bool
     restart_required: bool
     custom_env_changed: bool = False
+    per_instance: bool = False
+    """Whether this app runs a container per instance, which names the container."""
+
+    created: bool = False
+    """Whether this instance is new here, so no container is running it yet."""
+
+    @property
+    def container(self) -> str:
+        """The Compose service carrying this render, which is what an operator acts on."""
+        if self.per_instance and self.instance:
+            return f"{self.service}-{self.instance}"
+        return self.service
 
     @property
     def restart_hint(self) -> str:
         """The command that applies this change, or empty when none is needed."""
-        # An `up` recreates the container, so it applies a config change too.
-        if self.custom_env_changed:
-            return RECREATE_HINT.format(service=self.service)
+        # An `up` recreates the container, so it applies a config change too, and
+        # it is also what CREATES the container a new instance has yet to get.
+        if self.custom_env_changed or self.created:
+            return RECREATE_HINT.format(service=self.container)
         if not self.restart_required:
             return ""
-        return RESTART_HINT.format(service=self.service)
+        return RESTART_HINT.format(service=self.container)
 
 
 def enabled(settings: Any) -> bool:
@@ -194,6 +221,21 @@ def _write_private(path: Path, content: str) -> None:
     tmp.replace(path)
 
 
+def _report_unwritable(what: str, directory: Path, error: OSError) -> None:
+    """Report a directory the deployer named and this engine cannot write.
+
+    The config render is what the containers read and must survive it: the env
+    directory is the operator's own checkout, so a mode or an owner there is
+    theirs to fix and must not cost every app its config.
+    """
+    logger.warning(
+        "the directory this deployment names for its app env files cannot be written",
+        wrote=what,
+        directory=str(directory),
+        error=str(error),
+    )
+
+
 def write_custom_env(settings: Any, service: str, env: dict[str, Any]) -> bool:
     """Write one app's custom environment where its container reads it.
 
@@ -215,8 +257,12 @@ def write_custom_env(settings: Any, service: str, env: dict[str, Any]) -> bool:
         return False
     if target.is_file() and target.read_text(encoding="utf-8") == rendered:
         return False
-    directory.mkdir(parents=True, exist_ok=True)
-    _write_private(target, rendered)
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        _write_private(target, rendered)
+    except OSError as exc:
+        _report_unwritable(target.name, directory, exc)
+        return False
     return True
 
 
@@ -302,32 +348,64 @@ def _apply_entries(
         set_path(config, inner, existing + derived)
 
 
-def _instance_for(gc: GitCrud, service: str) -> instances.AppInstance | None:
-    """The one overlay this app's single container runs from, or None.
+def _instances_for(gc: GitCrud, app: AppDescriptor) -> list[instances.AppInstance | None]:
+    """Every overlay this app runs a container from here, in a stable order.
 
-    Compose declares its services in a committed file and creates none at run
-    time, so a per-config app holds ONE deployment there and the engine caps it
-    at one. A second overlay would have two configs racing for one container, so
-    the first is used and the rest are named in the log rather than applied.
+    A per-config app runs one container per source, so each of its overlays is
+    rendered into a directory of its own and the deployer declares a container
+    per name. A single-deployment app runs one container whatever the deploy repo
+    holds, so a second overlay for it is a manifest and a repo that disagree: the
+    first is used and the rest are named in the log rather than silently applied.
+
+    ``None`` is an app with no overlay at all, which still renders the
+    deployment's own base config for a container the profile started idle.
     """
-    deployed = instances.list_instances(gc, service=service)
+    deployed = instances.list_instances(gc, service=app.service)
     if not deployed:
-        return None
+        return [None]
+    if app.multiplicity is Multiplicity.PER_CONFIG:
+        return list(deployed)
     if len(deployed) > 1:
         logger.warning(
             "more overlays than this target runs containers for; the rest are not rendered",
-            app=service,
+            app=app.service,
             rendered=deployed[0].instance,
             ignored=[i.instance for i in deployed[1:]],
         )
-    return deployed[0]
+    return [deployed[0]]
+
+
+def write_instance_index(settings: Any, service: str, names: list[str]) -> None:
+    """Record which instances of a per-config app have rendered config here.
+
+    The one host-visible thing the engine writes on Compose: the deployer reads
+    it to declare a container per name, the way the layer2-apps ApplicationSet
+    reads an Application per overlay on Kubernetes. Written even when empty, so a
+    deployment whose last source of this kind went away stops declaring one.
+    """
+    directory = custom_env_dir(settings)
+    if directory is None:
+        return
+    target = directory / f"{service}{INSTANCE_INDEX_SUFFIX}"
+    rendered = "".join(f"{name}\n" for name in names)
+    if target.is_file() and target.read_text(encoding="utf-8") == rendered:
+        return
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        target.write_text(rendered, encoding="utf-8")
+    except OSError as exc:
+        _report_unwritable(target.name, directory, exc)
 
 
 def _render_one(
-    gc: GitCrud, app: AppDescriptor, settings: Any, out_root: Path, mount_root: str
+    gc: GitCrud,
+    app: AppDescriptor,
+    instance: instances.AppInstance | None,
+    settings: Any,
+    out_root: Path,
+    mount_root: str,
 ) -> RenderedApp:
-    """Write one app's config file and file sets, and report what taking it costs."""
-    instance = _instance_for(gc, app.service)
+    """Write one instance's config file and file sets, and report what taking it costs."""
     doc: dict = {}
     if instance is not None:
         try:
@@ -335,12 +413,17 @@ def _render_one(
         except ResourceNotFoundError:
             doc = {}
 
+    # A per-config app's container reads its OWN instance directory, so two
+    # sources of one connector never share a config file.
+    per_instance = app.multiplicity is Multiplicity.PER_CONFIG and instance is not None
+    leaf = f"{app.service}/{instance.instance}" if per_instance else app.service
+
     config = deep_merge(_base_config(settings, app.service), _config_block(doc), replace_lists=True)
-    app_dir = out_root / app.service
+    app_dir = out_root / leaf
     # A directory this render creates has no container reading it yet, so the
     # first write of a stack's whole app config is never a restart.
     first_write = not app_dir.exists()
-    mount_dir = f"{mount_root}/{app.service}"
+    mount_dir = f"{mount_root}/{leaf}"
     changed_sets = _apply_file_sets(app, doc, config, app_dir, mount_dir)
 
     env_changed = write_custom_env(settings, app.service, custom_env(doc))
@@ -362,6 +445,8 @@ def _render_one(
         (config_changed and not app.hot_reload)
         or any(fs.reload is not ReloadMode.HOT for fs in changed_sets)
     )
+    # A new instance has no container yet, so the deployer creates one rather
+    # than restarting anything: `up` reads the index this render just wrote.
     return RenderedApp(
         service=app.service,
         instance=instance.instance if instance is not None else "",
@@ -369,6 +454,8 @@ def _render_one(
         changed=config_changed or bool(changed_sets) or env_changed,
         restart_required=restart,
         custom_env_changed=env_changed,
+        per_instance=per_instance,
+        created=per_instance and first_write,
     )
 
 
@@ -393,6 +480,21 @@ def renderable(settings: Any) -> list[AppDescriptor]:
     )
 
 
+def _prune_instance_dirs(app_root: Path, keep: list[str]) -> None:
+    """Drop the directories of instances this deployment no longer has.
+
+    A source deleted here has to take its rendered config with it: the deployer
+    reads the index to stop declaring the container, and a config left behind
+    would come back the moment anything re-declared one by that name.
+    """
+    if not app_root.is_dir():
+        return
+    wanted = set(keep)
+    for path in app_root.iterdir():
+        if path.is_dir() and path.name not in wanted:
+            shutil.rmtree(path)
+
+
 def render(gc: GitCrud, settings: Any) -> list[RenderedApp]:
     """Render every app's config from the deploy repo. Returns what was written.
 
@@ -405,7 +507,18 @@ def render(gc: GitCrud, settings: Any) -> list[RenderedApp]:
     out_root = _out_root(settings)
     mount_root = _mount_root(settings)
     out_root.mkdir(parents=True, exist_ok=True)
-    return [_render_one(gc, app, settings, out_root, mount_root) for app in renderable(settings)]
+    written: list[RenderedApp] = []
+    for app in renderable(settings):
+        found = _instances_for(gc, app)
+        written.extend(
+            _render_one(gc, app, instance, settings, out_root, mount_root) for instance in found
+        )
+        if app.multiplicity is not Multiplicity.PER_CONFIG:
+            continue
+        names = [i.instance for i in found if i is not None]
+        _prune_instance_dirs(out_root / app.service, names)
+        write_instance_index(settings, app.service, names)
+    return written
 
 
 def restart_hints(rendered: list[RenderedApp]) -> list[str]:
@@ -433,6 +546,7 @@ def render_and_report(gc: GitCrud | None, settings: Any) -> list[str]:
             "Rendered an app's config for its running container",
             app=entry.service,
             instance=entry.instance,
+            container=entry.container,
             restart=entry.restart_hint or "not needed",
         )
     return restart_hints(rendered)

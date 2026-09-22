@@ -83,10 +83,12 @@ def instance_ceiling(
     app becomes per-config by being declared one.
 
     A single-deployment app is one everywhere. A per-config app is unbounded on
-    Kubernetes, where each overlay renders its own Argo Application. Compose
-    declares its services in a committed file and creates none at run time, so it
-    holds ONE of each: one where the engine renders that container's config, and
-    zero where nothing does and the source would be saved and never run. A target
+    Kubernetes, where each overlay renders its own Argo Application, and equally
+    unbounded on Compose WHERE THE ENGINE RENDERS THE APP CONFIG: each instance
+    gets its own directory and its name goes to the deployer's instance index, so
+    the deployer declares a container per instance on the next up. Where nothing
+    renders it, Compose holds only the services its committed file declares and
+    the source would be saved and never run, which is a ceiling of zero. A target
     nobody named is not assumed to be Compose.
 
     Args:
@@ -99,7 +101,7 @@ def instance_ceiling(
         return 1
     if target is not DeployTarget.DOCKER:
         return None
-    return 1 if writes_app_config else 0
+    return None if writes_app_config else 0
 
 
 def support(app: AppDescriptor, target: DeployTarget) -> tuple[bool, str]:

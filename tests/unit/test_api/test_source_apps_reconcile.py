@@ -194,12 +194,13 @@ class TestTheReconcileReportsTheRestartsItsOwnWritesNeed:
 
     The regression these guard: a Compose stack deployed a transformed source,
     the engine wrote the instance overlay and rendered the transform's config
-    from it, and the deploy answered no restart - so the runner left the resident
-    container on whatever source it started with and no record ever moved.
+    from it, and the deploy answered nothing - so the operator ran nothing and no
+    record ever moved. A transform is per-config, so the source's instance has no
+    container until an ``up`` creates one from the index this render wrote.
     """
 
     TRANSFORM = "dfe-transform-elastic"
-    RESTART = f"restart required: docker compose restart {TRANSFORM}"
+    RECREATE = f"recreate required: docker compose up -d {TRANSFORM}-elreg"
 
     def _compose(self, app, tmp_path):
         """A deploy repo plus the app-config directory a Compose stack mounts."""
@@ -219,14 +220,13 @@ class TestTheReconcileReportsTheRestartsItsOwnWritesNeed:
         assert client.post("/api/v1/sources", json=body, headers=admin_headers).status_code == 201
         _registries["source"].set_deployed_version(name, "1.0.0")
 
-    def test_a_new_transform_instance_reports_its_restart(
+    def test_a_new_transform_instance_names_the_container_to_bring_up(
         self, client, app, admin_headers, tmp_path
     ):
         from dfe_engine.appmgmt import appconfig
 
         gc = self._compose(app, tmp_path)
-        # The render every deployment does at startup: it creates each app's
-        # directory, and a directory no container has read yet needs no restart.
+        # The render every deployment does at startup, before any source exists.
         appconfig.render_and_report(gc, app.state.settings)
         self._deployed_transform_source(client, admin_headers, "elreg")
 
@@ -234,7 +234,7 @@ class TestTheReconcileReportsTheRestartsItsOwnWritesNeed:
 
         assert resp.status_code == 200, resp.text
         assert resp.json()["changes"] == [f"{self.TRANSFORM}/elreg: deploy instance"]
-        assert resp.json()["restart_required"] == [self.RESTART]
+        assert resp.json()["restart_required"] == [self.RECREATE]
 
     def test_the_deploying_write_reports_it_only_once(self, client, app, admin_headers, tmp_path):
         from dfe_engine.appmgmt import appconfig
