@@ -163,9 +163,9 @@ def additional_instance_allowed(
     chart names Kubernetes objects from the component alone, so a second config
     would render the same object names and the two Argo Applications would fight
     over them under self-heal. A per-config app is unbounded on Kubernetes and
-    capped by the TARGET elsewhere: Compose declares its services in a committed
-    file and creates none at run time, so it runs one container per app and a
-    second source needing its own would be stored and never run.
+    capped by the TARGET elsewhere: a Compose deployment whose engine renders no
+    app config runs only the containers its committed file declares, so a source
+    needing its own would be stored and never run.
 
     Args:
         gc: The deploy repo.
@@ -185,12 +185,15 @@ def additional_instance_allowed(
         )
     if ceiling is None or len(deployed) < ceiling:
         return True, ""
+    if ceiling == 0:
+        return False, (
+            f"this deployment runs no {app.service} at all: nothing here renders an "
+            "app's config, so Compose holds only the services its committed file "
+            f"declares and a {app.service} for this source would never run."
+        )
     running = ", ".join(i.instance for i in deployed) or "none"
     return False, (
-        f"this deployment runs {ceiling} {app.service} and it is already bound to "
-        f"{running}. Compose declares its services in a committed file and creates "
-        "none at run time, so a second one needs Kubernetes, which runs one "
-        f"{app.service} per source."
+        f"this deployment runs {ceiling} {app.service} and it is already bound to {running}."
     )
 
 

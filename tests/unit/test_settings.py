@@ -871,3 +871,38 @@ class TestEverySettingIsRead:
             f"these now have readers and must leave KNOWN_UNREAD: {fixed}. "
             "A stale allowlist hides the next one."
         )
+
+    def test_every_documented_env_var_is_actually_read(self):
+        """A field with a reader but no env route is inert where env is the config.
+
+        The sibling above asks whether anything CONSUMES a field. This asks
+        whether the deployment can SET it: every settings docstring maps its
+        environment names, and a name missing from the override block resolves
+        to the default however the deployer sets it. That is how
+        DFE_DEPLOYMENT_APP_ENV_DIR left the engine unable to write an app's
+        custom environment on every Compose tier.
+        """
+        import re
+        from pathlib import Path
+
+        package = Path(__file__).resolve().parents[2] / "src" / "dfe_engine"
+        settings_py = package / "settings.py"
+        source = settings_py.read_text(encoding="utf-8")
+        documented = set(re.findall(r"^\s*- (DFE_[A-Z0-9_]+) -> ", source, re.MULTILINE))
+        assert documented, "parsed no documented env names -- the parser, not the code, is wrong"
+
+        # Either settings.py routes it, or a module reads the name for itself.
+        routed = set(re.findall(r'_get_env\(\s*"(DFE_[A-Z0-9_]+)"', source))
+        elsewhere = "\n".join(
+            path.read_text(encoding="utf-8", errors="replace")
+            for path in sorted(package.rglob("*.py"))
+            if path != settings_py
+        )
+        assert elsewhere, "read no package source -- the test setup, not the code, is wrong"
+        routed |= {name for name in documented if name in elsewhere}
+
+        missing = sorted(documented - routed)
+        assert not missing, (
+            f"documented but never read: {missing}. Route each through _get_env, "
+            "or drop it from the docstring so nobody sets a name that does nothing."
+        )

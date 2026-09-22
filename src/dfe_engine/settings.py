@@ -2003,6 +2003,8 @@ def _get_env_overrides() -> dict:
         overrides["deployment"]["app_config_base_dir"] = val.strip()
     if val := _get_env("DFE_DEPLOYMENT_APP_CONFIG_MOUNT"):
         overrides["deployment"]["app_config_mount"] = val.strip()
+    if val := _get_env("DFE_DEPLOYMENT_APP_ENV_DIR"):
+        overrides["deployment"]["app_env_dir"] = val.strip()
 
     # Transform validation
     if val := _get_env("DFE_TRANSFORM_VALIDATION_ENABLED"):

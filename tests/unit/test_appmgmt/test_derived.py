@@ -57,6 +57,21 @@ def _fetcher_source(
     return Source.model_validate(doc)
 
 
+def _account_source(name: str, client_id: str) -> Source:
+    """One CrowdStrike tenant as its own source, carrying its own connection."""
+    return Source.model_validate(
+        {
+            "source": name,
+            "state": "active",
+            "deployed_version": "1.0.0",
+            "fetcher": {
+                "source_type": "crowdstrike",
+                "config": {"connections": [{"id": client_id}]},
+            },
+        }
+    )
+
+
 def _put(crud, app, doc):
     crud.put(instances.HELMVARS_CLASS, app.overlay_name, doc, ACTOR, message="test: put")
 
@@ -227,6 +242,34 @@ class TestFetcherInstances:
 
         assert [c.action for c in changes] == ["sync"]
         assert get_path(changes[0].doc, "config.sources.crates_io.topic") == "crates-audit"
+
+    def test_two_sources_of_one_type_get_an_instance_each(self, crud, settings):
+        """Two accounts on one connector are two sources, so they are two deployments."""
+        registry = _Registry(
+            [
+                _account_source("crowdstrike-eu", "eu-client"),
+                _account_source("crowdstrike-us", "us-client"),
+            ]
+        )
+
+        changes = derived.plan(crud, registry, settings)
+
+        assert [(c.app.instance, c.action) for c in changes] == [
+            ("crowdstrike-eu", "deploy"),
+            ("crowdstrike-us", "deploy"),
+        ]
+        eu, us = (c.doc for c in changes)
+        # Distinct component: dfe-common.fullname takes the object names from it,
+        # so two instances sharing one would fight over the same Deployment.
+        assert (eu["component"], us["component"]) == (
+            "fetcher-crowdstrike-eu",
+            "fetcher-crowdstrike-us",
+        )
+        assert get_path(eu, "config.sources.crowdstrike.connections") == [{"id": "eu-client"}]
+        assert get_path(us, "config.sources.crowdstrike.connections") == [{"id": "us-client"}]
+        # instance_id keys the cursor store, so the two must not resume each other's.
+        assert get_path(eu, "config.instance_id") == "crowdstrike-eu"
+        assert get_path(us, "config.instance_id") == "crowdstrike-us"
 
     def test_in_step_means_no_changes(self, crud, settings):
         registry = _Registry([_fetcher_source(), _receiver_source()])
