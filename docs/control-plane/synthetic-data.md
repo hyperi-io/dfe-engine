@@ -36,8 +36,8 @@ synthesised, so it doubles as a scrub.
 Correlated columns must not draw independently (an sshd message under
 `appname: cron` reads as fake). A pack's version entry may declare
 `synthetic.scenarios` - one weighted scenario is drawn per event and pins the
-correlated columns together. Format reference: dfe-schemas
-`docs/meta-schema.md`.
+correlated columns together. Format reference: the dfe-schemas repo, at
+`docs/meta-schema.md` in that tree.
 
 ## API surface
 
