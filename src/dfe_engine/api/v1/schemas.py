@@ -1163,7 +1163,7 @@ async def get_schema_columns(
     return SourceSchemaColumnsResponse(
         resource_type=_meta_schema_resource_type(
             schema_registry,
-            meta_schema_ref=snap.meta_schema,
+            meta_schema_ref=snap.effective_schema().meta_schema,
         ),
         **page.model_dump(),
     )
