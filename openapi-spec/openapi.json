@@ -3818,10 +3818,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Source version id (defaults to deployed_version)",
+              "description": "Source version id (defaults to the source's current version)",
               "title": "Version"
             },
-            "description": "Source version id (defaults to deployed_version)"
+            "description": "Source version id (defaults to the source's current version)"
           },
           {
             "name": "dry_run",
