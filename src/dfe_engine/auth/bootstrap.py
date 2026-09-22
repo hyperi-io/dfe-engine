@@ -184,8 +184,8 @@ def bootstrap_auth(
         default_admin_name: Username for the local admin. Empty falls through
             to ``admin``.
         gitcrud: When gitops is enabled, the deploy-repo engine. The live store is
-            hydrated from it before the reconcile, a freshly created admin is
-            persisted back into it, and the break-glass hash and the
+            hydrated from it before the reconcile, an admin the reconcile created or
+            re-hashed is persisted back into it, and the break-glass hash and the
             admin-retirement fact are read from its governance settings.
         seed_accounts: Named accounts reconciled on every boot (config wins), so
             shared team logins survive a teardown+rebuild unchanged (dfe-infra #106).
@@ -255,15 +255,17 @@ def bootstrap_auth(
                 email=seeded_account_email(admin_name, recovery_email),
             ),
         )
-    created = _reconcile_seed_accounts(account_store, group_store, specs)
+    seeded = _reconcile_seed_accounts(account_store, group_store, specs)
 
     if retired:
         _disable_retired_admin(account_store, admin_name)
-    # Persist a freshly created admin so it is durable from the first start.
-    elif admin_name in created:
-        seeded = account_store.get(admin_name)
-        if seeded is not None:
-            account_durability.publish_direct(gitcrud, seeded, summary="seed account")
+    # Publish every boot that writes the admin's credential: an unpublished reset
+    # leaves the superseded hash in the deploy repo for hydration to put back, and
+    # the next boot resets it again.
+    elif admin_name in seeded:
+        admin = account_store.get(admin_name)
+        if admin is not None:
+            account_durability.publish_direct(gitcrud, admin, summary="seed account")
 
     # The recovery admin: its hash lives in the deploy repo, not in config.
     from dfe_engine.auth import breakglass
@@ -319,10 +321,15 @@ def _reconcile_seed_accounts(
     For each spec: create it if absent, else reset the password when the
     configured one no longer verifies and align its groups to the config. Group
     rosters are reconciled to match exactly -- added to the config's groups,
-    removed from any other. Returns the usernames created on this pass.
+    removed from any other.
+
+    Returns:
+        The usernames whose stored credential this pass wrote -- created or
+        reset. The caller mirrors those into the deploy repo, so the durable copy
+        tracks the hash the live store is actually serving.
     """
     known_groups = {g.name for g in group_store.list()}
-    created: list[str] = []
+    seeded: list[str] = []
 
     for spec in seed_accounts:
         wanted_groups = []
@@ -339,11 +346,12 @@ def _reconcile_seed_accounts(
             account_store.create(
                 spec.username, spec.password, groups=wanted_groups, email=spec.email
             )
-            created.append(spec.username)
+            seeded.append(spec.username)
             logger.info(f"Seeded named account '{spec.username}'")
         else:
             if spec.password and not account_store.verify_password(spec.username, spec.password):
                 account_store.reset_password(spec.username, spec.password)
+                seeded.append(spec.username)
                 logger.info(f"Reconciled password for seed account '{spec.username}'")
             updates: dict[str, object] = {}
             if set(account.groups) != set(wanted_groups):
@@ -368,4 +376,4 @@ def _reconcile_seed_accounts(
             elif spec.username in group.members:
                 group_store.remove_member(group.name, spec.username)
 
-    return created
+    return seeded

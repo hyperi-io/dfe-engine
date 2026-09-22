@@ -121,6 +121,26 @@ class TestAdminSeed:
 
         assert store.verify_password("admin", MINTED_ADMIN)
 
+    def test_the_hash_is_stable_across_boots_after_a_rotation(self, tmp_path: Path, crud):
+        """The reconciled hash reaches the deploy repo, so hydration stops re-minting.
+
+        Unpublished, the deploy repo keeps the pre-rotation hash; hydration puts it
+        back on the next boot and the reconcile resets it again, minting a fresh
+        bcrypt hash every boot and leaving the durable copy permanently superseded.
+        """
+        auth_dir = tmp_path / "auth"
+        rotated = MINTED_ADMIN + "-rotated"
+        bootstrap_auth(auth_dir, default_admin_password=MINTED_ADMIN, gitcrud=crud)
+
+        hashes = set()
+        for _ in range(3):
+            store, *_ = bootstrap_auth(auth_dir, default_admin_password=rotated, gitcrud=crud)
+            hashes.add(store.get("admin").password_hash)
+
+        assert len(hashes) == 1, "the admin hash is re-minted on every boot"
+        assert crud.get("accounts", "admin")["password_hash"] == hashes.pop()
+        assert store.verify_password("admin", rotated)
+
     def test_admin_and_named_seeds_share_the_one_path(self, tmp_path: Path):
         seeds = [SeedAccount(username="kay", password=MINTED_SEED, groups=["dfe-viewers"])]
 
