@@ -33,6 +33,7 @@ from dfe_engine.settings import (
     SourceSettings,
     get_settings,
 )
+from dfe_engine.source.models import SourceHeader, SourceSchema, SourceVersion
 from dfe_engine.yaml_utils import yaml_dump
 
 PROMO_SOURCE = "promo-source"
@@ -371,6 +372,44 @@ class TestDiscoverJsonPaths:
             headers=admin_headers,
         )
         assert resp.status_code == 404
+
+
+class TestSchemaColumns:
+    """The success path of GET /columns, which only a source with a meta_schema reaches."""
+
+    def test_meta_schema_is_reached_through_effective_schema(self):
+        """A SourceVersion holds its meta_schema nested, never as its own attribute.
+
+        Reading it directly raised an AttributeError that the endpoint returned as a
+        bare 500, and no test reached that line because every existing case 404s on
+        a source with no schema first.
+        """
+        version = SourceVersion(
+            date_time="2026-09-22",
+            header=SourceHeader(),
+            schema_config=SourceSchema(meta_schema="meta/promo.yaml"),
+        )
+
+        assert version.effective_schema().meta_schema == "meta/promo.yaml"
+        with pytest.raises(AttributeError):
+            _ = version.meta_schema
+
+    def test_a_version_with_no_schema_still_answers(self):
+        """effective_schema() defaults, so the caller never has to None-check it."""
+        assert (
+            SourceVersion(date_time="2026-09-22", header=SourceHeader())
+            .effective_schema()
+            .meta_schema
+            is None
+        )
+
+    def test_a_source_without_one_is_refused_before_the_meta_schema_is_read(
+        self, client, admin_headers
+    ):
+        resp = client.get(f"/api/v1/schemas/{NOMETA_SOURCE}/columns", headers=admin_headers)
+
+        assert resp.status_code == 404
+        assert resp.json()["code"] == "no_schema"
 
 
 class TestSampleRows:
