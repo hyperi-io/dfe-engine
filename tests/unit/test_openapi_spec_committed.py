@@ -7,12 +7,20 @@ contract the server does not implement. The workflow triggers on CHANGES to the
 file, so a spec that is never regenerated never fires the sync either: the drift
 is silent at both ends.
 
-``info.version`` is excluded from the comparison deliberately. It comes from
-package metadata, which is the release version in a built artefact and ``0.0.0``
-in an editable install, so comparing it would fail every local run while proving
-nothing -- it generates no TypeScript. What IS asserted is that the committed
-value is not that placeholder: a generator run on a versionless machine wrote
-``0.0.0`` over ``1.8.0`` and shipped it to every consumer of the spec.
+``dfe-api`` is built from this file too (``dfe_engine/cli/auto/spec.py``), so a
+stale spec costs the CLI every command added since -- and a missing subcommand
+looks exactly like one nobody wrote.
+
+``info.version`` is dropped from the STRUCTURAL comparison deliberately. It comes
+from package metadata, which is the release version in a built artefact and
+``0.0.0`` in an editable install, so comparing it there would fail every local
+run while proving nothing -- it generates no TypeScript.
+
+The version is asserted separately, against the ``VERSION`` file, which reads the
+same in both. Two things are checked: that the committed value is not the
+placeholder (a generator run on a versionless machine wrote ``0.0.0`` over
+``1.8.0`` and shipped it), and that it equals the repo's version (the specs sat
+at ``1.20.19`` against a ``VERSION`` of ``1.21.2`` with every test green).
 
 Regenerate with ``uv run python openapi-spec/generate.py``.
 """
@@ -25,9 +33,14 @@ import pytest
 from dfe_engine.api.app import create_app
 from dfe_engine.settings import load_settings, reset_settings
 
-SPEC_DIR = Path(__file__).resolve().parents[2] / "openapi-spec"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SPEC_DIR = REPO_ROOT / "openapi-spec"
 SPEC_FILE = SPEC_DIR / "openapi.json"
 E2E_SPEC_FILE = SPEC_DIR / "openapi.e2e.json"
+
+# Read from the file, never from package metadata: an editable install reports
+# 0.0.0, which is why the structural comparison drops the version at all.
+VERSION_FILE = REPO_ROOT / "VERSION"
 
 REGENERATE = "regenerate with: uv run python openapi-spec/generate.py"
 
@@ -134,6 +147,26 @@ def test_committed_spec_carries_a_real_version(spec_file):
     )
 
 
+@pytest.mark.parametrize("spec_file", [SPEC_FILE, E2E_SPEC_FILE], ids=["product", "e2e"])
+def test_committed_spec_version_matches_the_repo(spec_file):
+    """A spec left behind at an older version takes dfe-ui and the CLI with it.
+
+    The CLI is BUILT from this file (``dfe_engine/cli/auto/spec.py``), so a stale
+    copy costs it every command added since -- silently, because a missing
+    subcommand looks the same as one that was never written.
+
+    Compared against the VERSION file rather than package metadata, which reads
+    0.0.0 in an editable install and would fail every local run.
+    """
+    committed_version = json.loads(spec_file.read_text())["info"]["version"]
+    repo_version = VERSION_FILE.read_text().strip()
+
+    assert committed_version == repo_version, (
+        f"{spec_file.name} is at {committed_version!r} while VERSION says "
+        f"{repo_version!r} -- the spec was not regenerated. {REGENERATE}"
+    )
+
+
 def test_post_sources_409_documents_the_core_landing_conflict(committed):
     """POST /sources can 409 for the core landing's reserved name, not just a plain dup.
 
@@ -157,8 +190,10 @@ def test_committed_e2e_spec_matches_its_builder():
     """Synced to dfe-ui by the same workflow, so it goes stale the same way."""
     from dfe_engine.api.e2e_docs import build_e2e_spec
 
+    # Built at the REPO's version, never at the file's own: handing the rebuild
+    # the on-disk value makes the two sides agree by construction.
     on_disk = json.loads(E2E_SPEC_FILE.read_text())
-    rebuilt = build_e2e_spec(version=on_disk["info"]["version"])
+    rebuilt = build_e2e_spec(version=VERSION_FILE.read_text().strip())
 
     assert _drop_version(on_disk) == _drop_version(rebuilt), (
         f"openapi.e2e.json is stale -- {REGENERATE}"
