@@ -4213,6 +4213,72 @@
         ]
       }
     },
+    "/api/v1/sources/{name}/export": {
+      "get": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Export Source",
+        "description": "Export one source version as a bundle another deployment can import.\n\nThe bundle carries the version's routing, schema and transform, each only\nwhere the source declares it, plus one document per meta schema the schema\npins name. A pinned schema with ``resource_type: core`` travels as a\nREFERENCE and a version pin rather than a copy of its columns, so importing\nthe bundle cannot fork the read-only definition dfe-schemas ships.",
+        "operationId": "export_source_api_v1_sources__name__export_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Version id to export; omitted takes the source's current",
+              "title": "Version"
+            },
+            "description": "Version id to export; omitted takes the source's current"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceBundle-Output"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/sources/bulk": {
       "post": {
         "tags": [
@@ -4302,6 +4368,63 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/dfe_engine__api__v1__sources__SeedResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sources/import": {
+      "post": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Import Source",
+        "description": "Import a source bundle exported from another deployment.\n\nThe bundle's meta-schema definitions are written first, then the source, both\nthrough the registries that commit to git. A definition marked\n``resource_type: core`` is resolved against what dfe-schemas already put here\nand never written, so the read-only schema is not forked.\n\nEvery check runs before the first write: a bundle applied halfway would leave\nthe source's schema pins with no definitions behind them.",
+        "operationId": "import_source_api_v1_sources_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceBundle-Input"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceImportResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The source name already exists here, or a meta schema the bundle carries would land on an occupied path (code conflict)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -9325,6 +9448,129 @@
         ]
       }
     },
+    "/api/v1/schemas/definitions/{schema_path}/export": {
+      "get": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "Export Meta Schema",
+        "description": "Export one meta schema as a document another deployment can import.\n\nA ``resource_type: core`` schema exports as a REFERENCE -- its path and the\nversion it was read at -- and never as a copy of its columns: dfe-schemas ships\nand updates those definitions, so an embedded copy would fork the read-only\nschema on every import.",
+        "operationId": "export_meta_schema_api_v1_schemas_definitions__schema_path__export_get",
+        "parameters": [
+          {
+            "name": "schema_path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Schema Path"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Single version to export. Omitted exports the whole history of a custom schema, and pins a core one at its current version.",
+              "title": "Version"
+            },
+            "description": "Single version to export. Omitted exports the whole history of a custom schema, and pins a core one at its current version."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetaSchemaExport-Output"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/schemas/import": {
+      "post": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "Import Meta Schema",
+        "description": "Import a meta-schema document exported from another deployment.\n\nA custom document is written through the schema registry, which commits it to\ngit. A core document names a schema dfe-schemas already put here: it is\nRESOLVED against the local registry at its pinned version and nothing is\nwritten, so the read-only definition is never forked.",
+        "operationId": "import_meta_schema_api_v1_schemas_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MetaSchemaExport-Input"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetaSchemaImportResult"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A meta schema already exists at the document's path, or that path holds a core schema no import may overwrite (code conflict)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/schemas/elastic-converter": {
       "post": {
         "tags": [
@@ -9350,7 +9596,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn"
+                    "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn-Output"
                   },
                   "type": "array",
                   "title": "Response Elastic Converter Api V1 Schemas Elastic Converter Post"
@@ -17942,6 +18188,72 @@
         "title": "BulkActionResponse",
         "description": "Result of a bulk operation."
       },
+      "BundleSchema-Input": {
+        "properties": {
+          "pins": {
+            "$ref": "#/components/schemas/SourceSchema",
+            "description": "The source version's own schema block"
+          },
+          "header": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceHeader"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Common-header profile and version, when the version declares one"
+          },
+          "definitions": {
+            "items": {
+              "$ref": "#/components/schemas/MetaSchemaExport-Input"
+            },
+            "type": "array",
+            "title": "Definitions",
+            "description": "One document per meta schema the pins name, in pin order"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pins"
+        ],
+        "title": "BundleSchema",
+        "description": "A source's schema: the pins it declares and the definitions those pins name."
+      },
+      "BundleSchema-Output": {
+        "properties": {
+          "pins": {
+            "$ref": "#/components/schemas/SourceSchema",
+            "description": "The source version's own schema block"
+          },
+          "header": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceHeader"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Common-header profile and version, when the version declares one"
+          },
+          "definitions": {
+            "items": {
+              "$ref": "#/components/schemas/MetaSchemaExport-Output"
+            },
+            "type": "array",
+            "title": "Definitions",
+            "description": "One document per meta schema the pins name, in pin order"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pins"
+        ],
+        "title": "BundleSchema",
+        "description": "A source's schema: the pins it declares and the definitions those pins name."
+      },
       "CancelResponse": {
         "properties": {
           "task_id": {
@@ -22944,6 +23256,157 @@
         "title": "MetaSchemaCreateRequest",
         "description": "Create a new custom meta-schema (``resource_type`` is set by the server)."
       },
+      "MetaSchemaExport-Input": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "meta_schema",
+            "title": "Kind",
+            "default": "meta_schema"
+          },
+          "format": {
+            "type": "integer",
+            "title": "Format",
+            "description": "Document format version",
+            "default": 1
+          },
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Registry path (e.g. meta/cisco_ios)"
+          },
+          "resource_type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "custom"
+            ],
+            "title": "Resource Type",
+            "description": "core travels as a reference; custom travels in full",
+            "default": "custom"
+          },
+          "current": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current",
+            "description": "Current version (custom schemas only)"
+          },
+          "versions": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/SchemaVersion-Input"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Versions",
+            "description": "Full version history (custom schemas only)"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResourceReference"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Path and version pin (core schemas only)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "MetaSchemaExport",
+        "description": "One meta schema, in full or as a reference.\n\n``resource_type: core`` carries ``reference`` and no columns. Everything else\ncarries ``current`` plus the whole ``versions`` history, because nothing\nupstream defines it."
+      },
+      "MetaSchemaExport-Output": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "meta_schema",
+            "title": "Kind",
+            "default": "meta_schema"
+          },
+          "format": {
+            "type": "integer",
+            "title": "Format",
+            "description": "Document format version",
+            "default": 1
+          },
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Registry path (e.g. meta/cisco_ios)"
+          },
+          "resource_type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "custom"
+            ],
+            "title": "Resource Type",
+            "description": "core travels as a reference; custom travels in full",
+            "default": "custom"
+          },
+          "current": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current",
+            "description": "Current version (custom schemas only)"
+          },
+          "versions": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Versions",
+            "description": "Full version history (custom schemas only)"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResourceReference"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Path and version pin (core schemas only)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "MetaSchemaExport",
+        "description": "One meta schema, in full or as a reference.\n\n``resource_type: core`` carries ``reference`` and no columns. Everything else\ncarries ``current`` plus the whole ``versions`` history, because nothing\nupstream defines it."
+      },
       "MetaSchemaGetResponse": {
         "properties": {
           "resource_type": {
@@ -22994,6 +23457,47 @@
         ],
         "title": "MetaSchemaGetResponse",
         "description": "Meta-schema definition for a single requested version."
+      },
+      "MetaSchemaImportResult": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Registry path written or resolved"
+          },
+          "resource_type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "custom"
+            ],
+            "title": "Resource Type",
+            "description": "core or custom"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "created",
+              "resolved"
+            ],
+            "title": "Action",
+            "description": "created wrote a new custom schema; resolved matched a core one already present"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "Current version written, or the pin resolved"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "resource_type",
+          "action",
+          "version"
+        ],
+        "title": "MetaSchemaImportResult",
+        "description": "What an import did with one meta schema."
       },
       "MetaSchemaUpdateRequest": {
         "properties": {
@@ -23140,7 +23644,7 @@
       },
       "NonEmptyDict_str_SchemaVersion_": {
         "additionalProperties": {
-          "$ref": "#/components/schemas/SchemaVersion"
+          "$ref": "#/components/schemas/SchemaVersion-Output"
         },
         "type": "object"
       },
@@ -23162,9 +23666,15 @@
         },
         "type": "array"
       },
-      "NonEmptyList_SchemaColumn_": {
+      "NonEmptyList_SchemaColumn_-Input": {
         "items": {
-          "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn"
+          "$ref": "#/components/schemas/SchemaColumn-Input"
+        },
+        "type": "array"
+      },
+      "NonEmptyList_SchemaColumn_-Output": {
+        "items": {
+          "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn-Output"
         },
         "type": "array"
       },
@@ -26182,6 +26692,27 @@
         ],
         "title": "ResourceBucketModel"
       },
+      "ResourceReference": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Registry path in the exporting deployment"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "Version the exporting deployment read it at; the importer resolves this"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "version"
+        ],
+        "title": "ResourceReference",
+        "description": "A pre-supplied resource named and pinned, never copied."
+      },
       "ResourceSeriesResponse": {
         "properties": {
           "telemetry_name": {
@@ -27595,6 +28126,146 @@
         ],
         "title": "ScalingResponse"
       },
+      "SchemaColumn-Input": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Name of the column"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "description": "Type of the column"
+          },
+          "attribute": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attribute",
+            "description": "Attributes of the column"
+          },
+          "use_case": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Use Case",
+            "description": "Use case of the column"
+          },
+          "default": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default",
+            "description": "DEFAULT expression"
+          },
+          "order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order",
+            "description": "Position in ORDER BY / PRIMARY KEY"
+          },
+          "expr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expr",
+            "description": "Expression for the column"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment",
+            "description": "Comment for the column"
+          },
+          "_field_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field Type",
+            "description": "Column classification (e.g. base); stored as _field_type in YAML"
+          },
+          "ch_override": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ch Override",
+            "description": "Exact ClickHouse type \u2014 bypasses primitive mapping"
+          },
+          "codec": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codec",
+            "description": "Explicit CODEC contents \u2014 required to set a codec with ch_override"
+          },
+          "matched_searchable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Matched Searchable",
+            "description": "Column fields that matched the search query (API only)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "type"
+        ],
+        "title": "SchemaColumn",
+        "description": "A column in the schema."
+      },
       "SchemaColumnWrite": {
         "properties": {
           "name": {
@@ -28144,7 +28815,7 @@
         "title": "SchemaSummaryObject",
         "description": "Summary of a schema.\n\nAttributes:\n    name: Name of the schema.\n    current: Current version of the schema.\n    versions: List of versions.\n    updated_at: Last updated timestamp.\n    column_count: Number of columns in the schema."
       },
-      "SchemaVersion": {
+      "SchemaVersion-Input": {
         "properties": {
           "date": {
             "type": "string",
@@ -28162,7 +28833,39 @@
             "description": "Summary of the version"
           },
           "columns": {
-            "$ref": "#/components/schemas/NonEmptyList_SchemaColumn_",
+            "$ref": "#/components/schemas/NonEmptyList_SchemaColumn_-Input",
+            "description": "List of columns in the version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "type",
+          "summary",
+          "columns"
+        ],
+        "title": "SchemaVersion",
+        "description": "A version in the schema."
+      },
+      "SchemaVersion-Output": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date",
+            "description": "Date of the version"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "description": "Type of the version"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary",
+            "description": "Summary of the version"
+          },
+          "columns": {
+            "$ref": "#/components/schemas/NonEmptyList_SchemaColumn_-Output",
             "description": "List of columns in the version"
           }
         },
@@ -28795,6 +29498,368 @@
         ],
         "title": "SizeResponse"
       },
+      "SourceBundle-Input": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "source_bundle",
+            "title": "Kind",
+            "default": "source_bundle"
+          },
+          "format": {
+            "type": "integer",
+            "title": "Format",
+            "description": "Document format version",
+            "default": 1
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "The _source label"
+          },
+          "resource_type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "custom"
+            ],
+            "title": "Resource Type",
+            "description": "core travels as a reference; custom travels in full",
+            "default": "custom"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResourceReference"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Name and version pin (core sources only)"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "Version id of the snapshot this bundle carries"
+          },
+          "date_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Time",
+            "description": "Creation date of the exported snapshot; absent takes the import date"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "Human-readable display name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Source description"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "dormant",
+              "disabled"
+            ],
+            "title": "State",
+            "description": "Lifecycle state",
+            "default": "active"
+          },
+          "routing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceMatch"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Receiver match rule (receiver-based sources)"
+          },
+          "fetcher": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceFetcher"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fetcher origin (fetcher-based sources)"
+          },
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BundleSchema-Input"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Schema pins, header and the definitions they name"
+          },
+          "transform": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceTransform"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Transform stage, when the version declares one"
+          },
+          "transport": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "bus",
+                  "direct"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transport",
+            "description": "bus or direct; absent takes the importing deployment's default"
+          },
+          "archive": {
+            "type": "boolean",
+            "title": "Archive",
+            "description": "Keep the record as it arrived",
+            "default": false
+          },
+          "views": {
+            "items": {
+              "$ref": "#/components/schemas/SourceView"
+            },
+            "type": "array",
+            "title": "Views",
+            "description": "Naming-standard views the version exposes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "title": "SourceBundle",
+        "description": "One source version: its routing, its schema and its transform.\n\nA section is present only when that source has it -- a source with no\ntransform carries no ``transform`` key rather than an empty one. A\n``resource_type: core`` source carries ``reference`` and nothing else: the\nengine reconciles it from the deployment's own settings, so a copy would be\nrefused on import anyway."
+      },
+      "SourceBundle-Output": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "source_bundle",
+            "title": "Kind",
+            "default": "source_bundle"
+          },
+          "format": {
+            "type": "integer",
+            "title": "Format",
+            "description": "Document format version",
+            "default": 1
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "The _source label"
+          },
+          "resource_type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "custom"
+            ],
+            "title": "Resource Type",
+            "description": "core travels as a reference; custom travels in full",
+            "default": "custom"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResourceReference"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Name and version pin (core sources only)"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "Version id of the snapshot this bundle carries"
+          },
+          "date_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Time",
+            "description": "Creation date of the exported snapshot; absent takes the import date"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "Human-readable display name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Source description"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "dormant",
+              "disabled"
+            ],
+            "title": "State",
+            "description": "Lifecycle state",
+            "default": "active"
+          },
+          "routing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceMatch"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Receiver match rule (receiver-based sources)"
+          },
+          "fetcher": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceFetcher"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fetcher origin (fetcher-based sources)"
+          },
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BundleSchema-Output"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Schema pins, header and the definitions they name"
+          },
+          "transform": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceTransform"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Transform stage, when the version declares one"
+          },
+          "transport": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "bus",
+                  "direct"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transport",
+            "description": "bus or direct; absent takes the importing deployment's default"
+          },
+          "archive": {
+            "type": "boolean",
+            "title": "Archive",
+            "description": "Keep the record as it arrived",
+            "default": false
+          },
+          "views": {
+            "items": {
+              "$ref": "#/components/schemas/SourceView"
+            },
+            "type": "array",
+            "title": "Views",
+            "description": "Naming-standard views the version exposes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "title": "SourceBundle",
+        "description": "One source version: its routing, its schema and its transform.\n\nA section is present only when that source has it -- a source with no\ntransform carries no ``transform`` key rather than an empty one. A\n``resource_type: core`` source carries ``reference`` and nothing else: the\nengine reconciles it from the deployment's own settings, so a copy would be\nrefused on import anyway."
+      },
       "SourceDetailResponse": {
         "properties": {
           "source": {
@@ -29114,6 +30179,73 @@
         "type": "object",
         "title": "SourceHeader",
         "description": "Common schema header configuration."
+      },
+      "SourceImportResponse": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "The _source label written or resolved"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "created",
+              "resolved"
+            ],
+            "title": "Action",
+            "description": "created wrote the source; resolved matched a core one already present"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "Version id written, or the pin resolved"
+          },
+          "schemas": {
+            "items": {
+              "$ref": "#/components/schemas/MetaSchemaImportResult"
+            },
+            "type": "array",
+            "title": "Schemas",
+            "description": "One entry per meta schema the bundle carried"
+          },
+          "apps_synced": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Apps Synced",
+            "description": "Deploy-repo writes made so the apps follow the imported source"
+          },
+          "apps_sync_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apps Sync Error",
+            "description": "Why the apps could not be brought into step; reconcile-apps retries it"
+          },
+          "restart_required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Restart Required",
+            "description": "One command per app whose running process cannot take this change in place"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "action",
+          "version"
+        ],
+        "title": "SourceImportResponse",
+        "description": "A bundle applied, plus what the apps now need to follow it."
       },
       "SourceMappingSummary": {
         "properties": {
@@ -32314,7 +33446,7 @@
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn"
+              "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn-Output"
             },
             "type": "array",
             "title": "Items"
@@ -33068,7 +34200,7 @@
         ],
         "title": "TestResponse"
       },
-      "dfe_engine__schema__models__SchemaColumn": {
+      "dfe_engine__schema__models__SchemaColumn-Output": {
         "properties": {
           "name": {
             "type": "string",

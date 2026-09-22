@@ -405,6 +405,14 @@ class SourceRegistry:
         """
         return config_is_core(self._get_raw(source_name))
 
+    def validate_source(self, source: Source) -> None:
+        """Run every save-time check without writing, for a caller that writes more than one thing.
+
+        Raises:
+            SourceValidationError: The source would be refused by ``save_source``.
+        """
+        self._validate_save(source)
+
     def save_source(
         self,
         source: Source | dict[str, Any],
