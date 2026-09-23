@@ -150,6 +150,12 @@ CAPTURE_DERIVED = "derived/accept/capture_off"
 CAPTURE_VERSION = "1.0.0"
 CAPTURE_SELECT = ("timestamp", "host_name", "event_dataset", "message")
 
+# What an UNPOPULATED `_json` reads as. The column is non-Nullable JSON, so the
+# loader writing nothing leaves the empty object rather than NULL: `toString()`
+# renders `{}` and `length()` is 2. A falsiness check on that length can never
+# hold, so it would xfail forever and never go red when #513 lands.
+EMPTY_JSON_LENGTH = 2
+
 HEADER = {"type": "common-header/timeseries", "version": "1.0.1"}
 
 
@@ -1182,8 +1188,9 @@ class TestStage3:
             {"h": f"host-{probe}"},
         )
         assert typed, "the typed column did not fill, so this says nothing about _json"
-        assert not json_length, (
-            f"_json on {table} carries {json_length} characters, so population did not stop"
+        assert json_length == EMPTY_JSON_LENGTH, (
+            f"_json on {table} renders {json_length} characters, not the "
+            f"{EMPTY_JSON_LENGTH} of an empty object, so population did not stop"
         )
 
     @pytest.mark.xfail(
@@ -1231,9 +1238,10 @@ class TestStage3:
             f"SELECT length(toString(`_json`)) FROM {table} WHERE host_name = %(h)s LIMIT 1",
             {"h": f"host-{before}"},
         )
-        assert not while_off, (
-            f"_json carries {while_off} characters while population is OFF, so refilling "
-            "it afterwards would prove nothing -- the loader is in its default full mode"
+        assert while_off == EMPTY_JSON_LENGTH, (
+            f"_json renders {while_off} characters while population is OFF, not the "
+            f"{EMPTY_JSON_LENGTH} of an empty object, so refilling it afterwards would "
+            "prove nothing -- the loader is in its default full mode"
         )
 
         _write_capture_version(engine, capture_json=True)
@@ -1256,12 +1264,19 @@ class TestStage3:
                 {"h": f"host-{probe}"},
             )
 
+        # `done` rather than truthiness: an unpopulated `_json` already renders 2
+        # characters, so a truthy check would return on the first poll and read the
+        # empty object as a refill.
         filled = poll_until(
             _sent_and_refilled,
             timeout=LANDING_DEADLINE,
+            done=lambda length: (length or 0) > EMPTY_JSON_LENGTH,
             desc=f"a record in {table} carrying _json again",
         )
-        assert filled, f"_json on {table} is still empty for a record sent after the switch"
+        assert filled > EMPTY_JSON_LENGTH, (
+            f"_json on {table} renders {filled} characters for a record sent after the "
+            f"switch, still the empty object, so population did not resume"
+        )
 
 
 class TestStage2Swap:

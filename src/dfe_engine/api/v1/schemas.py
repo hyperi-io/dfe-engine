@@ -1229,6 +1229,7 @@ async def get_schema_columns(
     Use ``per_page=-1`` to return all columns in one page.
     """
     from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
+    from dfe_engine.schema.schema_loader import SchemaLoadError
     from dfe_engine.source.type_registry import TypeRegistry
 
     try:
@@ -1269,7 +1270,7 @@ async def get_schema_columns(
     )
     try:
         columns = builder.load_columns_for_source_version(source, source_version=version_id)
-    except SchemaBuildError as exc:
+    except (SchemaBuildError, SchemaLoadError) as exc:
         raise HTTPException(
             status_code=400,
             detail={"code": "schema_error", "message": str(exc)},
@@ -1308,6 +1309,7 @@ async def build_schema(
     without executing it against ClickHouse.
     """
     from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
+    from dfe_engine.schema.schema_loader import SchemaLoadError
     from dfe_engine.source.type_registry import TypeRegistry
 
     try:
@@ -1348,7 +1350,7 @@ async def build_schema(
     )
     try:
         result = builder.build_for_source_version(source, source_version=version_id)
-    except SchemaBuildError as exc:
+    except (SchemaBuildError, SchemaLoadError) as exc:
         raise HTTPException(
             status_code=400,
             detail={"code": "build_error", "message": str(exc)},
