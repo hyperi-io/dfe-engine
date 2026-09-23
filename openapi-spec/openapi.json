@@ -8813,6 +8813,313 @@
         ]
       }
     },
+    "/api/v1/schemas/definitions/derived": {
+      "get": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "List Derived Schemas",
+        "description": "List every stored derived schema.",
+        "operationId": "list_derived_schemas_api_v1_schemas_definitions_derived_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search in path and base",
+              "title": "Search"
+            },
+            "description": "Search in path and base"
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sort field (path, base, current, updated_at)",
+              "title": "Sort By"
+            },
+            "description": "Sort field (path, base, current, updated_at)"
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Sort order: asc/desc",
+              "default": "asc",
+              "title": "Sort Order"
+            },
+            "description": "Sort order: asc/desc"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_DerivedSchemaSummary_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/schemas/definitions/derived/{schema_path}": {
+      "get": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "Get Derived Schema",
+        "description": "Read one derived schema by registry path (e.g. ``beats/filebeat_auth``).",
+        "operationId": "get_derived_schema_api_v1_schemas_definitions_derived__schema_path__get",
+        "parameters": [
+          {
+            "name": "schema_path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Schema Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DerivedSchemaResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "Create Derived Schema",
+        "description": "Create a derived schema at the given registry path.",
+        "operationId": "create_derived_schema_api_v1_schemas_definitions_derived__schema_path__post",
+        "parameters": [
+          {
+            "name": "schema_path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Schema Path"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DerivedSchemaWriteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DerivedSchemaResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "Update Derived Schema",
+        "description": "Replace a derived schema. The body is the whole document, as on create.",
+        "operationId": "update_derived_schema_api_v1_schemas_definitions_derived__schema_path__put",
+        "parameters": [
+          {
+            "name": "schema_path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Schema Path"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DerivedSchemaWriteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DerivedSchemaResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "Delete Derived Schema",
+        "description": "Delete a derived schema by registry path.",
+        "operationId": "delete_derived_schema_api_v1_schemas_definitions_derived__schema_path__delete",
+        "parameters": [
+          {
+            "name": "schema_path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Schema Path"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/schemas": {
       "get": {
         "tags": [
@@ -20163,6 +20470,226 @@
         ],
         "title": "DeploymentSummary"
       },
+      "DerivedSchemaResponse": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Registry path (derived/<group>/<name>)"
+          },
+          "base": {
+            "type": "string",
+            "title": "Base",
+            "description": "Meta-schema registry path the columns come from"
+          },
+          "base_version": {
+            "type": "string",
+            "title": "Base Version",
+            "description": "Version of the base meta schema"
+          },
+          "current": {
+            "type": "string",
+            "title": "Current",
+            "description": "Current version of this derived schema"
+          },
+          "versions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DerivedSchemaVersion"
+            },
+            "type": "object",
+            "title": "Versions",
+            "description": "Version id -> selection"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "base",
+          "base_version",
+          "current",
+          "versions"
+        ],
+        "title": "DerivedSchemaResponse",
+        "description": "A stored derived schema, as the API hands it back."
+      },
+      "DerivedSchemaSummary": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Registry path (derived/<group>/<name>)"
+          },
+          "base": {
+            "type": "string",
+            "title": "Base",
+            "description": "Meta-schema registry path the columns come from"
+          },
+          "base_version": {
+            "type": "string",
+            "title": "Base Version",
+            "description": "Version of the base meta schema"
+          },
+          "current": {
+            "type": "string",
+            "title": "Current",
+            "description": "Current version"
+          },
+          "versions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Versions",
+            "description": "All version ids"
+          },
+          "column_count": {
+            "type": "integer",
+            "title": "Column Count",
+            "description": "Columns the current version selects"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At",
+            "description": "Last write to the stored document"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "base",
+          "base_version",
+          "current",
+          "versions",
+          "column_count",
+          "updated_at"
+        ],
+        "title": "DerivedSchemaSummary",
+        "description": "One row of the derived-schema list."
+      },
+      "DerivedSchemaVersion": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Date",
+            "description": "ISO date the version was written"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary",
+            "description": "What this selection is for",
+            "default": ""
+          },
+          "capture_json": {
+            "type": "boolean",
+            "title": "Capture Json",
+            "description": "Whether dfe-loader populates _json for this table. The column and the common header stay in place either way, so the decision is reversible.",
+            "default": true
+          },
+          "capture_raw": {
+            "type": "boolean",
+            "title": "Capture Raw",
+            "description": "Whether dfe-loader populates _raw for this table",
+            "default": true
+          },
+          "select": {
+            "items": {
+              "$ref": "#/components/schemas/DerivedSelectEntry"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Select",
+            "description": "The complete, ordered column list of the result, after the common header"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "date",
+          "select"
+        ],
+        "title": "DerivedSchemaVersion",
+        "description": "One version: the ordered selection, plus the loader's catch-all switches."
+      },
+      "DerivedSchemaWriteRequest": {
+        "properties": {
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path",
+            "description": "Registry path (derived/<group>/<name>); must match the URL when set"
+          },
+          "base": {
+            "type": "string",
+            "title": "Base",
+            "description": "Meta-schema registry path, extensionless (e.g. meta/beats/filebeat)"
+          },
+          "base_version": {
+            "type": "string",
+            "title": "Base Version",
+            "description": "Version of the base meta schema"
+          },
+          "current": {
+            "type": "string",
+            "title": "Current",
+            "description": "Version of this derived schema to make current"
+          },
+          "versions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DerivedSchemaVersion"
+            },
+            "type": "object",
+            "minProperties": 1,
+            "title": "Versions",
+            "description": "Version id -> selection"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "base",
+          "base_version",
+          "current",
+          "versions"
+        ],
+        "title": "DerivedSchemaWriteRequest",
+        "description": "Create or replace a derived schema.\n\n``path`` is optional and, when given, must equal the URL path -- the UI\nsends both and a disagreement between them is a bug worth reporting."
+      },
+      "DerivedSelectEntry": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Name",
+            "description": "Column name, as the base defines it"
+          },
+          "index": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index",
+            "description": "Index use case for this column, overriding the base column's. 'none' keeps the column and drops its index; omitting the key keeps the base column's use case."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "DerivedSelectEntry",
+        "description": "One selected column, optionally re-answering the question it is asked."
+      },
       "DetachResponse": {
         "properties": {
           "deleted": {
@@ -24571,6 +25098,72 @@
           "prev_page"
         ],
         "title": "PaginatedResponse[DeploymentSummary]"
+      },
+      "PaginatedResponse_DerivedSchemaSummary_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DerivedSchemaSummary"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[DerivedSchemaSummary]"
       },
       "PaginatedResponse_FieldMapSummary_": {
         "properties": {
@@ -30512,7 +31105,19 @@
               }
             ],
             "title": "Derived Schema",
-            "description": "Source-specific field overrides (optional YAML reference)"
+            "description": "Derived-schema registry path (e.g. derived/beats/filebeat_auth). It SELECTS from the meta schema: the table's columns become exactly the names it lists, in its order, after the common header. It is not an override layer -- everything but the column's index resolves from the base -- and it also carries the _json/_raw capture switches for this table"
+          },
+          "derived_schema_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derived Schema Version",
+            "description": "Derived schema version (semver). Unset follows the derived schema's own 'current', so publishing a new selection changes this table"
           },
           "additional_fields": {
             "anyOf": [

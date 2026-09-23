@@ -639,12 +639,15 @@ def run_source_build(
     schemas_base_dir: str | Path | None,
     resolver: EngineResolver | None = None,
 ) -> SchemaBuildResult:
+    from dfe_engine.schema.derived_registry import derived_reference_root
     from dfe_engine.settings import get_settings
 
-    ch = get_settings().clickhouse
+    settings = get_settings()
+    ch = settings.clickhouse
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=schemas_base_dir or None,
+        derived_base_dir=derived_reference_root(settings),
         default_engine=ch.default_engine,
         default_ttl_days=ch.default_ttl_days,
         resolver=resolver,

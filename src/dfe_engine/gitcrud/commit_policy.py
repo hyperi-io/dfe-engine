@@ -29,6 +29,7 @@ _CLASS_TYPE = {
     "governance": "rbac",  # rbac/actions/policies; action invokes override to "action"
     "hunts": "hunt",
     "datamodel": "schema",
+    "schema": "schema",
 }
 
 SUBJECT_MAX = 50
@@ -55,6 +56,18 @@ def validate_name(name: str) -> None:
     """
     if not name or ".." in name or not _NAME_RE.fullmatch(name):
         raise CommitPolicyError(f"invalid resource name: {name!r}")
+
+
+def validate_resource_path(name: str) -> None:
+    """The same rule for a class whose names carry directory segments.
+
+    Every segment goes through :func:`validate_name`, so the one chokepoint still
+    decides what a name may contain; only the separator is permitted extra.
+    """
+    if not name or name.startswith("/") or name.endswith("/") or "//" in name:
+        raise CommitPolicyError(f"invalid resource name: {name!r}")
+    for segment in name.split("/"):
+        validate_name(segment)
 
 
 def type_for_class(rbac_class: str) -> str:

@@ -53,6 +53,9 @@ class ResourceClass:
                 class (helmvars, actions) is unversioned - the git log is enough.
     layout      FILE (one doc, one file) or BUNDLE (a directory per resource).
     manifest    BUNDLE only: the manifest filename inside a resource's directory.
+    nested      opt-in: a name may carry ``/`` segments, so the class's resources
+                live in a tree (``beats/filebeat_auth``). Every segment still goes
+                through the same name rule; only the separator is permitted.
     """
 
     name: str
@@ -62,6 +65,7 @@ class ResourceClass:
     versioned: bool = False
     layout: Layout = Layout.FILE
     manifest: str = "manifest.yaml"
+    nested: bool = False
 
     @property
     def is_bundle(self) -> bool:

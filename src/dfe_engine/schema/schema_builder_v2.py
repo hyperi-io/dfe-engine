@@ -92,6 +92,7 @@ class SchemaBuilderV2:
         registry: TypeRegistry | None = None,
         *,
         schemas_base_dir: str | Path | None = None,
+        derived_base_dir: str | Path | None = None,
         use_legacy_indexes: bool = False,
         field_map_registry: FieldMapRegistry | None = None,
         default_engine: str = "MergeTree",
@@ -106,6 +107,12 @@ class SchemaBuilderV2:
                               derived_schema, additional_fields). Schema file paths
                               in the Source model are resolved relative to this.
                               If None, paths must be absolute.
+            derived_base_dir: Root a ``derived/...`` reference resolves under. A
+                              deployment with gitops stores derived schemas in the
+                              deploy repo rather than the schemas tree, so the two
+                              roots differ; pass
+                              ``DerivedSchemaRegistry.reference_root``. None keeps
+                              them in the schemas tree.
             use_legacy_indexes: Use tokenbf/ngrambf instead of GA text indexes.
             field_map_registry: Optional FieldMapRegistry for generating standard
                                 views (sigma, ecs, cim, ocsf). When provided and the
@@ -130,6 +137,7 @@ class SchemaBuilderV2:
         """
         self._registry = registry or TypeRegistry.default()
         self._schemas_base_dir = Path(schemas_base_dir) if schemas_base_dir else None
+        self._derived_base_dir = Path(derived_base_dir) if derived_base_dir else None
         self._ddl_gen = DDLGenerator(
             self._registry, use_legacy_indexes=use_legacy_indexes, resolver=resolver
         )
@@ -368,8 +376,10 @@ class SchemaBuilderV2:
                 ) from e
 
         if schema_cfg.derived_schema:
-            derived_path = self._resolve_path(schema_cfg.derived_schema)
-            columns = SchemaLoader.apply_derived_schema(columns, derived_path)
+            derived_path = self.resolve_derived_path(schema_cfg.derived_schema)
+            columns = SchemaLoader.apply_derived_schema(
+                columns, derived_path, version=schema_cfg.derived_schema_version
+            )
 
         if schema_cfg.additional_fields:
             additional_path = self._resolve_path(schema_cfg.additional_fields)
@@ -381,6 +391,18 @@ class SchemaBuilderV2:
         """Resolve a schema file path (relative to schemas_base_dir or absolute)."""
         if self._schemas_base_dir:
             return resolve_schema_yaml_path(self._schemas_base_dir, path_str)
+        return Path(path_str)
+
+    def resolve_derived_path(self, path_str: str) -> Path:
+        """Resolve a ``derived/...`` reference under its own root.
+
+        The derived-schema store is the deploy repo when gitops is on, so the
+        reference cannot be resolved against the schemas tree the way the meta
+        schema is.
+        """
+        base = self._derived_base_dir or self._schemas_base_dir
+        if base:
+            return resolve_schema_yaml_path(base, path_str)
         return Path(path_str)
 
     # ── Internal: DDL config ────────────────────────────────────────
