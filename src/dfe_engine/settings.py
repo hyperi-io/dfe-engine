@@ -1264,6 +1264,34 @@ class AuthSettings(BaseModel):
             "headers and audit the socket address instead."
         ),
     )
+    proxy_provider: str = Field(
+        default="oidc",
+        description=(
+            "OIDC provider name the trusted front proxy authenticates against, "
+            "stamped on an account the proxy path provisions (auth Path 1). A "
+            "deployment running BOTH the proxy path and the engine-as-relying-party "
+            "path sets this to the same provider name the RP callback uses, so one "
+            "IdP's accounts are not two identities. Default 'oidc' is the protocol, "
+            "not a provider: it keeps a proxy-only deployment's existing accounts "
+            "reachable, and it matches no RP provider name. "
+            "DFE_AUTH_PROXY_PROVIDER."
+        ),
+    )
+    source_provider_bindings: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Maps a stored account's source_provider stamp to the ONE OIDC provider "
+            "name allowed to adopt it at login. The SCIM case is why it exists: a "
+            "user the SCIM face provisions is stamped 'scim', and without a binding "
+            "their first OIDC login is refused as a cross-identity write. "
+            "{'scim': 'entra'} declares that the SCIM connector and the 'entra' OIDC "
+            "provider are one identity source. Empty (the default) binds nothing and "
+            "every such account stays refused -- fail closed. A stamp maps to one "
+            "provider, so a second IdP can never claim the same accounts, and an "
+            "account with NO stamp is a local credential that no binding can name. "
+            "DFE_AUTH_SOURCE_PROVIDER_BINDINGS, a JSON object."
+        ),
+    )
     oidc: OIDCSettings = Field(default_factory=OIDCSettings)
     local: LocalAuthSettings = Field(default_factory=LocalAuthSettings)
     store_backend: str = Field(
@@ -2027,6 +2055,18 @@ def _get_env_overrides() -> dict:
         overrides["auth"]["auth_dir"] = val
     if val := _get_env("DFE_AUTH_TRUST_PROXY_AUTH_HEADERS"):
         overrides["auth"]["trust_proxy_auth_headers"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_AUTH_PROXY_PROVIDER"):
+        overrides["auth"]["proxy_provider"] = val
+    if val := _get_env("DFE_AUTH_SOURCE_PROVIDER_BINDINGS"):
+        # A JSON object of {source_provider_stamp: oidc_provider_name}. Fail loudly
+        # on malformed config: a dropped binding locks every bound user out at login.
+        import json
+
+        try:
+            bindings = json.loads(val)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"DFE_AUTH_SOURCE_PROVIDER_BINDINGS is not valid JSON: {exc}") from exc
+        overrides["auth"]["source_provider_bindings"] = bindings
 
     # Local auth settings (nested under auth.local)
     if val := _get_env("DFE_AUTH_LOCAL_ENABLED"):

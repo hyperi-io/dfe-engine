@@ -17,7 +17,10 @@ import pytest
 from dfe_engine.auth.accounts import Account, DocuStoreAccountStore
 from dfe_engine.auth.breakglass import GROUP as RECOVERY_GROUP
 from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS
+from dfe_engine.auth.groups import GroupStore
+from dfe_engine.auth.jit import JitIdentityCollisionError, JitProvisioner
 from dfe_engine.auth.protected_accounts import ProtectedAccountError
+from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
 from dfe_engine.store.documents import DocuStore
 
 pytestmark = pytest.mark.integration
@@ -109,6 +112,94 @@ class TestDocuStoreAccountStore:
         store.create("ext", "")
         assert not store.verify_password("ext", "")
         assert not store.verify_password("ext", "anything")
+
+    def test_the_external_stamps_round_trip(self, store):
+        # The identity guard decides on these two fields, so a backend that drops
+        # either reads every IdP-owned account as a local one.
+        store.create("stamped", "")
+        store.update("stamped", external=True, source_provider="entra")
+        stored = store.get("stamped")
+        assert stored.external is True
+        assert stored.source_provider == "entra"
+
+
+class TestJitIdentityGuardOnTheDocumentStore:
+    """The identity guard and the SCIM binding, against the document backend.
+
+    The guard reads ``external`` and ``source_provider`` off whatever the store
+    returns, so it is only as good as the backend's round-trip of them. #502 and
+    the binding were both proven on the YAML store alone.
+    """
+
+    def test_a_local_account_is_refused_and_left_untouched(self, store, tmp_path):
+        groups = GroupStore(tmp_path / "groups")
+        groups.create("dfe-admins", roles=["admin"])
+        store.create("jane-corp-com", "localpass-Pw-1", groups=["dfe-admins"])
+        jit = JitProvisioner(
+            account_store=store,
+            group_store=groups,
+            source_provider_bindings={"": "entra", SCIM_SOURCE_PROVIDER: "entra"},
+        )
+
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra", email="evil@example.com")
+
+        assert refused.value.reason == "local_account"
+        stored = store.get("jane-corp-com")
+        assert stored.groups == ["dfe-admins"]
+        assert stored.email == ""
+        assert stored.external is False
+        assert stored.last_login_at == ""
+
+    def test_an_unbound_scim_account_is_refused(self, store, tmp_path):
+        groups = GroupStore(tmp_path / "groups")
+        groups.create("dfe-admins", roles=["admin"])
+        store.create("jane-corp-com", "provisioned-Pw-1", groups=[])
+        store.update("jane-corp-com", source_provider=SCIM_SOURCE_PROVIDER)
+        jit = JitProvisioner(account_store=store, group_store=groups)
+
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
+
+        assert refused.value.reason == "provider_mismatch"
+        assert store.get("jane-corp-com").groups == []
+
+    def test_the_bound_provider_reconciles_the_scim_account(self, store, tmp_path):
+        groups = GroupStore(tmp_path / "groups")
+        groups.create("dfe-admins", roles=["admin"])
+        store.create("jane-corp-com", "provisioned-Pw-1", groups=[])
+        store.update("jane-corp-com", source_provider=SCIM_SOURCE_PROVIDER)
+        jit = JitProvisioner(
+            account_store=store,
+            group_store=groups,
+            source_provider_bindings={SCIM_SOURCE_PROVIDER: "entra"},
+        )
+
+        account = jit.ensure_account(
+            "jane@corp.com", ["dfe-admins"], "entra", email="jane@corp.com"
+        )
+
+        assert account.groups == ["dfe-admins"]
+        assert account.email == "jane@corp.com"
+        assert account.last_login_at != ""
+        assert account.source_provider == SCIM_SOURCE_PROVIDER
+
+    def test_an_unbound_provider_is_still_refused(self, store, tmp_path):
+        groups = GroupStore(tmp_path / "groups")
+        groups.create("dfe-admins", roles=["admin"])
+        store.create("jane-corp-com", "provisioned-Pw-1", groups=[])
+        store.update("jane-corp-com", source_provider=SCIM_SOURCE_PROVIDER)
+        jit = JitProvisioner(
+            account_store=store,
+            group_store=groups,
+            source_provider_bindings={SCIM_SOURCE_PROVIDER: "entra"},
+        )
+
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account("jane@corp.com", ["dfe-admins"], "okta")
+
+        assert refused.value.reason == "provider_mismatch"
+        assert store.get("jane-corp-com").groups == []
 
 
 class TestProtectedNameFloor:
