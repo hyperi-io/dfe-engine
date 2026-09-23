@@ -384,7 +384,9 @@ def hydrate_from_deploy_repo(
         except ResourceNotFoundError:
             continue
         account = Account.model_validate({**doc, "username": name})
-        account_store.put(account)
+        # The deploy repo is the durable authority, so it may hold a retired admin
+        # the protected-name floor would otherwise refuse to write back disabled.
+        account_store.put(account, allow_protected=True)
         restored += 1
     return restored
 
