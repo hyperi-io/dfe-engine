@@ -15,7 +15,10 @@ import uuid
 
 import pytest
 
+from dfe_engine.auth.breakglass import GROUP as RECOVERY_GROUP
+from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS
 from dfe_engine.auth.groups import DocuStoreGroupStore
+from dfe_engine.auth.protected_accounts import ProtectedAccountError
 from dfe_engine.store.documents import DocuStore
 
 pytestmark = pytest.mark.integration
@@ -159,3 +162,37 @@ class TestDocuStoreGroupStore:
         assert "prov-123" in index
         assert index["prov-123"].name == "with-src"
         assert all(g.source_id for g in index.values())
+
+
+class TestProtectedNameFloor:
+    """The floor from issue #505 holds on this backend exactly as on the YAML one."""
+
+    @pytest.fixture
+    def seeded(self, store):
+        store.create(RECOVERY_GROUP, ["admin"], members=["admin", BREAKGLASS, "alice"])
+        store.create("dfe-viewers", ["data_viewer"], members=[BREAKGLASS])
+        return store
+
+    @pytest.mark.parametrize("username", ["admin", BREAKGLASS])
+    def test_remove_member_from_the_admin_group_is_refused(self, seeded, username):
+        with pytest.raises(ProtectedAccountError):
+            seeded.remove_member(RECOVERY_GROUP, username)
+        assert username in seeded.get(RECOVERY_GROUP).members
+
+    @pytest.mark.parametrize("username", ["admin", BREAKGLASS])
+    def test_member_replacement_that_drops_it_is_refused(self, seeded, username):
+        with pytest.raises(ProtectedAccountError):
+            seeded.update(RECOVERY_GROUP, members=["alice"])
+        assert username in seeded.get(RECOVERY_GROUP).members
+
+    def test_removing_an_unprotected_member_still_works(self, seeded):
+        seeded.remove_member(RECOVERY_GROUP, "alice")
+        assert "alice" not in seeded.get(RECOVERY_GROUP).members
+
+    def test_removing_a_protected_member_from_another_group_still_works(self, seeded):
+        seeded.remove_member("dfe-viewers", BREAKGLASS)
+        assert seeded.get("dfe-viewers").members == []
+
+    def test_allow_protected_reaches_past_the_floor(self, seeded):
+        seeded.remove_member(RECOVERY_GROUP, BREAKGLASS, allow_protected=True)
+        assert BREAKGLASS not in seeded.get(RECOVERY_GROUP).members
