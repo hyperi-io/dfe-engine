@@ -16,7 +16,7 @@ for its number.
 | 0.1 | 0 | A record with no schema or source lands in `main` | live |
 | 0.2 | 0 | A nested sub-field in `_json` answers a query (`fred.nerk.frog`) | live |
 | 1.1 | 1 | A pre-supplied read-only meta schema imports from dfe-schemas | live |
-| 1.2 | 1 | A meta schema exports, then re-imports into a clean deployment | none |
+| 1.2 | 1 | A meta schema exports, then re-imports into a clean deployment | live, part |
 | 1.3 | 1 | A field seen in `_json` promotes to a real column | live, xfail dfe-engine#459 |
 | 2.1 | 2 | A source declares a `key=value` routing condition | live |
 | 2.2 | 2 | Deploy renders the routing, the receiver reloads it in place, and records route by it | live, part |
@@ -39,10 +39,11 @@ suite goes red the day that issue is fixed, which is how it gets removed.
 rendered and the table created; that the receiver reloads in place is the flow
 suite's routing check, and that records route by it is 2.3. 2.6 applies the ALTER
 directly rather than through a derived-schema edit, which is what 2.4 and 2.5
-cover.
+cover. 1.2 re-imports into the SAME deployment under a second path, which proves
+the bundle carries what the import needs but not that it lands in a deployment
+that has never seen the schema -- that needs a second stack.
 
-`none` is a step with no test, not a step that passes. 1.2 and 2.8 are
-unwritten. The three stage 3 steps cannot pass at all: a derived schema has no
+`none` is a step with no test, not a step that passes. 2.8 is unwritten. The three stage 3 steps cannot pass at all: a derived schema has no
 way to say "stop populating `_json`", so the engine never compiles it.
 
 ## Three carry the weight

@@ -103,6 +103,13 @@ PARSED_COLUMN = "source_ip"
 TRANSFORM_SOURCE = "ciscoios"
 TRANSFORM_MODULE = "cisco_ios"
 
+# Step 1.2. A custom schema of its own, because a `core` one exports as a
+# REFERENCE by design and a reference round-trips nothing.
+ROUNDTRIP_SOURCE = "meta/acceptance_roundtrip_src"
+ROUNDTRIP_TARGET = "meta/acceptance_roundtrip_dst"
+ROUNDTRIP_VERSION = "1.0.0"
+_COMPARED_FIELDS = ("name", "type", "use_case", "expr")
+
 # Steps 2.4 and 2.5. The derived schema selects five of SHIPPED_SCHEMA's twelve
 # columns; DERIVED_DROPPED is the other seven, and its absence from the deployed
 # table is what says the selection reached the data plane.
@@ -185,6 +192,12 @@ def _transform_engine(cfg: E2EConfig) -> str:
     return (cfg.transform or "dfe-transform-vrl").removeprefix("dfe-transform-")
 
 
+def _column_signatures(columns: Any) -> list[tuple]:
+    """One comparable tuple per column, over the fields an import must preserve."""
+    items = columns["items"] if isinstance(columns, dict) else columns
+    return [tuple(column.get(field) for field in _COMPARED_FIELDS) for column in items]
+
+
 @dataclass(frozen=True)
 class Evolved:
     """The source the stage 1 and stage 2 steps evolve, and how it was made."""
@@ -258,6 +271,67 @@ def evolved(engine: EngineAPI, e2e: E2EConfig, ch_client):
     yield state
     _delete(engine, SOURCE)
     drop_table(ch_client, e2e.ch_db, SOURCE)
+
+
+@pytest.fixture(scope="module")
+def exported_schema(engine: EngineAPI) -> dict:
+    """A custom meta schema, exported and re-pathed ready to import.
+
+    Built here rather than borrowed from the deployment: a `core` schema exports
+    as a reference by design, and a custom one belonging to something else
+    carries whatever that thing last did to it.
+    """
+    bundle = {
+        "kind": "meta_schema",
+        "format": 1,
+        "path": ROUNDTRIP_SOURCE,
+        "resource_type": "custom",
+        "current": ROUNDTRIP_VERSION,
+        "versions": {
+            ROUNDTRIP_VERSION: {
+                "date": "2026-09-23",
+                "type": "model",
+                "summary": "Acceptance 1.2 -- the export/import round trip",
+                "columns": [
+                    {
+                        "name": "timestamp",
+                        "type": "datetime",
+                        "use_case": "range",
+                        "expr": "@source: @timestamp",
+                        "comment": "Event timestamp",
+                    },
+                    {
+                        "name": "host_name",
+                        "type": "string",
+                        "use_case": "dimension",
+                        "expr": "@source: host.name",
+                        "comment": "Host the event came from",
+                    },
+                    {
+                        "name": "message",
+                        "type": "text",
+                        "use_case": "word_search",
+                        "comment": "The event text",
+                    },
+                ],
+            }
+        },
+    }
+    for path in (ROUNDTRIP_SOURCE, ROUNDTRIP_TARGET):
+        engine.call("DELETE", f"/schemas/definitions/{path}")
+    seeded = engine.call("POST", "/schemas/import", bundle)
+    assert seeded.status_code in (200, 201), (
+        f"the deployment refused the seed schema: {seeded.status_code} {seeded.text}"
+    )
+
+    exported = engine.json(
+        "GET",
+        f"/schemas/definitions/{ROUNDTRIP_SOURCE}/export?version={ROUNDTRIP_VERSION}",
+    )
+    exported["path"] = ROUNDTRIP_TARGET
+    yield exported
+    for path in (ROUNDTRIP_SOURCE, ROUNDTRIP_TARGET):
+        engine.call("DELETE", f"/schemas/definitions/{path}")
 
 
 @pytest.fixture(scope="module")
@@ -454,6 +528,38 @@ class TestStage1:
             f"refusal: {refused.text}"
         )
         assert "Core resources can't be mutated" in refused.text
+
+    def test_1_2_a_meta_schema_exports_then_re_imports(
+        self, engine: EngineAPI, exported_schema: dict
+    ) -> None:
+        """The export has to carry everything the import needs.
+
+        Compared per column on name, type, use case and expr rather than by
+        count. ``expr`` is the sharp one: it is written verbatim into the
+        ClickHouse COMMENT and read back by dfe-loader, so an import that drops
+        it produces a schema that looks right and instructs nothing.
+        """
+        sent = _column_signatures(exported_schema["versions"][ROUNDTRIP_VERSION]["columns"])
+        assert any(signature[3] for signature in sent), (
+            "the exported schema carries no expr at all, so this cannot tell whether "
+            "the import preserves one"
+        )
+
+        landed = engine.call("POST", "/schemas/import", exported_schema)
+        assert landed.status_code in (200, 201), (
+            f"the re-import was refused: {landed.status_code} {landed.text}"
+        )
+
+        columns_path = f"/schemas/definitions/{ROUNDTRIP_TARGET}/versions/columns"
+        read = engine.json("GET", f"{columns_path}?version={ROUNDTRIP_VERSION}&per_page=-1")
+        got = _column_signatures(read["version"]["columns"]["items"])
+
+        assert len(got) == len(sent), f"{len(sent)} columns exported and {len(got)} imported"
+        lost = [signature for signature in sent if signature not in got]
+        assert not lost, (
+            f"{len(lost)} column(s) did not survive the round trip on "
+            f"{', '.join(_COMPARED_FIELDS)}: {lost[:3]}"
+        )
 
     @pytest.mark.xfail(
         strict=True,
