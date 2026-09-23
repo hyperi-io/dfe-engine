@@ -46,6 +46,41 @@ if TYPE_CHECKING:
     from dfe_engine.source.registry import SourceRegistry
 
 
+def _pin_targets(pins: SourceSchema) -> list[tuple[str, str, str | None]]:
+    """Each meta schema a source version pins: the reference, its path and its version pin.
+
+    In pin order, one entry per path -- two pins naming the same schema resolve
+    once. Export and import walk the same list, so neither can check a pin the
+    other does not.
+    """
+    declared: list[tuple[str | None, str | None]] = [
+        (pins.meta_schema, pins.meta_schema_version),
+        (pins.derived_schema, None),
+        (pins.additional_fields, None),
+    ]
+    targets: list[tuple[str, str, str | None]] = []
+    seen: set[str] = set()
+    for reference, version in declared:
+        if not reference:
+            continue
+        path = reference.removesuffix(".yaml")
+        if path in seen:
+            continue
+        seen.add(path)
+        targets.append((reference, path, version))
+    return targets
+
+
+def _registry_key(reference: str) -> str | None:
+    """The registry path a schema reference names, or ``None`` when it names none."""
+    from dfe_engine.schema.registry import SchemaError, canonical_schema_path
+
+    try:
+        return canonical_schema_path(reference.removesuffix(".yaml"))
+    except SchemaError:
+        return None
+
+
 def _pinned_definitions(
     schema_registry: SchemaRegistry,
     pins: SourceSchema,
@@ -59,20 +94,8 @@ def _pinned_definitions(
     """
     from dfe_engine.schema.registry import SchemaNotFoundError
 
-    wanted: list[tuple[str, str | None]] = [
-        (pins.meta_schema, pins.meta_schema_version),
-        (pins.derived_schema, None),
-        (pins.additional_fields, None),
-    ]
     documents: list[MetaSchemaExport] = []
-    seen: set[str] = set()
-    for reference, version in wanted:
-        if not reference:
-            continue
-        path = reference.removesuffix(".yaml")
-        if path in seen:
-            continue
-        seen.add(path)
+    for reference, path, version in _pin_targets(pins):
         try:
             document = build_meta_schema_export(schema_registry, path)
             if version and document.resource_type == "core":
@@ -84,6 +107,35 @@ def _pinned_definitions(
             ) from exc
         documents.append(document)
     return documents
+
+
+def _require_pins_resolve(
+    schema_registry: SchemaRegistry,
+    pins: SourceSchema,
+    definitions: list[MetaSchemaExport],
+) -> None:
+    """Refuse a bundle whose schema pins name nothing the import will leave behind.
+
+    A pin is satisfied by a definition the bundle carries or by a schema this
+    deployment already holds. The second half is required, not lenient: a core
+    schema travels as a reference and never as a copy, so a bundle may pin one
+    and define nothing, and only the registry says whether it is here.
+
+    Raises:
+        ExchangeUnresolvedError: A pin is satisfied by neither.
+    """
+    carried = {key for document in definitions if (key := _registry_key(document.path))}
+    for reference, path, _version in _pin_targets(pins):
+        key = _registry_key(path)
+        if key is not None and (
+            key in carried or schema_registry.find_schema_at_location(key) is not None
+        ):
+            continue
+        raise ExchangeUnresolvedError(
+            f"Schema pin {reference!r} names {path!r}, which the bundle does not define and "
+            "this deployment does not carry, so the source would land with a pin and no "
+            "definition"
+        )
 
 
 def build_source_bundle(
@@ -229,6 +281,8 @@ def apply_source_bundle(
         raise ExchangeError(str(exc)) from exc
 
     # Everything the write needs is checked here, before the first one lands.
+    if section is not None:
+        _require_pins_resolve(schema_registry, section.pins, definitions)
     for document in definitions:
         apply_meta_schema_export(schema_registry, document, created_by=created_by, dry_run=True)
     try:
