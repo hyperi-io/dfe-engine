@@ -11,18 +11,42 @@ Usage:
     from dfe_engine.source.type_registry import TypeRegistry
 
     registry = TypeRegistry.default()
-    resolved = registry.resolve("string", attributes=["lowcardinality"])
+    resolved = registry.resolve("string", cardinality="low")
     # ResolvedType(ch_type='LowCardinality(Nullable(String))', codec='ZSTD(1)')
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from dfe_engine.yaml_utils import yaml_load
+
+# How many distinct values a column holds. One declaration, because it decides
+# both the LowCardinality wrapper and whether exact_match can hold every value.
+# The vocabulary is dfe-schemas registries/types.yaml, under `cardinality`.
+Cardinality = Literal["low", "high", "unknown"]
+CARDINALITIES = ("low", "high", "unknown")
+DEFAULT_CARDINALITY = "unknown"
+LOW_CARDINALITY = "low"
+# The retired spelling: a column declaring it means `cardinality: low`.
+LOWCARDINALITY_ATTRIBUTE = "lowcardinality"
+
+
+def fold_cardinality(cardinality: str | None, attributes: Iterable[str] | None) -> str:
+    """One cardinality, with the retired ``lowcardinality`` attribute folded in.
+
+    26 shipped schemas still carry the attribute, so it reads as ``low`` rather
+    than becoming a second answer to the same question.
+    """
+    if cardinality:
+        return cardinality
+    return (
+        LOW_CARDINALITY if LOWCARDINALITY_ATTRIBUTE in (attributes or []) else DEFAULT_CARDINALITY
+    )
 
 
 @dataclass(frozen=True)
@@ -51,6 +75,10 @@ class InvalidAttributeError(TypeRegistryError):
 
 class InvalidChOverrideError(TypeRegistryError):
     """ch_override value is not in the supported ClickHouse types catalogue."""
+
+
+class InvalidCardinalityError(TypeRegistryError):
+    """Cardinality is not one of the values the registry declares."""
 
 
 # A use case is a name, optionally carrying one integer argument.
@@ -115,6 +143,7 @@ class TypeRegistry:
         self._use_cases: dict[str, dict[str, Any]] = data.get("use_cases", {})
         self._attributes: dict[str, dict[str, Any]] = data.get("attributes", {})
         self._ch_overrides: dict[str, list[str]] = data.get("ch_overrides", {})
+        self._cardinality: dict[str, Any] = data.get("cardinality") or {}
 
         # Pre-compile parameterised override patterns
         self._override_patterns: list[re.Pattern] = [
@@ -146,14 +175,18 @@ class TypeRegistry:
         attributes: list[str] | None = None,
         use_case: str | None = None,
         ch_override: str | None = None,
+        cardinality: str | None = None,
     ) -> ResolvedType:
         """Resolve a primitive to a ClickHouse column type.
 
         Args:
             primitive: Primitive type name (e.g. 'string', 'integer').
-            attributes: Storage attributes (e.g. ['lowcardinality']).
+            attributes: Storage attributes (e.g. ['not_null']).
             use_case: Query use case (e.g. 'dimension'). Validated only.
             ch_override: Exact ClickHouse type (bypasses primitive mapping).
+            cardinality: 'low', 'high' or 'unknown'. Only 'low' adds the
+                LowCardinality wrapper. Left out, it is read off the retired
+                'lowcardinality' attribute.
 
         Returns:
             ResolvedType with the full CH type string and codec.
@@ -165,6 +198,7 @@ class TypeRegistry:
             InvalidChOverrideError: ch_override not in catalogue.
         """
         attributes = attributes or []
+        declared = fold_cardinality(cardinality, attributes)
 
         # Validate primitive exists
         if primitive not in self._primitives:
@@ -186,7 +220,7 @@ class TypeRegistry:
             ch_type = ch_override
             codec = None
             # Apply attributes even with ch_override
-            ch_type = self._apply_attributes(ch_type, attributes, nullable_default=False)
+            ch_type = self._wrap(ch_type, attributes, False, declared)
             return ResolvedType(ch_type=ch_type, codec=codec)
 
         # Normal resolution from primitive
@@ -195,16 +229,22 @@ class TypeRegistry:
         codec = prim_def.get("codec")
         nullable_default = prim_def.get("nullable", True)
 
-        ch_type = self._apply_attributes(base_type, attributes, nullable_default)
+        ch_type = self._wrap(base_type, attributes, nullable_default, declared)
         return ResolvedType(ch_type=ch_type, codec=codec)
 
-    def _apply_attributes(
+    def _wrap(
         self,
         base_type: str,
         attributes: list[str],
         nullable_default: bool,
+        cardinality: str,
     ) -> str:
-        """Apply nullable and lowcardinality wrapping to a base type."""
+        """Apply the Nullable and LowCardinality wrapping to a base type.
+
+        Only ``cardinality: low`` adds LowCardinality: on a high-cardinality
+        column the dictionary costs more than it saves, and ``unknown`` is the
+        safe way to be wrong.
+        """
         # Determine nullability
         nullable = nullable_default
         if "nullable" in attributes:
@@ -219,7 +259,7 @@ class TypeRegistry:
             ch_type = f"Nullable({ch_type})"
 
         # LowCardinality wraps outer
-        if "lowcardinality" in attributes:
+        if cardinality == LOW_CARDINALITY:
             ch_type = f"LowCardinality({ch_type})"
 
         return ch_type
@@ -293,6 +333,17 @@ class TypeRegistry:
                 f"Valid primitives for '{attribute}': {', '.join(valid)}"
             )
 
+    def validate_cardinality(self, cardinality: str) -> None:
+        """Validate a declared cardinality against the registry's vocabulary.
+
+        Raises:
+            InvalidCardinalityError: Cardinality not in the vocabulary.
+        """
+        if cardinality not in self.cardinalities:
+            raise InvalidCardinalityError(
+                f"Unknown cardinality '{cardinality}'. Valid: {', '.join(self.cardinalities)}"
+            )
+
     def validate_ch_override(self, ch_override: str) -> None:
         """Validate that a ch_override value is a supported ClickHouse type.
 
@@ -331,6 +382,11 @@ class TypeRegistry:
     def attribute_names(self) -> list[str]:
         """List all known attribute names."""
         return sorted(self._attributes.keys())
+
+    @property
+    def cardinalities(self) -> list[str]:
+        """The cardinality vocabulary, from the registry or the package default."""
+        return list(self._cardinality.get("values") or CARDINALITIES)
 
     def valid_primitives_for_use_case(self, use_case: str) -> list[str]:
         """Get the list of valid primitives for a use case."""

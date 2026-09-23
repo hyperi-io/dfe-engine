@@ -187,7 +187,7 @@ def _safe_type(ch_type: str) -> str:
 def _json_accessor(json_path: str) -> str:
     """Dynamic-subcolumn accessor for a path inside ``_json``.
 
-    Matches the codebase idiom (json_promotion_service._json_subcolumn): the WHOLE
+    Matches the codebase idiom (json_promotion_service.json_subcolumn): the WHOLE
     dotted path is ONE backtick-quoted identifier - that is how the ``JSON`` column
     reports a nested path - and ``assumeNotNull`` unwraps a ``Nullable(JSON)`` column
     (a no-op on a non-nullable one) so subcolumn access type-checks. Rejects a

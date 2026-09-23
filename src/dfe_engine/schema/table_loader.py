@@ -104,6 +104,7 @@ def _column(raw: dict[str, Any], source: Path) -> SchemaColumn:
         type="string",
         ch_override=ch_type,
         attribute=attribute,
+        cardinality=raw.get("cardinality"),
         order=raw.get("order"),
         default=default,
         codec=raw.get("codec"),

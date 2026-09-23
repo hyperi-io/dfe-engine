@@ -20729,7 +20729,7 @@
             },
             "type": "array",
             "title": "Attribute",
-            "description": "ClickHouse storage attributes for the column (e.g. 'nullable', 'lowcardinality'). Empty for a plain column."
+            "description": "ClickHouse storage attributes for the column (e.g. 'nullable', 'not_null'). Empty for a plain column. How many distinct values the column holds is declared apart, as 'cardinality'."
           },
           "use_case": {
             "anyOf": [
@@ -28740,6 +28740,23 @@
             "title": "Attribute",
             "description": "Attributes of the column"
           },
+          "cardinality": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "high",
+                  "unknown"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cardinality",
+            "description": "How many distinct values the column holds: low, high or unknown. 'low' is what adds the LowCardinality wrapper and what lets exact_match emit set(0) rather than a bloom filter. Absent means unknown, which is the honest answer where nothing was measured."
+          },
           "use_case": {
             "anyOf": [
               {
@@ -28879,6 +28896,23 @@
             ],
             "title": "Attribute",
             "description": "Attributes of the column"
+          },
+          "cardinality": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "high",
+                  "unknown"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cardinality",
+            "description": "How many distinct values the column holds: low, high or unknown. 'low' is what adds the LowCardinality wrapper and what lets exact_match emit set(0) rather than a bloom filter. Absent means unknown, which is the honest answer where nothing was measured."
           },
           "use_case": {
             "anyOf": [
@@ -34825,6 +34859,23 @@
             ],
             "title": "Attribute",
             "description": "Attributes of the column"
+          },
+          "cardinality": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "high",
+                  "unknown"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cardinality",
+            "description": "How many distinct values the column holds: low, high or unknown. 'low' is what adds the LowCardinality wrapper and what lets exact_match emit set(0) rather than a bloom filter. Absent means unknown, which is the honest answer where nothing was measured."
           },
           "use_case": {
             "anyOf": [

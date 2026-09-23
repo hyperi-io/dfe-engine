@@ -28,7 +28,12 @@ from pydantic import (
 
 from dfe_engine.api.pagination import PaginatedResponse, PaginatedResponseWithObjects, PathTree
 from dfe_engine.core_resources.yaml_resource_type import ResourceType
-from dfe_engine.source.type_registry import current_use_case
+from dfe_engine.source.type_registry import (
+    LOWCARDINALITY_ATTRIBUTE,
+    Cardinality,
+    current_use_case,
+    fold_cardinality,
+)
 
 
 def _reject_empty_str(value: Any, info: ValidationInfo) -> Any:
@@ -74,6 +79,15 @@ class SchemaColumn(BaseModel):
     name: NonEmptyStr = Field(..., description="Name of the column")
     type: NonEmptyStr = Field(..., description="Type of the column")
     attribute: list[str] | None = Field(default=None, description="Attributes of the column")
+    cardinality: Cardinality | None = Field(
+        default=None,
+        description=(
+            "How many distinct values the column holds: low, high or unknown. "
+            "'low' is what adds the LowCardinality wrapper and what lets "
+            "exact_match emit set(0) rather than a bloom filter. Absent means "
+            "unknown, which is the honest answer where nothing was measured."
+        ),
+    )
     use_case: str | None = Field(default=None, description="Use case of the column")
     default: str | None = Field(default=None, description="DEFAULT expression")
     order: int | None = Field(default=None, description="Position in ORDER BY / PRIMARY KEY")
@@ -109,7 +123,14 @@ class SchemaColumn(BaseModel):
         return list(value)
 
     @field_validator(
-        "use_case", "expr", "comment", "default", "ch_override", "codec", mode="before"
+        "use_case",
+        "expr",
+        "comment",
+        "default",
+        "ch_override",
+        "codec",
+        "cardinality",
+        mode="before",
     )
     @classmethod
     def _empty_str_to_none(cls, value: Any) -> Any:
@@ -122,6 +143,31 @@ class SchemaColumn(BaseModel):
     def _adopt_current_use_case(cls, value: Any) -> Any:
         """Read a schema stored under the retired vocabulary, and serve it current."""
         return current_use_case(value)
+
+    @model_validator(mode="after")
+    def _refuse_a_contradicted_cardinality(self) -> SchemaColumn:
+        """Declaring the retired attribute against the cardinality is refused.
+
+        Resolving it quietly would put the disagreement back that one field
+        exists to remove.
+        """
+        contradicted = self.cardinality not in (None, "low")
+        if contradicted and LOWCARDINALITY_ATTRIBUTE in (self.attribute or []):
+            raise ValueError(
+                f"column {self.name!r}: cardinality {self.cardinality!r} contradicts the "
+                f"{LOWCARDINALITY_ATTRIBUTE} attribute; drop the attribute"
+            )
+        return self
+
+    @property
+    def declared_cardinality(self) -> str:
+        """How many distinct values the column holds: low, high or unknown.
+
+        The retired ``lowcardinality`` attribute still reads as ``low``, so the
+        storage wrapper and the exact_match index read one answer rather than
+        two nothing keeps in agreement.
+        """
+        return fold_cardinality(self.cardinality, self.attribute)
 
     def to_yaml_dict(self) -> dict[str, Any]:
         """Serialize for YAML persistence."""

@@ -33,7 +33,12 @@ from pydantic import (
 from dfe_engine.api.pagination import PaginatedResponseWithObjects, PathTree
 from dfe_engine.core_resources.yaml_resource_type import ResourceType
 from dfe_engine.source.engine_registry import EngineRegistry, InvalidEngineError
-from dfe_engine.source.type_registry import current_use_case
+from dfe_engine.source.type_registry import (
+    LOWCARDINALITY_ATTRIBUTE,
+    Cardinality,
+    current_use_case,
+    fold_cardinality,
+)
 from dfe_engine.transport import SourceTransport
 
 # _source naming: a Kubernetes DNS-1123 label that starts with a letter. A
@@ -147,7 +152,16 @@ class SchemaColumn(BaseModel):
     type: str = Field(..., description="Primitive type (string, integer, etc.)")
     attribute: list[str] = Field(
         default_factory=list,
-        description="Storage attributes (lowcardinality, nullable, etc.)",
+        description="Storage attributes (nullable, not_null, materialized, alias)",
+    )
+    cardinality: Cardinality | None = Field(
+        default=None,
+        description=(
+            "How many distinct values the column holds: low, high or unknown. "
+            "'low' is what adds the LowCardinality wrapper and what lets "
+            "exact_match emit set(0) rather than a bloom filter. Absent means "
+            "unknown, which is the honest answer where nothing was measured."
+        ),
     )
     use_case: str | None = Field(
         default=None,
@@ -221,12 +235,43 @@ class SchemaColumn(BaseModel):
         """Read a schema stored under the retired vocabulary, and serialise it current."""
         return current_use_case(v)
 
+    @model_validator(mode="after")
+    def _refuse_a_contradicted_cardinality(self) -> SchemaColumn:
+        """Declaring the retired attribute against the cardinality is refused.
+
+        Resolving it quietly would put the disagreement back that one field
+        exists to remove.
+        """
+        contradicted = self.cardinality not in (None, "low")
+        if contradicted and LOWCARDINALITY_ATTRIBUTE in self.attribute:
+            raise ValueError(
+                f"column {self.name!r}: cardinality {self.cardinality!r} contradicts the "
+                f"{LOWCARDINALITY_ATTRIBUTE} attribute; drop the attribute"
+            )
+        return self
+
+    @property
+    def declared_cardinality(self) -> str:
+        """How many distinct values the column holds: low, high or unknown.
+
+        The retired ``lowcardinality`` attribute still reads as ``low``, so the
+        storage wrapper and the exact_match index read one answer rather than
+        two nothing keeps in agreement.
+        """
+        return fold_cardinality(self.cardinality, self.attribute)
+
     def validate_against_registry(self, registry: Any) -> list[str]:
         """Validate this column against a TypeRegistry.
 
         Returns a list of error messages (empty if valid).
         """
         errors: list[str] = []
+
+        if self.cardinality:
+            try:
+                registry.validate_cardinality(self.cardinality)
+            except Exception as e:
+                errors.append(f"Column {self.name!r}: {e}")
 
         # Validate primitive
         if self.type not in registry.primitives and not self.ch_override:

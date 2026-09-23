@@ -143,13 +143,13 @@ columns:
 
   - name: _org_id
     type: string
-    attribute: [lowcardinality]
+    cardinality: low
     use_case: dimension
     comment: "@source: org_id"
 
   - name: _source
     type: string
-    attribute: [lowcardinality]
+    cardinality: low
     use_case: dimension
     comment: "@source: first(_source) | topic_name"
 
@@ -178,7 +178,7 @@ columns:
 
   - name: severity
     type: string
-    attribute: [lowcardinality]
+    cardinality: low
     use_case: dimension
 
   - name: message
@@ -200,7 +200,8 @@ columns:
 |-------|----------|-------------|
 | `name` | Yes | Column name |
 | `type` | Yes | Primitive type (see below) |
-| `attribute` | No | List of storage attributes (e.g. `[lowcardinality]`) |
+| `cardinality` | No | `low`, `high` or `unknown` (the default) -- see below |
+| `attribute` | No | List of storage attributes (e.g. `[not_null]`) |
 | `use_case` | No | Query pattern hint -- determines indexing (see below) |
 | `default` | No | DEFAULT expression |
 | `order` | No | Position in ORDER BY / PRIMARY KEY |
@@ -374,6 +375,35 @@ catalogue:
 
 ---
 
+## Cardinality Axis
+
+How many distinct values the column holds. One declaration, because it decides
+two things that used to be set apart with nothing keeping them in agreement:
+`attribute: [lowcardinality]` was the storage decision, hand-set, and
+`exact_match` choosing `set(0)` over `bloom_filter` was the index decision,
+derived separately.
+
+| Value | Storage | `exact_match` index |
+|-------|---------|---------------------|
+| `low` | `LowCardinality(...)` -- dictionary encoding, which pays below about 10K distinct values | `set(0)`, holding every distinct value exactly |
+| `high` | plain | `bloom_filter`, bounded and probabilistic |
+| `unknown` *(default)* | plain | `bloom_filter` |
+
+`unknown` is the honest default. Nobody re-reviews a field that already looks
+decided, so a column with nothing measured says so and gets the safe way to be
+wrong.
+
+Measure it rather than guess it. An Elasticsearch index template does not carry
+cardinality, so an imported column is `unknown`;
+`dfe_engine.services.schema.data_shape_service` reads the distinct count off
+rows that have already landed and returns it with the row count and the date it
+was taken.
+
+`attribute: [lowcardinality]` is the retired spelling and still reads as
+`cardinality: low`. Declaring the two against each other is refused.
+
+---
+
 ## Attribute Axis
 
 Attributes modify how the type is stored. Specified as a **list** in
@@ -381,7 +411,7 @@ YAML -- multiple attributes can be combined:
 
 | Attribute | What It Does |
 |-----------|-------------|
-| `lowcardinality` | Dictionary encoding -- huge performance gain for <10K distinct values |
+| `lowcardinality` | Retired -- the old spelling of `cardinality: low` |
 | `nullable` | Allows NULL values (2x performance cost -- use only when NULL != empty) |
 | `not_null` | Explicitly prevents NULL (overrides the primitive's default) |
 | `materialized` | Column computed on insert, not stored in source data |
@@ -440,13 +470,15 @@ keep it off your ORDER BY and high-filter columns.
 # LowCardinality string, not nullable
   - name: category
     type: string
-    attribute: [lowcardinality, not_null]
+    cardinality: low
+    attribute: [not_null]
     use_case: dimension
 
 # Multiple attributes
   - name: region_code
     type: string
-    attribute: [lowcardinality, not_null]
+    cardinality: low
+    attribute: [not_null]
     use_case: dimension
 
 # Materialized column (computed from other columns at insert time)
@@ -515,7 +547,7 @@ vocabulary.
 | Use Case | ClickHouse Index Generated | Granularity | Notes |
 |----------|---------------------------|-------------|-------|
 | `dimension` | `set(0)` | 4 | Exact distinct values per granule |
-| `exact_match` | `set(0)` with the `lowcardinality` attribute, else `bloom_filter` | 4 | The bloom filter is probabilistic -- false positives, no false negatives |
+| `exact_match` | `set(0)` on `cardinality: low`, else `bloom_filter` | 4 | The bloom filter is probabilistic -- false positives, no false negatives |
 | `range` | `minmax` | 4 | Stores min/max per granule |
 | `word_search` | `text(tokenizer=splitByNonAlpha)` | 1 | Native text index (GA v26.2). Deterministic, no false positives, row-level filtering. 45x faster than without index. |
 | `substring_search` | `text(tokenizer=ngrams(3))` | 1 | Character n-gram text index for substring matching |

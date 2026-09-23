@@ -252,7 +252,8 @@ class DraftColumn(BaseModel):
         default_factory=list,
         description=(
             "ClickHouse storage attributes for the column (e.g. 'nullable', "
-            "'lowcardinality'). Empty for a plain column."
+            "'not_null'). Empty for a plain column. How many distinct values "
+            "the column holds is declared apart, as 'cardinality'."
         ),
     )
     use_case: str | None = Field(

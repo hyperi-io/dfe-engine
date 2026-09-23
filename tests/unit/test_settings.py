@@ -822,6 +822,15 @@ class TestEverySettingIsRead:
         ("QueryViewSettings", "max_rows_to_read"),
     }
 
+    # Names a ClickHouse SERVER setting also carries, where SQL naming the
+    # server setting would otherwise read as a reader; only an attribute
+    # access counts for these.
+    CH_SERVER_SETTING_NAMES = {
+        "max_rows_to_read",
+        "max_memory_usage",
+        "max_execution_time",
+    }
+
     def test_no_new_setting_lands_without_a_reader(self):
         import ast
         import re
@@ -854,11 +863,12 @@ class TestEverySettingIsRead:
         )
         assert corpus, "read no package source -- the test setup, not the code, is wrong"
 
-        unread = {
-            (cls, field)
-            for cls, field in declared
-            if not re.search(rf"\b{re.escape(field)}\b", corpus)
-        }
+        def reads(field: str) -> bool:
+            name = re.escape(field)
+            pattern = rf"\.{name}\b" if field in self.CH_SERVER_SETTING_NAMES else rf"\b{name}\b"
+            return bool(re.search(pattern, corpus))
+
+        unread = {(cls, field) for cls, field in declared if not reads(field)}
 
         new = sorted(unread - self.KNOWN_UNREAD)
         assert not new, (

@@ -26,6 +26,8 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+from dfe_engine.source.type_registry import LOW_CARDINALITY
+
 if TYPE_CHECKING:
     from dfe_engine.source.models import SchemaColumn
     from dfe_engine.synthetic_data.entities import CloudAccount, EntityPool, Host, User
@@ -282,7 +284,7 @@ def classify(column: SchemaColumn, *, provider: str = "aws") -> Inference:
     if numeric:
         low, high = rng_hint or (0, 10000)
         return Inference(Semantic.NUMBER, low=low, high=high)
-    if "lowcardinality" in (column.attribute or []) or column.use_case == "dimension":
+    if column.declared_cardinality == LOW_CARDINALITY or column.use_case == "dimension":
         return Inference(Semantic.LABEL)
     return Inference(Semantic.TOKEN)
 
