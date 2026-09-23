@@ -16,7 +16,7 @@ for its number.
 | 0.1 | 0 | A record with no schema or source lands in `main` | live |
 | 0.2 | 0 | A nested sub-field in `_json` answers a query (`fred.nerk.frog`) | live |
 | 1.1 | 1 | A pre-supplied read-only meta schema imports from dfe-schemas | live |
-| 1.2 | 1 | A meta schema exports, then re-imports into a clean deployment | none |
+| 1.2 | 1 | A meta schema exports, then re-imports into a clean deployment | live, part |
 | 1.3 | 1 | A field seen in `_json` promotes to a real column | live, xfail dfe-engine#459 |
 | 2.1 | 2 | A source declares a `key=value` routing condition | live |
 | 2.2 | 2 | Deploy renders the routing, the receiver reloads it in place, and records route by it | live, part |
@@ -25,10 +25,10 @@ for its number.
 | 2.5 | 2 | Deploying it routes the feed to the narrower table | live |
 | 2.6 | 2 | An index is added and dropped on the live table, no rebuild | live, part |
 | 2.7 | 2 | A transform turns a text line in `message` into typed columns | live, xfail dfe-loader#184 |
-| 2.8 | 2 | The transform is swapped and the same columns still fill | none |
-| 3.1 | 3 | A derived schema stops the loader populating `_json` and `_raw`, and the columns still EXIST on the table | none |
-| 3.2 | 3 | The feed still lands with typed columns filled and `_json` empty | none |
-| 3.3 | 3 | Turning population back on refills `_json` for new records -- the decision is reversible | none |
+| 2.8 | 2 | The transform is swapped and the same columns still fill | live, part |
+| 3.1 | 3 | A derived schema stops the loader populating `_json` and `_raw`, and the columns still EXIST on the table | live |
+| 3.2 | 3 | The feed still lands with typed columns filled and `_json` empty | live, xfail dfe-engine#513 |
+| 3.3 | 3 | Turning population back on refills `_json` for new records -- the decision is reversible | live, xfail dfe-engine#513 |
 
 ## What the marks mean
 
@@ -39,11 +39,13 @@ suite goes red the day that issue is fixed, which is how it gets removed.
 rendered and the table created; that the receiver reloads in place is the flow
 suite's routing check, and that records route by it is 2.3. 2.6 applies the ALTER
 directly rather than through a derived-schema edit, which is what 2.4 and 2.5
-cover.
+cover. 1.2 re-imports into the SAME deployment under a second path, which proves
+the bundle carries what the import needs but not that it lands in a deployment
+that has never seen the schema -- that needs a second stack.
 
-`none` is a step with no test, not a step that passes. 1.2 and 2.8 are
-unwritten. The three stage 3 steps cannot pass at all: a derived schema has no
-way to say "stop populating `_json`", so the engine never compiles it.
+No step is `none` any more. 2.8 drives the source that already has a transform instance rather than creating a second one, because Compose declares one service per transform app and binds it at deploy -- so it proves a different ENGINE on the same corpus, not a second binding. It also reads that source's match rule off the API instead of assuming one, since the source belongs to the deployment.
+
+Stage 3 was listed here as unable to pass at all, on the grounds that a derived schema had no way to say "stop populating `_json`". It has one: `capture_json: false` with `capture_raw: false`, which the engine compiles to dfe-loader's `extracted_only`. 3.1 passes. 3.2 and 3.3 are xfail on dfe-engine#513 -- the deploy writes `table_capture_modes` and reports `restart_required: []`, but the loader logs no config reload, so the mode only takes effect once it is restarted by hand.
 
 ## Three carry the weight
 

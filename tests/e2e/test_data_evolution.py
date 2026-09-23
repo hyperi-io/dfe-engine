@@ -103,6 +103,13 @@ PARSED_COLUMN = "source_ip"
 TRANSFORM_SOURCE = "ciscoios"
 TRANSFORM_MODULE = "cisco_ios"
 
+# Step 1.2. A custom schema of its own, because a `core` one exports as a
+# REFERENCE by design and a reference round-trips nothing.
+ROUNDTRIP_SOURCE = "meta/acceptance_roundtrip_src"
+ROUNDTRIP_TARGET = "meta/acceptance_roundtrip_dst"
+ROUNDTRIP_VERSION = "1.0.0"
+_COMPARED_FIELDS = ("name", "type", "use_case", "expr")
+
 # Steps 2.4 and 2.5. The derived schema selects five of SHIPPED_SCHEMA's twelve
 # columns; DERIVED_DROPPED is the other seven, and its absence from the deployed
 # table is what says the selection reached the data plane.
@@ -130,6 +137,18 @@ DERIVED_DROPPED = (
     "process_name",
     "process_pid",
 )
+
+# Step 2.8's source. Compose runs ONE instance per transform app and binds it to
+# a source at deploy, so this names the source that already has one rather than
+# creating a second the deployment cannot serve.
+SWAP_SOURCE = "filebeat"
+
+# Stage 3. Its own source, because it turns population off on the table it owns
+# and the stage 2 steps read `_json` on theirs.
+CAPTURE_SOURCE = "acceptcapture"
+CAPTURE_DERIVED = "derived/accept/capture_off"
+CAPTURE_VERSION = "1.0.0"
+CAPTURE_SELECT = ("timestamp", "host_name", "event_dataset", "message")
 
 HEADER = {"type": "common-header/timeseries", "version": "1.0.1"}
 
@@ -183,6 +202,52 @@ def _alter(ch_client, statement: str) -> None:
 def _transform_engine(cfg: E2EConfig) -> str:
     """The engine name for the transform app the deployment runs."""
     return (cfg.transform or "dfe-transform-vrl").removeprefix("dfe-transform-")
+
+
+def _nested(field: str, value: Any) -> dict:
+    """A record fragment that satisfies a dotted match field.
+
+    The receiver splits the field on ``.`` and walks the raw payload, so
+    ``tags.feed`` has to arrive as a nested object rather than a flat key.
+    """
+    body: Any = value
+    for part in reversed(field.split(".")):
+        body = {part: body}
+    return body
+
+
+def _write_capture_version(engine: EngineAPI, *, capture_json: bool) -> None:
+    """Write stage 3's derived version with both capture switches set together.
+
+    Both or neither: json alone has no dfe-loader mode and the version model
+    refuses the pair before a document can carry it.
+    """
+    body = {
+        "base": SHIPPED_SCHEMA,
+        "base_version": SHIPPED_SCHEMA_VERSION,
+        "current": CAPTURE_VERSION,
+        "versions": {
+            CAPTURE_VERSION: {
+                "date": "2026-09-23",
+                "summary": f"Acceptance stage 3 -- capture_json={capture_json}",
+                "capture_json": capture_json,
+                "capture_raw": capture_json,
+                "select": [{"name": name} for name in CAPTURE_SELECT],
+            }
+        },
+    }
+    written = engine.call("PUT", f"/schemas/definitions/derived/{CAPTURE_DERIVED}", body)
+    if written.status_code >= 300:
+        written = engine.call("POST", f"/schemas/definitions/derived/{CAPTURE_DERIVED}", body)
+    assert written.status_code in (200, 201), (
+        f"the deployment refused the capture schema: {written.status_code} {written.text}"
+    )
+
+
+def _column_signatures(columns: Any) -> list[tuple]:
+    """One comparable tuple per column, over the fields an import must preserve."""
+    items = columns["items"] if isinstance(columns, dict) else columns
+    return [tuple(column.get(field) for field in _COMPARED_FIELDS) for column in items]
 
 
 @dataclass(frozen=True)
@@ -258,6 +323,136 @@ def evolved(engine: EngineAPI, e2e: E2EConfig, ch_client):
     yield state
     _delete(engine, SOURCE)
     drop_table(ch_client, e2e.ch_db, SOURCE)
+
+
+@pytest.fixture(scope="module")
+def swapped_table(engine: EngineAPI, e2e: E2EConfig, ch_client) -> tuple:
+    """Step 2.8's source: one that ALREADY has a transform instance behind it.
+
+    Not created here. Compose declares one service per transform app and binds it
+    to a source at deploy, so a second transform-bearing source is refused and a
+    freshly created one has nothing running in front of it. The step is about a
+    different ENGINE on the same corpus, which this deployment already provides.
+    """
+    require(e2e, "receiver_url", "ch_host")
+    found = engine.call("GET", f"/sources/{SWAP_SOURCE}")
+    if found.status_code != 200:
+        pytest.skip(f"{SWAP_SOURCE} is not deployed here, so no second engine to swap to")
+    table = f"{e2e.ch_db}.{SWAP_SOURCE}"
+    exists = _scalar(
+        ch_client,
+        "SELECT count() FROM system.tables WHERE database = %(d)s AND name = %(t)s",
+        {"d": e2e.ch_db, "t": SWAP_SOURCE},
+    )
+    if not exists:
+        pytest.skip(f"{table} does not exist, so {SWAP_SOURCE} has never been deployed")
+
+    # Read the rule rather than assume it: this source belongs to the deployment,
+    # so its match field and value are not this suite's to choose.
+    stored = found.json()
+    match = stored["versions"][str(stored["current"])].get("match")
+    if not match:
+        pytest.skip(f"{SWAP_SOURCE} declares no match rule, so nothing can be routed to it")
+    return table, match
+
+
+@pytest.fixture(scope="module")
+def capture_off(engine: EngineAPI, e2e: E2EConfig, ch_client):
+    """Stage 3's source, deployed with `_json` and `_raw` population switched OFF."""
+    require(e2e, "receiver_url", "ch_host")
+    _delete(engine, CAPTURE_SOURCE)
+    drop_table(ch_client, e2e.ch_db, CAPTURE_SOURCE)
+    _write_capture_version(engine, capture_json=False)
+    created = engine.call(
+        "POST",
+        "/sources",
+        {
+            "source": CAPTURE_SOURCE,
+            "display_name": "Capture acceptance",
+            "description": "A source whose table stops carrying _json and _raw.",
+            "match": {
+                "field": MATCH_FIELD,
+                "operator": "equals",
+                "value": CAPTURE_SOURCE,
+            },
+            "header": HEADER,
+            "schema": {
+                "meta_schema": SHIPPED_SCHEMA,
+                "meta_schema_version": SHIPPED_SCHEMA_VERSION,
+                "derived_schema": CAPTURE_DERIVED,
+                "derived_schema_version": CAPTURE_VERSION,
+            },
+        },
+    )
+    assert created.status_code == 201, (
+        f"the deployment refused the capture source: {created.status_code} {created.text}"
+    )
+    _deploy(engine, CAPTURE_SOURCE)
+    yield CAPTURE_SOURCE
+    _delete(engine, CAPTURE_SOURCE)
+    drop_table(ch_client, e2e.ch_db, CAPTURE_SOURCE)
+    engine.call("DELETE", f"/schemas/definitions/derived/{CAPTURE_DERIVED}")
+
+
+@pytest.fixture(scope="module")
+def exported_schema(engine: EngineAPI) -> dict:
+    """A custom meta schema, exported and re-pathed ready to import.
+
+    Built here rather than borrowed from the deployment: a `core` schema exports
+    as a reference by design, and a custom one belonging to something else
+    carries whatever that thing last did to it.
+    """
+    bundle = {
+        "kind": "meta_schema",
+        "format": 1,
+        "path": ROUNDTRIP_SOURCE,
+        "resource_type": "custom",
+        "current": ROUNDTRIP_VERSION,
+        "versions": {
+            ROUNDTRIP_VERSION: {
+                "date": "2026-09-23",
+                "type": "model",
+                "summary": "Acceptance 1.2 -- the export/import round trip",
+                "columns": [
+                    {
+                        "name": "timestamp",
+                        "type": "datetime",
+                        "use_case": "range",
+                        "expr": "@source: @timestamp",
+                        "comment": "Event timestamp",
+                    },
+                    {
+                        "name": "host_name",
+                        "type": "string",
+                        "use_case": "dimension",
+                        "expr": "@source: host.name",
+                        "comment": "Host the event came from",
+                    },
+                    {
+                        "name": "message",
+                        "type": "text",
+                        "use_case": "word_search",
+                        "comment": "The event text",
+                    },
+                ],
+            }
+        },
+    }
+    for path in (ROUNDTRIP_SOURCE, ROUNDTRIP_TARGET):
+        engine.call("DELETE", f"/schemas/definitions/{path}")
+    seeded = engine.call("POST", "/schemas/import", bundle)
+    assert seeded.status_code in (200, 201), (
+        f"the deployment refused the seed schema: {seeded.status_code} {seeded.text}"
+    )
+
+    exported = engine.json(
+        "GET",
+        f"/schemas/definitions/{ROUNDTRIP_SOURCE}/export?version={ROUNDTRIP_VERSION}",
+    )
+    exported["path"] = ROUNDTRIP_TARGET
+    yield exported
+    for path in (ROUNDTRIP_SOURCE, ROUNDTRIP_TARGET):
+        engine.call("DELETE", f"/schemas/definitions/{path}")
 
 
 @pytest.fixture(scope="module")
@@ -454,6 +649,38 @@ class TestStage1:
             f"refusal: {refused.text}"
         )
         assert "Core resources can't be mutated" in refused.text
+
+    def test_1_2_a_meta_schema_exports_then_re_imports(
+        self, engine: EngineAPI, exported_schema: dict
+    ) -> None:
+        """The export has to carry everything the import needs.
+
+        Compared per column on name, type, use case and expr rather than by
+        count. ``expr`` is the sharp one: it is written verbatim into the
+        ClickHouse COMMENT and read back by dfe-loader, so an import that drops
+        it produces a schema that looks right and instructs nothing.
+        """
+        sent = _column_signatures(exported_schema["versions"][ROUNDTRIP_VERSION]["columns"])
+        assert any(signature[3] for signature in sent), (
+            "the exported schema carries no expr at all, so this cannot tell whether "
+            "the import preserves one"
+        )
+
+        landed = engine.call("POST", "/schemas/import", exported_schema)
+        assert landed.status_code in (200, 201), (
+            f"the re-import was refused: {landed.status_code} {landed.text}"
+        )
+
+        columns_path = f"/schemas/definitions/{ROUNDTRIP_TARGET}/versions/columns"
+        read = engine.json("GET", f"{columns_path}?version={ROUNDTRIP_VERSION}&per_page=-1")
+        got = _column_signatures(read["version"]["columns"]["items"])
+
+        assert len(got) == len(sent), f"{len(sent)} columns exported and {len(got)} imported"
+        lost = [signature for signature in sent if signature not in got]
+        assert not lost, (
+            f"{len(lost)} column(s) did not survive the round trip on "
+            f"{', '.join(_COMPARED_FIELDS)}: {lost[:3]}"
+        )
 
     @pytest.mark.xfail(
         strict=True,
@@ -880,6 +1107,198 @@ class TestStage2:
                 "has only inside its text and only the transform pulls out - check the "
                 "per-source transform instance is running and the receiver has been restarted "
                 "onto this source's routing before reading a timeout as the product's fault"
+            ),
+        )
+        assert gained > 0
+
+
+class TestStage3:
+    """Population of `_json` and `_raw` stops, and starts again.
+
+    The decision has to be REVERSIBLE, so the columns stay on the table either
+    way and only the writing stops. `capture_json: false` with `capture_raw:
+    false` compiles to dfe-loader's `extracted_only`; the pair with json alone is
+    refused at the document, because the loader has no mode for it.
+    """
+
+    def test_3_1_a_derived_schema_stops_population_and_keeps_the_columns(
+        self, e2e, ch_client, capture_off: str
+    ) -> None:
+        """Dropping the columns would be the wrong implementation of stopping.
+
+        The common header is what the rest of DFE reads, so a table that lost
+        `_json` could not be switched back without a migration -- which is the
+        opposite of the reversible decision stage 3 is for.
+        """
+        columns = {
+            str(row[0])
+            for row in ch_client.query(
+                "SELECT name FROM system.columns WHERE database = %(d)s AND table = %(t)s",
+                parameters={"d": e2e.ch_db, "t": capture_off},
+            ).result_rows
+        }
+        assert columns, f"the deploy created no {e2e.ch_db}.{capture_off}"
+        missing = [name for name in ("_json", "_raw") if name not in columns]
+        assert not missing, (
+            f"{', '.join(missing)} was DROPPED from {e2e.ch_db}.{capture_off} rather than "
+            "left unpopulated, so turning capture back on would need a migration"
+        )
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "dfe-engine#513: the deploy writes table_capture_modes and reports "
+            "restart_required: [], but dfe-loader logs no config reload, so the mode "
+            "only takes effect after the loader is restarted by hand"
+        ),
+    )
+    def test_3_2_the_feed_lands_typed_with_json_empty(
+        self, e2e, ch_client, capture_off: str
+    ) -> None:
+        require(e2e, "receiver_url", "ch_host")
+        table = f"{e2e.ch_db}.{capture_off}"
+        probe = f"capture{uuid.uuid4().hex}"
+        record = {
+            "tags": {"feed": capture_off},
+            "@timestamp": "2026-09-23T04:05:06.000Z",
+            "host": {"name": f"host-{probe}"},
+            "event": {"dataset": "system.auth"},
+            "message": f"capture probe {probe}",
+        }
+
+        def _sent_and_landed() -> Any:
+            post_events(e2e, [record])
+            return _scalar(
+                ch_client,
+                f"SELECT count() FROM {table} WHERE host_name = %(h)s",
+                {"h": f"host-{probe}"},
+            )
+
+        poll_until(_sent_and_landed, timeout=LANDING_DEADLINE, desc=f"a record in {table}")
+        typed, json_length = _row(
+            ch_client,
+            f"SELECT message, length(toString(`_json`)) FROM {table} "
+            "WHERE host_name = %(h)s LIMIT 1",
+            {"h": f"host-{probe}"},
+        )
+        assert typed, "the typed column did not fill, so this says nothing about _json"
+        assert not json_length, (
+            f"_json on {table} carries {json_length} characters, so population did not stop"
+        )
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "dfe-engine#513: turning capture back on writes the loader config and needs "
+            "the same manual restart, so a new record still lands with _json empty"
+        ),
+    )
+    def test_3_3_turning_population_back_on_refills_json(
+        self, engine: EngineAPI, e2e, ch_client, capture_off: str
+    ) -> None:
+        """The reverse direction, which is the half that makes it a decision.
+
+        Asserts the OFF state first. A record landing with `_json` filled after
+        the switch proves nothing on its own -- the loader's default mode is
+        `full`, so a run where population never stopped looks identical.
+
+        Rewrites the SAME derived version rather than adding one: the source pins
+        `derived_schema_version`, and replacing the versions map out from under
+        that pin is dfe-engine#519.
+        """
+        require(e2e, "receiver_url", "ch_host")
+        table = f"{e2e.ch_db}.{capture_off}"
+        before = f"stopped{uuid.uuid4().hex}"
+        stopped_record = {
+            "tags": {"feed": capture_off},
+            "@timestamp": "2026-09-23T04:05:06.000Z",
+            "host": {"name": f"host-{before}"},
+            "event": {"dataset": "system.auth"},
+            "message": f"stopped probe {before}",
+        }
+
+        def _sent_while_off() -> Any:
+            post_events(e2e, [stopped_record])
+            return _scalar(
+                ch_client,
+                f"SELECT count() FROM {table} WHERE host_name = %(h)s",
+                {"h": f"host-{before}"},
+            )
+
+        poll_until(_sent_while_off, timeout=LANDING_DEADLINE, desc=f"a record in {table}")
+        while_off = _scalar(
+            ch_client,
+            f"SELECT length(toString(`_json`)) FROM {table} WHERE host_name = %(h)s LIMIT 1",
+            {"h": f"host-{before}"},
+        )
+        assert not while_off, (
+            f"_json carries {while_off} characters while population is OFF, so refilling "
+            "it afterwards would prove nothing -- the loader is in its default full mode"
+        )
+
+        _write_capture_version(engine, capture_json=True)
+        _deploy(engine, capture_off)
+
+        probe = f"refill{uuid.uuid4().hex}"
+        record = {
+            "tags": {"feed": capture_off},
+            "@timestamp": "2026-09-23T04:05:06.000Z",
+            "host": {"name": f"host-{probe}"},
+            "event": {"dataset": "system.auth"},
+            "message": f"refill probe {probe}",
+        }
+
+        def _sent_and_refilled() -> Any:
+            post_events(e2e, [record])
+            return _scalar(
+                ch_client,
+                f"SELECT length(toString(`_json`)) FROM {table} WHERE host_name = %(h)s LIMIT 1",
+                {"h": f"host-{probe}"},
+            )
+
+        filled = poll_until(
+            _sent_and_refilled,
+            timeout=LANDING_DEADLINE,
+            desc=f"a record in {table} carrying _json again",
+        )
+        assert filled, f"_json on {table} is still empty for a record sent after the switch"
+
+
+class TestStage2Swap:
+    """Step 2.8 -- the transform is swapped and the same columns still fill.
+
+    2.7 proves ONE transform turns a Cisco IOS line into typed columns. 2.8 asks
+    whether a different engine on the same corpus produces the same answer, which
+    is what makes the transform a swappable part rather than the schema's owner.
+    """
+
+    def test_2_8_a_second_transform_fills_the_same_columns(
+        self, e2e, ch_client, swapped_table: tuple, cisco_samples: list[corpus.Sample]
+    ) -> None:
+        """Counted, never marked.
+
+        The VRL pipeline REPLACES the inbound `_tags` with its own, so a marker
+        sent in tags does not survive it and a marker query reads as total loss.
+        The parsed column is what says a line was read, so the assertion is the
+        gain in rows carrying one.
+        """
+        require(e2e, "receiver_url", "ch_host")
+        table, match = swapped_table
+        parsed = f"toString({PARSED_COLUMN}) NOT IN ('', '::', '0.0.0.0')"
+        before = count_rows(ch_client, table, where=parsed)
+        routed = _nested(match["field"], match["value"])
+        post_events(
+            e2e,
+            [{**routed, "message": sample.line} for sample in cisco_samples],
+        )
+
+        gained = poll_until(
+            lambda: count_rows(ch_client, table, where=parsed) - before,
+            timeout=LANDING_DEADLINE,
+            desc=(
+                f"a row in {table} carrying {PARSED_COLUMN}, which the corpus line "
+                "holds only inside its text - check the per-source transform instance for "
+                f"{SWAP_SOURCE} is running before reading a timeout as the product's fault"
             ),
         )
         assert gained > 0
