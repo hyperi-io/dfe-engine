@@ -23,11 +23,21 @@ test:
 
 quality:
   python:
+    # semgrep: warn matches hyperi-ci's own default (quality/semgrep.py:36), so
+    # this is a deliberate pin rather than a downgrade. Its 38 findings are
+    # Flask and Django rules firing on a FastAPI codebase -- the SQL-injection
+    # hit is api/v1/queries.py:232, a raw-query endpoint behind
+    # require_action(query_execute), where taking a caller's SQL is the point.
     semgrep: warn
     vulture: warn
     ty: warn
     bandit_exclude_tests: true
     # pip-audit: warn because diskcache CVE-2025-69872 (unsafe pickle) has no
-    # upstream fix — 5.6.3 is the latest release. Mitigated by K8s pod isolation.
-    # python-jose (ecdsa, pyasn1) eliminated — replaced by PyJWT[crypto].
+    # upstream fix -- 5.6.3 is the latest release. Mitigated by K8s pod isolation.
+    # python-jose (ecdsa, pyasn1) eliminated -- replaced by PyJWT[crypto].
+    #
+    # The `reason:` mapping form hyperi-ci#250 adds is MERGED but NOT RELEASED.
+    # The wheel consumers install predates it, resolves the mapping to no known
+    # mode, and fails closed as blocking -- which failed this repo's Quality on
+    # the very advisory the warn exists to tolerate. Convert once it ships.
     pip_audit: warn
