@@ -42,6 +42,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from scalo.logger import logger
+
 from dfe_engine.gitcrud.engine import del_path, get_path, set_path
 from dfe_engine.source.alignment import require_one_type
 from dfe_engine.source.models import Source
@@ -64,6 +66,9 @@ DIRECT_TRANSPORT = "grpc"
 # Push listener and sender and so is the same for every transform.
 SOURCE_BLOCK = "source"
 SINK_BLOCK = "sink"
+
+# The loader's per-table _json/_raw capture, compiled from the derived schemas.
+CAPTURE_BLOCK = "capture"
 
 
 class UnknownRoutingCompilerError(KeyError):
@@ -206,13 +211,29 @@ def _receiver(
 def _loader(
     app: AppDescriptor, registry: SourceRegistry, settings: Any, instance: str | None
 ) -> dict[str, Any]:
-    from dfe_engine.services.source_routing import compile_loader_routing
+    from dfe_engine.schema.derived_registry import derived_reference_root
+    from dfe_engine.services.source_routing import compile_loader_capture, compile_loader_routing
 
     db = settings.clickhouse.effective_data_database
     # Only the keys the sources derive: the block is written whole, so a model
     # default in it would overwrite the deployment's own setting for that key.
     compiled = compile_loader_routing(registry, db=db)
-    return {"routing": compiled.model_dump(mode="json", exclude_unset=True)}
+    blocks: dict[str, Any] = {"routing": compiled.model_dump(mode="json", exclude_unset=True)}
+    capture = compile_loader_capture(
+        registry, db=db, derived_base_dir=derived_reference_root(settings)
+    )
+    if capture and CAPTURE_BLOCK not in app.routing_paths:
+        logger.warning(
+            f"{app.service}: {len(capture)} source(s) turn a catch-all column off, and this "
+            f"manifest declares no {CAPTURE_BLOCK!r} overlay path - the loader will keep "
+            f"populating _json and _raw for them"
+        )
+        return blocks
+    # Absent when no derived schema turns a catch-all off, so the overlay path is
+    # removed rather than pinned to an empty map.
+    if capture:
+        blocks[CAPTURE_BLOCK] = capture
+    return blocks
 
 
 def _archiver(

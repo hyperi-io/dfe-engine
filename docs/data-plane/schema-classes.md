@@ -74,7 +74,7 @@ from dfe_engine.schema.schema_loader import SchemaLoader
 
 columns = SchemaLoader.load_columns("meta/syslog.yaml", version="1.0.0")
 profile = SchemaLoader.load_profile("timeseries", version="1.0.0")
-columns = SchemaLoader.apply_derived_schema(columns, "derived.yaml")
+columns = SchemaLoader.apply_derived_schema(columns, "derived/beats/filebeat_auth.yaml")
 columns = SchemaLoader.apply_additional_fields(columns, "additional.yaml")
 full = SchemaLoader.compose(profile, columns)
 errors = SchemaLoader.validate_columns(full, TypeRegistry.default())

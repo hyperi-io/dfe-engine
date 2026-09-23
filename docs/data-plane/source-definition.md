@@ -96,7 +96,8 @@ views:
 schema:
   meta_schema: logs_beats_filebeat      # Base field definitions (YAML)
   meta_schema_version: 1.0.0
-  derived_schema: filebeat/derived      # Source-specific field overrides (optional)
+  derived_schema: derived/beats/filebeat_auth   # Column SELECTION from the meta schema (optional)
+  derived_schema_version: 1.0.0                 # Unset follows the derived schema's own current
   additional_fields: filebeat/add       # Extra fields, indexes (optional)
   ttl_days: 90                          # Data retention
   engine: MergeTree                     # Base variant only (MergeTree, ReplacingMergeTree(...), ...)
@@ -113,6 +114,16 @@ here wins over that default and over the table's dfe-schemas definition. The
 next schema apply moves an existing table onto a changed value with `ALTER
 TABLE ... MODIFY TTL`, and shortening it expires the rows older than the new
 value.
+
+`derived_schema` NARROWS. The table's columns become exactly the names its
+`select` list carries, in that order, after the common header. A name the base
+meta schema does not define is a hard error, never an appended column, and
+`index` is the only per-column key it may set -- `type`, `expr`, `comment` and
+`attribute` all resolve from the base. `additional_fields` is still the append
+layer. A derived schema also carries `capture_json` and `capture_raw` for this
+table, both on by default; turning them off tells dfe-loader to stop populating
+`_json` and `_raw` without removing either column. Its CRUD surface is
+`/api/v1/schemas/definitions/derived/<group>/<name>`.
 
 The 2.1 keys `sigma`, `mapping_standards` and `field_mappings` were a clean
 break in 2.2, not a deprecation -- a write carrying one is rejected with a
@@ -145,7 +156,7 @@ Each source owns exactly one ClickHouse table schema, 1:1:
 Source: filebeat
   └── Schema: logs_beats_filebeat
         ├── meta_schema.yaml       (base columns, types, use cases)
-        ├── derived_schema.yaml    (source-specific overrides)
+        ├── derived_schema.yaml    (which of those columns this table keeps)
         └── additional_fields.yaml (enrichment fields)
 ```
 

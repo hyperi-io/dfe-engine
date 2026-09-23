@@ -20,14 +20,16 @@ from dfe_engine.gitcrud import (
 
 def test_default_registry_classes_are_the_rbac_prefixes():
     # deploy-repo scope: helmvars + governance + library + sources (the first
-    # datamodel class to land; the rest arrive with multi-repo) + the hunt and
-    # rule classes the hunt runner git-syncs
+    # datamodel class to land; the rest arrive with multi-repo) + schema (the
+    # derived column selections those sources name) + the hunt and rule classes
+    # the hunt runner git-syncs
     assert default_registry().classes() == [
         "governance",
         "helmvars",
         "hunt",
         "library",
         "rule",
+        "schema",
         "sources",
     ]
 

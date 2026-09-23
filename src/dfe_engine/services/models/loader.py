@@ -6,7 +6,7 @@ All defaults match the Rust `impl Default` values exactly.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
@@ -255,6 +255,10 @@ class FieldSanitizationConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+CaptureMode = Literal["full", "raw_only", "extracted_only"]
+"""How dfe-loader populates ``_json`` and ``_raw``: both, ``_raw`` alone, neither."""
+
+
 class MetadataConfig(BaseModel):
     """Metadata injection and field capture configuration."""
 
@@ -271,6 +275,11 @@ class MetadataConfig(BaseModel):
     tags_output: str = "_tags"
     drop_tags: bool = False
 
+    # The live per-table control: a derived schema's capture_json/capture_raw
+    # pair compiles to a table_capture_modes entry.
+    capture_mode: CaptureMode = "full"
+    table_capture_modes: dict[str, CaptureMode] = Field(default_factory=dict)
+
     # _json capture
     capture_json: bool = True
     json_output: str = "_json"
@@ -280,7 +289,8 @@ class MetadataConfig(BaseModel):
     raw_source_fields: list[str] = Field(default_factory=lambda: ["logoriginal"])
     raw_output: str = "_raw"
 
-    # Per-table overrides
+    # Superseded by table_capture_modes: dfe-loader warns on these at start and
+    # ignores a raw-only entry outright (dfe-loader src/pipeline/capture.rs).
     disable_json_tables: list[str] = []
     disable_raw_tables: list[str] = []
 

@@ -14,6 +14,7 @@ from dfe_engine.api.v1.backing_services import router as backing_services_router
 from dfe_engine.api.v1.cel import router as cel_router
 from dfe_engine.api.v1.config import router as config_router
 from dfe_engine.api.v1.deployments import router as deployments_router
+from dfe_engine.api.v1.derived_schemas import router as derived_schemas_router
 from dfe_engine.api.v1.discovery import router as discovery_router
 from dfe_engine.api.v1.fieldmaps import router as fieldmaps_router
 from dfe_engine.api.v1.gitops import router as gitops_router
@@ -107,6 +108,9 @@ v1_router.include_router(synthetic_data_router)
 v1_router.include_router(pipeline_router)
 v1_router.include_router(tasks_router)
 v1_router.include_router(discovery_router)
+# Ahead of schemas_router: /definitions/derived/... would otherwise be swallowed
+# by its /definitions/{schema_path:path} routes.
+v1_router.include_router(derived_schemas_router)
 v1_router.include_router(schemas_router)
 # SCIM 2.0 provisioning face (/scim/v2) over the account/group stores
 v1_router.include_router(scim_router)

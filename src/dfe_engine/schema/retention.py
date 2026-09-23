@@ -25,6 +25,7 @@ from typing import Any
 from scalo.logger import logger
 
 from dfe_engine.schema.applier import ApplyReport, SchemaApplier, SchemaApplyError
+from dfe_engine.schema.derived_registry import derived_reference_root
 from dfe_engine.schema.engine_resolver import EngineResolver
 from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
 from dfe_engine.source.deployment import SourceDeploymentStore, ensure_build_artifact
@@ -59,6 +60,7 @@ def reconcile_source_ttls(
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=schemas_dir,
+        derived_base_dir=derived_reference_root(settings),
         default_engine=settings.clickhouse.default_engine,
         default_ttl_days=settings.clickhouse.default_ttl_days,
         resolver=resolver,

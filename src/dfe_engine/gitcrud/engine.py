@@ -29,7 +29,7 @@ from typing import Any
 from dfe_engine.gitops.repo import GitopsRepo, PublishResult
 from dfe_engine.yaml_utils import yaml_dump_string, yaml_load, yaml_load_string
 
-from .commit_policy import validate_name
+from .commit_policy import validate_name, validate_resource_path
 from .registry import ResourceClass, ResourceClassRegistry, default_registry
 
 _MISSING = object()
@@ -163,19 +163,27 @@ class GitCrud:
         """Public: the resource-class registry (read-only introspection)."""
         return self._registry
 
+    @staticmethod
+    def _check_name(cls: ResourceClass, name: str) -> None:
+        """The one name rule, widened to path segments for a nested class."""
+        if cls.nested:
+            validate_resource_path(name)
+        else:
+            validate_name(name)
+
     def _rel(self, cls: ResourceClass, name: str) -> str:
         # Single chokepoint for every read/write path: the name must be safe to
         # splice into a file path AND a commit subject (see validate_name). For a
         # bundle this is the manifest, so every existing doc-level operation keeps
         # working against a directory-per-resource class unchanged.
-        validate_name(name)
+        self._check_name(cls, name)
         if cls.is_bundle:
             return f"{cls.directory}/{name}/{cls.manifest}"
         return f"{cls.directory}/{name}{cls.suffix}"
 
     def _rel_dir(self, cls: ResourceClass, name: str) -> str:
         """A bundle resource's directory, repo-relative."""
-        validate_name(name)
+        self._check_name(cls, name)
         return f"{cls.directory}/{name}"
 
     def _rel_payload(self, cls: ResourceClass, name: str, relpath: str) -> str:
@@ -223,7 +231,14 @@ class GitCrud:
             if cls.is_bundle:
                 return sorted(p.name for p in directory.iterdir() if (p / cls.manifest).is_file())
             n = len(cls.suffix)
-            return sorted(p.name[:-n] for p in directory.glob(f"*{cls.suffix}") if p.is_file())
+            # A nested class keeps its resources in a tree, so the name a caller
+            # reads back is the path from the class directory, not the filename.
+            pattern = f"**/*{cls.suffix}" if cls.nested else f"*{cls.suffix}"
+            return sorted(
+                p.relative_to(directory).as_posix()[:-n]
+                for p in directory.glob(pattern)
+                if p.is_file()
+            )
 
     def get(self, cls_name: str, name: str) -> dict:
         """Read a resource's YAML doc."""

@@ -116,7 +116,10 @@ class TestManifest:
         app = catalogue.descriptor(LOADER)
         assert (app.routing_compiler, app.routing_paths) == (
             "loader",
-            {"routing": "config.routing"},
+            {
+                "routing": "config.routing",
+                "capture": "config.metadata.table_capture_modes",
+            },
         )
 
     def test_the_fetcher_owns_what_it_polls_and_where_it_sends(self):
@@ -493,6 +496,117 @@ class TestLoaderStack:
                 "source_to_table": {"filebeat": "filebeat"},
             }
         }
+
+
+class TestLoaderCapture:
+    """Stage 3: a derived schema's capture switches reach the loader's config."""
+
+    @staticmethod
+    def _deployment(tmp_path, *, capture_json: bool, capture_raw: bool):
+        from dfe_engine.schema.derived import DerivedSchema
+        from dfe_engine.schema.derived_registry import DerivedSchemaRegistry, derived_reference
+        from dfe_engine.settings import DFESettings
+
+        settings = DFESettings(
+            env="dev", transport={"default": "bus"}, schemas={"schemas_dir": str(tmp_path)}
+        )
+        store = DerivedSchemaRegistry.from_settings(settings)
+        store.save(
+            DerivedSchema.model_validate(
+                {
+                    "base": "meta/beats/filebeat",
+                    "base_version": "1.0.0",
+                    "current": "1.0.0",
+                    "path": derived_reference("beats/filebeat_auth"),
+                    "versions": {
+                        "1.0.0": {
+                            "date": "2026-09-21",
+                            "summary": "system.auth subset",
+                            "capture_json": capture_json,
+                            "capture_raw": capture_raw,
+                            "select": [{"name": "timestamp"}],
+                        }
+                    },
+                }
+            )
+        )
+        registry = FakeRegistry(
+            [
+                _matched(
+                    "filebeat",
+                    schema_config={"derived_schema": "derived/beats/filebeat_auth"},
+                )
+            ]
+        )
+        return settings, registry
+
+    def test_turning_the_catch_all_off_reaches_the_loader(self, tmp_path):
+        settings, registry = self._deployment(tmp_path, capture_json=False, capture_raw=False)
+
+        compiled = routing.compile_for(catalogue.descriptor(LOADER), registry, settings)
+
+        db = settings.clickhouse.effective_data_database
+        assert compiled["capture"] == {f"{db}.filebeat": "extracted_only"}
+
+    def test_dropping_json_alone_leaves_raw_populated(self, tmp_path):
+        settings, registry = self._deployment(tmp_path, capture_json=False, capture_raw=True)
+
+        compiled = routing.compile_for(catalogue.descriptor(LOADER), registry, settings)
+
+        db = settings.clickhouse.effective_data_database
+        assert compiled["capture"] == {f"{db}.filebeat": "raw_only"}
+
+    def test_the_safety_net_left_on_writes_nothing(self, tmp_path):
+        settings, registry = self._deployment(tmp_path, capture_json=True, capture_raw=True)
+
+        compiled = routing.compile_for(catalogue.descriptor(LOADER), registry, settings)
+
+        assert "capture" not in compiled
+
+    def test_the_compiled_value_lands_where_the_loader_reads_it(self, tmp_path):
+        # The engine authors both ends of this connection, so assert that what it
+        # writes into the overlay is a config the loader model accepts, on the
+        # key the loader's router builds (<db>.<table>).
+        from dfe_engine.services.models.loader import LoaderConfig
+
+        settings, registry = self._deployment(tmp_path, capture_json=False, capture_raw=False)
+        app = catalogue.descriptor(LOADER)
+        doc = instances.initial_overlay(instances.instance_of(LOADER, "default"))
+
+        assert routing.sync(app, doc, registry, settings) is True
+
+        db = settings.clickhouse.effective_data_database
+        config = LoaderConfig.model_validate(doc["config"])
+        assert config.metadata.table_capture_modes == {f"{db}.filebeat": "extracted_only"}
+
+    def test_a_manifest_with_no_capture_path_says_so_rather_than_failing(
+        self, tmp_path, monkeypatch
+    ):
+        # dfe-infra's manifest is the SSoT and a deployment may mount an older
+        # copy of it; the compile reflects what that copy declares.
+        warnings: list[str] = []
+        monkeypatch.setattr(routing.logger, "warning", warnings.append)
+        settings, registry = self._deployment(tmp_path, capture_json=False, capture_raw=False)
+        app = replace(catalogue.descriptor(LOADER), routing_paths={"routing": "config.routing"})
+
+        compiled = routing.compile_for(app, registry, settings)
+
+        assert "capture" not in compiled
+        assert "keep populating _json and _raw" in warnings[0]
+
+    def test_turning_it_back_on_clears_the_overlay_entry(self, tmp_path):
+        app = catalogue.descriptor(LOADER)
+        doc = instances.initial_overlay(instances.instance_of(LOADER, "default"))
+        off_settings, off_registry = self._deployment(
+            tmp_path / "off", capture_json=False, capture_raw=False
+        )
+        routing.sync(app, doc, off_registry, off_settings)
+
+        on_settings, on_registry = self._deployment(
+            tmp_path / "on", capture_json=True, capture_raw=True
+        )
+        assert routing.sync(app, doc, on_registry, on_settings) is True
+        assert "table_capture_modes" not in doc["config"].get("metadata", {})
 
 
 class TestFetcherInstance:

@@ -323,7 +323,21 @@ class SourceSchema(BaseModel):
     )
     derived_schema: str | None = Field(
         default=None,
-        description="Source-specific field overrides (optional YAML reference)",
+        description=(
+            "Derived-schema registry path (e.g. derived/beats/filebeat_auth). It "
+            "SELECTS from the meta schema: the table's columns become exactly the "
+            "names it lists, in its order, after the common header. It is not an "
+            "override layer -- everything but the column's index resolves from the "
+            "base -- and it also carries the _json/_raw capture switches for this "
+            "table"
+        ),
+    )
+    derived_schema_version: str | None = Field(
+        default=None,
+        description=(
+            "Derived schema version (semver). Unset follows the derived schema's "
+            "own 'current', so publishing a new selection changes this table"
+        ),
     )
     additional_fields: str | None = Field(
         default=None,
@@ -982,6 +996,7 @@ def _schema_pin_for_bump(schema: SourceSchema) -> tuple[Any, ...]:
         schema.meta_schema,
         schema.meta_schema_version,
         schema.derived_schema,
+        schema.derived_schema_version,
         schema.additional_fields,
     )
 

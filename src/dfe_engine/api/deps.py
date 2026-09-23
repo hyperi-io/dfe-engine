@@ -63,6 +63,14 @@ def bootstrap_registries(
 
         _registries["meta_schema"] = SchemaRegistry(schemas_directory=settings.schemas.schemas_dir)
 
+    # A derived schema is a deployment's own artefact, so it follows the sources
+    # into the deploy repo when gitops is on and sits under the schemas tree
+    # otherwise.
+    if gitcrud is not None or settings.schemas.schemas_dir:
+        from dfe_engine.schema.derived_registry import DerivedSchemaRegistry
+
+        _registries["derived_schema"] = DerivedSchemaRegistry.from_settings(settings, crud=gitcrud)
+
     if gitcrud is not None or settings.source.sources_dir:
         from dfe_engine.source.registry import SourceRegistry
 
@@ -139,6 +147,23 @@ def get_schema_registry():
             detail={
                 "code": "not_configured",
                 "message": "SchemaRegistry not initialized — set DFE_SCHEMAS_DIR (schemas.schemas_dir)",
+            },
+        )
+    return reg
+
+
+def get_derived_schema_registry():
+    """FastAPI dependency: resolve the DerivedSchemaRegistry singleton."""
+    reg = _registries.get("derived_schema")
+    if reg is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "not_configured",
+                "message": (
+                    "DerivedSchemaRegistry not initialized — set DFE_SCHEMAS_DIR "
+                    "(schemas.schemas_dir) or enable gitops"
+                ),
             },
         )
     return reg
@@ -256,6 +281,7 @@ def get_hunt_config_registry():
 
 
 SchemaReg = Annotated[Any, Depends(get_schema_registry)]
+DerivedSchemaReg = Annotated[Any, Depends(get_derived_schema_registry)]
 SourceReg = Annotated[Any, Depends(get_source_registry)]
 ServiceConfigReg = Annotated[Any, Depends(get_service_config_registry)]
 FieldMapReg = Annotated[Any, Depends(get_field_map_registry)]

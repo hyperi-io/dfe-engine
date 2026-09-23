@@ -311,6 +311,58 @@ def compile_archiver_topics(registry: SourceRegistry, settings: Any) -> list[str
     return sorted(topics)
 
 
+def compile_loader_capture(
+    registry: SourceRegistry,
+    *,
+    db: str,
+    derived_base_dir: Any = None,
+) -> dict[str, str]:
+    """Compile each active source's derived-schema capture switches into loader modes.
+
+    A source with no derived schema, or one whose derived schema keeps both
+    switches on, contributes nothing: the loader's global ``capture_mode``
+    already populates both columns.
+
+    The key is the table the loader writes to, qualified the way the loader
+    matches it (``<db>.<table>``), so the value the engine emits here is the one
+    dfe-loader looks up.
+
+    Args:
+        registry: SourceRegistry to read Source definitions from.
+        db: Default database the loader writes to.
+        derived_base_dir: Root a ``derived/...`` reference resolves under
+            (``DerivedSchemaRegistry.reference_root``).
+    """
+    from dfe_engine.schema.derived import CAPTURE_MODE_FULL, capture_mode
+    from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
+    from dfe_engine.schema.schema_loader import SchemaLoader, SchemaLoadError
+
+    builder = SchemaBuilderV2(derived_base_dir=derived_base_dir)
+    modes: dict[str, str] = {}
+    for source in registry.get_all_sources(states=("active",)):
+        schema_cfg = source.version().effective_schema()
+        if not schema_cfg.derived_schema:
+            continue
+        try:
+            switches = SchemaLoader.load_derived_capture(
+                builder.resolve_derived_path(schema_cfg.derived_schema),
+                version=schema_cfg.derived_schema_version,
+            )
+        except SchemaLoadError as exc:
+            logger.warning(
+                f"Source {source.source!r} names derived schema "
+                f"{schema_cfg.derived_schema!r}, which does not read ({exc}) - its "
+                f"capture switches are skipped and the loader default applies"
+            )
+            continue
+        mode = capture_mode(
+            capture_json=switches["capture_json"], capture_raw=switches["capture_raw"]
+        )
+        if mode != CAPTURE_MODE_FULL:
+            modes[f"{db}.{source.table_name}"] = mode
+    return modes
+
+
 def compile_loader_routing(
     registry: SourceRegistry,
     *,
