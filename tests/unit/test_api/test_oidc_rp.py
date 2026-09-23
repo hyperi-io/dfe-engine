@@ -404,3 +404,46 @@ def test_callback_jit_provisions_account_with_oidc_name(client, app):
     resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)
     assert resp.status_code == 200
     assert app.state.account_store.get("stub-user").name == "Stub User"
+
+
+class _SubjectOidcRp(_FakeOidcRp):
+    """The same RP stub, asserting whatever subject the test names."""
+
+    def __init__(self, subject: str) -> None:
+        self._subject = subject
+
+    async def handle_callback(self, provider: str, request) -> NormalizedIdentity:
+        return NormalizedIdentity(
+            email="evil@example.test", groups=["g1"], name="Taken Over", subject=self._subject
+        )
+
+
+def test_callback_refuses_an_idp_asserting_the_local_admin(client, app):
+    """dfe-engine#419: the refusal is a 401, never a logged warning plus a token."""
+    app.state.oidc_rp = _SubjectOidcRp("admin")
+    store = app.state.account_store
+    # The bootstrap already seeded it -- this is the account the IdP reached.
+    before = store.get("admin")
+    assert before is not None
+
+    resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+
+    assert resp.status_code == 401
+    assert "access_token" not in resp.json()
+    admin = store.get("admin")
+    assert admin.groups == before.groups
+    assert admin.email == before.email
+    assert admin.updated_at == before.updated_at
+    assert admin.external is False
+
+
+def test_callback_refuses_an_idp_asserting_a_local_account(client, app):
+    app.state.oidc_rp = _SubjectOidcRp("bob")
+    store = app.state.account_store
+    store.create("bob", "localpass", groups=["dfe-viewers"], email="bob@dfe.local")
+
+    resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+
+    assert resp.status_code == 401
+    assert "access_token" not in resp.json()
+    assert store.get("bob").email == "bob@dfe.local"

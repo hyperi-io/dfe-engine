@@ -12,8 +12,9 @@ from unittest.mock import patch
 import pytest
 
 from dfe_engine.auth.accounts import AccountStore
+from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
 from dfe_engine.auth.groups import GroupStore
-from dfe_engine.auth.jit import JitProvisioner
+from dfe_engine.auth.jit import JitIdentityCollisionError, JitProvisioner
 
 
 @pytest.fixture
@@ -25,6 +26,30 @@ def stores(tmp_path):
     groups.create("dfe-admins", roles=["admin"])
     groups.create("dfe-analysts", roles=["data_analyst"])
     return accounts, groups
+
+
+class RacingAccountStore(AccountStore):
+    """A real store whose first ``get`` of one username misses.
+
+    What a request sees when another creates the account between its own lookup
+    and its create -- the only way into ``ensure_account``'s ValueError branch.
+    """
+
+    def __init__(self, accounts_dir, *, blind_to: str) -> None:
+        super().__init__(accounts_dir)
+        self._blind_to = blind_to
+
+    def get(self, username):
+        if username == self._blind_to:
+            self._blind_to = ""
+            return None
+        return super().get(username)
+
+
+def external_account(store: AccountStore, username: str, provider: str, groups: list[str]):
+    """Seed a shadow account owned by *provider*, as a first JIT login leaves it."""
+    store.create(username, "", groups=groups)
+    return store.update(username, external=True, source_provider=provider)
 
 
 class TestSanitiseUsername:
@@ -127,14 +152,188 @@ class TestEnsureAccount:
         account = accounts.get("jane-corp-com")
         assert "dfe-admins" in account.groups
 
-    def test_race_condition_handled(self, stores):
+    def test_race_condition_handled(self, tmp_path, stores):
+        _, groups = stores
+        accounts = RacingAccountStore(tmp_path / "accounts", blind_to="race-user-com")
+        external_account(accounts, "race-user-com", "entra", ["acme-viewers"])
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        # The lookup misses, the create loses the race, the ValueError branch runs.
+        account = jit.ensure_account("race@user.com", ["acme-viewers", "dfe-admins"], "entra")
+
+        assert account is not None
+        assert account.groups == ["acme-viewers", "dfe-admins"]
+
+
+class TestCrossIdentityRefusal:
+    """An IdP must not reach an account its own identity does not own (#419).
+
+    The account key is a sanitised subject with no provider in it, so a provider
+    asserting ``sub: admin`` once landed on the local admin and replaced its
+    group list -- privilege assignment by a third party.
+    """
+
+    def test_a_local_account_is_refused_and_left_untouched(self, stores):
+        accounts, groups = stores
+        accounts.create("jane-corp-com", "localpass", groups=["acme-viewers"], email="j@dfe.local")
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra", email="evil@example.com")
+
+        assert refused.value.reason == "local_account"
+        stored = accounts.get("jane-corp-com")
+        assert stored.groups == ["acme-viewers"]
+        assert stored.email == "j@dfe.local"
+        assert stored.last_login_at == ""
+        assert stored.external is False
+
+    def test_the_race_branch_refuses_a_local_account(self, tmp_path, stores):
+        _, groups = stores
+        accounts = RacingAccountStore(tmp_path / "accounts", blind_to="jane-corp-com")
+        accounts.create("jane-corp-com", "localpass", groups=["acme-viewers"], email="j@dfe.local")
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra", email="evil@example.com")
+
+        assert refused.value.reason == "local_account"
+        stored = AccountStore(tmp_path / "accounts").get("jane-corp-com")
+        assert stored.groups == ["acme-viewers"]
+        assert stored.email == "j@dfe.local"
+
+    def test_another_providers_account_is_refused(self, stores):
+        accounts, groups = stores
+        external_account(accounts, "jane-corp-com", "okta", ["acme-viewers"])
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
+
+        assert refused.value.reason == "provider_mismatch"
+        assert accounts.get("jane-corp-com").groups == ["acme-viewers"]
+
+    def test_the_race_branch_refuses_another_provider(self, tmp_path, stores):
+        _, groups = stores
+        accounts = RacingAccountStore(tmp_path / "accounts", blind_to="jane-corp-com")
+        external_account(accounts, "jane-corp-com", "okta", ["acme-viewers"])
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
+
+        assert refused.value.reason == "provider_mismatch"
+        assert AccountStore(tmp_path / "accounts").get("jane-corp-com").groups == ["acme-viewers"]
+
+    def test_the_owning_provider_still_updates(self, stores):
+        """The negative control: an ordinary shadow account still reconciles."""
+        accounts, groups = stores
+        external_account(accounts, "jane-corp-com", "entra", ["acme-viewers"])
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        account = jit.ensure_account(
+            "jane@corp.com", ["acme-viewers", "dfe-admins"], "entra", email="jane@corp.com"
+        )
+
+        assert account.groups == ["acme-viewers", "dfe-admins"]
+        assert account.email == "jane@corp.com"
+        assert account.last_login_at != ""
+
+    def test_the_message_names_no_account(self, stores):
+        """The client is told it was refused, never which local names are taken."""
+        accounts, groups = stores
+        accounts.create("jane-corp-com", "localpass", groups=["acme-viewers"])
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
+
+        message = str(refused.value)
+        assert message == "OIDC login refused"
+        assert "jane" not in message
+        assert refused.value.reason not in message
+
+    def test_the_refusal_is_audited(self, stores):
+        """A silent refusal is a security event nobody sees."""
+        accounts, groups = stores
+        accounts.create("jane-corp-com", "localpass", groups=["acme-viewers"])
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with patch("dfe_engine.auth.jit.audit_jit_login_refused") as audited:
+            with pytest.raises(JitIdentityCollisionError):
+                jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
+
+        audited.assert_called_once_with("jane@corp.com", "entra", "local_account")
+
+
+class TestRecoveryCredentialFloor:
+    """The admin and break-glass accounts are how an operator gets in when
+    federation is broken or hostile, so no IdP assertion reaches either."""
+
+    @pytest.mark.parametrize("protected", ["admin", BREAKGLASS_USERNAME])
+    def test_a_seeded_recovery_account_is_refused(self, stores, protected):
+        accounts, groups = stores
+        accounts.create(protected, "localpass", groups=["dfe-admins"], email="op@dfe.local")
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account(protected, ["acme-viewers"], "entra", email="evil@example.com")
+
+        assert refused.value.reason == "protected_account"
+        stored = accounts.get(protected)
+        assert stored.groups == ["dfe-admins"]
+        assert stored.email == "op@dfe.local"
+        assert stored.external is False
+        assert stored.last_login_at == ""
+
+    @pytest.mark.parametrize("protected", ["admin", BREAKGLASS_USERNAME])
+    def test_a_recovery_name_is_never_created(self, stores, protected):
+        """Refused before the store is read, so the name cannot be squatted either."""
         accounts, groups = stores
         jit = JitProvisioner(account_store=accounts, group_store=groups)
-        # Pre-create the account (simulating race)
-        accounts.create("race-user-com", "", groups=["acme-viewers"])
-        # Should not raise
-        account = jit.ensure_account("race@user.com", ["acme-viewers"], "entra")
-        assert account is not None
+
+        with patch("dfe_engine.auth.jit.audit_jit_login_refused") as audited:
+            with pytest.raises(JitIdentityCollisionError):
+                jit.ensure_account(protected, ["dfe-admins"], "entra")
+
+        assert accounts.get(protected) is None
+        audited.assert_called_once_with(protected, "entra", "protected_account")
+
+    def test_the_floor_holds_even_when_the_provider_matches(self, stores):
+        """Independent of the identity guard: a mis-seeded external admin is still refused."""
+        accounts, groups = stores
+        external_account(accounts, "admin", "entra", ["dfe-admins"])
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account("admin", ["acme-viewers"], "entra")
+
+        assert refused.value.reason == "protected_account"
+        assert accounts.get("admin").groups == ["dfe-admins"]
+
+    def test_the_floor_follows_a_renamed_admin(self, stores):
+        accounts, groups = stores
+        accounts.create("operator", "localpass", groups=["dfe-admins"])
+        jit = JitProvisioner(account_store=accounts, group_store=groups, admin_name="operator")
+
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account("operator", ["acme-viewers"], "entra")
+
+        assert refused.value.reason == "protected_account"
+        assert accounts.get("operator").groups == ["dfe-admins"]
+
+    @pytest.mark.parametrize("subject", ["ADMIN", "_admin_", ".admin.", "admin!"])
+    def test_a_subject_that_sanitises_onto_a_recovery_name_is_refused(self, stores, subject):
+        """sanitise_username collapses case and punctuation, so the floor compares the key."""
+        accounts, groups = stores
+        accounts.create("admin", "localpass", groups=["dfe-admins"])
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account(subject, ["acme-viewers"], "entra")
+
+        assert refused.value.reason == "protected_account"
+        assert accounts.get("admin").groups == ["dfe-admins"]
 
 
 class TestEnsureAccountHdxInvite:

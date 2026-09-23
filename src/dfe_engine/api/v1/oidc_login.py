@@ -46,6 +46,7 @@ from dfe_engine.api.deps import (
 )
 from dfe_engine.auth import hyperdx_role
 from dfe_engine.auth.audit import audit_login_denied, audit_login_success
+from dfe_engine.auth.jit import JitIdentityCollisionError
 
 router = APIRouter(prefix="/auth/oidc", tags=["OIDC Login"])
 
@@ -243,6 +244,14 @@ async def oidc_callback(
                 email=identity.email,
                 name=identity.name,
             )
+        except JitIdentityCollisionError as exc:
+            # Ordered before the catch-all: a refused identity must not go on to
+            # be minted an engine token.
+            audit_login_denied(identity.subject, "oidc", _get_client_ip(request), exc.reason)
+            raise HTTPException(
+                status_code=401,
+                detail={"code": "unauthorized", "message": str(exc)},
+            ) from exc
         except Exception:
             logger.exception("JIT provisioning failed", user_id=identity.subject)
 

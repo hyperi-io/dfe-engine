@@ -403,6 +403,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         account_store=account_store,
         group_store=group_store,
         hyperdx_client=getattr(app.state, "hyperdx_client", None),
+        # The same override the bootstrap seeds the admin with, so a renamed
+        # admin stays out of an IdP's reach.
+        admin_name=settings.auth.local.admin_name,
     )
 
     # Bootstrap task manager for async background tasks

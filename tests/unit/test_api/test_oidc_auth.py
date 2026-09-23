@@ -189,3 +189,20 @@ class TestOidcAuthentication:
                 assert resp.status_code == 401
         finally:
             _registries.clear()
+
+    def test_a_proxy_header_asserting_the_local_admin_is_refused(self, client: TestClient, app):
+        """dfe-engine#419 on the trusted-proxy path: 401, and the admin untouched."""
+        store = app.state.account_store
+        before = store.get("admin")
+        assert before is not None
+
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "admin", "X-Oidc-Groups": "dfe-viewers"},
+        )
+
+        assert resp.status_code == 401
+        admin = store.get("admin")
+        assert admin.groups == before.groups
+        assert admin.updated_at == before.updated_at
+        assert admin.external is False
