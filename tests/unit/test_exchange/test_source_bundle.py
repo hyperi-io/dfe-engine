@@ -33,6 +33,16 @@ SOURCE_BODY = {
     "transform": {"engine": "vector", "config_file": "/etc/vector/cisco-ios.toml"},
 }
 
+CORE_PINNED_BODY = {
+    **SOURCE_BODY,
+    "schema": {
+        "meta_schema": "meta/core_tpl",
+        "meta_schema_version": "2.0.0",
+        "engine": "MergeTree",
+    },
+}
+"""A source whose only pin is the pre-supplied schema, which travels as a reference."""
+
 
 def _export_from_alpha(deployment, *, source_body: dict[str, Any] | None = None) -> dict:
     """Stand up the authoring deployment, create the source, return its bundle."""
@@ -165,6 +175,50 @@ class TestRoundTripIntoACleanDeployment:
         # Nothing was written: the checks run before the first write.
         assert "cisco-ios" not in {entry["name"] for entry in listed.json()["items"]}
         assert "meta/cisco_ios" not in {entry["name"] for entry in schemas.json()["items"]}
+
+
+class TestAPinWithNoDefinition:
+    """The import mirrors the export: a pin resolves, or the whole bundle is refused."""
+
+    def test_a_pin_neither_side_carries_refuses_the_whole_bundle(self, deployment):
+        bundle = _export_from_alpha(deployment)
+        bundle["schema"]["definitions"] = []
+
+        client, headers = deployment("beta", schemas={"meta/core_tpl": CORE_SCHEMA})
+        with client:
+            imported = client.post("/api/v1/sources/import", json=bundle, headers=headers)
+            listed = client.get("/api/v1/sources", headers=headers)
+            schemas = client.get("/api/v1/schemas?per_page=-1", headers=headers)
+
+        assert imported.status_code == 422, imported.text
+        assert imported.json()["code"] == "unresolved_reference"
+        assert "meta/cisco_ios" in imported.json()["message"]
+        # Nothing was written: the check runs before the first write.
+        assert "cisco-ios" not in {entry["name"] for entry in listed.json()["items"]}
+        assert "meta/cisco_ios" not in {entry["name"] for entry in schemas.json()["items"]}
+
+    def test_a_core_pin_the_target_already_holds_is_accepted(self, deployment):
+        bundle = _export_from_alpha(deployment, source_body=CORE_PINNED_BODY)
+        bundle["schema"]["definitions"] = []
+
+        client, headers = deployment("beta", schemas={"meta/core_tpl": CORE_SCHEMA})
+        with client:
+            imported = client.post("/api/v1/sources/import", json=bundle, headers=headers)
+            landed = client.get("/api/v1/sources/cisco-ios", headers=headers)
+
+        assert imported.status_code == 201, imported.text
+        assert landed.json()["versions"]["1.0.0"]["schema"]["meta_schema"] == "meta/core_tpl"
+
+    def test_a_pin_the_bundle_defines_is_accepted(self, deployment):
+        bundle = _export_from_alpha(deployment)
+
+        client, headers = deployment("beta", schemas={"meta/core_tpl": CORE_SCHEMA})
+        with client:
+            imported = client.post("/api/v1/sources/import", json=bundle, headers=headers)
+            schemas = client.get("/api/v1/schemas?per_page=-1", headers=headers)
+
+        assert imported.status_code == 201, imported.text
+        assert "meta/cisco_ios" in {entry["name"] for entry in schemas.json()["items"]}
 
 
 class TestCoreSourceTravelsAsAReference:
