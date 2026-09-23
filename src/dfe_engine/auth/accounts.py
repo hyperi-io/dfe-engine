@@ -223,8 +223,8 @@ class AccountStore:
         ``blocked_at``, ``groups``, ``email``, ``phone``, ``name``, plus the
         external-identity stamps. Updating ``username`` or ``password_hash``
         directly is not permitted (use :meth:`reset_password` to change the
-        password). Toggling ``enabled`` or ``blocked`` also stamps or clears
-        the matching ``*_at`` field unless the caller supplied one.
+        password). Re-enabling or unblocking always clears the matching
+        ``*_at`` field. Disabling or blocking stamps it when it is empty.
 
         Args:
             username: Account to update.
@@ -543,13 +543,14 @@ class DocuStoreAccountStore:
 def _apply_access_stamps(account: Account, updates: dict[str, object]) -> dict[str, object]:
     """Stamp or clear ``disabled_at`` / ``blocked_at`` when those flags change.
 
-    A caller-supplied timestamp wins. Re-disabling or re-blocking an account
-    that already has a stamp leaves that stamp in place.
+    Re-enabling or unblocking always resets the matching stamp to empty, even
+    if the caller passed a leftover timestamp. Re-disabling or re-blocking an
+    account that already has a stamp leaves that stamp in place.
     """
     stamped = dict(updates)
     if "enabled" in stamped:
         if stamped["enabled"]:
-            stamped.setdefault("disabled_at", "")
+            stamped["disabled_at"] = ""
         elif account.enabled or not account.disabled_at:
             stamped.setdefault("disabled_at", _now())
     if "blocked" in stamped:
@@ -557,7 +558,7 @@ def _apply_access_stamps(account: Account, updates: dict[str, object]) -> dict[s
             if not account.blocked or not account.blocked_at:
                 stamped.setdefault("blocked_at", _now())
         else:
-            stamped.setdefault("blocked_at", "")
+            stamped["blocked_at"] = ""
     return stamped
 
 

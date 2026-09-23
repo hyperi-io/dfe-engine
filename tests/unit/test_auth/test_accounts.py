@@ -245,6 +245,18 @@ class TestUpdate:
         assert account.enabled is True
         assert account.disabled_at == ""
 
+    def test_reenable_clears_a_stale_disabled_at(self, store):
+        store.create("alice", "password123")
+        store.update("alice", enabled=False)
+        account = store.update(
+            "alice",
+            enabled=True,
+            disabled_at="2026-01-01T00:00:00+00:00",
+        )
+        assert account.enabled is True
+        assert account.disabled_at == ""
+        assert store.get("alice").disabled_at == ""
+
     def test_update_change_groups(self, store):
         store.create("alice", "password123", groups=["ops"])
         account = store.update("alice", groups=["admins", "dev"])
@@ -317,6 +329,18 @@ class TestUpdate:
         cleared = store.update("alice", blocked=False)
         assert cleared.blocked is False
         assert cleared.blocked_at == ""
+
+    def test_unblock_clears_a_stale_blocked_at(self, store):
+        store.create("alice", "password123")
+        store.update("alice", blocked=True)
+        account = store.update(
+            "alice",
+            blocked=False,
+            blocked_at="2026-01-01T00:00:00+00:00",
+        )
+        assert account.blocked is False
+        assert account.blocked_at == ""
+        assert store.get("alice").blocked_at == ""
 
 
 # ---------------------------------------------------------------------------

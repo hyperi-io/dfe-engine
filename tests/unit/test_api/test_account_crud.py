@@ -433,6 +433,15 @@ class TestUpdateAccount:
         assert resp.json()["enabled"] is False
         assert resp.json()["disabled_at"] != ""
 
+        reenabled = client.put(
+            "/api/v1/auth/accounts/disableme",
+            json={"enabled": True},
+            headers=admin_headers,
+        )
+        assert reenabled.status_code == 200
+        assert reenabled.json()["enabled"] is True
+        assert reenabled.json()["disabled_at"] == ""
+
     def test_update_blocked(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
@@ -450,6 +459,15 @@ class TestUpdateAccount:
         got = client.get("/api/v1/auth/accounts/blockme", headers=admin_headers)
         assert got.json()["blocked"] is True
         assert got.json()["blocked_at"] == resp.json()["blocked_at"]
+
+        unblocked = client.put(
+            "/api/v1/auth/accounts/blockme",
+            json={"blocked": False},
+            headers=admin_headers,
+        )
+        assert unblocked.status_code == 200
+        assert unblocked.json()["blocked"] is False
+        assert unblocked.json()["blocked_at"] == ""
 
     def test_update_nonexistent_returns_404(self, client, admin_headers):
         resp = client.put(
