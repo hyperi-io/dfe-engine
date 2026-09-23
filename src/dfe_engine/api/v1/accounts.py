@@ -351,6 +351,10 @@ async def list_accounts(
     request: Request,
     pagination: PaginationParams = Depends(),
     search: str | None = Query(None, description="Search in username, name, or email"),
+    blocked: bool | None = Query(
+        None,
+        description="Filter by blocked status. Omitted returns every account.",
+    ),
     sort_by: str | None = Query(None, description="Sort field (username, created_at, updated_at)"),
     sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
@@ -358,7 +362,10 @@ async def list_accounts(
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    rows = [_account_response(a).model_dump() for a in store.list()]
+    accounts = store.list()
+    if blocked is not None:
+        accounts = [account for account in accounts if account.blocked is blocked]
+    rows = [_account_response(a).model_dump() for a in accounts]
     rows = apply_search(rows, search, ["username", "name", "email"])
     rows = apply_sort(rows, sort_by, sort_order)
     summaries = [AccountResponse.model_validate(row) for row in rows]

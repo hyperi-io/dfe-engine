@@ -212,8 +212,69 @@ class TestListAccounts:
         assert by_name.status_code == 200
         assert any(a["username"] == "search-me" for a in by_name.json()["items"])
 
+    def test_list_blocked_omitted_returns_all(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "listed-blocked", "password": "pw", "email": "lb@example.com"},
+            headers=admin_headers,
+        )
+        client.put(
+            "/api/v1/auth/accounts/listed-blocked",
+            json={"blocked": True},
+            headers=admin_headers,
+        )
+        resp = client.get("/api/v1/auth/accounts", headers=admin_headers)
+        assert resp.status_code == 200
+        names = {a["username"] for a in resp.json()["items"]}
+        assert "listed-blocked" in names
+        assert "admin" in names
 
-class TestGetAccount:
+    def test_list_blocked_true_returns_only_blocked(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "only-blocked", "password": "pw", "email": "ob@example.com"},
+            headers=admin_headers,
+        )
+        client.put(
+            "/api/v1/auth/accounts/only-blocked",
+            json={"blocked": True},
+            headers=admin_headers,
+        )
+        resp = client.get(
+            "/api/v1/auth/accounts",
+            params={"blocked": True},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert items
+        assert all(a["blocked"] is True for a in items)
+        assert any(a["username"] == "only-blocked" for a in items)
+        assert all(a["username"] != "admin" for a in items)
+
+    def test_list_blocked_false_returns_only_unblocked(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "now-blocked", "password": "pw", "email": "nb@example.com"},
+            headers=admin_headers,
+        )
+        client.put(
+            "/api/v1/auth/accounts/now-blocked",
+            json={"blocked": True},
+            headers=admin_headers,
+        )
+        resp = client.get(
+            "/api/v1/auth/accounts",
+            params={"blocked": False},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert items
+        assert all(a["blocked"] is False for a in items)
+        assert all(a["username"] != "now-blocked" for a in items)
+        assert any(a["username"] == "admin" for a in items)
+
     """GET /api/v1/auth/accounts/{username}"""
 
     def test_get_account(self, client, admin_headers):

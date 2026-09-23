@@ -393,6 +393,24 @@
             "description": "Search in username, name, or email"
           },
           {
+            "name": "blocked",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by blocked status. Omitted returns every account.",
+              "title": "Blocked"
+            },
+            "description": "Filter by blocked status. Omitted returns every account."
+          },
+          {
             "name": "sort_by",
             "in": "query",
             "required": false,
