@@ -277,6 +277,26 @@ def audit_jit_groups_updated(user_id: str, added: list[str], removed: list[str])
     )
 
 
+def audit_jit_login_refused(user_id: str, source_provider: str, reason: str) -> None:
+    """Emit an audit event when an OIDC login is refused over an account collision.
+
+    Warning level: the IdP asserted a subject that resolves onto a local account,
+    a recovery credential, or another provider's account, so an operator needs to
+    see it whether it is a misconfiguration or an attempt.
+
+    Args:
+        user_id: The IdP-asserted subject that was refused.
+        source_provider: OIDC provider name that asserted it.
+        reason: ``protected_account``, ``local_account`` or ``provider_mismatch``.
+    """
+    logger.warning(
+        "auth.jit.login_refused",
+        user_id=user_id,
+        source_provider=source_provider,
+        reason=reason,
+    )
+
+
 def audit_jit_team_assigned(user_id: str, team_name: str, reason: str) -> None:
     """Emit an audit event when a JIT account is assigned to a team.
 

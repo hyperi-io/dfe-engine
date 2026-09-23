@@ -25,6 +25,7 @@ from dfe_engine.auth.audit import (
     audit_permission_denied,
 )
 from dfe_engine.auth.groups import Group, GroupStore
+from dfe_engine.auth.jit import JitIdentityCollisionError
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.settings import DFESettings, is_dev_posture
 
@@ -577,6 +578,15 @@ async def get_current_user(request: Request) -> AuthContext:
         if jit:
             try:
                 jit.ensure_account(oidc_subject, groups, "oidc", email=oidc_email or "")
+            except JitIdentityCollisionError as exc:
+                # Ordered before the catch-all: a refused identity must reach the
+                # caller as a 401, never be logged and waved through with a token.
+                audit_login_denied(oidc_subject, "oidc", client_ip, exc.reason)
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail={"code": "unauthorized", "message": str(exc)},
+                    headers={"WWW-Authenticate": "Bearer"},
+                ) from exc
             except Exception:
                 logger.exception("JIT provisioning failed", user_id=oidc_subject)
 
