@@ -5,6 +5,7 @@ from typing import Any
 
 from scalo.logger import logger
 
+from ..source.type_registry import current_use_case
 from ..yaml_utils import yaml_load
 
 
@@ -177,7 +178,8 @@ class FieldMappingService:
             schema_path: Path to the CSV schema file
 
         Returns:
-            Dictionary mapping column names to their metadata
+            Dictionary mapping column names to their metadata, keyed the way
+            SourceMapper.get_schema_metadata keys it so one consumer reads both.
         """
         metadata = {}
         try:
@@ -186,9 +188,11 @@ class FieldMappingService:
                 for row in reader:
                     column = row.get("column", "")
                     if column:
+                        # index_type is the retired header name for the same column.
+                        declared = row.get("use_case") or row.get("index_type", "")
                         metadata[column] = {
                             "type": row.get("type", ""),
-                            "index_type": row.get("index_type", ""),
+                            "use_case": current_use_case(declared),
                         }
 
             return metadata
