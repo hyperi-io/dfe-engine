@@ -109,6 +109,24 @@ class TestMe:
         assert data["org_id"] == "test-org"
         assert "admin" in data["roles"]
         assert "dfe-admins" in data["groups"]
+        assert data["external"] is False
+
+    def test_me_oidc_user_surfaces_external_true(self, client: TestClient, app, api_settings):
+        from dfe_engine.api.deps import create_access_token
+
+        store = app.state.account_store
+        store.create("sso-user", "", groups=["dfe-viewers"])
+        store.update("sso-user", external=True, source_provider="entra")
+        token = create_access_token(
+            data={"sub": "sso-user", "org_id": "test-org", "groups": ["dfe-viewers"]},
+            settings=api_settings,
+        )
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["external"] is True
 
     def test_me_no_token(self, client: TestClient):
         resp = client.get("/api/v1/auth/me")

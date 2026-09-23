@@ -694,7 +694,7 @@
           "Accounts"
         ],
         "summary": "Reset Current User Password",
-        "description": "Reset the authenticated user's password.\n\nThe username is taken from the session, not the request, so a caller cannot\nreset another account through this route. The live store takes the new\npassword immediately; the ``git`` block reports whether the durable mirror\nmerged, is pending review, or is a no-op for a non-git-backed account.",
+        "description": "Reset the authenticated user's password.\n\nThe username is taken from the session, not the request, so a caller cannot\nreset another account through this route. An IdP-owned (``external``)\naccount is refused: it has no local password. The live store takes the new\npassword immediately; the ``git`` block reports whether the durable mirror\nmerged, is pending review, or is a no-op for a non-git-backed account.",
         "operationId": "reset_current_user_password_api_v1_auth_accounts_reset_password_post",
         "requestBody": {
           "content": {
@@ -741,7 +741,7 @@
           "Accounts"
         ],
         "summary": "Reset Password",
-        "description": "Reset an account's password (admin only).\n\nThe live store takes the new password immediately (next login), and the change\nis mirrored into the durable deploy repo so it survives a rebuild. The ``git``\nblock reports whether that mirror merged straight away (dev/solo) or is a\npending review PR / CLI merge (production+team), or is a no-op file share.",
+        "description": "Reset an account's password (admin only).\n\nAn IdP-owned (``external``) account is refused: the password lives at the\nidentity provider. The live store takes the new password immediately (next\nlogin), and the change is mirrored into the durable deploy repo so it\nsurvives a rebuild. The ``git`` block reports whether that mirror merged\nstraight away (dev/solo) or is a pending review PR / CLI merge\n(production+team), or is a no-op file share.",
         "operationId": "reset_password_api_v1_auth_accounts__username__reset_password_post",
         "parameters": [
           {
@@ -17744,6 +17744,11 @@
             "title": "Name",
             "default": ""
           },
+          "external": {
+            "type": "boolean",
+            "title": "External",
+            "description": "True when the account authenticates through an identity provider"
+          },
           "created_at": {
             "type": "string",
             "title": "Created At"
@@ -17759,6 +17764,7 @@
           "enabled",
           "groups",
           "email",
+          "external",
           "created_at",
           "updated_at"
         ],
@@ -33429,13 +33435,19 @@
             "type": "array",
             "title": "Org Ids",
             "description": "Orgs this user can browse in the data plane (HyperDX). Empty means no org-scoped data access."
+          },
+          "external": {
+            "type": "boolean",
+            "title": "External",
+            "description": "True when the account authenticates through an identity provider"
           }
         },
         "type": "object",
         "required": [
           "org_id",
           "user_id",
-          "roles"
+          "roles",
+          "external"
         ],
         "title": "UserResponse"
       },

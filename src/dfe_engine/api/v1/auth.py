@@ -72,11 +72,34 @@ class UserResponse(BaseModel):
         description="Orgs this user can browse in the data plane (HyperDX). Empty "
         "means no org-scoped data access.",
     )
+    external: bool = Field(
+        description="True when the account authenticates through an identity provider",
+    )
 
 
 class PermissionsResponse(BaseModel):
     roles: list[str] = Field(description="User's assigned roles")
     permissions: list[str] = Field(description="Resolved permissions from all roles")
+
+
+def _session_is_external(request: Request, user_id: str) -> bool:
+    """Whether the session's store account is IdP-owned.
+
+    Looks up the raw subject first, then the JIT-sanitised stem an OIDC login
+    writes, so ``/auth/me`` matches ``Account.external`` for both local JWT
+    users and Envoy-header identities.
+    """
+    store = getattr(request.app.state, "account_store", None)
+    if store is None:
+        return False
+    account = store.get(user_id)
+    if account is None:
+        from dfe_engine.auth.jit import JitProvisioner
+
+        stem = JitProvisioner.sanitise_username(user_id)
+        if stem and stem != user_id:
+            account = store.get(stem)
+    return bool(account and account.external)
 
 
 # ── Endpoints ────────────────────────────────────────────────
@@ -187,6 +210,7 @@ async def get_me(user: CurrentUser, request: Request):
         permissions=permissions,
         groups=user.groups,
         org_ids=user.org_ids,
+        external=_session_is_external(request, user.user_id),
     )
 
 

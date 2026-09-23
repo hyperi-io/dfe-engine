@@ -181,6 +181,9 @@ class AccountResponse(BaseModel):
     email: str
     phone: str = ""
     name: str = ""
+    external: bool = Field(
+        description="True when the account authenticates through an identity provider",
+    )
     created_at: str
     updated_at: str
 
@@ -200,6 +203,7 @@ def _account_response(account: Account) -> AccountResponse:
         email=account.email,
         phone=account.phone,
         name=account.name,
+        external=account.external,
         created_at=account.created_at,
         updated_at=account.updated_at,
     )

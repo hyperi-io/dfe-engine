@@ -233,6 +233,51 @@ class TestGetAccount:
         assert resp.status_code == 403
 
 
+class TestAccountExternalFlag:
+    """AccountResponse carries ``external`` so the UI can tell IdP-owned accounts."""
+
+    def test_local_account_surfaces_external_false(self, client, viewer_headers, admin_headers):
+        me = client.get("/api/v1/auth/accounts/me", headers=viewer_headers)
+        assert me.status_code == 200
+        assert me.json()["external"] is False
+        got = client.get("/api/v1/auth/accounts/viewer", headers=admin_headers)
+        assert got.status_code == 200
+        assert got.json()["external"] is False
+
+    def test_oidc_account_surfaces_external_true(self, client, app, admin_headers, api_settings):
+        from dfe_engine.api.deps import create_access_token
+
+        store = app.state.account_store
+        store.create("sso-user", "", groups=["dfe-viewers"])
+        store.update("sso-user", external=True, source_provider="entra")
+        got = client.get("/api/v1/auth/accounts/sso-user", headers=admin_headers)
+        assert got.status_code == 200
+        assert got.json()["external"] is True
+        token = create_access_token(
+            data={"sub": "sso-user", "org_id": "test-org", "groups": ["dfe-viewers"]},
+            settings=api_settings,
+        )
+        me = client.get(
+            "/api/v1/auth/accounts/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert me.status_code == 200
+        assert me.json()["external"] is True
+
+    def test_list_and_create_include_external(self, client, admin_headers):
+        created = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "local-user", "password": "pw", "email": "local@example.com"},
+            headers=admin_headers,
+        )
+        assert created.status_code == 201
+        assert created.json()["external"] is False
+        listed = client.get("/api/v1/auth/accounts", headers=admin_headers)
+        assert listed.status_code == 200
+        for account in listed.json()["items"]:
+            assert isinstance(account["external"], bool)
+
+
 class TestUpdateAccount:
     """PUT /api/v1/auth/accounts/{username}"""
 
