@@ -1231,7 +1231,7 @@ async def plan_source_deploy(
 
 def _ensure_source_topics(
     source: Any, settings: Any, version_id: str | None = None
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], list[str]]:
     """Create the ``_land``/``_load`` topics this source needs.
 
     Deliberately non-fatal: the schema is already live, and a brokerless profile
@@ -1245,11 +1245,12 @@ def _ensure_source_topics(
         deployment_topic_config,
         ensure_topics,
         source_topic_specs,
+        stranded_source_topics,
         topics_managed,
     )
 
     if not topics_managed(settings):
-        return [], []
+        return [], [], []
 
     specs = source_topic_specs(
         source,
@@ -1264,7 +1265,18 @@ def _ensure_source_topics(
             f"Kafka topics not ensured for source '{source.source}': "
             f"{', '.join(f'{n} ({e})' for n, e in outcome.failed)}"
         )
-    return outcome.created + outcome.existing, [name for name, _ in outcome.failed]
+    stranded = stranded_source_topics(source, version_id=version_id, settings=settings)
+    if stranded:
+        logger.warning(
+            f"Source '{source.source}' has no transform on this version but "
+            f"{', '.join(stranded)} still exists: the loader suppresses "
+            f"{source.topic_land} while it does, so this source will not load"
+        )
+    return (
+        outcome.created + outcome.existing,
+        [name for name, _ in outcome.failed],
+        stranded,
+    )
 
 
 def _remove_source_topics(source: Any, settings: Any) -> tuple[list[str], list[str]]:
@@ -1443,7 +1455,7 @@ async def deploy_source_schema(
 
     # Off the event loop: the admin calls block for their full timeout when no
     # broker answers, which is the norm on the Kafka-less profile.
-    topics_ensured, topics_failed = await asyncio.to_thread(
+    topics_ensured, topics_failed, topics_stranded = await asyncio.to_thread(
         _ensure_source_topics, source, settings, version_id
     )
 
@@ -1459,6 +1471,7 @@ async def deploy_source_schema(
         statements_applied=applied,
         topics_ensured=topics_ensured,
         topics_failed=topics_failed,
+        topics_stranded=topics_stranded,
     )
     store.save_deploy(deploy_result, source)
     try:
@@ -1503,6 +1516,7 @@ async def deploy_source_schema(
             "version": version_id,
             "topics_ensured": topics_ensured,
             "topics_failed": topics_failed,
+            "topics_stranded": topics_stranded,
             "apps_synced": apps.changes,
         },
     )

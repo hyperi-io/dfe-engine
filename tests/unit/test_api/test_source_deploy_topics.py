@@ -44,7 +44,7 @@ class TestOffSwitch:
             raise AssertionError("ensure_topics called while it was switched off")
 
         monkeypatch.setattr("dfe_engine.kafka.topics.ensure_topics", _boom)
-        assert _ensure_source_topics(_source(), _settings(ensure_topics=False)) == ([], [])
+        assert _ensure_source_topics(_source(), _settings(ensure_topics=False)) == ([], [], [])
 
     def test_a_brokerless_deployment_reaches_no_broker_either(self, monkeypatch):
         """No bus is the fact the unset switch follows, so one dial does it."""
@@ -53,7 +53,7 @@ class TestOffSwitch:
             raise AssertionError("ensure_topics called on a deployment with no bus")
 
         monkeypatch.setattr("dfe_engine.kafka.topics.ensure_topics", _boom)
-        assert _ensure_source_topics(_source(), _settings(bus_present=False)) == ([], [])
+        assert _ensure_source_topics(_source(), _settings(bus_present=False)) == ([], [], [])
 
     def test_an_explicit_yes_overrides_the_brokerless_fact(self, monkeypatch):
         """An operator pointing at a broker the profile does not know about."""
@@ -61,7 +61,7 @@ class TestOffSwitch:
             "dfe_engine.kafka.topics.ensure_topics",
             lambda specs, **kw: TopicEnsureResult(created=[s.name for s in specs]),
         )
-        ensured, failed = _ensure_source_topics(
+        ensured, failed, _ = _ensure_source_topics(
             _source(), _settings(bus_present=False, ensure_topics=True)
         )
 
@@ -77,7 +77,7 @@ class TestReporting:
                 created=["filebeat_load"], existing=["filebeat_land"]
             ),
         )
-        ensured, failed = _ensure_source_topics(_source(), _settings())
+        ensured, failed, _ = _ensure_source_topics(_source(), _settings())
         assert ensured == ["filebeat_load", "filebeat_land"]
         assert failed == []
 
@@ -89,7 +89,7 @@ class TestReporting:
                 failed=[("filebeat_land", "broker unreachable: connection refused")]
             ),
         )
-        ensured, failed = _ensure_source_topics(_source(), _settings())
+        ensured, failed, _ = _ensure_source_topics(_source(), _settings())
         assert ensured == []
         assert failed == ["filebeat_land"]
 

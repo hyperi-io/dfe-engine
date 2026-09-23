@@ -493,6 +493,35 @@ def source_topic_names(source: Source) -> list[str]:
     return names
 
 
+def stranded_source_topics(
+    source: Source,
+    *,
+    version_id: str | None = None,
+    settings: DFESettings | None = None,
+    admin: TopicAdmin | None = None,
+) -> list[str]:
+    """Topics on the broker that the version being deployed has no consumer for.
+
+    A version that dropped its transform leaves its ``_load`` topic behind, and
+    scalo's resolver suppresses a ``_land`` topic whenever the matching ``_load``
+    one exists -- so the loader stops reading the topic the receiver is still
+    producing to, and the source silently stops loading.
+
+    Reported rather than deleted: records may still be in flight on it, and
+    whether the engine may remove a topic mid-life is not this function's call.
+    """
+    transform = source.version(version_id).transform if version_id else source.transform
+    if transform:
+        return []
+    load_topic = transformed_topic(source.source)
+    try:
+        admin = admin or build_admin(settings=settings)
+        present = admin.list_topic_names()
+    except Exception:
+        return []
+    return [load_topic] if load_topic in present else []
+
+
 def ensure_topics(
     specs: list[TopicSpec],
     *,

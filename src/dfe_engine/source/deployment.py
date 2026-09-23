@@ -88,6 +88,15 @@ class SchemaDeployResult(BaseModel):
             "schema is live and Kafka may not be in the path at all."
         ),
     )
+    topics_stranded: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Topics on the broker this version has no consumer for. A ``_load`` topic "
+            "left by a version that dropped its transform suppresses the source's "
+            "``_land`` topic in the loader, so the source silently stops loading. "
+            "Reported, never deleted: records may still be in flight on it."
+        ),
+    )
     apps_synced: list[str] = Field(
         default_factory=list,
         description=(
