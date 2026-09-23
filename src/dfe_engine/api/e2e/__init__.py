@@ -22,13 +22,16 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from scalo.logger import logger
 
 from dfe_engine.api.cli_exposure import CLI_HIDDEN
 from dfe_engine.api.deps import get_source_registry_optional
 from dfe_engine.api.e2e.seed import Seed
+from dfe_engine.appmgmt.routing import RoutingNotApplicableError
+from dfe_engine.source.flow import FlowError
+from dfe_engine.source.registry import SourceValidationError
 
 E2E_TAG = "E2E"
 E2E_OPENAPI_TAG: dict[str, str] = {
@@ -90,7 +93,23 @@ async def seed_static(body: SeedRequest, request: Request) -> SeedResponse:
         settings=request.app.state.settings,
         forge=getattr(request.app.state, "forge", None),
     )
-    success = seeder.seed_static(body.script)
+    try:
+        success = seeder.seed_static(body.script)
+    except (SourceValidationError, FlowError, RoutingNotApplicableError) as exc:
+        # A seed the engine refused and a seed that crashed are both 500 without
+        # this, and the Playwright suite runs against this endpoint. Narrow on
+        # purpose: SourceRegistryError's other subclasses are server faults, and
+        # answering those 422 would call a misconfiguration the caller's fault.
+        # The two conflict subclasses answer 409 on the product routes and 422
+        # here: on a seed endpoint a collision is the script's own doing, and the
+        # reason in the body matters more than the code.
+        # RoutingNotApplicableError is in the tuple because a FlowError never
+        # reaches here -- routing.py:164 wraps it, so catching FlowError alone
+        # left the refusal this endpoint exists to report answering 500.
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
     logger.warning("e2e seed", script=body.script, success=success)
     message = f"Seed {body.script} successful" if success else f"Unknown seed script: {body.script}"
     return SeedResponse(success=success, message=message)
