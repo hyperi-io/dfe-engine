@@ -81,6 +81,10 @@ class SchemaBootstrapState:
     overlay_refused: list[str] = field(default_factory=list)
     topics_created: list[str] = field(default_factory=list)
     topics_skipped: str = ""
+    # Its own field rather than ``refused``: that list means ClickHouse objects
+    # an operator clears with ``dfe schema apply --allow-drift``, which reaches
+    # no topic, and a non-empty ``refused`` exits the CLI 2.
+    topics_drift: list[str] = field(default_factory=list)
     counts: dict[str, int] = field(default_factory=dict)
 
     @property
@@ -128,6 +132,7 @@ class SchemaBootstrapState:
             "overlay_refused": list(self.overlay_refused),
             "topics_created": list(self.topics_created),
             "topics_skipped": self.topics_skipped,
+            "topics_drift": list(self.topics_drift),
         }
 
 
@@ -275,18 +280,23 @@ def _topics_skipped(settings: DFESettings) -> str:
     return ""
 
 
-def _apply_topics(plan: SchemaPlan, settings: DFESettings) -> tuple[list[str], str]:
-    """Create the declared bootstrap topics. Create only, never delete.
+def _apply_topics(plan: SchemaPlan, settings: DFESettings) -> tuple[list[str], str, list[str]]:
+    """Create the declared bootstrap topics, and report any whose shape differs.
 
     A deployment with no bus is not a failure: the brokerless tiers run the
     receiver straight into the loader over gRPC, so an absent broker means the
     topic set is skipped and the pass still converges.
+
+    ``ensure_topics`` leaves an existing topic untouched, so a topic created by
+    anything else keeps its own partitions, retention and replication factor. The
+    dry-run converge pass names that difference instead of adopting it silently;
+    applying it stays a separate, deliberate operation.
     """
-    from dfe_engine.kafka.topics import TopicSpec, ensure_topics
+    from dfe_engine.kafka.topics import TopicSpec, ensure_topics, update_topics
 
     skipped = _topics_skipped(settings)
     if skipped:
-        return [], skipped
+        return [], skipped, []
 
     specs = [
         TopicSpec(
@@ -301,7 +311,27 @@ def _apply_topics(plan: SchemaPlan, settings: DFESettings) -> tuple[list[str], s
     result = ensure_topics(specs, settings=settings)
     for name, error in result.failed:
         logger.warning("bootstrap topic not created", topic=name, error=error)
-    return result.created, ""
+
+    drift: list[str] = []
+    if result.existing:
+        existing_specs = [s for s in specs if s.name in set(result.existing)]
+        try:
+            compared = update_topics(existing_specs, settings=settings, dry_run=True)
+        except Exception as exc:  # a describe fault must not fail the create pass
+            logger.warning("bootstrap topics not compared", error=str(exc))
+        else:
+            drift = [f"{name}: {reason}" for name, reason in compared.refused]
+            drift += [f"{n}: config differs from the manifest" for n in compared.altered]
+            drift += [f"{n}: fewer partitions than the manifest asks for" for n in compared.widened]
+            # A topic the broker would not describe is UNKNOWN, not clean: without
+            # this a principal missing DescribeConfigs reports a converged
+            # deployment with no drift, which is what #439 exists to surface.
+            drift += [
+                f"{n}: shape unreadable, so drift is unknown -- {r}" for n, r in compared.failed
+            ]
+            for entry in drift:
+                logger.warning("bootstrap topic differs from the manifest", detail=entry)
+    return result.created, "", drift
 
 
 def run_bootstrap(
@@ -388,7 +418,9 @@ def run_bootstrap(
         state.refused = [f"{o.qualified}: {'; '.join(o.drift) or o.reason}" for o in report.refused]
 
     try:
-        state.topics_created, state.topics_skipped = _apply_topics(plan, settings)
+        state.topics_created, state.topics_skipped, state.topics_drift = _apply_topics(
+            plan, settings
+        )
     except Exception as exc:  # a broker fault must not take the ClickHouse apply with it
         state.topics_skipped = f"topic bootstrap failed: {exc}"
         logger.warning("bootstrap topics not created", error=str(exc))

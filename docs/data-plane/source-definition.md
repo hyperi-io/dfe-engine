@@ -60,7 +60,7 @@ match:
 #   topic: own                          # own: this source's topic and table | main: the shared main topic and table
 #   config:                             # The fetcher's own per-type stanza, verbatim
 #     tenant_url: https://example.okta.com
-#     credential_secret: vault:secret/dfe/okta:token   # credentials are env:/vault: references, never literals
+#     credential_secret: vault:kv/dfe/okta:token       # never a literal. vault:/bao:/openbao: take <mount>/<path>:<key>, first segment the mount; env: takes a variable name and file: a path, neither with a :key
 #     services:
 #       - name: system_log
 #     interval_secs: 300

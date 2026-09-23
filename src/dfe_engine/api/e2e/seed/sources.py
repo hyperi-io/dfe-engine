@@ -102,7 +102,10 @@ class Sources(Seed):
         transform: SourceTransform | None = None,
         display_name: str = "Seed Source",
     ) -> bool:
-        """Create the source when absent. Existing definitions are left alone.
+        """Create the source when absent, and reconcile an existing one's display name.
+
+        The version tree is left alone -- only ``display_name`` is written back,
+        because it sits beside ``versions`` rather than inside a snapshot.
 
         A source carries a version tree, and rewriting one would bump versions on
         every call, so this is create-once rather than the reset the account and
@@ -110,10 +113,18 @@ class Sources(Seed):
         """
         registry = self._require_source_registry()
         try:
-            registry.get_source(name)
+            existing = registry.get_source(name)
         except SourceNotFoundError:
             pass
         else:
+            # display_name sits beside ``versions``, not inside the snapshot, so
+            # reconciling it here costs no version bump.
+            if existing.display_name != display_name:
+                registry.save_source(
+                    existing.model_copy(update={"display_name": display_name}),
+                    created_by=SEED_ACTOR,
+                    description=f"e2e: reconcile display name for {name}",
+                )
             return False
         registry.create_source_from_write(
             SourceWriteRequest(
