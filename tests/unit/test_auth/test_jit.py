@@ -15,6 +15,7 @@ from dfe_engine.auth.accounts import AccountStore
 from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
 from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.jit import JitIdentityCollisionError, JitProvisioner
+from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
 
 
 @pytest.fixture
@@ -50,6 +51,16 @@ def external_account(store: AccountStore, username: str, provider: str, groups: 
     """Seed a shadow account owned by *provider*, as a first JIT login leaves it."""
     store.create(username, "", groups=groups)
     return store.update(username, external=True, source_provider=provider)
+
+
+def scim_account(store, username: str):
+    """Seed an account as the SCIM face provisions one (``api/v1/scim.py`` create_user).
+
+    The stamp comes from the mapper the route uses, so the test follows a change
+    of stamp rather than pinning a copy of it.
+    """
+    store.create(username, "provisioned-Pw-1", groups=[])
+    return store.update(username, enabled=True, source_provider=SCIM_SOURCE_PROVIDER)
 
 
 class TestSanitiseUsername:
@@ -264,6 +275,194 @@ class TestCrossIdentityRefusal:
                 jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
 
         audited.assert_called_once_with("jane@corp.com", "entra", "local_account")
+
+
+class TestSourceProviderBinding:
+    """SCIM and OIDC from the same IdP are ONE identity source (#506).
+
+    A SCIM-provisioned user is stamped ``scim`` and carries ``external=False``, so
+    the identity guard read their first OIDC login as a collision with a local
+    account. ``auth.source_provider_bindings`` is how a deployment declares that
+    its SCIM connector and one named OIDC provider are the same IdP.
+    """
+
+    def test_an_unbound_scim_account_is_refused(self, stores):
+        """Fail closed: no binding, no adoption."""
+        accounts, groups = stores
+        scim_account(accounts, "jane-corp-com")
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
+
+        assert refused.value.reason == "provider_mismatch"
+        assert accounts.get("jane-corp-com").groups == []
+
+    def test_the_bound_provider_reconciles_the_account(self, stores):
+        accounts, groups = stores
+        scim_account(accounts, "jane-corp-com")
+        jit = JitProvisioner(
+            account_store=accounts,
+            group_store=groups,
+            source_provider_bindings={SCIM_SOURCE_PROVIDER: "entra"},
+        )
+
+        account = jit.ensure_account(
+            "jane@corp.com", ["acme-viewers", "dfe-admins"], "entra", email="jane@corp.com"
+        )
+
+        assert account.groups == ["acme-viewers", "dfe-admins"]
+        assert account.email == "jane@corp.com"
+        assert account.last_login_at != ""
+
+    def test_adoption_leaves_the_scim_stamp_alone(self, stores):
+        """SCIM still owns the record, so removing the binding re-closes the door."""
+        accounts, groups = stores
+        scim_account(accounts, "jane-corp-com")
+        jit = JitProvisioner(
+            account_store=accounts,
+            group_store=groups,
+            source_provider_bindings={SCIM_SOURCE_PROVIDER: "entra"},
+        )
+
+        account = jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
+
+        assert account.source_provider == SCIM_SOURCE_PROVIDER
+        assert account.external is False
+
+    def test_an_unbound_provider_is_still_refused(self, stores):
+        """The binding names ONE provider -- account_write is all it takes to mint a
+        SCIM account, so an open rule would let any IdP claim another's users."""
+        accounts, groups = stores
+        scim_account(accounts, "jane-corp-com")
+        jit = JitProvisioner(
+            account_store=accounts,
+            group_store=groups,
+            source_provider_bindings={SCIM_SOURCE_PROVIDER: "entra"},
+        )
+
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account("jane@corp.com", ["dfe-admins"], "okta")
+
+        assert refused.value.reason == "provider_mismatch"
+        assert accounts.get("jane-corp-com").groups == []
+
+    def test_the_race_branch_honours_the_binding(self, tmp_path, stores):
+        """Both write paths, not just the main one."""
+        _, groups = stores
+        accounts = RacingAccountStore(tmp_path / "accounts", blind_to="jane-corp-com")
+        scim_account(accounts, "jane-corp-com")
+        jit = JitProvisioner(
+            account_store=accounts,
+            group_store=groups,
+            source_provider_bindings={SCIM_SOURCE_PROVIDER: "entra"},
+        )
+
+        account = jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
+
+        assert account.groups == ["dfe-admins"]
+
+    def test_the_race_branch_refuses_an_unbound_provider(self, tmp_path, stores):
+        _, groups = stores
+        accounts = RacingAccountStore(tmp_path / "accounts", blind_to="jane-corp-com")
+        scim_account(accounts, "jane-corp-com")
+        jit = JitProvisioner(
+            account_store=accounts,
+            group_store=groups,
+            source_provider_bindings={SCIM_SOURCE_PROVIDER: "entra"},
+        )
+
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account("jane@corp.com", ["dfe-admins"], "okta")
+
+        assert refused.value.reason == "provider_mismatch"
+        assert AccountStore(tmp_path / "accounts").get("jane-corp-com").groups == []
+
+    @pytest.mark.parametrize(
+        "bindings",
+        [
+            {SCIM_SOURCE_PROVIDER: "entra"},
+            # The empty stamp is what a local account carries, so an operator who
+            # writes it must still not hand any IdP the local credentials.
+            {"": "entra"},
+            {"oidc": "entra", "": "entra", SCIM_SOURCE_PROVIDER: "entra"},
+        ],
+    )
+    def test_a_local_account_stays_unclaimable(self, stores, bindings):
+        """DFE runs standalone on local accounts, so no binding widens the local rule."""
+        accounts, groups = stores
+        accounts.create("jane-corp-com", "localpass", groups=["acme-viewers"], email="j@dfe.local")
+        jit = JitProvisioner(
+            account_store=accounts, group_store=groups, source_provider_bindings=bindings
+        )
+
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra", email="evil@example.com")
+
+        assert refused.value.reason == "local_account"
+        stored = accounts.get("jane-corp-com")
+        assert stored.groups == ["acme-viewers"]
+        assert stored.email == "j@dfe.local"
+        assert stored.external is False
+        assert stored.last_login_at == ""
+
+    def test_the_race_branch_refuses_a_local_account_with_bindings_set(self, tmp_path, stores):
+        _, groups = stores
+        accounts = RacingAccountStore(tmp_path / "accounts", blind_to="jane-corp-com")
+        accounts.create("jane-corp-com", "localpass", groups=["acme-viewers"], email="j@dfe.local")
+        jit = JitProvisioner(
+            account_store=accounts,
+            group_store=groups,
+            source_provider_bindings={"": "entra", SCIM_SOURCE_PROVIDER: "entra"},
+        )
+
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
+
+        assert refused.value.reason == "local_account"
+        assert AccountStore(tmp_path / "accounts").get("jane-corp-com").email == "j@dfe.local"
+
+    def test_a_caller_asserting_no_provider_adopts_nothing(self, stores):
+        """A misconfigured proxy_provider must not become a wildcard."""
+        accounts, groups = stores
+        external_account(accounts, "jane-corp-com", "entra", ["acme-viewers"])
+        jit = JitProvisioner(
+            account_store=accounts, group_store=groups, source_provider_bindings={"entra": ""}
+        )
+
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account("jane@corp.com", ["dfe-admins"], "")
+
+        assert refused.value.reason == "provider_mismatch"
+        assert accounts.get("jane-corp-com").groups == ["acme-viewers"]
+
+    @pytest.mark.parametrize("protected", ["admin", BREAKGLASS_USERNAME])
+    def test_a_binding_cannot_reach_a_recovery_credential(self, stores, protected):
+        """The protected floor runs before the identity guard, binding or not."""
+        accounts, groups = stores
+        scim_account(accounts, protected)
+        jit = JitProvisioner(
+            account_store=accounts,
+            group_store=groups,
+            source_provider_bindings={SCIM_SOURCE_PROVIDER: "entra"},
+        )
+
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account(protected, ["dfe-admins"], "entra")
+
+        assert refused.value.reason == "protected_account"
+        assert accounts.get(protected).groups == []
+
+    def test_the_refusal_is_audited(self, stores):
+        accounts, groups = stores
+        scim_account(accounts, "jane-corp-com")
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with patch("dfe_engine.auth.jit.audit_jit_login_refused") as audited:
+            with pytest.raises(JitIdentityCollisionError):
+                jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
+
+        audited.assert_called_once_with("jane@corp.com", "entra", "provider_mismatch")
 
 
 class TestRecoveryCredentialFloor:

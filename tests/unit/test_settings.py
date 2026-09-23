@@ -371,6 +371,28 @@ class TestEnvOverrides:
         with pytest.raises(ValueError, match="not valid JSON"):
             load_settings()
 
+    def test_proxy_provider_defaults_to_the_protocol_name(self):
+        # Changing this default would refuse every account a proxy-only deployment
+        # has already stamped.
+        assert load_settings().auth.proxy_provider == "oidc"
+
+    def test_proxy_provider_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_AUTH_PROXY_PROVIDER", "entra")
+        assert load_settings().auth.proxy_provider == "entra"
+
+    def test_source_provider_bindings_default_empty(self):
+        # Fail closed: nothing is adoptable until a deployment says so.
+        assert load_settings().auth.source_provider_bindings == {}
+
+    def test_source_provider_bindings_json_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_AUTH_SOURCE_PROVIDER_BINDINGS", '{"scim": "entra"}')
+        assert load_settings().auth.source_provider_bindings == {"scim": "entra"}
+
+    def test_source_provider_bindings_malformed_json_fails_loud(self, monkeypatch):
+        monkeypatch.setenv("DFE_AUTH_SOURCE_PROVIDER_BINDINGS", "{not-json")
+        with pytest.raises(ValueError, match="not valid JSON"):
+            load_settings()
+
     def test_seed_orgs_json_override(self, monkeypatch):
         monkeypatch.setenv(
             "DFE_ORGS_SEED_ORGS",

@@ -577,7 +577,15 @@ async def get_current_user(request: Request) -> AuthContext:
         jit = getattr(request.app.state, "jit_provisioner", None)
         if jit:
             try:
-                jit.ensure_account(oidc_subject, groups, "oidc", email=oidc_email or "")
+                # The configured provider, not the protocol: a deployment running
+                # this path AND the RP callback must stamp one name for one IdP,
+                # or the guard reads its second path as another identity.
+                jit.ensure_account(
+                    oidc_subject,
+                    groups,
+                    settings.auth.proxy_provider,
+                    email=oidc_email or "",
+                )
             except JitIdentityCollisionError as exc:
                 # Ordered before the catch-all: a refused identity must reach the
                 # caller as a 401, never be logged and waved through with a token.

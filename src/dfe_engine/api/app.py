@@ -412,6 +412,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # The same override the bootstrap seeds the admin with, so a renamed
         # admin stays out of an IdP's reach.
         admin_name=settings.auth.local.admin_name,
+        source_provider_bindings=settings.auth.source_provider_bindings,
     )
 
     # Bootstrap task manager for async background tasks
