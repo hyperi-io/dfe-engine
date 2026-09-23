@@ -216,9 +216,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from dfe_engine.auth.groups import DocuStoreGroupStore
 
         injected_account_store = DocuStoreAccountStore(
-            doc_store, collection=settings.auth.accounts_store.collection
+            doc_store,
+            collection=settings.auth.accounts_store.collection,
+            admin_name=settings.auth.local.admin_name,
         )
-        injected_group_store = DocuStoreGroupStore(doc_store)
+        injected_group_store = DocuStoreGroupStore(
+            doc_store, admin_name=settings.auth.local.admin_name
+        )
 
     # Refuse to start on the shipped admin password outside a dev posture, unless
     # the operator has retired the admin -- then an absent password is the point.
@@ -406,6 +410,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # The same override the bootstrap seeds the admin with, so a renamed
         # admin stays out of an IdP's reach.
         admin_name=settings.auth.local.admin_name,
+        source_provider_bindings=settings.auth.source_provider_bindings,
     )
 
     # Bootstrap task manager for async background tasks

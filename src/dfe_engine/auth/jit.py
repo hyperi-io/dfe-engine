@@ -75,12 +75,14 @@ class JitProvisioner:
         group_store: GroupStore,
         hyperdx_client=None,
         admin_name: str = "",
+        source_provider_bindings: dict[str, str] | None = None,
     ) -> None:
         self._accounts = account_store
         self._groups = group_store
         self._hdx = hyperdx_client
         self._invite_tasks: set[asyncio.Task] = set()
         self._protected = _protected_usernames(admin_name)
+        self._bindings = dict(source_provider_bindings or {})
 
     @staticmethod
     def sanitise_username(user_id: str) -> str:
@@ -212,8 +214,7 @@ class JitProvisioner:
         audit_jit_login_refused(user_id, source_provider, "protected_account")
         raise JitIdentityCollisionError(user_id, source_provider, "protected_account")
 
-    @staticmethod
-    def _require_same_identity(existing: Account, user_id: str, source_provider: str) -> None:
+    def _require_same_identity(self, existing: Account, user_id: str, source_provider: str) -> None:
         """Refuse when the stored account is not this IdP identity's own.
 
         The account key is a sanitised subject with no provider in it, so without
@@ -223,14 +224,28 @@ class JitProvisioner:
         Raises:
             JitIdentityCollisionError: The account is local, or another provider's.
         """
-        if not existing.external:
-            reason = "local_account"
-        elif existing.source_provider != source_provider:
-            reason = "provider_mismatch"
-        else:
+        if self._may_adopt(existing, source_provider):
             return
+        reason = "provider_mismatch" if existing.source_provider else "local_account"
         audit_jit_login_refused(user_id, source_provider, reason)
         raise JitIdentityCollisionError(user_id, source_provider, reason)
+
+    def _may_adopt(self, existing: Account, source_provider: str) -> bool:
+        """Whether *source_provider* owns the identity behind *existing*.
+
+        Two ways to own it: the provider stamped the account itself on an earlier
+        login, or the deployment bound the account's stamp to this provider
+        (``auth.source_provider_bindings``) because a SCIM connector and an OIDC
+        provider are the same IdP.
+        """
+        if not source_provider or not existing.source_provider:
+            # An account carrying no stamp is a local credential that belongs to no
+            # IdP, so no binding can name it; a caller asserting no provider name
+            # owns nothing. Both are refused before any comparison runs.
+            return False
+        if existing.external and existing.source_provider == source_provider:
+            return True
+        return self._bindings.get(existing.source_provider) == source_provider
 
     def _resolve_group(self, identifier: str) -> Group | None:
         """A group by name, else by the provider identifier the sync recorded.

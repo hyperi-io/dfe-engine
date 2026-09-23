@@ -81,6 +81,49 @@ class TestOidcAuthentication:
         assert "admin" in data["roles"]
         assert "data_viewer" in data["roles"]
 
+    def test_the_proxy_path_stamps_the_configured_provider(self, client: TestClient, app):
+        """The stamp is a provider name, not the protocol -- ``auth.proxy_provider``."""
+        app.state.settings.auth.proxy_provider = "entra"
+
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "ivan@example.com", "X-Oidc-Groups": "dfe-admins"},
+        )
+
+        assert resp.status_code == 200
+        stamped = app.state.account_store.get("ivan-example-com")
+        assert stamped.external is True
+        assert stamped.source_provider == "entra"
+
+    def test_a_dual_path_deployment_reconciles_one_identity(self, client: TestClient, app):
+        """The defect this fixes: the proxy stamped 'oidc' and the RP callback
+        asserted the provider name, so the guard read one IdP as two identities."""
+        app.state.settings.auth.proxy_provider = "entra"
+        client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "judy@example.com", "X-Oidc-Groups": "dfe-admins"},
+        )
+
+        # What oidc_callback does for provider "entra" on the same subject.
+        account = app.state.jit_provisioner.ensure_account(
+            "judy@example.com", ["dfe-analysts"], "entra", email="judy@example.com"
+        )
+
+        assert account.groups == ["dfe-analysts"]
+        assert account.source_provider == "entra"
+
+    def test_the_default_stamp_keeps_a_proxy_only_deployment_working(self, client: TestClient, app):
+        """Unset, the stamp stays what deployed accounts already carry."""
+        assert app.state.settings.auth.proxy_provider == "oidc"
+
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "ken@example.com", "X-Oidc-Groups": "dfe-admins"},
+        )
+
+        assert resp.status_code == 200
+        assert app.state.account_store.get("ken-example-com").source_provider == "oidc"
+
     def test_unknown_groups_no_roles(self, client: TestClient):
         """Unknown groups authenticate but yield no roles."""
         resp = client.get(
