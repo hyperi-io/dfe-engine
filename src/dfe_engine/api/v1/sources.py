@@ -1009,6 +1009,7 @@ async def get_source_schema_columns(
     Use ``per_page=-1`` to return all columns in one page.
     """
     from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
+    from dfe_engine.schema.schema_loader import SchemaLoadError
     from dfe_engine.source.type_registry import TypeRegistry
 
     try:
@@ -1049,7 +1050,7 @@ async def get_source_schema_columns(
     )
     try:
         columns = builder.load_columns_for_source_version(source, source_version=version_id)
-    except SchemaBuildError as exc:
+    except (SchemaBuildError, SchemaLoadError) as exc:
         raise HTTPException(
             status_code=400,
             detail={"code": "schema_error", "message": str(exc)},
@@ -1083,6 +1084,7 @@ async def build_source_schema(
     without executing it against ClickHouse.
     """
     from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
+    from dfe_engine.schema.schema_loader import SchemaLoadError
 
     try:
         source = registry.get_source(name)
@@ -1122,7 +1124,7 @@ async def build_source_schema(
             schemas_base_dir=settings.schemas.schemas_dir or None,
             refresh=True,
         )
-    except SchemaBuildError as exc:
+    except (SchemaBuildError, SchemaLoadError) as exc:
         raise HTTPException(
             status_code=400,
             detail={"code": "build_error", "message": str(exc)},
@@ -1166,6 +1168,7 @@ async def plan_source_deploy(
     """Dry-run ClickHouse deploy: DDL statements and validation errors (not persisted)."""
     from dfe_engine.schema.engine_resolver import EngineResolver
     from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
+    from dfe_engine.schema.schema_loader import SchemaLoadError
     from dfe_engine.source.type_registry import TypeRegistry
 
     source, version_id = _resolve_source_version(registry, name, version, default_current=True)
@@ -1193,7 +1196,7 @@ async def plan_source_deploy(
             refresh=True,
             resolver=resolver,
         )
-    except SchemaBuildError as exc:
+    except (SchemaBuildError, SchemaLoadError) as exc:
         raise HTTPException(
             status_code=400,
             detail={"code": "build_error", "message": str(exc)},
@@ -1315,6 +1318,7 @@ async def deploy_source_schema(
     deployed.
     """
     from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
+    from dfe_engine.schema.schema_loader import SchemaLoadError
     from dfe_engine.source.type_registry import TypeRegistry
 
     # Targets current: defaulting to the deployed version makes an unparameterised
@@ -1362,7 +1366,7 @@ async def deploy_source_schema(
     )
     try:
         result = builder.build_for_source_version(source, source_version=version_id)
-    except SchemaBuildError as exc:
+    except (SchemaBuildError, SchemaLoadError) as exc:
         raise HTTPException(
             status_code=400,
             detail={"code": "build_error", "message": str(exc)},

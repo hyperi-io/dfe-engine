@@ -1019,3 +1019,42 @@ class TestSeedSources:
         resp = client.post("/api/v1/sources/seed", headers=admin_headers)
         assert resp.status_code == 200
         assert "seeded" in resp.json()
+
+
+class TestDeployReportsWhyItCouldNotBuild:
+    """A schema the deploy cannot LOAD is the caller's fault, not the server's.
+
+    `SchemaBuildError` was mapped to a 400 and `SchemaLoadError` was not, so a
+    source pinned to a derived-schema version that no longer exists answered
+    `500 internal_error` while the engine's own log named the missing version.
+    """
+
+    def test_a_schema_that_cannot_be_loaded_answers_400_with_the_reason(
+        self,
+        client: TestClient,
+        admin_headers: dict,
+        sample_source: dict,
+        monkeypatch,
+    ):
+        from dfe_engine.schema.schema_loader import SchemaLoadError
+
+        client.post(
+            "/api/v1/sources",
+            json={**sample_source, "schema": {"meta_schema": "meta/beats/filebeat"}},
+            headers=admin_headers,
+        )
+
+        def _raise(*args, **kwargs):
+            raise SchemaLoadError("Version '1.0.0' not found in derived/accept/gone.yaml")
+
+        monkeypatch.setattr(
+            "dfe_engine.schema.schema_builder_v2.SchemaBuilderV2.build_for_source_version",
+            _raise,
+        )
+        resp = client.post(
+            f"/api/v1/sources/{sample_source['source']}/deploy",
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 400, resp.text
+        assert "not found" in resp.json()["message"]
