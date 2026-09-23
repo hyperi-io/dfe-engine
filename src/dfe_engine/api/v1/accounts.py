@@ -247,6 +247,17 @@ def _reset_stored_password(
             status_code=404,
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
         )
+    if existing.external:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "external_account",
+                "message": (
+                    f"Account '{username}' authenticates through its identity "
+                    "provider; a local password cannot be set"
+                ),
+            },
+        )
     if store.verify_password(username, new_password):
         raise HTTPException(
             status_code=400,
@@ -468,7 +479,8 @@ async def reset_current_user_password(
     """Reset the authenticated user's password.
 
     The username is taken from the session, not the request, so a caller cannot
-    reset another account through this route. The live store takes the new
+    reset another account through this route. An IdP-owned (``external``)
+    account is refused: it has no local password. The live store takes the new
     password immediately; the ``git`` block reports whether the durable mirror
     merged, is pending review, or is a no-op for a non-git-backed account.
     """
@@ -498,10 +510,12 @@ async def reset_password(
 ) -> ResetPasswordResponse:
     """Reset an account's password (admin only).
 
-    The live store takes the new password immediately (next login), and the change
-    is mirrored into the durable deploy repo so it survives a rebuild. The ``git``
-    block reports whether that mirror merged straight away (dev/solo) or is a
-    pending review PR / CLI merge (production+team), or is a no-op file share.
+    An IdP-owned (``external``) account is refused: the password lives at the
+    identity provider. The live store takes the new password immediately (next
+    login), and the change is mirrored into the durable deploy repo so it
+    survives a rebuild. The ``git`` block reports whether that mirror merged
+    straight away (dev/solo) or is a pending review PR / CLI merge
+    (production+team), or is a no-op file share.
     """
     return _reset_stored_password(
         request,

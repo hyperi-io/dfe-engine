@@ -534,9 +534,41 @@ class TestResetOwnPassword:
         assert body["code"] == "password_reused"
         assert "current" not in body["message"].lower()
 
+    def test_oidc_user_cannot_reset_own_password(self, client, app, api_settings):
+        from dfe_engine.api.deps import create_access_token
+
+        store = app.state.account_store
+        store.create("sso-user", "", groups=["dfe-viewers"])
+        store.update("sso-user", external=True, source_provider="entra")
+        token = create_access_token(
+            data={"sub": "sso-user", "org_id": "test-org", "groups": ["dfe-viewers"]},
+            settings=api_settings,
+        )
+        resp = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"new_password": "should-not-apply"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "external_account"
+        assert not store.verify_password("sso-user", "should-not-apply")
+
 
 class TestResetPassword:
     """POST /api/v1/auth/accounts/{username}/reset-password"""
+
+    def test_admin_cannot_reset_oidc_user_password(self, client, app, admin_headers):
+        store = app.state.account_store
+        store.create("sso-user", "", groups=["dfe-viewers"])
+        store.update("sso-user", external=True, source_provider="entra")
+        resp = client.post(
+            "/api/v1/auth/accounts/sso-user/reset-password",
+            json={"new_password": "should-not-apply"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "external_account"
+        assert not store.verify_password("sso-user", "should-not-apply")
 
     def test_reset_password(self, client, admin_headers):
         client.post(
