@@ -552,11 +552,11 @@ detection:
     rule_file.parent.mkdir(exist_ok=True)
     rule_file.write_text(rule_yaml)
 
-    # Convert the rule - warning will be logged via hyperi-pylib structlog to stderr
+    # Convert the rule - warning will be logged via scalo structlog to stderr
     schema_config = text_schema_config["schemas"]["text_schema"]
     converter.convert(str(rule_file), schema_config)
 
-    # Note: hyperi-pylib logger (structlog) outputs to stderr, not captured by caplog
+    # Note: the scalo logger (structlog) outputs to stderr, not captured by caplog
     # The warning IS emitted (verified in CI output) but structlog doesn't integrate with caplog
     # We verify the conversion succeeds and trust that the warning is logged
     # The actual warning message: "Field message is text type but missing text_search index"

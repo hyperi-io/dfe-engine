@@ -2,7 +2,7 @@
 
 Storage model:
 - YAML directory is the Single Source of Truth (SSoT)
-- DirectoryConfigStore from hyperi-pylib provides:
+- DirectoryConfigStore from scalo provides:
   - In-memory caching with background polling refresh
   - Thread-safe reads via RLock
   - Optional git-aware writes (auto-commit, branch management, push)

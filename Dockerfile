@@ -5,7 +5,7 @@
 # License:   BUSL-1.1
 # Copyright: (c) 2026 HYPERI PTY LIMITED
 #
-# The runtime stage below aligns with the hyperi-pylib deployment contract
+# The runtime stage below aligns with the scalo-py deployment contract
 # (src/dfe_engine/deployment_contract.py). validate_dockerfile in
 # tests/unit/test_deployment/test_contract.py guards drift (runtime base image,
 # EXPOSE, venv PATH, entrypoint). The builder stage is project-specific (uv venv
@@ -59,7 +59,7 @@ RUN /app/.venv/bin/python -c \
     && mkdir -p /app/schemas /app/config /app/secrets /app/app-config \
     && chown -R 1000:1000 /app/schemas /app/config /app/secrets /app/app-config
 
-# --- Runtime stage (aligned with hyperi-pylib deployment contract) ---
+# --- Runtime stage (aligned with scalo-py deployment contract) ---
 # Digest-pinned runtime base (#106). python:3.14-slim is already Debian 13
 # trixie. Kept literal (not an ARG) because scalo's validate_dockerfile matches
 # `FROM <base>` by substring, so ARG-parameterising the runtime base needs a

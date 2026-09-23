@@ -1,7 +1,7 @@
 """Unit tests for dfe-engine's deployment contract.
 
 Verifies that :func:`dfe_engine.deployment_contract.engine_deployment_contract`
-is well-formed and that pylib's generators emit valid Dockerfile-runtime,
+is well-formed and that scalo's generators emit valid Dockerfile-runtime,
 ArgoCD Application, container manifest, and Helm chart artefacts from it.
 
 These tests are the dfe-engine analogue of dfe-loader's
@@ -78,7 +78,7 @@ class TestContractWellFormed:
 
 
 class TestArtefactGeneration:
-    """pylib generators emit non-empty, well-formed artefacts."""
+    """scalo generators emit non-empty, well-formed artefacts."""
 
     def test_runtime_stage_includes_contract_points(self) -> None:
         from scalo.deployment import generate_runtime_stage

@@ -10,7 +10,7 @@
 
 Mirrors the validation logic in
 ``scalo::transport::filter::TransportFilterEngine::new()`` —
-called by the control plane before filter configs reach rustlib, so
+called by the control plane before filter configs reach scalo-rs, so
 operators get immediate feedback in the UI/CLI.
 """
 
@@ -177,7 +177,7 @@ def _tier_enable_hint(tier: FilterTier, direction: Direction) -> str:
 def warn_suboptimal_ordering(rules: list[FilterRule]) -> list[str]:
     """Warn if higher-tier filters precede lower-tier filters.
 
-    Matches the ordering warning in rustlib's TransportFilterEngine::new().
+    Matches the ordering warning in scalo-rs's TransportFilterEngine::new().
     Returns a list of warning messages (empty if ordering is optimal).
 
     Example: `[Tier2, Tier1]` → warns because Tier 2 precedes Tier 1.

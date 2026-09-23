@@ -12,7 +12,7 @@ Used by the TS UI to validate CEL expressions as the user types. Returns
 structured results with:
 
 - Real CEL parser errors (via ``cel-interpreter`` v0.10.0, same engine
-  rustlib uses at runtime — zero drift between UI and runtime)
+  scalo-rs uses at runtime — zero drift between UI and runtime)
 - Performance tier classification (Tier 1 / 2 / 3)
 - Referenced fields, recognised operation, human-readable description
 - Required config opt-ins for the tier

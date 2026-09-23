@@ -110,7 +110,7 @@ class SurfaceRegistry:
         """Fetch /metrics/manifest from the service and update the surface.
 
         Returns None if the service is unreachable or has no manifest_url.
-        This is a placeholder for Phase 1.5 of rustlib — when rustlib
+        This is a placeholder for Phase 1.5 of scalo-rs — when scalo-rs
         exposes a /metrics/manifest endpoint, this method will fetch it
         and update the metrics_surface.
         """

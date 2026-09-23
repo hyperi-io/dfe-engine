@@ -9,7 +9,7 @@
 
 Status / start / stop / wait-running for a CH Cloud service through
 ``api.clickhouse.cloud``, using scalo's :class:`~scalo.http.HttpClient` (Stamina
-back-off, observability) - NOT urllib/httpx directly (pylib policy). This is the
+back-off, observability) - NOT urllib/httpx directly (scalo policy). This is the
 CONTROL plane and a BILLABLE lever: it is SEPARATE from the SQL data-plane
 connection (the regular ``clickhouse.*`` block pointed at a ``*.clickhouse.cloud``
 host). Wraps the "EV start button for a dev CH Cloud service": see it, start it,
@@ -97,7 +97,7 @@ class CloudService:
         self._org_id_cache = config.organization_id or ""
 
     def _default_http_factory(self) -> Any:
-        # Lazy import (pylib convention) so importing this module never drags httpx.
+        # Lazy import (scalo convention) so importing this module never drags httpx.
         from scalo.http import HttpClient
 
         if not self._config.configured:

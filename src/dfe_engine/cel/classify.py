@@ -1,5 +1,5 @@
 #  Project:      dfe-engine
-#  File:         src/dfe_engine/transport_filter/classify.py
+#  File:         src/dfe_engine/cel/classify.py
 #  Purpose:      CEL expression tier classification (Python mirror of Rust classify.rs)
 #  Language:     Python
 #
@@ -18,7 +18,7 @@ Classifies a CEL expression into one of three performance tiers:
   time functions). Requires ``allow_complex_filters_in/out`` opt-in.
 
 This Python implementation MUST match the Rust classification in
-``/projects/hyperi-rustlib/src/transport/filter/classify.rs`` byte-for-byte
+``/projects/scalo-rs/src/transport/filter/classify.rs`` byte-for-byte
 — divergence means the UI validates differently from the runtime engine.
 """
 

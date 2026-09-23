@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         src/dfe_engine/transport_filter/__init__.py
-#  Purpose:      Transport filter configuration helpers for hyperi-rustlib
+#  Purpose:      Transport filter configuration helpers for scalo-rs
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -11,9 +11,9 @@
 Mirrors the `scalo::transport::filter` module — provides Pydantic
 models, CEL syntax classifier, and validation for transport-level message
 filters. Used by the control plane to validate filter configs before they
-reach rustlib at service startup.
+reach scalo-rs at service startup.
 
-See: /projects/hyperi-rustlib/src/transport/filter/
+See: /projects/scalo-rs/src/transport/filter/
 
 ## Performance Tiers
 

@@ -5,7 +5,7 @@ a default field map plus optional source-specific overrides.
 
 Storage model:
     - YAML directory is the Single Source of Truth (SSoT)
-    - Backed by DirectoryConfigStore from hyperi-pylib
+    - Backed by DirectoryConfigStore from scalo
     - Two-tier resolution: default + source-specific override
 
 Usage:

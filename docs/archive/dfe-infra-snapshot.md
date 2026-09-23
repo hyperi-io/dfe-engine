@@ -136,7 +136,7 @@ Cluster annotations bridge Terraform outputs → ArgoCD ApplicationSet templates
 | RBAC policy | ArgoCD ConfigMap | `generate_rbac_csv()` |
 | Secrets | Terraform + ESO | ENV vars + mounted secrets |
 | Deployment | Helm chart in wave 5 | Deployed BY dfe-infra |
-| Observability | OTel infrastructure | hyperi-pylib logger auto-emit |
+| Observability | OTel infrastructure | scalo logger auto-emit |
 | Scaling | KEDA ScaledObjects (CPU default) | `dfe-keda-shim` (opt-in pressure/backlog metrics, fail-safe) |
 
 **dfe-engine is deployed BY dfe-infra, not part of it.** dfe-engine manages

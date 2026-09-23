@@ -5,7 +5,7 @@ Provides K8s deployment configuration management for DFE Rust services
 
 Storage model:
 - YAML directory is the Single Source of Truth (SSoT)
-- Backed by DirectoryConfigStore from hyperi-pylib
+- Backed by DirectoryConfigStore from scalo
 - Deployment configs are separate from service configs (different lifecycle)
 - T-shirt sizing bridges deployment and service config (buffer/memory scaling)
 

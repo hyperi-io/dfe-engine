@@ -3,10 +3,10 @@
 Mirrors the pattern dfe-loader uses (Rust): the app exports a single
 :class:`scalo.deployment.DeploymentContract` describing its
 deployment-facing surface (image, ports, health probes, secrets, OCI labels).
-pylib's Python-native generators consume that contract to emit:
+scalo's Python-native generators consume that contract to emit:
 
 - ``Dockerfile`` -- the full multi-stage image (uv builder stage + runtime
-  stage copying the ``/app/.venv``). pylib derives the base image from
+  stage copying the ``/app/.venv``). scalo derives the base image from
   ``python_version``; no hand-written Dockerfile to keep in sync.
 - ``container-manifest.json`` -- JSON describing OCI labels and contract points
   for hyperi-ci's container build pipeline
@@ -14,7 +14,7 @@ pylib's Python-native generators consume that contract to emit:
 
 The :func:`engine_deployment_contract` factory is the single source of truth.
 ``DfeEngineApp.deployment_contract()`` returns it so ``dfe-engine generate-artefacts``
-emits the artefacts, and pylib's ``validate_dockerfile`` / ``validate_helm_values``
+emits the artefacts, and scalo's ``validate_dockerfile`` / ``validate_helm_values``
 drift checks (see ``tests/unit/test_deployment/test_contract.py``) keep the
 committed ``Dockerfile`` and ``chart/`` aligned with it.
 """
@@ -44,7 +44,7 @@ def engine_deployment_contract() -> DeploymentContract:
     Defaults match the committed ``Dockerfile`` and ``chart/values.yaml``.
     ``image_registry`` reads from the config cascade
     (``deployment.image_registry``) so ops can override per-environment without
-    touching code; the base image is derived by pylib from ``python_version``.
+    touching code; the base image is derived by scalo from ``python_version``.
     """
     return DeploymentContract(
         app_name="dfe-engine",
