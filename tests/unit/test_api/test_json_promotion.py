@@ -319,6 +319,9 @@ class TestDiscoverJsonPaths:
         body = resp.json()
         # No meta_schema -> discovery runs against the catch-all landing table.
         assert body["table"] == f"{db}.{landing}"
+        # The version the answer was computed from, so a caller can tell an empty
+        # `paths` list apart from one read off a version behind `current` (#512).
+        assert body["version"]
         path0 = body["paths"][0]
         assert path0["path"] == "user.id"
         # Ready-to-send column the editor posts to the create-version endpoint
