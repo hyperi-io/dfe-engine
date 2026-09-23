@@ -111,6 +111,8 @@ class TestMe:
         assert "dfe-admins" in data["groups"]
         assert data["external"] is False
         assert data["blocked"] is False
+        assert data["disabled_at"] == ""
+        assert data["blocked_at"] == ""
 
     def test_me_oidc_user_surfaces_external_true(self, client: TestClient, app, api_settings):
         from dfe_engine.api.deps import create_access_token

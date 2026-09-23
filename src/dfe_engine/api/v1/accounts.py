@@ -179,6 +179,8 @@ class AccountResponse(BaseModel):
     username: str
     enabled: bool
     blocked: bool
+    disabled_at: str = ""
+    blocked_at: str = ""
     groups: list[str]
     email: str
     phone: str = ""
@@ -202,6 +204,8 @@ def _account_response(account: Account) -> AccountResponse:
         username=account.username,
         enabled=account.enabled,
         blocked=account.blocked,
+        disabled_at=account.disabled_at,
+        blocked_at=account.blocked_at,
         groups=account.groups,
         email=account.email,
         phone=account.phone,

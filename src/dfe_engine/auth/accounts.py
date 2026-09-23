@@ -69,6 +69,8 @@ class Account(BaseModel):
     external_id: str = ""
     """Provider-specific external identifier (SCIM externalId / IdP object ID)."""
     last_login_at: str = ""
+    disabled_at: str = ""
+    blocked_at: str = ""
     email: str = ""
     phone: str = ""
     name: str = ""
@@ -217,10 +219,12 @@ class AccountStore:
     def update(self, username: str, *, allow_protected: bool = False, **fields: object) -> Account:
         """Update mutable fields on an existing account.
 
-        Permitted fields: ``enabled``, ``blocked``, ``groups``, ``email``,
-        ``phone``, ``name``, plus the external-identity stamps. Updating
-        ``username`` or ``password_hash`` directly is not permitted (use
-        :meth:`reset_password` to change the password).
+        Permitted fields: ``enabled``, ``blocked``, ``disabled_at``,
+        ``blocked_at``, ``groups``, ``email``, ``phone``, ``name``, plus the
+        external-identity stamps. Updating ``username`` or ``password_hash``
+        directly is not permitted (use :meth:`reset_password` to change the
+        password). Toggling ``enabled`` or ``blocked`` also stamps or clears
+        the matching ``*_at`` field unless the caller supplied one.
 
         Args:
             username: Account to update.
@@ -243,7 +247,9 @@ class AccountStore:
         account = self._read(path)
         if not allow_protected:
             self.protected.check_account_update(username, fields, account.groups)
-        updates = {k: fields[k] for k in _UPDATABLE_FIELDS if k in fields}
+        updates = _apply_access_stamps(
+            account, {k: fields[k] for k in _UPDATABLE_FIELDS if k in fields}
+        )
         account = account.model_copy(update={**updates, "updated_at": _now()})
         self._write(path, account)
         return account
@@ -372,6 +378,8 @@ class AccountStore:
 _UPDATABLE_FIELDS = (
     "enabled",
     "blocked",
+    "disabled_at",
+    "blocked_at",
     "groups",
     "external",
     "source_provider",
@@ -473,7 +481,9 @@ class DocuStoreAccountStore:
             raise KeyError(username)
         if not allow_protected:
             self.protected.check_account_update(username, fields, account.groups)
-        updates = {k: fields[k] for k in _UPDATABLE_FIELDS if k in fields}
+        updates = _apply_access_stamps(
+            account, {k: fields[k] for k in _UPDATABLE_FIELDS if k in fields}
+        )
         account = account.model_copy(update={**updates, "updated_at": _now()})
         self._c.put(username, account)
         return account
@@ -528,6 +538,27 @@ class DocuStoreAccountStore:
 # ------------------------------------------------------------------
 # Module-level helpers
 # ------------------------------------------------------------------
+
+
+def _apply_access_stamps(account: Account, updates: dict[str, object]) -> dict[str, object]:
+    """Stamp or clear ``disabled_at`` / ``blocked_at`` when those flags change.
+
+    A caller-supplied timestamp wins. Re-disabling or re-blocking an account
+    that already has a stamp leaves that stamp in place.
+    """
+    stamped = dict(updates)
+    if "enabled" in stamped:
+        if stamped["enabled"]:
+            stamped.setdefault("disabled_at", "")
+        elif account.enabled or not account.disabled_at:
+            stamped.setdefault("disabled_at", _now())
+    if "blocked" in stamped:
+        if stamped["blocked"]:
+            if not account.blocked or not account.blocked_at:
+                stamped.setdefault("blocked_at", _now())
+        else:
+            stamped.setdefault("blocked_at", "")
+    return stamped
 
 
 def hash_password(password: str, rounds: int = 12) -> str:

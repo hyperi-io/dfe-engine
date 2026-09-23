@@ -78,6 +78,14 @@ class UserResponse(BaseModel):
     blocked: bool = Field(
         description="True when an operator has blocked this account from holding a session",
     )
+    disabled_at: str = Field(
+        default="",
+        description="When the account was disabled. Empty while it is enabled.",
+    )
+    blocked_at: str = Field(
+        default="",
+        description="When the account was blocked. Empty while it is not blocked.",
+    )
 
 
 class PermissionsResponse(BaseModel):
@@ -206,6 +214,8 @@ async def get_me(user: CurrentUser, request: Request):
         org_ids=user.org_ids,
         external=bool(account and account.external),
         blocked=bool(account and account.blocked),
+        disabled_at=account.disabled_at if account else "",
+        blocked_at=account.blocked_at if account else "",
     )
 
 

@@ -32,6 +32,8 @@ class TestCreateAccount:
         assert data["username"] == "newuser"
         assert data["enabled"] is True
         assert data["blocked"] is False
+        assert data["disabled_at"] == ""
+        assert data["blocked_at"] == ""
         assert data["groups"] == ["dfe-viewers"]
         assert "password_hash" not in data
         assert data["email"] == "newuser@example.com"
@@ -429,6 +431,7 @@ class TestUpdateAccount:
         )
         assert resp.status_code == 200
         assert resp.json()["enabled"] is False
+        assert resp.json()["disabled_at"] != ""
 
     def test_update_blocked(self, client, admin_headers):
         client.post(
@@ -443,8 +446,10 @@ class TestUpdateAccount:
         )
         assert resp.status_code == 200
         assert resp.json()["blocked"] is True
+        assert resp.json()["blocked_at"] != ""
         got = client.get("/api/v1/auth/accounts/blockme", headers=admin_headers)
         assert got.json()["blocked"] is True
+        assert got.json()["blocked_at"] == resp.json()["blocked_at"]
 
     def test_update_nonexistent_returns_404(self, client, admin_headers):
         resp = client.put(

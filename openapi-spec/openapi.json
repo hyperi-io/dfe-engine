@@ -17727,6 +17727,16 @@
             "type": "boolean",
             "title": "Blocked"
           },
+          "disabled_at": {
+            "type": "string",
+            "title": "Disabled At",
+            "default": ""
+          },
+          "blocked_at": {
+            "type": "string",
+            "title": "Blocked At",
+            "default": ""
+          },
           "groups": {
             "items": {
               "type": "string"
@@ -33462,6 +33472,18 @@
             "type": "boolean",
             "title": "Blocked",
             "description": "True when an operator has blocked this account from holding a session"
+          },
+          "disabled_at": {
+            "type": "string",
+            "title": "Disabled At",
+            "description": "When the account was disabled. Empty while it is enabled.",
+            "default": ""
+          },
+          "blocked_at": {
+            "type": "string",
+            "title": "Blocked At",
+            "description": "When the account was blocked. Empty while it is not blocked.",
+            "default": ""
           }
         },
         "type": "object",

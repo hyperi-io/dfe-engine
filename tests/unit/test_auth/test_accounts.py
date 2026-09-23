@@ -163,6 +163,8 @@ class TestGet:
         assert account.phone == ""
         assert account.name == ""
         assert account.blocked is False
+        assert account.disabled_at == ""
+        assert account.blocked_at == ""
 
 
 # ---------------------------------------------------------------------------
@@ -234,12 +236,14 @@ class TestUpdate:
         store.create("alice", "password123")
         account = store.update("alice", enabled=False)
         assert account.enabled is False
+        assert account.disabled_at != ""
 
     def test_update_enable_account(self, store):
         store.create("alice", "password123")
         store.update("alice", enabled=False)
         account = store.update("alice", enabled=True)
         assert account.enabled is True
+        assert account.disabled_at == ""
 
     def test_update_change_groups(self, store):
         store.create("alice", "password123", groups=["ops"])
@@ -306,7 +310,13 @@ class TestUpdate:
         store.create("alice", "password123")
         updated = store.update("alice", blocked=True)
         assert updated.blocked is True
+        assert updated.blocked_at != ""
         assert store.get("alice").blocked is True
+        assert store.get("alice").blocked_at == updated.blocked_at
+
+        cleared = store.update("alice", blocked=False)
+        assert cleared.blocked is False
+        assert cleared.blocked_at == ""
 
 
 # ---------------------------------------------------------------------------
