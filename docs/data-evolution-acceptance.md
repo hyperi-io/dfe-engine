@@ -21,8 +21,8 @@ for its number.
 | 2.1 | 2 | A source declares a `key=value` routing condition | live |
 | 2.2 | 2 | Deploy renders the routing, the receiver reloads it in place, and records route by it | live, part |
 | 2.3 | 2 | Records land in the source's OWN table, typed columns filled by dfe-loader rather than left in `_json` | live |
-| 2.4 | 2 | A derived schema selects a subset, with an index type per field | none |
-| 2.5 | 2 | Deploying it routes the feed to the narrower table | none |
+| 2.4 | 2 | A derived schema selects a subset, with an index type per field | live |
+| 2.5 | 2 | Deploying it routes the feed to the narrower table | live |
 | 2.6 | 2 | An index is added and dropped on the live table, no rebuild | live, part |
 | 2.7 | 2 | A transform turns a text line in `message` into typed columns | live, xfail dfe-loader#184 |
 | 2.8 | 2 | The transform is swapped and the same columns still fill | none |
@@ -38,10 +38,10 @@ suite goes red the day that issue is fixed, which is how it gets removed.
 `part` says the test covers less than the row claims. 2.2 asserts the DDL is
 rendered and the table created; that the receiver reloads in place is the flow
 suite's routing check, and that records route by it is 2.3. 2.6 applies the ALTER
-directly rather than through a derived-schema edit, because the CRUD that would
-emit it is 2.4 and 2.5.
+directly rather than through a derived-schema edit, which is what 2.4 and 2.5
+cover.
 
-`none` is a step with no test, not a step that passes. 1.2, 2.4, 2.5 and 2.8 are
+`none` is a step with no test, not a step that passes. 1.2 and 2.8 are
 unwritten. The three stage 3 steps cannot pass at all: a derived schema has no
 way to say "stop populating `_json`", so the engine never compiles it.
 

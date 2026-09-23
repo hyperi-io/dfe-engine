@@ -103,6 +103,34 @@ PARSED_COLUMN = "source_ip"
 TRANSFORM_SOURCE = "ciscoios"
 TRANSFORM_MODULE = "cisco_ios"
 
+# Steps 2.4 and 2.5. The derived schema selects five of SHIPPED_SCHEMA's twelve
+# columns; DERIVED_DROPPED is the other seven, and its absence from the deployed
+# table is what says the selection reached the data plane.
+NARROW_SOURCE = "acceptnarrow"
+DERIVED_PATH = "derived/accept/filebeat_narrow"
+DERIVED_VERSION = "1.0.0"
+SHIPPED_SCHEMA_VERSION = "1.0.0"
+
+# name -> the `index` we send. None omits the key, which keeps the base column's
+# own use case and reads differently from the string "none", which keeps the
+# column and drops its index.
+DERIVED_SELECT: dict[str, str | None] = {
+    "timestamp": None,
+    "host_name": "exact_match",
+    "event_dataset": None,
+    "source_ip": "none",
+    "message": "substring_search",
+}
+DERIVED_DROPPED = (
+    "agent_type",
+    "agent_version",
+    "event_module",
+    "log_file_path",
+    "user_name",
+    "process_name",
+    "process_pid",
+)
+
 HEADER = {"type": "common-header/timeseries", "version": "1.0.1"}
 
 
@@ -230,6 +258,69 @@ def evolved(engine: EngineAPI, e2e: E2EConfig, ch_client):
     yield state
     _delete(engine, SOURCE)
     drop_table(ch_client, e2e.ch_db, SOURCE)
+
+
+@pytest.fixture(scope="module")
+def narrowed(engine: EngineAPI, e2e: E2EConfig, ch_client):
+    """A derived schema selecting five of twelve columns, on a source of its own.
+
+    Separate from ``evolved`` because the selection has to be in place before the
+    deploy renders the table: binding one to a source that already has a wider
+    table would leave the extra columns behind and 2.5 would read them.
+    """
+    require(e2e, "receiver_url", "ch_host")
+    _delete(engine, NARROW_SOURCE)
+    drop_table(ch_client, e2e.ch_db, NARROW_SOURCE)
+    engine.call("DELETE", f"/schemas/definitions/derived/{DERIVED_PATH}")
+
+    select = [
+        {"name": name} if index is None else {"name": name, "index": index}
+        for name, index in DERIVED_SELECT.items()
+    ]
+    written = engine.call(
+        "POST",
+        f"/schemas/definitions/derived/{DERIVED_PATH}",
+        {
+            "base": SHIPPED_SCHEMA,
+            "base_version": SHIPPED_SCHEMA_VERSION,
+            "current": DERIVED_VERSION,
+            "versions": {
+                DERIVED_VERSION: {
+                    "date": "2026-09-23",
+                    "summary": "Acceptance 2.4 -- five of twelve, three re-indexed",
+                    "select": select,
+                }
+            },
+        },
+    )
+    assert written.status_code in (200, 201), (
+        f"the deployment refused the derived schema: {written.status_code} {written.text}"
+    )
+    created = engine.call(
+        "POST",
+        "/sources",
+        {
+            "source": NARROW_SOURCE,
+            "display_name": "Derived schema acceptance",
+            "description": "A source whose table is narrowed by a derived schema.",
+            "match": {"field": MATCH_FIELD, "operator": "equals", "value": NARROW_SOURCE},
+            "header": HEADER,
+            "schema": {
+                "meta_schema": SHIPPED_SCHEMA,
+                "meta_schema_version": SHIPPED_SCHEMA_VERSION,
+                "derived_schema": DERIVED_PATH,
+                "derived_schema_version": DERIVED_VERSION,
+            },
+        },
+    )
+    assert created.status_code == 201, (
+        f"the deployment refused the narrowed source: {created.status_code} {created.text}"
+    )
+    _deploy(engine, NARROW_SOURCE)
+    yield NARROW_SOURCE
+    _delete(engine, NARROW_SOURCE)
+    drop_table(ch_client, e2e.ch_db, NARROW_SOURCE)
+    engine.call("DELETE", f"/schemas/definitions/derived/{DERIVED_PATH}")
 
 
 @pytest.fixture(scope="module")
@@ -576,6 +667,117 @@ class TestStage2:
             "discriminating and the source's table holds another feed's records"
         )
 
+    def test_2_4_a_derived_schema_selects_a_subset_with_an_index_per_field(
+        self, engine: EngineAPI, narrowed: str
+    ) -> None:
+        """The selection has to survive the round trip, index answers included.
+
+        A store that keeps the column list and loses the per-field index would
+        pass a column count and fail the step, so the assertion is per column
+        rather than on the size of the selection.
+        """
+        read = engine.json("GET", f"/schemas/definitions/derived/{DERIVED_PATH}")
+        assert (read["base"], read["base_version"]) == (
+            SHIPPED_SCHEMA,
+            SHIPPED_SCHEMA_VERSION,
+        ), f"the derived schema reads back against {read['base']}@{read['base_version']}"
+
+        stored = {
+            entry["name"]: entry.get("index")
+            for entry in read["versions"][read["current"]]["select"]
+        }
+        assert set(stored) == set(DERIVED_SELECT), (
+            f"the selection reads back as {sorted(stored)}, not {sorted(DERIVED_SELECT)}"
+        )
+        overridden = {name: index for name, index in DERIVED_SELECT.items() if index is not None}
+        wrong = {name: stored[name] for name, index in overridden.items() if stored[name] != index}
+        assert not wrong, (
+            f"the per-field index did not survive the write: {wrong}, sent {overridden}"
+        )
+
+    def test_2_5_deploying_it_routes_the_feed_to_the_narrower_table(
+        self, e2e, ch_client, narrowed: str
+    ) -> None:
+        """The absent columns are the assertion, not the present ones.
+
+        A table carrying all twelve and filling five would pass a row count and a
+        value check and still be the wrong table, so this reads the seven the
+        selection drops and requires them to be missing.
+        """
+        require(e2e, "receiver_url", "ch_host")
+        table = f"{e2e.ch_db}.{narrowed}"
+        columns = [
+            str(row[0])
+            for row in ch_client.query(
+                "SELECT name FROM system.columns "
+                "WHERE database = %(d)s AND table = %(t)s ORDER BY position",
+                parameters={"d": e2e.ch_db, "t": narrowed},
+            ).result_rows
+        ]
+        assert columns, f"the deploy created no {table}"
+
+        # The common header is the engine's, not the selection's, and every
+        # column it contributes is underscore-prefixed.
+        body = [name for name in columns if not name.startswith("_")]
+        assert body == list(DERIVED_SELECT), (
+            f"{table} carries {body}, not the {list(DERIVED_SELECT)} the derived schema selects"
+        )
+        assert len(columns) > len(body), (
+            f"the common header did not survive the selection: {table} is only {body}"
+        )
+        strayed = [name for name in DERIVED_DROPPED if name in columns]
+        assert not strayed, (
+            f"{table} still carries {strayed}, so the derived schema narrowed the "
+            "definition and not the deployed table"
+        )
+
+        probe = f"narrow{uuid.uuid4().hex}"
+        record = {
+            "tags": {"feed": narrowed},
+            "@timestamp": "2026-09-23T04:05:06.000Z",
+            "host": {"name": f"host-{probe}"},
+            "agent": {"type": "filebeat", "version": "8.0.0"},
+            "event": {"module": "system", "dataset": "system.auth"},
+            "log": {"file": {"path": "/var/log/auth.log"}},
+            "source": {"ip": "203.0.113.9"},
+            "user": {"name": "acceptance"},
+            "process": {"name": "sshd", "pid": 4242},
+            "message": f"narrow probe {probe}",
+        }
+
+        def _sent_and_landed() -> Any:
+            # A record posted before the receiver reloads the deploy's routing is
+            # routed to the landing table and never reaches this one, so one
+            # record sent once cannot prove the step either way.
+            post_events(e2e, [record])
+            return _scalar(
+                ch_client,
+                f"SELECT count() FROM {table} WHERE host_name = %(h)s",
+                {"h": f"host-{probe}"},
+            )
+
+        poll_until(
+            _sent_and_landed,
+            timeout=LANDING_DEADLINE,
+            desc=f"a record in {table}",
+        )
+        typed = _row(
+            ch_client,
+            f"SELECT event_dataset, toString(source_ip), message FROM {table} "
+            "WHERE host_name = %(h)s",
+            {"h": f"host-{probe}"},
+        )
+        assert typed is not None
+        empty = [
+            name
+            for name, value in zip(("event_dataset", "source_ip", "message"), typed, strict=True)
+            if not value
+        ]
+        assert not empty, (
+            f"{', '.join(empty)} on {table} exist and are EMPTY, so the record reached "
+            "the narrower table without its selected columns filling"
+        )
+
     def test_2_6_an_index_is_added_and_dropped_on_the_live_table(
         self, e2e, ch_client, evolved: Evolved
     ) -> None:
@@ -586,8 +788,8 @@ class TestStage2:
         rebuild would replace every active part, which is what the part count
         catches.
 
-        This applies the ALTER directly. The derived-schema CRUD that will emit
-        it is steps 2.4 and 2.5, which have no test yet.
+        This applies the ALTER directly rather than through the derived-schema
+        CRUD that emits it, which is steps 2.4 and 2.5.
         """
         index = f"idx_{evolved.name}_hostname"
         where = "WHERE database = %(d)s AND table = %(t)s"
