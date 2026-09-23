@@ -11,7 +11,7 @@
 Designed for the TS UI use case: user types a CEL expression in a text
 field, the UI POSTs the string, and gets back a structured result with:
 
-- Whether the syntax is valid (via real CEL parser from hyperi-pylib)
+- Whether the syntax is valid (via real CEL parser from scalo)
 - Profile violations (DFE-disallowed functions)
 - The performance tier (Tier 1 / 2 / 3) — unique to dfe-engine
 - Referenced fields (for Tier 2/3)
@@ -25,14 +25,14 @@ This module layers THREE independent checks:
 
 1. **Syntax** — delegated to ``scalo.expression.validate()`` which
    wraps the real ``common-expression-language`` package (same Rust
-   ``cel-interpreter`` v0.10.0 that rustlib uses at runtime). Zero drift
+   ``cel-interpreter`` v0.10.0 that scalo-rs uses at runtime). Zero drift
    between UI validation and runtime behaviour.
 
 2. **DFE profile** — also from ``scalo.expression`` — rejects
    disallowed functions (regex, iteration, time) when the profile is
    strict.
 
-3. **Tier classification** — unique to dfe-engine, mirrors rustlib's
+3. **Tier classification** — unique to dfe-engine, mirrors scalo-rs's
    ``src/transport/filter/classify.rs`` byte-for-byte. Classifies
    expressions into performance tiers for transport filter gating.
 
@@ -44,7 +44,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from scalo.expression import validate as pylib_validate
+from scalo.expression import validate as scalo_validate
 
 from dfe_engine.cel.classify import (
     FilterTier,
@@ -119,7 +119,7 @@ def check_syntax(
         >>> r.opt_in_required
         'expression.allow_cel_filters_in (or _out)'
     """
-    # Step 1: Tier classification via text pattern matching (fast, matches rustlib)
+    # Step 1: Tier classification via text pattern matching (fast, matches scalo-rs)
     try:
         classification = classify_expression(expression)
     except ValueError as e:
@@ -127,23 +127,23 @@ def check_syntax(
 
     # Step 2: For Tier 2/3 (expressions that actually run through the CEL engine
     # at runtime), validate syntax via the real CEL parser. Tier 1 expressions
-    # bypass the CEL engine entirely in rustlib, so we skip the strict CEL
-    # parser check for them — rustlib accepts `has(bareword)` even though real
+    # bypass the CEL engine entirely in scalo-rs, so we skip the strict CEL
+    # parser check for them — scalo-rs accepts `has(bareword)` even though real
     # CEL requires `has(qualified.path)`.
     if classification.tier != FilterTier.TIER1:
-        pylib_errors = pylib_validate(expression)
-        if pylib_errors:
+        scalo_errors = scalo_validate(expression)
+        if scalo_errors:
             if not check_profile:
                 # Filter out profile violations — we want to classify Tier 3
                 # expressions, not reject them.
                 profile_errors = [
-                    e for e in pylib_errors if "not allowed in the DFE expression profile" in e
+                    e for e in scalo_errors if "not allowed in the DFE expression profile" in e
                 ]
-                syntax_errors = [e for e in pylib_errors if e not in profile_errors]
+                syntax_errors = [e for e in scalo_errors if e not in profile_errors]
                 if syntax_errors:
                     return SyntaxCheckResult(valid=False, errors=syntax_errors)
             else:
-                return SyntaxCheckResult(valid=False, errors=pylib_errors)
+                return SyntaxCheckResult(valid=False, errors=scalo_errors)
 
     result = SyntaxCheckResult(
         valid=True,

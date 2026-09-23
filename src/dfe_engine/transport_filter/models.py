@@ -8,7 +8,7 @@
 
 """Pydantic models mirroring the Rust transport filter config types.
 
-These models serialise to exactly the same YAML/JSON that rustlib's
+These models serialise to exactly the same YAML/JSON that scalo-rs's
 `TransportFilterEngine::new()` consumes.
 """
 
@@ -37,7 +37,7 @@ class FilterRule(BaseModel):
 
     Matches `scalo::transport::filter::FilterRule`.
 
-    Filters use CEL syntax regardless of execution tier. The rustlib engine
+    Filters use CEL syntax regardless of execution tier. The scalo-rs engine
     classifies expressions at config load time and selects the optimal
     execution strategy (Tier 1 SIMD, Tier 2 CEL, Tier 3 complex CEL).
 

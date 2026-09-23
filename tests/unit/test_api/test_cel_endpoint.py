@@ -11,7 +11,7 @@
 These endpoints power the live CEL validation in the TS UI. The router
 wraps ``dfe_engine.cel.syntax.check_syntax`` which in turn classifies via
 ``dfe_engine.cel.classify`` and validates parser correctness via the
-``cel-interpreter`` Rust crate (same engine rustlib uses at runtime).
+``cel-interpreter`` Rust crate (same engine scalo-rs uses at runtime).
 
 Tests cover:
 * Authentication required
@@ -127,7 +127,7 @@ class TestCelCheckEndpoint:
     ) -> None:
         # When check_profile=True, the DFE profile rejects per-element
         # iteration functions (exists, all, map, filter, timestamp, duration).
-        # Note: pylib's profile permits matches() — only iteration/time
+        # Note: scalo's profile permits matches() — only iteration/time
         # functions are blocked at the profile level. The classifier still
         # marks matches() as Tier 3 for performance gating.
         resp = client.post(
