@@ -832,9 +832,34 @@ class TestStrandedSourceTopics:
             == []
         )
 
-    def test_an_unreachable_broker_strands_nothing_knowable(self):
+    def test_an_unreachable_broker_answers_none_not_clean(self):
+        """ "Could not look" and "nothing stranded" call for opposite reactions."""
+
         class _Broken:
             def list_topic_names(self):
                 raise RuntimeError("no broker")
 
-        assert stranded_source_topics(_source("syslog", transform=False), admin=_Broken()) == []
+        assert stranded_source_topics(_source("syslog", transform=False), admin=_Broken()) is None
+
+    def test_a_main_landing_source_is_judged_on_the_shared_base(self):
+        """scalo suppresses ``<base>_land``, and for this source the base is ``main``.
+
+        Keyed on the source name instead, this misses the strand that actually stops
+        it loading -- and every other source landing on ``main`` with it.
+        """
+        assert stranded_source_topics(
+            _main_lander(), admin=self._Admin(["main_land", "main_load"])
+        ) == ["main_load"]
+
+    def test_a_main_landing_source_is_not_stranded_by_its_own_load_topic(self):
+        """``aws-cloudtrail_load`` suppresses nothing: no topic is named for it.
+
+        Reporting it would send an operator after ``main_land``, which the receiver's
+        default flow and every other main-landing source depend on.
+        """
+        assert (
+            stranded_source_topics(
+                _main_lander(), admin=self._Admin(["main_land", "aws-cloudtrail_load"])
+            )
+            == []
+        )

@@ -1242,6 +1242,7 @@ def _ensure_source_topics(
     a thread. ``version_id`` is the version being deployed, not the deployed one.
     """
     from dfe_engine.kafka.topics import (
+        build_admin,
         deployment_topic_config,
         ensure_topics,
         source_topic_specs,
@@ -1252,6 +1253,13 @@ def _ensure_source_topics(
     if not topics_managed(settings):
         return [], [], []
 
+    # One admin for both passes. Each builds its own otherwise, and an unreachable
+    # broker then costs two full librdkafka timeouts on the request path.
+    try:
+        admin = build_admin(settings=settings)
+    except Exception:
+        admin = None
+
     specs = source_topic_specs(
         source,
         partitions=settings.kafka.topic_partitions,
@@ -1259,23 +1267,25 @@ def _ensure_source_topics(
         config=deployment_topic_config(settings),
         version_id=version_id,
     )
-    outcome = ensure_topics(specs, settings=settings)
+    outcome = ensure_topics(specs, admin=admin, settings=settings)
     if outcome.failed:
         logger.warning(
             f"Kafka topics not ensured for source '{source.source}': "
             f"{', '.join(f'{n} ({e})' for n, e in outcome.failed)}"
         )
-    stranded = stranded_source_topics(source, version_id=version_id, settings=settings)
+    stranded = stranded_source_topics(source, version_id=version_id, settings=settings, admin=admin)
     if stranded:
         logger.warning(
-            f"Source '{source.source}' has no transform on this version but "
-            f"{', '.join(stranded)} still exists: the loader suppresses "
-            f"{source.topic_land} while it does, so this source will not load"
+            "source produces to a topic the loader suppresses; it will not load",
+            source=source.source,
+            stranded=",".join(stranded),
+            suppressed=source.topic_land,
         )
     return (
         outcome.created + outcome.existing,
         [name for name, _ in outcome.failed],
-        stranded,
+        # None is "could not ask the broker", which is not the same as "clean".
+        [] if stranded is None else stranded,
     )
 
 

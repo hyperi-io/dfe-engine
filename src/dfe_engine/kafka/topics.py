@@ -499,26 +499,50 @@ def stranded_source_topics(
     version_id: str | None = None,
     settings: DFESettings | None = None,
     admin: TopicAdmin | None = None,
-) -> list[str]:
-    """Topics on the broker that the version being deployed has no consumer for.
+) -> list[str] | None:
+    """Topics on the broker that the version being deployed still produces to.
 
     A version that dropped its transform leaves its ``_load`` topic behind, and
     scalo's resolver suppresses a ``_land`` topic whenever the matching ``_load``
     one exists -- so the loader stops reading the topic the receiver is still
     producing to, and the source silently stops loading.
 
+    Keyed on the LANDING LABEL, never the source name. scalo suppresses
+    ``<base>_land`` when ``<base>_load`` exists, and for a source landing on the
+    shared topic that base is the landing label -- so a source named
+    ``aws-cloudtrail`` with ``topic: main`` is suppressed by ``main_load``, and
+    ``aws-cloudtrail_load`` suppresses nothing. The two names coincide exactly
+    when ``owns_landing_topic``.
+
     Reported rather than deleted: records may still be in flight on it, and
     whether the engine may remove a topic mid-life is not this function's call.
+
+    Returns None where the broker could not be asked, because "nothing is
+    stranded" and "I could not look" call for opposite reactions.
     """
     transform = source.version(version_id).transform if version_id else source.transform
     if transform:
         return []
-    load_topic = transformed_topic(source.source)
+    from dfe_engine.kafka.contract import KafkaContractError
+
+    load_topic = transformed_topic(source.landing_label())
     try:
         admin = admin or build_admin(settings=settings)
         present = admin.list_topic_names()
-    except Exception:
-        return []
+    except KafkaContractError as exc:
+        logger.warning(
+            "stranded-topic check skipped; kafka config rejected",
+            source=source.source,
+            error=str(exc),
+        )
+        return None
+    except Exception as exc:
+        logger.warning(
+            "stranded-topic check skipped; broker unreachable",
+            source=source.source,
+            error=str(exc),
+        )
+        return None
     return [load_topic] if load_topic in present else []
 
 
