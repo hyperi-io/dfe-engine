@@ -13,12 +13,17 @@ Covers:
   - User CRUD via TestClient, verifying it lands in the AccountStore
   - Group CRUD via TestClient, verifying it lands in the GroupStore
   - PATCH deprovision (active=false) + group membership PATCH
+  - the protected-name floor: every write route refuses a recovery credential
   - discovery endpoints (ServiceProviderConfig / ResourceTypes / Schemas)
 """
 
 from __future__ import annotations
 
+import pytest
+
 from dfe_engine.auth.accounts import Account
+from dfe_engine.auth.breakglass import GROUP as RECOVERY_GROUP
+from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS
 from dfe_engine.auth.groups import Group
 from dfe_engine.auth.scim_mapping import (
     account_to_scim_user,
@@ -351,6 +356,144 @@ class TestScimGroups:
         assert resp.status_code == 204
         assert app.state.group_store.get("del-grp") is None
         assert "del-grp" not in app.state.account_store.get("dg-1").groups
+
+
+# ── The protected-name floor (issue #505) ────────────────────
+
+
+PATCH_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+
+
+@pytest.mark.parametrize("username", ["admin", BREAKGLASS])
+class TestScimProtectedNames:
+    """An IdP holding account:write may not remove either account's way back in."""
+
+    def test_patch_active_false_is_refused(
+        self, recovery_accounts, client, admin_headers, username
+    ):
+        resp = client.patch(
+            f"{BASE}/Users/{username}",
+            json={
+                "schemas": [PATCH_SCHEMA],
+                "Operations": [{"op": "replace", "path": "active", "value": False}],
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 403, resp.text
+        assert resp.headers["content-type"].startswith("application/scim+json")
+        assert resp.json()["scimType"] == "mutability"
+        assert recovery_accounts.state.account_store.get(username).enabled is True
+
+    def test_patch_bare_active_false_is_refused(
+        self, recovery_accounts, client, admin_headers, username
+    ):
+        """The pathless form IdPs also send: {"value": {"active": false}}."""
+        resp = client.patch(
+            f"{BASE}/Users/{username}",
+            json={
+                "schemas": [PATCH_SCHEMA],
+                "Operations": [{"op": "replace", "value": {"active": False}}],
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 403, resp.text
+        assert recovery_accounts.state.account_store.get(username).enabled is True
+
+    def test_put_active_false_is_refused(self, recovery_accounts, client, admin_headers, username):
+        resp = client.put(
+            f"{BASE}/Users/{username}",
+            json={"schemas": [USER_SCHEMA], "userName": username, "active": False},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 403, resp.text
+        assert recovery_accounts.state.account_store.get(username).enabled is True
+
+    def test_delete_user_is_refused(self, recovery_accounts, client, admin_headers, username):
+        resp = client.delete(f"{BASE}/Users/{username}", headers=admin_headers)
+        assert resp.status_code == 403, resp.text
+        assert recovery_accounts.state.account_store.get(username) is not None
+
+    def test_group_patch_remove_is_refused(
+        self, recovery_accounts, client, admin_headers, username
+    ):
+        resp = client.patch(
+            f"{BASE}/Groups/{RECOVERY_GROUP}",
+            json={
+                "schemas": [PATCH_SCHEMA],
+                "Operations": [{"op": "remove", "path": f'members[value eq "{username}"]'}],
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 403, resp.text
+        group = recovery_accounts.state.group_store.get(RECOVERY_GROUP)
+        assert username in group.members
+        assert RECOVERY_GROUP in recovery_accounts.state.account_store.get(username).groups
+
+    def test_group_put_dropping_it_is_refused(
+        self, recovery_accounts, client, admin_headers, username
+    ):
+        resp = client.put(
+            f"{BASE}/Groups/{RECOVERY_GROUP}",
+            json={
+                "schemas": [GROUP_SCHEMA],
+                "displayName": RECOVERY_GROUP,
+                "members": [{"value": "nobody"}],
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 403, resp.text
+        assert username in recovery_accounts.state.group_store.get(RECOVERY_GROUP).members
+
+    def test_group_delete_is_refused(self, recovery_accounts, client, admin_headers, username):
+        resp = client.delete(f"{BASE}/Groups/{RECOVERY_GROUP}", headers=admin_headers)
+        assert resp.status_code == 403, resp.text
+        assert recovery_accounts.state.group_store.get(RECOVERY_GROUP) is not None
+        assert username in recovery_accounts.state.group_store.get(RECOVERY_GROUP).members
+
+
+class TestScimProtectedNamesStillWork:
+    def test_a_protected_account_keeps_its_contact_fields_editable(
+        self, recovery_accounts, client, admin_headers
+    ):
+        resp = client.put(
+            f"{BASE}/Users/{BREAKGLASS}",
+            json={"schemas": [USER_SCHEMA], "userName": BREAKGLASS, "active": True},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert recovery_accounts.state.account_store.get(BREAKGLASS).enabled is True
+
+    def test_an_unprotected_member_of_the_admin_group_still_comes_out(
+        self, recovery_accounts, client, admin_headers
+    ):
+        recovery_accounts.state.group_store.add_member(RECOVERY_GROUP, "operator")
+        resp = client.patch(
+            f"{BASE}/Groups/{RECOVERY_GROUP}",
+            json={
+                "schemas": [PATCH_SCHEMA],
+                "Operations": [{"op": "remove", "path": 'members[value eq "operator"]'}],
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert "operator" not in recovery_accounts.state.group_store.get(RECOVERY_GROUP).members
+
+    def test_a_refused_batch_leaves_the_other_members_in_place(
+        self, recovery_accounts, client, admin_headers
+    ):
+        """The remove-with-no-filter form clears the group; nothing may be detached."""
+        recovery_accounts.state.group_store.add_member(RECOVERY_GROUP, "operator")
+        resp = client.patch(
+            f"{BASE}/Groups/{RECOVERY_GROUP}",
+            json={
+                "schemas": [PATCH_SCHEMA],
+                "Operations": [{"op": "remove", "path": "members"}],
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 403, resp.text
+        members = recovery_accounts.state.group_store.get(RECOVERY_GROUP).members
+        assert {"admin", BREAKGLASS, "operator"} <= set(members)
 
 
 # ── Discovery ────────────────────────────────────────────────

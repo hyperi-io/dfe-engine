@@ -272,7 +272,9 @@ async def retire_bootstrap_admin(
     store = request.app.state.account_store
     account = store.get(admin_name)
     if account is not None and account.enabled:
-        account = store.update(admin_name, enabled=False)
+        # The ONE route allowed to disable a protected name: it has just committed
+        # the retirement fact, and another admin-role account was a precondition.
+        account = store.update(admin_name, enabled=False, allow_protected=True)
         account_durability.publish_direct(
             gc, account, summary="retire the bootstrap admin", actor=user.user_id
         )

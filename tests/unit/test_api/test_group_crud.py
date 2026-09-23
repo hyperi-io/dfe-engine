@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 
 class TestCreateGroup:
     """POST /api/v1/auth/groups"""
@@ -404,3 +406,54 @@ class TestDeleteGroup:
     def test_delete_requires_admin(self, client, viewer_headers):
         resp = client.delete("/api/v1/auth/groups/dfe-admins", headers=viewer_headers)
         assert resp.status_code == 403
+
+
+# ── The protected-name floor (issue #505) ────────────────────
+
+
+@pytest.mark.parametrize("username", ["admin", "breakglass"])
+class TestProtectedGroupMembership:
+    """The native group router refuses de-roling a recovery credential."""
+
+    def test_remove_member_is_refused(self, recovery_accounts, client, admin_headers, username):
+        resp = client.delete(
+            f"/api/v1/auth/groups/dfe-admins/members/{username}",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["code"] == "protected_account"
+        assert username in recovery_accounts.state.group_store.get("dfe-admins").members
+        assert "dfe-admins" in recovery_accounts.state.account_store.get(username).groups
+
+    def test_member_replacement_that_drops_it_is_refused(
+        self, recovery_accounts, client, admin_headers, username
+    ):
+        resp = client.put(
+            "/api/v1/auth/groups/dfe-admins",
+            json={"members": ["operator"]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 403, resp.text
+        assert username in recovery_accounts.state.group_store.get("dfe-admins").members
+
+    def test_delete_of_the_admin_group_is_refused(
+        self, recovery_accounts, client, admin_headers, username
+    ):
+        """GroupStore.delete refuses a non-empty group, and the members cannot come out."""
+        resp = client.delete("/api/v1/auth/groups/dfe-admins", headers=admin_headers)
+        assert resp.status_code == 409, resp.text
+        assert recovery_accounts.state.group_store.get("dfe-admins") is not None
+        assert username in recovery_accounts.state.group_store.get("dfe-admins").members
+
+    def test_adding_another_member_still_works(
+        self, recovery_accounts, client, admin_headers, username
+    ):
+        resp = client.post(
+            "/api/v1/auth/groups/dfe-admins/members",
+            json={"username": "operator"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        members = recovery_accounts.state.group_store.get("dfe-admins").members
+        assert "operator" in members
+        assert username in members

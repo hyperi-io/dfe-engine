@@ -76,9 +76,10 @@ router = APIRouter(prefix="/scim/v2", tags=["SCIM"])
 SCIM_MEDIA_TYPE = "application/scim+json"
 
 # Where this router is mounted (v1_router "/v1" under app "/api"). Used to build
-# absolute meta.location URLs. Kept as a constant so a resource's self-link is
-# stable; adjust here if the mount point ever moves.
-_SCIM_ROOT = "/api/v1/scim/v2"
+# absolute meta.location URLs, and by the error handlers to tell a SCIM request
+# from a native one. Kept as a constant so a resource's self-link is stable;
+# adjust here if the mount point ever moves.
+SCIM_ROOT = "/api/v1/scim/v2"
 
 # members[value eq "alice"] -> "alice" (the value-path filter IdPs use on remove)
 _MEMBER_FILTER_RE = re.compile(r'value\s+eq\s+"([^"]+)"', re.IGNORECASE)
@@ -91,7 +92,7 @@ _EQ_FILTER_RE = re.compile(r'^\s*(\w+)\s+eq\s+"([^"]+)"\s*$', re.IGNORECASE)
 
 def _location(request: Request, kind: str, rid: str) -> str:
     """Absolute self-link for a SCIM resource (``meta.location``)."""
-    return f"{str(request.base_url).rstrip('/')}{_SCIM_ROOT}/{kind}/{rid}"
+    return f"{str(request.base_url).rstrip('/')}{SCIM_ROOT}/{kind}/{rid}"
 
 
 def _scim_json(model, status_code: int, request: Request | None = None) -> JSONResponse:
@@ -108,8 +109,12 @@ def _scim_json(model, status_code: int, request: Request | None = None) -> JSONR
     )
 
 
-def _scim_error(status_code: int, detail: str, scim_type: str | None = None) -> JSONResponse:
-    """Return an RFC 7644 SCIM error envelope."""
+def scim_error(status_code: int, detail: str, scim_type: str | None = None) -> JSONResponse:
+    """Return an RFC 7644 SCIM error envelope.
+
+    Public because the app-level exception handlers answer a SCIM request in this
+    envelope rather than the native one.
+    """
     err = Error(status=status_code, detail=detail, scim_type=scim_type)
     return JSONResponse(
         content=err.model_dump(),
@@ -201,7 +206,7 @@ async def get_user(user_id: str, user: CurrentUser, request: Request) -> Respons
     group_store = request.app.state.group_store
     account = store.get(user_id)
     if account is None:
-        return _scim_error(404, f"User '{user_id}' not found")
+        return scim_error(404, f"User '{user_id}' not found")
     groups = [g.name for g in group_store.list() if user_id in g.members] or account.groups
     scim_user = account_to_scim_user(
         account, groups=groups, location=_location(request, "Users", user_id)
@@ -217,17 +222,17 @@ async def create_user(user: CurrentUser, request: Request) -> Response:
     """Provision a user. IdP-owned; local password is randomised when omitted."""
     body = await _parse_body(request)
     if body is None:
-        return _scim_error(400, "Malformed JSON body", "invalidSyntax")
+        return scim_error(400, "Malformed JSON body", "invalidSyntax")
     try:
         inbound = ScimUser.model_validate(body, scim_ctx=Context.RESOURCE_CREATION_REQUEST)
     except Exception as exc:
-        return _scim_error(400, f"Invalid User: {exc}", "invalidValue")
+        return scim_error(400, f"Invalid User: {exc}", "invalidValue")
     if not inbound.user_name:
-        return _scim_error(400, "userName is required", "invalidValue")
+        return scim_error(400, "userName is required", "invalidValue")
 
     store = request.app.state.account_store
     if store.get(inbound.user_name) is not None:
-        return _scim_error(409, f"User '{inbound.user_name}' already exists", "uniqueness")
+        return scim_error(409, f"User '{inbound.user_name}' already exists", "uniqueness")
 
     fields = scim_user_to_account_fields(inbound)
     username = str(fields["username"])
@@ -256,15 +261,15 @@ async def replace_user(user_id: str, user: CurrentUser, request: Request) -> Res
     """Replace a user's writable attributes (SCIM PUT)."""
     body = await _parse_body(request)
     if body is None:
-        return _scim_error(400, "Malformed JSON body", "invalidSyntax")
+        return scim_error(400, "Malformed JSON body", "invalidSyntax")
     store = request.app.state.account_store
     group_store = request.app.state.group_store
     if store.get(user_id) is None:
-        return _scim_error(404, f"User '{user_id}' not found")
+        return scim_error(404, f"User '{user_id}' not found")
     try:
         inbound = ScimUser.model_validate(body, scim_ctx=Context.RESOURCE_REPLACEMENT_REQUEST)
     except Exception as exc:
-        return _scim_error(400, f"Invalid User: {exc}", "invalidValue")
+        return scim_error(400, f"Invalid User: {exc}", "invalidValue")
 
     fields = scim_user_to_account_fields(inbound)
     store.update(
@@ -288,15 +293,15 @@ async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Respo
     """Apply a PatchOp - primarily the ``active`` toggle IdPs use to deprovision."""
     body = await _parse_body(request)
     if body is None:
-        return _scim_error(400, "Malformed JSON body", "invalidSyntax")
+        return scim_error(400, "Malformed JSON body", "invalidSyntax")
     store = request.app.state.account_store
     group_store = request.app.state.group_store
     if store.get(user_id) is None:
-        return _scim_error(404, f"User '{user_id}' not found")
+        return scim_error(404, f"User '{user_id}' not found")
     try:
         patch = PatchOp[ScimUser].model_validate(body, scim_ctx=Context.RESOURCE_PATCH_REQUEST)
     except Exception as exc:
-        return _scim_error(400, f"Invalid PatchOp: {exc}", "invalidValue")
+        return scim_error(400, f"Invalid PatchOp: {exc}", "invalidValue")
 
     for op in patch.operations or []:
         # op.path may be a typed ``Path`` object; coerce to a plain string.
@@ -325,7 +330,7 @@ async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Resp
     """Delete a user (SCIM 204)."""
     store = request.app.state.account_store
     if store.get(user_id) is None:
-        return _scim_error(404, f"User '{user_id}' not found")
+        return scim_error(404, f"User '{user_id}' not found")
     store.delete(user_id)
     logger.info("SCIM user deleted", username=user_id)
     return Response(status_code=204)
@@ -375,7 +380,7 @@ async def get_group(group_id: str, user: CurrentUser, request: Request) -> Respo
     store = request.app.state.group_store
     group = store.get(group_id)
     if group is None:
-        return _scim_error(404, f"Group '{group_id}' not found")
+        return scim_error(404, f"Group '{group_id}' not found")
     return _scim_json(
         group_to_scim_group(group, location=_location(request, "Groups", group_id)), 200, request
     )
@@ -391,18 +396,18 @@ async def create_group(user: CurrentUser, request: Request) -> Response:
 
     body = await _parse_body(request)
     if body is None:
-        return _scim_error(400, "Malformed JSON body", "invalidSyntax")
+        return scim_error(400, "Malformed JSON body", "invalidSyntax")
     try:
         inbound = ScimGroup.model_validate(body, scim_ctx=Context.RESOURCE_CREATION_REQUEST)
     except Exception as exc:
-        return _scim_error(400, f"Invalid Group: {exc}", "invalidValue")
+        return scim_error(400, f"Invalid Group: {exc}", "invalidValue")
     if not inbound.display_name:
-        return _scim_error(400, "displayName is required", "invalidValue")
+        return scim_error(400, "displayName is required", "invalidValue")
 
     store = request.app.state.group_store
     account_store = request.app.state.account_store
     if store.get(inbound.display_name) is not None:
-        return _scim_error(409, f"Group '{inbound.display_name}' already exists", "uniqueness")
+        return scim_error(409, f"Group '{inbound.display_name}' already exists", "uniqueness")
 
     fields = scim_group_to_group_fields(inbound)
     name = str(fields["name"])
@@ -427,16 +432,16 @@ async def replace_group(group_id: str, user: CurrentUser, request: Request) -> R
 
     body = await _parse_body(request)
     if body is None:
-        return _scim_error(400, "Malformed JSON body", "invalidSyntax")
+        return scim_error(400, "Malformed JSON body", "invalidSyntax")
     store = request.app.state.group_store
     account_store = request.app.state.account_store
     existing = store.get(group_id)
     if existing is None:
-        return _scim_error(404, f"Group '{group_id}' not found")
+        return scim_error(404, f"Group '{group_id}' not found")
     try:
         inbound = ScimGroup.model_validate(body, scim_ctx=Context.RESOURCE_REPLACEMENT_REQUEST)
     except Exception as exc:
-        return _scim_error(400, f"Invalid Group: {exc}", "invalidValue")
+        return scim_error(400, f"Invalid Group: {exc}", "invalidValue")
 
     fields = scim_group_to_group_fields(inbound)
     new_members = list(fields["members"])  # type: ignore[arg-type]
@@ -466,16 +471,16 @@ async def patch_group(group_id: str, user: CurrentUser, request: Request) -> Res
 
     body = await _parse_body(request)
     if body is None:
-        return _scim_error(400, "Malformed JSON body", "invalidSyntax")
+        return scim_error(400, "Malformed JSON body", "invalidSyntax")
     store = request.app.state.group_store
     account_store = request.app.state.account_store
     group = store.get(group_id)
     if group is None:
-        return _scim_error(404, f"Group '{group_id}' not found")
+        return scim_error(404, f"Group '{group_id}' not found")
     try:
         patch = PatchOp[ScimGroup].model_validate(body, scim_ctx=Context.RESOURCE_PATCH_REQUEST)
     except Exception as exc:
-        return _scim_error(400, f"Invalid PatchOp: {exc}", "invalidValue")
+        return scim_error(400, f"Invalid PatchOp: {exc}", "invalidValue")
 
     added: set[str] = set()
     removed: set[str] = set()
@@ -494,6 +499,9 @@ async def patch_group(group_id: str, user: CurrentUser, request: Request) -> Res
             targets = [m.group(1)] if m else _member_values(value)
             if not targets:  # remove with no filter -> clear membership
                 targets = list(store.get(group_id).members)
+            # The whole removal set is checked before any of it is applied, so a
+            # refusal cannot leave earlier members already detached.
+            store.protected.check_member_removal(group_id, targets)
             for username in targets:
                 store.remove_member(group_id, username)
                 removed.add(username)
@@ -517,10 +525,13 @@ async def delete_group(group_id: str, user: CurrentUser, request: Request) -> Re
     account_store = request.app.state.account_store
     group = store.get(group_id)
     if group is None:
-        return _scim_error(404, f"Group '{group_id}' not found")
+        return scim_error(404, f"Group '{group_id}' not found")
     # GroupStore.delete refuses a non-empty group; detach members first and mirror
     # the removal onto each Account.groups.
     members = list(group.members)
+    # Checked before the first detach, so deleting the admin group with a recovery
+    # credential in it refuses whole rather than part-way through.
+    store.protected.check_member_removal(group_id, members)
     for username in members:
         store.remove_member(group_id, username)
     sync_account_groups_for_membership_change(account_store, group_id, removed=members)

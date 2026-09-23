@@ -215,10 +215,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from dfe_engine.auth.accounts import DocuStoreAccountStore
         from dfe_engine.auth.groups import DocuStoreGroupStore
 
+        # The admin name the bootstrap seeds, so the protected-name floor moves
+        # with a renamed admin on this backend too.
         injected_account_store = DocuStoreAccountStore(
-            doc_store, collection=settings.auth.accounts_store.collection
+            doc_store,
+            collection=settings.auth.accounts_store.collection,
+            admin_name=settings.auth.local.admin_name,
         )
-        injected_group_store = DocuStoreGroupStore(doc_store)
+        injected_group_store = DocuStoreGroupStore(
+            doc_store, admin_name=settings.auth.local.admin_name
+        )
 
     # Refuse to start on the shipped admin password outside a dev posture, unless
     # the operator has retired the admin -- then an absent password is the point.

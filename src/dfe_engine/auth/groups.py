@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from dfe_engine.auth.protected_accounts import resolve_floor
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 if TYPE_CHECKING:
@@ -87,11 +88,17 @@ class GroupStore:
         groups/
             admins.yaml     # { description: ..., roles: [...], members: [...] }
             operators.yaml
+
+    Attributes:
+        protected: The recovery credentials this store refuses to drop from the
+            admin-role group (:mod:`dfe_engine.auth.protected_accounts`). Public
+            so a caller can refuse a batch removal before applying any of it.
     """
 
-    def __init__(self, groups_dir: Path) -> None:
+    def __init__(self, groups_dir: Path, *, admin_name: str = "") -> None:
         self._dir = Path(groups_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
+        self.protected = resolve_floor(admin_name)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -187,15 +194,26 @@ class GroupStore:
                 index[group.source_id] = group
         return index
 
-    def update(self, name: str, **fields: object) -> Group:
+    def update(self, name: str, *, allow_protected: bool = False, **fields: object) -> Group:
         """Update one or more fields on an existing group and persist.
 
         Accepted keyword arguments: ``roles``, ``description``, ``members``,
         ``org_ids``, ``scope``.
 
+        Args:
+            name: Group to update.
+            allow_protected: Replace the admin-role group's members with a list
+                that drops a recovery credential. Reserved for the reconcile paths.
+            **fields: Fields to update.
+
+        Returns:
+            The updated Group.
+
         Raises:
             KeyError: If the group does not exist.
             ValueError: If ``scope`` is not ``system`` / ``org:<name>``.
+            ProtectedAccountError: The replacement drops a recovery credential
+                from the admin-role group.
         """
         group = self._read(name)
         if group is None:
@@ -203,6 +221,8 @@ class GroupStore:
         if "scope" in fields:
             # model_copy(update=...) skips validators - check explicitly.
             validate_group_scope(str(fields["scope"]))
+        if not allow_protected and "members" in fields:
+            self.protected.check_members_replaced(name, group.members, fields["members"])
         updated = group.model_copy(update=fields)
         self._write(updated)
         return updated
@@ -256,17 +276,29 @@ class GroupStore:
             updated = group.model_copy(update={"members": [*group.members, username]})
             self._write(updated)
 
-    def remove_member(self, group_name: str, username: str) -> None:
+    def remove_member(
+        self, group_name: str, username: str, *, allow_protected: bool = False
+    ) -> None:
         """Remove a username from the group's member list.
 
         Removing a user who is not in the group is a no-op.
 
+        Args:
+            group_name: Group to change.
+            username: Member to remove.
+            allow_protected: Remove a recovery credential from the admin-role
+                group. Reserved for the reconcile paths.
+
         Raises:
             KeyError: If the group does not exist.
+            ProtectedAccountError: *username* is a recovery credential and
+                *group_name* is the group it holds the admin role through.
         """
         group = self._read(group_name)
         if group is None:
             raise KeyError(f"Group '{group_name}' not found")
+        if not allow_protected:
+            self.protected.check_member_removal(group_name, [username])
         updated_members = [m for m in group.members if m != username]
         if updated_members != group.members:
             updated = group.model_copy(update={"members": updated_members})
@@ -302,13 +334,24 @@ class DocuStoreGroupStore:
 
     Persists one :class:`Group` document per name (keyed and unique-indexed on
     ``name``) instead of one YAML file. Every domain rule - name validation,
-    member de-duplication, scope validation, and the delete-with-members guard -
-    is identical to the YAML store, so the two are drop-in interchangeable behind
-    the same construction seam.
+    member de-duplication, scope validation, the protected-name floor, and the
+    delete-with-members guard - is identical to the YAML store, so the two are
+    drop-in interchangeable behind the same construction seam.
+
+    Attributes:
+        protected: The recovery credentials this store refuses to drop from the
+            admin-role group.
     """
 
-    def __init__(self, store: DocuStore, *, collection: str = "groups") -> None:
+    def __init__(
+        self,
+        store: DocuStore,
+        *,
+        collection: str = "groups",
+        admin_name: str = "",
+    ) -> None:
         self._c = store.typed(collection, Group, key="name")
+        self.protected = resolve_floor(admin_name)
 
     def create(
         self,
@@ -362,11 +405,13 @@ class DocuStoreGroupStore:
                 index[group.source_id] = group
         return index
 
-    def update(self, name: str, **fields: object) -> Group:
+    def update(self, name: str, *, allow_protected: bool = False, **fields: object) -> Group:
         """Update permitted fields on a group. Raises KeyError if missing, ValueError on bad scope.
 
         Accepted keyword arguments: ``roles``, ``description``, ``members``,
-        ``org_ids``, ``scope``.
+        ``org_ids``, ``scope``. ``allow_protected`` replaces the admin-role
+        group's members with a list that drops a recovery credential; reserved for
+        the reconcile paths. Raises ProtectedAccountError otherwise.
         """
         group = self._c.get(name)
         if group is None:
@@ -374,6 +419,8 @@ class DocuStoreGroupStore:
         if "scope" in fields:
             # model_copy(update=...) skips validators - check explicitly.
             validate_group_scope(str(fields["scope"]))
+        if not allow_protected and "members" in fields:
+            self.protected.check_members_replaced(name, group.members, fields["members"])
         updates = {k: fields[k] for k in _UPDATABLE_GROUP_FIELDS if k in fields}
         updated = group.model_copy(update=updates)
         self._c.put(name, updated)
@@ -408,11 +455,20 @@ class DocuStoreGroupStore:
             updated = group.model_copy(update={"members": [*group.members, username]})
             self._c.put(group_name, updated)
 
-    def remove_member(self, group_name: str, username: str) -> None:
-        """Remove a username from the group's member list (no-op if absent). KeyError if missing."""
+    def remove_member(
+        self, group_name: str, username: str, *, allow_protected: bool = False
+    ) -> None:
+        """Remove a username from the group's member list (no-op if absent). KeyError if missing.
+
+        ``allow_protected`` removes a recovery credential from the admin-role
+        group; reserved for the reconcile paths. Raises ProtectedAccountError
+        otherwise.
+        """
         group = self._c.get(group_name)
         if group is None:
             raise KeyError(f"Group '{group_name}' not found")
+        if not allow_protected:
+            self.protected.check_member_removal(group_name, [username])
         updated_members = [m for m in group.members if m != username]
         if updated_members != group.members:
             updated = group.model_copy(update={"members": updated_members})

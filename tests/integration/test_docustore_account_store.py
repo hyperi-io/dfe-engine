@@ -14,7 +14,10 @@ import uuid
 
 import pytest
 
-from dfe_engine.auth.accounts import DocuStoreAccountStore
+from dfe_engine.auth.accounts import Account, DocuStoreAccountStore
+from dfe_engine.auth.breakglass import GROUP as RECOVERY_GROUP
+from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS
+from dfe_engine.auth.protected_accounts import ProtectedAccountError
 from dfe_engine.store.documents import DocuStore
 
 pytestmark = pytest.mark.integration
@@ -106,3 +109,66 @@ class TestDocuStoreAccountStore:
         store.create("ext", "")
         assert not store.verify_password("ext", "")
         assert not store.verify_password("ext", "anything")
+
+
+class TestProtectedNameFloor:
+    """The floor from issue #505 holds on this backend exactly as on the YAML one."""
+
+    @pytest.fixture
+    def seeded(self, store):
+        store.create("admin", "s3cret-Pw", groups=[RECOVERY_GROUP])
+        store.create(BREAKGLASS, "s3cret-Pw", groups=[RECOVERY_GROUP])
+        return store
+
+    @pytest.mark.parametrize("username", ["admin", BREAKGLASS])
+    def test_disable_is_refused(self, seeded, username):
+        with pytest.raises(ProtectedAccountError):
+            seeded.update(username, enabled=False)
+        assert seeded.get(username).enabled is True
+
+    @pytest.mark.parametrize("username", ["admin", BREAKGLASS])
+    def test_delete_is_refused(self, seeded, username):
+        with pytest.raises(ProtectedAccountError):
+            seeded.delete(username)
+        assert seeded.get(username) is not None
+
+    @pytest.mark.parametrize("username", ["admin", BREAKGLASS])
+    def test_dropping_the_admin_group_is_refused(self, seeded, username):
+        with pytest.raises(ProtectedAccountError):
+            seeded.update(username, groups=[])
+        assert seeded.get(username).groups == [RECOVERY_GROUP]
+
+    @pytest.mark.parametrize("username", ["admin", BREAKGLASS])
+    def test_put_of_a_disabled_record_is_refused(self, seeded, username):
+        with pytest.raises(ProtectedAccountError):
+            seeded.put(
+                Account(
+                    username=username,
+                    password_hash="$2b$12$x",
+                    enabled=False,
+                    groups=[RECOVERY_GROUP],
+                )
+            )
+        assert seeded.get(username).enabled is True
+
+    @pytest.mark.parametrize("username", ["admin", BREAKGLASS])
+    def test_password_reset_and_contact_edits_still_work(self, seeded, username):
+        seeded.reset_password(username, "another-Pw-1")
+        assert seeded.verify_password(username, "another-Pw-1")
+        assert seeded.update(username, email="ops@example.com").email == "ops@example.com"
+
+    @pytest.mark.parametrize("username", ["admin", BREAKGLASS])
+    def test_allow_protected_reaches_past_the_floor(self, seeded, username):
+        assert seeded.update(username, enabled=False, allow_protected=True).enabled is False
+        seeded.delete(username, allow_protected=True)
+        assert seeded.get(username) is None
+
+    def test_a_missing_protected_name_answers_keyerror(self, store):
+        with pytest.raises(KeyError):
+            store.delete(BREAKGLASS)
+
+    def test_an_unprotected_account_is_untouched(self, store):
+        store.create("alice", "s3cret-Pw", groups=[RECOVERY_GROUP])
+        store.update("alice", enabled=False, groups=[])
+        store.delete("alice")
+        assert store.get("alice") is None

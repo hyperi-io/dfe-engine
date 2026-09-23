@@ -99,9 +99,13 @@ class Accounts(Seed):
         )
 
     def delete_all(self) -> None:
-        """Clear all accounts from the YAML account registry."""
+        """Clear all accounts from the YAML account registry.
+
+        Reaches past the protected-name floor: this is the e2e-server store wipe,
+        mounted only where ``e2e_routes_enabled``, and it reseeds break-glass after.
+        """
         for account in self._account_store.list():
-            self._account_store.delete(account.username)
+            self._account_store.delete(account.username, allow_protected=True)
 
     def _ensure_admin(self, name: str = "admin", *, password: str) -> bool:
         """Create or reset local break-glass admin account.

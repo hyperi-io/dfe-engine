@@ -116,6 +116,7 @@ class ErrorCode:
     VALIDATION_ERROR = "validation_error"
     NOT_FOUND = "not_found"
     CONFLICT = "conflict"
+    PROTECTED_ACCOUNT = "protected_account"
     INVALID_SQL = "invalid_sql"
     INTERNAL_ERROR = "internal_error"
     SERVICE_UNAVAILABLE = "service_unavailable"
@@ -200,6 +201,21 @@ def install_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AuthorizationError)
     async def authz_error_handler(_request: Request, exc: AuthorizationError):
         body = ErrorResponse(code=ErrorCode.FORBIDDEN, message=str(exc))
+        return JSONResponse(status_code=403, content=_error_response_json(body))
+
+    # Registered once rather than caught per route, so a route nobody has written
+    # yet answers a protected-name refusal the same way.
+    # Starlette matches the most derived handler, so this wins over AuthorizationError.
+    from dfe_engine.api.v1.scim import SCIM_ROOT, scim_error
+    from dfe_engine.auth.protected_accounts import ProtectedAccountError
+
+    @app.exception_handler(ProtectedAccountError)
+    async def protected_account_handler(request: Request, exc: ProtectedAccountError):
+        if request.url.path.startswith(SCIM_ROOT):
+            # mutability is the nearest RFC 7644 scimType: the attribute is not
+            # mutable on this resource, whatever it is on any other.
+            return scim_error(403, str(exc), "mutability")
+        body = ErrorResponse(code=ErrorCode.PROTECTED_ACCOUNT, message=str(exc))
         return JSONResponse(status_code=403, content=_error_response_json(body))
 
     # A backing service (today: ClickHouse) was unreachable after its
