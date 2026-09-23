@@ -32,7 +32,7 @@ quality:
     vulture: warn
     ty: warn
     bandit_exclude_tests: true
-    # pip-audit: warn because diskcache CVE-2025-69872 (unsafe pickle) has no
-    # upstream fix -- 5.6.3 is the latest release. Mitigated by K8s pod isolation.
     # python-jose (ecdsa, pyasn1) eliminated -- replaced by PyJWT[crypto].
-    pip_audit: warn
+    pip_audit:
+      mode: warn
+      reason: "diskcache CVE-2025-69872 (unsafe pickle) has no upstream fix; 5.6.3 is the latest release; mitigated by K8s pod isolation"
