@@ -138,6 +138,11 @@ DERIVED_DROPPED = (
     "process_pid",
 )
 
+# Step 2.8's source. Compose runs ONE instance per transform app and binds it to
+# a source at deploy, so this names the source that already has one rather than
+# creating a second the deployment cannot serve.
+SWAP_SOURCE = "filebeat"
+
 # Stage 3. Its own source, because it turns population off on the table it owns
 # and the stage 2 steps read `_json` on theirs.
 CAPTURE_SOURCE = "acceptcapture"
@@ -197,6 +202,18 @@ def _alter(ch_client, statement: str) -> None:
 def _transform_engine(cfg: E2EConfig) -> str:
     """The engine name for the transform app the deployment runs."""
     return (cfg.transform or "dfe-transform-vrl").removeprefix("dfe-transform-")
+
+
+def _nested(field: str, value: Any) -> dict:
+    """A record fragment that satisfies a dotted match field.
+
+    The receiver splits the field on ``.`` and walks the raw payload, so
+    ``tags.feed`` has to arrive as a nested object rather than a flat key.
+    """
+    body: Any = value
+    for part in reversed(field.split(".")):
+        body = {part: body}
+    return body
 
 
 def _write_capture_version(engine: EngineAPI, *, capture_json: bool) -> None:
@@ -306,6 +323,37 @@ def evolved(engine: EngineAPI, e2e: E2EConfig, ch_client):
     yield state
     _delete(engine, SOURCE)
     drop_table(ch_client, e2e.ch_db, SOURCE)
+
+
+@pytest.fixture(scope="module")
+def swapped_table(engine: EngineAPI, e2e: E2EConfig, ch_client) -> tuple:
+    """Step 2.8's source: one that ALREADY has a transform instance behind it.
+
+    Not created here. Compose declares one service per transform app and binds it
+    to a source at deploy, so a second transform-bearing source is refused and a
+    freshly created one has nothing running in front of it. The step is about a
+    different ENGINE on the same corpus, which this deployment already provides.
+    """
+    require(e2e, "receiver_url", "ch_host")
+    found = engine.call("GET", f"/sources/{SWAP_SOURCE}")
+    if found.status_code != 200:
+        pytest.skip(f"{SWAP_SOURCE} is not deployed here, so no second engine to swap to")
+    table = f"{e2e.ch_db}.{SWAP_SOURCE}"
+    exists = _scalar(
+        ch_client,
+        "SELECT count() FROM system.tables WHERE database = %(d)s AND name = %(t)s",
+        {"d": e2e.ch_db, "t": SWAP_SOURCE},
+    )
+    if not exists:
+        pytest.skip(f"{table} does not exist, so {SWAP_SOURCE} has never been deployed")
+
+    # Read the rule rather than assume it: this source belongs to the deployment,
+    # so its match field and value are not this suite's to choose.
+    stored = found.json()
+    match = stored["versions"][str(stored["current"])].get("match")
+    if not match:
+        pytest.skip(f"{SWAP_SOURCE} declares no match rule, so nothing can be routed to it")
+    return table, match
 
 
 @pytest.fixture(scope="module")
@@ -1214,3 +1262,43 @@ class TestStage3:
             desc=f"a record in {table} carrying _json again",
         )
         assert filled, f"_json on {table} is still empty for a record sent after the switch"
+
+
+class TestStage2Swap:
+    """Step 2.8 -- the transform is swapped and the same columns still fill.
+
+    2.7 proves ONE transform turns a Cisco IOS line into typed columns. 2.8 asks
+    whether a different engine on the same corpus produces the same answer, which
+    is what makes the transform a swappable part rather than the schema's owner.
+    """
+
+    def test_2_8_a_second_transform_fills_the_same_columns(
+        self, e2e, ch_client, swapped_table: tuple, cisco_samples: list[corpus.Sample]
+    ) -> None:
+        """Counted, never marked.
+
+        The VRL pipeline REPLACES the inbound `_tags` with its own, so a marker
+        sent in tags does not survive it and a marker query reads as total loss.
+        The parsed column is what says a line was read, so the assertion is the
+        gain in rows carrying one.
+        """
+        require(e2e, "receiver_url", "ch_host")
+        table, match = swapped_table
+        parsed = f"toString({PARSED_COLUMN}) NOT IN ('', '::', '0.0.0.0')"
+        before = count_rows(ch_client, table, where=parsed)
+        routed = _nested(match["field"], match["value"])
+        post_events(
+            e2e,
+            [{**routed, "message": sample.line} for sample in cisco_samples],
+        )
+
+        gained = poll_until(
+            lambda: count_rows(ch_client, table, where=parsed) - before,
+            timeout=LANDING_DEADLINE,
+            desc=(
+                f"a row in {table} carrying {PARSED_COLUMN}, which the corpus line "
+                "holds only inside its text - check the per-source transform instance for "
+                f"{SWAP_SOURCE} is running before reading a timeout as the product's fault"
+            ),
+        )
+        assert gained > 0
