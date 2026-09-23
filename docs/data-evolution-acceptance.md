@@ -26,9 +26,9 @@ for its number.
 | 2.6 | 2 | An index is added and dropped on the live table, no rebuild | live, part |
 | 2.7 | 2 | A transform turns a text line in `message` into typed columns | live, xfail dfe-loader#184 |
 | 2.8 | 2 | The transform is swapped and the same columns still fill | none |
-| 3.1 | 3 | A derived schema stops the loader populating `_json` and `_raw`, and the columns still EXIST on the table | none |
-| 3.2 | 3 | The feed still lands with typed columns filled and `_json` empty | none |
-| 3.3 | 3 | Turning population back on refills `_json` for new records -- the decision is reversible | none |
+| 3.1 | 3 | A derived schema stops the loader populating `_json` and `_raw`, and the columns still EXIST on the table | live |
+| 3.2 | 3 | The feed still lands with typed columns filled and `_json` empty | live, xfail dfe-engine#513 |
+| 3.3 | 3 | Turning population back on refills `_json` for new records -- the decision is reversible | live, xfail dfe-engine#513 |
 
 ## What the marks mean
 
@@ -43,8 +43,9 @@ cover. 1.2 re-imports into the SAME deployment under a second path, which proves
 the bundle carries what the import needs but not that it lands in a deployment
 that has never seen the schema -- that needs a second stack.
 
-`none` is a step with no test, not a step that passes. 2.8 is unwritten. The three stage 3 steps cannot pass at all: a derived schema has no
-way to say "stop populating `_json`", so the engine never compiles it.
+`none` is a step with no test, not a step that passes. 2.8 is the only one left, and it is blocked on Compose rather than unwritten -- a deploy does not start the per-source transform instance it needs.
+
+Stage 3 was listed here as unable to pass at all, on the grounds that a derived schema had no way to say "stop populating `_json`". It has one: `capture_json: false` with `capture_raw: false`, which the engine compiles to dfe-loader's `extracted_only`. 3.1 passes. 3.2 and 3.3 are xfail on dfe-engine#513 -- the deploy writes `table_capture_modes` and reports `restart_required: []`, but the loader logs no config reload, so the mode only takes effect once it is restarted by hand.
 
 ## Three carry the weight
 

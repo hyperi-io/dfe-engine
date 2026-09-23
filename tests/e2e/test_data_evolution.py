@@ -138,6 +138,13 @@ DERIVED_DROPPED = (
     "process_pid",
 )
 
+# Stage 3. Its own source, because it turns population off on the table it owns
+# and the stage 2 steps read `_json` on theirs.
+CAPTURE_SOURCE = "acceptcapture"
+CAPTURE_DERIVED = "derived/accept/capture_off"
+CAPTURE_VERSION = "1.0.0"
+CAPTURE_SELECT = ("timestamp", "host_name", "event_dataset", "message")
+
 HEADER = {"type": "common-header/timeseries", "version": "1.0.1"}
 
 
@@ -190,6 +197,34 @@ def _alter(ch_client, statement: str) -> None:
 def _transform_engine(cfg: E2EConfig) -> str:
     """The engine name for the transform app the deployment runs."""
     return (cfg.transform or "dfe-transform-vrl").removeprefix("dfe-transform-")
+
+
+def _write_capture_version(engine: EngineAPI, *, capture_json: bool) -> None:
+    """Write stage 3's derived version with both capture switches set together.
+
+    Both or neither: json alone has no dfe-loader mode and the version model
+    refuses the pair before a document can carry it.
+    """
+    body = {
+        "base": SHIPPED_SCHEMA,
+        "base_version": SHIPPED_SCHEMA_VERSION,
+        "current": CAPTURE_VERSION,
+        "versions": {
+            CAPTURE_VERSION: {
+                "date": "2026-09-23",
+                "summary": f"Acceptance stage 3 -- capture_json={capture_json}",
+                "capture_json": capture_json,
+                "capture_raw": capture_json,
+                "select": [{"name": name} for name in CAPTURE_SELECT],
+            }
+        },
+    }
+    written = engine.call("PUT", f"/schemas/definitions/derived/{CAPTURE_DERIVED}", body)
+    if written.status_code >= 300:
+        written = engine.call("POST", f"/schemas/definitions/derived/{CAPTURE_DERIVED}", body)
+    assert written.status_code in (200, 201), (
+        f"the deployment refused the capture schema: {written.status_code} {written.text}"
+    )
 
 
 def _column_signatures(columns: Any) -> list[tuple]:
@@ -271,6 +306,44 @@ def evolved(engine: EngineAPI, e2e: E2EConfig, ch_client):
     yield state
     _delete(engine, SOURCE)
     drop_table(ch_client, e2e.ch_db, SOURCE)
+
+
+@pytest.fixture(scope="module")
+def capture_off(engine: EngineAPI, e2e: E2EConfig, ch_client):
+    """Stage 3's source, deployed with `_json` and `_raw` population switched OFF."""
+    require(e2e, "receiver_url", "ch_host")
+    _delete(engine, CAPTURE_SOURCE)
+    drop_table(ch_client, e2e.ch_db, CAPTURE_SOURCE)
+    _write_capture_version(engine, capture_json=False)
+    created = engine.call(
+        "POST",
+        "/sources",
+        {
+            "source": CAPTURE_SOURCE,
+            "display_name": "Capture acceptance",
+            "description": "A source whose table stops carrying _json and _raw.",
+            "match": {
+                "field": MATCH_FIELD,
+                "operator": "equals",
+                "value": CAPTURE_SOURCE,
+            },
+            "header": HEADER,
+            "schema": {
+                "meta_schema": SHIPPED_SCHEMA,
+                "meta_schema_version": SHIPPED_SCHEMA_VERSION,
+                "derived_schema": CAPTURE_DERIVED,
+                "derived_schema_version": CAPTURE_VERSION,
+            },
+        },
+    )
+    assert created.status_code == 201, (
+        f"the deployment refused the capture source: {created.status_code} {created.text}"
+    )
+    _deploy(engine, CAPTURE_SOURCE)
+    yield CAPTURE_SOURCE
+    _delete(engine, CAPTURE_SOURCE)
+    drop_table(ch_client, e2e.ch_db, CAPTURE_SOURCE)
+    engine.call("DELETE", f"/schemas/definitions/derived/{CAPTURE_DERIVED}")
 
 
 @pytest.fixture(scope="module")
@@ -989,3 +1062,155 @@ class TestStage2:
             ),
         )
         assert gained > 0
+
+
+class TestStage3:
+    """Population of `_json` and `_raw` stops, and starts again.
+
+    The decision has to be REVERSIBLE, so the columns stay on the table either
+    way and only the writing stops. `capture_json: false` with `capture_raw:
+    false` compiles to dfe-loader's `extracted_only`; the pair with json alone is
+    refused at the document, because the loader has no mode for it.
+    """
+
+    def test_3_1_a_derived_schema_stops_population_and_keeps_the_columns(
+        self, e2e, ch_client, capture_off: str
+    ) -> None:
+        """Dropping the columns would be the wrong implementation of stopping.
+
+        The common header is what the rest of DFE reads, so a table that lost
+        `_json` could not be switched back without a migration -- which is the
+        opposite of the reversible decision stage 3 is for.
+        """
+        columns = {
+            str(row[0])
+            for row in ch_client.query(
+                "SELECT name FROM system.columns WHERE database = %(d)s AND table = %(t)s",
+                parameters={"d": e2e.ch_db, "t": capture_off},
+            ).result_rows
+        }
+        assert columns, f"the deploy created no {e2e.ch_db}.{capture_off}"
+        missing = [name for name in ("_json", "_raw") if name not in columns]
+        assert not missing, (
+            f"{', '.join(missing)} was DROPPED from {e2e.ch_db}.{capture_off} rather than "
+            "left unpopulated, so turning capture back on would need a migration"
+        )
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "dfe-engine#513: the deploy writes table_capture_modes and reports "
+            "restart_required: [], but dfe-loader logs no config reload, so the mode "
+            "only takes effect after the loader is restarted by hand"
+        ),
+    )
+    def test_3_2_the_feed_lands_typed_with_json_empty(
+        self, e2e, ch_client, capture_off: str
+    ) -> None:
+        require(e2e, "receiver_url", "ch_host")
+        table = f"{e2e.ch_db}.{capture_off}"
+        probe = f"capture{uuid.uuid4().hex}"
+        record = {
+            "tags": {"feed": capture_off},
+            "@timestamp": "2026-09-23T04:05:06.000Z",
+            "host": {"name": f"host-{probe}"},
+            "event": {"dataset": "system.auth"},
+            "message": f"capture probe {probe}",
+        }
+
+        def _sent_and_landed() -> Any:
+            post_events(e2e, [record])
+            return _scalar(
+                ch_client,
+                f"SELECT count() FROM {table} WHERE host_name = %(h)s",
+                {"h": f"host-{probe}"},
+            )
+
+        poll_until(_sent_and_landed, timeout=LANDING_DEADLINE, desc=f"a record in {table}")
+        typed, json_length = _row(
+            ch_client,
+            f"SELECT message, length(toString(`_json`)) FROM {table} "
+            "WHERE host_name = %(h)s LIMIT 1",
+            {"h": f"host-{probe}"},
+        )
+        assert typed, "the typed column did not fill, so this says nothing about _json"
+        assert not json_length, (
+            f"_json on {table} carries {json_length} characters, so population did not stop"
+        )
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "dfe-engine#513: turning capture back on writes the loader config and needs "
+            "the same manual restart, so a new record still lands with _json empty"
+        ),
+    )
+    def test_3_3_turning_population_back_on_refills_json(
+        self, engine: EngineAPI, e2e, ch_client, capture_off: str
+    ) -> None:
+        """The reverse direction, which is the half that makes it a decision.
+
+        Asserts the OFF state first. A record landing with `_json` filled after
+        the switch proves nothing on its own -- the loader's default mode is
+        `full`, so a run where population never stopped looks identical.
+
+        Rewrites the SAME derived version rather than adding one: the source pins
+        `derived_schema_version`, and replacing the versions map out from under
+        that pin is dfe-engine#519.
+        """
+        require(e2e, "receiver_url", "ch_host")
+        table = f"{e2e.ch_db}.{capture_off}"
+        before = f"stopped{uuid.uuid4().hex}"
+        stopped_record = {
+            "tags": {"feed": capture_off},
+            "@timestamp": "2026-09-23T04:05:06.000Z",
+            "host": {"name": f"host-{before}"},
+            "event": {"dataset": "system.auth"},
+            "message": f"stopped probe {before}",
+        }
+
+        def _sent_while_off() -> Any:
+            post_events(e2e, [stopped_record])
+            return _scalar(
+                ch_client,
+                f"SELECT count() FROM {table} WHERE host_name = %(h)s",
+                {"h": f"host-{before}"},
+            )
+
+        poll_until(_sent_while_off, timeout=LANDING_DEADLINE, desc=f"a record in {table}")
+        while_off = _scalar(
+            ch_client,
+            f"SELECT length(toString(`_json`)) FROM {table} WHERE host_name = %(h)s LIMIT 1",
+            {"h": f"host-{before}"},
+        )
+        assert not while_off, (
+            f"_json carries {while_off} characters while population is OFF, so refilling "
+            "it afterwards would prove nothing -- the loader is in its default full mode"
+        )
+
+        _write_capture_version(engine, capture_json=True)
+        _deploy(engine, capture_off)
+
+        probe = f"refill{uuid.uuid4().hex}"
+        record = {
+            "tags": {"feed": capture_off},
+            "@timestamp": "2026-09-23T04:05:06.000Z",
+            "host": {"name": f"host-{probe}"},
+            "event": {"dataset": "system.auth"},
+            "message": f"refill probe {probe}",
+        }
+
+        def _sent_and_refilled() -> Any:
+            post_events(e2e, [record])
+            return _scalar(
+                ch_client,
+                f"SELECT length(toString(`_json`)) FROM {table} WHERE host_name = %(h)s LIMIT 1",
+                {"h": f"host-{probe}"},
+            )
+
+        filled = poll_until(
+            _sent_and_refilled,
+            timeout=LANDING_DEADLINE,
+            desc=f"a record in {table} carrying _json again",
+        )
+        assert filled, f"_json on {table} is still empty for a record sent after the switch"
