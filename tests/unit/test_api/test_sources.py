@@ -1058,3 +1058,28 @@ class TestDeployReportsWhyItCouldNotBuild:
 
         assert resp.status_code == 400, resp.text
         assert "not found" in resp.json()["message"]
+
+    def test_a_meta_schema_that_does_not_exist_answers_400_on_the_real_path(
+        self, client, admin_headers, sample_source
+    ):
+        """The same refusal, driven rather than injected.
+
+        The faked version above patches the builder, so it proves the deploy
+        route's handler. This one proves an absent meta_schema actually reaches
+        it: `schema_builder_v2.py:373` re-raises a SchemaLoadError as
+        SchemaBuildError, and the handler at `api/v1/sources.py:1394` catches
+        both, so only a real load shows which class arrives.
+        """
+        client.post(
+            "/api/v1/sources",
+            json={**sample_source, "schema": {"meta_schema": "meta/beats/nosuchthing"}},
+            headers=admin_headers,
+        )
+
+        resp = client.post(
+            f"/api/v1/sources/{sample_source['source']}/deploy",
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "build_error"

@@ -124,6 +124,16 @@ class SchemaStatusResponse(BaseModel):
     topics_skipped: str = Field(
         description="Why the topic set was skipped; empty when it was applied."
     )
+    topics_drift: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Existing topics this pass could not confirm match the manifest, each named "
+            "with what was found -- a shape difference, or that the shape was unreadable "
+            "and so drift is unknown. A broker that answers a topic list but not a "
+            "describe puts every existing topic here. Reported, never applied: the engine "
+            "leaves an existing topic alone rather than altering a live broker on a deploy."
+        ),
+    )
 
 
 class TransportFacts(BaseModel):

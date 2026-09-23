@@ -141,6 +141,30 @@ class TestSourceHeader:
         assert h.type == "minimal"
         assert h.version == "2.0.0"
 
+    def test_default_version_lags_its_own_profile_marker_deliberately(self):
+        """The default header's version and ITS profile's ``current`` may differ
+        only while dfe-engine#440 is open.
+
+        Reads the profile ``SourceHeader.type`` actually defaults to, not the
+        minimal one: the two carry independent ``current`` markers, so watching
+        the wrong file leaves the tripwire green while the lag moves.
+        """
+        from dfe_engine.schema.schema_loader import _resolve_profile_yaml_path
+        from dfe_engine.yaml_utils import yaml_load
+
+        default = SourceHeader()
+        path = _resolve_profile_yaml_path(f"common-header/{default.type}", None)
+        assert path.is_file(), f"no profile on disk for the default header type {default.type!r}"
+        marker = str(yaml_load(path).get("current") or "")
+
+        assert marker, f"{path} carries no current marker"
+        if marker == default.version:
+            pytest.fail(
+                f"common-header/{default.type} is back at {marker}, so "
+                "SourceHeader.version is no longer a deliberate lag -- close "
+                "dfe-engine#440 and drop the comment above it"
+            )
+
 
 # ---------------------------------------------------------------------------
 # SourceMatch
@@ -293,6 +317,28 @@ class TestSourceFetcher:
             },
         )
         assert f.config["credential_secret"].startswith("vault:")
+
+    @pytest.mark.parametrize(
+        "reference",
+        [
+            "vault:kv/data/dfe-test/aws:secret_access_key",
+            "bao:kv/dfe-test/aws:secret_access_key",
+            "openbao:kv/dfe-test/aws:secret_access_key",
+            "env:AWS_SECRET_ACCESS_KEY",
+            "file:/run/secrets/aws-key",
+        ],
+    )
+    def test_every_prefix_the_fetcher_resolves_is_accepted(self, reference):
+        """The engine's list is dfe-fetcher's `RESOLVED_PREFIXES` (#490)."""
+        f = SourceFetcher(source_type="aws", config={"secret_access_key": reference})
+        assert f.config["secret_access_key"] == reference
+
+    def test_a_prefix_the_fetcher_cannot_resolve_is_still_refused(self):
+        """`aws:` is in the resolver's vocabulary with no provider behind it, so a
+        reference using it would reach the consumer as its own literal text.
+        """
+        with pytest.raises(ValueError, match="literal credential"):
+            SourceFetcher(source_type="aws", config={"secret_access_key": "aws:some/path"})
 
 
 class TestSourceOrigin:

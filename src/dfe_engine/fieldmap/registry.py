@@ -391,7 +391,11 @@ class FieldMapRegistry:
 
     @property
     def is_git(self) -> bool:
-        """Whether the field maps directory is a git repository."""
+        """Whether the field maps directory is INSIDE a git repository.
+
+        scalo walks up, so a directory under a gitops checkout answers True
+        without being a repository root itself.
+        """
         return self._store.is_git
 
     @property

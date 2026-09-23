@@ -315,6 +315,9 @@ class SourceHeader(BaseModel):
         default="timeseries",
         description="Profile name (timeseries, minimal, passthrough)",
     )
+    # Held behind the profile's current 1.0.1, which makes _json and _tags
+    # not_null: moving unpinned sources onto it retypes live ClickHouse columns.
+    # Settled together with dfe-schemas#33 -- dfe-engine#440.
     version: str = Field(
         default="1.0.0",
         description="Common header version (semver)",
@@ -531,8 +534,8 @@ that tests which source a record is has this as its field.
 # Keys the engine sets on the compiled fetcher stanza; a source may not carry them.
 _FETCHER_ENGINE_KEYS = frozenset({"enabled", "topic"})
 
-# The source YAML is committed to git, so a value under any of these must be an
-# ``env:`` or ``vault:`` reference the fetcher resolves at runtime.
+# The source YAML is committed to git, so a value under any of these must be a
+# reference the fetcher resolves at runtime.
 _CREDENTIAL_KEYS = frozenset(
     {
         "api_key",
@@ -547,7 +550,10 @@ _CREDENTIAL_KEYS = frozenset(
     }
 )
 _CREDENTIAL_FRAGMENTS = ("secret", "token", "password")
-_CREDENTIAL_REFERENCE_PREFIXES = ("env:", "vault:")
+# dfe-fetcher's RESOLVED_PREFIXES (crates/core/src/secret.rs:35), verbatim. Its
+# UNRESOLVED_PREFIXES entry ``aws:`` is deliberately absent: that build carries no
+# provider for it, so such a reference reaches its consumer as literal text.
+_CREDENTIAL_REFERENCE_PREFIXES = ("vault:", "bao:", "openbao:", "env:", "file:")
 
 
 def _is_credential_key(key: str) -> bool:
@@ -621,8 +627,8 @@ class SourceFetcher(BaseModel):
         default_factory=dict,
         description=(
             "The fetcher's per-type stanza (services, connections, interval_secs, "
-            "filter, credential references, ...). Credentials must be env: or vault: "
-            "references"
+            "filter, credential references, ...). Credentials must be vault:, bao:, "
+            "openbao:, env: or file: references"
         ),
     )
     routes: list[FetcherRoute] = Field(
@@ -662,7 +668,8 @@ class SourceFetcher(BaseModel):
         if plaintext:
             raise ValueError(
                 f"fetcher.config.{plaintext} holds a literal credential; the source is "
-                "committed to git, so use an env: or vault: reference"
+                "committed to git, so use one of "
+                f"{', '.join(_CREDENTIAL_REFERENCE_PREFIXES)}"
             )
         return v
 

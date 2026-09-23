@@ -112,6 +112,15 @@ def apply_cmd(allow_drift: bool, as_json: bool) -> None:
             click.echo(f"  {count}: {value}")
         for refusal in state.refused:
             click.echo(f"refused {refusal}")
+        # Topic drift is reported, never applied, so it does not gate the exit
+        # code -- but it has to reach the human branch or a deployment that
+        # adopted a foreign topic shape reads as converged with nothing to see.
+        for drift in state.topics_drift:
+            click.echo(f"topic drift {drift}")
+        for created in state.topics_created:
+            click.echo(f"topic created {created}")
+        if state.topics_skipped:
+            click.echo(f"topics skipped: {state.topics_skipped}")
         if state.error:
             click.echo(f"error: {state.error}", err=True)
     if state.state == "failed":

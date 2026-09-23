@@ -1,11 +1,11 @@
 # Project:   DFE Engine
 # File:      .github/workflows/pr-base-guard.yml
-# Purpose:   Fail a pull request whose base is not main, where ci.yml never runs
+# Purpose:   Fast pull-request guards: a base that is not main, and a stray gitlink
 #
 # License:   BUSL-1.1
 # Copyright: (c) 2026 HYPERI PTY LIMITED
 
-name: PR base guard
+name: PR fast guards
 
 "on":
   pull_request:
@@ -49,4 +49,28 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           echo "::error title=PR base is not main::This PR targets '$BASE_REF', so ci.yml never ran -- Quality, Test, Build and Commit messages are skipped, not passed. Retarget to main and push before review or merge."
+          exit 1
+
+  gitlink:
+    name: No gitlink
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Refuse a mode-160000 index entry
+        # tests/unit/test_index_has_no_gitlink.py asserts the same property, but inside the 2h26m suite; a gitlink breaks the release checkout's credential cleanup, so the report has to arrive before then.
+        run: |
+          set -euo pipefail
+
+          # Split on TAB: the path follows one, and awk's default FS would break
+          # a path containing a space into fields.
+          gitlinks="$(git ls-files --stage | awk -F'\t' '$1 ~ /^160000 / { print $2 }')"
+
+          if [ -z "$gitlinks" ]; then
+            echo "No index entry is a gitlink."
+            exit 0
+          fi
+
+          # Flattened: GitHub reads only the first line of an ::error, so a second
+          # gitlink and the hint itself would drop out of the annotation.
+          echo "::error title=Gitlink in the index::$(echo "$gitlinks" | tr '\n' ' ')-- remove with git rm --cached <path>; actions/checkout's post-job credential cleanup fails on a gitlink with no .gitmodules, which killed the release publish twice (#367)."
           exit 1

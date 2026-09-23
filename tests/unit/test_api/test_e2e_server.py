@@ -56,6 +56,7 @@ def _settings(
     env: str = "test",
     gitops: bool = False,
     deployment_target: str = "unknown",
+    profile: str = "",
 ) -> DFESettings:
     """Settings for an e2e-server process.
 
@@ -70,7 +71,7 @@ def _settings(
         e2e_server=e2e_server,
         config_dir=str(tmp_path),
         clickhouse=ClickHouseSettings(bootstrap_tables=False),
-        deployment=DeploymentSettings(target=deployment_target),
+        deployment=DeploymentSettings(target=deployment_target, profile=profile),
         gitops=GitopsSettings(
             enabled=gitops,
             local_path=str(tmp_path / "deploy") if gitops else "",
@@ -266,6 +267,50 @@ def _operator_sources(client: TestClient, headers: dict[str, str]) -> list[str]:
     """Seeded source names, without the landing source the engine always owns."""
     listed = _get(client, _SOURCES, headers)
     return [s["name"] for s in listed["items"] if s["resource_type"] != "core"]
+
+
+class TestSeedRefusalIsLegible:
+    """A refused seed and a crashed seed must not answer the same way (#452)."""
+
+    def test_a_profile_that_deploys_no_fetcher_answers_422_on_the_real_path(self, tmp_path):
+        """The refusal #452 was filed for, driven rather than faked.
+
+        `docker-slim` runs the core data path alone, so the catalogue does not
+        offer dfe-fetcher there and `source/flow.py` refuses the fetcher-based
+        source the seed writes.
+        """
+        app = create_app(
+            settings=_settings(tmp_path, e2e_server=True, gitops=True, profile="docker-slim")
+        )
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.post(_SEED, json={"script": "seed_source_with_transform"})
+        finally:
+            _registries.clear()
+
+        assert resp.status_code == 422, resp.text
+        body = resp.json()
+        assert body["code"] == "validation_error"
+        assert "dfe-fetcher" in body["message"]
+        assert "docker-slim" in body["message"]
+
+    def test_a_refused_seed_answers_422_with_the_reason(self, appmgmt_client, monkeypatch):
+        from dfe_engine.api.e2e.seed import Seed
+        from dfe_engine.source.registry import SourceValidationError
+
+        reason = "source 'seedfetch' needs dfe-fetcher, and this profile does not deploy it"
+
+        def _refuse(self, script):
+            raise SourceValidationError(reason)
+
+        monkeypatch.setattr(Seed, "seed_static", _refuse)
+
+        resp = appmgmt_client.post(_SEED, json={"script": "seed_source_with_transform"})
+
+        assert resp.status_code == 422, resp.text
+        body = resp.json()
+        assert body["code"] == "validation_error"
+        assert body["message"] == reason
 
 
 class TestSeedSourceWithTransform:

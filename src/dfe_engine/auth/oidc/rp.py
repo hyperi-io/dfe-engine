@@ -57,7 +57,11 @@ class NormalizedIdentity(BaseModel):
     """The IdP ``sub`` claim - the stable user identifier."""
 
     email: str = ""
-    """The user's email (``email`` claim), empty if the IdP did not assert one."""
+    """The ``email`` claim, else ``preferred_username``, else ``upn``, else empty.
+
+    Not necessarily an address: see ``extract_identity`` for why the fallback
+    exists, and dfe-engine#429 for the proposal to drop it.
+    """
 
     name: str = ""
     """The display name: the ``name`` claim, else ``preferred_username``, else empty."""

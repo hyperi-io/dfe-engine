@@ -29356,6 +29356,14 @@
             "type": "string",
             "title": "Topics Skipped",
             "description": "Why the topic set was skipped; empty when it was applied."
+          },
+          "topics_drift": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Topics Drift",
+            "description": "Existing topics this pass could not confirm match the manifest, each named with what was found -- a shape difference, or that the shape was unreadable and so drift is unknown. A broker that answers a topic list but not a describe puts every existing topic here. Reported, never applied: the engine leaves an existing topic alone rather than altering a live broker on a deploy."
           }
         },
         "type": "object",
@@ -30715,7 +30723,7 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Config",
-            "description": "The fetcher's per-type stanza (services, connections, interval_secs, filter, credential references, ...). Credentials must be env: or vault: references"
+            "description": "The fetcher's per-type stanza (services, connections, interval_secs, filter, credential references, ...). Credentials must be vault:, bao:, openbao:, env: or file: references"
           },
           "routes": {
             "items": {

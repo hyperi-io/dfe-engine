@@ -439,7 +439,11 @@ class SchemaRegistry:
 
     @property
     def is_git(self) -> bool:
-        """Whether the schemas directory is a git repository."""
+        """Whether the schemas directory is INSIDE a git repository.
+
+        scalo walks up, so a directory under a gitops checkout answers True
+        without being a repository root itself.
+        """
         return self._store.is_git
 
     @property
