@@ -117,7 +117,24 @@ class TestListSources:
         resp = client.get("/api/v1/sources?sort_by=source&sort_order=asc", headers=admin_headers)
         data = resp.json()
         names = [item["name"] for item in data["items"]]
-        assert names == sorted(names)
+        assert names[0] == "main"
+        assert names[1:] == sorted(names[1:])
+
+    def test_list_pins_main_first_regardless_of_sort(self, client: TestClient, admin_headers: dict):
+        for name in ["zebra", "alpha"]:
+            client.post(
+                "/api/v1/sources",
+                json={
+                    "source": name,
+                    "match": {"field": "tags.collector.type", "value": name},
+                },
+                headers=admin_headers,
+            )
+
+        resp = client.get("/api/v1/sources?sort_by=source&sort_order=asc", headers=admin_headers)
+        names = [item["name"] for item in resp.json()["items"]]
+        assert names[0] == "main"
+        assert names[1:] == sorted(names[1:])
 
     def test_list_object_tree_places_sources_at_root(self, client: TestClient, admin_headers: dict):
         client.post(

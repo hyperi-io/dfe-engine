@@ -18,6 +18,7 @@ from typing import Any, Literal, cast
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 from dfe_engine.api.deps import (
     ClickHouseClient,
@@ -283,6 +284,19 @@ class DraftColumn(BaseModel):
     )
 
 
+def _draft_column(col: Any) -> DraftColumn:
+    """Same ``DraftColumn`` payload json-paths returns for a promoted column."""
+    return DraftColumn(
+        name=col.name,
+        type=col.type,
+        attribute=list(col.attribute or []),
+        use_case=col.use_case,
+        expr=col.expr or "",
+        comment=col.comment,
+        field_type=col.field_type or PROMOTED_FIELD_TYPE,
+    )
+
+
 class JsonPathInfo(BaseModel):
     """One JSON path discovered inside a source's ``_json`` column."""
 
@@ -493,7 +507,7 @@ class PromoteResult(BaseModel):
 class SchemaDiff(BaseModel):
     """Proposed schema change returned by ``?dry_run=true``."""
 
-    new_columns: list[SchemaColumn]
+    new_columns: list[DraftColumn]
     ddl: list[str] = Field(default_factory=list, description="ALTER statements that would run")
     copy_directives: list[str] = Field(
         default_factory=list,
@@ -512,7 +526,11 @@ class PromoteFieldResponse(BaseModel):
         default=None, description="New schema version, or null on dry_run / no commit"
     )
     results: list[PromoteResult]
-    diff: SchemaDiff | None = Field(default=None, description="Populated only when dry_run=true")
+    diff: SchemaDiff | SkipJsonSchema[None] = Field(
+        default=None,
+        description="Populated only when dry_run=true",
+        exclude_if=lambda v: v is None,
+    )
 
 
 # ── Endpoints ───────────────────────────────────────────────
@@ -1985,17 +2003,7 @@ async def promote_field(
 
     if preview_only:
         diff = SchemaDiff(
-            new_columns=[
-                SchemaColumn(
-                    name=c.name,
-                    type=c.type,
-                    use_case=c.use_case or "",
-                    attribute=_normalize_attribute(c.attribute),
-                    description=c.comment or "",
-                    field_type=c.field_type,
-                )
-                for c in new_columns
-            ],
+            new_columns=[_draft_column(c) for c in new_columns],
             ddl=promotion_preview_ddl(source.table_name, new_columns, db=db),
             copy_directives=[c.expr for c in new_columns if c.expr],
         )

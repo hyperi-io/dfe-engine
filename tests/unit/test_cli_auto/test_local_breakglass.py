@@ -50,10 +50,16 @@ _TIER = (
 
 @pytest.fixture(autouse=True)
 def _hermetic_gitops(monkeypatch):
-    """Keep get_settings() offline + default: clear any DFE_GITOPS_* + reset cache."""
+    """Keep get_settings() offline + default: clear any DFE_GITOPS_* + reset cache.
+
+    ``load_settings`` re-reads ``.env`` with ``override=False``, so deleting
+    ``DFE_GITOPS_REPO_URL`` lets the local dotenv put it back and ``dfe local
+    push`` tries a real remote. An empty value stays empty.
+    """
     for key in list(os.environ):
         if key.startswith("DFE_GITOPS_"):
             monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("DFE_GITOPS_REPO_URL", "")
     reset_settings()
     yield
     reset_settings()

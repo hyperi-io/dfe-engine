@@ -212,13 +212,43 @@ def _reject_traversal(profile_name: str, normalized: str) -> None:
         raise SchemaLoadError(f"Profile {profile_name!r} must not contain '..'")
 
 
-def _profile_short_name(profile_name: str) -> str:
-    """Strip registry prefix so ``common-header/minimal`` -> ``minimal``."""
-    normalized = profile_name.replace("\\", "/").strip("/")
-    _reject_traversal(profile_name, normalized)
+_YAML_SUFFIXES = (".yaml", ".yml")
+
+
+def _strip_yaml_suffix(name: str) -> str:
+    """Drop a trailing ``.yaml``/``.yml`` so a stem can take ``.yaml`` once."""
+    lower = name.lower()
+    for suffix in _YAML_SUFFIXES:
+        if lower.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
+def _profile_file_stem(profile_name: str) -> str | None:
+    """YAML stem for a profile ref, or None when it names no profile file.
+
+    Empty, whitespace, a bare ``.yml``/``.yaml`` suffix, and the
+    ``common-header`` directory (with or without a trailing slash) are not
+    profiles — appending ``.yaml`` would look for ``.yaml`` or
+    ``common-header.yaml``.
+    """
+    normalized = profile_name.replace("\\", "/").strip()
+    _reject_traversal(profile_name, normalized.strip("/"))
     if normalized.startswith(_COMMON_HEADER_PREFIX):
-        return normalized[len(_COMMON_HEADER_PREFIX) :]
-    return normalized
+        rest = normalized[len(_COMMON_HEADER_PREFIX) :]
+    elif normalized.strip("/") == _COMMON_HEADER_SUBDIR:
+        return None
+    else:
+        rest = normalized
+    stem = _strip_yaml_suffix(rest.strip("/")).strip()
+    return stem or None
+
+
+def _profile_yaml_path(directory: Path, stem: str) -> Path:
+    cleaned = _strip_yaml_suffix(stem).strip().strip("/")
+    if not cleaned:
+        raise SchemaLoadError("Profile name is empty")
+    return directory / f"{cleaned}.yaml"
 
 
 def _resolve_profile_yaml_path(
@@ -226,26 +256,42 @@ def _resolve_profile_yaml_path(
     profiles_dir: str | Path | None = None,
 ) -> Path:
     """Map a profile ref (short name or ``common-header/…`` registry path) to a YAML file."""
-    if profiles_dir is not None:
-        short = _profile_short_name(profile_name)
-        return Path(profiles_dir) / f"{short}.yaml"
+    stem = _profile_file_stem(profile_name)
+    if stem is None:
+        raise SchemaLoadError(f"Profile {profile_name!r} is empty")
 
-    normalized = profile_name.replace("\\", "/").strip("/")
-    # This branch joins the parts itself rather than going through
-    # _profile_short_name, so it needs the same guard.
-    _reject_traversal(profile_name, normalized)
+    if profiles_dir is not None:
+        return _profile_yaml_path(Path(profiles_dir), stem)
+
+    normalized = profile_name.replace("\\", "/").strip()
+    # Traversal is already rejected in _profile_file_stem; keep the same
+    # guard on this join path so a future edit cannot skip it.
+    _reject_traversal(profile_name, normalized.strip("/"))
+
+    def candidate_under(root: Path) -> Path:
+        if normalized.startswith(_COMMON_HEADER_PREFIX) or "/" in normalized:
+            parts = [p for p in normalized.split("/") if p]
+            if len(parts) == 1:
+                return _profile_yaml_path(root, parts[0])
+            return _profile_yaml_path(root.joinpath(*parts[:-1]), parts[-1])
+        return _profile_yaml_path(root / _COMMON_HEADER_SUBDIR, stem)
+
+    # Same as ``_resolve_subdir``: DFE_SCHEMAS_DIR may be a partial tree
+    # (common-header only, no manifest.yaml). ``_resolve_schemas_root``
+    # would skip it and the packaged timeseries profile would win.
+    env_dir = os.getenv("DFE_SCHEMAS_DIR")
+    if env_dir:
+        env_candidate = candidate_under(Path(env_dir))
+        if env_candidate.is_file():
+            return env_candidate
+
     schemas_root = _resolve_schemas_root()
     if schemas_root and (normalized.startswith(_COMMON_HEADER_PREFIX) or "/" in normalized):
-        parts = [p for p in normalized.split("/") if p]
-        if len(parts) == 1:
-            candidate = schemas_root / f"{parts[0]}.yaml"
-        else:
-            candidate = schemas_root.joinpath(*parts[:-1]) / f"{parts[-1]}.yaml"
+        candidate = candidate_under(schemas_root)
         if candidate.exists():
             return candidate
 
-    short = _profile_short_name(normalized)
-    return _resolve_profiles_dir() / f"{short}.yaml"
+    return _profile_yaml_path(_resolve_profiles_dir(), stem)
 
 
 def resolve_schema_yaml_path(schemas_base: Path, path_str: str) -> Path:
@@ -253,16 +299,16 @@ def resolve_schema_yaml_path(schemas_base: Path, path_str: str) -> Path:
 
     Accepts legacy filenames (``meta.yaml``), explicit ``.yaml`` paths, and
     registry-style keys without a suffix (``meta/aws/cloudtrail``).
+    Directories at the unsuffixed path are ignored so a nested schema
+    ``meta/test/test.yaml`` is not shadowed by ``meta/test/test/``.
     """
     normalized = path_str.replace("\\", "/").strip("/")
     path = Path(normalized)
     if path.is_absolute():
-        if path.exists():
+        if path.is_file():
             return path
         if path.suffix not in (".yaml", ".yml"):
-            with_suffix = path.with_suffix(".yaml")
-            if with_suffix.exists():
-                return with_suffix
+            return path.with_suffix(".yaml")
         return path
 
     candidates: list[Path] = [schemas_base / normalized]
@@ -274,7 +320,7 @@ def resolve_schema_yaml_path(schemas_base: Path, path_str: str) -> Path:
             candidates.append(schemas_base.joinpath(*parts[:-1]) / f"{parts[-1]}.yaml")
 
     for candidate in candidates:
-        if candidate.exists():
+        if candidate.is_file():
             return candidate
     return candidates[-1]
 
