@@ -46,7 +46,7 @@ from dfe_engine.source.models import SchemaColumn
 col = SchemaColumn(
     name="user_name",
     type="string",
-    attribute=["lowcardinality"],
+    cardinality="low",
     use_case="dimension",
     expr="@source: first(user_id/uid/id)",
     comment="User identifier",
@@ -60,11 +60,11 @@ errors = col.validate_against_registry(TypeRegistry.default())
 from dfe_engine.source.type_registry import TypeRegistry
 
 registry = TypeRegistry.default()  # loads dfe-schemas registries/types.yaml
-resolved = registry.resolve("string", attributes=["lowcardinality"])
+resolved = registry.resolve("string", cardinality="low")
 # ResolvedType(ch_type='LowCardinality(Nullable(String))', codec='ZSTD(1)')
 registry.validate_use_case("integer", "dimension")  # OK
 registry.validate_use_case("integer", "word_search")  # raises ValueError
-registry.validate_attribute("json", "lowcardinality")  # raises ValueError
+registry.validate_cardinality("medium")  # raises InvalidCardinalityError
 ```
 
 ### SchemaLoader (`schema/schema_loader.py`)
@@ -171,9 +171,11 @@ written = writer.write_all(Path("out/"))  # writes + returns paths
 3. Attributes must be valid for the primitive (e.g. `lowcardinality` is not
    valid for `json`).
 4. `ch_override` must match the supported ClickHouse types catalogue.
-5. Duplicate column names are rejected (normalised: dots and hyphens become
+5. `cardinality` must be `low`, `high` or `unknown`, and cannot contradict the
+   retired `lowcardinality` attribute.
+6. Duplicate column names are rejected (normalised: dots and hyphens become
    underscores).
-6. Published versions are immutable - SchemaManager refuses to modify them.
+7. Published versions are immutable - SchemaManager refuses to modify them.
 
 ## Gotchas
 

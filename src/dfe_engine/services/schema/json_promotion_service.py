@@ -246,7 +246,7 @@ def list_promoted_json_fields(
     ]
 
 
-def _json_subcolumn(path: str) -> str:
+def json_subcolumn(path: str) -> str:
     """SQL accessor for a discovered JSON path, e.g. ``assumeNotNull(_json).`user.email```.
 
     The whole dotted path is one backtick-quoted identifier (that is how
@@ -274,15 +274,15 @@ def _match_accessor(match_field: str) -> str:
     """
     prefix = f"{JSON_COLUMN}."
     if match_field.startswith(prefix):
-        return _json_subcolumn(match_field[len(prefix) :])
+        return json_subcolumn(match_field[len(prefix) :])
     if "`" in match_field:
         raise JsonPromotionError(f"Illegal match field: {match_field!r}")
     if match_field.startswith("_"):
         return f"`{match_field}`"
-    return _json_subcolumn(match_field)
+    return json_subcolumn(match_field)
 
 
-def _match_condition(
+def match_condition(
     match_field: str | None,
     match_value: str | None,
     *,
@@ -355,7 +355,7 @@ def discover_paths(
     table = qualified_table(db, source)
     promoted = promoted_paths(existing_columns)
     existing_names = {col.name for col in existing_columns}
-    match_sql, match_params = _match_condition(
+    match_sql, match_params = match_condition(
         match_field, match_value, match_operator=match_operator
     )
 
@@ -421,7 +421,7 @@ def _fetch_samples(
     match_params: dict[str, Any] | None = None,
 ) -> list[str]:
     """Random, distinct example values for a path (ORDER BY rand())."""
-    sub = _json_subcolumn(path)
+    sub = json_subcolumn(path)
     where = f"{sub} IS NOT NULL"
     if match_sql:
         where += f" AND {match_sql}"
@@ -444,7 +444,7 @@ def _fetch_stats(
     match_params: dict[str, Any] | None = None,
 ) -> tuple[float | None, int | None]:
     """Coverage percentage and approximate distinct count for a path."""
-    sub = _json_subcolumn(path)
+    sub = json_subcolumn(path)
     sql = (
         "SELECT "
         f"100.0 * countIf({sub} IS NOT NULL) / count() AS coverage_pct, "
@@ -496,7 +496,7 @@ def sample_rows(
             source table does not exist yet).
     """
     table = qualified_table(db, source)
-    match_sql, match_params = _match_condition(
+    match_sql, match_params = match_condition(
         match_field, match_value, match_operator=match_operator
     )
     sql = f"SELECT * FROM {table} "

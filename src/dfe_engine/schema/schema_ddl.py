@@ -22,6 +22,7 @@ from scalo.logger import logger
 from dfe_engine.schema.engine_resolver import EngineResolver, ResolvedEngine, parse_engine
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.source.type_registry import (
+    LOW_CARDINALITY,
     InvalidUseCaseError,
     TypeRegistry,
     split_use_case,
@@ -193,8 +194,9 @@ _INDEX_TEMPLATES_LEGACY: dict[str, str] = {
     "substring_search": "INDEX {name} {col} TYPE ngrambf_v1(3, 256, 2, 0) GRANULARITY 4",
 }
 
-# exact_match picks on declared cardinality: set(0) holds every distinct value
-# of a LowCardinality column exactly, bloom_filter stays bounded on the rest.
+# exact_match reads the column's declared cardinality: set(0) holds every
+# distinct value of a `low` column exactly, and bloom_filter stays bounded on
+# `high` and on `unknown`, which is the safe way to be wrong.
 # Neither changed at v25.10, so the legacy fallback shares them.
 _EXACT_MATCH_LOW_CARDINALITY = "INDEX {name} {col} TYPE set(0) GRANULARITY 4"
 _EXACT_MATCH_HIGH_CARDINALITY = "INDEX {name} {col} TYPE bloom_filter GRANULARITY 4"
@@ -676,6 +678,7 @@ class DDLGenerator:
             col.type,
             attributes=col.attribute,
             ch_override=ch_override,
+            cardinality=col.declared_cardinality,
         )
 
         codec = resolved.codec
@@ -740,7 +743,7 @@ class DDLGenerator:
         if use_case == "exact_match":
             template = (
                 _EXACT_MATCH_LOW_CARDINALITY
-                if "lowcardinality" in col.attribute
+                if col.declared_cardinality == LOW_CARDINALITY
                 else _EXACT_MATCH_HIGH_CARDINALITY
             )
             return [template.format(name=index_name, col=quoted)]
