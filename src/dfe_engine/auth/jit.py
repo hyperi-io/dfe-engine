@@ -21,17 +21,51 @@ from dfe_engine.auth.audit import (
     audit_jit_account_created,
     audit_jit_groups_updated,
     audit_jit_hdx_invited,
+    audit_jit_login_refused,
     audit_jit_team_assigned,
 )
 from dfe_engine.auth.groups import Group, GroupStore
+from dfe_engine.auth.models import AuthenticationError
 
 # Broadest-wins precedence (highest first)
-_BROAD_ROLES = {"admin", "infra_admin", "data_analyst"}
 _ROLE_TO_TEAM = {
     "admin": "dfe-admin",
     "infra_admin": "dfe-admin",
     "data_analyst": "dfe-analysts",
 }
+
+# What the refused caller is told. Constant, because the handler returns str(exc)
+# to the client and the collision detail would say which local names are taken.
+_REFUSED_MESSAGE = "OIDC login refused"
+
+
+class JitIdentityCollisionError(AuthenticationError):
+    """An IdP assertion resolved onto an account that identity does not own.
+
+    Attributes:
+        user_id: The IdP-asserted subject.
+        source_provider: The provider that asserted it.
+        reason: ``protected_account``, ``local_account`` or ``provider_mismatch``.
+    """
+
+    def __init__(self, user_id: str, source_provider: str, reason: str) -> None:
+        super().__init__(_REFUSED_MESSAGE)
+        self.user_id = user_id
+        self.source_provider = source_provider
+        self.reason = reason
+
+
+def _protected_usernames(admin_name: str) -> frozenset[str]:
+    """The local credentials an IdP may never reach: the admin and break-glass.
+
+    ``admin_name`` is the deployment's configured override
+    (``settings.auth.local.admin_name``), resolved through the same helper the
+    bootstrap seeds with, so renaming the admin moves the floor with it.
+    """
+    from dfe_engine.auth.bootstrap import admin_account_name
+    from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
+
+    return frozenset({admin_account_name(admin_name), BREAKGLASS_USERNAME})
 
 
 class JitProvisioner:
@@ -40,11 +74,13 @@ class JitProvisioner:
         account_store: AccountStore,
         group_store: GroupStore,
         hyperdx_client=None,
+        admin_name: str = "",
     ) -> None:
         self._accounts = account_store
         self._groups = group_store
         self._hdx = hyperdx_client
         self._invite_tasks: set[asyncio.Task] = set()
+        self._protected = _protected_usernames(admin_name)
 
     @staticmethod
     def sanitise_username(user_id: str) -> str:
@@ -64,14 +100,21 @@ class JitProvisioner:
         ``email`` is the IdP-asserted address (OIDC ``email`` claim / ``X-Oidc-Email``)
         and ``name`` the IdP-asserted display name. Each is written on first create
         and reconciled on later logins when present.
+
+        Raises:
+            JitIdentityCollisionError: The asserted subject resolved onto a
+                recovery credential, or onto an account this provider does not
+                own. Nothing is written.
         """
         safe_name = self.sanitise_username(user_id)
+        self._refuse_protected(safe_name, user_id, source_provider)
         now = datetime.now(UTC).isoformat()
         wanted_email = email.strip()
         wanted_name = name.strip()
 
         existing = self._accounts.get(safe_name)
         if existing is not None:
+            self._require_same_identity(existing, user_id, source_provider)
             # Subsequent login — update groups if changed + last_login_at
             updates: dict[str, object] = {"last_login_at": now}
             if set(existing.groups) != set(oidc_groups):
@@ -102,7 +145,13 @@ class JitProvisioner:
                 last_login_at=now,
             )
         except ValueError:
-            # Race condition: another request created it
+            # Race condition: another request created it. The identity guard runs
+            # again because the account it created is the one about to be written.
+            raced = self._accounts.get(safe_name)
+            if raced is None:
+                # Not a race - create refused the name itself (empty or too long).
+                raise
+            self._require_same_identity(raced, user_id, source_provider)
             race_updates: dict[str, object] = {"groups": oidc_groups, "last_login_at": now}
             if wanted_email:
                 race_updates["email"] = wanted_email
@@ -147,6 +196,41 @@ class JitProvisioner:
                     task.add_done_callback(self._invite_tasks.discard)
 
         return self._accounts.get(safe_name)
+
+    def _refuse_protected(self, safe_name: str, user_id: str, source_provider: str) -> None:
+        """Refuse any assertion resolving onto a recovery credential.
+
+        The floor under :meth:`_require_same_identity`, and unconditional: these
+        two accounts are how an operator gets in when federation is broken or
+        hostile, so no IdP may read, create or rewrite one whatever it claims.
+
+        Raises:
+            JitIdentityCollisionError: ``safe_name`` is the admin or break-glass name.
+        """
+        if safe_name not in self._protected:
+            return
+        audit_jit_login_refused(user_id, source_provider, "protected_account")
+        raise JitIdentityCollisionError(user_id, source_provider, "protected_account")
+
+    @staticmethod
+    def _require_same_identity(existing: Account, user_id: str, source_provider: str) -> None:
+        """Refuse when the stored account is not this IdP identity's own.
+
+        The account key is a sanitised subject with no provider in it, so without
+        this a provider asserting somebody else's subject would rewrite their
+        groups, email and display name.
+
+        Raises:
+            JitIdentityCollisionError: The account is local, or another provider's.
+        """
+        if not existing.external:
+            reason = "local_account"
+        elif existing.source_provider != source_provider:
+            reason = "provider_mismatch"
+        else:
+            return
+        audit_jit_login_refused(user_id, source_provider, reason)
+        raise JitIdentityCollisionError(user_id, source_provider, reason)
 
     def _resolve_group(self, identifier: str) -> Group | None:
         """A group by name, else by the provider identifier the sync recorded.
