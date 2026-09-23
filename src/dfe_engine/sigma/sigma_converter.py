@@ -4,7 +4,7 @@ from scalo.logger import logger
 from sigma.collection import SigmaCollection
 
 from ..sigma.field_mapping_service import FieldMappingService
-from ..sigma.sigma_backend_clickhouse import SqlBackend
+from ..sigma.sigma_backend_clickhouse import SqlBackend, declares_text_index
 from ..sigma.sigma_pipelines import SigmaPipeline
 from ..yaml_utils import yaml_load
 
@@ -278,30 +278,21 @@ class SigmaRuleConverter:
             matched_schema_info = {}
 
             for sigma_field in source_fields:
-                if sigma_field in pipeline_mappings:
-                    mapped_field = pipeline_mappings[sigma_field]
+                if sigma_field not in pipeline_mappings:
+                    continue
 
-                    if isinstance(mapped_field, list):
-                        for field in mapped_field:
-                            if field in schema_metadata:
-                                matched_schema_info[field] = schema_metadata[field]
-                                if (
-                                    schema_metadata[field]["type"] == "text"
-                                    and schema_metadata[field]["index_type"] != "text_search"
-                                ):
-                                    logger.warning(
-                                        f"Field {field} is text type but missing text_search index"
-                                    )
-                    else:
-                        if mapped_field in schema_metadata:
-                            matched_schema_info[mapped_field] = schema_metadata[mapped_field]
-                            if (
-                                schema_metadata[mapped_field]["type"] == "text"
-                                and schema_metadata[mapped_field]["index_type"] != "text_search"
-                            ):
-                                logger.warning(
-                                    f"Field {mapped_field} is text type but missing text_search index"
-                                )
+                mapped_field = pipeline_mappings[sigma_field]
+                candidates = mapped_field if isinstance(mapped_field, list) else [mapped_field]
+
+                for field in candidates:
+                    if field not in schema_metadata:
+                        continue
+                    metadata = schema_metadata[field]
+                    matched_schema_info[field] = metadata
+                    if metadata.get("type") == "text" and not declares_text_index(metadata):
+                        logger.warning(
+                            f"Field {field} is text type but declares no text-index use case"
+                        )
 
             pipeline_config = SigmaPipeline(field_mappings=pipeline_mappings)
             pipeline = pipeline_config.create_pipeline()
@@ -330,78 +321,6 @@ class SigmaRuleConverter:
         except Exception as e:
             logger.error(f"Exception during conversion: {e}")
             raise
-
-    def _optimize_schema_info(self, schema_metadata: dict) -> dict:
-        """
-        Analyzes schema metadata to provide optimization hints.
-
-        :param schema_metadata: Original schema metadata
-        :return: Dictionary with optimization information
-        """
-        optimized_info = {"schema_metadata": schema_metadata.copy(), "field_hints": {}}
-
-        for field, info in schema_metadata.items():
-            if info.get("use_case") == "dimension" and info["type"] == "string":
-                optimized_info["field_hints"][field] = {"matching": "exact", "index_priority": 1}
-            elif info["type"] == "text" and info.get("use_case") in (
-                "word_search",
-                "substring_search",
-            ):
-                optimized_info["field_hints"][field] = {
-                    "matching": "text_search",
-                    "index_priority": 2,
-                }
-            elif info["type"] in ("integer", "float"):
-                optimized_info["field_hints"][field] = {"matching": "numeric", "index_priority": 1}
-
-        return optimized_info
-
-    def _optimize_query(self, query: str, optimization_info: dict) -> str:
-        """
-        Post-processes the query for better performance.
-
-        :param query: Original SQL query
-        :param optimization_info: Optimization information
-        :return: Optimized query
-        """
-        where_start = query.find("WHERE")
-        if where_start == -1:
-            return query
-
-        before_where = query[:where_start]
-        where_clause = query[where_start:]
-
-        conditions = []
-        current_condition = ""
-        parentheses_count = 0
-
-        for char in where_clause[6:]:
-            current_condition += char
-            if char == "(":
-                parentheses_count += 1
-            elif char == ")":
-                parentheses_count -= 1
-            elif char == " " and parentheses_count == 0:
-                if current_condition.strip().upper() in ["AND", "OR"]:
-                    current_condition = ""
-                    continue
-                conditions.append(current_condition.strip())
-                current_condition = ""
-
-        if current_condition.strip():
-            conditions.append(current_condition.strip())
-
-        def get_condition_priority(condition):
-            if "=" in condition and "ILIKE" not in condition:
-                return 1
-            elif "ILIKE" in condition and not condition.split("ILIKE")[1].strip().startswith("'%"):
-                return 2
-            return 3
-
-        sorted_conditions = sorted(conditions, key=get_condition_priority)
-        optimized_where = "WHERE " + " AND ".join(sorted_conditions)
-
-        return before_where + optimized_where
 
     @staticmethod
     def format_rules(rules: str) -> str:

@@ -4,6 +4,21 @@ import shutil
 import pandas as pd
 import pytest
 import yaml
+from scalo.logger import logger
+
+
+@pytest.fixture
+def captured_logs():
+    """Lines scalo's logger emits during the test.
+
+    The logger binds stderr when the module is imported, so pytest's capsys and
+    capfd both read a stream it no longer writes to; an extra sink is loguru's
+    own way to read its output.
+    """
+    lines: list[str] = []
+    sink_id = logger.add(lines.append, level="DEBUG", format="{level} {message}")
+    yield lines
+    logger.remove(sink_id)
 
 
 def _create_base_meta_schema_nxlog_windows():

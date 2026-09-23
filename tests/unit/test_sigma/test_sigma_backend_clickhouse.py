@@ -448,48 +448,106 @@ def test_clickhouse_format2_output(clickhouse_backend: SqlBackend):
     assert normalize_sql_query(converted_queries) == normalize_sql_query(expected_query)
 
 
-def test_text_search_field_handling():
-    """Test handling of text fields with text_search index type."""
-    schema_metadata = {"message": {"type": "text", "index_type": "text_search"}}
-    backend = SqlBackend(schema_metadata=schema_metadata)
+def convert_one(detection: str, schema_metadata: dict | None = None) -> str:
+    """Convert a one-selection rule and return its single query.
 
-    sigma_yaml = """
-        title: Test Text Search
+    Args:
+        detection: The body of ``selection:``, e.g. ``message|contains: 'x'``.
+        schema_metadata: Column metadata, in the shape the schema-metadata
+            producers emit (type / use_case / attribute).
+
+    Returns:
+        The emitted SQL, whitespace-normalised.
+    """
+    backend = SqlBackend(schema_metadata=schema_metadata or {})
+    sigma_yaml = f"""
+        title: Test
         status: test
         logsource:
             category: test_category
             product: test_product
         detection:
             selection:
-                message: 'error'
+                {detection}
             condition: selection
     """
-
-    generated_query = backend.convert(SigmaCollection.from_yaml(sigma_yaml))
-    expected_query = ["(message GLOBAL IN INDEX idx_ngram_bf 'error' AND message ILIKE '%error%')"]
-    assert normalize_sql_query(generated_query[0]) == normalize_sql_query(expected_query[0])
+    return normalize_sql_query(backend.convert(SigmaCollection.from_yaml(sigma_yaml))[0])
 
 
-def test_text_field_without_text_search():
-    """Test handling of text fields without text_search index type."""
-    schema_metadata = {"message": {"type": "text", "index_type": "default"}}
-    backend = SqlBackend(schema_metadata=schema_metadata)
+# The two use cases dfe-schemas renders as a ClickHouse text index, and the
+# retired spelling of each, which current_use_case translates on the way in.
+TEXT_INDEXED = {"type": "text", "use_case": "substring_search"}
+TEXT_INDEXED_WORDS = {"type": "text", "use_case": "word_search"}
 
-    sigma_yaml = """
-        title: Test Text Field
-        status: test
-        logsource:
-            category: test_category
-            product: test_product
-        detection:
-            selection:
-                message: 'error'
-            condition: selection
+
+@pytest.mark.parametrize(
+    ("detection", "expected"),
+    [
+        ("message|contains: 'PowerShell'", "lower(message) LIKE '%powershell%'"),
+        ("message|startswith: 'PowerShell'", "lower(message) LIKE 'powershell%'"),
+        ("message|endswith: 'PowerShell'", "lower(message) LIKE '%powershell'"),
+        ("message: '*PowerShell*'", "lower(message) LIKE '%powershell%'"),
+        ("message: 'Power*Shell*'", "lower(message) LIKE 'power%shell%'"),
+    ],
+)
+def test_a_text_indexed_column_is_matched_through_lower(detection: str, expected: str):
+    """ILIKE reads every granule: ClickHouse prunes on a text index for LIKE only.
+
+    Both sides fold case, so the needle is lowered with the column.
     """
+    assert convert_one(detection, {"message": TEXT_INDEXED}) == expected
 
-    generated_query = backend.convert(SigmaCollection.from_yaml(sigma_yaml))
-    expected_query = ["message = 'error'"]
-    assert normalize_sql_query(generated_query[0]) == normalize_sql_query(expected_query[0])
+
+@pytest.mark.parametrize("use_case", ["substring_search", "word_search", "text_search", "fulltext"])
+def test_every_text_index_use_case_reaches_the_lower_path(use_case: str):
+    """Including the retired spellings: a schema stored before the rename carries them."""
+    metadata = {"message": {"type": "text", "use_case": use_case}}
+
+    assert convert_one("message|contains: 'Error'", metadata) == "lower(message) LIKE '%error%'"
+
+
+@pytest.mark.parametrize("use_case", ["dimension", "exact_match", "range", None, ""])
+def test_a_column_with_no_text_index_keeps_ilike(use_case):
+    """lower() on an unindexed column buys nothing, so nothing outside the two changes."""
+    metadata = {"message": {"type": "text", "use_case": use_case}}
+
+    assert convert_one("message|contains: 'Error'", metadata) == "message ILIKE '%Error%'"
+
+
+def test_an_unknown_column_keeps_ilike():
+    """A field the schema metadata never mentions must not be assumed indexed."""
+    assert convert_one("message|contains: 'Error'", {}) == "message ILIKE '%Error%'"
+
+
+def test_an_unmodified_value_on_a_text_indexed_column_stays_an_equality():
+    """A Sigma value with no modifier and no wildcard asks for equality, not a substring.
+
+    The retired branch matched %value% here, so reviving it unchanged would have
+    turned every rule field on such a column into a substring hunt.
+    """
+    assert convert_one("message: 'error'", {"message": TEXT_INDEXED}) == "message = 'error'"
+
+
+@pytest.mark.parametrize(
+    ("needle", "expected"),
+    [
+        ("O'Brien", "lower(message) LIKE '%o''brien%'"),
+        ("back\\slash", "lower(message) LIKE '%back\\\\slash%'"),
+        ("x' OR '1'='1", "lower(message) LIKE '%x'' or ''1''=''1%'"),
+    ],
+)
+def test_the_lower_path_escapes_the_literal(needle: str, expected: str):
+    """F-SIGMA-ESCAPING: the needle still sits inside a single-quoted literal."""
+    assert convert_one(f"message|contains: {needle!r}", {"message": TEXT_INDEXED}) == expected
+
+
+def test_a_word_search_column_is_matched_the_same_way():
+    """word_search and substring_search differ in tokenizer, not in the query form."""
+    metadata = {"message": TEXT_INDEXED_WORDS}
+
+    assert (
+        convert_one("message|contains: 'Mimikatz'", metadata) == "lower(message) LIKE '%mimikatz%'"
+    )
 
 
 def test_malformed_cidr_handling(clickhouse_backend: SqlBackend):
