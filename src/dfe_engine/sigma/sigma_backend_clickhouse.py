@@ -19,6 +19,24 @@ from sigma.rule import SigmaRule, SigmaRuleTag
 from sigma.types import SigmaCIDRExpression, SigmaCompareExpression, SigmaString
 
 from ..sigma.field_mapping_service import read_csv_mappings, resolve_schema_path
+from ..source.type_registry import current_use_case
+
+# The use cases dfe-schemas renders as a ClickHouse text index, so a LIKE over
+# the indexed expression prunes granules; the templates are in schema_ddl
+# _INDEX_TEMPLATES, and the other use cases render index types LIKE cannot read.
+TEXT_INDEX_USE_CASES: frozenset[str] = frozenset({"word_search", "substring_search"})
+
+
+def declares_text_index(field_meta: dict[str, Any]) -> bool:
+    """Whether a column's metadata declares a use case rendered as a text index.
+
+    Args:
+        field_meta: One column's entry from a schema-metadata mapping.
+
+    Returns:
+        True when the declared use case renders a text index.
+    """
+    return current_use_case(field_meta.get("use_case")) in TEXT_INDEX_USE_CASES
 
 
 class SqlBackend(TextQueryBackend):
@@ -72,6 +90,13 @@ class SqlBackend(TextQueryBackend):
     endswith_expression: ClassVar[str] = "FIELD ILIKE '%VALUE'"
     contains_expression: ClassVar[str] = "FIELD ILIKE '%VALUE%'"
     wildcard_match_expression: ClassVar[str] = "match"
+
+    # Where the needle sits in the LIKE pattern, per anchoring.
+    _LIKE_PATTERNS: ClassVar[dict[str, str]] = {
+        "startswith": "{value}%",
+        "endswith": "%{value}",
+        "contains": "%{value}%",
+    }
 
     re_expression: ClassVar[str] = "match(FIELD, 'REGEX')"
     re_escape_char: ClassVar[str] = "\\"
@@ -201,17 +226,53 @@ class SqlBackend(TextQueryBackend):
         """Create CIDR match expression for field and value (escaped literal)."""
         return f"cidrmatch({field}, '{self._escape_value(cidr)}')"
 
+    def _has_text_index(self, field: str) -> bool:
+        """Whether *field* declares a use case dfe-schemas renders as a text index."""
+        return declares_text_index(self.schema_metadata.get(field, {}))
+
     def _create_like_expression(
-        self, field: str, value: str, pattern_type: str = "contains"
+        self, field: str, value: str, pattern_type: str = "contains", indexed: bool = False
     ) -> str:
-        """Create LIKE expression based on pattern type (startswith, endswith, contains)."""
-        value = self._escape_value(value)
-        if pattern_type == "startswith":
-            return f"{field} ILIKE '{value}%'"
-        elif pattern_type == "endswith":
-            return f"{field} ILIKE '%{value}'"
-        else:
-            return f"{field} ILIKE '%{value}%'"
+        """Create LIKE expression based on pattern type (startswith, endswith, contains).
+
+        Args:
+            field: Column name, already escaped and quoted.
+            value: The needle, unescaped.
+            pattern_type: startswith, endswith or contains; anything else reads as contains.
+            indexed: Whether the column carries a text index.
+
+        Returns:
+            The SQL predicate.
+        """
+        pattern = self._LIKE_PATTERNS.get(pattern_type, self._LIKE_PATTERNS["contains"])
+        if indexed:
+            # ILIKE reads every granule: ClickHouse prunes on a text index for LIKE
+            # only, so an indexed column folds case on both sides instead -- the shape
+            # the shipped otel tables index (INDEX idx_lower_body lower(Body)).
+            return (
+                f"lower({field}) LIKE '{pattern.format(value=self._escape_value(value.lower()))}'"
+            )
+        return f"{field} ILIKE '{pattern.format(value=self._escape_value(value))}'"
+
+    def _create_wildcard_expression(self, field: str, value: str, indexed: bool) -> str:
+        """Match a value whose wildcards do not reduce to one of the LIKE patterns.
+
+        F-SIGMA-ESCAPING: escape the SQL literal BEFORE mapping * -> %, so a crafted
+        value (e.g. ``x*y' OR '1'='1``) cannot break out of the single-quoted literal.
+        _escape_value leaves * untouched, so the wildcards still map afterwards.
+
+        Args:
+            field: Column name, already escaped and quoted.
+            value: The needle, unescaped, carrying at least one ``*``.
+            indexed: Whether the column carries a text index.
+
+        Returns:
+            The SQL predicate.
+        """
+        if indexed:
+            literal = self._convert_wildcards(self._escape_value(value.lower()))
+            return f"lower({field}) LIKE '{literal}'"
+        return f"{field} ILIKE '{self._convert_wildcards(self._escape_value(value))}'"
 
     def _convert_wildcards(self, value: str) -> str:
         """Convert wildcards to SQL LIKE patterns."""
@@ -246,26 +307,18 @@ class SqlBackend(TextQueryBackend):
         elif isinstance(value, SigmaString) and self.is_valid_cidr(str_value):
             return self._create_cidr_expression(field, str_value)
 
-        field_meta = self.schema_metadata.get(field, {})
-        is_text_search = (
-            field_meta.get("type") == "text" and field_meta.get("index_type") == "text_search"
-        )
-        if is_text_search:
-            # Both interpolations sit inside single-quoted literals - escape
-            # (F-SIGMA-ESCAPING). The ILIKE keeps its %...% wildcards (literal-safe).
-            esc = self._escape_value(str_value)
-            return f"({field} GLOBAL IN INDEX idx_ngram_bf '{esc}' AND {field} ILIKE '%{esc}%')"
+        indexed = self._has_text_index(field)
 
         if field.lower().endswith("targetobject"):
-            return self._create_like_expression(field, str_value, "contains")
+            return self._create_like_expression(field, str_value, "contains", indexed)
 
         if modifier:
             if modifier == "endswith":
-                return self._create_like_expression(field, str_value, "endswith")
+                return self._create_like_expression(field, str_value, "endswith", indexed)
             elif modifier == "startswith":
-                return self._create_like_expression(field, str_value, "startswith")
+                return self._create_like_expression(field, str_value, "startswith", indexed)
             elif modifier == "contains":
-                return self._create_like_expression(field, str_value, "contains")
+                return self._create_like_expression(field, str_value, "contains", indexed)
             elif modifier == "re":
                 return self._create_match_expression(field, str_value)
 
@@ -275,32 +328,28 @@ class SqlBackend(TextQueryBackend):
                 and not str_value.startswith("*")
                 and str_value.count("*") == 1
             ):
-                return self._create_like_expression(field, str_value[:-1], "startswith")
+                return self._create_like_expression(field, str_value[:-1], "startswith", indexed)
             elif (
                 str_value.startswith("*")
                 and not str_value.endswith("*")
                 and str_value.count("*") == 1
             ):
-                return self._create_like_expression(field, str_value[1:], "endswith")
+                return self._create_like_expression(field, str_value[1:], "endswith", indexed)
             elif (
                 str_value.startswith("*") and str_value.endswith("*") and str_value.count("*") == 2
             ):
-                return self._create_like_expression(field, str_value[1:-1], "contains")
+                return self._create_like_expression(field, str_value[1:-1], "contains", indexed)
             else:
-                # F-SIGMA-ESCAPING: escape the SQL literal BEFORE mapping * -> %, so a
-                # crafted value (e.g. x*y' OR '1'='1) cannot break out of the
-                # single-quoted ILIKE literal. _escape_value leaves * untouched, so
-                # _convert_wildcards still maps the wildcards afterwards.
-                return f"{field} ILIKE '{self._convert_wildcards(self._escape_value(str_value))}'"
+                return self._create_wildcard_expression(field, str_value, indexed)
 
         if hasattr(value, "source"):
             source = str(value.source)
             if "|contains" in source:
-                return self._create_like_expression(field, str_value, "contains")
+                return self._create_like_expression(field, str_value, "contains", indexed)
             elif "|endswith" in source:
-                return self._create_like_expression(field, str_value, "endswith")
+                return self._create_like_expression(field, str_value, "endswith", indexed)
             elif "|startswith" in source:
-                return self._create_like_expression(field, str_value, "startswith")
+                return self._create_like_expression(field, str_value, "startswith", indexed)
             elif "|re" in source:
                 return self._create_match_expression(field, str_value)
 

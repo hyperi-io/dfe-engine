@@ -522,15 +522,15 @@ message,text,default,message""")
     }
 
 
-def test_text_field_warning(converter, text_schema_config, tmp_path, monkeypatch, capsys):
-    """Test warning generation for text fields without text_search index."""
+def test_text_field_warning(converter, text_schema_config, tmp_path, monkeypatch, captured_logs):
+    """A text column declaring no text-index use case is warned about by name."""
     schema_dir = tmp_path / "derived_schemas" / "text_schema"
     schema_dir.mkdir(parents=True, exist_ok=True)
     schema_file = schema_dir / "text_schema.csv"
-    schema_file.write_text("""column,type,index_type,sigma_field_name
-message,text,default,message""")
+    schema_file.write_text("""column,type,use_case,sigma_field_name
+message,text,dimension,message""")
 
-    schema_metadata = {"message": {"type": "text", "index_type": "default"}}
+    schema_metadata = {"message": {"type": "text", "use_case": "dimension"}}
 
     def mock_get_schema_mappings(self, schema_config, rule_name):
         mappings = {"message": "message"}
@@ -552,14 +552,12 @@ detection:
     rule_file.parent.mkdir(exist_ok=True)
     rule_file.write_text(rule_yaml)
 
-    # Convert the rule - warning will be logged via hyperi-pylib structlog to stderr
     schema_config = text_schema_config["schemas"]["text_schema"]
     converter.convert(str(rule_file), schema_config)
 
-    # Note: hyperi-pylib logger (structlog) outputs to stderr, not captured by caplog
-    # The warning IS emitted (verified in CI output) but structlog doesn't integrate with caplog
-    # We verify the conversion succeeds and trust that the warning is logged
-    # The actual warning message: "Field message is text type but missing text_search index"
+    assert any(
+        "message is text type but declares no text-index use case" in line for line in captured_logs
+    )
 
 
 def test_standard_source_fields(converter):

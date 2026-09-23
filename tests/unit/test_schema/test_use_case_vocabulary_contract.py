@@ -25,11 +25,17 @@ import ast
 from pathlib import Path
 
 import pytest
+from sigma.collection import SigmaCollection
 
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
 from dfe_engine.schema.schema_loader import SchemaLoader, resolve_registry_path
 from dfe_engine.services.schema import elastic_schema_service
 from dfe_engine.services.schema.elastic_schema_service import _map_es_type
+from dfe_engine.sigma.sigma_backend_clickhouse import (
+    TEXT_INDEX_USE_CASES,
+    SqlBackend,
+    declares_text_index,
+)
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.source.type_registry import RETIRED_USE_CASES, TypeRegistry
 from dfe_engine.yaml_utils import yaml_load
@@ -196,3 +202,81 @@ class TestTheRetiredVocabulary:
         ddl = DDLGenerator(registry).generate_create_table("events", [column], DDLConfig(db="dfe"))
 
         assert "INDEX idx_message" in ddl
+
+
+def _indexed_expression(use_case: str, registry: TypeRegistry) -> str:
+    """The expression the rendered INDEX line is built over, backticks stripped."""
+    column = SchemaColumn(name="message", type="text", use_case=use_case)
+    (line,) = DDLGenerator(registry)._index_defs(column)
+    between_name_and_type = line.split("INDEX idx_message ", 1)[1].split(" TYPE ", 1)[0]
+    return between_name_and_type.replace("`", "")
+
+
+def _queried_expression(use_case: str) -> str:
+    """The expression the Sigma backend filters on, read off the emitted predicate."""
+    backend = SqlBackend(schema_metadata={"message": {"type": "text", "use_case": use_case}})
+    rule = """
+        title: Contract
+        status: test
+        logsource: {category: test, product: test}
+        detection:
+            selection:
+                message|contains: 'needle'
+            condition: selection
+    """
+    return backend.convert(SigmaCollection.from_yaml(rule))[0].split(" LIKE ", 1)[0]
+
+
+class TestTheQuerySideReadsTheSameVocabulary:
+    """The Sigma backend gates its text-index query form on the same vocabulary.
+
+    It gated on the retired ``index_type`` / ``text_search`` pair instead, so the
+    branch could never execute and no test saw it (dfe-engine#497).
+    """
+
+    def test_the_backend_keys_on_names_the_registry_accepts(self):
+        """A gate keyed on a retired name can never fire."""
+        assert TEXT_INDEX_USE_CASES <= ACCEPTED, (
+            f"the Sigma backend keys its text-index path on "
+            f"{sorted(TEXT_INDEX_USE_CASES - ACCEPTED)}, which the registry rejects"
+        )
+
+    @pytest.mark.parametrize("use_case", sorted(TEXT_INDEX_USE_CASES))
+    def test_the_backend_keys_on_every_use_case_that_renders_a_text_index(
+        self, use_case: str, registry: TypeRegistry
+    ):
+        """A use case rendering a text index the query side ignores buys storage for nothing."""
+        (line,) = DDLGenerator(registry)._index_defs(
+            SchemaColumn(name="message", type="text", use_case=use_case)
+        )
+
+        assert "TYPE text(" in line
+
+    @pytest.mark.parametrize("retired", sorted(RETIRED_USE_CASES))
+    def test_a_retired_name_reaches_the_text_index_query_path_iff_its_current_name_does(
+        self, retired: str
+    ):
+        """Translation is one rename, so both spellings answer the same question."""
+        current = RETIRED_USE_CASES[retired]
+
+        assert declares_text_index({"use_case": retired}) == declares_text_index(
+            {"use_case": current}
+        )
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "the renderers index the bare column, so lower(col) LIKE prunes nothing yet: "
+            "dfe-engine#496's schema half (schema_ddl._INDEX_TEMPLATES here and "
+            "dfe-schemas render.py _INDEX_TEMPLATES) has still to index lower(col)"
+        ),
+    )
+    @pytest.mark.parametrize("use_case", sorted(TEXT_INDEX_USE_CASES))
+    def test_the_queried_expression_is_the_indexed_expression(
+        self, use_case: str, registry: TypeRegistry
+    ):
+        """ClickHouse prunes only when the filter names the expression the index holds.
+
+        Passing means the schema half landed and this xfail is the thing to delete.
+        """
+        assert _queried_expression(use_case) == _indexed_expression(use_case, registry)
