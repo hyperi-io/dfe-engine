@@ -22907,6 +22907,11 @@
             "title": "Source Name",
             "description": "The source these paths were discovered for."
           },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "Source version the discovery ran against. Compare it to the source's `current`: a version that is behind, or one not yet deployed, reads the landing table rather than the source's own, which is why an empty `paths` list can mean 'looked somewhere else' rather than 'nothing to promote'."
+          },
           "table": {
             "type": "string",
             "title": "Table",
@@ -22929,6 +22934,7 @@
         "type": "object",
         "required": [
           "source_name",
+          "version",
           "table",
           "json_column",
           "paths"

@@ -362,6 +362,14 @@ class JsonPathsResponse(BaseModel):
     """Discovered JSON paths for a source."""
 
     source_name: str = Field(description="The source these paths were discovered for.")
+    version: str = Field(
+        description=(
+            "Source version the discovery ran against. Compare it to the source's "
+            "`current`: a version that is behind, or one not yet deployed, reads the "
+            "landing table rather than the source's own, which is why an empty `paths` "
+            "list can mean 'looked somewhere else' rather than 'nothing to promote'."
+        )
+    )
     table: str = Field(
         description=(
             "Fully-qualified ClickHouse table actually queried ('db.table'). The source's "
@@ -1772,6 +1780,7 @@ async def discover_json_paths(
 
     return JsonPathsResponse(
         source_name=source_name,
+        version=_version_id,
         table=f"{db}.{target_table}",
         json_column=JSON_COLUMN,
         paths=[
