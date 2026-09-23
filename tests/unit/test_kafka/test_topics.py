@@ -15,6 +15,7 @@ from dfe_engine.kafka.topics import (
     source_topic_names,
     source_topic_specs,
     specs_for_sources,
+    stranded_source_topics,
     topic_status,
     topics_managed,
     topics_managed_at_startup,
@@ -794,3 +795,46 @@ class TestCredentialsFollowTheirBroker:
         )
         assert conf["sasl.username"] == "other-user"
         assert conf["sasl.password"] == "other-pass"
+
+
+class TestStrandedSourceTopics:
+    """A `_load` topic left behind by a version that dropped its transform.
+
+    scalo's resolver suppresses a `_land` topic whenever the matching `_load` one
+    exists, so the leftover stops the loader reading the topic the receiver is
+    still producing to. The deploy reports it; deleting it is a separate call.
+    """
+
+    class _Admin:
+        def __init__(self, present):
+            self._present = present
+
+        def list_topic_names(self):
+            return self._present
+
+    def test_a_leftover_load_topic_is_reported(self):
+        assert stranded_source_topics(
+            _source("syslog", transform=False),
+            admin=self._Admin(["syslog_land", "syslog_load"]),
+        ) == ["syslog_load"]
+
+    def test_nothing_is_stranded_when_the_version_still_transforms(self):
+        assert (
+            stranded_source_topics(_source(), admin=self._Admin(["filebeat_land", "filebeat_load"]))
+            == []
+        )
+
+    def test_nothing_is_stranded_when_the_broker_never_had_one(self):
+        assert (
+            stranded_source_topics(
+                _source("syslog", transform=False), admin=self._Admin(["syslog_land"])
+            )
+            == []
+        )
+
+    def test_an_unreachable_broker_strands_nothing_knowable(self):
+        class _Broken:
+            def list_topic_names(self):
+                raise RuntimeError("no broker")
+
+        assert stranded_source_topics(_source("syslog", transform=False), admin=_Broken()) == []

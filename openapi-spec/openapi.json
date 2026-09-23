@@ -29088,6 +29088,14 @@
             "title": "Topics Failed",
             "description": "Kafka topics that could not be created. Never fails the deploy - the schema is live and Kafka may not be in the path at all."
           },
+          "topics_stranded": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Topics Stranded",
+            "description": "Topics on the broker this version has no consumer for. A ``_load`` topic left by a version that dropped its transform suppresses the source's ``_land`` topic in the loader, so the source silently stops loading. Reported, never deleted: records may still be in flight on it."
+          },
           "apps_synced": {
             "items": {
               "type": "string"
