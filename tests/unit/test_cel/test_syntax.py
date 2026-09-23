@@ -74,7 +74,7 @@ class TestProfileMode:
 
     def test_profile_on_rejects_iteration(self) -> None:
         """With check_profile=True, iteration functions are profile violations."""
-        # pylib profile allows matches() but bans map/filter/exists/all
+        # the scalo profile allows matches() but bans map/filter/exists/all
         r = check_syntax('tags.exists(t, t == "pii")', check_profile=True)
         assert not r.valid
         assert len(r.errors) > 0

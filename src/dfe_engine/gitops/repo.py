@@ -8,7 +8,7 @@
 
 """Git mechanics for the deploy-specific gitops repo.
 
-Uses ``dulwich.porcelain`` (the same library hyperi-pylib's DirectoryConfigStore
+Uses ``dulwich.porcelain`` (the same library scalo's DirectoryConfigStore
 uses internally) so there is no shell-out to ``git``.
 
 Every remote op goes through :meth:`GitopsRepo._remote_op`: dulwich writes the

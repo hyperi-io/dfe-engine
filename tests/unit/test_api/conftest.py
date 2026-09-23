@@ -29,6 +29,9 @@ from tests.support.core_sources import write_landing_definition
 
 # The admin password these fixtures inject, as a deployment's secret store would.
 ADMIN_PASSWORD = "test-admin-pw"
+# The break-glass password the recovery_accounts fixture seeds, standing in for the
+# hash a deployment commits to its deploy repo.
+BREAKGLASS_PASSWORD = "test-breakglass-pw"
 
 
 @pytest.fixture
@@ -136,6 +139,32 @@ def client(app, api_settings: DFESettings) -> TestClient:
         )
 
         yield c
+
+
+@pytest.fixture
+def recovery_accounts(app, client):
+    """Both recovery credentials in the store, in the group carrying the admin role.
+
+    These fixtures run without gitops, so the boot seed creates ``admin`` but no
+    break-glass account -- there is nowhere durable to hold its hash. Depends on
+    ``client`` because the stores are built by the lifespan it enters. Returns the
+    app, so a test reads the stores back through ``recovery_accounts.state``.
+    """
+    from dfe_engine.auth.accounts import Account, hash_password
+    from dfe_engine.auth.breakglass import GROUP, USERNAME
+
+    app.state.account_store.put(
+        Account(
+            username=USERNAME,
+            # A real bcrypt hash: verify_password raises on an invalid salt, and
+            # the reset-password route checks the candidate against it.
+            password_hash=hash_password(BREAKGLASS_PASSWORD),
+            enabled=True,
+            groups=[GROUP],
+        )
+    )
+    app.state.group_store.add_member(GROUP, USERNAME)
+    return app
 
 
 @pytest.fixture

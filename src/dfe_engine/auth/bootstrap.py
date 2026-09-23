@@ -221,9 +221,9 @@ def bootstrap_auth(
     # Instantiate stores. A caller may inject a backend (e.g. a document store); the
     # default is the YAML file store. Accounts and groups share one backend.
     if account_store is None:
-        account_store = AccountStore(accounts_dir)
+        account_store = AccountStore(accounts_dir, admin_name=default_admin_name)
     if group_store is None:
-        group_store = GroupStore(groups_dir)
+        group_store = GroupStore(groups_dir, admin_name=default_admin_name)
     api_key_store = APIKeyStore(api_keys_dir)
 
     # Seed default groups if the store has none (backend-agnostic)
@@ -293,7 +293,9 @@ def _disable_retired_admin(
     """
     account = account_store.get(admin_name)
     if account is not None and account.enabled:
-        account_store.update(admin_name, enabled=False)
+        # The retirement fact in the deploy repo is what authorises disabling a
+        # protected name; the store refuses it from anywhere else.
+        account_store.update(admin_name, enabled=False, allow_protected=True)
         logger.info(f"Local admin '{admin_name}' is retired; disabled the account")
 
 

@@ -687,3 +687,83 @@ class TestDeleteAccount:
     def test_delete_requires_admin(self, client, viewer_headers):
         resp = client.delete("/api/v1/auth/accounts/admin", headers=viewer_headers)
         assert resp.status_code == 403
+
+
+# ── The protected-name floor (issue #505) ────────────────────
+
+
+@pytest.mark.parametrize("username", ["admin", "breakglass"])
+class TestProtectedAccounts:
+    """The native account router refuses the writes that lock an operator out."""
+
+    def test_put_enabled_false_is_refused(self, recovery_accounts, client, admin_headers, username):
+        resp = client.put(
+            f"/api/v1/auth/accounts/{username}",
+            json={"enabled": False},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["code"] == "protected_account"
+        assert recovery_accounts.state.account_store.get(username).enabled is True
+
+    def test_put_dropping_the_admin_group_is_refused(
+        self, recovery_accounts, client, admin_headers, username
+    ):
+        resp = client.put(
+            f"/api/v1/auth/accounts/{username}",
+            json={"groups": ["dfe-viewers"]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 403, resp.text
+        account = recovery_accounts.state.account_store.get(username)
+        assert account.groups == ["dfe-admins"]
+        assert "dfe-viewers" not in recovery_accounts.state.group_store.get("dfe-viewers").members
+
+    def test_delete_is_refused(self, recovery_accounts, client, admin_headers, username):
+        resp = client.delete(f"/api/v1/auth/accounts/{username}", headers=admin_headers)
+        assert resp.status_code == 403, resp.text
+        assert recovery_accounts.state.account_store.get(username) is not None
+
+    def test_rename_leaves_the_original_in_place(
+        self, recovery_accounts, client, admin_headers, username
+    ):
+        """A rename is a create plus a delete, and the delete is what refuses."""
+        created = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": f"{username}-renamed", "password": "s3cret-Pw", "groups": []},
+            headers=admin_headers,
+        )
+        assert created.status_code == 201
+        resp = client.delete(f"/api/v1/auth/accounts/{username}", headers=admin_headers)
+        assert resp.status_code == 403, resp.text
+        assert recovery_accounts.state.account_store.get(username) is not None
+
+    def test_password_reset_still_works(self, recovery_accounts, client, admin_headers, username):
+        resp = client.post(
+            f"/api/v1/auth/accounts/{username}/reset-password",
+            json={"new_password": "a-fresh-Pw-99"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert recovery_accounts.state.account_store.verify_password(username, "a-fresh-Pw-99")
+
+    def test_contact_edits_still_work(self, recovery_accounts, client, admin_headers, username):
+        resp = client.put(
+            f"/api/v1/auth/accounts/{username}",
+            json={"email": "ops@example.com", "name": "Recovery"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert recovery_accounts.state.account_store.get(username).email == "ops@example.com"
+
+    def test_adding_a_group_still_works(self, recovery_accounts, client, admin_headers, username):
+        resp = client.put(
+            f"/api/v1/auth/accounts/{username}",
+            json={"groups": ["dfe-admins", "dfe-viewers"]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert recovery_accounts.state.account_store.get(username).groups == [
+            "dfe-admins",
+            "dfe-viewers",
+        ]

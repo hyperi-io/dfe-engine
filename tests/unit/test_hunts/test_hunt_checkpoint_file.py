@@ -28,7 +28,7 @@ def setup_paths(tmp_path):
 
 @pytest.fixture
 def setup_hunt_logger(setup_paths):
-    """Return hyperi-pylib logger for hunt tests."""
+    """Return the scalo logger for hunt tests."""
     return logger
 
 

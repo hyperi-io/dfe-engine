@@ -26,6 +26,7 @@ from dfe_engine.auth.audit import (
 )
 from dfe_engine.auth.groups import Group, GroupStore
 from dfe_engine.auth.models import AuthenticationError
+from dfe_engine.auth.protected_accounts import resolve_floor
 
 # Broadest-wins precedence (highest first)
 _ROLE_TO_TEAM = {
@@ -55,19 +56,6 @@ class JitIdentityCollisionError(AuthenticationError):
         self.reason = reason
 
 
-def _protected_usernames(admin_name: str) -> frozenset[str]:
-    """The local credentials an IdP may never reach: the admin and break-glass.
-
-    ``admin_name`` is the deployment's configured override
-    (``settings.auth.local.admin_name``), resolved through the same helper the
-    bootstrap seeds with, so renaming the admin moves the floor with it.
-    """
-    from dfe_engine.auth.bootstrap import admin_account_name
-    from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
-
-    return frozenset({admin_account_name(admin_name), BREAKGLASS_USERNAME})
-
-
 class JitProvisioner:
     def __init__(
         self,
@@ -81,7 +69,8 @@ class JitProvisioner:
         self._groups = group_store
         self._hdx = hyperdx_client
         self._invite_tasks: set[asyncio.Task] = set()
-        self._protected = _protected_usernames(admin_name)
+        # One definition of what is protected, shared with the stores that enforce it.
+        self._protected = resolve_floor(admin_name).usernames
         self._bindings = dict(source_provider_bindings or {})
 
     @staticmethod

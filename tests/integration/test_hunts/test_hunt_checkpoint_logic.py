@@ -45,7 +45,7 @@ def ch_client():
 
 @pytest.fixture
 def test_logger(tmp_path):
-    """Return hyperi-pylib logger for hunt tests."""
+    """Return the scalo logger for hunt tests."""
     return logger
 
 

@@ -215,6 +215,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from dfe_engine.auth.accounts import DocuStoreAccountStore
         from dfe_engine.auth.groups import DocuStoreGroupStore
 
+        # The admin name the bootstrap seeds, so the protected-name floor moves
+        # with a renamed admin on this backend too.
         injected_account_store = DocuStoreAccountStore(
             doc_store,
             collection=settings.auth.accounts_store.collection,

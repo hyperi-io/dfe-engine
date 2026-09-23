@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any
 import bcrypt
 from pydantic import BaseModel, Field
 
+from dfe_engine.auth.protected_accounts import resolve_floor
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 if TYPE_CHECKING:
@@ -86,11 +87,17 @@ class AccountStore:
     Each account is a ``{username}.yaml`` file in ``accounts_dir``.
     The username is derived from the filename stem and is never stored
     inside the YAML body.
+
+    Attributes:
+        protected: The recovery credentials this store refuses to lock out
+            (:mod:`dfe_engine.auth.protected_accounts`). Public so a caller can
+            refuse a batch before applying any of it.
     """
 
-    def __init__(self, accounts_dir: Path) -> None:
+    def __init__(self, accounts_dir: Path, *, admin_name: str = "") -> None:
         self._dir = Path(accounts_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
+        self.protected = resolve_floor(admin_name)
 
     # ------------------------------------------------------------------
     # Public API
@@ -143,15 +150,33 @@ class AccountStore:
         self._write(path, account)
         return account
 
-    def put(self, account: Account) -> Account:
+    def put(self, account: Account, *, allow_protected: bool = False) -> Account:
         """Upsert a complete account (used to restore from the durable deploy repo).
 
         Unlike :meth:`create` / :meth:`reset_password`, this writes the account
         verbatim -- hash and timestamps included -- so a hydration pass can put back
         exactly what the deploy repo holds. Raises on an invalid username.
+
+        Args:
+            account: The record to store verbatim.
+            allow_protected: Write a recovery credential that the floor would
+                otherwise refuse -- a disabled admin restored from the deploy
+                repo. Reserved for the reconcile paths.
+
+        Returns:
+            The account as written.
+
+        Raises:
+            ValueError: The username is not a safe filename stem.
+            ProtectedAccountError: The record would leave a recovery credential
+                unable to log in.
         """
         if not _VALID_NAME.match(account.username):
             raise ValueError(f"Invalid account name: {account.username!r}")
+        if not allow_protected:
+            self.protected.check_account_state(
+                account.username, enabled=account.enabled, groups=account.groups
+            )
         self._write(self._path(account.username), account)
         return account
 
@@ -177,7 +202,7 @@ class AccountStore:
         """
         return [self._read(p) for p in sorted(self._dir.glob("*.yaml"))]
 
-    def update(self, username: str, **fields: object) -> Account:
+    def update(self, username: str, *, allow_protected: bool = False, **fields: object) -> Account:
         """Update mutable fields on an existing account.
 
         Permitted fields: ``enabled``, ``groups``, ``email``, ``phone``,
@@ -187,6 +212,8 @@ class AccountStore:
 
         Args:
             username: Account to update.
+            allow_protected: Disable or de-role a recovery credential -- admin
+                retirement, and nothing else.
             **fields: Fields to update.
 
         Returns:
@@ -194,12 +221,16 @@ class AccountStore:
 
         Raises:
             KeyError: If no account with *username* exists.
+            ProtectedAccountError: The update would disable a recovery
+                credential or drop it from the admin-role group.
         """
         path = self._path(username)
         if not path.exists():
             raise KeyError(username)
 
         account = self._read(path)
+        if not allow_protected:
+            self.protected.check_account_update(username, fields, account.groups)
         updates = {k: fields[k] for k in _UPDATABLE_FIELDS if k in fields}
         account = account.model_copy(update={**updates, "updated_at": _now()})
         self._write(path, account)
@@ -250,18 +281,23 @@ class AccountStore:
         self._write(path, account)
         return account
 
-    def delete(self, username: str) -> None:
+    def delete(self, username: str, *, allow_protected: bool = False) -> None:
         """Remove an account.
 
         Args:
             username: Account to delete.
+            allow_protected: Delete a recovery credential -- the e2e-server
+                store wipe, and nothing else.
 
         Raises:
             KeyError: If no account with *username* exists.
+            ProtectedAccountError: *username* is a recovery credential.
         """
         path = self._path(username)
         if not path.exists():
             raise KeyError(username)
+        if not allow_protected:
+            self.protected.check_account_delete(username)
         path.unlink()
 
     def verify_password(self, username: str, password: str) -> bool:
@@ -339,13 +375,23 @@ class DocuStoreAccountStore:
 
     Persists one :class:`Account` document per username (keyed and unique-indexed
     on ``username``) instead of one YAML file. Every domain rule - name
-    validation, bcrypt hashing, the unusable-password sentinel, and the
-    timing-safe :meth:`verify_password` - is identical to the YAML store, so the
-    two are drop-in interchangeable behind the same construction seam.
+    validation, bcrypt hashing, the unusable-password sentinel, the protected-name
+    floor, and the timing-safe :meth:`verify_password` - is identical to the YAML
+    store, so the two are drop-in interchangeable behind the same construction seam.
+
+    Attributes:
+        protected: The recovery credentials this store refuses to lock out.
     """
 
-    def __init__(self, store: DocuStore, *, collection: str = "accounts") -> None:
+    def __init__(
+        self,
+        store: DocuStore,
+        *,
+        collection: str = "accounts",
+        admin_name: str = "",
+    ) -> None:
         self._c = store.typed(collection, Account, key="username")
+        self.protected = resolve_floor(admin_name)
 
     def create(
         self,
@@ -377,10 +423,18 @@ class DocuStoreAccountStore:
         self._c.put(username, account)
         return account
 
-    def put(self, account: Account) -> Account:
-        """Upsert a complete account verbatim (restore from the durable deploy repo)."""
+    def put(self, account: Account, *, allow_protected: bool = False) -> Account:
+        """Upsert a complete account verbatim (restore from the durable deploy repo).
+
+        ``allow_protected`` writes a recovery credential the floor would refuse;
+        reserved for the reconcile paths. Raises ProtectedAccountError otherwise.
+        """
         if not _VALID_NAME.match(account.username):
             raise ValueError(f"Invalid account name: {account.username!r}")
+        if not allow_protected:
+            self.protected.check_account_state(
+                account.username, enabled=account.enabled, groups=account.groups
+            )
         self._c.put(account.username, account)
         return account
 
@@ -392,11 +446,17 @@ class DocuStoreAccountStore:
         """Return all accounts, sorted by username."""
         return self._c.list()
 
-    def update(self, username: str, **fields: object) -> Account:
-        """Update permitted fields on an account. Raises KeyError if missing."""
+    def update(self, username: str, *, allow_protected: bool = False, **fields: object) -> Account:
+        """Update permitted fields on an account. Raises KeyError if missing.
+
+        ``allow_protected`` disables or de-roles a recovery credential -- admin
+        retirement only. Raises ProtectedAccountError otherwise.
+        """
         account = self._c.get(username)
         if account is None:
             raise KeyError(username)
+        if not allow_protected:
+            self.protected.check_account_update(username, fields, account.groups)
         updates = {k: fields[k] for k in _UPDATABLE_FIELDS if k in fields}
         account = account.model_copy(update={**updates, "updated_at": _now()})
         self._c.put(username, account)
@@ -421,10 +481,18 @@ class DocuStoreAccountStore:
         self._c.put(username, account)
         return account
 
-    def delete(self, username: str) -> None:
-        """Remove an account. Raises KeyError if it does not exist."""
-        if not self._c.delete(username):
+    def delete(self, username: str, *, allow_protected: bool = False) -> None:
+        """Remove an account. Raises KeyError if it does not exist.
+
+        ``allow_protected`` deletes a recovery credential -- the e2e-server store
+        wipe only. Raises ProtectedAccountError otherwise.
+        """
+        # Existence first, so a missing name answers KeyError on both backends.
+        if self._c.get(username) is None:
             raise KeyError(username)
+        if not allow_protected:
+            self.protected.check_account_delete(username)
+        self._c.delete(username)
 
     def verify_password(self, username: str, password: str) -> bool:
         """Timing-safe password check - identical semantics to the YAML store."""
