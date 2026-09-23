@@ -11,7 +11,7 @@
 Loads the shared fixture ``tests/fixtures/cel_classifier_parity.json`` and
 runs every entry through the Python classifier in
 ``dfe_engine.cel.classify``. The Rust classifier in
-``hyperi-rustlib/src/transport/filter/classify.rs`` ships an identical
+``scalo-rs/src/transport/filter/classify.rs`` ships an identical
 fixture and an identical test (``tests/transport_filter.rs``) that asserts
 the same results.
 
@@ -23,7 +23,7 @@ differently from the runtime — this test catches that drift early.
 The fixture file lives in two places:
 
 * ``/projects/dfe-engine/tests/fixtures/cel_classifier_parity.json`` (this side)
-* ``/projects/hyperi-rustlib/tests/fixtures/cel_classifier_parity.json`` (Rust side)
+* ``/projects/scalo-rs/tests/fixtures/cel_classifier_parity.json`` (Rust side)
 
 Keep them byte-identical when adding cases.
 """
@@ -90,22 +90,22 @@ def test_python_classifier_matches_fixture(case: dict) -> None:
         )
 
 
-RUSTLIB_COPY = Path("/projects/hyperi-rustlib/tests/fixtures/cel_classifier_parity.json")
+SCALO_RS_COPY = Path("/projects/scalo-rs/tests/fixtures/cel_classifier_parity.json")
 
 
-def test_fixture_is_in_sync_with_rustlib_copy() -> None:
+def test_fixture_is_in_sync_with_scalo_rs_copy() -> None:
     """Sanity check: the dfe-engine fixture must be byte-identical to the
-    rustlib copy. If this fails, run::
+    scalo-rs copy. If this fails, run::
 
         cp tests/fixtures/cel_classifier_parity.json \\
-           /projects/hyperi-rustlib/tests/fixtures/cel_classifier_parity.json
+           /projects/scalo-rs/tests/fixtures/cel_classifier_parity.json
     """
-    if not RUSTLIB_COPY.exists():
-        pytest.skip("rustlib checkout not available; skipping cross-repo sync check")
+    if not SCALO_RS_COPY.exists():
+        pytest.skip("scalo-rs checkout not available; skipping cross-repo sync check")
 
     local_bytes = FIXTURE_PATH.read_bytes()
-    rustlib_bytes = RUSTLIB_COPY.read_bytes()
-    assert local_bytes == rustlib_bytes, (
+    scalo_rs_bytes = SCALO_RS_COPY.read_bytes()
+    assert local_bytes == scalo_rs_bytes, (
         "Python and Rust fixtures have diverged — copy one over the other to re-sync"
     )
 
@@ -113,20 +113,20 @@ def test_fixture_is_in_sync_with_rustlib_copy() -> None:
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "The sync check keys on the absolute path /projects/hyperi-rustlib/..., which "
+        "The sync check keys on the absolute path /projects/scalo-rs/..., which "
         "resolves only where a sibling checkout happens to sit, so it skips on every CI run "
         "and the two fixtures can diverge unreported. The Rust copy must be reachable from "
         "repo state -- a submodule, or a vendored copy under tests/fixtures/ refreshed by a "
         "release step. Remove this marker once it is."
     ),
 )
-def test_rustlib_fixture_reference_resolves_from_repo_state() -> None:
+def test_scalo_rs_fixture_reference_resolves_from_repo_state() -> None:
     """The cross-repo sync check must not depend on a machine-specific path.
 
     A guard whose precondition is "someone happens to have cloned another repo
     next door" is a guard CI never runs. The reference has to come from
     something the repo carries.
     """
-    assert not RUSTLIB_COPY.is_absolute() or RUSTLIB_COPY.is_relative_to(
+    assert not SCALO_RS_COPY.is_absolute() or SCALO_RS_COPY.is_relative_to(
         Path(__file__).resolve().parents[3]
-    ), f"cross-repo fixture reference is outside the repo: {RUSTLIB_COPY}"
+    ), f"cross-repo fixture reference is outside the repo: {SCALO_RS_COPY}"

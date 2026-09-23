@@ -5,7 +5,7 @@ plugin-based architecture.
 
 Storage model:
 - YAML directory is the Single Source of Truth (SSoT)
-- Backed by DirectoryConfigStore from hyperi-pylib
+- Backed by DirectoryConfigStore from scalo
 - In-memory cache with background polling refresh
 - Optional git-aware writes (auto-commit, branch management, push)
 - Rust services read the YAML files directly

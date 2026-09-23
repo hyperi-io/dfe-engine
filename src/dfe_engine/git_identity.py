@@ -72,7 +72,7 @@ def commit_file(
     """Stage and commit a single file with split author/committer identities.
 
     Mirrors ``DirectoryConfigStore._git_commit`` but records ``committer``
-    separately from ``author`` (pylib collapses the two). A no-op when the
+    separately from ``author`` (scalo collapses the two). A no-op when the
     store is not git-backed.
 
     Args:
