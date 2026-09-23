@@ -12,7 +12,7 @@ Promoted from the ``.tmp/redpanda_lifecycle.py`` scratch driver (up: ensure
 resource group -> create serverless cluster -> wait on the provider operation ->
 mint a SCRAM-512 user + ACLs; down: delete the user BEFORE the cluster, then
 assert the cluster list is empty), onto scalo's :class:`~scalo.http.HttpClient`
-(retries/timeouts/observability - never raw ``urllib``/``httpx``, pylib policy)
+(retries/timeouts/observability - never raw ``urllib``/``httpx``, scalo policy)
 behind an injectable ``http_factory`` so tests mock the HTTP layer entirely (the
 same shape ``dfe_engine.clickhouse.cloud.CloudService`` uses).
 
@@ -94,7 +94,7 @@ class RedpandaCloudProvider(ManagedKafkaProvider):
         self._token_cache: str | None = None
 
     def _default_http_factory(self) -> Any:
-        # Lazy import (pylib convention) so importing this module never drags httpx.
+        # Lazy import (scalo convention) so importing this module never drags httpx.
         from scalo.http import HttpClient
 
         return HttpClient()
