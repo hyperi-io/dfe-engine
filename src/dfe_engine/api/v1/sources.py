@@ -718,7 +718,11 @@ async def list_sources(
     ),
     sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
-    """List sources with pagination, search, filtering, and a full object tree."""
+    """List sources with pagination, search, filtering, and a full object tree.
+
+    The landing source (``main``) is always the first item when it is in the
+    result set; remaining sources keep the requested sort.
+    """
     raw_sources = registry.list_sources(enabled_only=bool(enabled))
 
     if enabled is False:
@@ -726,6 +730,7 @@ async def list_sources(
 
     raw_sources = apply_search(raw_sources, search, ["source", "display_name", "description"])
     raw_sources = apply_sort(raw_sources, sort_by, sort_order)
+    raw_sources = _pin_landing_source_first(raw_sources)
 
     summaries = [_to_summary(row) for row in raw_sources]
     return PaginatedSourceSummaryResponse.from_summaries(
@@ -1289,7 +1294,7 @@ async def deploy_source_schema(
     settings: Settings,
     request: Request,
     version: str | None = Query(
-        None, description="Source version id (defaults to deployed_version)"
+        None, description="Source version id (defaults to the source's current version)"
     ),
     dry_run: bool = Query(
         False, description="Plan only: generate + validate the DDL without applying it"
@@ -1306,23 +1311,9 @@ async def deploy_source_schema(
     from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
     from dfe_engine.source.type_registry import TypeRegistry
 
-    try:
-        source = registry.get_source(name)
-    except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Source '{name}' not found"},
-        ) from None
-
-    version_id = version or source.runtime_version_id()
-    if version_id not in source.versions:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Version '{version_id}' not found for source '{name}'",
-            },
-        )
+    # Targets current: defaulting to the deployed version makes an unparameterised
+    # deploy a no-op that can never advance.
+    source, version_id = _resolve_source_version(registry, name, version, default_current=True)
 
     snap = source.versions[version_id]
     if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
@@ -2102,6 +2093,13 @@ def _plan_to_response(plan: SourcePlanArtifact) -> SourcePlanResponse:
         ready=plan.ready,
         ready_reason=plan.ready_reason,
     )
+
+
+def _pin_landing_source_first(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep the landing source (``main``) first; other rows keep their order."""
+    landing = [row for row in rows if row.get("source") == DEFAULT_LANDING_LABEL]
+    rest = [row for row in rows if row.get("source") != DEFAULT_LANDING_LABEL]
+    return landing + rest
 
 
 def _to_summary(raw: dict[str, Any]) -> SourceSummaryObject:

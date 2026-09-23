@@ -275,8 +275,7 @@ class TestValidateLoaderTransport:
         assert any("50051" in e and "6000" in e for e in errors)
 
     def test_a_listen_without_a_port_is_refused(self):
-        # The address under test is the malformed input, not a binding.
-        config = self._make_grpc(listen="0.0.0.0")  # noqa: S104
+        config = self._make_grpc(listen="127.0.0.1")
         errors, _ = run_loader_validation(config)
         assert any("port number" in e for e in errors)
 

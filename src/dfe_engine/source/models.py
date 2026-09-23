@@ -1019,14 +1019,15 @@ def source_from_write(write: SourceWriteRequest, *, source_name: str) -> Source:
 def _build_merged_version_snapshot(existing: Source, write: SourceWriteRequest) -> SourceVersion:
     """Build the version snapshot for a write, inheriting unset optional fields.
 
-    ``transport`` and ``archive`` inherit on ABSENCE from the body, not on their
-    value: ``transport: null`` is how a source is put back on the deployment
+    ``transform``, ``transport`` and ``archive`` all inherit on ABSENCE from the
+    body, not on their value: ``transform: null`` is how a source releases its
+    transform app, ``transport: null`` is how it goes back on the deployment
     default, and ``archive: false`` is how archiving is turned off, so a PUT that
-    only edits the description must not read as either.
+    only edits the description must not read as any of them.
     """
     snapshot = write.to_version_snapshot()
     inherited: dict[str, Any] = {}
-    if write.transform is None and existing.transform is not None:
+    if "transform" not in write.model_fields_set and existing.transform is not None:
         inherited["transform"] = existing.transform
     for field in ("transport", "archive"):
         if field not in write.model_fields_set:

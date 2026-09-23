@@ -3090,7 +3090,7 @@
           "Sources"
         ],
         "summary": "List Sources",
-        "description": "List sources with pagination, search, filtering, and a full object tree.",
+        "description": "List sources with pagination, search, filtering, and a full object tree.\n\nThe landing source (``main``) is always the first item when it is in the\nresult set; remaining sources keep the requested sort.",
         "operationId": "list_sources_api_v1_sources_get",
         "parameters": [
           {
@@ -3818,10 +3818,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Source version id (defaults to deployed_version)",
+              "description": "Source version id (defaults to the source's current version)",
               "title": "Version"
             },
-            "description": "Source version id (defaults to deployed_version)"
+            "description": "Source version id (defaults to the source's current version)"
           },
           {
             "name": "dry_run",
@@ -26362,14 +26362,8 @@
             "title": "Results"
           },
           "diff": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SchemaDiff"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "$ref": "#/components/schemas/SchemaDiff",
+            "title": "Diff",
             "description": "Populated only when dry_run=true"
           }
         },
@@ -29156,7 +29150,7 @@
         "properties": {
           "new_columns": {
             "items": {
-              "$ref": "#/components/schemas/dfe_engine__api__v1__schemas__SchemaColumn"
+              "$ref": "#/components/schemas/DraftColumn"
             },
             "type": "array",
             "title": "New Columns"
