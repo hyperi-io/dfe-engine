@@ -162,6 +162,7 @@ class TestGet:
         assert account.email == ""
         assert account.phone == ""
         assert account.name == ""
+        assert account.blocked is False
 
 
 # ---------------------------------------------------------------------------
@@ -299,6 +300,13 @@ class TestUpdate:
         assert acct.external is True
         assert acct.source_provider == "entra"
         assert acct.last_login_at == "2026-04-03T00:00:00Z"
+        assert acct.blocked is False
+
+    def test_update_blocked_round_trips(self, store):
+        store.create("alice", "password123")
+        updated = store.update("alice", blocked=True)
+        assert updated.blocked is True
+        assert store.get("alice").blocked is True
 
 
 # ---------------------------------------------------------------------------

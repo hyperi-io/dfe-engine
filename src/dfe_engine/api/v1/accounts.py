@@ -111,6 +111,7 @@ class CreateAccountRequest(BaseModel):
 class UpdateAccountRequest(BaseModel):
     groups: list[str] | None = Field(None, description="Replace group memberships")
     enabled: bool | None = Field(None, description="Enable or disable the account")
+    blocked: bool | None = Field(None, description="Block the account from holding a session")
     email: str | None = Field(None, min_length=1, description="Contact email")
     phone: str | None = Field(None, description="Contact phone")
     name: str | None = Field(None, description="Display name")
@@ -177,6 +178,7 @@ class AccountResponse(BaseModel):
 
     username: str
     enabled: bool
+    blocked: bool
     groups: list[str]
     email: str
     phone: str = ""
@@ -199,6 +201,7 @@ def _account_response(account: Account) -> AccountResponse:
     return AccountResponse(
         username=account.username,
         enabled=account.enabled,
+        blocked=account.blocked,
         groups=account.groups,
         email=account.email,
         phone=account.phone,
@@ -434,7 +437,7 @@ async def update_account(
     request: Request,
     settings: Settings,
 ):
-    """Update account groups, enabled status, or contact fields (admin only)."""
+    """Update account groups, enabled/blocked status, or contact fields (admin only)."""
     from dfe_engine.auth.accounts import AccountStore
     from dfe_engine.auth.membership import sync_group_members_for_account_groups_change
 
@@ -446,6 +449,8 @@ async def update_account(
         update_fields["groups"] = body.groups
     if body.enabled is not None:
         update_fields["enabled"] = body.enabled
+    if body.blocked is not None:
+        update_fields["blocked"] = body.blocked
     if body.groups is not None:
         old_groups = set(existing.groups)
         new_groups = set(body.groups)

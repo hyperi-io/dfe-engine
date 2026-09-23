@@ -83,6 +83,8 @@ class ProtectedFloor:
             return
         if "enabled" in fields and not fields["enabled"]:
             raise ProtectedAccountError(_disable_message(username))
+        if fields.get("blocked"):
+            raise ProtectedAccountError(_disable_message(username))
         if "groups" not in fields or self.group not in current_groups:
             return
         if self.group not in _as_names(fields["groups"]):
@@ -93,6 +95,7 @@ class ProtectedFloor:
         username: str,
         *,
         enabled: bool,
+        blocked: bool = False,
         groups: Collection[str],
     ) -> None:
         """Refuse a whole-record write that lands a protected account locked out.
@@ -103,6 +106,7 @@ class ProtectedFloor:
         Args:
             username: The account being written.
             enabled: The ``enabled`` value the write would store.
+            blocked: The ``blocked`` value the write would store.
             groups: The group list the write would store.
 
         Raises:
@@ -111,7 +115,7 @@ class ProtectedFloor:
         """
         if username not in self.usernames:
             return
-        if not enabled:
+        if not enabled or blocked:
             raise ProtectedAccountError(_disable_message(username))
         if self.group not in groups:
             raise ProtectedAccountError(_derole_message(username, self.group))

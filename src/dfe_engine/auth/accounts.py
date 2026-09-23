@@ -62,6 +62,7 @@ class Account(BaseModel):
     username: str
     password_hash: str
     enabled: bool = True
+    blocked: bool = False
     groups: list[str] = Field(default_factory=list)
     external: bool = False
     source_provider: str = ""
@@ -79,6 +80,14 @@ class Account(BaseModel):
     Stored inline on the account and round-trips through both backends. Never put
     secrets here - a broad account read returns this blob; sensitive attributes
     live in the separate keyed store (:mod:`dfe_engine.auth.attributes`)."""
+
+    def session_denied(self) -> tuple[str, str] | None:
+        """Return ``(code, message)`` when this account may not hold a session."""
+        if self.blocked:
+            return "account_blocked", "Account blocked"
+        if not self.enabled:
+            return "unauthorized", "Account disabled"
+        return None
 
 
 class AccountStore:
@@ -175,7 +184,10 @@ class AccountStore:
             raise ValueError(f"Invalid account name: {account.username!r}")
         if not allow_protected:
             self.protected.check_account_state(
-                account.username, enabled=account.enabled, groups=account.groups
+                account.username,
+                enabled=account.enabled,
+                blocked=account.blocked,
+                groups=account.groups,
             )
         self._write(self._path(account.username), account)
         return account
@@ -205,10 +217,10 @@ class AccountStore:
     def update(self, username: str, *, allow_protected: bool = False, **fields: object) -> Account:
         """Update mutable fields on an existing account.
 
-        Permitted fields: ``enabled``, ``groups``, ``email``, ``phone``,
-        ``name``, plus the external-identity stamps. Updating ``username`` or
-        ``password_hash`` directly is not permitted (use :meth:`reset_password`
-        to change the password).
+        Permitted fields: ``enabled``, ``blocked``, ``groups``, ``email``,
+        ``phone``, ``name``, plus the external-identity stamps. Updating
+        ``username`` or ``password_hash`` directly is not permitted (use
+        :meth:`reset_password` to change the password).
 
         Args:
             username: Account to update.
@@ -359,6 +371,7 @@ class AccountStore:
 # password changes only via reset_password). Shared by both store backends.
 _UPDATABLE_FIELDS = (
     "enabled",
+    "blocked",
     "groups",
     "external",
     "source_provider",
@@ -433,7 +446,10 @@ class DocuStoreAccountStore:
             raise ValueError(f"Invalid account name: {account.username!r}")
         if not allow_protected:
             self.protected.check_account_state(
-                account.username, enabled=account.enabled, groups=account.groups
+                account.username,
+                enabled=account.enabled,
+                blocked=account.blocked,
+                groups=account.groups,
             )
         self._c.put(account.username, account)
         return account

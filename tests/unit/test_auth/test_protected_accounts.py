@@ -64,6 +64,13 @@ class TestAccountStoreRefuses:
         assert store.get(username).enabled is True
 
     @pytest.mark.parametrize("username", PROTECTED)
+    def test_block_is_refused(self, store, username):
+        _seed(store, username)
+        with pytest.raises(ProtectedAccountError):
+            store.update(username, blocked=True)
+        assert store.get(username).blocked is False
+
+    @pytest.mark.parametrize("username", PROTECTED)
     def test_delete_is_refused(self, store, username):
         _seed(store, username)
         with pytest.raises(ProtectedAccountError):

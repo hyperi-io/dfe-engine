@@ -447,3 +447,31 @@ def test_callback_refuses_an_idp_asserting_a_local_account(client, app):
     assert resp.status_code == 401
     assert "access_token" not in resp.json()
     assert store.get("bob").email == "bob@dfe.local"
+
+
+def test_callback_refuses_a_disabled_external_account(client, app):
+    app.state.oidc_rp = _SubjectOidcRp("stub-user")
+    store = app.state.account_store
+    store.create("stub-user", "", groups=["dfe-viewers"])
+    store.update("stub-user", external=True, source_provider="stub", enabled=False)
+
+    resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+
+    assert resp.status_code == 401
+    assert "access_token" not in resp.json()
+    assert resp.json()["message"] == "Account disabled"
+    assert store.get("stub-user").last_login_at == ""
+
+
+def test_callback_refuses_a_blocked_external_account(client, app):
+    app.state.oidc_rp = _SubjectOidcRp("stub-user")
+    store = app.state.account_store
+    store.create("stub-user", "", groups=["dfe-viewers"])
+    store.update("stub-user", blocked=True, external=True, source_provider="stub")
+
+    resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+
+    assert resp.status_code == 401
+    assert "access_token" not in resp.json()
+    assert resp.json()["message"] == "Account blocked"
+    assert store.get("stub-user").last_login_at == ""

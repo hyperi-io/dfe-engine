@@ -25,7 +25,7 @@ from dfe_engine.auth.audit import (
     audit_permission_denied,
 )
 from dfe_engine.auth.groups import Group, GroupStore
-from dfe_engine.auth.jit import JitIdentityCollisionError
+from dfe_engine.auth.jit import JitAccountUnavailableError, JitIdentityCollisionError
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.settings import DFESettings, is_dev_posture
 
@@ -514,10 +514,29 @@ def resolve_live_groups_for_user(
     return list(fallback_groups or [])
 
 
-def require_local_account_enabled(request: Request, user_id: str) -> None:
-    """Reject JWT auth when the backing local account exists and is disabled.
+def account_for_session_subject(store: Any, user_id: str):
+    """Look up the store account for a session subject.
 
-    Skips ``apikey:…`` subjects and usernames with no account record.
+    Tries the raw subject first, then the JIT-sanitised stem an OIDC login
+    writes, so a JWT ``sub`` of ``alice@example.com`` matches
+    ``alice-example-com.yaml``.
+    """
+    account = store.get(user_id)
+    if account is not None:
+        return account
+    from dfe_engine.auth.jit import JitProvisioner
+
+    stem = JitProvisioner.sanitise_username(user_id)
+    if stem and stem != user_id:
+        return store.get(stem)
+    return None
+
+
+def require_local_account_enabled(request: Request, user_id: str) -> None:
+    """Reject a session when the backing account is disabled or blocked.
+
+    Looks up the raw subject and the JIT-sanitised stem. Skips ``apikey:…``
+    subjects and usernames with no account record.
     """
     if user_id.startswith("apikey:"):
         return
@@ -526,13 +545,16 @@ def require_local_account_enabled(request: Request, user_id: str) -> None:
     if account_store is None:
         return
 
-    account = account_store.get(user_id)
-    if account is None or account.enabled:
+    account = account_for_session_subject(account_store, user_id)
+    if account is None:
         return
-
+    denied = account.session_denied()
+    if denied is None:
+        return
+    code, message = denied
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail={"code": "unauthorized", "message": "Account disabled"},
+        detail={"code": code, "message": message},
         headers={"WWW-Authenticate": "Bearer"},
     )
 
@@ -595,9 +617,17 @@ async def get_current_user(request: Request) -> AuthContext:
                     detail={"code": "unauthorized", "message": str(exc)},
                     headers={"WWW-Authenticate": "Bearer"},
                 ) from exc
+            except JitAccountUnavailableError as exc:
+                audit_login_denied(oidc_subject, "oidc", client_ip, exc.reason)
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail={"code": exc.reason, "message": str(exc)},
+                    headers={"WWW-Authenticate": "Bearer"},
+                ) from exc
             except Exception:
                 logger.exception("JIT provisioning failed", user_id=oidc_subject)
 
+        require_local_account_enabled(request, oidc_subject)
         return AuthContext(
             user_id=oidc_subject,
             email=oidc_email,

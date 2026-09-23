@@ -597,7 +597,7 @@
           "Accounts"
         ],
         "summary": "Update Account",
-        "description": "Update account groups, enabled status, or contact fields (admin only).",
+        "description": "Update account groups, enabled/blocked status, or contact fields (admin only).",
         "operationId": "update_account_api_v1_auth_accounts__username__put",
         "parameters": [
           {
@@ -17723,6 +17723,10 @@
             "type": "boolean",
             "title": "Enabled"
           },
+          "blocked": {
+            "type": "boolean",
+            "title": "Blocked"
+          },
           "groups": {
             "items": {
               "type": "string"
@@ -17762,6 +17766,7 @@
         "required": [
           "username",
           "enabled",
+          "blocked",
           "groups",
           "email",
           "external",
@@ -33046,6 +33051,18 @@
             "title": "Enabled",
             "description": "Enable or disable the account"
           },
+          "blocked": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked",
+            "description": "Block the account from holding a session"
+          },
           "email": {
             "anyOf": [
               {
@@ -33440,6 +33457,11 @@
             "type": "boolean",
             "title": "External",
             "description": "True when the account authenticates through an identity provider"
+          },
+          "blocked": {
+            "type": "boolean",
+            "title": "Blocked",
+            "description": "True when an operator has blocked this account from holding a session"
           }
         },
         "type": "object",
@@ -33447,7 +33469,8 @@
           "org_id",
           "user_id",
           "roles",
-          "external"
+          "external",
+          "blocked"
         ],
         "title": "UserResponse"
       },
