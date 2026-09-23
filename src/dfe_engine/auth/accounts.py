@@ -224,7 +224,7 @@ class AccountStore:
         external-identity stamps. Updating ``username`` or ``password_hash``
         directly is not permitted (use :meth:`reset_password` to change the
         password). Re-enabling or unblocking always clears the matching
-        ``*_at`` field. Disabling or blocking stamps it when it is empty.
+        ``*_at`` field. Disabling or blocking always writes a new stamp.
 
         Args:
             username: Account to update.
@@ -247,9 +247,7 @@ class AccountStore:
         account = self._read(path)
         if not allow_protected:
             self.protected.check_account_update(username, fields, account.groups)
-        updates = _apply_access_stamps(
-            account, {k: fields[k] for k in _UPDATABLE_FIELDS if k in fields}
-        )
+        updates = _apply_access_stamps({k: fields[k] for k in _UPDATABLE_FIELDS if k in fields})
         account = account.model_copy(update={**updates, "updated_at": _now()})
         self._write(path, account)
         return account
@@ -481,9 +479,7 @@ class DocuStoreAccountStore:
             raise KeyError(username)
         if not allow_protected:
             self.protected.check_account_update(username, fields, account.groups)
-        updates = _apply_access_stamps(
-            account, {k: fields[k] for k in _UPDATABLE_FIELDS if k in fields}
-        )
+        updates = _apply_access_stamps({k: fields[k] for k in _UPDATABLE_FIELDS if k in fields})
         account = account.model_copy(update={**updates, "updated_at": _now()})
         self._c.put(username, account)
         return account
@@ -540,25 +536,17 @@ class DocuStoreAccountStore:
 # ------------------------------------------------------------------
 
 
-def _apply_access_stamps(account: Account, updates: dict[str, object]) -> dict[str, object]:
+def _apply_access_stamps(updates: dict[str, object]) -> dict[str, object]:
     """Stamp or clear ``disabled_at`` / ``blocked_at`` when those flags change.
 
-    Re-enabling or unblocking always resets the matching stamp to empty, even
-    if the caller passed a leftover timestamp. Re-disabling or re-blocking an
-    account that already has a stamp leaves that stamp in place.
+    Disabling or blocking always writes a new stamp. Re-enabling or unblocking
+    always resets the matching stamp to empty.
     """
     stamped = dict(updates)
     if "enabled" in stamped:
-        if stamped["enabled"]:
-            stamped["disabled_at"] = ""
-        elif account.enabled or not account.disabled_at:
-            stamped.setdefault("disabled_at", _now())
+        stamped["disabled_at"] = "" if stamped["enabled"] else _now()
     if "blocked" in stamped:
-        if stamped["blocked"]:
-            if not account.blocked or not account.blocked_at:
-                stamped.setdefault("blocked_at", _now())
-        else:
-            stamped["blocked_at"] = ""
+        stamped["blocked_at"] = _now() if stamped["blocked"] else ""
     return stamped
 
 

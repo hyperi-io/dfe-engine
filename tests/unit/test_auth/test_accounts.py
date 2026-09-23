@@ -257,6 +257,21 @@ class TestUpdate:
         assert account.disabled_at == ""
         assert store.get("alice").disabled_at == ""
 
+    def test_disable_sets_a_new_timestamp(self, store):
+        store.create("alice", "password123")
+        first = store.update("alice", enabled=False)
+        store.update("alice", enabled=True)
+        time.sleep(0.01)
+        second = store.update(
+            "alice",
+            enabled=False,
+            disabled_at="2026-01-01T00:00:00+00:00",
+        )
+        assert second.enabled is False
+        assert second.disabled_at != ""
+        assert second.disabled_at != "2026-01-01T00:00:00+00:00"
+        assert second.disabled_at != first.disabled_at
+
     def test_update_change_groups(self, store):
         store.create("alice", "password123", groups=["ops"])
         account = store.update("alice", groups=["admins", "dev"])
@@ -341,6 +356,21 @@ class TestUpdate:
         assert account.blocked is False
         assert account.blocked_at == ""
         assert store.get("alice").blocked_at == ""
+
+    def test_block_sets_a_new_timestamp(self, store):
+        store.create("alice", "password123")
+        first = store.update("alice", blocked=True)
+        store.update("alice", blocked=False)
+        time.sleep(0.01)
+        second = store.update(
+            "alice",
+            blocked=True,
+            blocked_at="2026-01-01T00:00:00+00:00",
+        )
+        assert second.blocked is True
+        assert second.blocked_at != ""
+        assert second.blocked_at != "2026-01-01T00:00:00+00:00"
+        assert second.blocked_at != first.blocked_at
 
 
 # ---------------------------------------------------------------------------
