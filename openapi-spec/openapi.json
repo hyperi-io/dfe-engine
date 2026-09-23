@@ -3214,7 +3214,7 @@
           "Sources"
         ],
         "summary": "Create Source",
-        "description": "Create a new source from a flat source definition (initial version ``1.0.0``).\n\n``header`` is optional: when omitted, no common-header profile is stored on the\nversion (DDL compose uses meta/derived columns only until a header is set).",
+        "description": "Create a new source from a flat source definition (initial version ``1.0.0``).\n\n``header`` is optional: when omitted, no common-header profile is stored on the\nversion (DDL compose uses meta/derived columns only until a header is set).\n\nA schema pin naming a schema that does not exist is ACCEPTED here and REFUSED\nby ``/sources/import`` (#501), so the same stored document is valid or invalid\ndepending on how it arrived. That asymmetry is known and undecided -- #504.\nAuthoring a source before its schema is a real ordering, and making this path\nas strict as import forbids it.",
         "operationId": "create_source_api_v1_sources_post",
         "requestBody": {
           "required": true,
@@ -3917,7 +3917,7 @@
           "Sources"
         ],
         "summary": "Update Source",
-        "description": "Update a source from a flat revision body.\n\nBefore the first deploy, edits update the working version in place. After deploy, a new\nmajor version is created only when ``current`` equals ``deployed_version`` and schema pins\n(``meta_schema``, ``meta_schema_version``, ``derived_schema``, ``additional_fields``),\n``views``, or ``transform`` change. Draft versions (``current`` not deployed) update\nin place.\n\n``header`` is optional: when omitted, no header is stored on the written version snapshot\n(same as create). Send ``header`` explicitly to set or change it.",
+        "description": "Update a source from a flat revision body.\n\nBefore the first deploy, edits update the working version in place. After deploy, a new\nmajor version is created only when ``current`` equals ``deployed_version`` and schema pins\n(``meta_schema``, ``meta_schema_version``, ``derived_schema``, ``additional_fields``),\n``views``, or ``transform`` change. Draft versions (``current`` not deployed) update\nin place.\n\n``header`` is optional: when omitted, no header is stored on the written version snapshot\n(same as create). Send ``header`` explicitly to set or change it.\n\nA schema pin naming nothing is accepted here and refused by ``/sources/import``.\nSee ``create_source`` and #504; the asymmetry is known and undecided.",
         "operationId": "update_source_api_v1_sources__name__put",
         "parameters": [
           {
