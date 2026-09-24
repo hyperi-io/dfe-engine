@@ -1,8 +1,14 @@
-size: small
+size: large
 replicas: 1
 image: harbor.hyperi.io/dfe/dfe-receiver
 image_tag: latest
 resources:
+  requests:
+    cpu: '2'
+    memory: 4Gi
+  limits:
+    cpu: '4'
+    memory: 8Gi
 keda:
   enabled: false
   min_replicas: 2
