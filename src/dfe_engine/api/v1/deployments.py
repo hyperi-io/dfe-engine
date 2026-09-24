@@ -1,20 +1,18 @@
-"""Deployments router — DeploymentConfigRegistry CRUD + KEDA sizing.
+"""Deployments router -- DeploymentConfigRegistry CRUD + t-shirt sizing.
 
 Manages K8s deployment configuration: replicas, resources, KEDA autoscaling.
-Works alongside the services router (runtime config) — together they compose
+Works alongside the services router (runtime config) -- together they compose
 the full Helm values for each service instance.
 
-GET    /api/v1/deployments                              → Paginated list
-GET    /api/v1/deployments/{service}/{instance}         → Full deployment config
-PUT    /api/v1/deployments/{service}/{instance}         → Save deployment config
-DELETE /api/v1/deployments/{service}/{instance}         → Delete deployment config
-POST   /api/v1/deployments/{service}/{instance}/validate → Dry-run validate
-GET    /api/v1/deployments/{service}/{instance}/history  → Git history
-POST   /api/v1/deployments/{service}/{instance}/size/{size} → Apply t-shirt size
-POST   /api/v1/deployments/seed                         → Seed built-in defaults
+GET    /api/v1/deployments                              -> Paginated list
+GET    /api/v1/deployments/{service}/{instance}         -> Full deployment config
+PUT    /api/v1/deployments/{service}/{instance}         -> Save deployment config
+DELETE /api/v1/deployments/{service}/{instance}         -> Delete deployment config
+POST   /api/v1/deployments/{service}/{instance}/validate -> Dry-run validate
+GET    /api/v1/deployments/{service}/{instance}/history  -> Git history
+POST   /api/v1/deployments/{service}/{instance}/size/{size} -> Apply t-shirt size
+POST   /api/v1/deployments/seed                         -> Seed built-in defaults
 """
-
-from __future__ import annotations
 
 from typing import Any
 
@@ -33,7 +31,7 @@ router = APIRouter(prefix="/deployments", tags=["Deployments"])
 _VALID_SIZES = {"xs", "small", "medium", "large", "xlarge"}
 
 
-# ── Response models ──────────────────────────────────────────
+# Response models
 
 
 class DeploymentSummary(BaseModel):
@@ -82,7 +80,7 @@ class SeedResponse(BaseModel):
     seeded: int
 
 
-# ── Endpoints ────────────────────────────────────────────────
+# Endpoints
 
 
 @router.get(
@@ -259,9 +257,10 @@ async def apply_size(
 ):
     """Apply a t-shirt size to a deployment config.
 
-    Updates replicas, resources, and KEDA thresholds for the given size.
-    Returns any service config overrides that should also be applied
-    (e.g. buffer sizes) — the caller may optionally PUT these to
+    Sets the size and the CPU/memory requests and limits from the shared size table, and
+    resets the KEDA min/max replicas to the service's defaults, which do not vary by size.
+    Scaling triggers are left alone. Returns the service's per-size config overrides
+    (buffer, memory and batch sizes) -- the caller may optionally PUT these to
     /api/v1/services/{service}/{instance}.
     """
     if size not in _VALID_SIZES:

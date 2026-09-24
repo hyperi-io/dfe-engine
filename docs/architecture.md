@@ -202,7 +202,7 @@ different subtrees (`config/` and `values/` + `ddl/`).
    and DFE's own Argo CD in `dfe-system`, coexisting with any host Argo.
 5. **ClickHouse is the only operational store.** All non-gitops state -
    events, results, watermarks, leases - lives in CH via
-   `effective_data_database`. PG/FerretDB/Valkey are bundled-app
+   `effective_data_database`. PG/FerretDB are bundled-app
    conveniences, never DFE state.
 6. **A commit is not a deployment.** The engine reports what it committed;
    Argo (and any org approval gate) decides when it is live.
