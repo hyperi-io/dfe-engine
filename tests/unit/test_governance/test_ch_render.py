@@ -193,6 +193,23 @@ class TestRenderTenantAxis:
         )
         assert "PERMISSIVE" not in s  # restrictive-only, both kinds
 
+    def test_each_filter_is_reasserted_in_place_and_nothing_is_dropped(self):
+        # A table moving between the two kinds keeps its policy's name, so only an
+        # ALTER changes the filter; a DROP first would leave it open to every org.
+        stmts = render_tenant_axis([("dfe", "events")], [("dfe", "hunt_lease")])
+
+        assert (
+            "ALTER ROW POLICY `dfe_rowpol_tenant_dfe_events` ON `dfe`.`events` "
+            "AS RESTRICTIVE FOR SELECT USING "
+            "has(splitByChar(',', getSetting('SQL_current_tenant_id')), _org_id) "
+            "TO `dfe_tenant_role`"
+        ) in stmts
+        assert (
+            "ALTER ROW POLICY `dfe_rowpol_tenant_dfe_hunt_lease` ON `dfe`.`hunt_lease` "
+            "AS RESTRICTIVE FOR SELECT USING 0 TO `dfe_tenant_role`"
+        ) in stmts
+        assert not [s for s in stmts if s.startswith("DROP")]
+
     def test_deny_tables_default_empty_changes_nothing(self):
         """No deny list -> only the _org_id policy, no USING 0."""
         assert _joined(render_tenant_axis([("dfe", "events")])).count("USING 0") == 0

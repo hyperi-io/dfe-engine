@@ -264,6 +264,60 @@ class TestFileSets:
         entries = _rendered(settings, VRL, "filebeat")["enrichment_tables"]
         assert entries == [{"name": "timezones", "path": "/elsewhere.csv", "key_columns": ["zone"]}]
 
+    @staticmethod
+    def _warnings(monkeypatch) -> list[tuple[str, dict]]:
+        seen: list[tuple[str, dict]] = []
+        monkeypatch.setattr(
+            appconfig.logger, "warning", lambda message, **fields: seen.append((message, fields))
+        )
+        return seen
+
+    def test_a_declared_entry_whose_file_was_removed_is_kept_and_named(
+        self, crud, tmp_path, monkeypatch
+    ):
+        # Kept for its key columns; the render rewrote the directory, so its path is dead.
+        seen = self._warnings(monkeypatch)
+        settings = _settings(tmp_path)
+        app = _deploy(crud, VRL, "filebeat")
+        doc = instances.read_overlay(crud, app)
+        orphan = {
+            "name": "geo",
+            "path": f"{MOUNT}/{VRL}/filebeat/enrichment/geo.csv",
+            "key_columns": ["ip"],
+        }
+        set_path(doc, "config.enrichment_tables", [orphan])
+        files.upsert_file(doc, file_set(VRL, "enrichment"), "timezones.csv", "a,b\n1,2\n")
+        _put(crud, app, doc)
+
+        appconfig.render(crud, settings)
+
+        entries = _rendered(settings, VRL, "filebeat")["enrichment_tables"]
+        assert orphan in entries
+        named = [fields for _, fields in seen if fields.get("entry") == "geo"]
+        assert named == [
+            {
+                "file_set": "enrichment",
+                "entry": "geo",
+                "missing_file": "geo.csv",
+                "path": orphan["path"],
+            }
+        ]
+
+    def test_an_entry_pointing_outside_the_set_is_not_called_an_orphan(
+        self, crud, tmp_path, monkeypatch
+    ):
+        # A file baked into the image or mounted by the chart never passes through the set.
+        seen = self._warnings(monkeypatch)
+        settings = _settings(tmp_path)
+        app = _deploy(crud, VRL, "filebeat")
+        doc = instances.read_overlay(crud, app)
+        set_path(doc, "config.enrichment_tables", [{"name": "geo", "path": "/opt/baked/geo.csv"}])
+        _put(crud, app, doc)
+
+        appconfig.render(crud, settings)
+
+        assert [fields for _, fields in seen if fields.get("entry") == "geo"] == []
+
 
 class TestOneContainerPerInstance:
     """A per-config app runs one container per source, so it renders one config each."""
@@ -426,6 +480,30 @@ class TestWhatTakingTheChangeCosts:
         assert rendered[RECEIVER].changed
         assert not rendered[RECEIVER].restart_required
         assert rendered[RECEIVER].restart_hint == ""
+
+    def test_the_loader_is_told_to_watch_the_file_rendered_for_it(self, crud, tmp_path):
+        # dfe-loader's watcher ships off; without this key a change reported as
+        # needing no restart is never read.
+        settings = _settings(tmp_path)
+        _deploy(crud, LOADER)
+
+        appconfig.render(crud, settings)
+
+        assert _rendered(settings, LOADER)["hot_reload"] == {"enabled": True}
+
+    def test_a_loader_the_deployment_pins_is_restarted_for_a_change(self, crud, tmp_path):
+        settings = _settings(tmp_path)
+        _base(settings, LOADER, "hot_reload:\n  enabled: false\n")
+        app = _deploy(crud, LOADER)
+        appconfig.render(crud, settings)
+        doc = instances.read_overlay(crud, app)
+        set_path(doc, "config.routing.default_table", "elsewhere")
+        _put(crud, app, doc)
+
+        rendered = {r.service: r for r in appconfig.render(crud, settings)}
+
+        assert _rendered(settings, LOADER)["hot_reload"] == {"enabled": False}
+        assert rendered[LOADER].restart_hint == f"restart required: docker compose restart {LOADER}"
 
     def test_a_startup_bound_app_names_the_command_that_applies_it(self, crud, tmp_path):
         settings = _settings(tmp_path)

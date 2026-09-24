@@ -270,10 +270,19 @@ class AppDescriptor:
     """
 
     hot_reload: bool = False
-    """Whether the app can apply a config change in place; reported, never acted on.
+    """Whether the app can apply a config change in place.
 
     Every chart checksums its whole config into the pod template, so a change
-    rolls the pods as a rolling update whether or not the app could reload.
+    rolls the pods as a rolling update whether or not the app could reload. It
+    is spent only where no chart renders the config.
+    """
+
+    reload_setting: str = ""
+    """The app's own config key that turns its watcher on; empty where it always watches.
+
+    An overlay path, ``config.`` rooted. Where the engine renders the config it
+    sets this true unless the deployment already set it, so ``hot_reload`` holds
+    for an app whose watcher ships off.
     """
 
     endpoints: dict[str, AppEndpoint] = field(default_factory=dict)
@@ -470,6 +479,7 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
     if not isinstance(types, list):
         raise CatalogueError(f"{service}: source_types must be a list")
     families = tuple(str(t) for t in types)
+    hot_reload = bool(raw.get("hot_reload", False))
     app = AppDescriptor(
         service=service,
         scale_deployed=bool(raw.get("scale_deployed", True)),
@@ -487,7 +497,10 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
         profiles=_profiles_from(service, "profiles", raw.get("profiles")),
         default_in=_default_in_from(service, raw.get("default_in")),
         idle_when=_idle_when_from(service, raw.get("idle_when")),
-        hot_reload=bool(raw.get("hot_reload", False)),
+        hot_reload=hot_reload,
+        reload_setting=_reload_setting_from(
+            service, raw.get("reload_setting"), hot_reload=hot_reload
+        ),
         endpoints=_endpoints_from(service, raw.get("endpoints")),
         variant_path=str(raw.get("variant_path", "")),
         catalogue=_catalogue_from(service, raw.get("catalogue")),
@@ -520,6 +533,28 @@ def _config_file_from(service: str, raw: object) -> str:
             "because the directory belongs to whoever mounts it"
         )
     return name
+
+
+def _reload_setting_from(service: str, raw: object, *, hot_reload: bool) -> str:
+    """The config key that turns this app's watcher on, empty when it names none.
+
+    Refused on an app that does not reload, and anywhere but under ``config.``:
+    it is written into the file the app reads, which is that block alone.
+    """
+    if raw is None:
+        return ""
+    setting = str(raw)
+    if not hot_reload:
+        raise CatalogueError(
+            f"{service}: reload_setting {setting!r} names a watcher on an app that "
+            "declares hot_reload false"
+        )
+    if not setting.startswith("config.") or setting == "config.":
+        raise CatalogueError(
+            f"{service}: reload_setting {setting!r} must be a config. overlay path, "
+            "because it is written into the app's own config file"
+        )
+    return setting
 
 
 def _routing_paths_from(service: str, raw: object) -> dict[str, str]:

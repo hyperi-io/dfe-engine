@@ -169,20 +169,27 @@ def render_tenant_axis(
     # empty source.
     stmts += [f"GRANT {grant} TO {role}" for grant in TENANT_SYSTEM_GRANTS]
     for db, table in tables:
-        policy = _bq(tenant_policy_name(db, table))
-        target = f"{_bq(db)}.{_bq(table)}"
-        stmts.append(
-            f"CREATE ROW POLICY IF NOT EXISTS {policy} ON {target} "
-            f"AS RESTRICTIVE FOR SELECT USING {predicate} TO {role}"
-        )
+        stmts += _tenant_policy(db, table, using=predicate, role=role)
     for db, table in deny_tables or []:
-        policy = _bq(tenant_policy_name(db, table))
-        target = f"{_bq(db)}.{_bq(table)}"
-        stmts.append(
-            f"CREATE ROW POLICY IF NOT EXISTS {policy} ON {target} "
-            f"AS RESTRICTIVE FOR SELECT USING 0 TO {role}"
-        )
+        stmts += _tenant_policy(db, table, using="0", role=role)
     return stmts
+
+
+def _tenant_policy(db: str, table: str, *, using: str, role: str) -> list[str]:
+    """Create one table's tenant policy, then re-assert its filter in place.
+
+    Both kinds share the one name, so a table that gains or loses ``_org_id``
+    already holds a policy under it and ``IF NOT EXISTS`` alone would keep the old
+    filter forever. The ALTER changes the filter in one step, so the table is
+    never left with no restrictive policy at all.
+    """
+    policy = _bq(tenant_policy_name(db, table))
+    target = f"{_bq(db)}.{_bq(table)}"
+    body = f"AS RESTRICTIVE FOR SELECT USING {using} TO {role}"
+    return [
+        f"CREATE ROW POLICY IF NOT EXISTS {policy} ON {target} {body}",
+        f"ALTER ROW POLICY {policy} ON {target} {body}",
+    ]
 
 
 def render_pinned_user(

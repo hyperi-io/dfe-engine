@@ -53,8 +53,10 @@ from dataclasses import asdict
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi.exceptions import RequestValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from dfe_engine.api import body_limits
 from dfe_engine.api.deps import (
     ClickHouseClient,
     CurrentUser,
@@ -63,6 +65,7 @@ from dfe_engine.api.deps import (
     get_source_registry,
     require_action,
 )
+from dfe_engine.api.errors import ErrorResponse
 from dfe_engine.api.v1.app_contracts import read_contract
 from dfe_engine.appmgmt import (
     AppInstance,
@@ -1670,22 +1673,76 @@ async def read_app_file(
     )
 
 
+_JSON_ESCAPE_BYTES = 6
+"""JSON may spell any character as a six-byte ``\\uXXXX`` escape."""
+
+_WRITE_ENVELOPE_BYTES = 1024
+"""The ``{"content": ...}`` wrapper around a file, with room for whitespace."""
+
+
+async def _read_file_write(request: Request) -> FileWriteRequest:
+    """The write's body, refused with 413 before a file over the object cap is buffered.
+
+    The stream bound allows every character to arrive escaped, so a file that fits
+    is never refused for its encoding; the content is then measured exactly.
+    """
+    limit = request.app.state.settings.repository.max_object_bytes
+    raw = await body_limits.read_body_capped(
+        request,
+        limit=limit * _JSON_ESCAPE_BYTES + _WRITE_ENVELOPE_BYTES,
+        code="payload_too_large",
+        message=f"request body is larger than a file of {limit} bytes can be sent in "
+        "(repository.max_object_bytes)",
+    )
+    try:
+        body = FileWriteRequest.model_validate_json(raw)
+    except ValidationError as exc:
+        errors = [{**e, "loc": ("body", *e["loc"])} for e in exc.errors(include_url=False)]
+        raise RequestValidationError(errors) from exc
+    size = len(body.content.encode("utf-8"))
+    if size > limit:
+        raise body_limits.too_large(
+            "payload_too_large",
+            f"file is {size} bytes, over repository.max_object_bytes ({limit} bytes)",
+        )
+    return body
+
+
 @router.put(
     "/{service}/{instance}/files/{set_name}/{filename}",
     response_model=WriteResult,
     dependencies=[_WRITE],
+    responses={
+        413: {
+            "model": ErrorResponse,
+            "description": (
+                "The file exceeds repository.max_object_bytes (HTTP 413, code "
+                "payload_too_large). Tune via DFE_REPOSITORY_MAX_OBJECT_BYTES."
+            ),
+        },
+    },
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {"application/json": {"schema": FileWriteRequest.model_json_schema()}},
+        }
+    },
 )
 async def write_app_file(
     service: str,
     instance: str,
     set_name: str,
     filename: str,
-    body: FileWriteRequest,
     user: CurrentUser,
     request: Request,
     if_match: str | None = Header(default=None, alias="If-Match"),
 ) -> WriteResult:
-    """Add or replace a file the app consumes."""
+    """Add or replace a file the app consumes, up to ``repository.max_object_bytes``.
+
+    The file lands in the deploy repo's history for good, so an oversized one is
+    refused before it is buffered rather than after it is committed.
+    """
+    body = await _read_file_write(request)
     app = _resolve(service, instance)
     fs = _file_set(service, set_name)
     doc = _overlay(_gitcrud(request), app)

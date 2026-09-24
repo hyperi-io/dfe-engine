@@ -52,7 +52,7 @@ from typing import Any
 from scalo.logger import logger
 
 from dfe_engine.gitcrud import GitCrud
-from dfe_engine.gitcrud.engine import ResourceNotFoundError, set_path
+from dfe_engine.gitcrud.engine import ResourceNotFoundError, get_path, set_path
 from dfe_engine.yaml_utils import deep_merge, yaml_dump_string, yaml_load
 
 from . import files, instances
@@ -272,6 +272,24 @@ def _inner_path(path: str) -> str:
     return path[len(prefix) :] if path.startswith(prefix) else path
 
 
+def _enable_reload(app: AppDescriptor, config: dict[str, Any]) -> bool:
+    """Turn the app's config watcher on where it ships off, and say whether it reloads.
+
+    A value the deployment already set is kept, so an operator can pin the app;
+    one set false then costs a restart per change, which is what is reported.
+    """
+    if not app.hot_reload:
+        return False
+    if not app.reload_setting:
+        return True
+    inner = _inner_path(app.reload_setting)
+    current = get_path(config, inner, default=None)
+    if current is None:
+        set_path(config, inner, True)
+        return True
+    return current is True
+
+
 def _write_file_set(directory: Path, entries: list[files.AppFile]) -> bool:
     """Replace the set's directory with exactly what the overlay carries.
 
@@ -330,6 +348,11 @@ def _apply_entries(
     author's key columns, and replacing it with a derived entry would turn every
     lookup into a full scan. The name is the file name without its extension,
     which is the name a program looks the table up by.
+
+    A declared entry whose path sits in this set's directory and names a file the
+    set no longer carries is kept and warned about: this render just rewrote that
+    directory, so the path is known to be dead, while an entry pointing anywhere
+    else may name a file the app receives another way.
     """
     inner = _inner_path(file_set.entries_path)
     declared = config
@@ -338,6 +361,20 @@ def _apply_entries(
         if declared is None:
             break
     existing = list(declared) if isinstance(declared, list) else []
+    carried = {entry.name for entry in entries}
+    for entry in existing:
+        path = entry.get("path") if isinstance(entry, dict) else None
+        if not isinstance(path, str) or not path.startswith(f"{mounted}/"):
+            continue
+        missing = path.removeprefix(f"{mounted}/")
+        if missing not in carried:
+            logger.warning(
+                "a declared entry names a file this set no longer carries",
+                file_set=file_set.name,
+                entry=entry.get("name"),
+                missing_file=missing,
+                path=path,
+            )
     named = {e.get("name") for e in existing if isinstance(e, dict)}
     derived = [
         {"name": entry.name.rsplit(".", 1)[0], "path": f"{mounted}/{entry.name}"}
@@ -419,6 +456,7 @@ def _render_one(
     leaf = f"{app.service}/{instance.instance}" if per_instance else app.service
 
     config = deep_merge(_base_config(settings, app.service), _config_block(doc), replace_lists=True)
+    reloads = _enable_reload(app, config)
     app_dir = out_root / leaf
     # A directory this render creates has no container reading it yet, so the
     # first write of a stack's whole app config is never a restart.
@@ -442,7 +480,7 @@ def _render_one(
     # manifest fact is what is reported: a hot-reloading app takes a config
     # change where it stands, and every other write needs the process restarted.
     restart = not first_write and (
-        (config_changed and not app.hot_reload)
+        (config_changed and not reloads)
         or any(fs.reload is not ReloadMode.HOT for fs in changed_sets)
     )
     # A new instance has no container yet, so the deployer creates one rather

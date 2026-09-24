@@ -109,6 +109,17 @@ class TestCreate:
         version = created.json()["versions"]["1.0.0"]
         assert (version["capture_json"], version["capture_raw"]) == (False, False)
 
+    def test_capture_json_alone_is_stored(self, base_schema, client, admin_headers):
+        # dfe-loader's json_only is this pair: _json populated, _raw left empty.
+        response = client.post(
+            URL,
+            headers=admin_headers,
+            json=_body([{"name": "timestamp"}], capture_json=True, capture_raw=False),
+        )
+        assert response.status_code == 201, response.text
+        version = client.get(URL, headers=admin_headers).json()["versions"]["1.0.0"]
+        assert (version["capture_json"], version["capture_raw"]) == (True, False)
+
     def test_a_second_create_at_the_same_path_is_refused(self, base_schema, client, admin_headers):
         client.post(URL, headers=admin_headers, json=_body([{"name": "timestamp"}]))
         again = client.post(URL, headers=admin_headers, json=_body([{"name": "timestamp"}]))
@@ -176,15 +187,6 @@ class TestValidationFailures:
         response = client.post(URL, headers=admin_headers, json=body)
         assert response.status_code == 422
         assert response.json()["code"] == "unknown_base_version"
-
-    def test_capture_json_alone_is_refused(self, base_schema, client, admin_headers):
-        response = client.post(
-            URL,
-            headers=admin_headers,
-            json=_body([{"name": "timestamp"}], capture_json=True, capture_raw=False),
-        )
-        assert response.status_code == 422
-        assert "dfe-loader cannot express" in response.text
 
 
 class TestUpdateAndDelete:
