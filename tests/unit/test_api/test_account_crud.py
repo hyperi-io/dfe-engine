@@ -31,6 +31,9 @@ class TestCreateAccount:
         data = resp.json()
         assert data["username"] == "newuser"
         assert data["enabled"] is True
+        assert data["blocked"] is False
+        assert data["disabled_at"] == ""
+        assert data["blocked_at"] == ""
         assert data["groups"] == ["dfe-viewers"]
         assert "password_hash" not in data
         assert data["email"] == "newuser@example.com"
@@ -169,8 +172,9 @@ class TestListAccounts:
         assert resp.status_code == 200
         data = resp.json()["items"]
         assert isinstance(data, list)
-        # At minimum, admin account exists from bootstrap
-        assert any(a["username"] == "admin" for a in data)
+        names = {a["username"] for a in data}
+        assert "viewer" in names
+        assert "admin" not in names
         # No password hashes leaked
         for account in data:
             assert "password_hash" not in account
@@ -209,6 +213,111 @@ class TestListAccounts:
         assert by_name.status_code == 200
         assert any(a["username"] == "search-me" for a in by_name.json()["items"])
 
+    def test_list_blocked_omitted_returns_all(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "listed-blocked", "password": "pw", "email": "lb@example.com"},
+            headers=admin_headers,
+        )
+        client.put(
+            "/api/v1/auth/accounts/listed-blocked",
+            json={"blocked": True},
+            headers=admin_headers,
+        )
+        resp = client.get("/api/v1/auth/accounts", headers=admin_headers)
+        assert resp.status_code == 200
+        names = {a["username"] for a in resp.json()["items"]}
+        assert "listed-blocked" in names
+        assert "viewer" in names
+        assert "admin" not in names
+
+    def test_list_blocked_true_returns_only_blocked(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "only-blocked", "password": "pw", "email": "ob@example.com"},
+            headers=admin_headers,
+        )
+        client.put(
+            "/api/v1/auth/accounts/only-blocked",
+            json={"blocked": True},
+            headers=admin_headers,
+        )
+        resp = client.get(
+            "/api/v1/auth/accounts",
+            params={"blocked": True},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert items
+        assert all(a["blocked"] is True for a in items)
+        assert any(a["username"] == "only-blocked" for a in items)
+        assert all(a["username"] != "admin" for a in items)
+
+    def test_list_blocked_false_returns_only_unblocked(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "now-blocked", "password": "pw", "email": "nb@example.com"},
+            headers=admin_headers,
+        )
+        client.put(
+            "/api/v1/auth/accounts/now-blocked",
+            json={"blocked": True},
+            headers=admin_headers,
+        )
+        resp = client.get(
+            "/api/v1/auth/accounts",
+            params={"blocked": False},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert items
+        assert all(a["blocked"] is False for a in items)
+        assert all(a["username"] != "now-blocked" for a in items)
+        assert any(a["username"] == "viewer" for a in items)
+        assert all(a["username"] != "admin" for a in items)
+
+    def test_list_excludes_core_accounts_by_default(self, recovery_accounts, client, admin_headers):
+        from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS
+
+        resp = client.get("/api/v1/auth/accounts", headers=admin_headers)
+        assert resp.status_code == 200
+        names = {a["username"] for a in resp.json()["items"]}
+        assert "admin" not in names
+        assert BREAKGLASS not in names
+        assert "viewer" in names
+
+    def test_list_include_core_returns_admin_and_breakglass(
+        self, recovery_accounts, client, admin_headers
+    ):
+        from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS
+
+        resp = client.get(
+            "/api/v1/auth/accounts",
+            params={"include_core": True},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        names = {a["username"] for a in resp.json()["items"]}
+        assert "admin" in names
+        assert BREAKGLASS in names
+        assert "viewer" in names
+
+    def test_list_include_core_false_matches_the_default(self, client, admin_headers):
+        omitted = client.get("/api/v1/auth/accounts", headers=admin_headers)
+        explicit = client.get(
+            "/api/v1/auth/accounts",
+            params={"include_core": False},
+            headers=admin_headers,
+        )
+        assert omitted.status_code == 200
+        assert explicit.status_code == 200
+        assert {a["username"] for a in omitted.json()["items"]} == {
+            a["username"] for a in explicit.json()["items"]
+        }
+        assert "admin" not in {a["username"] for a in omitted.json()["items"]}
+
 
 class TestGetAccount:
     """GET /api/v1/auth/accounts/{username}"""
@@ -231,6 +340,51 @@ class TestGetAccount:
     def test_get_requires_admin(self, client, viewer_headers):
         resp = client.get("/api/v1/auth/accounts/admin", headers=viewer_headers)
         assert resp.status_code == 403
+
+
+class TestAccountExternalFlag:
+    """AccountResponse carries ``external`` so the UI can tell IdP-owned accounts."""
+
+    def test_local_account_surfaces_external_false(self, client, viewer_headers, admin_headers):
+        me = client.get("/api/v1/auth/accounts/me", headers=viewer_headers)
+        assert me.status_code == 200
+        assert me.json()["external"] is False
+        got = client.get("/api/v1/auth/accounts/viewer", headers=admin_headers)
+        assert got.status_code == 200
+        assert got.json()["external"] is False
+
+    def test_oidc_account_surfaces_external_true(self, client, app, admin_headers, api_settings):
+        from dfe_engine.api.deps import create_access_token
+
+        store = app.state.account_store
+        store.create("sso-user", "", groups=["dfe-viewers"])
+        store.update("sso-user", external=True, source_provider="entra")
+        got = client.get("/api/v1/auth/accounts/sso-user", headers=admin_headers)
+        assert got.status_code == 200
+        assert got.json()["external"] is True
+        token = create_access_token(
+            data={"sub": "sso-user", "org_id": "test-org", "groups": ["dfe-viewers"]},
+            settings=api_settings,
+        )
+        me = client.get(
+            "/api/v1/auth/accounts/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert me.status_code == 200
+        assert me.json()["external"] is True
+
+    def test_list_and_create_include_external(self, client, admin_headers):
+        created = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "local-user", "password": "pw", "email": "local@example.com"},
+            headers=admin_headers,
+        )
+        assert created.status_code == 201
+        assert created.json()["external"] is False
+        listed = client.get("/api/v1/auth/accounts", headers=admin_headers)
+        assert listed.status_code == 200
+        for account in listed.json()["items"]:
+            assert isinstance(account["external"], bool)
 
 
 class TestUpdateAccount:
@@ -383,6 +537,43 @@ class TestUpdateAccount:
         )
         assert resp.status_code == 200
         assert resp.json()["enabled"] is False
+        assert resp.json()["disabled_at"] != ""
+
+        reenabled = client.put(
+            "/api/v1/auth/accounts/disableme",
+            json={"enabled": True},
+            headers=admin_headers,
+        )
+        assert reenabled.status_code == 200
+        assert reenabled.json()["enabled"] is True
+        assert reenabled.json()["disabled_at"] == ""
+
+    def test_update_blocked(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "blockme", "password": "pw", "email": "blockme@example.com"},
+            headers=admin_headers,
+        )
+        resp = client.put(
+            "/api/v1/auth/accounts/blockme",
+            json={"blocked": True},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["blocked"] is True
+        assert resp.json()["blocked_at"] != ""
+        got = client.get("/api/v1/auth/accounts/blockme", headers=admin_headers)
+        assert got.json()["blocked"] is True
+        assert got.json()["blocked_at"] == resp.json()["blocked_at"]
+
+        unblocked = client.put(
+            "/api/v1/auth/accounts/blockme",
+            json={"blocked": False},
+            headers=admin_headers,
+        )
+        assert unblocked.status_code == 200
+        assert unblocked.json()["blocked"] is False
+        assert unblocked.json()["blocked_at"] == ""
 
     def test_update_nonexistent_returns_404(self, client, admin_headers):
         resp = client.put(
@@ -534,9 +725,41 @@ class TestResetOwnPassword:
         assert body["code"] == "password_reused"
         assert "current" not in body["message"].lower()
 
+    def test_oidc_user_cannot_reset_own_password(self, client, app, api_settings):
+        from dfe_engine.api.deps import create_access_token
+
+        store = app.state.account_store
+        store.create("sso-user", "", groups=["dfe-viewers"])
+        store.update("sso-user", external=True, source_provider="entra")
+        token = create_access_token(
+            data={"sub": "sso-user", "org_id": "test-org", "groups": ["dfe-viewers"]},
+            settings=api_settings,
+        )
+        resp = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"new_password": "should-not-apply"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "external_account"
+        assert not store.verify_password("sso-user", "should-not-apply")
+
 
 class TestResetPassword:
     """POST /api/v1/auth/accounts/{username}/reset-password"""
+
+    def test_admin_cannot_reset_oidc_user_password(self, client, app, admin_headers):
+        store = app.state.account_store
+        store.create("sso-user", "", groups=["dfe-viewers"])
+        store.update("sso-user", external=True, source_provider="entra")
+        resp = client.post(
+            "/api/v1/auth/accounts/sso-user/reset-password",
+            json={"new_password": "should-not-apply"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "external_account"
+        assert not store.verify_password("sso-user", "should-not-apply")
 
     def test_reset_password(self, client, admin_headers):
         client.post(

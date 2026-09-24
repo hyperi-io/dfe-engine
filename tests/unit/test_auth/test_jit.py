@@ -14,7 +14,11 @@ import pytest
 from dfe_engine.auth.accounts import AccountStore
 from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
 from dfe_engine.auth.groups import GroupStore
-from dfe_engine.auth.jit import JitIdentityCollisionError, JitProvisioner
+from dfe_engine.auth.jit import (
+    JitAccountUnavailableError,
+    JitIdentityCollisionError,
+    JitProvisioner,
+)
 from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
 
 
@@ -174,6 +178,38 @@ class TestEnsureAccount:
 
         assert account is not None
         assert account.groups == ["acme-viewers", "dfe-admins"]
+
+    def test_disabled_account_is_refused_and_left_untouched(self, stores):
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+        jit.ensure_account("jane@corp.com", ["acme-viewers"], "entra")
+        accounts.update("jane-corp-com", enabled=False)
+        before = accounts.get("jane-corp-com")
+
+        with pytest.raises(JitAccountUnavailableError) as refused:
+            jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
+
+        assert refused.value.reason == "account_disabled"
+        stored = accounts.get("jane-corp-com")
+        assert stored.enabled is False
+        assert stored.groups == before.groups
+        assert stored.last_login_at == before.last_login_at
+
+    def test_blocked_account_is_refused_and_left_untouched(self, stores):
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+        jit.ensure_account("jane@corp.com", ["acme-viewers"], "entra")
+        accounts.update("jane-corp-com", blocked=True)
+        before = accounts.get("jane-corp-com")
+
+        with pytest.raises(JitAccountUnavailableError) as refused:
+            jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
+
+        assert refused.value.reason == "account_blocked"
+        stored = accounts.get("jane-corp-com")
+        assert stored.blocked is True
+        assert stored.groups == before.groups
+        assert stored.last_login_at == before.last_login_at
 
 
 class TestCrossIdentityRefusal:

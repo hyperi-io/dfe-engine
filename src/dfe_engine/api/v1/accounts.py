@@ -111,6 +111,7 @@ class CreateAccountRequest(BaseModel):
 class UpdateAccountRequest(BaseModel):
     groups: list[str] | None = Field(None, description="Replace group memberships")
     enabled: bool | None = Field(None, description="Enable or disable the account")
+    blocked: bool | None = Field(None, description="Block the account from holding a session")
     email: str | None = Field(None, min_length=1, description="Contact email")
     phone: str | None = Field(None, description="Contact phone")
     name: str | None = Field(None, description="Display name")
@@ -177,10 +178,16 @@ class AccountResponse(BaseModel):
 
     username: str
     enabled: bool
+    blocked: bool
+    disabled_at: str = ""
+    blocked_at: str = ""
     groups: list[str]
     email: str
     phone: str = ""
     name: str = ""
+    external: bool = Field(
+        description="True when the account authenticates through an identity provider",
+    )
     created_at: str
     updated_at: str
 
@@ -196,10 +203,14 @@ def _account_response(account: Account) -> AccountResponse:
     return AccountResponse(
         username=account.username,
         enabled=account.enabled,
+        blocked=account.blocked,
+        disabled_at=account.disabled_at,
+        blocked_at=account.blocked_at,
         groups=account.groups,
         email=account.email,
         phone=account.phone,
         name=account.name,
+        external=account.external,
         created_at=account.created_at,
         updated_at=account.updated_at,
     )
@@ -246,6 +257,17 @@ def _reset_stored_password(
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
+        )
+    if existing.external:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "external_account",
+                "message": (
+                    f"Account '{username}' authenticates through its identity "
+                    "provider; a local password cannot be set"
+                ),
+            },
         )
     if store.verify_password(username, new_password):
         raise HTTPException(
@@ -329,6 +351,14 @@ async def list_accounts(
     request: Request,
     pagination: PaginationParams = Depends(),
     search: str | None = Query(None, description="Search in username, name, or email"),
+    blocked: bool | None = Query(
+        None,
+        description="Filter by blocked status. Omitted returns every account.",
+    ),
+    include_core: bool = Query(
+        False,
+        description="Include the local admin and break-glass recovery accounts.",
+    ),
     sort_by: str | None = Query(None, description="Sort field (username, created_at, updated_at)"),
     sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
@@ -336,7 +366,14 @@ async def list_accounts(
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    rows = [_account_response(a).model_dump() for a in store.list()]
+    accounts = store.list()
+    if not include_core:
+        accounts = [
+            account for account in accounts if not store.protected.is_protected(account.username)
+        ]
+    if blocked is not None:
+        accounts = [account for account in accounts if account.blocked is blocked]
+    rows = [_account_response(a).model_dump() for a in accounts]
     rows = apply_search(rows, search, ["username", "name", "email"])
     rows = apply_sort(rows, sort_by, sort_order)
     summaries = [AccountResponse.model_validate(row) for row in rows]
@@ -419,7 +456,7 @@ async def update_account(
     request: Request,
     settings: Settings,
 ):
-    """Update account groups, enabled status, or contact fields (admin only)."""
+    """Update account groups, enabled/blocked status, or contact fields (admin only)."""
     from dfe_engine.auth.accounts import AccountStore
     from dfe_engine.auth.membership import sync_group_members_for_account_groups_change
 
@@ -431,6 +468,8 @@ async def update_account(
         update_fields["groups"] = body.groups
     if body.enabled is not None:
         update_fields["enabled"] = body.enabled
+    if body.blocked is not None:
+        update_fields["blocked"] = body.blocked
     if body.groups is not None:
         old_groups = set(existing.groups)
         new_groups = set(body.groups)
@@ -468,7 +507,8 @@ async def reset_current_user_password(
     """Reset the authenticated user's password.
 
     The username is taken from the session, not the request, so a caller cannot
-    reset another account through this route. The live store takes the new
+    reset another account through this route. An IdP-owned (``external``)
+    account is refused: it has no local password. The live store takes the new
     password immediately; the ``git`` block reports whether the durable mirror
     merged, is pending review, or is a no-op for a non-git-backed account.
     """
@@ -498,10 +538,12 @@ async def reset_password(
 ) -> ResetPasswordResponse:
     """Reset an account's password (admin only).
 
-    The live store takes the new password immediately (next login), and the change
-    is mirrored into the durable deploy repo so it survives a rebuild. The ``git``
-    block reports whether that mirror merged straight away (dev/solo) or is a
-    pending review PR / CLI merge (production+team), or is a no-op file share.
+    An IdP-owned (``external``) account is refused: the password lives at the
+    identity provider. The live store takes the new password immediately (next
+    login), and the change is mirrored into the durable deploy repo so it
+    survives a rebuild. The ``git`` block reports whether that mirror merged
+    straight away (dev/solo) or is a pending review PR / CLI merge
+    (production+team), or is a no-op file share.
     """
     return _reset_stored_password(
         request,

@@ -56,6 +56,20 @@ class JitIdentityCollisionError(AuthenticationError):
         self.reason = reason
 
 
+class JitAccountUnavailableError(AuthenticationError):
+    """The IdP identity's own account is disabled or blocked.
+
+    Attributes:
+        user_id: The IdP-asserted subject.
+        reason: ``account_disabled`` or ``account_blocked``.
+    """
+
+    def __init__(self, user_id: str, reason: str) -> None:
+        super().__init__("Account blocked" if reason == "account_blocked" else "Account disabled")
+        self.user_id = user_id
+        self.reason = reason
+
+
 class JitProvisioner:
     def __init__(
         self,
@@ -106,6 +120,7 @@ class JitProvisioner:
         existing = self._accounts.get(safe_name)
         if existing is not None:
             self._require_same_identity(existing, user_id, source_provider)
+            self._require_available(existing, user_id, source_provider)
             # Subsequent login — update groups if changed + last_login_at
             updates: dict[str, object] = {"last_login_at": now}
             if set(existing.groups) != set(oidc_groups):
@@ -143,6 +158,7 @@ class JitProvisioner:
                 # Not a race - create refused the name itself (empty or too long).
                 raise
             self._require_same_identity(raced, user_id, source_provider)
+            self._require_available(raced, user_id, source_provider)
             race_updates: dict[str, object] = {"groups": oidc_groups, "last_login_at": now}
             if wanted_email:
                 race_updates["email"] = wanted_email
@@ -235,6 +251,16 @@ class JitProvisioner:
         if existing.external and existing.source_provider == source_provider:
             return True
         return self._bindings.get(existing.source_provider) == source_provider
+
+    @staticmethod
+    def _require_available(existing: Account, user_id: str, source_provider: str) -> None:
+        """Refuse when the operator has disabled or blocked this identity."""
+        denied = existing.session_denied()
+        if denied is None:
+            return
+        reason = "account_blocked" if existing.blocked else "account_disabled"
+        audit_jit_login_refused(user_id, source_provider, reason)
+        raise JitAccountUnavailableError(user_id, reason)
 
     def _resolve_group(self, identifier: str) -> Group | None:
         """A group by name, else by the provider identifier the sync recorded.
