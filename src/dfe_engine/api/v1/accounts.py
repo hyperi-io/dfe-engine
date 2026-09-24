@@ -355,6 +355,10 @@ async def list_accounts(
         None,
         description="Filter by blocked status. Omitted returns every account.",
     ),
+    include_core: bool = Query(
+        False,
+        description="Include the local admin and break-glass recovery accounts.",
+    ),
     sort_by: str | None = Query(None, description="Sort field (username, created_at, updated_at)"),
     sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
@@ -363,6 +367,10 @@ async def list_accounts(
 
     store: AccountStore = request.app.state.account_store
     accounts = store.list()
+    if not include_core:
+        accounts = [
+            account for account in accounts if not store.protected.is_protected(account.username)
+        ]
     if blocked is not None:
         accounts = [account for account in accounts if account.blocked is blocked]
     rows = [_account_response(a).model_dump() for a in accounts]

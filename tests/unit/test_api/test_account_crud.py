@@ -172,8 +172,9 @@ class TestListAccounts:
         assert resp.status_code == 200
         data = resp.json()["items"]
         assert isinstance(data, list)
-        # At minimum, admin account exists from bootstrap
-        assert any(a["username"] == "admin" for a in data)
+        names = {a["username"] for a in data}
+        assert "viewer" in names
+        assert "admin" not in names
         # No password hashes leaked
         for account in data:
             assert "password_hash" not in account
@@ -227,7 +228,8 @@ class TestListAccounts:
         assert resp.status_code == 200
         names = {a["username"] for a in resp.json()["items"]}
         assert "listed-blocked" in names
-        assert "admin" in names
+        assert "viewer" in names
+        assert "admin" not in names
 
     def test_list_blocked_true_returns_only_blocked(self, client, admin_headers):
         client.post(
@@ -273,8 +275,51 @@ class TestListAccounts:
         assert items
         assert all(a["blocked"] is False for a in items)
         assert all(a["username"] != "now-blocked" for a in items)
-        assert any(a["username"] == "admin" for a in items)
+        assert any(a["username"] == "viewer" for a in items)
+        assert all(a["username"] != "admin" for a in items)
 
+    def test_list_excludes_core_accounts_by_default(self, recovery_accounts, client, admin_headers):
+        from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS
+
+        resp = client.get("/api/v1/auth/accounts", headers=admin_headers)
+        assert resp.status_code == 200
+        names = {a["username"] for a in resp.json()["items"]}
+        assert "admin" not in names
+        assert BREAKGLASS not in names
+        assert "viewer" in names
+
+    def test_list_include_core_returns_admin_and_breakglass(
+        self, recovery_accounts, client, admin_headers
+    ):
+        from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS
+
+        resp = client.get(
+            "/api/v1/auth/accounts",
+            params={"include_core": True},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        names = {a["username"] for a in resp.json()["items"]}
+        assert "admin" in names
+        assert BREAKGLASS in names
+        assert "viewer" in names
+
+    def test_list_include_core_false_matches_the_default(self, client, admin_headers):
+        omitted = client.get("/api/v1/auth/accounts", headers=admin_headers)
+        explicit = client.get(
+            "/api/v1/auth/accounts",
+            params={"include_core": False},
+            headers=admin_headers,
+        )
+        assert omitted.status_code == 200
+        assert explicit.status_code == 200
+        assert {a["username"] for a in omitted.json()["items"]} == {
+            a["username"] for a in explicit.json()["items"]
+        }
+        assert "admin" not in {a["username"] for a in omitted.json()["items"]}
+
+
+class TestGetAccount:
     """GET /api/v1/auth/accounts/{username}"""
 
     def test_get_account(self, client, admin_headers):

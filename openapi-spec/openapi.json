@@ -411,6 +411,18 @@
             "description": "Filter by blocked status. Omitted returns every account."
           },
           {
+            "name": "include_core",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Include the local admin and break-glass recovery accounts.",
+              "default": false,
+              "title": "Include Core"
+            },
+            "description": "Include the local admin and break-glass recovery accounts."
+          },
+          {
             "name": "sort_by",
             "in": "query",
             "required": false,
