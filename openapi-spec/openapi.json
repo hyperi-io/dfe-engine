@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.21.2"
+    "version": "1.22.0"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -5615,7 +5615,7 @@
           "Deployments"
         ],
         "summary": "Apply Size",
-        "description": "Apply a t-shirt size to a deployment config.\n\nUpdates replicas, resources, and KEDA thresholds for the given size.\nReturns any service config overrides that should also be applied\n(e.g. buffer sizes) \u2014 the caller may optionally PUT these to\n/api/v1/services/{service}/{instance}.",
+        "description": "Apply a t-shirt size to a deployment config.\n\nSets the size and the CPU/memory requests and limits from the shared size table, and\nresets the KEDA min/max replicas to the service's defaults, which do not vary by size.\nScaling triggers are left alone. Returns the service's per-size config overrides\n(buffer, memory and batch sizes) -- the caller may optionally PUT these to\n/api/v1/services/{service}/{instance}.",
         "operationId": "apply_size_api_v1_deployments__service___instance__size__size__post",
         "parameters": [
           {

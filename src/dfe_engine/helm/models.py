@@ -15,8 +15,6 @@ conventions). App config (Layer B) is a passthrough blob: the engine emits
 needs to know per-app config keys (no coupling to chart internals).
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -59,9 +57,9 @@ class HelmKeda(BaseModel):
     maxReplicaCount: int = 10
     cooldownPeriod: int = 300
     pollingInterval: int = 30
-    # None => omit from the overlay so the chart's default trigger (the gated
-    # ScalingPressure metrics-api trigger) stands. Helm replaces lists rather than
-    # merging, so emitting [] here would WIPE the chart default -- hence Optional.
+    # None keeps the key out of the overlay so dfe-common renders its default triggers, CPU
+    # always plus the ScalingPressure metrics-api trigger via dfe-keda-shim when
+    # keda.pressure.enabled, rather than a verbatim list.
     triggers: list[HelmKedaTrigger] | None = None
     triggerAuthentication: HelmKedaTriggerAuth | None = None
 
