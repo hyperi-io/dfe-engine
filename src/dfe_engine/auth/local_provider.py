@@ -71,8 +71,9 @@ class LocalAuthProvider:
             self._accounts.verify_password(username, password)
             raise AuthenticationError("Invalid username or password")
 
-        if not account.enabled:
-            raise AuthenticationError("Account disabled")
+        denied = account.session_denied()
+        if denied is not None:
+            raise AuthenticationError(denied[1])
 
         # External (IdP-owned / JIT-provisioned) identities never authenticate via
         # the local password path - they hold no usable local credential and log in

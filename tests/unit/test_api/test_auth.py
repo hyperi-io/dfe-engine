@@ -109,6 +109,27 @@ class TestMe:
         assert data["org_id"] == "test-org"
         assert "admin" in data["roles"]
         assert "dfe-admins" in data["groups"]
+        assert data["external"] is False
+        assert data["blocked"] is False
+        assert data["disabled_at"] == ""
+        assert data["blocked_at"] == ""
+
+    def test_me_oidc_user_surfaces_external_true(self, client: TestClient, app, api_settings):
+        from dfe_engine.api.deps import create_access_token
+
+        store = app.state.account_store
+        store.create("sso-user", "", groups=["dfe-viewers"])
+        store.update("sso-user", external=True, source_provider="entra")
+        token = create_access_token(
+            data={"sub": "sso-user", "org_id": "test-org", "groups": ["dfe-viewers"]},
+            settings=api_settings,
+        )
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["external"] is True
 
     def test_me_no_token(self, client: TestClient):
         resp = client.get("/api/v1/auth/me")
@@ -182,8 +203,49 @@ class TestMe:
             headers=admin_headers,
         )
 
+    def test_me_rejects_blocked_account(self, client: TestClient, admin_headers: dict):
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "viewer", "password": "test-viewer-pw"},
+        )
+        assert login.status_code == 200
+        viewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
-class TestPermissions:
+        client.put(
+            "/api/v1/auth/accounts/viewer",
+            json={"blocked": True},
+            headers=admin_headers,
+        )
+
+        resp = client.get("/api/v1/auth/me", headers=viewer_headers)
+        assert resp.status_code == 401
+        assert resp.json()["message"] == "Account blocked"
+
+        client.put(
+            "/api/v1/auth/accounts/viewer",
+            json={"blocked": False},
+            headers=admin_headers,
+        )
+
+    def test_me_rejects_disabled_external_jwt_by_sanitised_name(
+        self, client: TestClient, app, api_settings
+    ):
+        from dfe_engine.api.deps import create_access_token
+
+        store = app.state.account_store
+        store.create("alice-example-com", "", groups=["dfe-viewers"])
+        store.update("alice-example-com", external=True, source_provider="entra", enabled=False)
+        token = create_access_token(
+            data={"sub": "alice@example.com", "org_id": "test-org", "groups": ["dfe-viewers"]},
+            settings=api_settings,
+        )
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 401
+        assert resp.json()["message"] == "Account disabled"
+
     """GET /api/v1/auth/permissions"""
 
     def test_admin_has_wildcard(self, client: TestClient, admin_headers: dict):

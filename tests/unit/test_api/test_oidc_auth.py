@@ -249,3 +249,41 @@ class TestOidcAuthentication:
         assert admin.groups == before.groups
         assert admin.updated_at == before.updated_at
         assert admin.external is False
+
+    def test_disabled_external_account_is_refused(self, client: TestClient, app):
+        store = app.state.account_store
+        store.create("blocked-sso-example-com", "", groups=["dfe-viewers"])
+        store.update(
+            "blocked-sso-example-com",
+            external=True,
+            source_provider="oidc",
+            enabled=False,
+        )
+
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "blocked-sso@example.com", "X-Oidc-Groups": "dfe-viewers"},
+        )
+
+        assert resp.status_code == 401
+        assert resp.json()["message"] == "Account disabled"
+        assert store.get("blocked-sso-example-com").last_login_at == ""
+
+    def test_blocked_external_account_is_refused(self, client: TestClient, app):
+        store = app.state.account_store
+        store.create("locked-sso-example-com", "", groups=["dfe-viewers"])
+        store.update(
+            "locked-sso-example-com",
+            blocked=True,
+            external=True,
+            source_provider="oidc",
+        )
+
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "locked-sso@example.com", "X-Oidc-Groups": "dfe-viewers"},
+        )
+
+        assert resp.status_code == 401
+        assert resp.json()["message"] == "Account blocked"
+        assert store.get("locked-sso-example-com").last_login_at == ""

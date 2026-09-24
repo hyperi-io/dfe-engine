@@ -72,11 +72,35 @@ class UserResponse(BaseModel):
         description="Orgs this user can browse in the data plane (HyperDX). Empty "
         "means no org-scoped data access.",
     )
+    external: bool = Field(
+        description="True when the account authenticates through an identity provider",
+    )
+    blocked: bool = Field(
+        description="True when an operator has blocked this account from holding a session",
+    )
+    disabled_at: str = Field(
+        default="",
+        description="When the account was disabled. Empty while it is enabled.",
+    )
+    blocked_at: str = Field(
+        default="",
+        description="When the account was blocked. Empty while it is not blocked.",
+    )
 
 
 class PermissionsResponse(BaseModel):
     roles: list[str] = Field(description="User's assigned roles")
     permissions: list[str] = Field(description="Resolved permissions from all roles")
+
+
+def _session_account(request: Request, user_id: str):
+    """The store account for a session subject, including the JIT-sanitised stem."""
+    from dfe_engine.api.deps import account_for_session_subject
+
+    store = getattr(request.app.state, "account_store", None)
+    if store is None:
+        return None
+    return account_for_session_subject(store, user_id)
 
 
 # ── Endpoints ────────────────────────────────────────────────
@@ -180,6 +204,7 @@ async def get_me(user: CurrentUser, request: Request):
     """Get the current authenticated user's info."""
     role_config = get_role_config(request)
     permissions = sorted(role_config.resolve_permissions(user.roles))
+    account = _session_account(request, user.user_id)
     return UserResponse(
         org_id=user.org_id,
         user_id=user.user_id,
@@ -187,6 +212,10 @@ async def get_me(user: CurrentUser, request: Request):
         permissions=permissions,
         groups=user.groups,
         org_ids=user.org_ids,
+        external=bool(account and account.external),
+        blocked=bool(account and account.blocked),
+        disabled_at=account.disabled_at if account else "",
+        blocked_at=account.blocked_at if account else "",
     )
 
 

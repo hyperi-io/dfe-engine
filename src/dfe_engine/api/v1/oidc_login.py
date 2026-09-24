@@ -42,11 +42,12 @@ from dfe_engine.api.deps import (
     Settings,
     _get_client_ip,
     jwt_authority_for,
+    require_local_account_enabled,
     resolve_live_roles_for_user,
 )
 from dfe_engine.auth import hyperdx_role
 from dfe_engine.auth.audit import audit_login_denied, audit_login_success
-from dfe_engine.auth.jit import JitIdentityCollisionError
+from dfe_engine.auth.jit import JitAccountUnavailableError, JitIdentityCollisionError
 
 router = APIRouter(prefix="/auth/oidc", tags=["OIDC Login"])
 
@@ -252,8 +253,16 @@ async def oidc_callback(
                 status_code=401,
                 detail={"code": "unauthorized", "message": str(exc)},
             ) from exc
+        except JitAccountUnavailableError as exc:
+            audit_login_denied(identity.subject, "oidc", _get_client_ip(request), exc.reason)
+            raise HTTPException(
+                status_code=401,
+                detail={"code": exc.reason, "message": str(exc)},
+            ) from exc
         except Exception:
             logger.exception("JIT provisioning failed", user_id=identity.subject)
+
+    require_local_account_enabled(request, identity.subject)
 
     # From the group files rather than the IdP token, for the claim and the audit.
     roles = resolve_live_roles_for_user(request, identity.subject, fallback_groups=identity.groups)

@@ -20,6 +20,8 @@ release:
 
 test:
   min_coverage: 70  # Current: 75%. Target: 80%. Ratchet up as coverage improves.
+  python:
+    parallel: auto
 
 quality:
   python:

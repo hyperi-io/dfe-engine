@@ -162,6 +162,9 @@ class TestGet:
         assert account.email == ""
         assert account.phone == ""
         assert account.name == ""
+        assert account.blocked is False
+        assert account.disabled_at == ""
+        assert account.blocked_at == ""
 
 
 # ---------------------------------------------------------------------------
@@ -233,12 +236,41 @@ class TestUpdate:
         store.create("alice", "password123")
         account = store.update("alice", enabled=False)
         assert account.enabled is False
+        assert account.disabled_at != ""
 
     def test_update_enable_account(self, store):
         store.create("alice", "password123")
         store.update("alice", enabled=False)
         account = store.update("alice", enabled=True)
         assert account.enabled is True
+        assert account.disabled_at == ""
+
+    def test_reenable_clears_a_stale_disabled_at(self, store):
+        store.create("alice", "password123")
+        store.update("alice", enabled=False)
+        account = store.update(
+            "alice",
+            enabled=True,
+            disabled_at="2026-01-01T00:00:00+00:00",
+        )
+        assert account.enabled is True
+        assert account.disabled_at == ""
+        assert store.get("alice").disabled_at == ""
+
+    def test_disable_sets_a_new_timestamp(self, store):
+        store.create("alice", "password123")
+        first = store.update("alice", enabled=False)
+        store.update("alice", enabled=True)
+        time.sleep(0.01)
+        second = store.update(
+            "alice",
+            enabled=False,
+            disabled_at="2026-01-01T00:00:00+00:00",
+        )
+        assert second.enabled is False
+        assert second.disabled_at != ""
+        assert second.disabled_at != "2026-01-01T00:00:00+00:00"
+        assert second.disabled_at != first.disabled_at
 
     def test_update_change_groups(self, store):
         store.create("alice", "password123", groups=["ops"])
@@ -299,6 +331,46 @@ class TestUpdate:
         assert acct.external is True
         assert acct.source_provider == "entra"
         assert acct.last_login_at == "2026-04-03T00:00:00Z"
+        assert acct.blocked is False
+
+    def test_update_blocked_round_trips(self, store):
+        store.create("alice", "password123")
+        updated = store.update("alice", blocked=True)
+        assert updated.blocked is True
+        assert updated.blocked_at != ""
+        assert store.get("alice").blocked is True
+        assert store.get("alice").blocked_at == updated.blocked_at
+
+        cleared = store.update("alice", blocked=False)
+        assert cleared.blocked is False
+        assert cleared.blocked_at == ""
+
+    def test_unblock_clears_a_stale_blocked_at(self, store):
+        store.create("alice", "password123")
+        store.update("alice", blocked=True)
+        account = store.update(
+            "alice",
+            blocked=False,
+            blocked_at="2026-01-01T00:00:00+00:00",
+        )
+        assert account.blocked is False
+        assert account.blocked_at == ""
+        assert store.get("alice").blocked_at == ""
+
+    def test_block_sets_a_new_timestamp(self, store):
+        store.create("alice", "password123")
+        first = store.update("alice", blocked=True)
+        store.update("alice", blocked=False)
+        time.sleep(0.01)
+        second = store.update(
+            "alice",
+            blocked=True,
+            blocked_at="2026-01-01T00:00:00+00:00",
+        )
+        assert second.blocked is True
+        assert second.blocked_at != ""
+        assert second.blocked_at != "2026-01-01T00:00:00+00:00"
+        assert second.blocked_at != first.blocked_at
 
 
 # ---------------------------------------------------------------------------

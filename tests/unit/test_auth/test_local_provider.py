@@ -133,6 +133,16 @@ class TestAuthenticationFailure:
         with pytest.raises(AuthenticationError, match="Account disabled"):
             provider.authenticate("viewer", "viewer-secret")
 
+    def test_blocked_account(
+        self,
+        stores: tuple[AccountStore, GroupStore],
+    ):
+        account_store, group_store = stores
+        account_store.update("viewer", blocked=True)
+        provider = LocalAuthProvider(account_store, group_store)
+        with pytest.raises(AuthenticationError, match="Account blocked"):
+            provider.authenticate("viewer", "viewer-secret")
+
 
 # ---------------------------------------------------------------------------
 # AccountStore always produces bcrypt hashes
