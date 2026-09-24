@@ -20,11 +20,7 @@ keda:
   max_replicas: 8
   polling_interval: 30
   cooldown_period: 300
-  kafka_trigger:
-    consumer_group: dfe-transform-wasm
-    topic: ""
-    lag_threshold: 500
-    authentication_ref: ""
+  kafka_trigger: null
   cpu_trigger: null
   fallback_replicas: 2
 

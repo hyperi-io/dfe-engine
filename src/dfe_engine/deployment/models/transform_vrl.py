@@ -7,7 +7,6 @@ from pydantic import Field
 from dfe_engine.deployment.models.common import (
     BaseDeploymentConfig,
     KedaConfig,
-    KedaTriggerKafka,
     TShirtSize,
 )
 
@@ -25,15 +24,7 @@ class TransformVrlDeploymentConfig(BaseDeploymentConfig):
     )
     image: str = "harbor.hyperi.io/dfe/dfe-transform-vrl"
     keda: KedaConfig = Field(
-        default_factory=lambda: KedaConfig(
-            enabled=False,
-            min_replicas=1,
-            max_replicas=10,
-            kafka_trigger=KedaTriggerKafka(
-                consumer_group="dfe-transform-vrl",
-                lag_threshold=1000,
-            ),
-        ),
+        default_factory=lambda: KedaConfig(enabled=False, min_replicas=1, max_replicas=10),
     )
     transforms_volume: str = Field(
         default="",

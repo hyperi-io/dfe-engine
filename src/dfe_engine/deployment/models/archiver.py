@@ -8,7 +8,6 @@ from dfe_engine.deployment.models.common import (
     BaseDeploymentConfig,
     K8sServiceConfig,
     KedaConfig,
-    KedaTriggerKafka,
     TShirtSize,
 )
 
@@ -26,15 +25,7 @@ class ArchiverDeploymentConfig(BaseDeploymentConfig):
     )
     image: str = "harbor.hyperi.io/dfe/dfe-archiver"
     keda: KedaConfig = Field(
-        default_factory=lambda: KedaConfig(
-            enabled=False,
-            min_replicas=1,
-            max_replicas=4,
-            kafka_trigger=KedaTriggerKafka(
-                consumer_group="dfe-archiver",
-                lag_threshold=100000,
-            ),
-        ),
+        default_factory=lambda: KedaConfig(enabled=False, min_replicas=1, max_replicas=4),
     )
     service: K8sServiceConfig = Field(
         default_factory=lambda: K8sServiceConfig(port=8080, metrics_port=9090),

@@ -91,10 +91,6 @@ _sizing_overrides: dict[str, dict[str, Any]] = {
 _keda_defaults: dict[str, Any] = {
     "min_replicas": 1,
     "max_replicas": 4,
-    "kafka_trigger": {
-        "consumer_group": "dfe-archiver",
-        "lag_threshold": 100000,
-    },
 }
 
 _template_overrides: dict[str, dict[str, Any]] = {
