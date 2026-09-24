@@ -11,7 +11,8 @@
 It runs inside the API lifespan, ahead of readiness, and in one order: resolve
 the schema tree, take the lease, render the plan, compare it against the ledger
 and the live catalogue, apply what is additive, refuse what is not, record every
-object, create the declared topics, release the lease.
+object, release the lease, create the declared topics, and confirm the dead-letter
+topics are on the broker.
 
 Two things make it a GATE rather than the best-effort pass it replaces. A failure
 leaves the engine UP and NotReady with the cause on the status route, because a
@@ -42,7 +43,16 @@ from dfe_engine.schema.manifest_applier import (
 from dfe_engine.schema.plan import LEDGER_ID, LOCK_ID, SchemaPlan, SchemaPlanError, build_plan
 
 if TYPE_CHECKING:
+    from dfe_engine.kafka.topics import TopicAdmin
     from dfe_engine.settings import DFESettings
+
+DEAD_LETTER_TOPIC_KIND = "dlq"
+"""The dfe-schemas topic kind every app's dead-letter topic is declared under."""
+
+
+class DeadLetterPathError(Exception):
+    """A declared dead-letter topic is not on the broker, so a dead letter would be lost."""
+
 
 # What the deployment is told about the schema. `running` is what the status
 # route reports while the phase is mid-pass, so a slow apply reads as in
@@ -334,6 +344,61 @@ def _apply_topics(plan: SchemaPlan, settings: DFESettings) -> tuple[list[str], s
     return result.created, "", drift
 
 
+def require_dead_letter_topics(
+    plan: SchemaPlan,
+    settings: DFESettings,
+    *,
+    wait_seconds: float,
+    admin: TopicAdmin | None = None,
+) -> list[str]:
+    """Confirm every declared dead-letter topic is on the broker, or refuse the pass.
+
+    A deployment that cannot record a dead letter discards it silently, so it is
+    held NotReady instead of running. Retried for the same bounded window as the
+    ClickHouse connect, since the broker can start in the same wave. A deployment
+    with no bus, or whose topic bootstrap is off, records no dead letter on Kafka
+    through this set and is not held to it.
+
+    Returns the dead-letter topics confirmed, which is empty where none apply.
+
+    Raises:
+        DeadLetterPathError: A dead-letter topic is still not on the broker when
+            the window closes.
+    """
+    from dfe_engine.kafka.topics import TopicSpec, ensure_topics
+
+    if _topics_skipped(settings):
+        return []
+    specs = [
+        TopicSpec(
+            name=rendered.topic["name"],
+            partitions=int(rendered.topic["partitions"]),
+            replication_factor=int(rendered.topic["replication_factor"]),
+            config=dict(rendered.topic["config"]),
+        )
+        for rendered in plan.topics()
+        if rendered.topic and rendered.topic.get("kind") == DEAD_LETTER_TOPIC_KIND
+    ]
+    if not specs:
+        return []
+    deadline = time.monotonic() + max(wait_seconds, 0.0)
+    while True:
+        result = ensure_topics(specs, admin=admin, settings=settings)
+        if result.ok:
+            return sorted(result.created + result.existing)
+        if time.monotonic() >= deadline:
+            missing = "; ".join(f"{name}: {error}" for name, error in result.failed)
+            raise DeadLetterPathError(
+                f"dead-letter topic(s) are not on the broker, so a dead letter would be "
+                f"lost: {missing}"
+            )
+        logger.info(
+            "waiting for the broker to hold the dead-letter topics",
+            missing=[name for name, _ in result.failed],
+        )
+        time.sleep(min(5.0, max(wait_seconds / 10.0, 1.0)))
+
+
 def run_bootstrap(
     *,
     settings: DFESettings,
@@ -424,6 +489,17 @@ def run_bootstrap(
     except Exception as exc:  # a broker fault must not take the ClickHouse apply with it
         state.topics_skipped = f"topic bootstrap failed: {exc}"
         logger.warning("bootstrap topics not created", error=str(exc))
+
+    try:
+        require_dead_letter_topics(plan, settings, wait_seconds=wait)
+    except DeadLetterPathError as exc:
+        state.state = STATE_FAILED
+        state.error = str(exc)
+        logger.error(
+            "dead letters cannot be recorded; the engine stays up and NotReady", error=str(exc)
+        )
+        _finish(state, started)
+        return state
 
     if state.state != STATE_OBSERVED:
         state.state = STATE_CONVERGED

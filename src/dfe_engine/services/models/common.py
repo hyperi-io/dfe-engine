@@ -102,12 +102,13 @@ class MemoryConfig(BaseModel):
 
 
 class DlqConfig(BaseModel):
-    """Dead Letter Queue configuration."""
+    """Dead Letter Queue configuration for the receiver's routing block."""
 
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = True
-    topic: str = "dlq_land"
+    # The per-app topic dfe-schemas declares and the engine creates at bootstrap.
+    topic: str = "dfe_receiver_dlq"
 
 
 class LoggingConfig(BaseModel):

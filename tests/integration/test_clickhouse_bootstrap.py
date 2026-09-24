@@ -21,6 +21,8 @@ def _bootstrap_settings(*, database):
     settings.clickhouse.hunts_database = _hunts_database(database)
     settings.clickhouse.secure = False
     settings.clickhouse.bootstrap_tables = True
+    # These assert ClickHouse objects; the topic step would reach whatever broker .env names.
+    settings.kafka.bootstrap_topics = False
     return settings
 
 

@@ -30,7 +30,7 @@ routing:
   source_to_topic: {}
   dlq:
     enabled: true
-    topic: dlq_land
+    topic: dfe_receiver_dlq
 
 destinations:
   default: kafka

@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
+from dfe_engine.api.body_limits import refuse_declared_oversize, too_large
 from dfe_engine.api.deps import (
     ClickHouseClient,
     CurrentUser,
@@ -78,31 +79,6 @@ from dfe_engine.source.registry import SourceNotFoundError, SourceValidationErro
 router = APIRouter(prefix="/schemas", tags=["schemas"])
 
 
-def _reject_body_over_limit_via_content_length(
-    request: Request,
-    max_payload_bytes: int,
-    slack_bytes: int,
-) -> None:
-    raw = request.headers.get("content-length")
-    if raw is None:
-        return
-    try:
-        content_length = int(raw)
-    except ValueError:
-        return
-    if content_length > max_payload_bytes + slack_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail={
-                "code": "upload_too_large",
-                "message": (
-                    f"Request body exceeds maximum upload size "
-                    f"({max_payload_bytes} bytes) for this endpoint"
-                ),
-            },
-        )
-
-
 async def _read_upload_capped(upload: UploadFile, *, max_bytes: int, read_chunk_size: int) -> bytes:
     chunks: list[bytes] = []
     total = 0
@@ -113,14 +89,9 @@ async def _read_upload_capped(upload: UploadFile, *, max_bytes: int, read_chunk_
             break
         total += len(chunk)
         if total > max_bytes:
-            raise HTTPException(
-                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                detail={
-                    "code": "upload_too_large",
-                    "message": (
-                        f"Upload exceeds maximum size ({max_bytes} bytes) for this endpoint"
-                    ),
-                },
+            raise too_large(
+                "upload_too_large",
+                f"Upload exceeds maximum size ({max_bytes} bytes) for this endpoint",
             )
         chunks.append(chunk)
     return b"".join(chunks)
@@ -1187,7 +1158,12 @@ async def elastic_converter(
     max_bytes = api_s.elastic_converter_max_upload_bytes
     slack = api_s.elastic_converter_content_length_slack_bytes
     chunk_sz = api_s.elastic_converter_read_chunk_size
-    _reject_body_over_limit_via_content_length(request, max_bytes, slack)
+    refuse_declared_oversize(
+        request,
+        limit=max_bytes + slack,
+        code="upload_too_large",
+        message=f"Request body exceeds maximum upload size ({max_bytes} bytes) for this endpoint",
+    )
 
     try:
         raw = await _read_upload_capped(file, max_bytes=max_bytes, read_chunk_size=chunk_sz)
