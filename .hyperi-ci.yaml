@@ -13,9 +13,8 @@ build:
 release:
   enabled: true
   channel: release
-  # Private service: ship only the GHCR container image, not a Python wheel.
-  # destinations_oss is the control; hyperi-ci >= 2.6.17 for the falsy opt-out.
-  destinations_oss:
+  # Private service: ship only the GHCR container image, never a wheel to PyPI.
+  destinations:
     python: false
 
 test:
