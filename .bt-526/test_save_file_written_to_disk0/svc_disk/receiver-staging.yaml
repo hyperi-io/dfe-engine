@@ -1,0 +1,78 @@
+metrics:
+  enabled: true
+  address: 0.0.0.0:9090
+  path: /metrics
+logging:
+  level: info
+  format: json
+server:
+  bind_address: 0.0.0.0:8080
+  max_body_size: 10485760
+  request_timeout_ms: 30000
+  tls:
+    enabled: false
+    cert_file:
+    key_file:
+    ca_file:
+    client_auth: none
+    cert_secret:
+    key_secret:
+    ca_secret:
+    refresh_interval_secs: 3600
+  auth:
+    mode: none
+    accepted_headers:
+      - name: x-hyperi-agent
+        values:
+          - '1.0'
+    bearer:
+      tokens: []
+      secret_source:
+      refresh_interval_secs: 300
+    header_name: ''
+    header_values: []
+grpc:
+  enabled: false
+  bind_address: 0.0.0.0:6000
+validation:
+  require_json: true
+  required_fields: []
+  dlq_on_invalid: true
+routing:
+  source_rules: []
+  default_source: main
+  topic_suffix: _land
+  source_to_topic: {}
+  legacy_compat: false
+  dlq:
+    enabled: true
+    topic: dfe_receiver_dlq
+destinations:
+  default: kafka
+  rules: []
+kafka:
+  brokers:
+    - localhost:9092
+  client_id: dfe-receiver
+  sasl:
+  tls:
+    enabled: false
+    ca_file:
+    cert_file:
+    key_file:
+    skip_verify: false
+  producer:
+    batch_size: 8388608
+    batch_messages: 10000
+    linger_ms: 20
+    compression: lz4
+    acks: all
+    retries: 5
+loader:
+  address: dfe-loader:6000
+  transport: kafka
+  timeout_ms: 5000
+  grpc_endpoint:
+buffer:
+  memory_limit: 0
+  pressure_threshold: 0.8
