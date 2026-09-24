@@ -23,6 +23,7 @@ from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.schema.derived import (
     CAPTURE_MODE_EXTRACTED_ONLY,
     CAPTURE_MODE_FULL,
+    CAPTURE_MODE_JSON_ONLY,
     CAPTURE_MODE_RAW_ONLY,
     DerivedSchema,
     IncompatibleIndexError,
@@ -103,10 +104,11 @@ class TestDocument:
         with pytest.raises(ValueError):
             DerivedSchema.model_validate(_doc(select=[{"name": "host_name", "type": "integer"}]))
 
-    def test_capture_json_without_capture_raw_is_refused(self):
-        # No dfe-loader capture mode populates _json and leaves _raw empty.
-        with pytest.raises(ValueError, match="dfe-loader cannot express"):
-            DerivedSchema.model_validate(_doc(capture_json=True, capture_raw=False))
+    def test_capture_json_without_capture_raw_is_accepted(self):
+        # dfe-loader's json_only populates _json and leaves _raw empty.
+        version = DerivedSchema.model_validate(_doc(capture_json=True, capture_raw=False)).version()
+        assert (version.capture_json, version.capture_raw) == (True, False)
+        assert version.to_yaml_dict()["capture_raw"] is False
 
     def test_the_safety_net_is_on_unless_asked(self):
         version = _schema().version()
@@ -262,6 +264,7 @@ class TestCaptureMode:
         [
             (True, True, CAPTURE_MODE_FULL),
             (False, True, CAPTURE_MODE_RAW_ONLY),
+            (True, False, CAPTURE_MODE_JSON_ONLY),
             (False, False, CAPTURE_MODE_EXTRACTED_ONLY),
         ],
     )

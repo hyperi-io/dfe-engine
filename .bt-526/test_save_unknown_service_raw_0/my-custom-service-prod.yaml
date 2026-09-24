@@ -1,0 +1,3 @@
+replicas: 2
+image: custom:latest
+custom_field: value

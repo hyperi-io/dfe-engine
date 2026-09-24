@@ -93,20 +93,6 @@ class IncompatibleIndexError(DerivedSchemaError):
         )
 
 
-UNREACHABLE_CAPTURE = (
-    "capture_json true with capture_raw false is a pair dfe-loader cannot express: "
-    "its capture modes are full (both), raw_only (_raw alone) and extracted_only "
-    "(neither). Turn capture_json off as well, or leave capture_raw on."
-)
-
-
-class UnreachableCaptureError(DerivedSchemaError):
-    """A capture combination dfe-loader has no mode for."""
-
-    def __init__(self) -> None:
-        super().__init__(UNREACHABLE_CAPTURE)
-
-
 class MalformedIndexError(DerivedSchemaError):
     """A declared index names a known use case in a shape it does not take."""
 
@@ -160,14 +146,6 @@ class DerivedSchemaVersion(BaseModel):
         min_length=1,
         description="The complete, ordered column list of the result, after the common header",
     )
-
-    @model_validator(mode="after")
-    def _capture_pair_is_reachable(self) -> DerivedSchemaVersion:
-        # Storing a pair the loader has no mode for would deploy a switch nothing
-        # acts on, which is the drift this layer exists to stop.
-        if self.capture_json and not self.capture_raw:
-            raise ValueError(UNREACHABLE_CAPTURE)
-        return self
 
     def to_yaml_dict(self) -> dict[str, Any]:
         """Serialize for YAML persistence (defaults stay off disk)."""
@@ -299,20 +277,20 @@ def _check_index(column: str, index: str, primitive: str, registry: TypeRegistry
 
 CAPTURE_MODE_FULL = "full"
 CAPTURE_MODE_RAW_ONLY = "raw_only"
+CAPTURE_MODE_JSON_ONLY = "json_only"
 CAPTURE_MODE_EXTRACTED_ONLY = "extracted_only"
 
 
 def capture_mode(*, capture_json: bool, capture_raw: bool) -> str:
     """The dfe-loader capture mode a pair of switches compiles to.
 
-    full = both columns populated, raw_only = _raw alone, extracted_only =
-    neither. There is no mode for _json alone, which the version model refuses
-    before a document can carry it.
+    full = both columns populated, raw_only = _raw alone, json_only = _json
+    alone, extracted_only = neither: one loader ``CaptureMode`` per pair.
     """
     if capture_json and capture_raw:
         return CAPTURE_MODE_FULL
     if capture_raw:
         return CAPTURE_MODE_RAW_ONLY
-    if not capture_json:
-        return CAPTURE_MODE_EXTRACTED_ONLY
-    raise UnreachableCaptureError()
+    if capture_json:
+        return CAPTURE_MODE_JSON_ONLY
+    return CAPTURE_MODE_EXTRACTED_ONLY

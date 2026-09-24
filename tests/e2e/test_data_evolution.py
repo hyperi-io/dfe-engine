@@ -1123,8 +1123,8 @@ class TestStage3:
 
     The decision has to be REVERSIBLE, so the columns stay on the table either
     way and only the writing stops. `capture_json: false` with `capture_raw:
-    false` compiles to dfe-loader's `extracted_only`; the pair with json alone is
-    refused at the document, because the loader has no mode for it.
+    false` compiles to dfe-loader's `extracted_only`, and json alone to its
+    `json_only`.
     """
 
     def test_3_1_a_derived_schema_stops_population_and_keeps_the_columns(

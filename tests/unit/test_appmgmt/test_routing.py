@@ -556,6 +556,19 @@ class TestLoaderCapture:
         db = settings.clickhouse.effective_data_database
         assert compiled["capture"] == {f"{db}.filebeat": "raw_only"}
 
+    def test_keeping_json_alone_compiles_to_json_only(self, tmp_path):
+        from dfe_engine.services.models.loader import LoaderConfig
+
+        settings, registry = self._deployment(tmp_path, capture_json=True, capture_raw=False)
+        app = catalogue.descriptor(LOADER)
+        doc = instances.initial_overlay(instances.instance_of(LOADER, "default"))
+
+        assert routing.sync(app, doc, registry, settings) is True
+
+        db = settings.clickhouse.effective_data_database
+        config = LoaderConfig.model_validate(doc["config"])
+        assert config.metadata.table_capture_modes == {f"{db}.filebeat": "json_only"}
+
     def test_the_safety_net_left_on_writes_nothing(self, tmp_path):
         settings, registry = self._deployment(tmp_path, capture_json=True, capture_raw=True)
 

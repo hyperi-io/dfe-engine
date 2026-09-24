@@ -207,8 +207,9 @@ tables should never arrive.
 **The data plane already does this.** dfe-loader's `MetadataConfig` carries
 `capture_json` / `capture_raw` with `disable_json_tables` and
 `disable_raw_tables` for per-table control, and the column directive framework
-reaches the same end with `@skip` on `_json`. What is missing is the control
-plane: a derived schema cannot yet say it, so the engine never compiles it.
+reaches the same end with `@skip` on `_json`. The control plane says it through
+a derived schema's `capture_json` and `capture_raw`, which the engine compiles
+into the loader's per-table `table_capture_modes`.
 
 ### Column comments carry loader instructions
 

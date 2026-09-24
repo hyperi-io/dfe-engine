@@ -13,6 +13,7 @@ from dfe_engine.deployment.registry import (
     DeploymentConfigNotFoundError,
     DeploymentConfigRegistry,
 )
+from tests.support.git_repos import own_repo
 
 
 @pytest.fixture
@@ -236,17 +237,29 @@ class TestValidation:
 
 
 class TestGitProperties:
-    """Test non-git path of git-related properties (no actual git repo)."""
+    """Asked of a repository the test builds, so the answer holds wherever tmp_path lives.
 
-    def test_is_git_false_for_plain_dir(self, registry):
-        assert registry.is_git is False
+    The branch name belongs to that repository alone, which is what shows the
+    registry read it rather than whatever encloses ``tmp_path``.
+    """
 
-    def test_current_branch_none_for_plain_dir(self, registry):
-        assert registry.current_branch is None
+    @pytest.fixture
+    def repo_registry(self, tmp_path):
+        repo = own_repo(tmp_path / "repo", branch="deploy-branch")
+        DeploymentConfigRegistry.reset_instance()
+        reg = DeploymentConfigRegistry(config_directory=repo / "deployments")
+        yield reg
+        reg.close()
+        DeploymentConfigRegistry.reset_instance()
 
-    def test_list_branches_raises_for_plain_dir(self, registry):
-        with pytest.raises(RuntimeError, match="not a git repository"):
-            registry.list_branches()
+    def test_is_git_true_for_a_directory_inside_a_repo(self, repo_registry):
+        assert repo_registry.is_git is True
+
+    def test_current_branch_is_the_enclosing_repos(self, repo_registry):
+        assert repo_registry.current_branch == "deploy-branch"
+
+    def test_list_branches_reads_the_enclosing_repo(self, repo_registry):
+        assert repo_registry.list_branches() == ["deploy-branch"]
 
 
 class TestHistoryNonGit:

@@ -144,6 +144,10 @@ class LoaderDlqConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = True
+    # Non-empty routes every dead letter here; the per-app topic dfe-schemas
+    # declares and the engine creates at bootstrap.
+    topic: str = "dfe_loader_dlq"
+    # Read only when topic is empty, as <destination><suffix>.
     topic_suffix: str = ".dlq"
 
 
@@ -255,8 +259,8 @@ class FieldSanitizationConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-CaptureMode = Literal["full", "raw_only", "extracted_only"]
-"""How dfe-loader populates ``_json`` and ``_raw``: both, ``_raw`` alone, neither."""
+CaptureMode = Literal["full", "raw_only", "json_only", "extracted_only"]
+"""How dfe-loader populates ``_json`` and ``_raw``: both, either one alone, or neither."""
 
 
 class MetadataConfig(BaseModel):

@@ -14289,7 +14289,7 @@
           "App Management"
         ],
         "summary": "Write App File",
-        "description": "Add or replace a file the app consumes.",
+        "description": "Add or replace a file the app consumes, up to ``repository.max_object_bytes``.\n\nThe file lands in the deploy repo's history for good, so an oversized one is\nrefused before it is buffered rather than after it is committed.",
         "operationId": "write_app_file_api_v1_apps__service___instance__files__set_name___filename__put",
         "parameters": [
           {
@@ -14345,16 +14345,6 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FileWriteRequest"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -14366,6 +14356,16 @@
               }
             }
           },
+          "413": {
+            "description": "The file exceeds repository.max_object_bytes (HTTP 413, code payload_too_large). Tune via DFE_REPOSITORY_MAX_OBJECT_BYTES.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -14373,6 +14373,26 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "content": {
+                    "title": "Content",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "content"
+                ],
+                "title": "FileWriteRequest",
+                "type": "object"
               }
             }
           }
@@ -21276,19 +21296,6 @@
           "size_bytes"
         ],
         "title": "FileSummary"
-      },
-      "FileWriteRequest": {
-        "properties": {
-          "content": {
-            "type": "string",
-            "title": "Content"
-          }
-        },
-        "type": "object",
-        "required": [
-          "content"
-        ],
-        "title": "FileWriteRequest"
       },
       "FilterTier": {
         "type": "string",

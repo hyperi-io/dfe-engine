@@ -80,6 +80,17 @@ class TestShippedManifest:
             "hyperdx": False,
         }
 
+    def test_the_loader_names_the_key_that_turns_its_watcher_on(self):
+        # dfe-loader's HotReloadConfig::enabled defaults false; every other
+        # reloading app watches without being asked.
+        settings = {
+            name: app.reload_setting
+            for name, app in catalogue.APP_CATALOGUE.items()
+            if app.reload_setting
+        }
+
+        assert settings == {"dfe-loader": "config.hot_reload.enabled"}
+
     def test_vector_reloads_its_transform_files_in_place(self):
         # It SIGHUPs Vector when only the transform files changed; the enrichment
         # tables are not watched, so they still roll.
@@ -377,6 +388,18 @@ class TestManifestParsing:
             "config.sources",
             "config.ingest.enabled",
         )
+
+    def test_a_reload_setting_on_an_app_that_does_not_reload_is_refused(self, tmp_path):
+        path = self._manifest(tmp_path, {"reload_setting": "config.hot_reload.enabled"})
+
+        with pytest.raises(CatalogueError, match="declares hot_reload false"):
+            load_catalogue(path)
+
+    def test_a_reload_setting_outside_the_config_block_is_refused(self, tmp_path):
+        path = self._manifest(tmp_path, {"hot_reload": True, "reload_setting": "hot_reload"})
+
+        with pytest.raises(CatalogueError, match=r"must be a config\. overlay path"):
+            load_catalogue(path)
 
     def test_an_idle_when_that_is_not_a_list_is_refused(self, tmp_path):
         with pytest.raises(CatalogueError, match="idle_when must be a list"):

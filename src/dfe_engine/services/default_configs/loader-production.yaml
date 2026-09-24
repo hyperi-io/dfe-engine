@@ -61,6 +61,7 @@ routing:
   compat_v2_source: false
   dlq:
     enabled: true
+    topic: dfe_loader_dlq
     topic_suffix: .dlq
 
 buffer:

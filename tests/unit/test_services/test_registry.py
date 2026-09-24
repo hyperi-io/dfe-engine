@@ -8,6 +8,7 @@ from dfe_engine.services.registry import (
     ConfigNotFoundError,
     ServiceConfigRegistry,
 )
+from tests.support.git_repos import own_repo
 
 
 @pytest.fixture(autouse=True)
@@ -334,15 +335,27 @@ class TestSingleton:
 
 
 class TestGitProperties:
-    def test_is_git_false_for_non_git_dir(self, registry):
-        assert registry.is_git is False
+    """Asked of a repository the test builds, so the answer holds wherever tmp_path lives.
 
-    def test_current_branch_none_for_non_git(self, registry):
-        assert registry.current_branch is None
+    The branch name belongs to that repository alone, which is what shows the
+    registry read it rather than whatever encloses ``tmp_path``.
+    """
 
-    def test_list_branches_raises_for_non_git(self, registry):
-        with pytest.raises(RuntimeError):
-            registry.list_branches()
+    @pytest.fixture
+    def repo_registry(self, tmp_path):
+        repo = own_repo(tmp_path / "repo", branch="config-branch")
+        reg = ServiceConfigRegistry(config_directory=repo / "services", refresh_interval=0)
+        yield reg
+        reg.close()
+
+    def test_is_git_true_for_a_directory_inside_a_repo(self, repo_registry):
+        assert repo_registry.is_git is True
+
+    def test_current_branch_is_the_enclosing_repos(self, repo_registry):
+        assert repo_registry.current_branch == "config-branch"
+
+    def test_list_branches_reads_the_enclosing_repo(self, repo_registry):
+        assert repo_registry.list_branches() == ["config-branch"]
 
 
 # ---------------------------------------------------------------------------

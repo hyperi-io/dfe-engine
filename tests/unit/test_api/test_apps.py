@@ -537,6 +537,68 @@ class TestFiles:
         assert resp.status_code == 200, resp.text
         assert resp.json()["reload"] == "hot"
 
+    def test_a_file_over_the_object_cap_is_413_and_never_committed(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # The overlay is committed to the deploy repo, so an oversized file would
+        # stay in its history after the file itself was deleted.
+        _wire(app, tmp_path)
+        app.state.settings.repository.max_object_bytes = 64
+        _deploy(client, admin_headers)
+        path = f"{BASE}/files/transforms/000_parse.vrl"
+
+        resp = client.put(path, json={"content": "." * 65}, headers=admin_headers)
+
+        assert resp.status_code == 413, resp.text
+        assert resp.json()["code"] == "payload_too_large"
+        assert client.get(path, headers=admin_headers).status_code == 404
+
+    def test_a_declared_length_past_the_bound_is_refused_unread(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        app.state.settings.repository.max_object_bytes = 64
+        _deploy(client, admin_headers)
+
+        resp = client.put(
+            f"{BASE}/files/transforms/000_parse.vrl",
+            content=iter([b'{"content": "x"}']),
+            headers={**admin_headers, "content-type": "application/json", "content-length": "9999"},
+        )
+
+        assert resp.status_code == 413, resp.text
+        assert resp.json()["code"] == "payload_too_large"
+
+    def test_a_file_at_the_cap_is_accepted_however_it_is_escaped(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # Every character here doubles on the wire, so the body is twice the cap.
+        _wire(app, tmp_path)
+        app.state.settings.repository.max_object_bytes = 64
+        _deploy(client, admin_headers)
+        content = '"\n' * 32
+
+        resp = client.put(
+            f"{BASE}/files/transforms/000_parse.vrl",
+            json={"content": content},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        got = client.get(f"{BASE}/files/transforms/000_parse.vrl", headers=admin_headers)
+        assert got.json()["content"] == content
+
+    def test_a_body_that_is_not_a_file_write_is_422(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+
+        resp = client.put(
+            f"{BASE}/files/transforms/000_parse.vrl", json={"text": "x"}, headers=admin_headers
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["errors"][0]["field"] == "content"
+
     def test_viewer_cannot_write_a_file(self, client, app, admin_headers, viewer_headers, tmp_path):
         _wire(app, tmp_path)
         _deploy(client, admin_headers)
