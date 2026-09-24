@@ -80,14 +80,12 @@ def _validate_autoscaling(config, errors: list[str], warnings: list[str]) -> Non
     if config.keda.enabled and config.hpa.enabled:
         errors.append("KEDA and HPA cannot both be enabled")
 
-    if config.keda.enabled:
-        if config.keda.min_replicas > config.keda.max_replicas:
-            errors.append(
-                f"KEDA min_replicas ({config.keda.min_replicas}) > "
-                f"max_replicas ({config.keda.max_replicas})"
-            )
-        if config.keda.kafka_trigger is None and config.keda.cpu_trigger is None:
-            errors.append("KEDA enabled but no triggers configured")
+    # No explicit trigger is valid: the chart's CPU and ScalingPressure triggers then apply.
+    if config.keda.enabled and config.keda.min_replicas > config.keda.max_replicas:
+        errors.append(
+            f"KEDA min_replicas ({config.keda.min_replicas}) > "
+            f"max_replicas ({config.keda.max_replicas})"
+        )
 
     if config.hpa.enabled:
         if config.hpa.min_replicas > config.hpa.max_replicas:

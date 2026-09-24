@@ -37,8 +37,9 @@ class ServicePlugin:
             Signature: ``(config: BaseModel, errors: list[str], warnings: list[str]) -> None``
         sizing_overrides: Per t-shirt size service config overrides.
             Shape: ``{"xs": {"buffer": {"flush_bytes": 524288}}, ...}``
-        keda_defaults: Default KEDA trigger configuration.
-            Shape: ``{"min_replicas": 2, "max_replicas": 10, "kafka_trigger": {...}}``
+        keda_defaults: Default KEDA replica bounds, never a trigger -- with no
+            explicit trigger the chart's CPU and ScalingPressure triggers stand.
+            Shape: ``{"min_replicas": 2, "max_replicas": 10}``
         default_size: Default t-shirt size for production deployments.
         config_template_overrides: Per-profile config overrides for template generation.
             Shape: ``{"production": {"kafka": {"sasl": {...}}}, "k8s": {...}}``

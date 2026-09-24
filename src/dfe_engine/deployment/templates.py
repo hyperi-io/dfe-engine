@@ -65,7 +65,12 @@ def _apply_default_overrides(service: str, config: dict) -> dict:
 
 
 def _apply_production_overrides(service: str, config: dict) -> dict:
-    """Apply production defaults: KEDA on, service-default sizing, prometheus annotations."""
+    """Apply production defaults: KEDA on, service-default sizing, prometheus annotations.
+
+    KEDA gets replica bounds only, so the chart's CPU and ScalingPressure triggers
+    stand. A raw consumer-lag trigger would replace them, and lag also rises when a
+    downstream stage is broken, where more pods cannot help.
+    """
     default_size = get_default_size(service)
     config["size"] = default_size.value
 
@@ -81,8 +86,6 @@ def _apply_production_overrides(service: str, config: dict) -> dict:
         config["keda"]["max_replicas"] = keda_defaults.get(
             "max_replicas", config["keda"]["max_replicas"]
         )
-        if "kafka_trigger" in keda_defaults:
-            config["keda"]["kafka_trigger"] = keda_defaults["kafka_trigger"].copy()
 
     config["hpa"]["enabled"] = False
 

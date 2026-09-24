@@ -446,10 +446,11 @@ class HelmValuesCompiler:
 
         Emits the scaling BOUNDS (enabled/min/max/cooldown/polling) always. It
         leaves ``triggers`` as None UNLESS the deploy config explicitly configures
-        triggers -- so by default the chart's own trigger (the gated
-        ScalingPressure metrics-api trigger) stands. DFE scales on that gated
-        signal, not raw CG lag (see project_keda_scaling_signal); Helm replaces
-        lists, so emitting an empty/override list here would wipe the chart default.
+        triggers -- so by default the chart's own triggers stand: CPU, plus the
+        gated ScalingPressure metrics-api trigger where ``keda.pressure.enabled``.
+        DFE scales on those, not raw consumer-group lag, which also rises when a
+        downstream stage is broken. Helm replaces lists, so any list emitted here,
+        an explicit ``kafka_trigger`` included, replaces the chart's triggers, CPU too.
         """
         if not keda_config.enabled:
             return HelmKeda(enabled=False)

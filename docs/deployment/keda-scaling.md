@@ -71,6 +71,6 @@ has a default trigger to describe until it ships.
 
 All ScaledObjects default `minReplicaCount: 1` - there is no scale-to-zero on
 the fleet baseline today (`idleReplicaCount` support exists in `_keda.tpl` for
-a later opt-in, e.g. the Kafka-pipeline apps once that is wired). A per-app
-`keda.triggers` override still exists for a bespoke scaler (e.g. Kafka
-consumer lag) where one is genuinely needed, passed through verbatim.
+a later opt-in, e.g. the Kafka-pipeline apps once that is wired).
+
+A per-app `keda.triggers` list is passed through verbatim and replaces the default triggers outright, CPU included. An explicit `kafka_trigger` in an engine deploy config compiles to that same override. The engine never sets one by default: consumer-group lag also rises when a downstream stage is broken, and more pods cannot help there.
