@@ -148,7 +148,8 @@ class TestValidateDeploymentConfig:
         assert result.valid is False
         assert any("min_replicas" in e for e in result.errors)
 
-    def test_keda_no_triggers(self):
+    def test_keda_without_an_explicit_trigger_is_valid(self):
+        # The chart's CPU and ScalingPressure triggers apply when the config names none.
         from dfe_engine.deployment.models import ReceiverDeploymentConfig
 
         config = ReceiverDeploymentConfig()
@@ -157,8 +158,8 @@ class TestValidateDeploymentConfig:
         data["keda"]["kafka_trigger"] = None
         data["keda"]["cpu_trigger"] = None
         result = validate_deployment_config("receiver", data)
-        assert result.valid is False
-        assert any("no triggers" in e for e in result.errors)
+        assert result.valid is True, result.errors
+        assert result.errors == []
 
     def test_resource_requests_gt_limits_error(self):
         result = validate_deployment_config(

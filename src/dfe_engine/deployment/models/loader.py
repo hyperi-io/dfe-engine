@@ -8,7 +8,6 @@ from dfe_engine.deployment.models.common import (
     BaseDeploymentConfig,
     K8sServiceConfig,
     KedaConfig,
-    KedaTriggerKafka,
     TShirtSize,
 )
 
@@ -26,15 +25,7 @@ class LoaderDeploymentConfig(BaseDeploymentConfig):
     )
     image: str = "harbor.hyperi.io/dfe/dfe-loader"
     keda: KedaConfig = Field(
-        default_factory=lambda: KedaConfig(
-            enabled=False,
-            min_replicas=2,
-            max_replicas=8,
-            kafka_trigger=KedaTriggerKafka(
-                consumer_group="clickhouse-loader",
-                lag_threshold=50000,
-            ),
-        ),
+        default_factory=lambda: KedaConfig(enabled=False, min_replicas=2, max_replicas=8),
     )
     service: K8sServiceConfig = Field(
         default_factory=lambda: K8sServiceConfig(port=9000, metrics_port=9090),
