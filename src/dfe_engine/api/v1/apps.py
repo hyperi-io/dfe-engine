@@ -1257,6 +1257,17 @@ def _checked_changes(
     return config_changes, env_changes
 
 
+def _restored(doc: dict, changes: dict[str, Any]) -> dict[str, Any]:
+    """The requested changes with every masked credential put back to what is stored."""
+    out: dict[str, Any] = {}
+    for path, value in changes.items():
+        try:
+            out[path] = contract.restore_masked_at(doc, path, value)
+        except contract.MaskedValueError as exc:
+            raise _refuse(400, "masked_value", path, str(exc)) from exc
+    return out
+
+
 def _custom_env_delivery(request: Request, env_changes: dict[str, Any]) -> str:
     """How the custom environment in this write reaches the app's container."""
     if not env_changes:
@@ -1297,7 +1308,8 @@ async def set_app_config(
 
     A secret is written like any other option: it goes into the overlay as the rest
     of this surface writes one, and neither this response nor a read route on this
-    surface says what it is.
+    surface says what it is. A masked value written back as it was read keeps the
+    stored credential; the mask where nothing is stored is a 400 ``masked_value``.
 
     409 where the deployment already decides the value: a config path the chart
     derives, or an `extraEnv` name the chart sets for this app.
@@ -1306,7 +1318,9 @@ async def set_app_config(
     gc = _gitcrud(request)
     doc = _overlay(gc, app)
     _require_fresh(gc, if_match)
-    config_changes, env_changes = _checked_changes(service, read_contract(service), body.changes)
+    config_changes, env_changes = _checked_changes(
+        service, read_contract(service), _restored(doc, body.changes)
+    )
     if not config_changes and not env_changes:
         return ConfigWriteResult(changed=False)
 

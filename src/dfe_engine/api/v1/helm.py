@@ -151,6 +151,13 @@ def set_var_governed(
         stored = gc.get(cls, name)
     except ResourceNotFoundError:
         stored = {}
+    # The vars routes read credentials masked, so one written back as read keeps its value.
+    try:
+        value = contract.restore_masked_at(stored, path, value)
+    except contract.MaskedValueError as exc:
+        raise HTTPException(
+            status_code=400, detail={"code": "masked_value", "message": str(exc)}
+        ) from exc
     try:
         validate_change(path, value, stored)
     except CommitPolicyError as exc:

@@ -18,13 +18,14 @@ from pathlib import Path
 import pytest
 
 from dfe_engine.appmgmt import contract
+from dfe_engine.gitcrud.engine import set_path
 
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "contract"
 
-# Receiver, loader and transform-vrl schemas from the builds that hold each source
-# acknowledgement until delivery, copied byte for byte from each app's
-# docs/config-schema.json (dfe-receiver f61c903, dfe-loader edef368,
-# dfe-transform-vrl da42bd2).
+# Schemas from the builds that hold each source acknowledgement until delivery,
+# copied byte for byte from each app's docs/config-schema.json: dfe-receiver
+# f61c903, dfe-loader edef368, dfe-transform-vrl da42bd2, dfe-archiver 29f201a,
+# dfe-transform-vector 36dbfa6, dfe-fetcher 0ab0317.
 HELD = Path(__file__).parents[2] / "fixtures" / "contract-acknowledgements"
 
 # Every block of each app that holds its acknowledgement, as its schema declares it.
@@ -40,6 +41,10 @@ HOLDING_BLOCKS = [
     ("dfe-loader", "kafka"),
     ("dfe-loader", "grpc"),
     ("dfe-transform-vrl", "source"),
+    ("dfe-archiver", "kafka"),
+    ("dfe-archiver", "grpc"),
+    ("dfe-transform-vector", "source"),
+    ("dfe-fetcher", "extractors.vector"),
 ]
 
 # What each app's contract flattens to. Asserted exactly: these move only when an
@@ -500,9 +505,10 @@ class TestCustomEnvKeys:
             "DFE_LOADER_KAFKA_SASL_PASSWORD",
             "GITHUB_TOKEN",
             "OAUTH_CLIENT_SECRET",
-            "DFE_LOADER_HOUSE_KEY",
             "S3_API_KEY",
+            "S3_SECRET_KEY",
             "AWS_SECRET_ACCESS_KEY",
+            "MAXMIND_LICENSE_KEY",
             "SIGNING_PRIVATE_KEY",
             "TOKEN",
             "RECEIVER_BEARER_TOKENS",
@@ -513,10 +519,48 @@ class TestCustomEnvKeys:
 
     @pytest.mark.parametrize(
         "name",
-        ["DFE_LOADER_HOUSE_STYLE", "TOKEN_URL", "SECRET_SOURCE", "KEYCLOAK_REALM", "MONKEY"],
+        [
+            "DFE_LOADER_HOUSE_STYLE",
+            "TOKEN_URL",
+            "SECRET_SOURCE",
+            "KEYCLOAK_REALM",
+            "MONKEY",
+            "DFE_LOADER_HOUSE_KEY",
+            "KAFKA_PARTITION_KEY",
+            "KEY",
+        ],
     )
     def test_a_name_that_only_contains_one_is_not(self, name):
         assert contract.secret_env_name(name) is False
+
+    @pytest.mark.parametrize(
+        ("name", "section"),
+        [
+            ("api_key", ""),
+            ("private_key", ""),
+            ("secret_access_key", "s3"),
+            ("service_account_key", "gcp"),
+            ("maxmind_license_key", "auto_download"),
+            ("key", "tls"),
+            ("key", "client_auth"),
+        ],
+    )
+    def test_a_qualified_key_is_a_secret(self, name, section):
+        assert contract.secret_name(name, section) is True
+
+    @pytest.mark.parametrize(
+        ("name", "section"),
+        [
+            ("key", "routing"),
+            ("key", ""),
+            ("partition_key", "sink"),
+            ("routing_key", ""),
+            ("integration_key", "duo"),
+            ("key_field", "sink"),
+        ],
+    )
+    def test_a_key_nothing_qualifies_is_not(self, name, section):
+        assert contract.secret_name(name, section) is False
 
     def test_an_app_with_no_custom_env_reports_none(self):
         assert contract.resolve_config(_contract("dfe-loader"), {}).custom == []
@@ -626,7 +670,8 @@ class TestHeldAcknowledgements:
     @pytest.mark.parametrize(("service", "block"), HOLDING_BLOCKS)
     def test_a_written_false_is_the_overlay_s(self, service, block):
         found = contract.load_contract(service, HELD)
-        overlay = {"config": {block: {"acknowledgements": {"enabled": False}}}}
+        overlay: dict = {}
+        set_path(overlay, f"config.{block}.acknowledgements.enabled", False)
         view = contract.resolve_config(found, overlay)
         held = {f.path: f for f in view.fields}[f"config.{block}.acknowledgements.enabled"]
         assert (held.value, held.provenance) == (False, contract.Provenance.OVERLAY)
@@ -751,6 +796,36 @@ class TestRedactingTheOverlay:
             contract.REDACTED
         )
 
+    @pytest.mark.parametrize("root", ["held", "unmounted"])
+    def test_a_routing_key_shows_and_a_tls_key_masks(self, root, tmp_path):
+        found = contract.load_contract("dfe-receiver", HELD if root == "held" else tmp_path)
+        overlay = {
+            "config": {
+                "routing": {"key": "org_id"},
+                "sink": {"partition_key": "host"},
+                "tls": {"key": "-----BEGIN PRIVATE KEY-----"},
+                "s3": {"secret_key": "s3-sk"},
+            }
+        }
+        assert contract.redact_overlay(found, overlay)["config"] == {
+            "routing": {"key": "org_id"},
+            "sink": {"partition_key": "host"},
+            "tls": {"key": contract.REDACTED},
+            "s3": {"secret_key": contract.REDACTED},
+        }
+
+    def test_a_key_inside_a_listed_entry_is_judged_by_the_list(self):
+        found = contract.load_contract("dfe-receiver", HELD)
+        overlay = {"config": {"credentials": [{"key": "c-1"}], "shards": [{"key": "s-1"}]}}
+        assert contract.redact_overlay(found, overlay)["config"] == {
+            "credentials": [{"key": contract.REDACTED}],
+            "shards": [{"key": "s-1"}],
+        }
+
+    def test_an_unmarked_licence_key_is_a_secret(self):
+        by_path = {f.path: f for f in contract.resolve_config(_contract("dfe-loader"), {}).fields}
+        assert by_path["config.geoip.auto_download.maxmind_license_key"].secret is True
+
     def test_nothing_written_stays_nothing(self):
         found = contract.load_contract("dfe-receiver", HELD)
         overlay = {"config": {"kafka": {"sasl": {"password": ""}}, "server": {"auth": {}}}}
@@ -761,3 +836,61 @@ class TestRedactingTheOverlay:
         overlay = json.loads(json.dumps(self.OVERLAY))
         contract.redact_overlay(found, overlay)
         assert overlay == self.OVERLAY
+
+
+class TestRestoringMaskedValues:
+    """A masked read written back unchanged puts the stored credential back."""
+
+    R = contract.REDACTED
+    STORED = {
+        "config": {
+            "kafka": {"sasl": {"password": "kafka-pw"}},
+            "server": {
+                "auth": {
+                    "bearer": {"tokens": ["tok-1", "tok-2"]},
+                    "accepted_headers": [{"name": "x-api-key", "values": ["hv-1"]}],
+                }
+            },
+        },
+        "extraEnv": {"DFE_X_TOKEN": "env-tok"},
+    }
+
+    def test_the_whole_redacted_overlay_restores_to_what_is_stored(self):
+        found = contract.load_contract("dfe-receiver", HELD)
+        masked = contract.redact_overlay(found, json.loads(json.dumps(self.STORED)))
+        assert contract.restore_masked(masked, self.STORED) == self.STORED
+
+    @pytest.mark.parametrize(
+        ("path", "value", "restored"),
+        [
+            ("config.kafka.sasl.password", R, "kafka-pw"),
+            ("config.server.auth.bearer.tokens", [R, R], ["tok-1", "tok-2"]),
+            ("config.server.auth.bearer.tokens", [R, R, "tok-3"], ["tok-1", "tok-2", "tok-3"]),
+            ("config.server.auth.bearer.tokens", ["tok-9"], ["tok-9"]),
+            (
+                "config.server.auth.accepted_headers",
+                [{"name": "x-renamed", "values": [R]}],
+                [{"name": "x-renamed", "values": ["hv-1"]}],
+            ),
+            ("extraEnv.DFE_X_TOKEN", R, "env-tok"),
+            ("config.kafka.sasl.password", "new-pw", "new-pw"),
+        ],
+    )
+    def test_a_write_at_a_path(self, path, value, restored):
+        assert contract.restore_masked_at(self.STORED, path, value) == restored
+
+    @pytest.mark.parametrize(
+        ("path", "value"),
+        [
+            ("config.kafka.sasl.username", R),
+            ("config.server.auth.bearer.tokens", [R, R, R]),
+            ("extraEnv.DFE_Y_TOKEN", R),
+        ],
+    )
+    def test_the_mask_with_nothing_behind_it_is_refused(self, path, value):
+        with pytest.raises(contract.MaskedValueError, match="nothing is stored"):
+            contract.restore_masked_at(self.STORED, path, value)
+
+    def test_a_stored_null_is_nothing_to_restore(self):
+        with pytest.raises(contract.MaskedValueError):
+            contract.restore_masked_at({"a": {"password": None}}, "a.password", self.R)

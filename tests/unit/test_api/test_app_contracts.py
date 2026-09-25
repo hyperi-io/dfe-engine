@@ -752,6 +752,98 @@ class TestCredentialsAreNotEchoed:
         for credential in (*PLAINTEXT, "env-secret"):
             assert credential not in resp.text
 
+    def test_a_masked_read_written_back_keeps_the_stored_credentials(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # A client that reads /values, edits one field and writes the rest back
+        # unchanged hands the engine the mask where the credentials were.
+        gc = _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        _put_receiver(
+            client, admin_headers, {**CREDENTIALS, "extraEnv.DFE_RECEIVER_S3_SECRET": "env-secret"}
+        )
+        shown = client.get(f"{RECEIVER_BASE}/values", headers=admin_headers).json()["values"]
+        auth = shown["config"]["server"]["auth"]
+
+        resp = _put_receiver(
+            client,
+            admin_headers,
+            {
+                "config.server.auth.mode": "header",
+                "config.server.auth.bearer.tokens": auth["bearer"]["tokens"],
+                "config.server.auth.accepted_headers": auth["accepted_headers"],
+                "config.server.auth.header_values": auth["header_values"],
+                "extraEnv.DFE_RECEIVER_S3_SECRET": shown["extraEnv"]["DFE_RECEIVER_S3_SECRET"],
+            },
+        )
+        assert resp.status_code == 200, resp.text
+
+        stored = gc.get("helmvars", "dfe-receiver-default-values")
+        assert stored["config"]["server"]["auth"] == {
+            "mode": "header",
+            "bearer": {"tokens": ["tok-1", "tok-2"]},
+            "accepted_headers": [{"name": "x-api-key", "values": ["hv-1"]}],
+            "header_values": ["legacy-1"],
+        }
+        assert stored["extraEnv"]["DFE_RECEIVER_S3_SECRET"] == "env-secret"
+        assert contract.REDACTED not in json.dumps(stored)
+
+    def test_a_masked_entry_added_to_a_list_keeps_the_stored_ones_and_takes_the_new(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        _put_receiver(client, admin_headers, CREDENTIALS)
+        path = "config.server.auth.bearer.tokens"
+        resp = _put_receiver(
+            client, admin_headers, {path: [contract.REDACTED, contract.REDACTED, "tok-3"]}
+        )
+        assert resp.status_code == 200, resp.text
+        stored = gc.get("helmvars", "dfe-receiver-default-values")
+        assert stored["config"]["server"]["auth"]["bearer"]["tokens"] == ["tok-1", "tok-2", "tok-3"]
+
+    def test_the_mask_with_nothing_stored_behind_it_is_refused(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # Writing it would put the placeholder itself in as the credential.
+        gc = _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        before = gc.head_revision()
+        resp = _put_receiver(
+            client, admin_headers, {"config.kafka.sasl.password": contract.REDACTED}
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "masked_value"
+        assert gc.head_revision() == before
+
+    def test_the_helm_vars_route_keeps_a_credential_written_back_masked(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        _put_receiver(client, admin_headers, CREDENTIALS)
+        resp = client.put(
+            "/api/v1/helm/files/dfe-receiver-default-values/vars/config.server.auth.bearer.tokens",
+            json={"value": [contract.REDACTED, contract.REDACTED]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        stored = gc.get("helmvars", "dfe-receiver-default-values")
+        assert stored["config"]["server"]["auth"]["bearer"]["tokens"] == ["tok-1", "tok-2"]
+
+    def test_the_helm_vars_route_refuses_the_mask_with_nothing_behind_it(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        resp = client.put(
+            "/api/v1/helm/files/dfe-receiver-default-values/vars/config.kafka.sasl.password",
+            json={"value": contract.REDACTED},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "masked_value"
+
     def test_the_stored_overlay_still_holds_what_was_written(
         self, client, app, admin_headers, tmp_path
     ):
