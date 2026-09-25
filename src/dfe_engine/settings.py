@@ -637,6 +637,18 @@ class KafkaSettings(BaseModel):
             "``compact``). Empty leaves the broker default in place."
         ),
     )
+    topic_max_message_bytes: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "``max.message.bytes`` for every topic DFE creates and converges: the "
+            "bootstrap set and each source's _land and _load "
+            "(DFE_KAFKA_TOPIC_MAX_MESSAGE_BYTES). Set it to the deployment's message "
+            "size, the one its broker and producers carry. Unset falls back to the "
+            "dfe-schemas manifest's size, which a managed broker capped below it "
+            "refuses at create."
+        ),
+    )
 
     @model_validator(mode="after")
     def _derive_from_provider(self) -> "KafkaSettings":
@@ -1231,7 +1243,7 @@ class AccountStoreSettings(BaseModel):
 class AuthSettings(BaseModel):
     """Authorization settings.
 
-    Bespoke role→permission RBAC. Zero external dependencies.
+    Bespoke role->permission RBAC. Zero external dependencies.
 
     Environment variables:
     - DFE_AUTH_ENABLED -> auth.enabled
@@ -1864,6 +1876,8 @@ def _get_env_overrides() -> dict:
         overrides["kafka"]["topic_retention_ms"] = int(val)
     if val := _get_env("DFE_KAFKA_TOPIC_CLEANUP_POLICY"):
         overrides["kafka"]["topic_cleanup_policy"] = val
+    if val := _get_env("DFE_KAFKA_TOPIC_MAX_MESSAGE_BYTES"):
+        overrides["kafka"]["topic_max_message_bytes"] = int(val)
 
     # Transport: what this deployment can carry a source on. The profile sets
     # both - a brokerless profile is bus_present=false, default=direct.
@@ -2216,7 +2230,7 @@ def _get_env_overrides() -> dict:
     if val := _get_env("DFE_E2E_SERVER"):
         overrides["e2e_server"] = val.lower() in ("true", "1", "yes")
 
-    # Config directory (dfe-devex submodule) — auto-resolves registry subdirs
+    # Config directory (dfe-devex submodule) -- auto-resolves registry subdirs
     # Individual env vars (DFE_SOURCES_DIR, etc.) take precedence.
     config_dir = _get_env("DFE_CONFIG_DIR")
     if config_dir:

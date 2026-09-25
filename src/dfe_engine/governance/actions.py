@@ -32,8 +32,6 @@ from .policies import PolicyStore, ProtectedVarError
 ACTION_CLASS = "actions"
 """The gitops class action definitions are stored in."""
 
-_ACTION_CLASS = ACTION_CLASS
-
 CREDENTIAL_REFUSAL = (
     "an action definition is stored in the deploy repo's history, so it may not carry "
     "a credential: set credentials through the vars routes (PUT "
@@ -147,15 +145,15 @@ class ActionStore:
         self._crud = crud
 
     def list(self) -> builtins.list[str]:
-        return self._crud.list(_ACTION_CLASS)
+        return self._crud.list(ACTION_CLASS)
 
     def get(self, name: str) -> ActionDef:
         """The stored definition as written, credentials included: for invoking it."""
-        return ActionDef.model_validate(self._crud.get(_ACTION_CLASS, name))
+        return ActionDef.model_validate(self._crud.get(ACTION_CLASS, name))
 
     def get_shown(self, name: str) -> ActionDef:
         """The stored definition for a reader, any credential it carries masked."""
-        return ActionDef.model_validate(self.shown_doc(name, self._crud.get(_ACTION_CLASS, name)))
+        return ActionDef.model_validate(self.shown_doc(name, self._crud.get(ACTION_CLASS, name)))
 
     def _target(self, change: VarChange) -> dict:
         """The document a change writes into, or nothing where there is none yet."""
@@ -238,7 +236,7 @@ class ActionStore:
 
     def save(self, action: ActionDef, actor: str, branch: str = "") -> PublishResult:
         return self._crud.put(
-            _ACTION_CLASS,
+            ACTION_CLASS,
             action.name,
             action.model_dump(),
             actor,
@@ -247,7 +245,7 @@ class ActionStore:
         )
 
     def delete(self, name: str, actor: str, branch: str = "") -> PublishResult:
-        return self._crud.delete(_ACTION_CLASS, name, actor, branch=branch)
+        return self._crud.delete(ACTION_CLASS, name, actor, branch=branch)
 
     def _walk(
         self,

@@ -802,6 +802,52 @@ class TestCredentialsAreNotEchoed:
         stored = gc.get("helmvars", "dfe-fetcher-alpha-values")["config"]["sources"]["rest"]
         assert stored == {"primary": {**entry, "topic": "t-2"}}
 
+    def test_the_fetcher_ingest_token_is_masked_on_both_reads(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # The schema carries no marker on it, so the name rule is what hides it.
+        _wire(app, tmp_path)
+        _deploy_fetcher(client, admin_headers, "alpha")
+        base = "/api/v1/apps/dfe-fetcher/alpha"
+        path = "config.ingest.auth_token"
+        resp = client.put(
+            f"{base}/config", json={"changes": {path: "ingest-tok-6620"}}, headers=admin_headers
+        )
+        assert resp.status_code == 200, resp.text
+
+        config = client.get(f"{base}/config", headers=admin_headers)
+        field = {f["path"]: f for f in config.json()["fields"]}[path]
+        assert (field["secret"], field["set"], field["value"]) == (True, True, None)
+        assert "ingest-tok-6620" not in config.text
+        values = client.get(f"{base}/values", headers=admin_headers)
+        assert values.json()["values"]["config"]["ingest"]["auth_token"] == contract.REDACTED
+        assert "ingest-tok-6620" not in values.text
+
+    def test_deleting_a_fetcher_connection_leaves_each_token_on_its_own_account(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        _deploy_fetcher(client, admin_headers, "alpha")
+        base = "/api/v1/apps/dfe-fetcher/alpha"
+        path = "config.sources.github.connections"
+        connections = [{"id": n, "org": f"org-{n}", "token": f"gh-{n}-5521"} for n in "abc"]
+        resp = client.put(
+            f"{base}/config", json={"changes": {path: connections}}, headers=admin_headers
+        )
+        assert resp.status_code == 200, resp.text
+
+        read = client.get(f"{base}/config", headers=admin_headers)
+        shown = {f["path"]: f for f in read.json()["fields"]}[path]["value"]
+        assert [entry["token"] for entry in shown] == [contract.REDACTED] * 3
+        written = client.put(
+            f"{base}/config",
+            json={"changes": {path: [shown[0], shown[2]]}},
+            headers=admin_headers,
+        )
+        assert written.status_code == 200, written.text
+        stored = gc.get("helmvars", "dfe-fetcher-alpha-values")["config"]["sources"]["github"]
+        assert stored["connections"] == [connections[0], connections[2]]
+
     def test_the_helm_vars_route_masks_them_too(self, client, app, admin_headers, tmp_path):
         # The same overlay read through the generic helm-var surface, same privilege.
         _wire(app, tmp_path)

@@ -11,6 +11,9 @@ import pytest
 
 from dfe_engine.kafka.topics import TopicEnsureResult, TopicUpdateResult
 from dfe_engine.schema import phase
+from dfe_engine.settings import DFESettings
+
+SETTINGS = DFESettings(env="dev")
 
 
 class _Rendered:
@@ -46,7 +49,7 @@ def test_a_refused_shape_difference_is_reported(monkeypatch, plan):
     )
     monkeypatch.setattr("dfe_engine.kafka.topics.update_topics", _compare)
 
-    created, skipped, drift = phase._apply_topics(plan, settings=None)
+    created, skipped, drift = phase._apply_topics(plan, settings=SETTINGS)
 
     assert created == []
     assert skipped == ""
@@ -65,7 +68,7 @@ def test_config_and_partition_differences_are_named(monkeypatch, plan):
         lambda specs, **kw: TopicUpdateResult(altered=["main_land"], widened=["main_land"]),
     )
 
-    _, _, drift = phase._apply_topics(plan, settings=None)
+    _, _, drift = phase._apply_topics(plan, settings=SETTINGS)
 
     assert "main_land: config differs from the manifest" in drift
     assert "main_land: fewer partitions than the manifest asks for" in drift
@@ -81,7 +84,7 @@ def test_a_topic_that_matches_reports_nothing(monkeypatch, plan):
         lambda specs, **kw: TopicUpdateResult(unchanged=["main_land"]),
     )
 
-    assert phase._apply_topics(plan, settings=None)[2] == []
+    assert phase._apply_topics(plan, settings=SETTINGS)[2] == []
 
 
 def test_a_freshly_created_topic_is_not_compared(monkeypatch, plan):
@@ -96,7 +99,7 @@ def test_a_freshly_created_topic_is_not_compared(monkeypatch, plan):
 
     monkeypatch.setattr("dfe_engine.kafka.topics.update_topics", _fail)
 
-    created, _, drift = phase._apply_topics(plan, settings=None)
+    created, _, drift = phase._apply_topics(plan, settings=SETTINGS)
 
     assert created == ["main_land"]
     assert drift == []
@@ -119,7 +122,7 @@ def test_an_undescribable_topic_reports_unknown_not_clean(monkeypatch, plan):
         ),
     )
 
-    _, _, drift = phase._apply_topics(plan, settings=None)
+    _, _, drift = phase._apply_topics(plan, settings=SETTINGS)
 
     assert drift == [
         "main_land: shape unreadable, so drift is unknown -- "
@@ -139,7 +142,7 @@ def test_a_raising_compare_does_not_fail_the_create_pass(monkeypatch, plan):
 
     monkeypatch.setattr("dfe_engine.kafka.topics.update_topics", _boom)
 
-    created, skipped, drift = phase._apply_topics(plan, settings=None)
+    created, skipped, drift = phase._apply_topics(plan, settings=SETTINGS)
 
     assert created == ["a_land"]
     assert skipped == ""

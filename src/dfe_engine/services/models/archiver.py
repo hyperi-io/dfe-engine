@@ -143,10 +143,11 @@ class ArchiverBufferConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    flush_bytes: int = Field(default=64 * 1024 * 1024, gt=0, description="64MB default")
+    # Pinned to dfe-archiver BufferConfig::default (35f9b49).
+    flush_bytes: int = Field(default=1024 * 1024, gt=0)
     flush_age_secs: int = Field(default=60, gt=0)
     flush_records: int = Field(default=100_000, gt=0)
-    writer_parallelism: int = Field(default=4, ge=1)
+    writer_parallelism: int = Field(default=2, ge=1)
 
 
 # ---------------------------------------------------------------------------

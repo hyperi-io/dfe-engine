@@ -44,8 +44,6 @@ underlying ``confluent_kafka`` AdminClient, built with the identical config
 shape. Collapse onto KafkaAdmin once scalo grows that surface.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -415,15 +413,30 @@ def broker_count(
     return nodes
 
 
+def topic_max_message_bytes(settings: DFESettings) -> int:
+    """The ``max.message.bytes`` every topic DFE creates carries, bootstrap and source alike.
+
+    The deployment's own size where it sets one, else the dfe-schemas manifest's.
+    A topic left on the broker default refuses records the rest of the chain
+    accepts, and dead-letters them.
+    """
+    configured = settings.kafka.topic_max_message_bytes
+    if configured is not None:
+        return configured
+    from dfe_engine.source.models import _topic_policy
+
+    return int(_topic_policy().defaults["max_message_bytes"])
+
+
 def deployment_topic_config(settings: DFESettings) -> dict[str, str]:
     """The alterable topic configs DFE asks for, as librdkafka string values.
 
-    Empty by default: a deployment that sets neither dial gets a topic whose
-    retention and cleanup policy are the broker's, which is what every topic
-    created before these dials existed already has.
+    Always the message size, from :func:`topic_max_message_bytes`. Retention and
+    cleanup policy only where a dial sets them: unset leaves the broker's, which is
+    what every topic created before those dials existed already has.
     """
     ks = settings.kafka
-    config: dict[str, str] = {}
+    config: dict[str, str] = {"max.message.bytes": str(topic_max_message_bytes(settings))}
     if ks.topic_retention_ms is not None:
         config["retention.ms"] = str(ks.topic_retention_ms)
     if ks.topic_cleanup_policy:

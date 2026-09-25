@@ -610,6 +610,38 @@ class TestCustomEnvKeys:
     def test_a_key_nothing_qualifies_is_not(self, name, section):
         assert contract.secret_name(name, section) is False
 
+    @pytest.mark.parametrize(
+        ("name", "section"),
+        [
+            ("auth_token", "ingest"),
+            ("sasl_password", "kafka"),
+            ("aws_session_token", "sasl"),
+            ("client_secret", "azure"),
+            ("oauth_client_secret", "sasl"),
+            ("bearer_tokens", "auth"),
+        ],
+    )
+    def test_a_config_key_ending_in_a_credential_word_is_secret(self, name, section):
+        # dfe-fetcher's ingest.auth_token carries no marker, so its name is all there is.
+        assert contract.secret_name(name, section) is True
+
+    @pytest.mark.parametrize(
+        ("name", "section"),
+        [
+            ("credential_secret", "github"),
+            ("private_key_secret", "salesforce"),
+            ("key_secret", "tls"),
+            ("ca_secret", "tls"),
+            ("cert_secret", "tls"),
+            ("config_secret", ""),
+            ("secret_source", "bearer"),
+            ("token_url_override", "gcp"),
+        ],
+    )
+    def test_a_secret_source_or_a_name_that_only_contains_one_is_not(self, name, section):
+        # A secret source holds a provider:path:key spec, which an operator needs to see.
+        assert contract.secret_name(name, section) is False
+
     def test_an_app_with_no_custom_env_reports_none(self):
         assert contract.resolve_config(_contract("dfe-loader"), {}).custom == []
 
@@ -917,8 +949,8 @@ class TestRestoringMaskedValues:
             ("config.server.auth.bearer.tokens", ["tok-9"], ["tok-9"]),
             (
                 "config.server.auth.accepted_headers",
-                [{"name": "x-renamed", "values": [R]}],
-                [{"name": "x-renamed", "values": ["hv-1"]}],
+                [{"name": "x-api-key", "values": [R, "hv-2"]}],
+                [{"name": "x-api-key", "values": ["hv-1", "hv-2"]}],
             ),
             ("extraEnv.DFE_X_TOKEN", R, "env-tok"),
             ("config.kafka.sasl.password", "new-pw", "new-pw"),
@@ -933,6 +965,8 @@ class TestRestoringMaskedValues:
             ("config.kafka.sasl.username", R),
             ("config.server.auth.bearer.tokens", [R, R, R]),
             ("extraEnv.DFE_Y_TOKEN", R),
+            # A renamed header is a new entry, so its masked values have nothing behind them.
+            ("config.server.auth.accepted_headers", [{"name": "x-renamed", "values": [R]}]),
         ],
     )
     def test_the_mask_with_nothing_behind_it_is_refused(self, path, value):
@@ -942,3 +976,86 @@ class TestRestoringMaskedValues:
     def test_a_stored_null_is_nothing_to_restore(self):
         with pytest.raises(contract.MaskedValueError):
             contract.restore_masked_at({"a": {"password": None}}, "a.password", self.R)
+
+
+class TestAMaskedListEntryKeepsItsOwnCredential:
+    """A masked list entry gets back the credential it was read with, or the write is refused."""
+
+    R = contract.REDACTED
+    # dfe-fetcher's connections: one account per entry, named by a required id.
+    CONNECTIONS = [
+        {"id": "a", "org": "org-a", "token": "tok-a"},
+        {"id": "b", "org": "org-b", "token": "tok-b"},
+        {"id": "c", "org": "org-c", "token": "tok-c"},
+    ]
+
+    def _shown(self, *ids: str) -> list[dict]:
+        by_id = {entry["id"]: entry for entry in self.CONNECTIONS}
+        return [{**by_id[i], "token": self.R} for i in ids]
+
+    def test_deleting_one_keeps_each_other_token_on_its_own_entry(self):
+        restored = contract.restore_masked(self._shown("a", "c"), self.CONNECTIONS)
+        assert restored == [self.CONNECTIONS[0], self.CONNECTIONS[2]]
+
+    def test_reordering_keeps_each_token_on_its_own_entry(self):
+        restored = contract.restore_masked(self._shown("c", "a", "b"), self.CONNECTIONS)
+        assert restored == [self.CONNECTIONS[2], self.CONNECTIONS[0], self.CONNECTIONS[1]]
+
+    def test_an_appended_entry_is_kept_as_written(self):
+        added = {"id": "d", "org": "org-d", "token": "tok-d"}
+        restored = contract.restore_masked([*self._shown("a", "b", "c"), added], self.CONNECTIONS)
+        assert restored == [*self.CONNECTIONS, added]
+
+    def test_an_entry_edited_in_place_keeps_its_token(self):
+        edited = self._shown("b", "a")
+        edited[0]["org"] = "org-b-2"
+        restored = contract.restore_masked(edited, self.CONNECTIONS)
+        assert restored == [{**self.CONNECTIONS[1], "org": "org-b-2"}, self.CONNECTIONS[0]]
+
+    def test_a_renamed_entry_is_refused(self):
+        renamed = self._shown("a", "b")
+        renamed[1]["id"] = "b-2"
+        with pytest.raises(contract.MaskedValueError, match=r"\[1\]\.token.*nothing is stored"):
+            contract.restore_masked(renamed, self.CONNECTIONS, path="connections")
+
+    def test_headers_are_matched_by_name(self):
+        stored = [{"name": "x-one", "values": ["hv-1"]}, {"name": "x-two", "values": ["hv-2"]}]
+        shown = [{"name": "x-two", "values": [self.R]}]
+        assert contract.restore_masked(shown, stored) == [stored[1]]
+
+    def test_unnamed_masks_restore_while_every_stored_one_is_there(self):
+        # Two masks for two stored tokens, and a third written in full.
+        assert contract.restore_masked([self.R, "tok-3", self.R], ["tok-1", "tok-2"]) == [
+            "tok-1",
+            "tok-3",
+            "tok-2",
+        ]
+
+    @pytest.mark.parametrize(
+        "written",
+        [
+            pytest.param([R], id="deleted"),
+            pytest.param([R, "tok-3"], id="deleted-and-appended"),
+        ],
+    )
+    def test_an_unnamed_deletion_is_refused(self, written):
+        # Which token went cannot be told, and guessing could keep a revoked one.
+        with pytest.raises(contract.MaskedValueError, match="which were removed cannot be told"):
+            contract.restore_masked(written, ["tok-1", "tok-2"], path="tokens")
+
+    def test_unnamed_entries_reordered_are_refused(self):
+        stored = [{"url": "u-1", "token": "tok-1"}, {"url": "u-2", "token": "tok-2"}]
+        shown = [{"url": "u-2", "token": self.R}, {"url": "u-1", "token": self.R}]
+        with pytest.raises(contract.MaskedValueError, match=r"\[0\] is masked but no longer"):
+            contract.restore_masked(shown, stored, path="endpoints")
+
+    def test_unnamed_entries_unchanged_restore(self):
+        stored = [{"url": "u-1", "token": "tok-1"}, {"url": "u-2", "token": "tok-2"}]
+        shown = [{"url": "u-1", "token": self.R}, {"url": "u-2", "token": self.R}]
+        assert contract.restore_masked(shown, stored) == stored
+
+    def test_a_shared_name_is_not_an_identity(self):
+        # Two stored entries under one id: nothing says which a mask came from.
+        stored = [{"id": "a", "token": "tok-1"}, {"id": "a", "token": "tok-2"}]
+        with pytest.raises(contract.MaskedValueError, match="which were removed cannot be told"):
+            contract.restore_masked([{"id": "a", "token": self.R}], stored, path="connections")

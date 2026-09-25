@@ -71,9 +71,10 @@ SECRET_NAMES = frozenset(
         "passphrases",
     }
 )
-"""Leaf names treated as secret whatever the schema says, singular and as a list.
+"""Words that make a name a credential, as the whole name or its last words.
 
-The same words decide an environment name, read as its last words: see
+``password`` and ``sasl_password``, ``token`` and ``auth_token`` are all credentials,
+in a config key and an environment name alike: see :func:`secret_name` and
 :func:`secret_env_name`. A ``key`` is judged apart, by :data:`KEY_QUALIFIERS`.
 
 Part of the fleet ships no ``x-dfe-secret`` at all - dfe-transform-vector carries
@@ -116,11 +117,27 @@ The qualifier is the word before ``key`` in the name - ``secret_access_key``,
 A ``key`` nothing qualifies is as often a routing or partition key, and stays shown.
 """
 
+SECRET_SOURCE_WORDS = frozenset({"credential", "credentials", "ca", "cert", "key", "config"})
+"""Words that make a config key ending in ``secret`` a secret source, not a secret.
+
+It names where a credential is fetched from, which an operator needs to see:
+dfe-fetcher's ``credential_secret`` and ``private_key_secret`` and dfe-receiver's
+``tls.key_secret`` each hold a ``provider:path:key`` spec such as
+``vault:kv/data/github:token``, and a chart's ``config_secret`` names a Secret.
+"""
+
 REDACTED = "***REDACTED***"
 """What stands in for a credential in a document read back over the API.
 
 The placeholder scalo serialises a secret as, so an operator sees one spelling
 for a hidden value wherever it is shown.
+"""
+
+IDENTITY_KEYS = ("id", "name")
+"""Fields that name a list entry, so a masked entry finds the stored one it was read from.
+
+dfe-fetcher requires an ``id`` on each of its ``connections``; dfe-receiver names
+each accepted header by ``name``.
 """
 
 _TRANSFORM_CHART_ENV = {
@@ -317,7 +334,7 @@ class ConfigView:
     custom: list[CustomEnvEntry] = field(default_factory=list)
 
 
-# ── reading the mount ─────────────────────────────────────────
+# --- reading the mount ---
 
 
 def contract_root(path: Path | str | None = None) -> Path | None:
@@ -404,7 +421,7 @@ def reload_contracts() -> None:
     _HELD.clear()
 
 
-# ── the schema, flattened to options ──────────────────────────
+# --- the schema, flattened to options ---
 
 
 def _deref(node: Any, root: dict, seen: tuple[str, ...] = ()) -> dict:
@@ -533,15 +550,30 @@ def _qualified_key(words: list[str], section: str) -> bool:
     return qualifier in KEY_QUALIFIERS or qualifier in SECRET_NAMES
 
 
+def _secret_word(lowered: str) -> str | None:
+    """The word of :data:`SECRET_NAMES` that ``lowered`` is, or ends in after an underscore."""
+    return next(
+        (word for word in SECRET_NAMES if lowered == word or lowered.endswith(f"_{word}")),
+        None,
+    )
+
+
 def secret_name(name: str, section: str = "") -> bool:
     """Whether a config key is named as a credential.
 
-    Its whole name is one of :data:`SECRET_NAMES`, or it is a ``key`` a credential
-    word qualifies. ``section`` is the name of the mapping holding it, which is what
-    qualifies a bare ``key``.
+    It is, or ends in, one of :data:`SECRET_NAMES` - ``auth_token``, ``sasl_password``
+    - unless it is a secret source per :data:`SECRET_SOURCE_WORDS`; or it is a ``key``
+    a credential word qualifies. ``section`` is the name of the mapping holding it,
+    which is what qualifies a bare ``key``.
     """
     lowered = name.lower()
-    return lowered in SECRET_NAMES or _qualified_key(lowered.split("_"), section)
+    words = lowered.split("_")
+    if _qualified_key(words, section):
+        return True
+    word = _secret_word(lowered)
+    if word in ("secret", "secrets") and len(words) > 1:
+        return words[-2] not in SECRET_SOURCE_WORDS
+    return word is not None
 
 
 def _holds_secret(
@@ -649,9 +681,7 @@ def secret_env_name(name: str) -> bool:
     so ``S3_SECRET_KEY`` is masked and ``KAFKA_PARTITION_KEY`` is not.
     """
     lowered = name.lower()
-    if any(lowered == word or lowered.endswith(f"_{word}") for word in SECRET_NAMES):
-        return True
-    return _qualified_key(lowered.split("_"), "")
+    return _secret_word(lowered) is not None or _qualified_key(lowered.split("_"), "")
 
 
 def _redact_env(env: Any) -> Any:
@@ -729,17 +759,111 @@ def credential_var(doc: dict, path: str, value: Any = MISSING) -> bool:
     return any(shown_var(doc, path, probe) != probe for probe in probes)
 
 
+def _carries_mask(value: Any) -> bool:
+    """Whether :data:`REDACTED` stands anywhere in ``value``."""
+    if isinstance(value, str):
+        return value == REDACTED
+    if isinstance(value, list):
+        return any(_carries_mask(item) for item in value)
+    if isinstance(value, dict):
+        return any(_carries_mask(item) for item in value.values())
+    return False
+
+
+def _named(entries: list, key: str) -> dict[Any, Any] | None:
+    """Each entry by its ``key``, or None where one lacks it or two share it."""
+    found: dict[Any, Any] = {}
+    for entry in entries:
+        name = entry.get(key) if isinstance(entry, dict) else None
+        if not isinstance(name, str | int) or isinstance(name, bool):
+            return None
+        if name == REDACTED or name in found:
+            return None
+        found[name] = entry
+    return found
+
+
+def _same_but_masked(value: Any, stored: Any) -> bool:
+    """Whether ``value`` is ``stored`` as a read shows it: equal wherever it is not masked."""
+    if isinstance(value, str) and value == REDACTED:
+        return stored is not None and not isinstance(stored, _Missing)
+    if isinstance(value, dict):
+        return isinstance(stored, dict) and all(
+            _same_but_masked(item, stored.get(key, MISSING)) for key, item in value.items()
+        )
+    if isinstance(value, list):
+        return (
+            isinstance(stored, list)
+            and len(value) == len(stored)
+            and all(_same_but_masked(a, b) for a, b in zip(value, stored, strict=True))
+        )
+    return value == stored
+
+
+def _restore_list(value: list, stored: Any, path: str) -> list:
+    """A written list with each masked entry matched to the stored entry it was read from.
+
+    Entries named by one of :data:`IDENTITY_KEYS` are matched by name, so deleting
+    or reordering one cannot hand its credential to a neighbour. Unnamed entries are
+    matched in stored order, and only while every stored entry is accounted for and
+    each masked one is otherwise unchanged; anything else cannot be told apart.
+    """
+    kept = stored if isinstance(stored, list) else []
+    masked = [item for item in value if _carries_mask(item)]
+    for key in IDENTITY_KEYS:
+        wanted, by_name = _named(masked, key), _named(kept, key)
+        if wanted is not None and by_name is not None:
+            return [
+                restore_masked(item, by_name.get(item[key], MISSING), path=f"{path}[{i}]")
+                if _carries_mask(item)
+                else item
+                for i, item in enumerate(value)
+            ]
+    remaining = list(kept)
+    for item in value:
+        if not _carries_mask(item) and item in remaining:
+            remaining.remove(item)
+    if not remaining:
+        return [restore_masked(item, MISSING, path=f"{path}[{i}]") for i, item in enumerate(value)]
+    where = path or "the list"
+    if len(masked) > len(remaining):
+        raise MaskedValueError(
+            f"{where} has {len(masked)} masked entries for {len(remaining)} stored, so a "
+            "placeholder stands where nothing is stored: write the credential itself"
+        )
+    if len(masked) < len(remaining):
+        raise MaskedValueError(
+            f"{where} has {len(masked)} masked entries for {len(remaining)} stored and "
+            "nothing names them, so which were removed cannot be told: write the "
+            "list's credentials in full"
+        )
+    behind = iter(remaining)
+    out = []
+    for i, item in enumerate(value):
+        if not _carries_mask(item):
+            out.append(item)
+            continue
+        entry = next(behind)
+        if not _same_but_masked(item, entry):
+            raise MaskedValueError(
+                f"{where}[{i}] is masked but no longer matches the stored entry in its "
+                "place, and nothing names it: write its credentials in full"
+            )
+        out.append(restore_masked(item, entry, path=f"{where}[{i}]"))
+    return out
+
+
 def restore_masked(value: Any, stored: Any = MISSING, *, path: str = "") -> Any:
     """``value`` with every :data:`REDACTED` it carries put back to what is stored there.
 
     A client that reads a masked document and writes it back hands in the mask
     where the credentials were, and writing that literally would replace each
-    credential with the placeholder. A list is matched position by position, so an
-    entry appended after the masked ones is kept as written.
+    credential with the placeholder. A list is matched as :func:`_restore_list`
+    says, which refuses rather than guess which stored entry a mask stands for.
 
     Raises:
-        MaskedValueError: The placeholder stands where nothing is stored, so there
-            is no credential it could mean.
+        MaskedValueError: The placeholder stands where nothing is stored, or in a
+            list entry that cannot be matched to the stored one it was read from.
     """
     if isinstance(value, str) and value == REDACTED:
         if isinstance(stored, _Missing) or stored is None:
@@ -749,11 +873,7 @@ def restore_masked(value: Any, stored: Any = MISSING, *, path: str = "") -> Any:
             )
         return stored
     if isinstance(value, list):
-        kept = stored if isinstance(stored, list) else []
-        return [
-            restore_masked(item, kept[i] if i < len(kept) else MISSING, path=f"{path}[{i}]")
-            for i, item in enumerate(value)
-        ]
+        return _restore_list(value, stored, path) if _carries_mask(value) else value
     if isinstance(value, dict):
         kept_map = stored if isinstance(stored, dict) else {}
         return {
@@ -844,7 +964,7 @@ def catalogue_enums(capabilities: list[Any]) -> dict[str, list[Any]]:
     return out
 
 
-# ── judging a value before it is committed ────────────────────
+# --- judging a value before it is committed ---
 
 _JSON_TYPES: dict[str, tuple[type, ...]] = {
     "string": (str,),
@@ -941,7 +1061,7 @@ def chart_env_names(service: str) -> dict[str, str]:
     return out
 
 
-# ── resolving one instance's values ───────────────────────────
+# --- resolving one instance's values ---
 
 
 def _at(doc: Any, path: str) -> Any:

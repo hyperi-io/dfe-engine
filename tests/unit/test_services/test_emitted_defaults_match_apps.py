@@ -46,6 +46,14 @@ class TestArchiverDefaults:
         """The per-topic writers prepend it; a template carrying it doubles it."""
         assert ArchiverConfig().archive.path_template == "{year}/{month}/{day}/{hour}"
 
+    @pytest.mark.parametrize(
+        "field", ["flush_bytes", "flush_age_secs", "flush_records", "writer_parallelism"]
+    )
+    def test_the_buffer_is_the_app_s(self, field: str):
+        """BufferConfig::default, dfe-archiver 35f9b49."""
+        app = _schema_default("contract-acknowledgements", "dfe-archiver", "buffer")
+        assert getattr(ArchiverConfig().buffer, field) == app[field]
+
     def test_emitted_template_carries_them(self):
         """What an operator who touched nothing actually gets written."""
         emitted = generate_template("archiver", profile="default")
