@@ -4923,7 +4923,7 @@
           "Services"
         ],
         "summary": "Save Service Config",
-        "description": "Create or update a service config.",
+        "description": "Create or update a service config.\n\nA read shows every set secret as pydantic's placeholder, so a body carrying it\nis a 400 ``masked_value`` rather than a save of the placeholder as the secret.",
         "operationId": "save_service_config_api_v1_services__service___instance__put",
         "parameters": [
           {
@@ -13218,7 +13218,7 @@
           "App Management"
         ],
         "summary": "Create Instance",
-        "description": "Deploy an instance by creating its values overlay.\n\nThe overlay's presence is what the layer2-apps ApplicationSet turns into an Argo\nApplication, so this is the whole deployment step.",
+        "description": "Deploy an instance by creating its values overlay.\n\nThe overlay's presence is what the layer2-apps ApplicationSet turns into an Argo\nApplication, so this is the whole deployment step. A new instance stores nothing,\nso a masked value copied from another instance's read is a 400 ``masked_value``.",
         "operationId": "create_instance_api_v1_apps__service__instances_post",
         "parameters": [
           {

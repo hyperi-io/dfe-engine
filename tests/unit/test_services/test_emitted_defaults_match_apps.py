@@ -1,10 +1,11 @@
-"""An engine default is what the Rust app runs on, so it must match the app's.
+"""An engine default claims to be the Rust app's, so it must match the app's.
 
 ``ServiceConfigRegistry.save_config`` validates the operator's partial dict and
-dumps the whole model, and ``HelmValuesCompiler._compile_service_config`` does
-the same. Every key the operator left alone is therefore WRITTEN into the config
-the app reads, and the app's own ``#[serde(default)]`` never gets a look in --
-so an engine default that drifts from the app's silently replaces it.
+dumps the whole model, and ``generate_template`` does the same, so every key the
+operator left alone is WRITTEN into the stored ``/services`` config with the
+engine's default. No app mounts that registry - the apps read their overlays
+through the app-management routes - so a drifted default misstates what the app
+runs rather than changing it.
 
 The values below are pinned to the upstream Rust ``impl Default``. Changing one
 here without changing it there re-opens the drift; the citation is the commit to

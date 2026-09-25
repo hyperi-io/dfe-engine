@@ -120,7 +120,7 @@ _DEPLOY_WRITE = Depends(require_action(scopes_dict["deployment_write"]))
 _DEPLOY_DELETE = Depends(require_action(scopes_dict["deployment_delete"]))
 
 
-# ── request and response models ───────────────────────────────
+# --- request and response models ---
 
 
 class ValidationModel(BaseModel):
@@ -624,7 +624,7 @@ class MetricsResponse(BaseModel):
     rates: dict[str, float]
 
 
-# ── shared plumbing ───────────────────────────────────────────
+# --- shared plumbing ---
 
 
 def _gitcrud(request: Request) -> GitCrud:
@@ -867,7 +867,7 @@ def _file_sets(service: str) -> list[FileSetSummary]:
     ]
 
 
-# ── catalogue and lifecycle ───────────────────────────────────
+# --- catalogue and lifecycle ---
 
 
 @router.get("", dependencies=[_DEPLOY_READ])
@@ -924,9 +924,11 @@ async def create_instance(
     """Deploy an instance by creating its values overlay.
 
     The overlay's presence is what the layer2-apps ApplicationSet turns into an Argo
-    Application, so this is the whole deployment step.
+    Application, so this is the whole deployment step. A new instance stores nothing,
+    so a masked value copied from another instance's read is a 400 ``masked_value``.
     """
     app = _resolve(service, body.instance)
+    values = _restored({}, body.values)
     gc = _gitcrud(request)
     if instances.exists(gc, app):
         raise HTTPException(
@@ -942,7 +944,7 @@ async def create_instance(
         raise HTTPException(409, detail={"code": "single_instance_app", "message": reason})
     _require_source(request, app)
     try:
-        doc = instances.initial_overlay(app, body.values)
+        doc = instances.initial_overlay(app, values)
     except ValueError as exc:
         raise HTTPException(400, detail={"code": "invalid_values", "message": str(exc)}) from exc
     # An instance-routed app is derived state: it exists for an active, deployed
@@ -1351,7 +1353,7 @@ async def set_app_config(
     )
 
 
-# ── scaling ───────────────────────────────────────────────────
+# --- scaling ---
 
 
 @router.get("/{service}/{instance}/scaling", dependencies=[_READ])
@@ -1405,7 +1407,7 @@ async def set_scaling(
     )
 
 
-# ── consumed files ────────────────────────────────────────────
+# --- consumed files ---
 
 
 def _file_set(service: str, set_name: str):
@@ -1844,7 +1846,7 @@ async def delete_app_file(
     return result.model_copy(update={"reload": str(fs.reload)})
 
 
-# ── source-derived routing ────────────────────────────────────
+# --- source-derived routing ---
 
 
 def _routing_app(service: str, instance: str) -> AppInstance:
@@ -1945,7 +1947,7 @@ async def sync_app_routing(
     )
 
 
-# ── dry run ───────────────────────────────────────────────────
+# --- dry run ---
 
 
 def _require_dry_run(request: Request, user: Any) -> None:
@@ -2056,7 +2058,7 @@ async def dry_run_app_file(
     )
 
 
-# ── operational surface ───────────────────────────────────────
+# --- operational surface ---
 
 
 def _reader(request: Request, client: Any) -> OperationalReader:

@@ -621,6 +621,45 @@ class TestWritingCustomEnv:
         assert written.read_text() == ""
 
 
+class TestANewInstanceRefusesTheMask:
+    """A new instance stores nothing, so the mask in its values has nothing to mean."""
+
+    def test_a_masked_read_redeployed_is_refused(self, client, app, admin_headers, tmp_path):
+        # Undeploy, then deploy again from what /values showed: the password is the mask.
+        gc = _wire(app, tmp_path)
+        _deploy(
+            client, admin_headers, values={"config": {"clickhouse": {"password": "ch-pw-4410"}}}
+        )
+        shown = client.get(f"/api/v1/apps/{LOADER}/default/values", headers=admin_headers).json()
+        assert shown["values"]["config"]["clickhouse"]["password"] == contract.REDACTED
+        assert client.delete(f"/api/v1/apps/{LOADER}/default", headers=admin_headers).is_success
+
+        before = gc.head_revision()
+        resp = _deploy(client, admin_headers, values={"config": shown["values"]["config"]})
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "masked_value"
+        assert resp.json()["context"]["path"] == "config"
+        assert gc.head_revision() == before
+        assert "dfe-loader-default-values" not in gc.list("helmvars")
+
+    def test_a_masked_dot_path_is_refused(self, client, app, admin_headers, tmp_path):
+        gc = _wire(app, tmp_path)
+        before = gc.head_revision()
+        resp = _deploy(
+            client, admin_headers, values={"config.clickhouse.password": contract.REDACTED}
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "masked_value"
+        assert gc.head_revision() == before
+
+    def test_a_real_value_still_deploys(self, client, app, admin_headers, tmp_path):
+        gc = _wire(app, tmp_path)
+        resp = _deploy(client, admin_headers, values={"config.clickhouse.password": "ch-pw-4410"})
+        assert resp.status_code == 200, resp.text
+        stored = gc.get("helmvars", "dfe-loader-default-values")
+        assert stored["config"]["clickhouse"]["password"] == "ch-pw-4410"
+
+
 RECEIVER = "dfe-receiver"
 RECEIVER_BASE = f"/api/v1/apps/{RECEIVER}/default"
 

@@ -1,20 +1,18 @@
-"""Services router — ServiceConfigRegistry CRUD.
+"""Services router -- ServiceConfigRegistry CRUD.
 
-GET    /api/v1/services                        → Paginated list
-GET    /api/v1/services/{service}/{instance}   → Full config
-PUT    /api/v1/services/{service}/{instance}   → Save config
-DELETE /api/v1/services/{service}/{instance}   → Delete config
-POST   /api/v1/services/{service}/{instance}/validate  → Dry-run validate
-GET    /api/v1/services/{service}/{instance}/history   → Git history
-POST   /api/v1/services/seed                   → Seed built-in defaults
+GET    /api/v1/services                        -> Paginated list
+GET    /api/v1/services/{service}/{instance}   -> Full config
+PUT    /api/v1/services/{service}/{instance}   -> Save config
+DELETE /api/v1/services/{service}/{instance}   -> Delete config
+POST   /api/v1/services/{service}/{instance}/validate  -> Dry-run validate
+GET    /api/v1/services/{service}/{instance}/history   -> Git history
+POST   /api/v1/services/seed                   -> Seed built-in defaults
 """
-
-from __future__ import annotations
 
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from dfe_engine.api.deps import CurrentUser, ServiceConfigReg, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
@@ -24,8 +22,28 @@ from dfe_engine.git_identity import git_author
 
 router = APIRouter(prefix="/services", tags=["Services"])
 
+_SECRET_MASK = str(SecretStr("x"))
+"""What a read of this registry shows for a set secret: pydantic's own placeholder."""
 
-# ── Response models ──────────────────────────────────────────
+
+def _masked_paths(value: Any, path: str = "") -> list[str]:
+    """Every dot path in ``value`` that holds the secret placeholder."""
+    if isinstance(value, str):
+        return [path] if value == _SECRET_MASK else []
+    if isinstance(value, dict):
+        return [
+            found
+            for key, child in value.items()
+            for found in _masked_paths(child, f"{path}.{key}" if path else str(key))
+        ]
+    if isinstance(value, list):
+        return [
+            found for i, child in enumerate(value) for found in _masked_paths(child, f"{path}[{i}]")
+        ]
+    return []
+
+
+# --- Response models ---
 
 
 class ServiceConfigSummary(BaseModel):
@@ -58,7 +76,7 @@ class SeedResponse(BaseModel):
     seeded: int
 
 
-# ── Endpoints ────────────────────────────────────────────────
+# --- Endpoints ---
 
 
 @router.get(
@@ -129,7 +147,23 @@ async def save_service_config(
     user: CurrentUser,
     registry: ServiceConfigReg,
 ):
-    """Create or update a service config."""
+    """Create or update a service config.
+
+    A read shows every set secret as pydantic's placeholder, so a body carrying it
+    is a 400 ``masked_value`` rather than a save of the placeholder as the secret.
+    """
+    masked = _masked_paths(body)
+    if masked:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "masked_value",
+                "message": (
+                    f"{', '.join(masked)} carries the masked placeholder {_SECRET_MASK!r}: "
+                    "write the secret itself"
+                ),
+            },
+        )
     registry.save_config(
         service=service,
         config=body,

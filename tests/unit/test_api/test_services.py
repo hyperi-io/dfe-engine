@@ -1,5 +1,7 @@
 """Tests for the services router."""
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -65,6 +67,49 @@ class TestServiceConfigNotFound:
     def test_delete_missing(self, client, admin_headers):
         resp = client.delete("/api/v1/services/receiver/production", headers=admin_headers)
         assert resp.status_code == 404
+
+
+class TestSecretPlaceholderIsNotSaved:
+    """A read shows each set secret as pydantic's placeholder; writing it back is refused."""
+
+    URL = "/api/v1/services/receiver/placeholder"
+
+    def _body(self) -> dict:
+        return {
+            "kafka": {
+                "brokers": ["k:9092"],
+                "sasl": {"enabled": True, "username": "dfe", "password": "sasl-pw-8810"},
+            }
+        }
+
+    def _stored_retries(self) -> int:
+        from dfe_engine.api.deps import _registries
+
+        config = _registries["service_config"].get_config("receiver", "placeholder")
+        return config.kafka.producer.retries
+
+    def test_a_read_written_back_is_refused_and_nothing_saved(self, client, admin_headers):
+        assert client.put(self.URL, json=self._body(), headers=admin_headers).status_code == 200
+        shown = client.get(self.URL, headers=admin_headers).json()["config"]
+        assert shown["kafka"]["sasl"]["password"] == "**********"
+        assert "sasl-pw-8810" not in json.dumps(shown)
+        retries = self._stored_retries()
+
+        shown["kafka"]["producer"]["retries"] = retries + 7
+        resp = client.put(self.URL, json=shown, headers=admin_headers)
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "masked_value"
+        assert "kafka.sasl.password" in resp.json()["message"]
+        assert self._stored_retries() == retries
+
+    def test_the_placeholder_is_refused_wherever_it_sits(self, client, admin_headers):
+        body = {"server": {"auth": {"bearer": {"tokens": ["tok-8811", "**********"]}}}}
+        resp = client.put(self.URL, json=body, headers=admin_headers)
+        assert resp.status_code == 400, resp.text
+        assert "server.auth.bearer.tokens[1]" in resp.json()["message"]
+
+    def test_a_real_secret_is_accepted(self, client, admin_headers):
+        assert client.put(self.URL, json=self._body(), headers=admin_headers).status_code == 200
 
 
 class TestServicesSeed:
