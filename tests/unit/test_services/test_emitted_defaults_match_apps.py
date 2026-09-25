@@ -19,7 +19,9 @@ import pytest
 from dfe_engine.services.models.archiver import ArchiverConfig
 from dfe_engine.services.models.loader import LoaderConfig
 from dfe_engine.services.models.receiver import ReceiverConfig
+from dfe_engine.services.registry import ServiceConfigRegistry
 from dfe_engine.services.templates import generate_template
+from dfe_engine.yaml_utils import yaml_load
 
 FIXTURES = Path(__file__).parents[2] / "fixtures"
 
@@ -49,6 +51,50 @@ class TestArchiverDefaults:
         assert emitted["routing"]["mode"] == "expression"
         assert emitted["routing"]["expression_fields"] == ["org_id"]
         assert emitted["archive"]["path_template"] == "{year}/{month}/{day}/{hour}"
+
+
+class TestArchiverRollInterval:
+    """dfe-archiver picks 300 s while it holds Kafka offsets and 3600 s otherwise.
+
+    It can only pick when the key is absent, and a dump writes every field, so an
+    unset interval has to leave the key out rather than write null or a number.
+    """
+
+    def test_the_app_leaves_it_unset(self):
+        app = _schema_default("contract-acknowledgements", "dfe-archiver", "archive")
+        assert app["roll_interval_secs"] is None
+        assert ArchiverConfig().archive.roll_interval_secs is None
+
+    def test_an_untouched_config_dumps_without_it(self):
+        assert "roll_interval_secs" not in ArchiverConfig().model_dump(mode="json")["archive"]
+
+    @pytest.mark.parametrize("profile", ["default", "production", "k8s"])
+    def test_no_emitted_template_writes_it(self, profile: str):
+        emitted = generate_template("archiver", profile=profile)
+        assert "roll_interval_secs" not in emitted["archive"]
+
+    def test_an_operator_value_is_kept(self):
+        config = ArchiverConfig.model_validate({"archive": {"roll_interval_secs": 900}})
+        assert config.model_dump(mode="json")["archive"]["roll_interval_secs"] == 900
+
+    def test_a_saved_config_round_trips_without_it(self, tmp_path):
+        """The /services path: validate the operator's dict, dump the model, write YAML."""
+        registry = ServiceConfigRegistry(config_directory=tmp_path, writable=True)
+        try:
+            registry.save_config("archiver", {"archive": {"roll_size_bytes": 1024}}, "unset")
+            registry.save_config("archiver", {"archive": {"roll_interval_secs": 900}}, "set")
+            unset = yaml_load(tmp_path / "archiver-unset.yaml")["archive"]
+            written = yaml_load(tmp_path / "archiver-set.yaml")["archive"]
+            read_back = registry.get_config("archiver", "set").archive.roll_interval_secs
+        finally:
+            registry.close()
+        assert "roll_interval_secs" not in unset
+        assert written["roll_interval_secs"] == 900
+        assert read_back == 900
+
+    def test_a_zero_interval_is_refused(self):
+        with pytest.raises(ValueError, match="greater than 0"):
+            ArchiverConfig.model_validate({"archive": {"roll_interval_secs": 0}})
 
 
 class TestLoaderClickHouseDefaults:

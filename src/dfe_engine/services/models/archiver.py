@@ -4,12 +4,10 @@ Mirrors the Rust config structs in dfe-archiver/src/config/types.rs.
 All defaults match the Rust `impl Default` values exactly.
 """
 
-from __future__ import annotations
-
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from dfe_engine.services.models.base import BaseServiceConfig
-from dfe_engine.services.models.common import MemoryConfig
+from dfe_engine.services.models.common import AcknowledgementsConfig, MemoryConfig
 
 # ---------------------------------------------------------------------------
 # Kafka (Archiver-specific: consumer with flat SASL fields)
@@ -35,6 +33,7 @@ class ArchiverKafkaConfig(BaseModel):
     batch_size: int = Field(default=10_000, gt=0)
     max_poll_interval_ms: int = Field(default=300_000, gt=0)
     session_timeout_ms: int = Field(default=30_000, gt=0)
+    acknowledgements: AcknowledgementsConfig = Field(default_factory=AcknowledgementsConfig)
 
     @field_validator("security_protocol")
     @classmethod
@@ -120,7 +119,14 @@ class ArchiveConfig(BaseModel):
     roll_size_bytes: int = Field(
         default=1024 * 1024 * 1024, gt=0, description="1GB final compressed file size"
     )
-    roll_interval_secs: int = Field(default=3600, gt=0)
+    # Unset, the archiver picks by whether it holds Kafka offsets (300 s) or not
+    # (3600 s), so a written value would override that choice.
+    roll_interval_secs: int | None = Field(
+        default=None,
+        gt=0,
+        exclude_if=lambda value: value is None,
+        description="Omitted unless set, so the archiver chooses its own interval",
+    )
     s3: S3Config | None = None
     gcs: GcsConfig | None = None
     azure: AzureConfig | None = None

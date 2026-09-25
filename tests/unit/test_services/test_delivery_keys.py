@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from dfe_engine.services.models.archiver import ArchiverConfig
 from dfe_engine.services.models.loader import LoaderConfig
 from dfe_engine.services.models.receiver import ReceiverConfig
 from dfe_engine.services.models.transform_vrl import TransformVrlConfig
@@ -35,6 +36,7 @@ HOLDING_BLOCKS = [
     ("loader", LoaderConfig, "kafka", "dfe-loader"),
     ("loader", LoaderConfig, "grpc", "dfe-loader"),
     ("transform-vrl", TransformVrlConfig, "source", "dfe-transform-vrl"),
+    ("archiver", ArchiverConfig, "kafka", "dfe-archiver"),
 ]
 
 # The least each plugin's cross-field check accepts, so a failure names the new key.
@@ -42,6 +44,7 @@ BASE: dict[str, dict[str, Any]] = {
     "receiver": {"kafka": {"brokers": ["kafka:9092"]}},
     "loader": {},
     "transform-vrl": {"sink": {"topic": "main_load"}, "transforms": {"dir": "/etc/vrl"}},
+    "archiver": {"kafka": {"topics": ["main_land"]}},
 }
 
 
@@ -62,7 +65,8 @@ def _app_default(app: str, dotted: str) -> Any:
 class TestAcknowledgements:
     @pytest.mark.parametrize(("service", "model", "block", "app"), HOLDING_BLOCKS)
     def test_turning_it_off_validates(self, service, model, block, app):
-        doc = {**BASE[service], block: {"acknowledgements": {"enabled": False}}}
+        base = BASE[service]
+        doc = {**base, block: {**base.get(block, {}), "acknowledgements": {"enabled": False}}}
         result = validate_config(service, doc)
         assert result.valid, result.errors
         assert getattr(model.model_validate(doc), block).acknowledgements.enabled is False
