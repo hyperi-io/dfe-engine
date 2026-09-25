@@ -222,9 +222,9 @@ class TestSecrets:
         by_path = {f.path: f for f in contract.resolve_config(found, {}).fields}
         assert by_path[path].secret is True
 
-    def test_a_marked_field_of_a_listed_object_hides_the_list(self):
-        # Each accepted header carries a name and its marked values, and the list is
-        # one option, so a readable name would come back with the values beside it.
+    def test_a_marked_field_of_a_listed_object_is_masked_and_the_rest_shown(self):
+        # Each accepted header carries a name and its marked values; the name is a
+        # setting an operator needs, the values are the credential.
         found = contract.load_contract("dfe-receiver", HELD)
         overlay = {
             "config": {
@@ -233,16 +233,60 @@ class TestSecrets:
         }
         by_path = {f.path: f for f in contract.resolve_config(found, overlay).fields}
         headers = by_path["config.server.auth.accepted_headers"]
-        assert (headers.secret, headers.value, headers.is_set) == (True, None, True)
+        assert (headers.secret, headers.is_set) == (False, True)
+        assert headers.value == [{"name": "x-key", "values": [contract.REDACTED]}]
 
     def test_the_shipped_fetcher_s_connection_tokens_stay_hidden(self):
         # dfe-fetcher marks each connection's token inside the list, so the list
         # itself carried no marker and came back whole.
-        overlay = {"config": {"sources": {"okta": {"connections": [{"token": "s3"}]}}}}
+        overlay = {
+            "config": {"sources": {"okta": {"connections": [{"token": "s3", "domain": "d"}]}}}
+        }
         view = contract.resolve_config(_contract("dfe-fetcher"), overlay)
-        by_path = {f.path: f for f in view.fields}
-        assert by_path["config.sources.okta.connections"].secret is True
+        connections = {f.path: f for f in view.fields}["config.sources.okta.connections"]
+        assert connections.value == [{"token": contract.REDACTED, "domain": "d"}]
         assert "s3" not in json.dumps([[f.value, f.default] for f in view.fields])
+
+    @pytest.mark.parametrize(
+        ("path", "entry", "shown", "credential"),
+        [
+            (
+                "config.sources.rest",
+                {"url": "https://api.example", "topic": "t", "auth": {"token": "t-1"}},
+                {"url": "https://api.example", "topic": "t", "auth": {"token": contract.REDACTED}},
+                "t-1",
+            ),
+            (
+                "config.sources.db",
+                {"dialect": "postgres", "connection_string": "postgres://u:p@h/db"},
+                {"dialect": "postgres", "connection_string": contract.REDACTED},
+                "postgres://u:p@h/db",
+            ),
+        ],
+    )
+    def test_a_map_entry_shows_with_only_its_credential_fields_masked(
+        self, path, entry, shown, credential
+    ):
+        # dfe-fetcher keys its REST and DB sources by name, and marks the credential
+        # fields of each entry.
+        found = contract.load_contract("dfe-fetcher", HELD)
+        overlay: dict = {}
+        set_path(overlay, path, {"primary": entry})
+        field = {f.path: f for f in contract.resolve_config(found, overlay).fields}[path]
+        assert field.secret is False
+        assert field.value == {"primary": shown}
+        assert credential not in json.dumps(field.value)
+
+    def test_a_masked_map_entry_written_back_restores(self):
+        found = contract.load_contract("dfe-fetcher", HELD)
+        path = "config.sources.rest"
+        stored: dict = {}
+        set_path(stored, path, {"primary": {"url": "u", "auth": {"token": "t-1"}}})
+        field = {f.path: f for f in contract.resolve_config(found, stored).fields}[path]
+        edited = {"primary": {**field.value["primary"], "url": "u-2"}}
+        assert contract.restore_masked_at(stored, path, edited) == {
+            "primary": {"url": "u-2", "auth": {"token": "t-1"}}
+        }
 
     @pytest.mark.parametrize(("marked", "secret"), [(False, False), (True, True)])
     def test_a_definition_that_lists_itself_is_judged_and_ends(self, marked, secret):
@@ -268,8 +312,12 @@ class TestSecrets:
             source=contract.ContractSource.MOUNT,
             schema=schema,
         )
-        (tree,) = contract.resolve_config(found, {}).fields
-        assert tree.secret is secret
+        overlay = {"config": {"tree": [{"label": "l-1", "children": [{"label": "l-2"}]}]}}
+        (tree,) = contract.resolve_config(found, overlay).fields
+        # The tree itself is not a credential; only a marked label inside it is.
+        assert tree.secret is False
+        shown = contract.REDACTED if secret else None
+        assert tree.value == [{"label": shown or "l-1", "children": [{"label": shown or "l-2"}]}]
 
     def test_a_non_secret_list_is_still_shown(self):
         by_path = {f.path: f for f in contract.resolve_config(_contract("dfe-loader"), {}).fields}

@@ -12,12 +12,11 @@ in ONE commit (atomic - a protected-var violation fails the whole action), honou
 the protected-var policy, and supports dry-run (returns the diff without writing).
 """
 
-from __future__ import annotations
-
 import builtins
 from dataclasses import dataclass, field
 from typing import Any
 
+from dfe_engine.appmgmt import contract
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError, get_path, set_path
 from dfe_engine.gitcrud.commit_policy import CommitPolicyError, validate_change
 from dfe_engine.gitcrud.registry import UnknownResourceClassError
@@ -167,16 +166,26 @@ class ActionStore:
                     docs[key] = self._crud.get(ch.cls, ch.name)
                 except ResourceNotFoundError:
                     docs[key] = {}
+            doc = docs[key]
+            # A value copied from a masked listing keeps the credential stored there.
+            try:
+                value = contract.restore_masked_at(doc, ch.path, value)
+            except contract.MaskedValueError as exc:
+                if not collect:
+                    raise
+                errors.append(f"{ch.cls}/{ch.name}:{ch.path}: {exc}")
+                continue
+            # The diff is returned to the caller, so a credential in it is masked.
             diff.append(
                 {
                     "cls": ch.cls,
                     "name": ch.name,
                     "path": ch.path,
-                    "old": get_path(docs[key], ch.path),
-                    "new": value,
+                    "old": contract.shown_var(doc, ch.path, get_path(doc, ch.path)),
+                    "new": contract.shown_var(doc, ch.path, value),
                 }
             )
-            set_path(docs[key], ch.path, value)
+            set_path(doc, ch.path, value)
         return docs, diff, errors
 
     def preview(

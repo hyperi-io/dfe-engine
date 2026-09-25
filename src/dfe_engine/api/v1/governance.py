@@ -20,8 +20,6 @@ Operators get curated actions via `action:invoke:<name>`; raw class CRUD stays w
 admins (governance:write). Everything commits to gitops via the engine.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -29,6 +27,7 @@ from pydantic import BaseModel
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.review import apply_review_headers
+from dfe_engine.appmgmt import contract
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -209,6 +208,8 @@ async def invoke_action(
         raise HTTPException(403, detail={"code": "action_forbidden", "message": str(exc)}) from exc
     except CommitPolicyError as exc:
         raise HTTPException(403, detail={"code": "policy_violation", "message": str(exc)}) from exc
+    except contract.MaskedValueError as exc:
+        raise HTTPException(400, detail={"code": "masked_value", "message": str(exc)}) from exc
 
     if dry_run:
         return InvokeResponse(dry_run=True, changed=False, commit_sha=None, diff=preview.diff)

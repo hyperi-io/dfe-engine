@@ -105,15 +105,6 @@ def shown_vars(gc: GitCrud, cls: str, name: str) -> dict[str, Any]:
     return flatten(shown)
 
 
-def _shown_value(stored: dict, path: str, value: Any) -> Any:
-    """A value about to be written, masked as a read of it would be."""
-    try:
-        return contract.redact_var(stored, path, value)
-    except contract.ContractError:
-        # An unreadable mount must not block the write, so only the name rule judges it.
-        return contract.redact_var({}, path, value)
-
-
 def enforce_protected(request: Request, user: Any, cls: str, name: str, path: str) -> bool:
     """403 unless the caller may write this var. Returns whether it is protected."""
     policy = policy_of(request)
@@ -182,7 +173,7 @@ def set_var_governed(
         )
 
     # The review PR's text leaves the deploy repo, so a credential is named, not shown.
-    shown = _shown_value(stored, path, value)
+    shown = contract.shown_var(stored, path, value)
     try:
         outcome = route_write(
             gc=gc,

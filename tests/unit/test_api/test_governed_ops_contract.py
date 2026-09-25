@@ -6,6 +6,8 @@ required_action default is server-derived, and an action definition can be
 validated (with diff) before anything commits.
 """
 
+import pytest
+
 from dfe_engine.appmgmt import contract
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
@@ -337,6 +339,110 @@ class TestInvokeParamsAPI:
         }
         res = client.post("/api/v1/governance/admin/actions", json=action, headers=admin_headers)
         assert res.status_code == 422
+
+
+class TestActionDiffsMaskCredentials:
+    """An action's diff goes back to its caller, so a credential in it is masked."""
+
+    PATH = "config.kafka.sasl.password"
+
+    def _action(self, value, name: str = "rotate-kafka") -> dict:
+        return {
+            "name": name,
+            "description": "rotate the bus credential",
+            "changes": [
+                {"cls": "helmvars", "name": "receiver-default", "path": self.PATH, "value": value},
+                {
+                    "cls": "helmvars",
+                    "name": "receiver-default",
+                    "path": "keda.maxReplicas",
+                    "value": 12,
+                },
+            ],
+        }
+
+    def _seed(self, client, admin_headers):
+        _seed_helmvar(client, admin_headers, value=4)
+        _seed_helmvar(client, admin_headers, path=self.PATH, value="old-pw")
+
+    def test_the_validate_diff_masks_old_and_new(self, client, app, admin_headers, tmp_path):
+        _wire_gitcrud(app, tmp_path)
+        self._seed(client, admin_headers)
+        resp = client.post(
+            "/api/v1/governance/admin/actions/validate",
+            json=self._action("new-pw"),
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        by_path = {d["path"]: d for d in resp.json()["diff"]}
+        assert (by_path[self.PATH]["old"], by_path[self.PATH]["new"]) == (
+            contract.REDACTED,
+            contract.REDACTED,
+        )
+        assert (by_path["keda.maxReplicas"]["old"], by_path["keda.maxReplicas"]["new"]) == (4, 12)
+        assert "old-pw" not in resp.text
+        assert "new-pw" not in resp.text
+
+    @pytest.mark.parametrize("dry_run", [True, False])
+    def test_the_invoke_diff_masks_and_the_write_keeps_the_value(
+        self, client, app, admin_headers, tmp_path, dry_run
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        self._seed(client, admin_headers)
+        created = client.post(
+            "/api/v1/governance/admin/actions", json=self._action("new-pw"), headers=admin_headers
+        )
+        assert created.status_code == 201, created.text
+        resp = client.post(
+            f"/api/v1/governance/actions/rotate-kafka/invoke?dry_run={str(dry_run).lower()}",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        by_path = {d["path"]: d for d in resp.json()["diff"]}
+        assert by_path[self.PATH]["new"] == contract.REDACTED
+        assert "old-pw" not in resp.text
+        assert "new-pw" not in resp.text
+        stored = gc.get("helmvars", "receiver-default")["config"]["kafka"]["sasl"]["password"]
+        assert stored == ("old-pw" if dry_run else "new-pw")
+
+    def test_a_masked_action_value_keeps_the_stored_credential(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # An action authored from a masked listing carries the mask as its value.
+        gc = _wire_gitcrud(app, tmp_path)
+        self._seed(client, admin_headers)
+        client.post(
+            "/api/v1/governance/admin/actions",
+            json=self._action(contract.REDACTED),
+            headers=admin_headers,
+        )
+        resp = client.post("/api/v1/governance/actions/rotate-kafka/invoke", headers=admin_headers)
+        assert resp.status_code == 200, resp.text
+        stored = gc.get("helmvars", "receiver-default")
+        assert stored["config"]["kafka"]["sasl"]["password"] == "old-pw"
+        assert stored["keda"]["maxReplicas"] == 12
+
+    def test_the_mask_with_nothing_behind_it_is_refused(self, client, app, admin_headers, tmp_path):
+        gc = _wire_gitcrud(app, tmp_path)
+        _seed_helmvar(client, admin_headers, value=4)
+        validated = client.post(
+            "/api/v1/governance/admin/actions/validate",
+            json=self._action(contract.REDACTED),
+            headers=admin_headers,
+        ).json()
+        assert validated["valid"] is False
+        assert any("nothing is stored" in e for e in validated["errors"])
+
+        client.post(
+            "/api/v1/governance/admin/actions",
+            json=self._action(contract.REDACTED),
+            headers=admin_headers,
+        )
+        before = gc.head_revision()
+        resp = client.post("/api/v1/governance/actions/rotate-kafka/invoke", headers=admin_headers)
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "masked_value"
+        assert gc.head_revision() == before
 
 
 class TestEnumSourceAnnotations:

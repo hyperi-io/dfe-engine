@@ -576,11 +576,24 @@ def _holds_secret(
     return any(_holds_secret(child, root, below, seen) for child, below in children)
 
 
-def _is_secret(path: str, node: dict, root: dict) -> bool:
-    """Whether an option is credential material, by its name or by what it holds."""
+def _wholly_secret(path: str, node: dict, root: dict) -> bool:
+    """Whether an option's whole value is credential material, not just fields inside it.
+
+    Its name says so, its schema marks it, or it lists values each marked secret, as
+    bearer tokens are. A map or list of objects with credential fields is not: its
+    other fields are settings an operator needs to see.
+    """
     parts = path.split(".")
     section = parts[-2] if len(parts) > 1 else ""
-    return secret_name(parts[-1], section) or _holds_secret(node, root, parts[-1])
+    if secret_name(parts[-1], section):
+        return True
+    for branch in _branches(node, root):
+        if branch.get(SECRET_MARKER):
+            return True
+        items = branch.get("items")
+        if isinstance(items, dict) and any(b.get(SECRET_MARKER) for b in _branches(items, root)):
+            return True
+    return False
 
 
 def _masked(value: Any) -> Any:
@@ -685,6 +698,18 @@ def redact_resource(doc: dict) -> dict:
     else:
         found = AppContract(service="", available=False, source=ContractSource.ABSENT)
     return redact_overlay(found, doc)
+
+
+def shown_var(doc: dict, path: str, value: Any) -> Any:
+    """:func:`redact_var` for text that leaves the engine, where it must never fail.
+
+    An unreadable contract mount leaves the name rule to judge the value, so a
+    broken mount cannot block the write that is being described.
+    """
+    try:
+        return redact_var(doc, path, value)
+    except ContractError:
+        return redact_var({}, path, value)
 
 
 def restore_masked(value: Any, stored: Any = MISSING, *, path: str = "") -> Any:
@@ -954,7 +979,7 @@ def resolve_config(
         written = _at(block, path)
         default = node["default"] if "default" in node else inherited
         has_default = not isinstance(default, _Missing)
-        secret = _is_secret(path, node, app_contract.schema)
+        secret = _wholly_secret(path, node, app_contract.schema)
 
         if path in derived:
             provenance = Provenance.CHART
@@ -966,6 +991,12 @@ def resolve_config(
             provenance = Provenance.UNSET
 
         value = written if not isinstance(written, _Missing) else default
+        # An option holding credential fields shows with only those fields masked.
+        parts = path.split(".")
+        if not secret and _holds_secret(node, app_contract.schema, parts[-1]):
+            section = parts[-2] if len(parts) > 1 else ""
+            default = _redact(default, node, app_contract.schema, parts[-1], section)
+            value = _redact(value, node, app_contract.schema, parts[-1], section)
         fields.append(
             ConfigField(
                 path=full,

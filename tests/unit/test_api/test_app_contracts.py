@@ -722,11 +722,46 @@ class TestCredentialsAreNotEchoed:
 
         resp = client.get(f"{RECEIVER_BASE}/config", headers=admin_headers)
         by_path = {f["path"]: f for f in resp.json()["fields"]}
-        for path in list(CREDENTIALS)[1:]:
+        for path in ("config.server.auth.bearer.tokens", "config.server.auth.header_values"):
             assert (by_path[path]["secret"], by_path[path]["set"]) == (True, True), path
             assert by_path[path]["value"] is None, path
+        # A header's name is a setting; only its values are the credential.
+        headers = by_path["config.server.auth.accepted_headers"]
+        assert (headers["secret"], headers["set"]) == (False, True)
+        assert headers["value"] == [{"name": "x-api-key", "values": [contract.REDACTED]}]
         for credential in PLAINTEXT:
             assert credential not in resp.text
+
+    def test_a_fetcher_map_entry_shows_and_its_token_survives_a_write_back(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        _deploy_fetcher(client, admin_headers, "alpha")
+        base = "/api/v1/apps/dfe-fetcher/alpha"
+        entry = {"url": "https://api.example", "topic": "t", "auth": {"token": "rest-tok-7731"}}
+        resp = client.put(
+            f"{base}/config",
+            json={"changes": {"config.sources.rest": {"primary": entry}}},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+
+        read = client.get(f"{base}/config", headers=admin_headers)
+        field = {f["path"]: f for f in read.json()["fields"]}["config.sources.rest"]
+        shown = field["value"]["primary"]
+        assert shown["url"] == "https://api.example"
+        assert shown["auth"]["token"] == contract.REDACTED
+        assert "rest-tok-7731" not in read.text
+
+        shown["topic"] = "t-2"
+        written = client.put(
+            f"{base}/config",
+            json={"changes": {"config.sources.rest": {"primary": shown}}},
+            headers=admin_headers,
+        )
+        assert written.status_code == 200, written.text
+        stored = gc.get("helmvars", "dfe-fetcher-alpha-values")["config"]["sources"]["rest"]
+        assert stored == {"primary": {**entry, "topic": "t-2"}}
 
     def test_the_helm_vars_route_masks_them_too(self, client, app, admin_headers, tmp_path):
         # The same overlay read through the generic helm-var surface, same privilege.
