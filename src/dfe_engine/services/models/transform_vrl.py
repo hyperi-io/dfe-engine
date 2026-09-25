@@ -26,7 +26,6 @@ class VrlSourceConfig(BaseModel):
     brokers: list[str] = Field(default_factory=lambda: ["localhost:9092"])
     topics: list[str] = Field(default_factory=lambda: ["events"])
     group_id: str = "dfe-transform-vrl"
-    format: str = Field(default="auto", description="auto, json, or msgpack")
     max_buffer_bytes: int = Field(default=67_108_864, gt=0, description="Consumer buffer (bytes)")
     sasl: SaslConfig | None = None
     tls: KafkaTlsConfig | None = None

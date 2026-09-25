@@ -154,7 +154,7 @@
           "default": "dfe-transform-vrl"
         },
         "format": {
-          "description": "Payload format: auto, json, msgpack.",
+          "description": "Payload format: auto, json.",
           "type": "string",
           "default": "auto"
         },

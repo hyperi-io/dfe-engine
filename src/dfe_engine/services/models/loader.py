@@ -129,20 +129,6 @@ class ClickHouseConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Payload
-# ---------------------------------------------------------------------------
-
-
-class PayloadConfig(BaseModel):
-    """Payload format detection configuration."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    format: str = Field(default="auto", description="auto, json, or messagepack/msgpack")
-    mismatch_threshold: int = Field(default=10, ge=0)
-
-
-# ---------------------------------------------------------------------------
 # Routing
 # ---------------------------------------------------------------------------
 
@@ -389,7 +375,6 @@ class LoaderConfig(BaseServiceConfig):
     kafka: LoaderKafkaConfig = Field(default_factory=LoaderKafkaConfig)
     grpc: GrpcConfig = Field(default_factory=GrpcConfig)
     clickhouse: ClickHouseConfig = Field(default_factory=ClickHouseConfig)
-    payload: PayloadConfig = Field(default_factory=PayloadConfig)
     routing: LoaderRoutingConfig = Field(default_factory=LoaderRoutingConfig)
     buffer: LoaderBufferConfig = Field(default_factory=LoaderBufferConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)

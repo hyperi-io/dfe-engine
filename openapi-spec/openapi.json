@@ -32707,24 +32707,6 @@
             "type": "array",
             "title": "Records",
             "description": "Sample input records"
-          },
-          "source_format": {
-            "type": "string",
-            "enum": [
-              "json",
-              "msgpack"
-            ],
-            "title": "Source Format",
-            "default": "json"
-          },
-          "sink_format": {
-            "type": "string",
-            "enum": [
-              "json",
-              "msgpack"
-            ],
-            "title": "Sink Format",
-            "default": "json"
           }
         },
         "type": "object",

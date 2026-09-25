@@ -25,10 +25,6 @@ clickhouse:
   password: ""
   protocol: http
 
-payload:
-  format: auto
-  mismatch_threshold: 10
-
 # Every key here is one dfe-loader's RoutingConfig deserialises
 # (src/config/pipeline.rs) -- serde ignores anything else without complaint,
 # so an invented key routes to the loader's own default instead of failing.

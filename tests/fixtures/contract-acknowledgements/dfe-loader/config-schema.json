@@ -735,7 +735,7 @@
       "type": "object",
       "properties": {
         "format": {
-          "description": "Format mode: \"auto\" (default), \"json\", \"messagepack\"/\"msgpack\"",
+          "description": "Format mode: \"auto\" (default), \"json\"",
           "type": "string",
           "default": "auto"
         },
@@ -1260,11 +1260,6 @@
           "description": "JSON format.",
           "type": "string",
           "const": "json"
-        },
-        {
-          "description": "MessagePack format.",
-          "type": "string",
-          "const": "msgpack"
         }
       ]
     },
