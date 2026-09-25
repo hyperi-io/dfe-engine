@@ -1,7 +1,5 @@
 """Shared configuration models used across DFE Rust services."""
 
-from __future__ import annotations
-
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 

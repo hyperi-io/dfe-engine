@@ -21,8 +21,6 @@ one the app accepts. A deployment that mounts nothing answers
 that has not been given one still serves every other route.
 """
 
-from __future__ import annotations
-
 import json
 import re
 from collections.abc import Callable, Iterator
@@ -32,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from dfe_engine.appmgmt.appconfig import CONFIG_ROOT, ENV_ROOT, custom_env
+from dfe_engine.appmgmt.catalogue import APP_CATALOGUE, DEPLOY_SERVICE_PATH
 from dfe_engine.gitcrud.engine import flatten
 from dfe_engine.manifest import ManifestError, manifest_path
 
@@ -64,6 +63,7 @@ SECRET_NAMES = frozenset(
         "api_key",
         "private_key",
         "passphrase",
+        "key",
         "passwords",
         "secrets",
         "tokens",
@@ -73,6 +73,9 @@ SECRET_NAMES = frozenset(
     }
 )
 """Leaf names treated as secret whatever the schema says, singular and as a list.
+
+The same words decide an environment name, read as its last words: see
+:func:`secret_env_name`.
 
 Part of the fleet ships no ``x-dfe-secret`` at all - dfe-transform-vector carries
 none, and dfe-receiver marks none of its Kafka credentials, a plain-string
@@ -566,18 +569,61 @@ def _redact(value: Any, node: Any, root: dict, name: str) -> Any:
     return value
 
 
+def secret_env_name(name: str) -> bool:
+    """Whether an environment name says it carries a credential.
+
+    Judged by the words :data:`SECRET_NAMES` holds, as the name's last words:
+    ``DFE_LOADER_KAFKA_SASL_PASSWORD``, ``S3_API_KEY`` and ``GITHUB_TOKEN`` each end
+    in one.
+    """
+    lowered = name.lower()
+    return any(lowered == word or lowered.endswith(f"_{word}") for word in SECRET_NAMES)
+
+
+def _redact_env(env: Any) -> Any:
+    """An environment block with every value whose name says it is a credential masked."""
+    if not isinstance(env, dict):
+        return env
+    return {
+        key: _masked(value) if secret_env_name(str(key)) else value for key, value in env.items()
+    }
+
+
 def redact_overlay(app_contract: AppContract, overlay: dict) -> dict:
     """The overlay with every credential it carries replaced by :data:`REDACTED`.
 
     The ``config:`` block is read against the app's own schema, so a value the app
-    marks secret is hidden whatever it is called. Every other key, and everything
-    when no contract is mounted, is judged by name alone.
+    marks secret is hidden whatever it is called. An ``extraEnv`` entry is judged by
+    :func:`secret_env_name`. Every other key, and everything when no contract is
+    mounted, is judged by name alone.
     """
     schema = app_contract.schema if app_contract.available else {}
-    return {
-        key: _redact(value, schema if key == CONFIG_ROOT and schema else None, schema, str(key))
-        for key, value in overlay.items()
-    }
+    out: dict = {}
+    for key, value in overlay.items():
+        if key == ENV_ROOT:
+            out[key] = _redact_env(value)
+        else:
+            node = schema if key == CONFIG_ROOT and schema else None
+            out[key] = _redact(value, node, schema, str(key))
+    return out
+
+
+def redact_resource(doc: dict) -> dict:
+    """Any deploy-repo document with its credentials masked.
+
+    An app overlay names its app at ``deploy.service`` and is read against that
+    app's mounted contract. A document naming no app the manifest declares is
+    judged by name alone, so a crafted name never picks the file that is read.
+
+    Raises:
+        ContractError: The named app's mounted contract is there but unreadable.
+    """
+    service = _at(doc, DEPLOY_SERVICE_PATH)
+    if isinstance(service, str) and service in APP_CATALOGUE:
+        found = contract(service)
+    else:
+        found = AppContract(service="", available=False, source=ContractSource.ABSENT)
+    return redact_overlay(found, doc)
 
 
 def walk_schema(schema: dict) -> Iterator[tuple[str, dict, Any]]:
@@ -836,7 +882,7 @@ def resolve_config(
     # an extraEnv key is outside every contract on purpose.
     custom = [
         CustomEnvEntry(path=f"{ENV_ROOT}.{key}", value=value)
-        for key, value in sorted(custom_env(overlay).items())
+        for key, value in sorted(_redact_env(custom_env(overlay)).items())
     ]
     return ConfigView(
         available=app_contract.available, fields=fields, unknown=unknown, custom=custom

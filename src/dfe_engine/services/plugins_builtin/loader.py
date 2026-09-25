@@ -4,8 +4,6 @@ Consolidates loader-specific descriptor, validation, sizing, and template
 overrides.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from dfe_engine.services.descriptor import KafkaRole, ServiceDescriptor
@@ -18,7 +16,6 @@ descriptor = ServiceDescriptor(
     default_port=9000,
     metrics_port=9090,
     kafka_role=KafkaRole.CONSUMER,
-    consumer_group="clickhouse-loader",
     liveness_paths=("/livez",),
     readiness_paths=("/readyz",),
     description="Kafka consumer or gRPC server -- loads events into ClickHouse.",

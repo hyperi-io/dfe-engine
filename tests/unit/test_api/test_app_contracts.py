@@ -7,8 +7,6 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """The routes the console's app-settings page is built on: two reads and a write."""
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 
@@ -219,9 +217,9 @@ class TestTheConfigRoute:
         self, client, app, admin_headers, tmp_path
     ):
         _wire(app, tmp_path)
-        _deploy(client, admin_headers, values={"config": {"retired": {"key": "value"}}})
+        _deploy(client, admin_headers, values={"config": {"retired": {"setting": "value"}}})
         body = client.get(CONFIG, headers=admin_headers).json()
-        assert body["unknown"] == [{"path": "config.retired.key", "value": "value"}]
+        assert body["unknown"] == [{"path": "config.retired.setting", "value": "value"}]
 
     @pytest.mark.usefixtures("_unmounted")
     def test_nothing_mounted_leaves_the_overlay_unexplained_rather_than_failing(
@@ -503,18 +501,39 @@ class TestWritingCustomEnv:
         _wire(app, tmp_path)
         _deploy(client, admin_headers)
         assert (
-            _write(client, admin_headers, {"extraEnv.DFE_LOADER_HOUSE_KEY": "kept"}).status_code
+            _write(client, admin_headers, {"extraEnv.DFE_LOADER_HOUSE_STYLE": "kept"}).status_code
             == 200
         )
         body = client.get(CONFIG, headers=admin_headers).json()
-        assert body["custom"] == [{"path": "extraEnv.DFE_LOADER_HOUSE_KEY", "value": "kept"}]
+        assert body["custom"] == [{"path": "extraEnv.DFE_LOADER_HOUSE_STYLE", "value": "kept"}]
         assert body["unknown"] == []
 
         assert (
-            _write(client, admin_headers, {"extraEnv.DFE_LOADER_HOUSE_KEY": None}).status_code
+            _write(client, admin_headers, {"extraEnv.DFE_LOADER_HOUSE_STYLE": None}).status_code
             == 200
         )
         assert client.get(CONFIG, headers=admin_headers).json()["custom"] == []
+
+    def test_a_custom_credential_is_written_and_never_read_back(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        resp = _write(client, admin_headers, {"extraEnv.DFE_LOADER_S3_SECRET": "s3-secret"})
+        assert resp.status_code == 200, resp.text
+        assert "s3-secret" not in resp.text
+
+        config = client.get(CONFIG, headers=admin_headers)
+        assert config.json()["custom"] == [
+            {"path": "extraEnv.DFE_LOADER_S3_SECRET", "value": contract.REDACTED}
+        ]
+        values = client.get(f"/api/v1/apps/{LOADER}/default/values", headers=admin_headers)
+        assert values.json()["values"]["extraEnv"] == {"DFE_LOADER_S3_SECRET": contract.REDACTED}
+        for read in (config, values):
+            assert "s3-secret" not in read.text
+        # The container still needs the real value.
+        doc = gc.get("helmvars", "dfe-loader-default-values")
+        assert doc["extraEnv"]["DFE_LOADER_S3_SECRET"] == "s3-secret"
 
     def test_a_custom_key_is_never_judged_against_the_app_schema(
         self, client, app, admin_headers, tmp_path
@@ -707,6 +726,30 @@ class TestCredentialsAreNotEchoed:
             assert (by_path[path]["secret"], by_path[path]["set"]) == (True, True), path
             assert by_path[path]["value"] is None, path
         for credential in PLAINTEXT:
+            assert credential not in resp.text
+
+    def test_the_helm_vars_route_masks_them_too(self, client, app, admin_headers, tmp_path):
+        # The same overlay read through the generic helm-var surface, same privilege.
+        _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        _put_receiver(
+            client,
+            admin_headers,
+            {**CREDENTIALS, "extraEnv.DFE_RECEIVER_S3_SECRET": "env-secret"},
+        )
+
+        resp = client.get(
+            "/api/v1/helm/files/dfe-receiver-default-values/vars", headers=admin_headers
+        )
+        assert resp.status_code == 200, resp.text
+        by_path = {v["path"]: v["value"] for v in resp.json()}
+        assert by_path["config.server.auth.bearer.tokens[0]"] == contract.REDACTED
+        assert by_path["config.server.auth.accepted_headers[0].name"] == "x-api-key"
+        assert by_path["config.server.auth.accepted_headers[0].values[0]"] == contract.REDACTED
+        assert by_path["config.server.auth.header_values[0]"] == contract.REDACTED
+        assert by_path["extraEnv.DFE_RECEIVER_S3_SECRET"] == contract.REDACTED
+        assert by_path["config.server.auth.mode"] == "bearer"
+        for credential in (*PLAINTEXT, "env-secret"):
             assert credential not in resp.text
 
     def test_the_stored_overlay_still_holds_what_was_written(

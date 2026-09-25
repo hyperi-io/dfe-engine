@@ -6,8 +6,6 @@ Kafka config, a VRL transforms directory or file list, and pipeline
 settings (batch size, timeouts).
 """
 
-from __future__ import annotations
-
 from pydantic import BaseModel, ConfigDict, Field
 
 from dfe_engine.services.models.base import BaseServiceConfig

@@ -4,9 +4,7 @@ Mirrors the Rust config structs in dfe-receiver/src/config/mod.rs.
 All defaults match the Rust `impl Default` values exactly.
 """
 
-from __future__ import annotations
-
-from typing import Literal
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
@@ -266,7 +264,7 @@ class DestinationsConfig(BaseModel):
     rules: list[DestinationRule] = []
 
     @model_validator(mode="after")
-    def validate_destinations(self) -> DestinationsConfig:
+    def validate_destinations(self) -> Self:
         named = self.__pydantic_extra__ or {}
         for name, entry in named.items():
             grpc = entry.get("grpc") if isinstance(entry, dict) else None

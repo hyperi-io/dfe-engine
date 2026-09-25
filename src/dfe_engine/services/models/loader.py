@@ -4,8 +4,6 @@ Mirrors the Rust config structs in dfe-loader/src/config/loader.rs.
 All defaults match the Rust `impl Default` values exactly.
 """
 
-from __future__ import annotations
-
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator

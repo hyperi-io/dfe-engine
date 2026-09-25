@@ -12,8 +12,6 @@ descending or starts double counting shows up as a changed leaf total rather tha
 as a plausible-looking list nobody checks.
 """
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 
@@ -451,10 +449,10 @@ class TestProvenance:
 
 class TestUnknownKeys:
     def test_an_overlay_key_the_contract_does_not_declare_comes_back(self):
-        overlay = {"config": {"retired_section": {"key": "value"}}}
+        overlay = {"config": {"retired_section": {"setting": "value"}}}
         view = contract.resolve_config(_contract("dfe-loader"), overlay)
         assert [(u.path, u.value) for u in view.unknown] == [
-            ("config.retired_section.key", "value")
+            ("config.retired_section.setting", "value")
         ]
 
     def test_a_declared_key_is_not_unknown(self):
@@ -481,12 +479,44 @@ class TestUnknownKeys:
 
 class TestCustomEnvKeys:
     def test_an_extra_env_key_is_reported_apart_from_the_unknown_block(self):
-        overlay = {"extraEnv": {"DFE_LOADER_HOUSE_KEY": "kept"}}
+        overlay = {"extraEnv": {"DFE_LOADER_HOUSE_STYLE": "kept"}}
         view = contract.resolve_config(_contract("dfe-loader"), overlay)
         assert [(c.path, c.value) for c in view.custom] == [
-            ("extraEnv.DFE_LOADER_HOUSE_KEY", "kept")
+            ("extraEnv.DFE_LOADER_HOUSE_STYLE", "kept")
         ]
         assert view.unknown == []
+
+    def test_a_custom_key_named_like_a_credential_reports_no_value(self):
+        overlay = {"extraEnv": {"DFE_LOADER_S3_SECRET": "s3", "DFE_LOADER_HOUSE_STYLE": "kept"}}
+        view = contract.resolve_config(_contract("dfe-loader"), overlay)
+        assert [(c.path, c.value) for c in view.custom] == [
+            ("extraEnv.DFE_LOADER_HOUSE_STYLE", "kept"),
+            ("extraEnv.DFE_LOADER_S3_SECRET", contract.REDACTED),
+        ]
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "DFE_LOADER_KAFKA_SASL_PASSWORD",
+            "GITHUB_TOKEN",
+            "OAUTH_CLIENT_SECRET",
+            "DFE_LOADER_HOUSE_KEY",
+            "S3_API_KEY",
+            "AWS_SECRET_ACCESS_KEY",
+            "SIGNING_PRIVATE_KEY",
+            "TOKEN",
+            "RECEIVER_BEARER_TOKENS",
+        ],
+    )
+    def test_an_environment_name_ending_in_a_credential_word_is_secret(self, name):
+        assert contract.secret_env_name(name) is True
+
+    @pytest.mark.parametrize(
+        "name",
+        ["DFE_LOADER_HOUSE_STYLE", "TOKEN_URL", "SECRET_SOURCE", "KEYCLOAK_REALM", "MONKEY"],
+    )
+    def test_a_name_that_only_contains_one_is_not(self, name):
+        assert contract.secret_env_name(name) is False
 
     def test_an_app_with_no_custom_env_reports_none(self):
         assert contract.resolve_config(_contract("dfe-loader"), {}).custom == []
@@ -627,7 +657,11 @@ class TestRedactingTheOverlay:
             "kafka": {"sasl": {"username": "dfe", "password": "kafka-pw"}},
             "retired": {"api_key": "old-key"},
         },
-        "extraEnv": {"DFE_RECEIVER_HOUSE_KEY": "kept"},
+        "extraEnv": {
+            "DFE_RECEIVER_HOUSE_STYLE": "kept",
+            "DFE_RECEIVER_KAFKA_SASL_PASSWORD": "env-pw",
+            "S3_API_KEY": "env-key",
+        },
     }
 
     def _redacted(self, root: Path = HELD) -> dict:
@@ -653,17 +687,50 @@ class TestRedactingTheOverlay:
     def test_an_undeclared_key_named_like_a_credential_is_masked(self):
         assert self._redacted()["config"]["retired"] == {"api_key": contract.REDACTED}
 
+    def test_an_environment_credential_is_masked_by_its_name(self):
+        assert self._redacted()["extraEnv"] == {
+            "DFE_RECEIVER_HOUSE_STYLE": "kept",
+            "DFE_RECEIVER_KAFKA_SASL_PASSWORD": contract.REDACTED,
+            "S3_API_KEY": contract.REDACTED,
+        }
+
     def test_everything_else_comes_back_as_written(self):
         redacted = self._redacted()
         assert redacted["deploy"] == self.OVERLAY["deploy"]
-        assert redacted["extraEnv"] == self.OVERLAY["extraEnv"]
         assert redacted["config"]["server"]["request_timeout_ms"] == 30000
         assert redacted["config"]["server"]["auth"]["bearer"]["secret_source"] is None
 
     def test_no_credential_survives_anywhere_in_it(self):
         text = json.dumps(self._redacted())
-        for credential in ("tok-1", "tok-2", "hv-1", "legacy-1", "kafka-pw", "old-key"):
+        for credential in (
+            "tok-1",
+            "tok-2",
+            "hv-1",
+            "legacy-1",
+            "kafka-pw",
+            "old-key",
+            "env-pw",
+            "env-key",
+        ):
             assert credential not in text
+
+    def test_a_document_naming_its_app_is_read_against_that_app(self, monkeypatch):
+        monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(HELD))
+        contract.reload_contracts()
+        auth = contract.redact_resource(json.loads(json.dumps(self.OVERLAY)))["config"]["server"][
+            "auth"
+        ]
+        # Only the receiver's marker says a header value is secret.
+        assert auth["header_values"] == [contract.REDACTED]
+
+    def test_a_document_naming_no_app_is_judged_by_name(self, monkeypatch):
+        monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(HELD))
+        contract.reload_contracts()
+        doc = json.loads(json.dumps(self.OVERLAY))
+        doc["deploy"]["service"] = "../dfe-receiver"
+        auth = contract.redact_resource(doc)["config"]["server"]["auth"]
+        assert auth["header_values"] == ["legacy-1"]
+        assert auth["bearer"]["tokens"] == [contract.REDACTED, contract.REDACTED]
 
     def test_with_no_contract_the_name_rule_still_holds(self, tmp_path):
         # Unmounted, the names are all there is to judge by.

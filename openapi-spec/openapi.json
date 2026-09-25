@@ -12671,7 +12671,7 @@
           "Governed Ops: Helm Vars"
         ],
         "summary": "List Vars",
-        "description": "Flattened dot-path vars for a resource, each marked protected or not.",
+        "description": "Flattened dot-path vars for a resource, each marked protected or not.\n\nCredentials come back masked, as the app surface's values route masks them.",
         "operationId": "list_vars_api_v1_helm_files__name__vars_get",
         "parameters": [
           {

@@ -47,8 +47,6 @@ operational surface is ``service:{service}:metrics:read`` - reading telemetry is
 the same privilege as reading configuration.
 """
 
-from __future__ import annotations
-
 from dataclasses import asdict
 from typing import Any
 

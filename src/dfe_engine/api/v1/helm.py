@@ -17,14 +17,13 @@ is bound at the class: helmvars:read / helmvars:write (+ helmvars:override for
 protected vars). Optimistic concurrency via the If-Match header (commit SHA).
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.appmgmt import contract
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -36,7 +35,7 @@ from dfe_engine.gitcrud.commit_policy import (
     validate_change,
     validate_name,
 )
-from dfe_engine.gitcrud.engine import ResourceNotFoundError
+from dfe_engine.gitcrud.engine import ResourceNotFoundError, flatten
 from dfe_engine.gitcrud.routing import ReviewRequiredError, route_write
 from dfe_engine.governance import PolicyStore, ProtectedVarError
 
@@ -248,12 +247,21 @@ async def list_files(user: CurrentUser, request: Request) -> list[str]:
     "/files/{name}/vars", dependencies=[Depends(require_action(scopes_dict["helmvars_read"]))]
 )
 async def list_vars(name: str, user: CurrentUser, request: Request) -> list[dict[str, Any]]:
-    """Flattened dot-path vars for a resource, each marked protected or not."""
+    """Flattened dot-path vars for a resource, each marked protected or not.
+
+    Credentials come back masked, as the app surface's values route masks them.
+    """
     check_name(name)
     gc = gitcrud_of(request)
     policy = policy_of(request)
+    try:
+        shown = contract.redact_resource(gc.get(_CLASS, name))
+    except contract.ContractError as exc:
+        raise HTTPException(
+            500, detail={"code": "contract_unreadable", "message": str(exc)}
+        ) from exc
     out: list[dict[str, Any]] = []
-    for path, value in gc.vars(_CLASS, name).items():
+    for path, value in flatten(shown).items():
         protected = bool(policy and policy.is_protected(_CLASS, name, path))
         out.append({"path": path, "value": value, "protected": protected})
     return out

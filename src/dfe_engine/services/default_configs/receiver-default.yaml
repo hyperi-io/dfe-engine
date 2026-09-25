@@ -53,7 +53,7 @@ kafka:
 loader:
   address: "localhost:6000"
   transport: kafka
-  timeout_ms: 5000
+  timeout_ms: 20000  # inside the 25 s a listener holds its answer
 
 buffer:
   memory_limit: 0  # auto-detect

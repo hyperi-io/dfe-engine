@@ -8,8 +8,6 @@
 
 """Tests for plugin validation functions — pure logic, no external deps."""
 
-from __future__ import annotations
-
 import pytest
 from pydantic import SecretStr, ValidationError
 

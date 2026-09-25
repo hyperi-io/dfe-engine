@@ -14,9 +14,9 @@ carries only placeholders dfe-archiver substitutes -- it refuses to start on any
 other token, so a shipped default with one strands the deployment.
 """
 
-from __future__ import annotations
-
+import json
 import re
+from pathlib import Path
 
 import pytest
 
@@ -41,6 +41,16 @@ def _shipped_configs() -> list[tuple[str, str]]:
 
 _SHIPPED = _shipped_configs()
 _ARCHIVER = [(name, text) for name, text in _SHIPPED if name.startswith("archiver-")]
+_LOADER = [(name, text) for name, text in _SHIPPED if name.startswith("loader-")]
+_RECEIVER = [(name, text) for name, text in _SHIPPED if name.startswith("receiver-")]
+
+_FIXTURES = Path(__file__).parents[2] / "fixtures"
+
+
+def _app_default(fixture_dir: str, app: str, section: str) -> dict:
+    """The default an app's emitted schema gives one top-level section."""
+    schema = json.loads((_FIXTURES / fixture_dir / app / "config-schema.json").read_text())
+    return schema["properties"][section]["default"]
 
 
 @pytest.mark.parametrize(("name", "text"), _SHIPPED, ids=[n for n, _ in _SHIPPED])
@@ -68,6 +78,23 @@ def test_every_shipped_archiver_template_uses_a_placeholder_the_archiver_substit
     unsupported = set(_TOKEN.findall(template)) - PATH_TEMPLATE_PLACEHOLDERS
 
     assert unsupported == set(), f"{name} carries {sorted(unsupported)}"
+
+
+@pytest.mark.parametrize(("name", "text"), _LOADER, ids=[n for n, _ in _LOADER])
+@pytest.mark.parametrize("field", ["group", "client_id", "topics"])
+def test_every_shipped_loader_config_consumes_as_the_loader_does(name: str, text: str, field: str):
+    # A seeded [events] had the loader read one topic nothing writes, where the
+    # loader's own empty list discovers every *_load / *_land topic.
+    shipped = (yaml_load_string(text) or {})["kafka"][field]
+    assert shipped == _app_default("contract", "dfe-loader", "kafka")[field], name
+
+
+@pytest.mark.parametrize(("name", "text"), _RECEIVER, ids=[n for n, _ in _RECEIVER])
+def test_every_shipped_receiver_config_sends_inside_the_hold(name: str, text: str):
+    # A seeded 5 s deadline replaced the receiver's own 20 s one.
+    shipped = (yaml_load_string(text) or {})["loader"]["timeout_ms"]
+    app = _app_default("contract-acknowledgements", "dfe-receiver", "loader")["timeout_ms"]
+    assert shipped == app, name
 
 
 def test_no_shipped_fetcher_config_authors_a_dlq_topic():
