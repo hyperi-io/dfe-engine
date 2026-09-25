@@ -600,7 +600,7 @@ class TestWritingCustomEnv:
         assert written.stat().st_mode & 0o777 == 0o600
         # Compose reads env_file at up time, so a restart would keep the old set.
         assert resp.json()["restart_required"] == [
-            f"recreate required: docker compose up -d {LOADER}"
+            f"recreate required: make apply SERVICES={LOADER}"
         ]
         assert "app environment directory" in resp.json()["custom_env"]
         # Nothing rolls a pod on a Compose stack, so the command is the answer.

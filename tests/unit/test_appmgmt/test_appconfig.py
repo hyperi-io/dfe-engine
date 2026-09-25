@@ -447,7 +447,7 @@ class TestCustomEnvironment:
         rendered = {r.service: r for r in appconfig.render(crud, settings)}
 
         assert rendered[LOADER].custom_env_changed
-        assert rendered[LOADER].restart_hint == f"recreate required: docker compose up -d {LOADER}"
+        assert rendered[LOADER].restart_hint == f"recreate required: make apply SERVICES={LOADER}"
 
     def test_an_unchanged_block_asks_for_nothing(self, crud, tmp_path):
         settings = _settings(tmp_path)
@@ -503,7 +503,7 @@ class TestWhatTakingTheChangeCosts:
         rendered = {r.service: r for r in appconfig.render(crud, settings)}
 
         assert _rendered(settings, LOADER)["hot_reload"] == {"enabled": False}
-        assert rendered[LOADER].restart_hint == f"restart required: docker compose restart {LOADER}"
+        assert rendered[LOADER].restart_hint == f"restart required: make apply SERVICES={LOADER}"
 
     def test_a_startup_bound_app_names_the_command_that_applies_it(self, crud, tmp_path):
         settings = _settings(tmp_path)
@@ -519,7 +519,7 @@ class TestWhatTakingTheChangeCosts:
         # The container carrying this instance, not the app: a per-config app has
         # one per source, so the app's own name would restart the wrong one.
         assert rendered[VRL].restart_hint == (
-            f"restart required: docker compose restart {VRL}-filebeat"
+            f"restart required: make apply SERVICES={VRL}-filebeat"
         )
         assert appconfig.restart_hints(list(rendered.values())) == [rendered[VRL].restart_hint]
 
@@ -542,7 +542,7 @@ class TestWhatTakingTheChangeCosts:
         rendered = {r.container: r for r in appconfig.render(crud, settings)}
 
         assert rendered[f"{VRL}-filebeat"].restart_hint == (
-            f"recreate required: docker compose up -d {VRL}-filebeat"
+            f"recreate required: make apply SERVICES={VRL}-filebeat"
         )
 
     def test_a_rolled_file_set_needs_a_restart_even_on_a_hot_app(self, crud, tmp_path):

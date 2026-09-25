@@ -85,10 +85,19 @@ The deployer declares a container per line. A file with no lines is an app with
 no source yet, which is a deployment that starts with none of that app running.
 """
 
-RESTART_HINT = "restart required: docker compose restart {service}"
+APPLY_COMMAND = "make apply SERVICES={service}"
+"""What a Compose operator runs in the deployment's checkout to apply a render.
+
+The target re-resolves the stack before it starts anything, so it names a
+per-source container this render has only just declared, which a plain
+``docker compose`` call cannot: that service lives in a file only ``make``
+chains.
+"""
+
+RESTART_HINT = f"restart required: {APPLY_COMMAND}"
 """What an operator runs to apply a write the running app cannot take in place."""
 
-RECREATE_HINT = "recreate required: docker compose up -d {service}"
+RECREATE_HINT = f"recreate required: {APPLY_COMMAND}"
 """Compose reads env_file at up time, so a restart keeps the old environment."""
 
 
@@ -124,8 +133,8 @@ class RenderedApp:
     @property
     def restart_hint(self) -> str:
         """The command that applies this change, or empty when none is needed."""
-        # An `up` recreates the container, so it applies a config change too, and
-        # it is also what CREATES the container a new instance has yet to get.
+        # A changed env file changes the service definition, which `up` recreates
+        # on, and `up` is also what CREATES the container a new instance lacks.
         if self.custom_env_changed or self.created:
             return RECREATE_HINT.format(service=self.container)
         if not self.restart_required:
