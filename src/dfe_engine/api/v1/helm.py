@@ -37,7 +37,7 @@ from dfe_engine.gitcrud.commit_policy import (
 )
 from dfe_engine.gitcrud.engine import ResourceNotFoundError, flatten
 from dfe_engine.gitcrud.routing import ReviewRequiredError, route_write
-from dfe_engine.governance import PolicyStore, ProtectedVarError
+from dfe_engine.governance import ACTION_CLASS, ActionStore, PolicyStore, ProtectedVarError
 
 router = APIRouter(prefix="/helm", tags=["Governed Ops: Helm Vars"])
 
@@ -93,11 +93,17 @@ def check_name(name: str) -> None:
 def shown_vars(gc: GitCrud, cls: str, name: str) -> dict[str, Any]:
     """One resource's flattened vars, credentials masked, for any route that lists them.
 
+    An action definition's credentials sit in change values the name rule cannot
+    see, so it is masked by the action rule first.
+
     Raises:
         ResourceNotFoundError: The resource does not exist; the caller maps it.
     """
+    doc = gc.get(cls, name)
+    if cls == ACTION_CLASS:
+        doc = ActionStore(gc).shown_doc(name, doc)
     try:
-        shown = contract.redact_resource(gc.get(cls, name))
+        shown = contract.redact_resource(doc)
     except contract.ContractError as exc:
         raise HTTPException(
             500, detail={"code": "contract_unreadable", "message": str(exc)}

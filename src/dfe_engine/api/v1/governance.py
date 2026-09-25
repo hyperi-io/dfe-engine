@@ -38,6 +38,7 @@ from dfe_engine.governance import (
     ActionDef,
     ActionForbiddenError,
     ActionStore,
+    CredentialInActionError,
     InvalidParamsError,
     PolicyStore,
     ProtectedPolicy,
@@ -137,8 +138,9 @@ async def list_actions(user: CurrentUser, request: Request) -> list[str]:
     "/actions/{name}", dependencies=[Depends(require_action(scopes_dict["governance_read"]))]
 )
 async def get_action(name: str, user: CurrentUser, request: Request) -> ActionDef:
+    """One defined action; a credential a legacy definition still carries comes back masked."""
     try:
-        return _actions(request).get(name)
+        return _actions(request).get_shown(name)
     except ResourceNotFoundError as exc:
         raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
 
@@ -298,7 +300,18 @@ async def validate_action(body: ActionDef, user: CurrentUser, request: Request) 
 async def create_action(
     body: ActionDef, user: CurrentUser, request: Request, response: Response
 ) -> ActionDef:
+    """Define or replace an action.
+
+    400 ``credential_in_action`` where a change targets a credential: the definition
+    is committed to the deploy repo, so a credential in it is plaintext in history.
+    """
     _check_name(body.name)
+    try:
+        _actions(request).refuse_credentials(body)
+    except CredentialInActionError as exc:
+        raise HTTPException(
+            400, detail={"code": "credential_in_action", "message": str(exc)}
+        ) from exc
 
     def _write(branch: str):
         return _actions(request).save(body, user.user_id, branch=branch)

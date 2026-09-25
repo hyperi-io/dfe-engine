@@ -712,6 +712,23 @@ def shown_var(doc: dict, path: str, value: Any) -> Any:
         return redact_var({}, path, value)
 
 
+_PROBE = "probe"
+"""A stand-in value, so a path is judged by where it points and not by what it holds."""
+
+
+def credential_var(doc: dict, path: str, value: Any = MISSING) -> bool:
+    """Whether a write of ``value`` at ``path`` in ``doc`` would store a credential.
+
+    True where the path itself is one - its name, the schema's marker, a list of
+    marked values - whatever the value, and where ``value`` carries a credential
+    field of its own.
+    """
+    probes: list[Any] = [_PROBE, [_PROBE]]
+    if not isinstance(value, _Missing):
+        probes.append(value)
+    return any(shown_var(doc, path, probe) != probe for probe in probes)
+
+
 def restore_masked(value: Any, stored: Any = MISSING, *, path: str = "") -> Any:
     """``value`` with every :data:`REDACTED` it carries put back to what is stored there.
 

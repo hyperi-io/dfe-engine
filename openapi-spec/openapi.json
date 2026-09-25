@@ -15816,6 +15816,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "Get Action",
+        "description": "One defined action; a credential a legacy definition still carries comes back masked.",
         "operationId": "get_action_api_v1_governance_actions__name__get",
         "parameters": [
           {
@@ -16062,6 +16063,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "Create Action",
+        "description": "Define or replace an action.\n\n400 ``credential_in_action`` where a change targets a credential: the definition\nis committed to the deploy repo, so a credential in it is plaintext in history.",
         "operationId": "create_action_api_v1_governance_admin_actions_post",
         "requestBody": {
           "content": {
