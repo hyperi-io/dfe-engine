@@ -30,8 +30,6 @@ data per member, so removing one takes its copy with it unless something moves t
 data off first. CPU and memory move freely both ways.
 """
 
-from __future__ import annotations
-
 import copy
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -53,6 +51,7 @@ from .helm import (
     gitcrud_of,
     policy_of,
     set_var_governed,
+    shown_vars,
 )
 
 router = APIRouter(prefix="/backing-services", tags=["Governed Ops: Backing Services"])
@@ -380,7 +379,10 @@ async def list_overlays(user: CurrentUser, request: Request) -> list[str]:
     "/overlays/{name}/vars", dependencies=[Depends(require_action(scopes_dict["helmvars_read"]))]
 )
 async def list_overlay_vars(name: str, user: CurrentUser, request: Request) -> list[dict[str, Any]]:
-    """Flattened dot-path vars for one overlay, each marked protected or not."""
+    """Flattened dot-path vars for one overlay, each marked protected or not.
+
+    Credentials come back masked, as every other read of the deploy repo masks them.
+    """
     check_name(name)
     gc = gitcrud_of(request)
     policy = policy_of(request)
@@ -390,7 +392,7 @@ async def list_overlay_vars(name: str, user: CurrentUser, request: Request) -> l
             "value": value,
             "protected": bool(policy and policy.is_protected(_CLASS, name, path)),
         }
-        for path, value in gc.vars(_CLASS, name).items()
+        for path, value in shown_vars(gc, _CLASS, name).items()
     ]
 
 

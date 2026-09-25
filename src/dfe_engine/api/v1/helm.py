@@ -90,6 +90,30 @@ def check_name(name: str) -> None:
         ) from exc
 
 
+def shown_vars(gc: GitCrud, cls: str, name: str) -> dict[str, Any]:
+    """One resource's flattened vars, credentials masked, for any route that lists them.
+
+    Raises:
+        ResourceNotFoundError: The resource does not exist; the caller maps it.
+    """
+    try:
+        shown = contract.redact_resource(gc.get(cls, name))
+    except contract.ContractError as exc:
+        raise HTTPException(
+            500, detail={"code": "contract_unreadable", "message": str(exc)}
+        ) from exc
+    return flatten(shown)
+
+
+def _shown_value(stored: dict, path: str, value: Any) -> Any:
+    """A value about to be written, masked as a read of it would be."""
+    try:
+        return contract.redact_var(stored, path, value)
+    except contract.ContractError:
+        # An unreadable mount must not block the write, so only the name rule judges it.
+        return contract.redact_var({}, path, value)
+
+
 def enforce_protected(request: Request, user: Any, cls: str, name: str, path: str) -> bool:
     """403 unless the caller may write this var. Returns whether it is protected."""
     policy = policy_of(request)
@@ -150,6 +174,8 @@ def set_var_governed(
             cls, name, path, value, user.user_id, message=msg, base_revision=if_match, branch=branch
         )
 
+    # The review PR's text leaves the deploy repo, so a credential is named, not shown.
+    shown = _shown_value(stored, path, value)
     try:
         outcome = route_write(
             gc=gc,
@@ -161,7 +187,7 @@ def set_var_governed(
             actor=user.user_id,
             protected=protected,
             title=f"cfg({name}): set {path}",
-            body=f"Governed helm-var change to {name} ({path}={value!r}) "
+            body=f"Governed helm-var change to {name} ({path}={shown!r}) "
             f"by {user.user_id}. Opened for review because production+team may "
             "not commit straight to main.",
             write=_write,
@@ -254,14 +280,8 @@ async def list_vars(name: str, user: CurrentUser, request: Request) -> list[dict
     check_name(name)
     gc = gitcrud_of(request)
     policy = policy_of(request)
-    try:
-        shown = contract.redact_resource(gc.get(_CLASS, name))
-    except contract.ContractError as exc:
-        raise HTTPException(
-            500, detail={"code": "contract_unreadable", "message": str(exc)}
-        ) from exc
     out: list[dict[str, Any]] = []
-    for path, value in flatten(shown).items():
+    for path, value in shown_vars(gc, _CLASS, name).items():
         protected = bool(policy and policy.is_protected(_CLASS, name, path))
         out.append({"path": path, "value": value, "protected": protected})
     return out

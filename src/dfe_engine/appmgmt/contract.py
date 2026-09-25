@@ -31,7 +31,7 @@ from typing import Any
 
 from dfe_engine.appmgmt.appconfig import CONFIG_ROOT, ENV_ROOT, custom_env
 from dfe_engine.appmgmt.catalogue import APP_CATALOGUE, DEPLOY_SERVICE_PATH
-from dfe_engine.gitcrud.engine import flatten
+from dfe_engine.gitcrud.engine import flatten, get_path, set_path
 from dfe_engine.manifest import ManifestError, manifest_path
 
 CONTRACT_DIR_ENV = "DFE_APP_CONTRACT_DIR"
@@ -624,6 +624,23 @@ def redact_resource(doc: dict) -> dict:
     else:
         found = AppContract(service="", available=False, source=ContractSource.ABSENT)
     return redact_overlay(found, doc)
+
+
+def redact_var(doc: dict, path: str, value: Any) -> Any:
+    """One value about to be written at ``path`` in ``doc``, masked as a read of it would be.
+
+    Judged by :func:`redact_resource` on a document holding only that value and the
+    app ``doc`` names, so a write and a read of the same var cannot disagree.
+
+    Raises:
+        ContractError: The named app's mounted contract is there but unreadable.
+    """
+    probe: dict = {}
+    service = _at(doc, DEPLOY_SERVICE_PATH)
+    if not isinstance(service, _Missing):
+        set_path(probe, DEPLOY_SERVICE_PATH, service)
+    set_path(probe, path, value)
+    return get_path(redact_resource(probe), path)
 
 
 def walk_schema(schema: dict) -> Iterator[tuple[str, dict, Any]]:

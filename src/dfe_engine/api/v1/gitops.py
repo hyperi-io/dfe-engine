@@ -22,8 +22,6 @@ values outside a set, the contract must expose the set. VarChange's fields
 carry ``x-dfe-enum-source`` annotations pointing here.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -31,6 +29,7 @@ from pydantic import BaseModel
 from scalo.logger import logger
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.v1.helm import shown_vars
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
 from dfe_engine.auth.models import AuthContext
@@ -191,7 +190,8 @@ async def list_class_resource_vars(
 ) -> list[VarEntry]:
     """Flattened dot-path vars of one resource - what VarChange.path may name.
 
-    Values ride along so a select can show the current value beside each path.
+    Values ride along so a select can show the current value beside each path, with
+    credentials masked as every other read of the deploy repo masks them.
     """
     gc = _gitcrud(request)
     rc = _resource_class(gc, cls)
@@ -202,7 +202,7 @@ async def list_class_resource_vars(
         raise HTTPException(400, detail={"code": "invalid_name", "message": str(exc)}) from exc
     policy = getattr(request.app.state, "policy_store", None)
     try:
-        flat = gc.vars(cls, name)
+        flat = shown_vars(gc, cls, name)
     except ResourceNotFoundError as exc:
         raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
     return [

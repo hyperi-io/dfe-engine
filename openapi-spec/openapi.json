@@ -12924,7 +12924,7 @@
           "Governed Ops: Backing Services"
         ],
         "summary": "List Overlay Vars",
-        "description": "Flattened dot-path vars for one overlay, each marked protected or not.",
+        "description": "Flattened dot-path vars for one overlay, each marked protected or not.\n\nCredentials come back masked, as every other read of the deploy repo masks them.",
         "operationId": "list_overlay_vars_api_v1_backing_services_overlays__name__vars_get",
         "parameters": [
           {
@@ -16418,7 +16418,7 @@
           "Governed Ops: Gitops"
         ],
         "summary": "List Class Resource Vars",
-        "description": "Flattened dot-path vars of one resource - what VarChange.path may name.\n\nValues ride along so a select can show the current value beside each path.",
+        "description": "Flattened dot-path vars of one resource - what VarChange.path may name.\n\nValues ride along so a select can show the current value beside each path, with\ncredentials masked as every other read of the deploy repo masks them.",
         "operationId": "list_class_resource_vars_api_v1_gitops_classes__cls__resources__name__vars_get",
         "parameters": [
           {

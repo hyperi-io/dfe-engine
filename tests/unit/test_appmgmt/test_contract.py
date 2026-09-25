@@ -723,6 +723,17 @@ class TestRedactingTheOverlay:
         # Only the receiver's marker says a header value is secret.
         assert auth["header_values"] == [contract.REDACTED]
 
+    def test_a_var_about_to_be_written_is_judged_as_its_read_would_be(self, monkeypatch):
+        # Only the receiver's marker says a header value is secret, so the app
+        # the stored document names has to reach the judgement.
+        monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(HELD))
+        contract.reload_contracts()
+        doc = {"deploy": {"service": "dfe-receiver"}}
+        path = "config.server.auth.header_values"
+        assert contract.redact_var(doc, path, ["h-1"]) == [contract.REDACTED]
+        assert contract.redact_var({}, path, ["h-1"]) == ["h-1"]
+        assert contract.redact_var(doc, "config.server.request_timeout_ms", 30000) == 30000
+
     def test_a_document_naming_no_app_is_judged_by_name(self, monkeypatch):
         monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(HELD))
         contract.reload_contracts()

@@ -5,15 +5,20 @@ a governed write must NOT land on main - it is routed to a review PR, or refused
 (409) when no forge is configured (Finding 5).
 """
 
-from __future__ import annotations
-
+import pytest
 from dulwich import porcelain
+from dulwich.object_store import tree_lookup_path
+from dulwich.objects import Blob, Commit
+from dulwich.refs import local_branch_name
 from dulwich.repo import Repo
 
+from dfe_engine.appmgmt import contract
 from dfe_engine.gitcrud import GitCrud, default_registry
+from dfe_engine.gitcrud.engine import get_path
 from dfe_engine.gitcrud.forge import PullRequest
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import PolicyStore
+from dfe_engine.yaml_utils import yaml_load_string
 
 
 def _wire_gitcrud(app, tmp_path):
@@ -238,7 +243,7 @@ class TestProdTeamPrRouting:
 
     def _remote_main(self, bare) -> str:
         with Repo(str(bare)) as r:
-            return r.refs[b"refs/heads/main"].decode()
+            return r.refs[local_branch_name(b"main")].decode()
 
     def _remote_refs(self, bare) -> list[str]:
         with Repo(str(bare)) as r:
@@ -269,6 +274,51 @@ class TestProdTeamPrRouting:
         # main untouched; the review branch really landed on the remote
         assert self._remote_main(bare) == main_before
         assert f"refs/heads/{branch}" in self._remote_refs(bare)
+
+    def _branch_doc(self, bare, gc, branch: str) -> dict:
+        """The resource as the review branch carries it on the remote."""
+        rel = gc._rel(gc._cls("helmvars"), "receiver-default").encode()
+        with Repo(str(bare)) as r:
+            commit = r[r.refs[local_branch_name(branch.encode())]]
+            assert isinstance(commit, Commit)
+            _mode, sha = tree_lookup_path(r.__getitem__, commit.tree, rel)
+            blob = r[sha]
+            assert isinstance(blob, Blob)
+            return yaml_load_string(blob.data.decode())
+
+    @pytest.mark.parametrize(
+        ("path", "credential"),
+        [("config.kafka.sasl.password", "hunter2"), ("extraEnv.DFE_X_API_KEY", "env-key")],
+    )
+    def test_a_credential_is_named_not_shown_in_the_pr(
+        self, client, app, admin_headers, tmp_path, path, credential
+    ):
+        # The PR text leaves the deploy repo for the forge; the branch does not.
+        forge = _RecordingForge()
+        gc, bare = _wire_gitcrud_remote(app, tmp_path, forge)
+        resp = client.put(
+            f"/api/v1/helm/files/receiver-default/vars/{path}",
+            json={"value": credential},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert credential not in resp.text
+
+        body = forge.calls[0]["body"]
+        assert credential not in body
+        assert f"{path}={contract.REDACTED!r}" in body
+        written = self._branch_doc(bare, gc, forge.calls[0]["head"])
+        assert get_path(written, path) == credential
+
+    def test_a_plain_value_is_still_shown_in_the_pr(self, client, app, admin_headers, tmp_path):
+        forge = _RecordingForge()
+        _wire_gitcrud_remote(app, tmp_path, forge)
+        client.put(
+            "/api/v1/helm/files/receiver-default/vars/keda.maxReplicas",
+            json={"value": 10},
+            headers=admin_headers,
+        )
+        assert "keda.maxReplicas=10" in forge.calls[0]["body"]
 
     def test_admin_create_action_opens_pr_with_header(self, client, app, admin_headers, tmp_path):
         forge = _RecordingForge(url="http://forge/pr/7")

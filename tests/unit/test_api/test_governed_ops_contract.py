@@ -6,8 +6,7 @@ required_action default is server-derived, and an action definition can be
 validated (with diff) before anything commits.
 """
 
-from __future__ import annotations
-
+from dfe_engine.appmgmt import contract
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import PolicyStore
@@ -99,6 +98,24 @@ class TestVarsListing:
         by_path = {v["path"]: v for v in resp.json()}
         assert by_path["keda.maxReplicas"]["value"] == 6
         assert by_path["keda.maxReplicas"]["protected"] is True
+
+    def test_credentials_come_back_masked(self, client, app, admin_headers, tmp_path):
+        # The same deploy-repo document the helm and app routes mask.
+        _wire_gitcrud(app, tmp_path)
+        _seed_helmvar(client, admin_headers, value=6)
+        _seed_helmvar(client, admin_headers, path="config.kafka.sasl.password", value="hunter2")
+        _seed_helmvar(client, admin_headers, path="extraEnv.DFE_X_TOKEN", value="env-tok")
+        resp = client.get(
+            "/api/v1/gitops/classes/helmvars/resources/receiver-default/vars",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        by_path = {v["path"]: v["value"] for v in resp.json()}
+        assert by_path["config.kafka.sasl.password"] == contract.REDACTED
+        assert by_path["extraEnv.DFE_X_TOKEN"] == contract.REDACTED
+        assert by_path["keda.maxReplicas"] == 6
+        assert "hunter2" not in resp.text
+        assert "env-tok" not in resp.text
 
     def test_missing_resource_404(self, client, app, admin_headers, tmp_path):
         _wire_gitcrud(app, tmp_path)
