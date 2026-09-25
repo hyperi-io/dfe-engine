@@ -23,6 +23,27 @@ from dfe_engine.appmgmt import contract
 
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "contract"
 
+# Receiver, loader and transform-vrl schemas from the builds that hold each source
+# acknowledgement until delivery, copied byte for byte from each app's
+# docs/config-schema.json (dfe-receiver f61c903, dfe-loader edef368,
+# dfe-transform-vrl da42bd2).
+HELD = Path(__file__).parents[2] / "fixtures" / "contract-acknowledgements"
+
+# Every block of each app that holds its acknowledgement, as its schema declares it.
+HOLDING_BLOCKS = [
+    ("dfe-receiver", "server"),
+    ("dfe-receiver", "grpc"),
+    ("dfe-receiver", "otlp"),
+    ("dfe-receiver", "splunk_hec"),
+    ("dfe-receiver", "lumberjack"),
+    ("dfe-receiver", "fluent"),
+    ("dfe-receiver", "webhook"),
+    ("dfe-receiver", "prometheus_rw"),
+    ("dfe-loader", "kafka"),
+    ("dfe-loader", "grpc"),
+    ("dfe-transform-vrl", "source"),
+]
+
 # What each app's contract flattens to. Asserted exactly: these move only when an
 # app changes its own config or the flattener changes what it counts as an option.
 LEAF_COUNTS = {
@@ -179,6 +200,85 @@ class TestSecrets:
     def test_a_marked_secret_is_a_secret_whatever_it_is_called(self):
         by_path = {f.path: f for f in contract.resolve_config(_contract("dfe-loader"), {}).fields}
         assert by_path["config.clickhouse.password"].secret is True
+
+    def test_a_list_of_tokens_is_a_secret_before_the_app_marks_it(self):
+        # The shipped receiver marks nothing, and its bearer tokens are a list.
+        by_path = {f.path: f for f in contract.resolve_config(_contract("dfe-receiver"), {}).fields}
+        assert by_path["config.server.auth.bearer.tokens"].secret is True
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "config.server.auth.bearer.tokens",
+            "config.server.auth.header_values",
+            "config.otlp.auth.header_values",
+        ],
+    )
+    def test_a_marker_on_a_list_s_items_hides_the_list(self, path):
+        found = contract.load_contract("dfe-receiver", HELD)
+        by_path = {f.path: f for f in contract.resolve_config(found, {}).fields}
+        assert by_path[path].secret is True
+
+    def test_a_marked_field_of_a_listed_object_hides_the_list(self):
+        # Each accepted header carries a name and its marked values, and the list is
+        # one option, so a readable name would come back with the values beside it.
+        found = contract.load_contract("dfe-receiver", HELD)
+        overlay = {
+            "config": {
+                "server": {"auth": {"accepted_headers": [{"name": "x-key", "values": ["s3"]}]}}
+            }
+        }
+        by_path = {f.path: f for f in contract.resolve_config(found, overlay).fields}
+        headers = by_path["config.server.auth.accepted_headers"]
+        assert (headers.secret, headers.value, headers.is_set) == (True, None, True)
+
+    def test_the_shipped_fetcher_s_connection_tokens_stay_hidden(self):
+        # dfe-fetcher marks each connection's token inside the list, so the list
+        # itself carried no marker and came back whole.
+        overlay = {"config": {"sources": {"okta": {"connections": [{"token": "s3"}]}}}}
+        view = contract.resolve_config(_contract("dfe-fetcher"), overlay)
+        by_path = {f.path: f for f in view.fields}
+        assert by_path["config.sources.okta.connections"].secret is True
+        assert "s3" not in json.dumps([[f.value, f.default] for f in view.fields])
+
+    @pytest.mark.parametrize(("marked", "secret"), [(False, False), (True, True)])
+    def test_a_definition_that_lists_itself_is_judged_and_ends(self, marked, secret):
+        node: dict = {"type": "string"}
+        if marked:
+            node[contract.SECRET_MARKER] = True
+        schema = {
+            "type": "object",
+            "properties": {"tree": {"type": "array", "items": {"$ref": "#/$defs/Node"}}},
+            "$defs": {
+                "Node": {
+                    "type": "object",
+                    "properties": {
+                        "label": node,
+                        "children": {"type": "array", "items": {"$ref": "#/$defs/Node"}},
+                    },
+                }
+            },
+        }
+        found = contract.AppContract(
+            service="dfe-loader",
+            available=True,
+            source=contract.ContractSource.MOUNT,
+            schema=schema,
+        )
+        (tree,) = contract.resolve_config(found, {}).fields
+        assert tree.secret is secret
+
+    def test_a_non_secret_list_is_still_shown(self):
+        by_path = {f.path: f for f in contract.resolve_config(_contract("dfe-loader"), {}).fields}
+        assert by_path["config.clickhouse.hosts"].secret is False
+
+    def test_an_undeclared_key_named_like_a_credential_is_masked(self):
+        overlay = {"config": {"retired": {"password": "hunter2", "host": "h"}}}
+        view = contract.resolve_config(_contract("dfe-loader"), overlay)
+        assert {(u.path, u.value) for u in view.unknown} == {
+            ("config.retired.password", contract.REDACTED),
+            ("config.retired.host", "h"),
+        }
 
     def test_a_written_secret_reports_that_it_is_set_without_saying_what(self):
         # A secret the chart does not supply: the loader's warehouse and Kafka
@@ -468,3 +568,118 @@ class TestProtectedPaths:
         )
         protected = [f.path for f in view.fields if f.protected]
         assert protected == ["config.clickhouse.hosts"]
+
+
+class TestHeldAcknowledgements:
+    """The overlay route judges a write against the mounted schema, so it takes the key as is."""
+
+    @pytest.mark.parametrize(("service", "block"), HOLDING_BLOCKS)
+    def test_the_key_is_a_declared_boolean(self, service, block):
+        options = contract.declared_options(contract.load_contract(service, HELD))
+        option = options[f"config.{block}.acknowledgements.enabled"]
+        assert option.type == "boolean"
+
+    @pytest.mark.parametrize(("service", "block"), HOLDING_BLOCKS)
+    def test_turning_it_off_is_accepted_and_anything_else_is_not(self, service, block):
+        options = contract.declared_options(contract.load_contract(service, HELD))
+        option = options[f"config.{block}.acknowledgements.enabled"]
+        assert contract.check_value(option, False) == ""
+        assert "takes boolean" in contract.check_value(option, "off")
+
+    @pytest.mark.parametrize(("service", "block"), HOLDING_BLOCKS)
+    def test_an_untouched_block_holds_by_default(self, service, block):
+        found = contract.load_contract(service, HELD)
+        by_path = {f.path: f for f in contract.resolve_config(found, {}).fields}
+        held = by_path[f"config.{block}.acknowledgements.enabled"]
+        assert (held.value, held.provenance) == (True, contract.Provenance.DEFAULT)
+
+    @pytest.mark.parametrize(("service", "block"), HOLDING_BLOCKS)
+    def test_a_written_false_is_the_overlay_s(self, service, block):
+        found = contract.load_contract(service, HELD)
+        overlay = {"config": {block: {"acknowledgements": {"enabled": False}}}}
+        view = contract.resolve_config(found, overlay)
+        held = {f.path: f for f in view.fields}[f"config.{block}.acknowledgements.enabled"]
+        assert (held.value, held.provenance) == (False, contract.Provenance.OVERLAY)
+        assert view.unknown == []
+
+    @pytest.mark.parametrize(("service", "block"), HOLDING_BLOCKS)
+    def test_no_chart_supplies_it(self, service, block):
+        # A chart-derived path is refused on write; this one is the operator's.
+        path = f"config.{block}.acknowledgements.enabled"
+        assert contract.chart_supplier(service, path) is None
+
+
+class TestRedactingTheOverlay:
+    """What the values route hands back: the overlay as written, less its credentials."""
+
+    OVERLAY = {
+        "deploy": {"service": "dfe-receiver", "instance": "default"},
+        "config": {
+            "server": {
+                "request_timeout_ms": 30000,
+                "auth": {
+                    "mode": "bearer",
+                    "bearer": {"tokens": ["tok-1", "tok-2"], "secret_source": None},
+                    "accepted_headers": [{"name": "x-api-key", "values": ["hv-1"]}],
+                    "header_values": ["legacy-1"],
+                },
+            },
+            "kafka": {"sasl": {"username": "dfe", "password": "kafka-pw"}},
+            "retired": {"api_key": "old-key"},
+        },
+        "extraEnv": {"DFE_RECEIVER_HOUSE_KEY": "kept"},
+    }
+
+    def _redacted(self, root: Path = HELD) -> dict:
+        return contract.redact_overlay(
+            contract.load_contract("dfe-receiver", root), json.loads(json.dumps(self.OVERLAY))
+        )
+
+    def test_bearer_tokens_are_masked_one_for_one(self):
+        auth = self._redacted()["config"]["server"]["auth"]
+        assert auth["bearer"]["tokens"] == [contract.REDACTED, contract.REDACTED]
+
+    def test_a_header_keeps_its_name_and_loses_its_values(self):
+        auth = self._redacted()["config"]["server"]["auth"]
+        assert auth["accepted_headers"] == [{"name": "x-api-key", "values": [contract.REDACTED]}]
+        assert auth["header_values"] == [contract.REDACTED]
+
+    def test_an_unmarked_password_is_masked_by_its_name(self):
+        assert self._redacted()["config"]["kafka"]["sasl"] == {
+            "username": "dfe",
+            "password": contract.REDACTED,
+        }
+
+    def test_an_undeclared_key_named_like_a_credential_is_masked(self):
+        assert self._redacted()["config"]["retired"] == {"api_key": contract.REDACTED}
+
+    def test_everything_else_comes_back_as_written(self):
+        redacted = self._redacted()
+        assert redacted["deploy"] == self.OVERLAY["deploy"]
+        assert redacted["extraEnv"] == self.OVERLAY["extraEnv"]
+        assert redacted["config"]["server"]["request_timeout_ms"] == 30000
+        assert redacted["config"]["server"]["auth"]["bearer"]["secret_source"] is None
+
+    def test_no_credential_survives_anywhere_in_it(self):
+        text = json.dumps(self._redacted())
+        for credential in ("tok-1", "tok-2", "hv-1", "legacy-1", "kafka-pw", "old-key"):
+            assert credential not in text
+
+    def test_with_no_contract_the_name_rule_still_holds(self, tmp_path):
+        # Unmounted, the names are all there is to judge by.
+        auth = self._redacted(tmp_path)["config"]["server"]["auth"]
+        assert auth["bearer"]["tokens"] == [contract.REDACTED, contract.REDACTED]
+        assert self._redacted(tmp_path)["config"]["kafka"]["sasl"]["password"] == (
+            contract.REDACTED
+        )
+
+    def test_nothing_written_stays_nothing(self):
+        found = contract.load_contract("dfe-receiver", HELD)
+        overlay = {"config": {"kafka": {"sasl": {"password": ""}}, "server": {"auth": {}}}}
+        assert contract.redact_overlay(found, overlay) == overlay
+
+    def test_the_stored_document_is_not_changed(self):
+        found = contract.load_contract("dfe-receiver", HELD)
+        overlay = json.loads(json.dumps(self.OVERLAY))
+        contract.redact_overlay(found, overlay)
+        assert overlay == self.OVERLAY

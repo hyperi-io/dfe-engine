@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, m
 
 from dfe_engine.services.models.base import BaseServiceConfig
 from dfe_engine.services.models.common import (
+    AcknowledgementsConfig,
     DlqConfig,
     KafkaTlsConfig,
     SaslConfig,
@@ -100,6 +101,7 @@ class ServerConfig(BaseModel):
     request_timeout_ms: int = Field(default=30_000, ge=0)
     tls: TlsConfig = Field(default_factory=TlsConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
+    acknowledgements: AcknowledgementsConfig = Field(default_factory=AcknowledgementsConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +116,10 @@ class GrpcConfig(BaseModel):
 
     enabled: bool = False
     bind_address: str = "0.0.0.0:6000"
+    max_message_size: int = Field(
+        default=16 * 1024 * 1024, ge=0, description="Largest decoded push accepted, in bytes"
+    )
+    acknowledgements: AcknowledgementsConfig = Field(default_factory=AcknowledgementsConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -347,8 +353,9 @@ class LoaderConnectionConfig(BaseModel):
 
     address: str = "dfe-loader:6000"
     transport: str = Field(default="kafka", description="kafka or grpc")
+    # Inside the 25 s a listener holds its answer, so a delivery settles before it.
     timeout_ms: int = Field(
-        default=5000,
+        default=20_000,
         ge=0,
         description="Per-RPC deadline for the receiver's gRPC loader client (0 = none)",
     )

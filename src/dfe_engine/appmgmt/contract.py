@@ -56,17 +56,39 @@ The whole point of the block is a name no contract declares, so the name is all
 there is to check; the value is never judged against the app's schema.
 """
 
-SECRET_NAMES = frozenset({"password", "secret", "token", "api_key", "private_key", "passphrase"})
-"""Leaf names treated as secret whatever the schema says.
+SECRET_NAMES = frozenset(
+    {
+        "password",
+        "secret",
+        "token",
+        "api_key",
+        "private_key",
+        "passphrase",
+        "passwords",
+        "secrets",
+        "tokens",
+        "api_keys",
+        "private_keys",
+        "passphrases",
+    }
+)
+"""Leaf names treated as secret whatever the schema says, singular and as a list.
 
-Part of the fleet ships no ``x-dfe-secret`` at all - dfe-receiver and
-dfe-transform-vector carry none, including plain-string passwords - so trusting
-the marker alone would hand an operator's Kafka password back over the API. The
-rule errs towards hiding.
+Part of the fleet ships no ``x-dfe-secret`` at all - dfe-transform-vector carries
+none, and dfe-receiver marks none of its Kafka credentials, a plain-string
+password included - so trusting the marker alone would hand an operator's Kafka
+password back over the API. The rule errs towards hiding.
 
 dfe-transform-vrl now marks its SASL password (its PR #61, 2026-09-16), so the
 list shrinks as apps adopt the marker. The rule stays regardless: it has to hold
 for the app that has not adopted it yet.
+"""
+
+REDACTED = "***REDACTED***"
+"""What stands in for a credential in a document read back over the API.
+
+The placeholder scalo serialises a secret as, so an operator sees one spelling
+for a hidden value wherever it is shown.
 """
 
 _TRANSFORM_CHART_ENV = {
@@ -451,8 +473,111 @@ def _nullable(node: dict, root: dict) -> bool:
     return False
 
 
-def _is_secret(path: str, node: dict) -> bool:
-    return bool(node.get(SECRET_MARKER)) or path.rsplit(".", 1)[-1] in SECRET_NAMES
+def _branches(node: Any, root: dict) -> list[dict]:
+    """A node and every non-null branch of it, each resolved.
+
+    An optional value is spelled ``anyOf: [<the value>, null]``, so what it holds -
+    its items, its fields, a secret marker - sits on a branch rather than the node.
+    """
+    resolved = _deref(node, root)
+    out = [resolved]
+    for keyword in ("anyOf", "oneOf", "allOf"):
+        for branch in resolved.get(keyword) or ():
+            target = _deref(branch, root)
+            if target.get("type") != "null":
+                out.append(target)
+    return out
+
+
+def _holds_secret(node: Any, root: dict, seen: frozenset[str] = frozenset()) -> bool:
+    """Whether a value of this schema carries credential material anywhere inside it.
+
+    An array is one option, so a marker on its items, or a secret field of an object
+    it lists, makes the whole option secret: dfe-receiver marks each bearer token and
+    each accepted header value, not the list that holds them.
+    """
+    ref = node.get("$ref") if isinstance(node, dict) else None
+    if isinstance(ref, str):
+        # A definition that refers to itself would otherwise be walked without end.
+        if ref in seen:
+            return False
+        seen = seen | {ref}
+    children: list[Any] = []
+    for branch in _branches(node, root):
+        if branch.get(SECRET_MARKER):
+            return True
+        props = branch.get("properties")
+        if isinstance(props, dict):
+            if SECRET_NAMES.intersection(props):
+                return True
+            children.extend(props.values())
+        children.extend(
+            branch[keyword]
+            for keyword in ("items", "additionalProperties")
+            if isinstance(branch.get(keyword), dict)
+        )
+    return any(_holds_secret(child, root, seen) for child in children)
+
+
+def _is_secret(path: str, node: dict, root: dict) -> bool:
+    """Whether an option is credential material, by its name or by what it holds."""
+    return path.rsplit(".", 1)[-1] in SECRET_NAMES or _holds_secret(node, root)
+
+
+def _masked(value: Any) -> Any:
+    """The redaction in the shape of what it replaces, so a list stays a list.
+
+    Nothing to hide stays as it is: a null or an empty string says only that no
+    credential was written.
+    """
+    if value is None or value == "":
+        return value
+    if isinstance(value, list):
+        return [_masked(item) for item in value]
+    return REDACTED
+
+
+def _redact(value: Any, node: Any, root: dict, name: str) -> Any:
+    """``value`` with every part its schema marks, or its name calls, a secret masked.
+
+    ``node`` is the schema the value was written against, or None where nothing
+    declares it, which leaves only the name rule to judge it.
+    """
+    branches = _branches(node, root) if node is not None else []
+    if name in SECRET_NAMES or any(b.get(SECRET_MARKER) for b in branches):
+        return _masked(value)
+    if isinstance(value, dict):
+        props: dict[str, Any] = {}
+        extra: Any = None
+        for branch in branches:
+            props.update(branch.get("properties") or {})
+            if extra is None and isinstance(branch.get("additionalProperties"), dict):
+                extra = branch["additionalProperties"]
+        return {
+            key: _redact(child, props.get(key, extra), root, str(key))
+            for key, child in value.items()
+        }
+    if isinstance(value, list):
+        items = next(
+            (b["items"] for b in branches if isinstance(b.get("items"), dict)),
+            None,
+        )
+        return [_redact(child, items, root, "") for child in value]
+    return value
+
+
+def redact_overlay(app_contract: AppContract, overlay: dict) -> dict:
+    """The overlay with every credential it carries replaced by :data:`REDACTED`.
+
+    The ``config:`` block is read against the app's own schema, so a value the app
+    marks secret is hidden whatever it is called. Every other key, and everything
+    when no contract is mounted, is judged by name alone.
+    """
+    schema = app_contract.schema if app_contract.available else {}
+    return {
+        key: _redact(value, schema if key == CONFIG_ROOT and schema else None, schema, str(key))
+        for key, value in overlay.items()
+    }
 
 
 def walk_schema(schema: dict) -> Iterator[tuple[str, dict, Any]]:
@@ -666,7 +791,7 @@ def resolve_config(
         written = _at(block, path)
         default = node["default"] if "default" in node else inherited
         has_default = not isinstance(default, _Missing)
-        secret = _is_secret(path, node)
+        secret = _is_secret(path, node, app_contract.schema)
 
         if path in derived:
             provenance = Provenance.CHART
@@ -699,9 +824,12 @@ def resolve_config(
             )
         )
 
+    # Read back through the same redaction as the values route: an undeclared key
+    # named like a credential is still one.
+    shown = _redact(block, app_contract.schema or None, app_contract.schema, CONFIG_ROOT)
     unknown = [
         UnknownEntry(path=f"{CONFIG_ROOT}.{path}", value=value)
-        for path, value in flatten(block).items()
+        for path, value in flatten(shown).items()
         if not _declares(path, leaves)
     ]
     # Apart from `unknown`, which is an overlay key that has outrun its contract;

@@ -1,6 +1,6 @@
 """Configuration model for dfe-transform-vrl.
 
-A transform-vrl deployment embeds the VRL crate directly — no Vector
+A transform-vrl deployment embeds the VRL crate directly -- no Vector
 subprocess. Config is simpler than transform-vector: flat source/sink
 Kafka config, a VRL transforms directory or file list, and pipeline
 settings (batch size, timeouts).
@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dfe_engine.services.models.base import BaseServiceConfig
 from dfe_engine.services.models.common import (
+    AcknowledgementsConfig,
     KafkaTlsConfig,
     LoggingConfig,
     MetricsConfig,
@@ -35,6 +36,7 @@ class VrlSourceConfig(BaseModel):
     session_timeout_ms: int = Field(default=30_000, gt=0)
     commit_interval_ms: int = Field(default=5_000, gt=0)
     librdkafka_options: dict[str, str] = Field(default_factory=dict)
+    acknowledgements: AcknowledgementsConfig = Field(default_factory=AcknowledgementsConfig)
 
 
 class VrlSinkConfig(BaseModel):
@@ -96,7 +98,7 @@ class TransformVrlConfig(BaseServiceConfig):
     """Complete configuration for dfe-transform-vrl.
 
     Unlike transform-vector, this is a flat config with no multi-source
-    tree — just a single source → VRL transform → sink pipeline.
+    tree -- just a single source -> VRL transform -> sink pipeline.
     """
 
     pipeline: VrlPipelineConfig = Field(default_factory=VrlPipelineConfig)

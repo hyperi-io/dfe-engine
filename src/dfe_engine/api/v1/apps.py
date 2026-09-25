@@ -11,7 +11,7 @@ GET    /api/v1/apps                                   catalogue + deployed insta
 POST   /api/v1/apps/{service}/instances               deploy an instance
 GET    /api/v1/apps/{service}/{instance}              one instance, summarised
 DELETE /api/v1/apps/{service}/{instance}              undeploy an instance
-GET    /api/v1/apps/{service}/{instance}/values       the instance's overlay values
+GET    /api/v1/apps/{service}/{instance}/values       the instance's overlay values, secrets masked
 GET    /api/v1/apps/{service}/{instance}/config       every declared option, with provenance
 PUT    /api/v1/apps/{service}/{instance}/config       write options, and custom env beside them
 GET    /api/v1/apps/{service}/{instance}/scaling      the scaling dials
@@ -1110,10 +1110,17 @@ async def get_history(
 async def get_values(
     service: str, instance: str, user: CurrentUser, request: Request
 ) -> ValuesResponse:
-    """The instance's overlay document as stored, with the revision to write against."""
+    """The instance's overlay document, credentials masked, with the revision to write against.
+
+    Masked as the config route hides them: by the app's own secret marker in its
+    schema, and by name wherever the schema says nothing.
+    """
     app = _resolve(service, instance)
     gc = _gitcrud(request)
-    return ValuesResponse(values=_overlay(gc, app), etag=_etag(gc))
+    doc = _overlay(gc, app)
+    return ValuesResponse(
+        values=contract.redact_overlay(read_contract(service), doc), etag=_etag(gc)
+    )
 
 
 @router.get("/{service}/{instance}/config", dependencies=[_READ])
@@ -1291,7 +1298,8 @@ async def set_app_config(
     landing a commit an operator then has to revert.
 
     A secret is written like any other option: it goes into the overlay as the rest
-    of this surface writes one, and the read route still never says what it is.
+    of this surface writes one, and neither this response nor a read route on this
+    surface says what it is.
 
     409 where the deployment already decides the value: a config path the chart
     derives, or an `extraEnv` name the chart sets for this app.

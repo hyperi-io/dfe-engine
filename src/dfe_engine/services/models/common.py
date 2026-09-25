@@ -66,6 +66,21 @@ class KafkaTlsConfig(BaseModel):
     skip_verify: bool = False
 
 
+class AcknowledgementsConfig(BaseModel):
+    """When a source acknowledges what it received: once it is delivered, or at receipt.
+
+    The ``acknowledgements`` block of every transport that can hold its answer - a
+    Kafka offset commit, a gRPC or HTTP response. ``enabled: true`` releases it only
+    once every piece built from the record is delivered, dead-lettered or dropped by
+    policy, so a failed delivery is redelivered. ``enabled: false`` acknowledges at
+    receipt, and a crash or a failed delivery then loses what was acknowledged.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+
+
 class MetricsConfig(BaseModel):
     """Prometheus metrics server configuration."""
 
@@ -88,7 +103,7 @@ class MemoryConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _coerce_legacy_max_memory_mb(cls, data: object) -> object:
-        """Accept deprecated ``max_memory_mb`` from older seeded defaults (MB → bytes)."""
+        """Accept deprecated ``max_memory_mb`` from older seeded defaults (MB -> bytes)."""
         if not isinstance(data, dict):
             return data
         if "limit_bytes" in data or "max_memory_mb" not in data:

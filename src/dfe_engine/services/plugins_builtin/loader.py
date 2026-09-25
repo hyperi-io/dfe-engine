@@ -77,8 +77,7 @@ def _validate_loader(config: Any, errors: list[str], warnings: list[str]) -> Non
         if not config.kafka.brokers:
             errors.append("At least one Kafka broker must be configured")
 
-        if not config.kafka.topics and not config.kafka.topic_regex:
-            errors.append("Either kafka.topics or kafka.topic_regex must be configured")
+        # An empty kafka.topics is valid: the loader auto-discovers every *_load/*_land topic.
 
         if config.kafka.sasl and config.kafka.sasl.enabled:
             mechanism = config.kafka.sasl.mechanism.lower().replace("-", "_")

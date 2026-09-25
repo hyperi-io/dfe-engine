@@ -11,13 +11,23 @@ here without changing it there re-opens the drift; the citation is the commit to
 check it against.
 """
 
-from __future__ import annotations
+import json
+from pathlib import Path
 
 import pytest
 
 from dfe_engine.services.models.archiver import ArchiverConfig
 from dfe_engine.services.models.loader import LoaderConfig
+from dfe_engine.services.models.receiver import ReceiverConfig
 from dfe_engine.services.templates import generate_template
+
+FIXTURES = Path(__file__).parents[2] / "fixtures"
+
+
+def _schema_default(fixture_dir: str, app: str, section: str) -> dict:
+    """The default an app's emitted schema gives one top-level section."""
+    schema = json.loads((FIXTURES / fixture_dir / app / "config-schema.json").read_text())
+    return schema["properties"][section]["default"]
 
 
 class TestArchiverDefaults:
@@ -71,3 +81,28 @@ class TestLoaderClickHouseDefaults:
         assert emitted["clickhouse"]["protocol"] == "http"
         for host in emitted["clickhouse"]["hosts"]:
             assert not host.endswith(":9000"), f"{profile} points http at a native port"
+
+
+class TestLoaderKafkaDefaults:
+    """dfe-loader src/config/kafka.rs, as the pinned image's emitted schema states it."""
+
+    @pytest.mark.parametrize("field", ["group", "client_id", "topics"])
+    def test_the_consumer_identity_is_the_app_s(self, field: str):
+        app = _schema_default("contract", "dfe-loader", "kafka")[field]
+        assert getattr(LoaderConfig().kafka, field) == app
+
+    def test_an_empty_topic_list_is_the_default(self):
+        """Empty is how the loader is told to auto-discover its *_load/*_land topics."""
+        assert LoaderConfig().kafka.topics == []
+
+
+class TestReceiverNextHopDeadline:
+    """dfe-receiver src/config/mod.rs, from the build that holds each answer."""
+
+    def test_the_loader_deadline_is_the_app_s(self):
+        app = _schema_default("contract-acknowledgements", "dfe-receiver", "loader")
+        assert ReceiverConfig().loader.timeout_ms == app["timeout_ms"]
+
+    def test_it_sits_inside_the_listener_s_hold(self):
+        """A 25 s hold answered before a 20 s send settles would retry a delivered batch."""
+        assert ReceiverConfig().loader.timeout_ms < 25_000

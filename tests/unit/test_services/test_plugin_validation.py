@@ -87,12 +87,14 @@ class TestValidateLoaderBrokerTopicHosts:
         errors, _ = run_loader_validation(config)
         assert any("broker" in e.lower() for e in errors)
 
-    def test_empty_topics_and_no_regex_produces_error(self):
+    def test_empty_topics_and_no_regex_is_auto_discovery(self):
+        # dfe-loader src/config/loader.rs validate(): an empty list discovers every
+        # *_load/*_land topic, so refusing it refuses the loader's own default.
         config = LoaderConfig()
         config.kafka.topics = []
         config.kafka.topic_regex = None
         errors, _ = run_loader_validation(config)
-        assert any("topic" in e.lower() for e in errors)
+        assert not any("topic" in e.lower() for e in errors)
 
     def test_topic_regex_satisfies_topic_requirement(self):
         config = LoaderConfig()

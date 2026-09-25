@@ -600,3 +600,121 @@ class TestWritingCustomEnv:
         _write(client, admin_headers, {"extraEnv.DFE_LOADER_HOUSE_KEY": None})
         written = tmp_path / "app-env" / f"{LOADER}{appconfig.CUSTOM_ENV_SUFFIX}"
         assert written.read_text() == ""
+
+
+RECEIVER = "dfe-receiver"
+RECEIVER_BASE = f"/api/v1/apps/{RECEIVER}/default"
+
+# Schemas from the builds that hold each source acknowledgement until delivery.
+HELD = Path(__file__).parents[2] / "fixtures" / "contract-acknowledgements"
+
+CREDENTIALS = {
+    "config.server.auth.mode": "bearer",
+    "config.server.auth.bearer.tokens": ["tok-1", "tok-2"],
+    "config.server.auth.accepted_headers": [{"name": "x-api-key", "values": ["hv-1"]}],
+    "config.server.auth.header_values": ["legacy-1"],
+}
+PLAINTEXT = ("tok-1", "tok-2", "hv-1", "legacy-1")
+
+
+@pytest.fixture
+def _held(monkeypatch):
+    """Mount the schemas that carry the acknowledgements key and the secret marker."""
+    monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(HELD))
+    contract.reload_contracts()
+
+
+def _deploy_receiver(client, headers):
+    return client.post(
+        f"/api/v1/apps/{RECEIVER}/instances",
+        json={"instance": "default"},
+        headers=headers,
+    )
+
+
+def _put_receiver(client, headers, changes: dict):
+    return client.put(f"{RECEIVER_BASE}/config", json={"changes": changes}, headers=headers)
+
+
+@pytest.mark.usefixtures("_held")
+class TestTurningAcknowledgementsOff:
+    @pytest.mark.parametrize("block", ["server", "grpc", "otlp", "webhook"])
+    def test_the_receiver_takes_it_and_reads_it_back(
+        self, client, app, admin_headers, tmp_path, block
+    ):
+        _wire(app, tmp_path)
+        assert _deploy_receiver(client, admin_headers).status_code == 200
+        path = f"config.{block}.acknowledgements.enabled"
+        resp = _put_receiver(client, admin_headers, {path: False})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["changed"] is True
+
+        body = client.get(f"{RECEIVER_BASE}/config", headers=admin_headers).json()
+        held = {f["path"]: f for f in body["fields"]}[path]
+        assert (held["value"], held["provenance"]) == (False, "overlay")
+
+    def test_a_string_where_the_app_takes_a_boolean_is_refused(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        before = gc.head_revision()
+        resp = _put_receiver(
+            client, admin_headers, {"config.server.acknowledgements.enabled": "off"}
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "invalid_value"
+        assert gc.head_revision() == before
+
+
+@pytest.mark.usefixtures("_held")
+class TestCredentialsAreNotEchoed:
+    def test_the_write_response_carries_none_of_them(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        resp = _put_receiver(client, admin_headers, CREDENTIALS)
+        assert resp.status_code == 200, resp.text
+        for credential in PLAINTEXT:
+            assert credential not in resp.text
+
+    def test_the_values_route_masks_tokens_and_header_values(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        assert _put_receiver(client, admin_headers, CREDENTIALS).status_code == 200
+
+        resp = client.get(f"{RECEIVER_BASE}/values", headers=admin_headers)
+        assert resp.status_code == 200, resp.text
+        auth = resp.json()["values"]["config"]["server"]["auth"]
+        assert auth["bearer"]["tokens"] == [contract.REDACTED, contract.REDACTED]
+        assert auth["accepted_headers"] == [{"name": "x-api-key", "values": [contract.REDACTED]}]
+        assert auth["header_values"] == [contract.REDACTED]
+        assert auth["mode"] == "bearer"
+        for credential in PLAINTEXT:
+            assert credential not in resp.text
+
+    def test_the_config_route_reports_them_set_and_says_nothing_else(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        _put_receiver(client, admin_headers, CREDENTIALS)
+
+        resp = client.get(f"{RECEIVER_BASE}/config", headers=admin_headers)
+        by_path = {f["path"]: f for f in resp.json()["fields"]}
+        for path in list(CREDENTIALS)[1:]:
+            assert (by_path[path]["secret"], by_path[path]["set"]) == (True, True), path
+            assert by_path[path]["value"] is None, path
+        for credential in PLAINTEXT:
+            assert credential not in resp.text
+
+    def test_the_stored_overlay_still_holds_what_was_written(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # Masking is on the way out: the app still needs the real tokens.
+        gc = _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        _put_receiver(client, admin_headers, CREDENTIALS)
+        doc = gc.get("helmvars", "dfe-receiver-default-values")
+        assert doc["config"]["server"]["auth"]["bearer"]["tokens"] == ["tok-1", "tok-2"]

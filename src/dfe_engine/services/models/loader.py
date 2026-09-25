@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from dfe_engine.services.models.base import BaseServiceConfig
 from dfe_engine.services.models.common import (
+    AcknowledgementsConfig,
     KafkaTlsConfig,
     MemoryConfig,
     SaslConfig,
@@ -29,12 +30,16 @@ class LoaderKafkaConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     brokers: list[str] = Field(default_factory=lambda: ["localhost:9092"])
-    group: str = "clickhouse-loader"
-    topics: list[str] = Field(default_factory=lambda: ["events"])
+    group: str = "dfe-loader"
+    topics: list[str] = Field(
+        default_factory=list,
+        description="Empty = auto-discover every *_load / *_land topic on the broker",
+    )
     topic_regex: str | None = None
-    client_id: str = "clickhouse-loader"
+    client_id: str = "dfe-loader"
     sasl: SaslConfig | None = None
     tls: KafkaTlsConfig | None = None
+    acknowledgements: AcknowledgementsConfig = Field(default_factory=AcknowledgementsConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +84,12 @@ class GrpcConfig(BaseModel):
     default_topic: str = Field(
         default=landing_topic(DEFAULT_LANDING_LABEL),
         description="Routing key for messages without a topic in the gRPC metadata",
+    )
+    acknowledgements: AcknowledgementsConfig = Field(default_factory=AcknowledgementsConfig)
+    max_hold_ms: int = Field(
+        default=13_500,
+        ge=0,
+        description="Longest a Push waits for its answer before it is told to retry",
     )
 
 
