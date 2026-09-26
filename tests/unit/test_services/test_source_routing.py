@@ -6,15 +6,12 @@ Both emits target REAL Rust serde contracts - the receiver's
 by a round-trip over its exact field names; the loader side is pinned by
 reading the Rust struct itself, because serde drops an unknown key without
 complaint and a wrong key therefore has no signal until data lands in the wrong
-table.
+table. The struct comes from a dfe-loader checkout, else from the release pinned
+in ``tests/support/producer_contract.py``.
 """
 
-from __future__ import annotations
-
-import os
 import re
 from dataclasses import dataclass
-from pathlib import Path
 
 import pytest
 
@@ -32,6 +29,7 @@ from dfe_engine.services.source_routing import (
 )
 from dfe_engine.source.models import Source
 from dfe_engine.source.registry import SourceNotFoundError
+from tests.support.producer_contract import DFE_LOADER, ProducerFile, producer_file
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -80,9 +78,8 @@ class FakeSourceRegistry:
 # The dfe-loader serde contract, read out of the Rust that defines it
 # ---------------------------------------------------------------------------
 
-_LOADER_DIR_ENV = "DFE_LOADER_DIR"
-_PIPELINE_RS = Path("src") / "config" / "pipeline.rs"
-_LOADER_RS = Path("src") / "config" / "loader.rs"
+_PIPELINE_RS = "src/config/pipeline.rs"
+_LOADER_RS = "src/config/loader.rs"
 
 _UNPARSED = object()
 
@@ -93,24 +90,6 @@ class RustStruct:
 
     fields: set[str]
     defaults: dict[str, object]
-
-
-def _loader_source(relative: Path) -> Path | None:
-    """A file inside dfe-loader, from the env override or a sibling checkout."""
-    roots: list[Path] = []
-    override = os.environ.get(_LOADER_DIR_ENV)
-    if override:
-        roots.append(Path(override))
-    roots.append(Path(__file__).resolve().parents[3].parent / "dfe-loader")
-    for root in roots:
-        candidate = root / relative
-        if candidate.is_file():
-            return candidate
-    return None
-
-
-def _loader_pipeline_rs() -> Path | None:
-    return _loader_source(_PIPELINE_RS)
 
 
 def _rust_block(text: str, header: str) -> str:
@@ -197,15 +176,14 @@ def _rust_literal(expr: str) -> object:
     return _UNPARSED
 
 
-def _parse_rust_fields(path: Path, name: str) -> set[str]:
+def _parse_rust_fields(source: ProducerFile, name: str) -> set[str]:
     """A Rust struct's field names, for a struct that derives Default."""
-    text = path.read_text(encoding="utf-8")
-    struct_body = _strip_comments(_rust_block(text, f"pub struct {name} {{"))
+    struct_body = _strip_comments(_rust_block(source.text, f"pub struct {name} {{"))
     return set(re.findall(r"^\s*pub (\w+)\s*:", struct_body, re.MULTILINE))
 
 
-def _parse_rust_struct(path: Path, name: str) -> RustStruct:
-    text = path.read_text(encoding="utf-8")
+def _parse_rust_struct(source: ProducerFile, name: str) -> RustStruct:
+    text = source.text
 
     struct_body = _strip_comments(_rust_block(text, f"pub struct {name} {{"))
     fields = set(re.findall(r"^\s*pub (\w+)\s*:", struct_body, re.MULTILINE))
@@ -234,30 +212,20 @@ def _parse_rust_struct(path: Path, name: str) -> RustStruct:
 @pytest.fixture(scope="module")
 def rust_routing() -> RustStruct:
     """dfe-loader's RoutingConfig, as the Rust source declares it."""
-    path = _loader_pipeline_rs()
-    if path is None:
-        pytest.skip(
-            f"no dfe-loader checkout alongside this one - point {_LOADER_DIR_ENV} at "
-            "one to check the engine model against the real loader contract"
-        )
-    parsed = _parse_rust_struct(path, "RoutingConfig")
+    source = producer_file(DFE_LOADER, _PIPELINE_RS)
+    parsed = _parse_rust_struct(source, "RoutingConfig")
     # A reshuffle upstream that defeats the parser must fail loudly here rather
     # than pass every assertion against an empty field set.
-    assert "default_db" in parsed.fields, f"could not parse RoutingConfig out of {path}"
+    assert "default_db" in parsed.fields, f"could not parse RoutingConfig out of {source.origin}"
     return parsed
 
 
 @pytest.fixture(scope="module")
 def rust_loader_fields() -> set[str]:
     """dfe-loader's top-level Config field names, as the Rust source declares them."""
-    path = _loader_source(_LOADER_RS)
-    if path is None:
-        pytest.skip(
-            f"no dfe-loader checkout alongside this one - point {_LOADER_DIR_ENV} at "
-            "one to check the engine model against the real loader contract"
-        )
-    fields = _parse_rust_fields(path, "Config")
-    assert "clickhouse" in fields, f"could not parse Config out of {path}"
+    source = producer_file(DFE_LOADER, _LOADER_RS)
+    fields = _parse_rust_fields(source, "Config")
+    assert "clickhouse" in fields, f"could not parse Config out of {source.origin}"
     return fields
 
 
