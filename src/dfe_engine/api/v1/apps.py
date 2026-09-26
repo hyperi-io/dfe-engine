@@ -49,12 +49,14 @@ the same privilege as reading configuration.
 
 from __future__ import annotations
 
+import functools
 from dataclasses import asdict
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from scalo.concurrency import run_blocking
 
 from dfe_engine.api import body_limits
 from dfe_engine.api.deps import (
@@ -67,6 +69,7 @@ from dfe_engine.api.deps import (
 )
 from dfe_engine.api.errors import ErrorResponse
 from dfe_engine.api.v1.app_contracts import read_contract
+from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import (
     AppInstance,
     DeployTarget,
@@ -108,7 +111,7 @@ from dfe_engine.sampling import SampleRequest, SamplerError
 from dfe_engine.source.flow import stage_instance_ceiling
 from dfe_engine.source.registry import SourceNotFoundError
 
-router = APIRouter(prefix="/apps", tags=["App Management"])
+router = APIRouter(prefix="/apps", tags=["App Management"], dependencies=[WRITE_TURN])
 
 _CLASS = instances.HELMVARS_CLASS
 
@@ -873,7 +876,7 @@ def _file_sets(service: str) -> list[FileSetSummary]:
 
 
 @router.get("", dependencies=[_DEPLOY_READ])
-async def list_apps(
+def list_apps(
     user: CurrentUser,
     request: Request,
     settings: Settings,
@@ -916,7 +919,7 @@ async def list_apps(
 
 
 @router.post("/{service}/instances", response_model=WriteResult, dependencies=[_DEPLOY_WRITE])
-async def create_instance(
+def create_instance(
     service: str,
     body: CreateInstanceRequest,
     user: CurrentUser,
@@ -978,7 +981,7 @@ async def create_instance(
 
 
 @router.get("/{service}/{instance}", dependencies=[_DEPLOY_READ])
-async def get_app(service: str, instance: str, user: CurrentUser, request: Request) -> AppSummary:
+def get_app(service: str, instance: str, user: CurrentUser, request: Request) -> AppSummary:
     """One instance's identity and shape."""
     app = _resolve(service, instance)
     _overlay(_gitcrud(request), app)
@@ -1000,7 +1003,7 @@ async def get_app(service: str, instance: str, user: CurrentUser, request: Reque
 
 
 @router.delete("/{service}/{instance}", response_model=WriteResult, dependencies=[_DEPLOY_DELETE])
-async def delete_instance(
+def delete_instance(
     service: str,
     instance: str,
     user: CurrentUser,
@@ -1075,7 +1078,7 @@ def remove_overlay(
 
 
 @router.get("/{service}/{instance}/history", dependencies=[_READ])
-async def get_history(
+def get_history(
     service: str,
     instance: str,
     user: CurrentUser,
@@ -1107,9 +1110,7 @@ async def get_history(
 
 
 @router.get("/{service}/{instance}/values", dependencies=[_READ])
-async def get_values(
-    service: str, instance: str, user: CurrentUser, request: Request
-) -> ValuesResponse:
+def get_values(service: str, instance: str, user: CurrentUser, request: Request) -> ValuesResponse:
     """The instance's overlay document as stored, with the revision to write against."""
     app = _resolve(service, instance)
     gc = _gitcrud(request)
@@ -1117,7 +1118,7 @@ async def get_values(
 
 
 @router.get("/{service}/{instance}/config", dependencies=[_READ])
-async def get_app_config(
+def get_app_config(
     service: str, instance: str, user: CurrentUser, request: Request
 ) -> AppConfigResponse:
     """Every option the app declares, with this instance's value and where it comes from.
@@ -1276,7 +1277,7 @@ def _reload_mode(request: Request, result: WriteResult) -> str:
 
 
 @router.put("/{service}/{instance}/config", response_model=ConfigWriteResult, dependencies=[_WRITE])
-async def set_app_config(
+def set_app_config(
     service: str,
     instance: str,
     body: ConfigWriteRequest,
@@ -1335,7 +1336,7 @@ async def set_app_config(
 
 
 @router.get("/{service}/{instance}/scaling", dependencies=[_READ])
-async def get_scaling(
+def get_scaling(
     service: str, instance: str, user: CurrentUser, request: Request
 ) -> ScalingResponse:
     """The scaling dials, or why they do not apply here."""
@@ -1348,7 +1349,7 @@ async def get_scaling(
 
 
 @router.put("/{service}/{instance}/scaling", response_model=WriteResult, dependencies=[_WRITE])
-async def set_scaling(
+def set_scaling(
     service: str,
     instance: str,
     body: ScalingRequest,
@@ -1396,7 +1397,7 @@ def _file_set(service: str, set_name: str):
 
 
 @router.get("/{service}/{instance}/files/{set_name}", dependencies=[_READ])
-async def list_app_files(
+def list_app_files(
     service: str, instance: str, set_name: str, user: CurrentUser, request: Request
 ) -> list[FileSummary]:
     """Every file in the set, without their contents."""
@@ -1431,7 +1432,7 @@ def _link_model(link: links.Link) -> LinkModel:
 
 
 @router.get("/{service}/{instance}/files/{set_name}/links", dependencies=[_READ])
-async def list_app_links(
+def list_app_links(
     service: str, instance: str, set_name: str, user: CurrentUser, request: Request
 ) -> list[LinkStatusModel]:
     """Where each linked file came from, and whether it still matches.
@@ -1467,7 +1468,7 @@ async def list_app_links(
     response_model=LinkResult,
     dependencies=[_WRITE],
 )
-async def link_app_file(
+def link_app_file(
     service: str,
     instance: str,
     set_name: str,
@@ -1541,7 +1542,7 @@ async def link_app_file(
     response_model=RelinkResult,
     dependencies=[_WRITE],
 )
-async def relink_app_files(
+def relink_app_files(
     service: str,
     instance: str,
     set_name: str,
@@ -1587,7 +1588,7 @@ async def relink_app_files(
     response_model=CopyFilesResult,
     dependencies=[_WRITE],
 )
-async def copy_app_files(
+def copy_app_files(
     service: str,
     instance: str,
     set_name: str,
@@ -1645,7 +1646,7 @@ async def copy_app_files(
 
 
 @router.get("/{service}/{instance}/files/{set_name}/{filename}", dependencies=[_READ])
-async def read_app_file(
+def read_app_file(
     service: str,
     instance: str,
     set_name: str,
@@ -1743,6 +1744,24 @@ async def write_app_file(
     refused before it is buffered rather than after it is committed.
     """
     body = await _read_file_write(request)
+    return await run_blocking(
+        functools.partial(
+            _write_app_file, service, instance, set_name, filename, user, request, if_match, body
+        )
+    )
+
+
+def _write_app_file(
+    service: str,
+    instance: str,
+    set_name: str,
+    filename: str,
+    user: Any,
+    request: Request,
+    if_match: str | None,
+    body: FileWriteRequest,
+) -> WriteResult:
+    """The deploy-repo half of ``write_app_file``, run on a worker thread."""
     app = _resolve(service, instance)
     fs = _file_set(service, set_name)
     doc = _overlay(_gitcrud(request), app)
@@ -1786,7 +1805,7 @@ async def write_app_file(
     response_model=WriteResult,
     dependencies=[_WRITE],
 )
-async def delete_app_file(
+def delete_app_file(
     service: str,
     instance: str,
     set_name: str,
@@ -1866,7 +1885,7 @@ def _routing_status(request: Request, app: AppInstance, doc: dict, source_regist
 
 
 @router.get("/{service}/{instance}/routing", response_model=RoutingResponse, dependencies=[_READ])
-async def get_app_routing(
+def get_app_routing(
     service: str,
     instance: str,
     user: CurrentUser,
@@ -1897,7 +1916,7 @@ async def get_app_routing(
 @router.post(
     "/{service}/{instance}/routing/sync", response_model=WriteResult, dependencies=[_WRITE]
 )
-async def sync_app_routing(
+def sync_app_routing(
     service: str,
     instance: str,
     user: CurrentUser,
@@ -1961,7 +1980,7 @@ async def _sample_events(
         )
     req = SampleRequest(source=source, limit=limit)
     try:
-        sampler.resolve_or_raise(req, source_registry)
+        await run_blocking(functools.partial(sampler.resolve_or_raise, req, source_registry))
         result = await sampler.run(req, ch, source_registry)
     except SamplerError as exc:
         raise HTTPException(
@@ -1995,7 +2014,7 @@ async def dry_run_app_file(
 
     content = body.content
     if content is None:
-        doc = _overlay(_gitcrud(request), app)
+        doc = await run_blocking(functools.partial(_overlay, _gitcrud(request), app))
         try:
             content = files.read_file(doc, fs, body.name).content
         except FileNotInSetError:
@@ -2005,11 +2024,14 @@ async def dry_run_app_file(
 
     source = body.source or app.instance
     events = await _sample_events(request, source, body.limit, ch, source_registry)
-    result = dryrun.run_language(
-        fs.language,
-        content,
-        events,
-        enabled=request.app.state.settings.transform_validation.dry_run,
+    result = await run_blocking(
+        functools.partial(
+            dryrun.run_language,
+            fs.language,
+            content,
+            events,
+            enabled=request.app.state.settings.transform_validation.dry_run,
+        )
     )
     audit_resource_change(user.user_id, "dryrun", f"{service}/{instance}/{body.name}", "executed")
     return DryRunResponse(
@@ -2045,7 +2067,7 @@ def _reader(request: Request, client: Any) -> OperationalReader:
 
 
 @router.get("/{service}/{instance}/status")
-async def get_status(
+def get_status(
     service: str, instance: str, user: CurrentUser, request: Request, client: ClickHouseClient
 ) -> StatusResponse:
     """Whether the instance is reporting telemetry, and since when."""
@@ -2067,7 +2089,7 @@ async def get_status(
 
 
 @router.get("/{service}/{instance}/metrics")
-async def get_metrics(
+def get_metrics(
     service: str, instance: str, user: CurrentUser, request: Request, client: ClickHouseClient
 ) -> MetricsResponse:
     """Throughput, CPU, memory and saturation for the instance."""
@@ -2088,7 +2110,7 @@ async def get_metrics(
 
 
 @router.get("/{service}/{instance}/metrics/series")
-async def get_resource_series(
+def get_resource_series(
     service: str,
     instance: str,
     user: CurrentUser,

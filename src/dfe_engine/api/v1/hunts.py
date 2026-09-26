@@ -40,6 +40,7 @@ from dfe_engine.api.deps import (
 )
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.api.review import apply_review_headers, review_audit_detail
+from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.hunt_runner.run_status import RunStatus, live_runner_count, read_run_status
@@ -104,7 +105,7 @@ def _validate_hunt_config(config: dict[str, Any], settings: Any) -> None:
         ) from exc
 
 
-router = APIRouter(prefix="/hunts", tags=["hunts"])
+router = APIRouter(prefix="/hunts", tags=["hunts"], dependencies=[WRITE_TURN])
 
 
 # ── Response models ─────────────────────────────────────────
@@ -361,7 +362,7 @@ def _hunt_row_to_summary(row: dict[str, Any], status: RunStatus | None, now: int
     response_model=HuntEngineStatus,
     dependencies=[Depends(require_action(scopes_dict["hunt_read"]))],
 )
-async def get_engine_status(
+def get_engine_status(
     user: CurrentUser,
     registry: HuntConfigReg,
 ) -> HuntEngineStatus:
@@ -387,7 +388,7 @@ async def get_engine_status(
     response_model=PaginatedResponse[HuntSummary],
     dependencies=[Depends(require_action(scopes_dict["hunt_read"]))],
 )
-async def list_hunts(
+def list_hunts(
     registry: HuntConfigReg,
     user: CurrentUser,
     pagination: PaginationParams = Depends(),
@@ -429,7 +430,7 @@ async def list_hunts(
     status_code=201,
     dependencies=[Depends(require_action(scopes_dict["hunt_write"]))],
 )
-async def create_hunt(
+def create_hunt(
     body: HuntCreateRequest,
     user: CurrentUser,
     registry: HuntConfigReg,
@@ -464,7 +465,7 @@ async def create_hunt(
     response_model=HuntDetailResponse,
     dependencies=[Depends(require_action(scopes_dict["hunt_read"]))],
 )
-async def get_hunt(
+def get_hunt(
     name: str,
     user: CurrentUser,
     registry: HuntConfigReg,
@@ -485,7 +486,7 @@ async def get_hunt(
     response_model=HuntDetailResponse,
     dependencies=[Depends(require_action(scopes_dict["hunt_write"]))],
 )
-async def update_hunt(
+def update_hunt(
     name: str,
     body: HuntWriteRequest,
     user: CurrentUser,
@@ -524,7 +525,7 @@ async def update_hunt(
     status_code=204,
     dependencies=[Depends(require_action(scopes_dict["hunt_delete"]))],
 )
-async def delete_hunt(
+def delete_hunt(
     name: str,
     user: CurrentUser,
     registry: HuntConfigReg,
@@ -556,7 +557,7 @@ async def delete_hunt(
     status_code=202,
     dependencies=[Depends(require_action(scopes_dict["hunt_execute"]))],
 )
-async def trigger_hunt(
+def trigger_hunt(
     name: str,
     user: CurrentUser,
     registry: HuntConfigReg,
