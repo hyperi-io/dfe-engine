@@ -48,6 +48,18 @@ POOL_SERVICES = ("dfe-receiver", "dfe-loader")
 POOL_INSTANCE = "default"
 """Instance name for a single-multiplicity app: one deployment for the whole stack."""
 
+MANAGED_SERVICES = frozenset(
+    {FETCHER_SERVICE, *POOL_SERVICES, *(s for _e, s, _v in TRANSFORM_ENGINES)}
+)
+"""Apps a seed method here can deploy, so a reset undeploys only these.
+
+dfe-engine, dfe-ui, hyperdx and culvert also catalogue a values overlay, but no
+seeder writes one: it is standing infra a deployment carries from the moment it
+is stood up, not per-run state this class created. ``list_instances`` returns
+every catalogued app's overlay, so the filter is what keeps a reset from pruning
+one of theirs along with the sources and pools this class actually seeds.
+"""
+
 RUN_STATE_CLASSES = ("infravars", "gov_settings")
 """Deploy-repo classes a reset clears, beyond the ones the child seeders own.
 
@@ -59,6 +71,14 @@ storage, CPU); ``gov_settings`` is the auto-merge posture flag.
 Deliberately NOT here: ``actions`` and ``policies`` are the shipped governance
 library, re-seeded from packaged resources on every start; ``accounts`` is the
 durable break-glass copy the reset re-mirrors rather than removes.
+"""
+
+_COMMON_OVERLAY = "common"
+"""``infravars``' deployment-wide file (api/v1/backing_services.py ``_COMMON``).
+
+Read before every per-chart overlay, so it is the deployer's own baseline for
+node counts, storage and CPU rather than state a spec wrote -- on Kubernetes it
+predates any e2e run. A per-chart name under the same class is still cleared.
 """
 
 _TRANSFORM_FILENAME = f"{SEED_SOURCE_NAME}.vrl"
@@ -143,11 +163,19 @@ class Apps(Seed):
         return changed
 
     def delete_all(self) -> None:
-        """Undeploy every managed instance. A no-op without a deploy repo."""
+        """Undeploy every instance a seed method here can create. A no-op without a deploy repo.
+
+        Restricted to ``MANAGED_SERVICES``: dfe-engine, dfe-ui, hyperdx and
+        culvert also catalogue a values overlay, but no seeder writes one, so
+        deleting theirs would prune standing infra rather than reset per-run
+        state.
+        """
         gc = self._gitcrud
         if gc is None:
             return
         for app in instances.list_instances(gc):
+            if app.service not in MANAGED_SERVICES:
+                continue
             gc.delete(
                 instances.HELMVARS_CLASS,
                 app.overlay_name,
@@ -166,13 +194,16 @@ class Apps(Seed):
 
         Without this, a backing-service node count raised by one spec is still
         raised for the next -- the state that survived a reset and failed a spec
-        against its own leftovers.
+        against its own leftovers. The deployer's own ``_COMMON_OVERLAY`` is the
+        one exception: it is not per-run state, so it is left in place.
         """
         gc = self._gitcrud
         if gc is None:
             return
         for cls_name in RUN_STATE_CLASSES:
             for name in gc.list(cls_name):
+                if cls_name == "infravars" and name == _COMMON_OVERLAY:
+                    continue
                 gc.delete(
                     cls_name,
                     name,
