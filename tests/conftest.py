@@ -153,9 +153,6 @@ try:
 except ImportError:  # stamina ships with scalo[http]; skip if absent
     pass
 
-# Test statistics tracking
-test_stats = {"total": 0, "passed": 0, "failed": 0, "skipped": 0, "test_files": {}}
-
 # Docker configuration
 DOCKER_COMPOSE_FILE = Path(__file__).parent.parent / "docker-compose.yml"
 CONTAINER_STARTUP_TIMEOUT = 60  # seconds
@@ -330,33 +327,6 @@ def pytest_collection_modifyitems(config, items):
         else:
             # Default to unit tests
             item.add_marker(pytest.mark.unit)
-
-
-def pytest_runtest_logreport(report):
-    """Collect test statistics."""
-    if report.when == "call":
-        test_stats["total"] += 1
-
-        test_file = report.nodeid.split("::")[0]
-        if test_file not in test_stats["test_files"]:
-            test_stats["test_files"][test_file] = {
-                "total": 0,
-                "passed": 0,
-                "failed": 0,
-                "skipped": 0,
-            }
-
-        if report.passed:
-            test_stats["passed"] += 1
-            test_stats["test_files"][test_file]["passed"] += 1
-        elif report.failed:
-            test_stats["failed"] += 1
-            test_stats["test_files"][test_file]["failed"] += 1
-        elif report.skipped:
-            test_stats["skipped"] += 1
-            test_stats["test_files"][test_file]["skipped"] += 1
-
-        test_stats["test_files"][test_file]["total"] += 1
 
 
 # Markers whose tests talk to real ClickHouse / Kafka. In-process tests under
