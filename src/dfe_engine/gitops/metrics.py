@@ -9,13 +9,12 @@
 
 A batch lands many writes as one commit, so the writes it throws away are invisible
 in the deploy repo's history: an error inside the block, or a push the remote
-refused, leaves nothing behind but this counter. The instruments are created
-through scalo's manager, which applies the ``dfe`` namespace from the deployment
-contract, so they land as ``dfe_gitops_*``. With no backend wired every record call
-returns without doing anything, which is the state the unit suite and the CLI run in.
+refused, leaves nothing behind but this counter. The engine registers it on the
+metrics manager its service framework serves on ``/metrics``, so it carries that
+manager's namespace. With no manager every record call returns without doing
+anything, which is the state the unit suite and the CLI run in.
 """
 
-import functools
 from typing import Any, Literal
 
 BATCHES = "gitops_batches_total"
@@ -59,21 +58,4 @@ class GitopsMetrics:
         self._batches.labels(outcome=outcome).inc()
 
 
-@functools.cache
-def create(app_name: str = "dfe-engine") -> GitopsMetrics:
-    """Build the instrument set on scalo's metrics backend, once per process.
-
-    Every manager scalo builds starts its own exporter, so a second call hands back
-    the first set. The namespace comes from the deployment contract rather than a
-    literal, so these carry the same ``dfe`` prefix as the rest of the product.
-    """
-    from scalo.metrics import create_metrics
-
-    from dfe_engine.deployment_contract import engine_deployment_contract
-
-    return GitopsMetrics(
-        create_metrics(app_name, metric_prefix=engine_deployment_contract().metric_prefix)
-    )
-
-
-__all__ = ["BATCHES", "BatchOutcome", "GitopsMetrics", "create"]
+__all__ = ["BATCHES", "BatchOutcome", "GitopsMetrics"]

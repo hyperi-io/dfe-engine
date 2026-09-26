@@ -14,9 +14,11 @@ features.
 
 from __future__ import annotations
 
+from typing import Any
+
 from scalo.logger import logger
 
-from dfe_engine.gitops import metrics as gitops_metrics
+from dfe_engine.gitops.metrics import GitopsMetrics
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance.seed import SEED_COMMIT_MESSAGE, pending_seed
 from dfe_engine.settings import GitopsSettings
@@ -24,8 +26,12 @@ from dfe_engine.settings import GitopsSettings
 from .engine import GitCrud
 
 
-def build_gitcrud(gs: GitopsSettings) -> GitCrud | None:
-    """Build a GitCrud over the deploy repo, or None if gitops is off/unconfigured."""
+def build_gitcrud(gs: GitopsSettings, metrics_manager: Any | None = None) -> GitCrud | None:
+    """Build a GitCrud over the deploy repo, or None if gitops is off/unconfigured.
+
+    ``metrics_manager`` is the process's scalo manager, so the clone's counters are
+    served where every other engine metric is; None records nothing.
+    """
     if not gs.enabled or not gs.local_path:
         return None
     repo = GitopsRepo(
@@ -37,7 +43,7 @@ def build_gitcrud(gs: GitopsSettings) -> GitCrud | None:
         token=gs.token,
         author_name=gs.author_name,
         author_email=gs.author_email,
-        metrics=gitops_metrics.create(),
+        metrics=GitopsMetrics(metrics_manager),
     )
     _seed_governance(repo)
     return GitCrud(repo)

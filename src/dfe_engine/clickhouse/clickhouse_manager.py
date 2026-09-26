@@ -451,6 +451,9 @@ class ClickHouseManager:
                 "host": host,
                 "port": port,
                 "pool_mgr": self._pool_manager,
+                # One client serves every worker thread, and clickhouse-connect
+                # refuses a second query in flight on a shared session.
+                "autogenerate_session_id": False,
             }
 
             # Add authentication if provided

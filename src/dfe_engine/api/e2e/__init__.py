@@ -19,7 +19,6 @@ POST /api/e2e/seed-static  → run a named seed script (e.g. seed_admin)
 """
 
 import functools
-import threading
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
@@ -30,7 +29,7 @@ from scalo.logger import logger
 from dfe_engine.api.cli_exposure import CLI_HIDDEN
 from dfe_engine.api.deps import get_source_registry_optional
 from dfe_engine.api.e2e.seed import Seed
-from dfe_engine.api.e2e.seed import metrics as seed_metrics
+from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt.routing import RoutingNotApplicableError
 from dfe_engine.source.flow import FlowError
 from dfe_engine.source.registry import SourceValidationError
@@ -49,9 +48,6 @@ E2E_OPENAPI_TAG: dict[str, str] = {
 _E2E_OPENAPI_EXTRA: dict[str, Any] = {**CLI_HIDDEN, "security": []}
 
 router = APIRouter(prefix="/e2e", tags=[E2E_TAG])
-
-# One seed at a time: off the event loop, two could otherwise interleave their store writes.
-_SEED_LOCK = threading.Lock()
 
 
 class E2EStatusResponse(BaseModel):
@@ -85,18 +81,19 @@ async def e2e_status() -> E2EStatusResponse:
     return E2EStatusResponse(enabled=True)
 
 
-def _run_seed(seeder: Seed, script: str) -> bool:
-    """Run one seed script while holding the seed lock."""
-    with _SEED_LOCK:
-        return seeder.seed_static(script)
-
-
-@router.post("/seed-static", response_model=SeedResponse, openapi_extra=_E2E_OPENAPI_EXTRA)
+@router.post(
+    "/seed-static",
+    response_model=SeedResponse,
+    openapi_extra=_E2E_OPENAPI_EXTRA,
+    dependencies=[WRITE_TURN],
+)
 async def seed_static(body: SeedRequest, request: Request) -> SeedResponse:
     """Run a named e2e seed script. Unauthenticated by design.
 
     The script runs on a worker thread: it writes the deploy repo over the network,
     and on the event loop every other request this process serves would wait for it.
+    It takes the same write turn as the product's own writes, so a seed never runs
+    beside one.
     """
     seeder = Seed(
         account_store=request.app.state.account_store,
@@ -107,10 +104,10 @@ async def seed_static(body: SeedRequest, request: Request) -> SeedResponse:
         source_registry=get_source_registry_optional(),
         settings=request.app.state.settings,
         forge=getattr(request.app.state, "forge", None),
-        metrics=seed_metrics.create(),
+        metrics=getattr(request.app.state, "seed_metrics", None),
     )
     try:
-        success = await run_blocking(functools.partial(_run_seed, seeder, body.script))
+        success = await run_blocking(functools.partial(seeder.seed_static, body.script))
     except (SourceValidationError, FlowError, RoutingNotApplicableError) as exc:
         # A seed the engine refused and a seed that crashed are both 500 without
         # this, and the Playwright suite runs against this endpoint. Narrow on

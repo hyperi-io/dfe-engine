@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from scalo.logger import logger
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
 from dfe_engine.auth.models import AuthContext
@@ -42,7 +43,7 @@ from dfe_engine.gitcrud.log import LogEntry, UnknownCursorError, group_log, read
 from dfe_engine.gitcrud.models import ResourceClass
 from dfe_engine.gitcrud.registry import UnknownResourceClassError
 
-router = APIRouter(prefix="/gitops", tags=["Governed Ops: Gitops"])
+router = APIRouter(prefix="/gitops", tags=["Governed Ops: Gitops"], dependencies=[WRITE_TURN])
 
 
 class AutoMergeStatus(BaseModel):
@@ -87,7 +88,7 @@ def _status(state: AutoMergeState) -> AutoMergeStatus:
     response_model=AutoMergeStatus,
     dependencies=[Depends(require_action(scopes_dict["governance_read"]))],
 )
-async def get_auto_merge(user: CurrentUser, request: Request) -> AutoMergeStatus:
+def get_auto_merge(user: CurrentUser, request: Request) -> AutoMergeStatus:
     """Auto-merge status for the UI banner: stored flag, gate verdict, net effect."""
     # warn=False: the UI polls this - a stranded flag must not WARN per poll.
     return _status(_state(request, warn=False))
@@ -98,9 +99,7 @@ async def get_auto_merge(user: CurrentUser, request: Request) -> AutoMergeStatus
     response_model=AutoMergeStatus,
     dependencies=[Depends(require_action(scopes_dict["governance_write"]))],
 )
-async def put_auto_merge(
-    body: AutoMergeRequest, user: CurrentUser, request: Request
-) -> AutoMergeStatus:
+def put_auto_merge(body: AutoMergeRequest, user: CurrentUser, request: Request) -> AutoMergeStatus:
     """Toggle auto-merge. Enabling requires the deployment gate; disabling always works."""
     gc = _gitcrud(request)
     # warn=False both calls: the stranded-flag case on enable is already refused
@@ -157,7 +156,7 @@ def _require_class_read(request: Request, user: AuthContext, rc: ResourceClass) 
 
 
 @router.get("/classes", response_model=list[ClassInfo])
-async def list_classes(user: CurrentUser, request: Request) -> list[ClassInfo]:
+def list_classes(user: CurrentUser, request: Request) -> list[ClassInfo]:
     """The resource-class registry - what VarChange.cls may legally name.
 
     Registry metadata only (no resource content), so any authenticated caller
@@ -177,7 +176,7 @@ async def list_classes(user: CurrentUser, request: Request) -> list[ClassInfo]:
 
 
 @router.get("/classes/{cls}/resources", response_model=list[str])
-async def list_class_resources(cls: str, user: CurrentUser, request: Request) -> list[str]:
+def list_class_resources(cls: str, user: CurrentUser, request: Request) -> list[str]:
     """Resource names in a class - what VarChange.name may legally name."""
     gc = _gitcrud(request)
     rc = _resource_class(gc, cls)
@@ -186,7 +185,7 @@ async def list_class_resources(cls: str, user: CurrentUser, request: Request) ->
 
 
 @router.get("/classes/{cls}/resources/{name}/vars", response_model=list[VarEntry])
-async def list_class_resource_vars(
+def list_class_resource_vars(
     cls: str, name: str, user: CurrentUser, request: Request
 ) -> list[VarEntry]:
     """Flattened dot-path vars of one resource - what VarChange.path may name.
@@ -269,7 +268,7 @@ def _entry_model(e: LogEntry) -> LogEntryModel:
     response_model=LogResponse | GroupedLogResponse,
     dependencies=[Depends(require_action(scopes_dict["governance_read"]))],
 )
-async def get_log(
+def get_log(
     user: CurrentUser,
     request: Request,
     limit: int = Query(default=50, ge=1, le=500),

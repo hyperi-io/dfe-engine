@@ -38,6 +38,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, R
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import library, links, validate_language
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
@@ -55,7 +56,7 @@ from dfe_engine.gitcrud.routing import ReviewRequiredError, route_write
 from dfe_engine.gitcrud.versioned import VersionConflictError
 from dfe_engine.governance import PolicyStore, ProtectedVarError
 
-router = APIRouter(prefix="/library", tags=["Artefact Library"])
+router = APIRouter(prefix="/library", tags=["Artefact Library"], dependencies=[WRITE_TURN])
 
 _CLASS = links.LIBRARY_CLASS
 
@@ -438,7 +439,7 @@ def _commit(
 
 
 @router.get("/kinds", dependencies=[_READ])
-async def list_kinds(user: CurrentUser, request: Request) -> list[KindModel]:
+def list_kinds(user: CurrentUser, request: Request) -> list[KindModel]:
     """Every artefact kind the manifest declares."""
     return [
         KindModel(
@@ -455,7 +456,7 @@ async def list_kinds(user: CurrentUser, request: Request) -> list[KindModel]:
 
 
 @router.get("", dependencies=[_READ])
-async def list_artifacts(
+def list_artifacts(
     user: CurrentUser,
     request: Request,
     kind: str = "",
@@ -481,7 +482,7 @@ async def list_artifacts(
 
 
 @router.post("", response_model=WriteResult, dependencies=[_WRITE])
-async def create_artifact(
+def create_artifact(
     body: CreateArtifactRequest, user: CurrentUser, request: Request
 ) -> WriteResult:
     """Create an artefact, with or without its first version.
@@ -533,14 +534,14 @@ async def create_artifact(
 
 
 @router.get("/{artifact}", dependencies=[_READ])
-async def get_artifact(artifact: str, user: CurrentUser, request: Request) -> ArtifactModel:
+def get_artifact(artifact: str, user: CurrentUser, request: Request) -> ArtifactModel:
     """One artefact's metadata and pointers."""
     name = _check_name(artifact)
     return _summary_model(library.summarise(name, _envelope(_gitcrud(request), name)))
 
 
 @router.patch("/{artifact}", response_model=WriteResult, dependencies=[_WRITE])
-async def patch_artifact(
+def patch_artifact(
     artifact: str,
     body: PatchArtifactRequest,
     user: CurrentUser,
@@ -565,7 +566,7 @@ async def patch_artifact(
 
 
 @router.delete("/{artifact}", response_model=WriteResult, dependencies=[_WRITE])
-async def delete_artifact(artifact: str, user: CurrentUser, request: Request) -> WriteResult:
+def delete_artifact(artifact: str, user: CurrentUser, request: Request) -> WriteResult:
     """Remove an artefact. Refused while any instance links to it.
 
     Retiring an artefact that is still in use is a state change, not a delete, so
@@ -628,7 +629,7 @@ async def delete_artifact(artifact: str, user: CurrentUser, request: Request) ->
 
 
 @router.put("/{artifact}/state", response_model=WriteResult, dependencies=[_WRITE])
-async def set_state(
+def set_state(
     artifact: str, body: StateRequest, user: CurrentUser, request: Request
 ) -> WriteResult:
     """Set the lifecycle state."""
@@ -644,7 +645,7 @@ async def set_state(
 
 
 @router.get("/{artifact}/versions", dependencies=[_READ])
-async def list_versions(artifact: str, user: CurrentUser, request: Request) -> list[VersionSummary]:
+def list_versions(artifact: str, user: CurrentUser, request: Request) -> list[VersionSummary]:
     """Every version, oldest first, without their content."""
     name = _check_name(artifact)
     env = _envelope(_gitcrud(request), name)
@@ -652,7 +653,7 @@ async def list_versions(artifact: str, user: CurrentUser, request: Request) -> l
 
 
 @router.post("/{artifact}/versions", response_model=WriteResult, dependencies=[_WRITE])
-async def publish_version(
+def publish_version(
     artifact: str,
     body: PublishVersionRequest,
     user: CurrentUser,
@@ -709,7 +710,7 @@ async def publish_version(
 
 
 @router.get("/{artifact}/versions/{version}", dependencies=[_READ])
-async def get_version(
+def get_version(
     artifact: str, version: int, user: CurrentUser, request: Request, response: Response
 ) -> VersionDetail:
     """One immutable version, with its digest as a strong ETag."""
@@ -727,7 +728,7 @@ async def get_version(
 
 
 @router.post("/{artifact}/rollback", response_model=WriteResult, dependencies=[_WRITE])
-async def rollback(
+def rollback(
     artifact: str, body: RollbackRequest, user: CurrentUser, request: Request
 ) -> WriteResult:
     """Point ``current`` back at an earlier version, keeping the newer ones."""
@@ -767,7 +768,7 @@ async def rollback(
 
 
 @router.put("/{artifact}/tags/{tag}", response_model=WriteResult, dependencies=[_WRITE])
-async def set_tag(
+def set_tag(
     artifact: str, tag: str, body: TagRequest, user: CurrentUser, request: Request
 ) -> WriteResult:
     """Point a tag at a version. Repointing is explicit, never a side effect."""
@@ -788,7 +789,7 @@ async def set_tag(
 
 
 @router.delete("/{artifact}/tags/{tag}", response_model=WriteResult, dependencies=[_WRITE])
-async def delete_tag(artifact: str, tag: str, user: CurrentUser, request: Request) -> WriteResult:
+def delete_tag(artifact: str, tag: str, user: CurrentUser, request: Request) -> WriteResult:
     """Remove a tag. The versions it named are untouched."""
     name = _check_name(artifact)
     doc = _envelope(_gitcrud(request), name)
@@ -806,7 +807,7 @@ async def delete_tag(artifact: str, tag: str, user: CurrentUser, request: Reques
 
 
 @router.get("/{artifact}/usage", dependencies=[_READ])
-async def get_usage(artifact: str, user: CurrentUser, request: Request) -> list[UsageModel]:
+def get_usage(artifact: str, user: CurrentUser, request: Request) -> list[UsageModel]:
     """Every instance file that links to this artefact."""
     name = _check_name(artifact)
     gc = _gitcrud(request)

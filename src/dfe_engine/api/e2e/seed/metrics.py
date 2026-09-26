@@ -10,11 +10,11 @@
 A reset rewrites the deployment's own receiver and loader pools rather than
 deleting them, and recreates one a run removed. Both are silent in the deploy
 repo's history once folded into the reset's single commit, so they are counted
-here, landing as ``dfe_e2e_*``. With no backend wired every record call returns
-without doing anything, which is the state the unit suite runs in.
+here, on the metrics manager the engine serves on ``/metrics``. With no manager
+every record call returns without doing anything, which is the state the unit
+suite runs in.
 """
 
-import functools
 from typing import Any, Literal
 
 POOL_RESETS = "e2e_pool_resets_total"
@@ -56,20 +56,4 @@ class SeedMetrics:
         self._pool_resets.labels(service=service, action=action).inc()
 
 
-@functools.cache
-def create(app_name: str = "dfe-engine") -> SeedMetrics:
-    """Build the instrument set on scalo's metrics backend, once per process.
-
-    Every manager scalo builds starts its own exporter, so a second call hands back
-    the first set, in the product's own metric namespace.
-    """
-    from scalo.metrics import create_metrics
-
-    from dfe_engine.deployment_contract import engine_deployment_contract
-
-    return SeedMetrics(
-        create_metrics(app_name, metric_prefix=engine_deployment_contract().metric_prefix)
-    )
-
-
-__all__ = ["POOL_RESETS", "PoolReset", "SeedMetrics", "create"]
+__all__ = ["POOL_RESETS", "PoolReset", "SeedMetrics"]
