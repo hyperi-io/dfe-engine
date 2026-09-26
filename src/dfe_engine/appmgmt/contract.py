@@ -1048,29 +1048,28 @@ def _wholly_masked(shown: Any) -> bool:
 def _field_unchanged(written: Any, stored: Any, shown: Any) -> bool:
     """Whether one field beside a masked credential leaves it where it was set.
 
-    A field still masked is judged by its own restore, and one the read showed only
-    as a credential may be typed again. A URL whose password alone was masked may
-    take a new password and nothing else, and a structure holding credentials is
-    judged field by field. Every other field has to be exactly what is stored.
+    A masked value, or a list of them, is judged by its own restore, and a value the
+    read showed only as a credential may be typed again. A URL whose password alone
+    was masked may take a new password and nothing else. A mapping, or a list as
+    long as the stored one, is judged item by item, so a setting inside a neighbour
+    that also holds a credential still counts. Anything else is exactly as stored.
     """
-    if _carries_mask(written) or _wholly_masked(shown):
+    if _holds_mask(written) or _wholly_masked(shown):
         return True
     if isinstance(shown, str) and REDACTED in shown:
         return isinstance(written, str) and _shown_text(written) == shown
-    if isinstance(shown, dict) and _carries_mask(shown):
-        kept = stored if isinstance(stored, dict) else {}
-        return isinstance(written, dict) and all(
-            _field_unchanged(
-                written.get(key, MISSING), kept.get(key, MISSING), shown.get(key, MISSING)
-            )
-            for key in written.keys() | kept.keys()
-        )
-    if isinstance(shown, list) and _carries_mask(shown):
-        if not isinstance(written, list) or len(written) != len(shown):
-            return False
-        kept_list = stored if isinstance(stored, list) and len(stored) == len(shown) else []
+    if isinstance(written, dict) and isinstance(stored, dict):
+        seen = shown if isinstance(shown, dict) else {}
         return all(
-            _field_unchanged(item, kept_list[i] if kept_list else MISSING, shown[i])
+            _field_unchanged(
+                written.get(key, MISSING), stored.get(key, MISSING), seen.get(key, MISSING)
+            )
+            for key in written.keys() | stored.keys()
+        )
+    if isinstance(written, list) and isinstance(stored, list) and len(written) == len(stored):
+        views = shown if isinstance(shown, list) and len(shown) == len(stored) else None
+        return all(
+            _field_unchanged(item, stored[i], views[i] if views else MISSING)
             for i, item in enumerate(written)
         )
     return written == stored

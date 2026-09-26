@@ -1170,6 +1170,24 @@ class TestAMaskedCredentialRestoresOnlyWhereItWasSet:
         with pytest.raises(contract.CredentialReentryError, match="url"):
             contract.restore_masked_at(doc, "config.hooks", written)
 
+    def test_a_setting_changed_inside_a_neighbour_holding_a_credential_is_refused(self):
+        stored = [
+            {
+                "id": "a",
+                "token": "tok-4446",
+                "upstream": {"url": "https://a.example", "auth": {"password": "pw-4447"}},
+            }
+        ]
+        written = [
+            {
+                "id": "a",
+                "token": self.R,
+                "upstream": {"url": "https://evil.example", "auth": {"password": self.R}},
+            }
+        ]
+        with pytest.raises(contract.CredentialReentryError, match="upstream"):
+            contract.restore_masked(written, stored, path="mirrors")
+
     def test_the_url_password_alone_typed_again_is_not_a_change(self):
         doc = {
             "config": {
