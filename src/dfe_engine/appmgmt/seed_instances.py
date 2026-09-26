@@ -59,6 +59,21 @@ def default_services(profile: str) -> list[str]:
     )
 
 
+def marked_offered(gc: GitCrud) -> set[str]:
+    """The apps the deployment's marker says it was stood up with.
+
+    Written by whichever deployer seeded the repo - the Kubernetes setup job or the
+    engine on Compose - so it is the deployer's own record of its baseline, which the
+    overlays under ``values/`` stop being the moment anything edits or deletes one.
+    """
+    with gc.reading():
+        marker = gc.repo_path / MARKER_FILE
+        if not marker.is_file():
+            return set()
+        text = marker.read_text(encoding="utf-8")
+    return {line.strip() for line in text.splitlines() if line.strip()}
+
+
 def _already_offered(gc: GitCrud) -> set[str]:
     """The apps this deployment has already been offered.
 
@@ -67,12 +82,7 @@ def _already_offered(gc: GitCrud) -> set[str]:
     hand - neither is overwritten by the seed.
     """
     offered = {i.service for i in instances.list_instances(gc) if i.instance == SEED_INSTANCE}
-    marker = gc.repo_path / MARKER_FILE
-    if marker.is_file():
-        offered |= {
-            line.strip() for line in marker.read_text(encoding="utf-8").splitlines() if line.strip()
-        }
-    return offered
+    return offered | marked_offered(gc)
 
 
 def seed_default_instances(gc: GitCrud, settings: Any) -> list[str]:

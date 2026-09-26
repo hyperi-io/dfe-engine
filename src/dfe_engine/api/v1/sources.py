@@ -33,12 +33,14 @@ source away again. Like the reconcile, neither ever fails the source write.
 from __future__ import annotations
 
 import asyncio
+import functools
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Literal, NoReturn
+from typing import Any, Literal, NamedTuple, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
 from dfe_engine.api.deps import (
@@ -58,6 +60,7 @@ from dfe_engine.api.errors import (
 )
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.api.v1.apps import commit_overlay, remove_overlay
+from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import (
     LOADER_COMPILER,
     MetricsUnavailableError,
@@ -106,7 +109,7 @@ from dfe_engine.source.registry import (
 )
 from dfe_engine.transport import SourceTransport
 
-router = APIRouter(prefix="/sources", tags=["Sources"])
+router = APIRouter(prefix="/sources", tags=["Sources"], dependencies=[WRITE_TURN])
 
 
 def _raise_save_validation_http(exc: SourceValidationError) -> NoReturn:
@@ -706,7 +709,7 @@ class SourceVersionGetDetailResponse(SourceVersionGetResponse):
     response_model=PaginatedSourceSummaryResponse,
     dependencies=[Depends(require_action(scopes_dict["source_read"]))],
 )
-async def list_sources(
+def list_sources(
     user: CurrentUser,
     registry: SourceReg,
     pagination: PaginationParams = Depends(),
@@ -754,7 +757,7 @@ async def list_sources(
     },
     dependencies=[Depends(require_action(scopes_dict["source_write"]))],
 )
-async def create_source(
+def create_source(
     body: SourceWriteRequest,
     user: CurrentUser,
     registry: SourceReg,
@@ -806,7 +809,7 @@ async def create_source(
     response_model=PaginatedResponse[CatalogueEntryObject],
     dependencies=[Depends(require_action(scopes_dict["source_read"]))],
 )
-async def list_catalogue(
+def list_catalogue(
     user: CurrentUser,
     pagination: PaginationParams = Depends(),
     intake: str | None = Query(
@@ -857,7 +860,7 @@ async def list_catalogue(
     response_model=PaginatedResponse[TableEngineObject],
     dependencies=[Depends(require_action(scopes_dict["source_read"]))],
 )
-async def list_table_engines(
+def list_table_engines(
     user: CurrentUser,
     pagination: PaginationParams = Depends(),
 ) -> PaginatedResponse[TableEngineObject]:
@@ -889,7 +892,7 @@ async def list_table_engines(
     },
     dependencies=[Depends(require_action(scopes_dict["source_write"]))],
 )
-async def create_source_from_catalogue(
+def create_source_from_catalogue(
     entry: str,
     body: CatalogueSourceRequest,
     user: CurrentUser,
@@ -933,7 +936,7 @@ async def create_source_from_catalogue(
             status_code=422,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
-    return await create_source(write, user, registry, request)
+    return create_source(write, user, registry, request)
 
 
 @router.get(
@@ -941,7 +944,7 @@ async def create_source_from_catalogue(
     response_model=SourceVersionGetDetailResponse,
     dependencies=[Depends(require_action(scopes_dict["source_read"]))],
 )
-async def get_source_version(
+def get_source_version(
     name: str,
     version: str,
     user: CurrentUser,
@@ -994,7 +997,7 @@ async def get_source_version(
     response_model=PaginatedResponse[SchemaColumn],
     dependencies=[Depends(require_action(scopes_dict["source_read"]))],
 )
-async def get_source_schema_columns(
+def get_source_schema_columns(
     name: str,
     user: CurrentUser,
     registry: SourceReg,
@@ -1072,7 +1075,7 @@ async def get_source_schema_columns(
     response_model=SchemaBuildResult,
     dependencies=[Depends(require_action(scopes_dict["source_deploy"]))],
 )
-async def build_source_schema(
+def build_source_schema(
     name: str,
     user: CurrentUser,
     registry: SourceReg,
@@ -1158,7 +1161,7 @@ async def build_source_schema(
     response_model=SourcePlanResponse,
     dependencies=[Depends(require_action(scopes_dict["source_deploy"]))],
 )
-async def plan_source_deploy(
+def plan_source_deploy(
     name: str,
     user: CurrentUser,
     registry: SourceReg,
@@ -1342,6 +1345,128 @@ async def deploy_source_schema(
     NOT EXISTS) so a re-deploy is a no-op. A schema that failed validation is never
     deployed.
     """
+    applied = await run_blocking(
+        functools.partial(_apply_source_schema, name, registry, settings, version, dry_run)
+    )
+    if isinstance(applied, SchemaDeployResult):
+        return applied
+    source, version_id, result, views, statements_applied, db = applied
+
+    # Off the event loop: the admin calls block for their full timeout when no
+    # broker answers, which is the norm on the Kafka-less profile.
+    topics_ensured, topics_failed, topics_stranded = await asyncio.to_thread(
+        _ensure_source_topics, source, settings, version_id
+    )
+
+    deploy_result = SchemaDeployResult(
+        source_name=name,
+        version=version_id,
+        dry_run=False,
+        applied=True,
+        create_table=result.create_table_ddl,
+        views=views,
+        validation_errors=[],
+        statements_applied=statements_applied,
+        topics_ensured=topics_ensured,
+        topics_failed=topics_failed,
+        topics_stranded=topics_stranded,
+    )
+    store = SourceDeploymentStore.from_settings(settings)
+    apps = await run_blocking(
+        functools.partial(
+            _record_source_deploy,
+            store,
+            deploy_result,
+            source,
+            name,
+            version_id,
+            user,
+            registry,
+            request,
+        )
+    )
+
+    # The HyperDX source is how an operator sees the rows the new table takes;
+    # without it the deploy lands and stays invisible until someone adds one.
+    hyperdx_teams, hyperdx_error = await _sync_hyperdx_source(
+        request, source, db, [col.name for col in result.columns]
+    )
+
+    deploy_result = deploy_result.model_copy(
+        update={
+            "apps_synced": apps.changes,
+            "apps_sync_error": apps.error,
+            "restart_required": apps.restart_required,
+            "hyperdx_source_teams": hyperdx_teams,
+            "hyperdx_source_error": hyperdx_error,
+        }
+    )
+    await run_blocking(functools.partial(store.save_deploy, deploy_result, source))
+
+    # Topic creation mutates the broker, so it is attributable and belongs in the
+    # audit record alongside the DDL rather than only in an unattributed log line.
+    audit_resource_change(
+        user.user_id,
+        "schema",
+        name,
+        "deployed",
+        details={
+            "version": version_id,
+            "topics_ensured": topics_ensured,
+            "topics_failed": topics_failed,
+            "topics_stranded": topics_stranded,
+            "apps_synced": apps.changes,
+        },
+    )
+    return deploy_result
+
+
+class _AppliedSchema(NamedTuple):
+    """A source version whose DDL has reached ClickHouse, and what it took."""
+
+    source: Source
+    version_id: str
+    result: Any
+    views: dict[str, str]
+    statements_applied: int
+    database: str
+
+
+def _record_source_deploy(
+    store: SourceDeploymentStore,
+    deploy_result: SchemaDeployResult,
+    source: Source,
+    name: str,
+    version_id: str,
+    user: Any,
+    registry: Any,
+    request: Request,
+) -> AppsSync:
+    """Record the deploy, mark the version deployed and reconcile the apps it makes live."""
+    store.save_deploy(deploy_result, source)
+    try:
+        registry.set_deployed_version(
+            name,
+            version_id,
+            created_by=git_author(user),
+            description=f"source: deploy {name} version {version_id}",
+        )
+    except SourceValidationError as exc:
+        _raise_save_validation_http(exc)
+
+    # The receiver's rule for this source, the loader's table map and (for a
+    # fetcher-based source) the fetcher instance are what make the deploy live.
+    return _reconcile_apps(request, user, registry)
+
+
+def _apply_source_schema(
+    name: str, registry: Any, settings: Any, version: str | None, dry_run: bool
+) -> SchemaDeployResult | _AppliedSchema:
+    """Build a source version's DDL and, unless a dry run, apply it to ClickHouse.
+
+    A dry run returns its finished result; a deploy returns what the caller needs to
+    ensure the topics and record the deploy.
+    """
     from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
     from dfe_engine.schema.schema_loader import SchemaLoadError
     from dfe_engine.source.type_registry import TypeRegistry
@@ -1469,74 +1594,7 @@ async def deploy_source_schema(
     except Exception as exc:
         logger.warning(f"Tenant fence not applied after deploying '{name}': {exc}")
 
-    # Off the event loop: the admin calls block for their full timeout when no
-    # broker answers, which is the norm on the Kafka-less profile.
-    topics_ensured, topics_failed, topics_stranded = await asyncio.to_thread(
-        _ensure_source_topics, source, settings, version_id
-    )
-
-    store = SourceDeploymentStore.from_settings(settings)
-    deploy_result = SchemaDeployResult(
-        source_name=name,
-        version=version_id,
-        dry_run=False,
-        applied=True,
-        create_table=result.create_table_ddl,
-        views=views,
-        validation_errors=[],
-        statements_applied=applied,
-        topics_ensured=topics_ensured,
-        topics_failed=topics_failed,
-        topics_stranded=topics_stranded,
-    )
-    store.save_deploy(deploy_result, source)
-    try:
-        registry.set_deployed_version(
-            name,
-            version_id,
-            created_by=git_author(user),
-            description=f"source: deploy {name} version {version_id}",
-        )
-    except SourceValidationError as exc:
-        _raise_save_validation_http(exc)
-
-    # The receiver's rule for this source, the loader's table map and (for a
-    # fetcher-based source) the fetcher instance are what make the deploy live.
-    apps = _reconcile_apps(request, user, registry)
-
-    # The HyperDX source is how an operator sees the rows the new table takes;
-    # without it the deploy lands and stays invisible until someone adds one.
-    hyperdx_teams, hyperdx_error = await _sync_hyperdx_source(
-        request, source, db, [col.name for col in result.columns]
-    )
-
-    deploy_result = deploy_result.model_copy(
-        update={
-            "apps_synced": apps.changes,
-            "apps_sync_error": apps.error,
-            "restart_required": apps.restart_required,
-            "hyperdx_source_teams": hyperdx_teams,
-            "hyperdx_source_error": hyperdx_error,
-        }
-    )
-    store.save_deploy(deploy_result, source)
-
-    # Topic creation mutates the broker, so it is attributable and belongs in the
-    # audit record alongside the DDL rather than only in an unattributed log line.
-    audit_resource_change(
-        user.user_id,
-        "schema",
-        name,
-        "deployed",
-        details={
-            "version": version_id,
-            "topics_ensured": topics_ensured,
-            "topics_failed": topics_failed,
-            "topics_stranded": topics_stranded,
-            "apps_synced": apps.changes,
-        },
-    )
-    return deploy_result
+    return _AppliedSchema(source, version_id, result, views, applied, db)
 
 
 @router.get(
@@ -1544,7 +1602,7 @@ async def deploy_source_schema(
     response_model=SourceDetailResponse,
     dependencies=[Depends(require_action(scopes_dict["source_read"]))],
 )
-async def get_source(name: str, user: CurrentUser, registry: SourceReg):
+def get_source(name: str, user: CurrentUser, registry: SourceReg):
     """Get a full source definition by name, including build/deploy per version."""
     try:
         source = registry.get_source(name)
@@ -1573,7 +1631,7 @@ async def get_source(name: str, user: CurrentUser, registry: SourceReg):
     },
     dependencies=[Depends(require_action(scopes_dict["source_read"]))],
 )
-async def get_source_flow(name: str, user: CurrentUser, registry: SourceReg, settings: Settings):
+def get_source_flow(name: str, user: CurrentUser, registry: SourceReg, settings: Settings):
     """The stages this source's records travel, resolved against this deployment.
 
     The console draws the flow from this rather than from the source's fields,
@@ -1597,7 +1655,7 @@ async def get_source_flow(name: str, user: CurrentUser, registry: SourceReg, set
     response_model=SourceSignalsResponse,
     dependencies=[Depends(require_action(scopes_dict["source_read"]))],
 )
-async def get_source_signals(
+def get_source_signals(
     name: str,
     user: CurrentUser,
     request: Request,
@@ -1644,7 +1702,7 @@ async def get_source_signals(
     response_model_exclude_none=True,
     dependencies=[Depends(require_action(scopes_dict["source_read"]))],
 )
-async def export_source(
+def export_source(
     name: str,
     user: CurrentUser,
     registry: SourceReg,
@@ -1682,7 +1740,7 @@ async def export_source(
     },
     dependencies=[Depends(require_action(scopes_dict["source_write"]))],
 )
-async def update_source(
+def update_source(
     name: str,
     body: SourceWriteRequest,
     user: CurrentUser,
@@ -1747,7 +1805,7 @@ async def update_source(
     },
     dependencies=[Depends(require_action(scopes_dict["source_write"]))],
 )
-async def patch_source_enabled(
+def patch_source_enabled(
     name: str,
     body: SourceEnabledPatchRequest,
     user: CurrentUser,
@@ -1808,6 +1866,25 @@ async def delete_source(
     An engine-owned source -- the landing table's own -- is refused with 409
     ``conflict``, the same answer PUT and PATCH give.
     """
+    source = await run_blocking(functools.partial(_delete_stored_source, name, user, registry))
+    # Off the event loop: the admin calls block for their full timeout when no
+    # broker answers, which is the norm on the Kafka-less profile.
+    topics_removed, topics_failed = await asyncio.to_thread(_remove_source_topics, source, settings)
+    # Deleting a topic destroys what is on it, so it is attributable and belongs
+    # in the audit record rather than only in a log line.
+    audit_resource_change(
+        user.user_id,
+        "source",
+        name,
+        "deleted",
+        details={"topics_removed": topics_removed, "topics_failed": topics_failed},
+    )
+    await run_blocking(functools.partial(_reconcile_apps, request, user, registry))
+    await _remove_hyperdx_source(request, name)
+
+
+def _delete_stored_source(name: str, user: Any, registry: Any) -> Source:
+    """Delete one source from the registry and return it as it was, or 404."""
     try:
         source = registry.get_source(name)
     except SourceNotFoundError:
@@ -1822,20 +1899,7 @@ async def delete_source(
         registry.delete_source(name, created_by=git_author(user))
     except SourceValidationError as e:
         _raise_save_validation_http(e)
-    # Off the event loop: the admin calls block for their full timeout when no
-    # broker answers, which is the norm on the Kafka-less profile.
-    topics_removed, topics_failed = await asyncio.to_thread(_remove_source_topics, source, settings)
-    # Deleting a topic destroys what is on it, so it is attributable and belongs
-    # in the audit record rather than only in a log line.
-    audit_resource_change(
-        user.user_id,
-        "source",
-        name,
-        "deleted",
-        details={"topics_removed": topics_removed, "topics_failed": topics_failed},
-    )
-    _reconcile_apps(request, user, registry)
-    await _remove_hyperdx_source(request, name)
+    return source
 
 
 @router.post(
@@ -1863,10 +1927,31 @@ async def bulk_action(
             },
         )
 
+    succeeded, failed, deleted = await run_blocking(
+        functools.partial(_apply_bulk, body, action_to_state, user, registry)
+    )
+
+    result = BulkActionResponse(action=body.action, succeeded=succeeded, failed=failed)
+    if succeeded:
+        audit_resource_change(user.user_id, "source", ",".join(succeeded), body.action)
+        await run_blocking(functools.partial(_reconcile_apps, request, user, registry))
+        for source in deleted:
+            # One pass per source: the delete is already done, and a broker that
+            # cannot be reached must not cost the next source its cleanup.
+            await asyncio.to_thread(_remove_source_topics, source, settings)
+        if body.action == "delete":
+            for name in succeeded:
+                await _remove_hyperdx_source(request, name)
+    return result
+
+
+def _apply_bulk(
+    body: BulkActionRequest, action_to_state: dict[str, str], user: Any, registry: Any
+) -> tuple[list[str], list[dict[str, str]], list[Source]]:
+    """Apply a bulk action source by source, returning the names done, the failures and the deleted."""
     succeeded: list[str] = []
     failed: list[dict[str, str]] = []
     deleted: list[Source] = []
-
     for name in body.sources:
         try:
             if body.action == "delete":
@@ -1883,19 +1968,7 @@ async def bulk_action(
             succeeded.append(name)
         except Exception as e:
             failed.append({"source": name, "code": _failure_code(e), "error": str(e)})
-
-    result = BulkActionResponse(action=body.action, succeeded=succeeded, failed=failed)
-    if succeeded:
-        audit_resource_change(user.user_id, "source", ",".join(succeeded), body.action)
-        _reconcile_apps(request, user, registry)
-        for source in deleted:
-            # One pass per source: the delete is already done, and a broker that
-            # cannot be reached must not cost the next source its cleanup.
-            await asyncio.to_thread(_remove_source_topics, source, settings)
-        if body.action == "delete":
-            for name in succeeded:
-                await _remove_hyperdx_source(request, name)
-    return result
+    return succeeded, failed, deleted
 
 
 @router.post(
@@ -1903,7 +1976,7 @@ async def bulk_action(
     response_model=AppsReconcileResponse,
     dependencies=[Depends(require_action(scopes_dict["source_write"]))],
 )
-async def reconcile_apps(user: CurrentUser, registry: SourceReg, request: Request):
+def reconcile_apps(user: CurrentUser, registry: SourceReg, request: Request):
     """Bring the deploy repo's derived app state into step with the sources.
 
     Recompiles every stack-scoped routing block (receiver, loader, archiver) and
@@ -1930,7 +2003,7 @@ async def reconcile_apps(user: CurrentUser, registry: SourceReg, request: Reques
     response_model=SeedResponse,
     dependencies=[Depends(require_action(scopes_dict["source_write"]))],
 )
-async def seed_sources(user: CurrentUser, registry: SourceReg):
+def seed_sources(user: CurrentUser, registry: SourceReg):
     """Seed built-in default source definitions. Non-destructive (skips existing)."""
     count = registry.seed_builtin_sources(overwrite=False)
     audit_resource_change(user.user_id, "source", "all", "seeded")
@@ -1952,7 +2025,7 @@ async def seed_sources(user: CurrentUser, registry: SourceReg):
     },
     dependencies=[Depends(require_action(scopes_dict["source_write"]))],
 )
-async def import_source(
+def import_source(
     body: SourceBundle,
     user: CurrentUser,
     registry: SourceReg,

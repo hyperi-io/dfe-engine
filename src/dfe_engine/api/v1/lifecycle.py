@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -38,7 +39,7 @@ from dfe_engine.governance.lifecycle import (
     set_state,
 )
 
-router = APIRouter(prefix="/lifecycle", tags=["Governed Ops: Lifecycle"])
+router = APIRouter(prefix="/lifecycle", tags=["Governed Ops: Lifecycle"], dependencies=[WRITE_TURN])
 
 
 class ServiceInfo(BaseModel):
@@ -78,7 +79,7 @@ def _current_state(gc: GitCrud, svc: ServiceLifecycle) -> str:
 
 
 @router.get("", dependencies=[Depends(require_action(scopes_dict["lifecycle_read"]))])
-async def list_services(user: CurrentUser, request: Request) -> list[ServiceInfo]:
+def list_services(user: CurrentUser, request: Request) -> list[ServiceInfo]:
     """List services with their tier and current lifecycle state."""
     gc = _gitcrud(request)
     out: list[ServiceInfo] = []
@@ -89,7 +90,7 @@ async def list_services(user: CurrentUser, request: Request) -> list[ServiceInfo
 
 
 @router.post("/{name}", response_model=LifecycleResponse)
-async def set_lifecycle(
+def set_lifecycle(
     name: str, body: LifecycleRequest, user: CurrentUser, request: Request
 ) -> LifecycleResponse:
     """Set a service's lifecycle state - per-service RBAC; pinned services are 404."""

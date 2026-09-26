@@ -311,6 +311,108 @@ def test_reset_all_keeps_the_deployers_common_infra_overlay(tmp_path, monkeypatc
     assert "clickhouse" not in gc.list("infravars")
 
 
+def _pool_resets(manager, service: str, action: str) -> float:
+    """The pool-reset counter for one service and action, read off the real exposition."""
+    from prometheus_client.parser import text_string_to_metric_families
+
+    from dfe_engine.api.e2e.seed.metrics import POOL_RESETS
+
+    for family in text_string_to_metric_families(manager.metrics_text):
+        for sample in family.samples:
+            if sample.name == POOL_RESETS and sample.labels == {
+                "service": service,
+                "action": action,
+            }:
+                return sample.value
+    return 0.0
+
+
+def _pool_seeder(tmp_path: Path, gc: GitCrud, manager=None):
+    from dfe_engine.api.e2e.seed import Seed
+    from dfe_engine.api.e2e.seed.metrics import SeedMetrics
+
+    accounts, groups, orgs = _stores(tmp_path)
+    return Seed(
+        account_store=accounts,
+        group_store=groups,
+        org_registry=orgs,
+        gitcrud=gc,
+        settings=DFESettings(env="test", transport={"default": "bus"}),
+        metrics=SeedMetrics(manager),
+    )
+
+
+def test_reset_all_restores_a_marked_pool_and_removes_an_unmarked_one(tmp_path, monkeypatch):
+    """The marker is the deployer's record, so a pool it does not name came from a seed."""
+    from scalo.metrics import create_metrics
+
+    monkeypatch.setenv("DFE_ENV", "test")
+    gc = _crud(tmp_path)
+    gc.repo.publish({".seeded-apps": "dfe-receiver\n"}, "test: marker")
+    receiver = _deploy(gc, "dfe-receiver", "default")
+    loader = _deploy(gc, "dfe-loader", "default")
+    manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+    seeder = _pool_seeder(tmp_path, gc, manager)
+
+    assert seeder.seed_static("reset_all") is True
+
+    assert instances.exists(gc, receiver)
+    assert not instances.exists(gc, loader)
+    assert _pool_resets(manager, "dfe-receiver", "restored") == 1
+    assert _pool_resets(manager, "dfe-loader", "removed") == 1
+
+    gc.delete(instances.HELMVARS_CLASS, receiver.overlay_name, "test", message="test: removed")
+    assert seeder.seed_static("reset_all") is True
+
+    assert instances.exists(gc, receiver)
+    assert _pool_resets(manager, "dfe-receiver", "recreated") == 1
+
+
+def test_reset_all_keeps_the_identity_a_compose_deployer_wrote(tmp_path, monkeypatch):
+    """The engine's own seed writes an OTel name, which the reset keeps as it drops the dials."""
+    monkeypatch.setenv("DFE_ENV", "test")
+    gc = _crud(tmp_path)
+    gc.repo.publish({".seeded-apps": "dfe-receiver\n"}, "test: marker")
+    receiver = instances.instance_of("dfe-receiver", "default")
+    doc = instances.initial_overlay(receiver)
+    doc["keda"] = {"enabled": True, "minReplicaCount": 2}
+    gc.put(instances.HELMVARS_CLASS, receiver.overlay_name, doc, "test", message="test: dials")
+
+    assert _pool_seeder(tmp_path, gc).seed_static("reset_all") is True
+
+    assert instances.read_overlay(gc, receiver) == instances.initial_overlay(receiver)
+
+
+def test_reset_all_is_one_commit(tmp_path, monkeypatch):
+    from dulwich.repo import Repo
+
+    monkeypatch.setenv("DFE_ENV", "test")
+    gc = _crud(tmp_path)
+    gc.repo.publish({".seeded-apps": "dfe-receiver\n"}, "test: marker")
+    _deploy(gc, "dfe-receiver", "default")
+    _deploy(gc, "dfe-loader", "default")
+    _deploy(gc, "dfe-transform-vrl", "crowdstrike")
+    gc.put("infravars", "clickhouse", {"replicas": 5}, "test", message="test: dial")
+
+    def commits() -> int:
+        with Repo(str(gc.repo_path)) as repo:
+            return sum(1 for _ in repo.get_walker())
+
+    before = commits()
+    assert _pool_seeder(tmp_path, gc).seed_static("reset_all") is True
+
+    assert commits() == before + 1
+
+
+def test_seed_metrics_without_a_backend_record_nothing():
+    from dfe_engine.api.e2e.seed.metrics import SeedMetrics
+
+    metrics = SeedMetrics()
+
+    assert metrics.enabled is False
+    metrics.pool_reset("dfe-receiver", "recreated")
+
+
 def test_seeders_never_create_groups_themselves(tmp_path, monkeypatch):
     """Groups are startup-bootstrap territory: a seeder refuses an unknown one.
 

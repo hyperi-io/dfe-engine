@@ -42,6 +42,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.gitcrud.engine import ResourceNotFoundError, get_path, set_path
 
@@ -55,7 +56,11 @@ from .helm import (
     set_var_governed,
 )
 
-router = APIRouter(prefix="/backing-services", tags=["Governed Ops: Backing Services"])
+router = APIRouter(
+    prefix="/backing-services",
+    tags=["Governed Ops: Backing Services"],
+    dependencies=[WRITE_TURN],
+)
 
 _CLASS = "infravars"
 
@@ -360,7 +365,7 @@ def _guard_member_count(request: Request, name: str, path: str, value: Any) -> N
 
 
 @router.get("", dependencies=[Depends(require_action(scopes_dict["helmvars_read"]))])
-async def list_backing_services(user: CurrentUser, request: Request) -> list[BackingServiceConfig]:
+def list_backing_services(user: CurrentUser, request: Request) -> list[BackingServiceConfig]:
     """Every backing service's DECLARED deploy configuration.
 
     Declared, not observed: these are the values the deploy repo asks for, read
@@ -371,7 +376,7 @@ async def list_backing_services(user: CurrentUser, request: Request) -> list[Bac
 
 
 @router.get("/overlays", dependencies=[Depends(require_action(scopes_dict["helmvars_read"]))])
-async def list_overlays(user: CurrentUser, request: Request) -> list[str]:
+def list_overlays(user: CurrentUser, request: Request) -> list[str]:
     """List substrate/platform overlay resources in the deploy repo's infra/ dir."""
     return gitcrud_of(request).list(_CLASS)
 
@@ -379,7 +384,7 @@ async def list_overlays(user: CurrentUser, request: Request) -> list[str]:
 @router.get(
     "/overlays/{name}/vars", dependencies=[Depends(require_action(scopes_dict["helmvars_read"]))]
 )
-async def list_overlay_vars(name: str, user: CurrentUser, request: Request) -> list[dict[str, Any]]:
+def list_overlay_vars(name: str, user: CurrentUser, request: Request) -> list[dict[str, Any]]:
     """Flattened dot-path vars for one overlay, each marked protected or not."""
     check_name(name)
     gc = gitcrud_of(request)
@@ -395,9 +400,7 @@ async def list_overlay_vars(name: str, user: CurrentUser, request: Request) -> l
 
 
 @router.get("/{service}", dependencies=[Depends(require_action(scopes_dict["helmvars_read"]))])
-async def get_backing_service(
-    service: str, user: CurrentUser, request: Request
-) -> BackingServiceConfig:
+def get_backing_service(service: str, user: CurrentUser, request: Request) -> BackingServiceConfig:
     """One backing service's DECLARED deploy configuration (see the list route)."""
     spec = _BY_SERVICE.get(service)
     if spec is None:
@@ -416,7 +419,7 @@ async def get_backing_service(
     response_model=BackingWriteResult,
     dependencies=[Depends(require_action(scopes_dict["helmvars_write"]))],
 )
-async def set_overlay_var(
+def set_overlay_var(
     name: str,
     path: str,
     body: SetVarRequest,
@@ -442,7 +445,7 @@ async def set_overlay_var(
     response_model=BackingWriteResult,
     dependencies=[Depends(require_action(scopes_dict["helmvars_write"]))],
 )
-async def delete_overlay_var(
+def delete_overlay_var(
     name: str, path: str, user: CurrentUser, request: Request
 ) -> BackingWriteResult:
     """Revert a substrate/platform value to its chart default. Protected vars refuse.

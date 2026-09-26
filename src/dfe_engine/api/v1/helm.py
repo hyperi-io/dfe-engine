@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -40,7 +41,7 @@ from dfe_engine.gitcrud.engine import ResourceNotFoundError
 from dfe_engine.gitcrud.routing import ReviewRequiredError, route_write
 from dfe_engine.governance import PolicyStore, ProtectedVarError
 
-router = APIRouter(prefix="/helm", tags=["Governed Ops: Helm Vars"])
+router = APIRouter(prefix="/helm", tags=["Governed Ops: Helm Vars"], dependencies=[WRITE_TURN])
 
 _CLASS = "helmvars"
 
@@ -239,7 +240,7 @@ def delete_var_governed(cls: str, name: str, path: str, user: Any, request: Requ
 
 
 @router.get("/files", dependencies=[Depends(require_action(scopes_dict["helmvars_read"]))])
-async def list_files(user: CurrentUser, request: Request) -> list[str]:
+def list_files(user: CurrentUser, request: Request) -> list[str]:
     """List helm-var overlay resources."""
     return gitcrud_of(request).list(_CLASS)
 
@@ -247,7 +248,7 @@ async def list_files(user: CurrentUser, request: Request) -> list[str]:
 @router.get(
     "/files/{name}/vars", dependencies=[Depends(require_action(scopes_dict["helmvars_read"]))]
 )
-async def list_vars(name: str, user: CurrentUser, request: Request) -> list[dict[str, Any]]:
+def list_vars(name: str, user: CurrentUser, request: Request) -> list[dict[str, Any]]:
     """Flattened dot-path vars for a resource, each marked protected or not."""
     check_name(name)
     gc = gitcrud_of(request)
@@ -264,7 +265,7 @@ async def list_vars(name: str, user: CurrentUser, request: Request) -> list[dict
     response_model=WriteResult,
     dependencies=[Depends(require_action(scopes_dict["helmvars_write"]))],
 )
-async def set_var(
+def set_var(
     name: str,
     path: str,
     body: SetVarRequest,
@@ -283,7 +284,7 @@ async def set_var(
     response_model=WriteResult,
     dependencies=[Depends(require_action(scopes_dict["helmvars_write"]))],
 )
-async def delete_var(name: str, path: str, user: CurrentUser, request: Request) -> WriteResult:
+def delete_var(name: str, path: str, user: CurrentUser, request: Request) -> WriteResult:
     """Revert a helm var to its chart default. Routed like set_var (PR in prod+team);
     403 if protected, since reverting a locked var changes it as surely as setting it.
     """

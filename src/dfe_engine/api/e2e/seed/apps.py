@@ -15,16 +15,22 @@ review routing that router applies; everything it produces is read back through 
 product API unchanged.
 """
 
-from __future__ import annotations
-
 from dfe_engine.api.e2e.seed.base import Seed
 from dfe_engine.api.e2e.seed.sources import (
     SEED_ACTOR,
     SEED_FETCHER_SOURCE_NAME,
     SEED_SOURCE_NAME,
 )
-from dfe_engine.appmgmt import catalogue, files, instances, routing, scaling
-from dfe_engine.gitcrud.engine import set_path
+from dfe_engine.appmgmt import (
+    catalogue,
+    derived,
+    files,
+    instances,
+    routing,
+    scaling,
+    seed_instances,
+)
+from dfe_engine.gitcrud.engine import get_path, set_path
 
 TRANSFORM_SERVICE = "dfe-transform-vrl"
 """The transform an instance of which IS a source's processing step."""
@@ -51,7 +57,7 @@ POOL_INSTANCE = "default"
 MANAGED_SERVICES = frozenset(
     {FETCHER_SERVICE, *POOL_SERVICES, *(s for _e, s, _v in TRANSFORM_ENGINES)}
 )
-"""Apps a seed method here can deploy, so a reset undeploys only these.
+"""Apps a seed method here can deploy, so a reset touches only these.
 
 dfe-engine, dfe-ui, hyperdx and culvert also catalogue a values overlay, but no
 seeder writes one: it is standing infra a deployment carries from the moment it
@@ -60,12 +66,15 @@ every catalogued app's overlay, so the filter is what keeps a reset from pruning
 one of theirs along with the sources and pools this class actually seeds.
 """
 
+_DEPLOY_BLOCK = catalogue.DEPLOY_SERVICE_PATH.rpartition(".")[0]
+"""The overlay block the ApplicationSet names an Application from, which a pool keeps whole."""
+
 RUN_STATE_CLASSES = ("infravars", "gov_settings")
 """Deploy-repo classes a reset clears, beyond the ones the child seeders own.
 
 Both are per-run state on the same three tests: nothing seeds them at startup,
 each is only written through an API a spec drives, and its absence IS the shipped
-default. ``infravars`` is the substrate overlay (backing-service node counts,
+default. ``infravars`` is the infra overlay (backing-service node counts,
 storage, CPU); ``gov_settings`` is the auto-merge posture flag.
 
 Deliberately NOT here: ``actions`` and ``policies`` are the shipped governance
@@ -163,18 +172,18 @@ class Apps(Seed):
         return changed
 
     def delete_all(self) -> None:
-        """Undeploy every instance a seed method here can create. A no-op without a deploy repo.
+        """Undeploy every per-source instance a seed method here can create.
 
-        Restricted to ``MANAGED_SERVICES``: dfe-engine, dfe-ui, hyperdx and
-        culvert also catalogue a values overlay, but no seeder writes one, so
-        deleting theirs would prune standing infra rather than reset per-run
-        state.
+        A no-op without a deploy repo. Restricted to ``MANAGED_SERVICES``, and the
+        pools are left to ``reset_pools``: dfe-engine, dfe-ui, hyperdx and culvert
+        also catalogue a values overlay, but no seeder writes one, so deleting
+        theirs would prune standing infra rather than reset per-run state.
         """
         gc = self._gitcrud
         if gc is None:
             return
         for app in instances.list_instances(gc):
-            if app.service not in MANAGED_SERVICES:
+            if app.service not in MANAGED_SERVICES or app.service in POOL_SERVICES:
                 continue
             gc.delete(
                 instances.HELMVARS_CLASS,
@@ -182,6 +191,50 @@ class Apps(Seed):
                 SEED_ACTOR,
                 message=f"e2e: undeploy {app.service}/{app.instance}",
             )
+
+    def reset_pools(self) -> None:
+        """Put each pool back to what the deployment was stood up with.
+
+        A no-op without a deploy repo. A pool the deployer's marker names is the
+        deployment's own data path -- on Kubernetes, deleting its overlay makes Argo
+        prune the Application -- so it is rewritten to the identity the deployer gave
+        it, and recreated if a run removed it. A pool the marker does not name was
+        created by a seed here, so it goes. The routing a pool carries is derived from
+        the sources, and ``reconcile_derived`` compiles it back in once they are reset.
+        """
+        gc = self._gitcrud
+        if gc is None:
+            return
+        offered = seed_instances.marked_offered(gc)
+        for service in POOL_SERVICES:
+            app = instances.instance_of(service, POOL_INSTANCE)
+            present = instances.exists(gc, app)
+            if service not in offered:
+                if present:
+                    gc.delete(
+                        instances.HELMVARS_CLASS,
+                        app.overlay_name,
+                        SEED_ACTOR,
+                        message=f"e2e: undeploy {app.service}/{app.instance}",
+                    )
+                    self._metrics.pool_reset(service, "removed")
+                continue
+            doc = instances.read_overlay(gc, app) if present else None
+            self._put(app, _baseline(app, doc), "restore deployed baseline")
+            self._metrics.pool_reset(service, "restored" if present else "recreated")
+
+    def reconcile_derived(self) -> list[str]:
+        """Recompile every app's derived state from the sources, as the engine does at start.
+
+        A no-op without a deploy repo or a source registry. The receiver refuses to
+        start without a destination, so a reset recompiles a pool's routing before
+        its commit lands.
+        """
+        gc = self._gitcrud
+        registry = self._source_registry
+        if gc is None or registry is None:
+            return []
+        return derived.reconcile(gc, registry, self._require_settings(), actor=SEED_ACTOR)
 
     def delete_run_state(self) -> None:
         """Clear the deploy-repo classes no seeder creates but a spec can change.
@@ -274,3 +327,27 @@ class Apps(Seed):
             message=f"e2e({app.service}/{app.instance}): {summary}",
         )
         return bool(result.changed)
+
+
+def _baseline(app: instances.AppInstance, doc: dict | None) -> dict:
+    """The pool overlay as its deployer wrote it: the identity, and nothing a run added.
+
+    Both deployers write identity alone -- the Kubernetes setup job the ``deploy``
+    block, the engine on Compose ``instances.initial_overlay`` -- so the identity
+    paths are kept from *doc* where it has them and everything else (routing, dials,
+    files, links) goes. A pool with no overlay left gets the engine's own.
+    """
+    initial = instances.initial_overlay(app)
+    if doc is None:
+        return initial
+    baseline: dict = {_DEPLOY_BLOCK: dict(doc.get(_DEPLOY_BLOCK) or initial[_DEPLOY_BLOCK])}
+    identity = [
+        catalogue.OTEL_SERVICE_NAME_PATH,
+        catalogue.COMPONENT_PATH,
+        *catalogue.render_source_binding(app.descriptor, app.instance),
+    ]
+    for path in identity:
+        value = get_path(doc, path)
+        if value is not None:
+            set_path(baseline, path, value)
+    return baseline

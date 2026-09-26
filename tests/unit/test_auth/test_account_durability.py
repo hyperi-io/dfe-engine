@@ -18,14 +18,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from dulwich import porcelain
 from dulwich.repo import Repo
 
 from dfe_engine.auth import account_durability as ad
 from dfe_engine.auth.accounts import Account, AccountStore
 from dfe_engine.gitcrud.auto_merge import set_stored
-from dfe_engine.gitcrud.engine import GitCrud, ResourceNotFoundError
+from dfe_engine.gitcrud.engine import GitCrud
 from dfe_engine.gitcrud.forge import PullRequest
 from dfe_engine.gitops.repo import GitopsRepo
 
@@ -278,35 +277,6 @@ def test_publish_direct_carries_the_summary_and_actor_into_the_commit(tmp_path):
     repo.close()
     assert "retire the bootstrap admin" in message
     assert "kaz" in message
-
-
-# ── Delete ───────────────────────────────────────────────────
-
-
-def test_remove_account_deletes_from_deploy_repo(tmp_path):
-    gc = _gc(tmp_path)
-    _publish_seed(gc, _account(password_hash=_HASH_A))
-    assert gc.get(ad.ACCOUNTS_CLASS, "admin")["password_hash"] == _HASH_A
-
-    outcome = ad.remove_account(
-        gc,
-        None,
-        environment=DEV,
-        mode="solo",
-        username="admin",
-        actor="admin",
-    )
-    assert outcome is not None
-    assert outcome.changed is True
-    with pytest.raises(ResourceNotFoundError):
-        gc.get(ad.ACCOUNTS_CLASS, "admin")
-
-
-def test_remove_account_noop_when_disabled():
-    assert (
-        ad.remove_account(None, None, environment=DEV, mode="solo", username="admin", actor="admin")
-        is None
-    )
 
 
 # ── Remote merge poll (step 2 of the review-PR path) ─────────

@@ -10,15 +10,18 @@ POST   /api/v1/rules/validate     → Validate SQL/CEL without creating
 
 from __future__ import annotations
 
+import functools
 import re
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator, model_validator
+from scalo.concurrency import run_blocking
 
 from dfe_engine.api.deps import CurrentUser, HuntConfigReg, RuleReg, Settings, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.api.review import apply_review_headers, review_audit_detail
+from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.git_identity import git_author
@@ -27,7 +30,7 @@ from dfe_engine.hunts.rule_registry import RuleNotFoundError
 
 _RULE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
-router = APIRouter(prefix="/rules", tags=["Rules"])
+router = APIRouter(prefix="/rules", tags=["Rules"], dependencies=[WRITE_TURN])
 
 
 # ── Request/response models ───────────────────────────────────
@@ -186,7 +189,7 @@ class RuleFromHyperdxResponse(BaseModel):
     response_model=PaginatedResponse[RuleSummary],
     dependencies=[Depends(require_action(scopes_dict["rule_read"]))],
 )
-async def list_rules(
+def list_rules(
     user: CurrentUser,
     registry: RuleReg,
     pagination: PaginationParams = Depends(),
@@ -224,7 +227,7 @@ async def list_rules(
     status_code=201,
     dependencies=[Depends(require_action(scopes_dict["rule_write"]))],
 )
-async def create_rule(
+def create_rule(
     body: RuleCreateRequest,
     user: CurrentUser,
     settings: Settings,
@@ -300,6 +303,31 @@ async def create_rule_from_hyperdx(
     RBAC: ``rule:write`` (data_analyst) -- ``org_viewer`` has neither this grant nor
     the UI button.
     """
+    raw_sql, search_name = await _resolve_hyperdx_sql(request, body)
+    return await run_blocking(
+        functools.partial(
+            _create_rule_from_sql,
+            body,
+            raw_sql,
+            search_name,
+            user,
+            settings,
+            registry,
+            response,
+        )
+    )
+
+
+def _create_rule_from_sql(
+    body: RuleFromHyperdxRequest,
+    raw_sql: str,
+    search_name: str | None,
+    user: CurrentUser,
+    settings: Settings,
+    registry: RuleReg,
+    response: Response,
+) -> RuleFromHyperdxResponse:
+    """The deploy-repo and ClickHouse half of ``create_rule_from_hyperdx``, on a worker thread."""
     from dfe_engine.hunts.rule_creation_service import (
         RuleCreateRequest as SvcRequest,
     )
@@ -308,7 +336,6 @@ async def create_rule_from_hyperdx(
     )
     from dfe_engine.settings import get_clickhouse_config
 
-    raw_sql, search_name = await _resolve_hyperdx_sql(request, body)
     resolved_from = "raw_sql" if body.raw_sql else "saved_search"
 
     rule_id = _unique_rule_id(registry, search_name)
@@ -347,7 +374,7 @@ async def create_rule_from_hyperdx(
     response_model=SqlValidationResponse,
     dependencies=[Depends(require_action(scopes_dict["rule_validate"]))],
 )
-async def validate_rule_sql(
+def validate_rule_sql(
     body: SqlValidationRequest,
     user: CurrentUser,
     settings: Settings,
@@ -380,7 +407,7 @@ async def validate_rule_sql(
     response_model=RuleResponse,
     dependencies=[Depends(require_action(scopes_dict["rule_read"]))],
 )
-async def get_rule(name: str, user: CurrentUser, registry: RuleReg, settings: Settings):
+def get_rule(name: str, user: CurrentUser, registry: RuleReg, settings: Settings):
     """Get a detection rule by file name."""
     try:
         rule = registry.get(name)
@@ -398,7 +425,7 @@ async def get_rule(name: str, user: CurrentUser, registry: RuleReg, settings: Se
     response_model=RuleCreateResponse,
     dependencies=[Depends(require_action(scopes_dict["rule_write"]))],
 )
-async def update_rule(
+def update_rule(
     name: str,
     body: RuleUpdateRequest,
     user: CurrentUser,
@@ -462,7 +489,7 @@ async def update_rule(
     status_code=204,
     dependencies=[Depends(require_action(scopes_dict["rule_delete"]))],
 )
-async def delete_rule(
+def delete_rule(
     name: str,
     user: CurrentUser,
     registry: RuleReg,

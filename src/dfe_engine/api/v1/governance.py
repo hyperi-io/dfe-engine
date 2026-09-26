@@ -29,6 +29,7 @@ from pydantic import BaseModel
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.review import apply_review_headers
+from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -45,7 +46,7 @@ from dfe_engine.governance import (
     ProtectedVarError,
 )
 
-router = APIRouter(prefix="/governance", tags=["Governed Ops: Actions"])
+router = APIRouter(prefix="/governance", tags=["Governed Ops: Actions"], dependencies=[WRITE_TURN])
 
 _POLICY_CLASS = "policies"
 
@@ -130,14 +131,14 @@ def _route_admin_write(
 
 
 @router.get("/actions", dependencies=[Depends(require_action(scopes_dict["governance_read"]))])
-async def list_actions(user: CurrentUser, request: Request) -> list[str]:
+def list_actions(user: CurrentUser, request: Request) -> list[str]:
     return _actions(request).list()
 
 
 @router.get(
     "/actions/{name}", dependencies=[Depends(require_action(scopes_dict["governance_read"]))]
 )
-async def get_action(name: str, user: CurrentUser, request: Request) -> ActionDef:
+def get_action(name: str, user: CurrentUser, request: Request) -> ActionDef:
     try:
         return _actions(request).get(name)
     except ResourceNotFoundError as exc:
@@ -145,14 +146,14 @@ async def get_action(name: str, user: CurrentUser, request: Request) -> ActionDe
 
 
 @router.get("/policies", dependencies=[Depends(require_action(scopes_dict["governance_read"]))])
-async def list_policies(user: CurrentUser, request: Request) -> list[str]:
+def list_policies(user: CurrentUser, request: Request) -> list[str]:
     return _policies(request).list()
 
 
 @router.get(
     "/policies/{name}", dependencies=[Depends(require_action(scopes_dict["governance_read"]))]
 )
-async def get_policy(name: str, user: CurrentUser, request: Request) -> ProtectedPolicy:
+def get_policy(name: str, user: CurrentUser, request: Request) -> ProtectedPolicy:
     _check_name(name)
     try:
         return _policies(request).get(name)
@@ -161,7 +162,7 @@ async def get_policy(name: str, user: CurrentUser, request: Request) -> Protecte
 
 
 @router.post("/actions/{name}/invoke", response_model=InvokeResponse)
-async def invoke_action(
+def invoke_action(
     name: str,
     user: CurrentUser,
     request: Request,
@@ -273,7 +274,7 @@ class ValidateResponse(BaseModel):
     response_model=ValidateResponse,
     dependencies=[Depends(require_action("governance:write"))],
 )
-async def validate_action(body: ActionDef, user: CurrentUser, request: Request) -> ValidateResponse:
+def validate_action(body: ActionDef, user: CurrentUser, request: Request) -> ValidateResponse:
     """Dry-check an action definition: every violation + the would-be diff.
 
     Nothing is committed - this is the authoring hand-hold, run before the
@@ -294,7 +295,7 @@ async def validate_action(body: ActionDef, user: CurrentUser, request: Request) 
     status_code=201,
     dependencies=[Depends(require_action(scopes_dict["governance_write"]))],
 )
-async def create_action(
+def create_action(
     body: ActionDef, user: CurrentUser, request: Request, response: Response
 ) -> ActionDef:
     _check_name(body.name)
@@ -321,7 +322,7 @@ async def create_action(
     status_code=204,
     dependencies=[Depends(require_action(scopes_dict["governance_write"]))],
 )
-async def delete_action(name: str, user: CurrentUser, request: Request, response: Response) -> None:
+def delete_action(name: str, user: CurrentUser, request: Request, response: Response) -> None:
     _check_name(name)
     # Surface 404 before any review routing.
     try:
@@ -350,7 +351,7 @@ async def delete_action(name: str, user: CurrentUser, request: Request, response
     status_code=201,
     dependencies=[Depends(require_action(scopes_dict["governance_write"]))],
 )
-async def create_policy(
+def create_policy(
     body: ProtectedPolicy, user: CurrentUser, request: Request, response: Response
 ) -> ProtectedPolicy:
     _check_name(body.name)
@@ -378,7 +379,7 @@ async def create_policy(
     status_code=204,
     dependencies=[Depends(require_action(scopes_dict["governance_write"]))],
 )
-async def delete_policy(name: str, user: CurrentUser, request: Request, response: Response) -> None:
+def delete_policy(name: str, user: CurrentUser, request: Request, response: Response) -> None:
     _check_name(name)
     gc = _gitcrud(request)
     # Surface 404 before any review routing.
@@ -407,7 +408,7 @@ async def delete_policy(name: str, user: CurrentUser, request: Request, response
     "/ch-rbac/reconcile",
     dependencies=[Depends(require_action(scopes_dict["governance_write"]))],
 )
-async def reconcile_ch_rbac_endpoint(user: CurrentUser, request: Request) -> dict[str, Any]:
+def reconcile_ch_rbac_endpoint(user: CurrentUser, request: Request) -> dict[str, Any]:
     """Reconcile CH quota tiers + service roles + per-org row policies into
     ClickHouse, minting the service-user secrets via the secrets seam. Idempotent.
     governance:write.

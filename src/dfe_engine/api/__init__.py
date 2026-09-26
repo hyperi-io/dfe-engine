@@ -68,8 +68,14 @@ class _DfeEngineApp:
                 # Share ServiceApp's OWN HealthManager -- the instance scalo's
                 # observability server serves on 9090 /readyz. Without this the
                 # lifespan sets ready on a DIFFERENT manager and the probe reads
-                # an always-unready one.
-                app = create_app(settings=settings, health_manager=self.health())
+                # an always-unready one. Its metrics manager, the one served on
+                # 9090 /metrics, carries the engine's own counters for the same
+                # reason.
+                app = create_app(
+                    settings=settings,
+                    health_manager=self.health(),
+                    metrics_manager=self._metrics,
+                )
                 # proxy_headers off here: create_app installs the same middleware
                 # keyed on api.forwarded_allow_ips, so trust is decided once.
                 server = uvicorn.Server(

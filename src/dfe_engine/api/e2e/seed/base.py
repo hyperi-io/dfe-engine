@@ -8,13 +8,13 @@
 
 """Base seeder: construction is refused unless the posture is ``test``."""
 
-from __future__ import annotations
-
 import os
-from typing import TYPE_CHECKING, TypeVar
+from contextlib import AbstractContextManager, nullcontext
+from typing import TYPE_CHECKING
 
 from scalo.logger import logger
 
+from dfe_engine.api.e2e.seed.metrics import SeedMetrics
 from dfe_engine.auth.accounts import AccountStore, DocuStoreAccountStore
 from dfe_engine.auth.groups import DocuStoreGroupStore, GroupStore
 from dfe_engine.orgs.registry import OrgRegistry
@@ -27,8 +27,6 @@ if TYPE_CHECKING:
 
 _TEST_ENV = "test"
 _SETUP_ADMIN_PASSWORD = "already_reset"
-
-_S = TypeVar("_S", bound="Seed")
 
 
 class Seed:
@@ -52,6 +50,7 @@ class Seed:
         source_registry: SourceRegistry | None = None,
         settings: DFESettings | None = None,
         forge: ForgeProvider | None = None,
+        metrics: SeedMetrics | None = None,
     ) -> None:
         resolved = (env if env is not None else os.environ.get("DFE_ENV", "")).strip().lower()
         if resolved != _TEST_ENV:
@@ -63,9 +62,10 @@ class Seed:
         self._source_registry = source_registry
         self._settings = settings
         self._forge = forge
+        self._metrics = metrics or SeedMetrics()
         self._attach_seeders(resolved)
 
-    def _child(self, seeder: type[_S], env: str) -> _S:
+    def _child[S: Seed](self, seeder: type[S], env: str) -> S:
         """Build one child seeder over the same stores."""
         return seeder(
             account_store=self._account_store,
@@ -76,6 +76,7 @@ class Seed:
             source_registry=self._source_registry,
             settings=self._settings,
             forge=self._forge,
+            metrics=self._metrics,
         )
 
     def _attach_seeders(self, env: str) -> None:
@@ -143,7 +144,24 @@ class Seed:
             self._settings.auth.local.admin_password = password
 
     def seed_static(self, script: str) -> bool:
-        """Dispatch *script* to child seeders. Returns False when unknown."""
+        """Dispatch *script* to child seeders. Returns False when unknown.
+
+        Every deploy-repo write the script makes lands as one commit and one push.
+        Written one at a time, each is its own round trip to the forge, and a reset
+        also pushes the states in between -- among them a pool with no routing,
+        which a receiver refuses to start on.
+        """
+        with self._deploy_repo_batch(script):
+            return self._run(script)
+
+    def _deploy_repo_batch(self, script: str) -> AbstractContextManager[None]:
+        """The deploy repo's batch for one script, or nothing when there is no repo."""
+        if self._gitcrud is None:
+            return nullcontext()
+        return self._gitcrud.batch(f"e2e: {script}")
+
+    def _run(self, script: str) -> bool:
+        """The body of ``seed_static``: dispatch *script*, False when unknown."""
         if script == "seed_dfe_admin_user":
             account = self.accounts.seed_dfe_admin_user()
             logger.info("e2e seed", script=script, account=account)
@@ -254,19 +272,26 @@ class Seed:
             # Then the deploy repo. Instances first: an overlay carries the
             # content a library link resolved into it, so removing the artefact
             # while an overlay still references it would leave a dangling link.
+            # The pools are the deployment's own data path, so they are restored
+            # rather than removed.
             self.apps.delete_all()
+            self.apps.reset_pools()
             self.artefacts.delete_all()
             self.sources.delete_all()
 
             # The deploy-repo state no seeder creates but a spec can change --
-            # the substrate overlay and the auto-merge flag. Left behind, a
+            # the infra overlay and the auto-merge flag. Left behind, a
             # backing-service count raised by one spec is still raised for the next.
             self.apps.delete_run_state()
+
+            # With the sources back to the core set, the routing the pools carry is
+            # compiled from them, as the engine does on a fresh deployment.
+            derived = self.apps.reconcile_derived()
 
             # Back to a fresh deployment: the local admin on the shipped default,
             # in the store and in the config the boot reconcile reads.
             self._set_configured_admin_password("")
             self.accounts.reset_break_glass_admin()
-            logger.info("e2e seed", script=script)
+            logger.info("e2e seed", script=script, derived=derived)
             return True
         return False

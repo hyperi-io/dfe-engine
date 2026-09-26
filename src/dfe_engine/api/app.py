@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -66,7 +67,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from dfe_engine.gitcrud.factory import build_gitcrud
 
     try:
-        gitcrud = build_gitcrud(settings.gitops)
+        gitcrud = build_gitcrud(settings.gitops, app.state.metrics_manager)
     except Exception as exc:  # never let gitops setup break app startup
         logger.warning("Governed Ops gitcrud unavailable", error=str(exc))
         gitcrud = None
@@ -489,6 +490,7 @@ def create_app(
     settings: DFESettings | None = None,
     cors_origins: list[str] | None = None,
     health_manager: HealthManager | None = None,
+    metrics_manager: Any | None = None,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -500,6 +502,10 @@ def create_app(
             instance scalo's observability server serves on ``/readyz`` -- so the
             lifespan's ``set_ready`` and the probe agree. Left ``None`` (standalone
             ``create_app()`` / tests) a fresh manager is created.
+        metrics_manager: the scalo ``MetricsManager`` the engine's own counters
+            register on. Under the daemon this is ServiceApp's, the one its
+            observability server serves on ``/metrics``, so the process runs one
+            exporter. Left ``None`` those counters record nothing.
 
     Returns:
         Configured FastAPI application.
@@ -527,6 +533,14 @@ def create_app(
     # act on ONE manager. (Daemon: ServiceApp's own, served on 9090 /readyz.)
     health_manager = health_manager or HealthManager()
     app.state.health_manager = health_manager
+
+    # The routes reach these through app.state, so each set is built once per app.
+    from dfe_engine.api.e2e.seed.metrics import SeedMetrics
+    from dfe_engine.api.metrics import ApiMetrics
+
+    app.state.metrics_manager = metrics_manager
+    app.state.api_metrics = ApiMetrics(metrics_manager)
+    app.state.seed_metrics = SeedMetrics(metrics_manager)
 
     # Core-resource write guard (register before CORS so 409 responses still get CORS headers)
     from dfe_engine.api.middleware.core_resource_guard import install_core_resource_guard

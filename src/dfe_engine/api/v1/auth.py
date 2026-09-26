@@ -24,6 +24,7 @@ from dfe_engine.api.deps import (
     resolve_live_groups_for_user,
     resolve_live_roles_for_user,
 )
+from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth import account_durability, admin_retirement, breakglass, hyperdx_role
 from dfe_engine.auth.audit import (
     audit_account_change,
@@ -232,7 +233,7 @@ async def get_permissions(user: CurrentUser, request: Request):
 
 
 @router.get("/setup-status", response_model=SetupStatus)
-async def get_setup_status(request: Request) -> SetupStatus:
+def get_setup_status(request: Request) -> SetupStatus:
     """Report first-run setup state and what is configured (no auth — pre-login UI).
 
     Driven by the setup state machine (``state_machines/setup.py``). The
@@ -247,8 +248,8 @@ async def get_setup_status(request: Request) -> SetupStatus:
     return evaluate_initial_setup(request)
 
 
-@router.post("/setup/retire-admin", response_model=SetupStatus)
-async def retire_bootstrap_admin(
+@router.post("/setup/retire-admin", response_model=SetupStatus, dependencies=[WRITE_TURN])
+def retire_bootstrap_admin(
     user: CurrentUser,
     request: Request,
     settings: Settings,
