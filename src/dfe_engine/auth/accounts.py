@@ -82,6 +82,16 @@ class Account(BaseModel):
     Stored inline on the account and round-trips through both backends. Never put
     secrets here - a broad account read returns this blob; sensitive attributes
     live in the separate keyed store (:mod:`dfe_engine.auth.attributes`)."""
+    password_change_required: bool = False
+    """The password was issued to the account rather than chosen by its owner.
+
+    While set, the API refuses the account everything but changing its own
+    password (:mod:`dfe_engine.api.password_change`); the owner's change clears it."""
+    seeded_password_hash: str = ""
+    """Digest of the last password issued with ``password_change_required``.
+
+    Kept after the owner's change, so the boot reconcile can tell an injected
+    password it already issued from one the deployment has since rotated."""
 
     def session_denied(self) -> tuple[str, str] | None:
         """Return ``(code, message)`` when this account may not hold a session."""
@@ -123,6 +133,7 @@ class AccountStore:
         email: str = "",
         phone: str = "",
         name: str = "",
+        change_required: bool = False,
     ) -> Account:
         """Create a new account.
 
@@ -133,6 +144,8 @@ class AccountStore:
             email: Optional contact email.
             phone: Optional contact phone.
             name: Optional display name (distinct from ``username``).
+            change_required: The password is issued, not the owner's own, so the
+                owner must replace it before the API serves them.
 
         Returns:
             The newly created Account.
@@ -146,17 +159,14 @@ class AccountStore:
         if path.exists():
             raise ValueError(f"Account already exists: {username}")
 
-        now = _now()
-        account = Account(
-            username=username,
-            password_hash=hash_password(password) if password else _UNUSABLE_PASSWORD_HASH,
-            enabled=True,
-            groups=groups or [],
+        account = _new_account(
+            username,
+            password,
+            groups=groups,
             email=email,
             phone=phone,
             name=name,
-            created_at=now,
-            updated_at=now,
+            change_required=change_required,
         )
         self._write(path, account)
         return account
@@ -252,12 +262,16 @@ class AccountStore:
         self._write(path, account)
         return account
 
-    def reset_password(self, username: str, new_password: str) -> None:
+    def reset_password(
+        self, username: str, new_password: str, *, change_required: bool = False
+    ) -> None:
         """Replace the stored password hash with a fresh bcrypt hash.
 
         Args:
             username: Account to update.
             new_password: New plaintext password.
+            change_required: The password is issued, not the owner's own. False
+                clears a pending change, which is what the owner's own reset does.
 
         Raises:
             KeyError: If no account with *username* exists.
@@ -267,12 +281,7 @@ class AccountStore:
             raise KeyError(username)
 
         account = self._read(path)
-        account = account.model_copy(
-            update={
-                "password_hash": hash_password(new_password),
-                "updated_at": _now(),
-            }
-        )
+        account = account.model_copy(update=_password_update(new_password, change_required))
         self._write(path, account)
 
     def set_attributes(self, username: str, attributes: dict) -> Account:
@@ -421,23 +430,21 @@ class DocuStoreAccountStore:
         email: str = "",
         phone: str = "",
         name: str = "",
+        change_required: bool = False,
     ) -> Account:
         """Create a new account. Raises ValueError if the name is invalid or taken."""
         if not _VALID_NAME.match(username):
             raise ValueError(f"Invalid account name: {username!r}")
         if self._c.exists(username):
             raise ValueError(f"Account already exists: {username}")
-        now = _now()
-        account = Account(
-            username=username,
-            password_hash=hash_password(password) if password else _UNUSABLE_PASSWORD_HASH,
-            enabled=True,
-            groups=groups or [],
+        account = _new_account(
+            username,
+            password,
+            groups=groups,
             email=email,
             phone=phone,
             name=name,
-            created_at=now,
-            updated_at=now,
+            change_required=change_required,
         )
         self._c.put(username, account)
         return account
@@ -484,14 +491,17 @@ class DocuStoreAccountStore:
         self._c.put(username, account)
         return account
 
-    def reset_password(self, username: str, new_password: str) -> None:
-        """Replace the stored hash with a fresh bcrypt hash. Raises KeyError if missing."""
+    def reset_password(
+        self, username: str, new_password: str, *, change_required: bool = False
+    ) -> None:
+        """Replace the stored hash with a fresh bcrypt hash. Raises KeyError if missing.
+
+        ``change_required`` marks the password as issued; False clears a pending change.
+        """
         account = self._c.get(username)
         if account is None:
             raise KeyError(username)
-        account = account.model_copy(
-            update={"password_hash": hash_password(new_password), "updated_at": _now()}
-        )
+        account = account.model_copy(update=_password_update(new_password, change_required))
         self._c.put(username, account)
 
     def set_attributes(self, username: str, attributes: dict) -> Account:
@@ -550,9 +560,57 @@ def _apply_access_stamps(updates: dict[str, object]) -> dict[str, object]:
     return stamped
 
 
+def _new_account(
+    username: str,
+    password: str,
+    *,
+    groups: list[str] | None,
+    email: str,
+    phone: str,
+    name: str,
+    change_required: bool,
+) -> Account:
+    """The record both stores write for a new account."""
+    now = _now()
+    digest = hash_password(password) if password else _UNUSABLE_PASSWORD_HASH
+    return Account(
+        username=username,
+        password_hash=digest,
+        enabled=True,
+        groups=groups or [],
+        email=email,
+        phone=phone,
+        name=name,
+        created_at=now,
+        updated_at=now,
+        password_change_required=change_required,
+        seeded_password_hash=digest if change_required else "",
+    )
+
+
+def _password_update(new_password: str, change_required: bool) -> dict[str, object]:
+    """The fields a password reset writes; an issued password is also the seeded digest."""
+    digest = hash_password(new_password)
+    update: dict[str, object] = {
+        "password_hash": digest,
+        "password_change_required": change_required,
+        "updated_at": _now(),
+    }
+    if change_required:
+        update["seeded_password_hash"] = digest
+    return update
+
+
 def hash_password(password: str, rounds: int = 12) -> str:
     """Bcrypt-hash *password* and return the hash as a UTF-8 string."""
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=rounds)).decode("utf-8")
+
+
+def matches_digest(password: str, digest: str) -> bool:
+    """Whether *digest* was made from *password*; an empty or non-bcrypt digest never matches."""
+    if not password or not digest.startswith("$2"):
+        return False
+    return bcrypt.checkpw(password.encode("utf-8"), digest.encode("utf-8"))
 
 
 def _now() -> str:

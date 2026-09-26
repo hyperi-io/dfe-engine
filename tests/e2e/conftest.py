@@ -67,6 +67,8 @@ class E2EConfig:
     engine_token: str | None
     engine_user: str
     engine_password: str | None
+    # What a fresh deployment's admin is changed to at its forced first-login change.
+    engine_new_password: str | None
     # The data path the flow suite must prove, in the deployment's own words
     # (kafka | grpc | both). Empty means nothing asked, so the flow suite gates.
     transport: str
@@ -99,6 +101,7 @@ def _cfg() -> E2EConfig:
         engine_token=os.getenv("DFE_E2E_ENGINE_TOKEN"),
         engine_user=os.getenv("DFE_E2E_ENGINE_USER", "admin"),
         engine_password=os.getenv("DFE_E2E_ENGINE_PASSWORD"),
+        engine_new_password=os.getenv("DFE_E2E_ADMIN_NEW_PASSWORD"),
         transport=os.getenv("DFE_E2E_TRANSPORT", ""),
         deploy_repo_url=os.getenv("DFE_E2E_DEPLOY_REPO_URL"),
         deploy_repo_token=os.getenv("DFE_E2E_DEPLOY_REPO_TOKEN"),

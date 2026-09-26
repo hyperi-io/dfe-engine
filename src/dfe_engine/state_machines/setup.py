@@ -394,10 +394,9 @@ def _has_real_user(ctx: SetupContext) -> bool:
 def default_credentials(ctx: SetupContext) -> bool:
     """True when the deployment is still running on the shipped admin password.
 
-    Read from the configured password, not from a bcrypt verify: the admin is
-    reconciled from that config on every boot, so config is what the deployment
-    is actually running on. A runtime change that config does not carry is
-    reasserted at the next start.
+    Read from the configured password, not from a bcrypt verify: it grades what
+    the deployment issues to its admin, and the admin's own replacement of it is
+    reported per account as ``password_change_required``, not here.
     """
     return default_credentials_in_use(ctx.bootstrap_admin_password)
 

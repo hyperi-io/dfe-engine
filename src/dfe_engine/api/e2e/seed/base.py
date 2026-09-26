@@ -137,8 +137,8 @@ class Seed:
     def _set_configured_admin_password(self, password: str) -> None:
         """Point the injected admin password at *password*, when settings are present.
 
-        The admin is reconciled from config on every boot, so a seeded password that
-        only reached the store is reverted at the next start.
+        Config is what the boot reconcile issues to the admin and what
+        ``default_credentials`` grades, so the store and config are kept saying the same.
         """
         if self._settings is not None:
             self._settings.auth.local.admin_password = password
@@ -288,8 +288,8 @@ class Seed:
             # compiled from them, as the engine does on a fresh deployment.
             derived = self.apps.reconcile_derived()
 
-            # Back to a fresh deployment: the local admin on the shipped default,
-            # in the store and in the config the boot reconcile reads.
+            # Back to a fresh deployment: the local admin issued the shipped default,
+            # in the store and in the config, and due its forced change at login.
             self._set_configured_admin_password("")
             self.accounts.reset_break_glass_admin()
             logger.info("e2e seed", script=script, derived=derived)

@@ -9,10 +9,12 @@
 """Retirement of the bootstrap admin, recorded in the deploy repo.
 
 The deployment mints a random admin password and injects it as
-``DFE_AUTH_LOCAL_ADMIN_PASSWORD``; the engine reasserts that credential on every
-boot (``auth/bootstrap.py``). That is what makes a rebuild restore the account,
-and it is also why the plaintext can never be deleted from the Secret or ``.env``
--- anyone holding it holds a working admin for the life of the deployment.
+``DFE_AUTH_LOCAL_ADMIN_PASSWORD``; the engine issues that credential with a forced
+change at first login and reasserts it whenever the injected value changes
+(``auth/bootstrap.py``). That is what makes a rebuild restore the account, and it
+is also why the plaintext can never be deleted from the Secret or ``.env`` -- the
+engine refuses to start without it, and anyone able to write it can issue
+themselves the admin at the next boot.
 
 Retirement ends that. The fact lives beside the break-glass hash in the deploy
 repo (``governance/settings/auth.yaml``, key ``admin_retired``), so it survives a

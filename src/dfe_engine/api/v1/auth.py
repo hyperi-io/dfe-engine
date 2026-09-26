@@ -60,6 +60,12 @@ class TokenResponse(BaseModel):
         description="True when this session is running on the shipped default admin "
         "password. Only reachable in a dev posture; the UI banners and forces a change.",
     )
+    password_change_required: bool = Field(
+        default=False,
+        description="True when the account is on an issued password -- the bootstrap "
+        "admin the deployment minted. The token works, but every route answers 403 "
+        "password_change_required until POST /api/v1/auth/accounts/reset-password.",
+    )
 
 
 class UserResponse(BaseModel):
@@ -87,6 +93,11 @@ class UserResponse(BaseModel):
         default="",
         description="When the account was blocked. Empty while it is not blocked.",
     )
+    password_change_required: bool = Field(
+        default=False,
+        description="True until the account replaces an issued password; a console "
+        "shows the change screen before anything else while it is set.",
+    )
 
 
 class PermissionsResponse(BaseModel):
@@ -102,6 +113,26 @@ def _session_account(request: Request, user_id: str):
     if store is None:
         return None
     return account_for_session_subject(store, user_id)
+
+
+def _password_change_required(request: Request, user_id: str) -> bool:
+    """Whether the session's account must replace an issued password first."""
+    account = _session_account(request, user_id)
+    return bool(account and account.password_change_required)
+
+
+def _standing(
+    change_required: bool, roles: list[str], groups: list[str], org_ids: list[str]
+) -> tuple[list[str], list[str], list[str]]:
+    """The roles, groups and orgs a token may carry for this account.
+
+    A token on an issued password carries none: the engine refuses it by account,
+    but dfe-hyperdx admits a token by its claims, so empty claims keep the data
+    plane closed too until the password is changed and the token refreshed.
+    """
+    if change_required:
+        return [], [], []
+    return roles, groups, org_ids
 
 
 # ── Endpoints ────────────────────────────────────────────────
@@ -150,15 +181,19 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
     # audit trail counts - not the per-request token check in get_current_user.
     audit_login_success(auth_ctx.user_id, "jwt", client_ip, auth_ctx.roles)
 
+    change_required = _password_change_required(request, auth_ctx.user_id)
+    roles, groups, org_ids = _standing(
+        change_required, auth_ctx.roles, auth_ctx.groups, auth_ctx.org_ids
+    )
     token = create_access_token(
         data={
             "sub": auth_ctx.user_id,
             "org_id": auth_ctx.org_id,
-            "roles": auth_ctx.roles,
-            "groups": auth_ctx.groups,
-            "org_ids": auth_ctx.org_ids,
+            "roles": roles,
+            "groups": groups,
+            "org_ids": org_ids,
             # dfe-hyperdx gates changing what a team sees on this one value.
-            hyperdx_role.CLAIM: hyperdx_role.role_claim(auth_ctx.roles),
+            hyperdx_role.CLAIM: hyperdx_role.role_claim(roles),
         },
         settings=settings,
     )
@@ -167,8 +202,9 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
         access_token=token,
         expires_in=settings.api.jwt_expire_minutes * 60,
         user_id=auth_ctx.user_id,
-        roles=auth_ctx.roles,
+        roles=roles,
         default_credentials=getattr(request.app.state, "default_credentials", False),
+        password_change_required=change_required,
     )
 
 
@@ -176,15 +212,20 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
 async def refresh_token(user: CurrentUser, request: Request, settings: Settings):
     """Refresh the current JWT token. Requires a valid existing token."""
     require_local_account_enabled(request, user.user_id)
-    roles = resolve_live_roles_for_user(request, user.user_id, fallback_groups=user.groups)
-    groups = resolve_live_groups_for_user(request, user.user_id, fallback_groups=user.groups)
+    change_required = _password_change_required(request, user.user_id)
+    roles, groups, org_ids = _standing(
+        change_required,
+        resolve_live_roles_for_user(request, user.user_id, fallback_groups=user.groups),
+        resolve_live_groups_for_user(request, user.user_id, fallback_groups=user.groups),
+        user.org_ids,
+    )
     token = create_access_token(
         data={
             "sub": user.user_id,
             "org_id": user.org_id,
             "roles": roles,
             "groups": groups,
-            "org_ids": user.org_ids,
+            "org_ids": org_ids,
             # Re-resolved, so a role taken away is gone from the next token too.
             hyperdx_role.CLAIM: hyperdx_role.role_claim(roles),
         },
@@ -197,6 +238,7 @@ async def refresh_token(user: CurrentUser, request: Request, settings: Settings)
         user_id=user.user_id,
         roles=roles,
         default_credentials=getattr(request.app.state, "default_credentials", False),
+        password_change_required=change_required,
     )
 
 
@@ -217,6 +259,7 @@ async def get_me(user: CurrentUser, request: Request):
         blocked=bool(account and account.blocked),
         disabled_at=account.disabled_at if account else "",
         blocked_at=account.blocked_at if account else "",
+        password_change_required=bool(account and account.password_change_required),
     )
 
 
@@ -256,9 +299,9 @@ def retire_bootstrap_admin(
 ) -> SetupStatus:
     """Retire the bootstrap admin: disable it and record the fact in the deploy repo.
 
-    The deployment mints the admin password and the engine reasserts it on every
-    boot, so until it is retired the plaintext in the Secret or ``.env`` is a
-    working admin credential for anyone with cluster or host access. Retiring
+    The deployment mints the admin password and the engine reissues it whenever
+    the injected value changes, so until it is retired anyone able to write the
+    Secret or ``.env`` can issue themselves the admin at the next boot. Retiring
     ends the reseed: the account stays disabled, the password may be deleted, and
     ``breakglass`` is the recovery path.
 

@@ -167,7 +167,7 @@
           "Auth"
         ],
         "summary": "Retire Bootstrap Admin",
-        "description": "Retire the bootstrap admin: disable it and record the fact in the deploy repo.\n\nThe deployment mints the admin password and the engine reasserts it on every\nboot, so until it is retired the plaintext in the Secret or ``.env`` is a\nworking admin credential for anyone with cluster or host access. Retiring\nends the reseed: the account stays disabled, the password may be deleted, and\n``breakglass`` is the recovery path.\n\nRefused unless the deployment already has an enabled admin-role account of its\nown -- ``retire_admin_available`` on the setup status is the same predicate, so\nthe wizard only offers what this accepts. Returns the setup status, which now\nreports ``admin_retired``. Reversal is not an API: remove ``admin_retired``\nfrom ``governance/settings/auth.yaml`` in the deploy repo and restart.",
+        "description": "Retire the bootstrap admin: disable it and record the fact in the deploy repo.\n\nThe deployment mints the admin password and the engine reissues it whenever\nthe injected value changes, so until it is retired anyone able to write the\nSecret or ``.env`` can issue themselves the admin at the next boot. Retiring\nends the reseed: the account stays disabled, the password may be deleted, and\n``breakglass`` is the recovery path.\n\nRefused unless the deployment already has an enabled admin-role account of its\nown -- ``retire_admin_available`` on the setup status is the same predicate, so\nthe wizard only offers what this accepts. Returns the setup status, which now\nreports ``admin_retired``. Reversal is not an API: remove ``admin_retired``\nfrom ``governance/settings/auth.yaml`` in the deploy repo and restart.",
         "operationId": "retire_bootstrap_admin_api_v1_auth_setup_retire_admin_post",
         "responses": {
           "200": {
@@ -724,7 +724,7 @@
           "Accounts"
         ],
         "summary": "Reset Current User Password",
-        "description": "Reset the authenticated user's password.\n\nThe username is taken from the session, not the request, so a caller cannot\nreset another account through this route. An IdP-owned (``external``)\naccount is refused: it has no local password. The live store takes the new\npassword immediately; the ``git`` block reports whether the durable mirror\nmerged, is pending review, or is a no-op for a non-git-backed account.",
+        "description": "Reset the authenticated user's password.\n\nThe username is taken from the session, not the request, so a caller cannot\nreset another account through this route. An IdP-owned (``external``)\naccount is refused: it has no local password. The live store takes the new\npassword immediately; the ``git`` block reports whether the durable mirror\nmerged, is pending review, or is a no-op for a non-git-backed account.\n\nAn account on an issued password may call this and nothing else that\nchanges state, and the reset clears ``password_change_required``.",
         "operationId": "reset_current_user_password_api_v1_auth_accounts_reset_password_post",
         "requestBody": {
           "content": {
@@ -829,7 +829,7 @@
           "Accounts"
         ],
         "summary": "Rotate Password",
-        "description": "Rotate an account's password in the deployment's secret store.\n\nThe store that injects ``DFE_AUTH_LOCAL_ADMIN_PASSWORD`` is the source of that\npassword, so the engine writes the new value through the scalo secrets seam\nand never into its own YAML -- a YAML-only change is reverted by the next boot\nreconcile. Returns 501 with the store command when the deployment has not\ndeclared a secrets path for the password.",
+        "description": "Rotate an account's password in the deployment's secret store.\n\nThe store that injects ``DFE_AUTH_LOCAL_ADMIN_PASSWORD`` is the source of that\npassword, so the engine writes the new value through the scalo secrets seam\nand never into its own YAML. The next boot reconcile issues the rotated value\nto the admin, who must replace it at the following login. Returns 501 with the\nstore command when the deployment has not declared a secrets path for the\npassword.",
         "operationId": "rotate_password_api_v1_auth_accounts__username__rotate_password_post",
         "parameters": [
           {
@@ -32767,6 +32767,12 @@
             "title": "Default Credentials",
             "description": "True when this session is running on the shipped default admin password. Only reachable in a dev posture; the UI banners and forces a change.",
             "default": false
+          },
+          "password_change_required": {
+            "type": "boolean",
+            "title": "Password Change Required",
+            "description": "True when the account is on an issued password -- the bootstrap admin the deployment minted. The token works, but every route answers 403 password_change_required until POST /api/v1/auth/accounts/reset-password.",
+            "default": false
           }
         },
         "type": "object",
@@ -33514,6 +33520,12 @@
             "title": "Blocked At",
             "description": "When the account was blocked. Empty while it is not blocked.",
             "default": ""
+          },
+          "password_change_required": {
+            "type": "boolean",
+            "title": "Password Change Required",
+            "description": "True until the account replaces an issued password; a console shows the change screen before anything else while it is set.",
+            "default": false
           }
         },
         "type": "object",

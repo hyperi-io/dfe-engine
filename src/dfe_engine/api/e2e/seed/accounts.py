@@ -49,14 +49,11 @@ class Accounts(Seed):
         )
 
     def reset_break_glass_admin(self) -> bool:
-        """Reset the break-glass admin account."""
+        """Reset the bootstrap admin to a fresh deployment's: issued, and due a forced change."""
         name = _break_glass_admin_name()
         password = _break_glass_admin_password()
 
-        return self._ensure_admin(
-            name,
-            password=password,
-        )
+        return self._ensure_admin(name, password=password, change_required=True)
 
     def seed_dfe_admin_user(self, name: str = "dfe_admin", *, password: str | None = None) -> bool:
         """Seed local DFE admin account.
@@ -107,13 +104,15 @@ class Accounts(Seed):
         for account in self._account_store.list():
             self._account_store.delete(account.username, allow_protected=True)
 
-    def _ensure_admin(self, name: str = "admin", *, password: str) -> bool:
+    def _ensure_admin(
+        self, name: str = "admin", *, password: str, change_required: bool = False
+    ) -> bool:
         """Create or reset local break-glass admin account.
 
         Returns True when the account was created, False when it was reset.
         """
         self._ensure_group(_ADMIN_GROUP)
-        return self._ensure(name, password, groups=[_ADMIN_GROUP])
+        return self._ensure(name, password, groups=[_ADMIN_GROUP], change_required=change_required)
 
     def _ensure_dfe_analyst(self, name: str = "dfe_analyst", *, password: str) -> bool:
         """Create or reset local DFE analyst account.
@@ -139,13 +138,19 @@ class Accounts(Seed):
         self._ensure_group(_DFE_VIEWERS_GROUP)
         return self._ensure(name, password, groups=[_DFE_VIEWERS_GROUP])
 
-    def _ensure(self, name: str, password: str, *, groups: list[str]) -> bool:
+    def _ensure(
+        self, name: str, password: str, *, groups: list[str], change_required: bool = False
+    ) -> bool:
         """Create or reset local account and attach it to *groups*.
 
         Groups must already exist -- ``bootstrap_auth`` seeds them on every
         startup, so guard with ``_ensure_group``. Returns True when created.
+        ``change_required`` issues the password, so the account must replace it
+        at its next login; otherwise it is the account's own.
         """
-        created = self._upsert_local_account(name, password, groups=groups)
+        created = self._upsert_local_account(
+            name, password, groups=groups, change_required=change_required
+        )
         for group_name in groups:
             self._ensure_membership(group_name, name)
         self._mirror_to_deploy_repo(name)
@@ -196,7 +201,9 @@ class Accounts(Seed):
         if self._group_store.get(name) is None:
             raise ValueError(f"Group {name} does not exist")
 
-    def _upsert_local_account(self, name: str, password: str, *, groups: list[str]) -> bool:
+    def _upsert_local_account(
+        self, name: str, password: str, *, groups: list[str], change_required: bool = False
+    ) -> bool:
         """Create the account or reset password / merge groups / enable it."""
         from dfe_engine.auth.bootstrap import admin_account_name, seeded_account_email
         from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
@@ -209,9 +216,11 @@ class Accounts(Seed):
             else ""
         )
         if existing is None:
-            self._account_store.create(name, password, groups=list(groups), email=email)
+            self._account_store.create(
+                name, password, groups=list(groups), email=email, change_required=change_required
+            )
             return True
-        self._account_store.reset_password(name, password)
+        self._account_store.reset_password(name, password, change_required=change_required)
         merged = list(existing.groups)
         for group in groups:
             if group not in merged:
