@@ -8,12 +8,14 @@
 
 """How the cross-repo contract tests find what a producer ships.
 
-A checkout wins, an unreadable contract fails in CI and skips elsewhere, and every pin
-is a release. The last test reads GitHub and warns when a producer has released a change
-to a file the engine still pins at an older release.
+A checkout wins, an unreadable contract fails in CI and skips elsewhere, a token stays on
+GitHub, and every pin is a release. The last test reads GitHub and warns when a producer
+has released a change to a file the engine still pins at an older release.
 """
 
+import http.server
 import re
+import threading
 import warnings
 
 import pytest
@@ -89,6 +91,33 @@ def test_an_unreadable_contract_skips_outside_ci(tmp_path, monkeypatch, value):
     assert not in_ci()
     with pytest.raises(pytest.skip.Exception, match="SCALO_RS_DIR"):
         producer_file(SCALO_RS, _CEL, checkouts=tmp_path, base_url=_UNREACHABLE)
+
+
+def test_a_token_is_never_sent_off_github(monkeypatch):
+    seen: list[str | None] = []
+
+    class _Recorder(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append(self.headers.get("Authorization"))
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"served")
+
+        def log_message(self, *_args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), _Recorder)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setenv("GITHUB_TOKEN", "held-for-github")
+    try:
+        body = fetch_at(
+            "scalo-rs", "v0.0.0-token-probe", _CEL, f"http://127.0.0.1:{server.server_port}"
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert body == b"served"
+    assert seen == [None]
 
 
 def test_a_file_the_producer_does_not_declare_is_refused():

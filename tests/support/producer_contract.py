@@ -125,10 +125,12 @@ def in_ci() -> bool:
 def _get(url: str, *, accept: str | None = None) -> bytes:
     """The body of a 200 from ``url``, retrying only a transport error, a 5xx or a 429.
 
-    Redirects are not followed, so a token never reaches a host it was not sent to.
+    A token goes only to GitHub over HTTPS, and redirects are not followed, so it never
+    reaches another host.
     """
     headers = {"Accept": accept} if accept else {}
-    if token := os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"):
+    to_github = url.startswith((f"{RAW_BASE}/", f"{API_BASE}/"))
+    if to_github and (token := os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")):
         headers["Authorization"] = f"Bearer {token}"
     outcome = ""
     status: int | None = None
