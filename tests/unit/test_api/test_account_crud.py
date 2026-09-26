@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import re
 import secrets
 
 import pytest
@@ -765,9 +766,9 @@ class TestResetOwnPassword:
         assert resp.status_code == 400
         body = resp.json()
         assert body["code"] == "password_reused"
-        # Only the current password is compared, so the message claims no history.
+        # No password history is stored, so the message claims no history depth.
         assert "current password" in body["message"]
-        assert "last" not in body["message"]
+        assert re.search(r"last \d+", body["message"]) is None
 
     def test_oidc_user_cannot_reset_own_password(self, client, app, api_settings):
         from dfe_engine.api.deps import create_access_token
@@ -833,9 +834,9 @@ class TestResetPassword:
         assert resp.status_code == 400
         body = resp.json()
         assert body["code"] == "password_reused"
-        # Only the current password is compared, so the message claims no history.
+        # No password history is stored, so the message claims no history depth.
         assert "current password" in body["message"]
-        assert "last" not in body["message"]
+        assert re.search(r"last \d+", body["message"]) is None
 
     def test_a_password_under_the_floor_is_refused(self, client, app, admin_headers):
         store = app.state.account_store

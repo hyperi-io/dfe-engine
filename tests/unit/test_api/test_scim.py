@@ -252,6 +252,96 @@ class TestScimUsers:
         assert resp.status_code == 403
 
 
+# ── A refused body never echoes what it carried ──────────────
+
+
+def _echoes(secret: str, text: str, window: int = 8) -> bool:
+    """Whether any run of *window* characters of *secret* appears in *text*.
+
+    pydantic truncates a long input in its error string, so a partial echo counts.
+    """
+    return any(secret[i : i + window] in text for i in range(len(secret) - window + 1))
+
+
+# Bodies scim2_models refuses, each carrying a password.
+_REFUSED_USER_BODIES = {
+    "no_username": lambda pw: {"schemas": [USER_SCHEMA], "password": pw},
+    "password_list": lambda pw: {
+        "schemas": [USER_SCHEMA],
+        "userName": "leak-list",
+        "password": [pw],
+    },
+    "body_list": lambda pw: [{"schemas": [USER_SCHEMA], "userName": "leak-body", "password": pw}],
+    "wrong_urn": lambda pw: {
+        "schemas": ["urn:example:wrong"],
+        "userName": "leak-urn",
+        "password": pw,
+    },
+    "password_object": lambda pw: {
+        "schemas": [USER_SCHEMA],
+        "userName": "leak-object",
+        "password": {"value": pw},
+    },
+}
+
+
+class TestScimRefusalsCarryNoPassword:
+    @pytest.mark.parametrize("shape", sorted(_REFUSED_USER_BODIES))
+    def test_create(self, client, admin_headers, shape):
+        password = secrets.token_urlsafe(24)
+        resp = client.post(
+            f"{BASE}/Users", json=_REFUSED_USER_BODIES[shape](password), headers=admin_headers
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["scimType"] == "invalidValue"
+        assert resp.json()["detail"].startswith("Invalid User")
+        assert not _echoes(password, resp.text)
+        assert "model_fields" not in resp.text
+
+    def test_put(self, client, admin_headers):
+        client.post(
+            f"{BASE}/Users",
+            json={"schemas": [USER_SCHEMA], "userName": "leak-put"},
+            headers=admin_headers,
+        )
+        password = secrets.token_urlsafe(24)
+        resp = client.put(
+            f"{BASE}/Users/leak-put",
+            json=_REFUSED_USER_BODIES["no_username"](password),
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400, resp.text
+        assert not _echoes(password, resp.text)
+
+    def test_patch(self, client, admin_headers):
+        client.post(
+            f"{BASE}/Users",
+            json={"schemas": [USER_SCHEMA], "userName": "leak-patch"},
+            headers=admin_headers,
+        )
+        password = secrets.token_urlsafe(24)
+        resp = client.patch(
+            f"{BASE}/Users/leak-patch",
+            json={
+                "schemas": ["urn:example:wrong"],
+                "Operations": [{"op": "replace", "path": "password", "value": password}],
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400, resp.text
+        assert not _echoes(password, resp.text)
+
+    def test_group_create(self, client, admin_headers):
+        secret = secrets.token_urlsafe(24)
+        resp = client.post(
+            f"{BASE}/Groups",
+            json={"schemas": ["urn:example:wrong"], "displayName": "leak-group", "x": secret},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400, resp.text
+        assert not _echoes(secret, resp.text)
+
+
 # ── Group CRUD via the API ───────────────────────────────────
 
 

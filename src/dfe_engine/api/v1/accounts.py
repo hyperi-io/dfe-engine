@@ -41,7 +41,7 @@ from dfe_engine.api.pagination import (
 )
 from dfe_engine.auth import account_durability
 from dfe_engine.auth.account_durability import AccountGitState
-from dfe_engine.auth.accounts import Account
+from dfe_engine.auth.accounts import Account, matches_digest
 from dfe_engine.auth.audit import audit_account_change
 from dfe_engine.auth.bootstrap import (
     MIN_ADMIN_PASSWORD_LENGTH,
@@ -304,13 +304,19 @@ async def _reset_stored_password(
                 ),
             },
         )
-    # Only the current password is compared: no password history is stored.
-    if store.verify_password(username, new_password):
+    # No history is stored: the current password and the last one issued are all there is.
+    reused = store.verify_password(username, new_password) or matches_digest(
+        new_password, existing.seeded_password_hash
+    )
+    if reused:
         raise HTTPException(
             status_code=400,
             detail={
                 "code": "password_reused",
-                "message": "New password must differ from the account's current password",
+                "message": (
+                    "New password must differ from the account's current password "
+                    "and from the password it was last issued"
+                ),
             },
         )
     store.reset_password(username, new_password)

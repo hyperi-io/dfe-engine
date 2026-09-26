@@ -172,6 +172,21 @@ class TestTheChange:
         assert "current password" in resp.json()["message"]
         assert fresh.get("/api/v1/sources", headers=headers).status_code == 403
 
+    def test_the_issued_password_cannot_be_readopted_after_the_change(self, fresh):
+        headers = _bearer(_login(fresh))
+        _change(fresh, headers)
+
+        resp = fresh.post(_CHANGE, json={"new_password": ADMIN_PASSWORD}, headers=headers)
+
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "password_reused"
+        assert "issued" in resp.json()["message"]
+        assert (
+            fresh.post(_LOGIN, json={"username": "admin", "password": ADMIN_PASSWORD}).status_code
+            == 401
+        )
+        assert _login(fresh, _OWN_PASSWORD)["password_change_required"] is False
+
 
 class TestTheFloorOnTheChange:
     def test_a_short_password_is_refused_and_the_flag_stays_set(self, fresh):
