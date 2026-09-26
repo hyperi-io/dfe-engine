@@ -10,8 +10,6 @@ Or via CLI::
     dfe-engine
 """
 
-from __future__ import annotations
-
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -232,7 +230,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from dfe_engine.auth import admin_retirement
     from dfe_engine.auth.bootstrap import require_admin_password
 
-    app.state.default_credentials = require_admin_password(
+    require_admin_password(
         settings.auth.local.admin_password,
         settings.env,
         retired=admin_retirement.is_retired(gitcrud),

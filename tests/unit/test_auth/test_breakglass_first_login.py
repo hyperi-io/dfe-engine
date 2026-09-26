@@ -14,8 +14,6 @@ hardcodes a passing password reads as a credential to a secret scanner and to
 whoever copies the fixture next.
 """
 
-from __future__ import annotations
-
 import secrets
 from pathlib import Path
 
@@ -26,6 +24,7 @@ from dfe_engine.auth import account_durability, admin_retirement, breakglass
 from dfe_engine.auth.accounts import AccountStore
 from dfe_engine.auth.bootstrap import (
     DefaultCredentialsError,
+    admin_account_password,
     bootstrap_auth,
     default_credentials_in_use,
     require_admin_password,
@@ -47,6 +46,8 @@ from dfe_engine.yaml_utils import yaml_load
 MINTED_ADMIN = secrets.token_urlsafe(16)
 MINTED_BREAKGLASS = secrets.token_urlsafe(16)
 MINTED_SEED = secrets.token_urlsafe(16)
+# The password an unset config issues to the admin.
+SHIPPED_DEFAULT = admin_account_password()
 
 
 @pytest.fixture
@@ -72,18 +73,18 @@ class TestPostureGate:
             require_admin_password("", env)
 
     @pytest.mark.parametrize("env", ["dev", "development", "local", "test", "ci"])
-    def test_dev_posture_runs_on_the_default_and_flags_it(self, env):
-        assert require_admin_password("changeme", env) is True
-        assert require_admin_password("", env) is True
+    def test_dev_posture_runs_on_the_default(self, env):
+        require_admin_password(SHIPPED_DEFAULT, env)
+        require_admin_password("", env)
 
     @pytest.mark.parametrize("env", ["production", "dev"])
     def test_a_minted_password_passes_in_any_posture(self, env):
-        assert require_admin_password(MINTED_ADMIN, env) is False
+        require_admin_password(MINTED_ADMIN, env)
 
     @pytest.mark.parametrize("env", ["production", "dev"])
     def test_a_retired_admin_starts_with_no_password_at_all(self, env):
         """The point of retiring: the operator deletes the injected credential."""
-        assert require_admin_password("", env, retired=True) is False
+        require_admin_password("", env, retired=True)
 
     def test_default_credentials_predicate(self):
         assert default_credentials_in_use("") is True

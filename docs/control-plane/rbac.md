@@ -451,10 +451,7 @@ On first startup (empty `config/auth/` directory), `bootstrap_auth()` seeds:
 The deploy mints the credentials, the engine refuses defaults, the UI never holds
 a password.
 
-**`admin`** takes its password from `DFE_AUTH_LOCAL_ADMIN_PASSWORD`, filled by
-the deployment's own secret store, and goes through the same reconcile path as
-the named seed accounts: password and groups reasserted from config on every
-boot. A password changed only in the store is reverted at the next start.
+**`admin`** takes its password from `DFE_AUTH_LOCAL_ADMIN_PASSWORD`, filled by the deployment's own secret store, issued with a forced change at first login. Every boot reasserts it until the admin replaces it, and after that only on a rotation.
 
 **`breakglass`** is the recovery admin, verified against a bcrypt hash committed
 at `governance/settings/auth.yaml` in the deploy repo, so it survives losing the
@@ -474,9 +471,7 @@ account. Every attempt is audit-logged (`auth.breakglass.login`); with
 **No `changeme` outside dev.** The engine refuses to start on an unset or default
 admin password unless `DFE_ENV` is a dev posture -- the predicate gitops
 auto-merge gates on (`settings.is_dev_posture`), and the error names the variable
-and the fix. A dev posture running the default reports `default_credentials:
-true` on `GET /auth/setup-status` and on the `POST /auth/login` response, for the
-UI to banner and force a change.
+and the fix. A dev posture running the default reports `default_credentials: true` on setup-status, login and refresh, for the UI to banner and force a change. Each reads the admin account at the request, so the forced change clears it with no restart.
 
 **The predicate other repos copy** is `auth.bootstrap.default_credentials_in_use`:
 strip surrounding whitespace, then treat empty and `changeme` as the default. An

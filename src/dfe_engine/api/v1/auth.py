@@ -8,8 +8,6 @@ GET  /api/v1/auth/setup-status      → Initial setup required? (public, pre-log
 POST /api/v1/auth/setup/retire-admin → Retire the bootstrap admin (admin, or itself)
 """
 
-from __future__ import annotations
-
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -33,11 +31,12 @@ from dfe_engine.auth.audit import (
     audit_login_denied,
     audit_login_success,
 )
-from dfe_engine.auth.bootstrap import admin_account_name
+from dfe_engine.auth.bootstrap import admin_account_name, admin_on_default_password
 from dfe_engine.auth.local_provider import LocalAuthProvider
 from dfe_engine.auth.models import AuthenticationError
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.setup_status import SetupStatus, evaluate_initial_setup
+from dfe_engine.settings import DFESettings
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -58,8 +57,9 @@ class TokenResponse(BaseModel):
     roles: list[str] = Field(description="User roles")
     default_credentials: bool = Field(
         default=False,
-        description="True when this session is running on the shipped default admin "
-        "password. Only reachable in a dev posture; the UI banners and forces a change.",
+        description="True while the local admin still logs in on the shipped default "
+        "password, read at this request, so the admin's own change clears it at once. "
+        "Only reachable in a dev posture; the UI banners and forces a change.",
     )
     password_change_required: bool = Field(
         default=False,
@@ -120,6 +120,16 @@ def _password_change_required(request: Request, user_id: str) -> bool:
     """Whether the session's account must replace an issued password first."""
     account = _session_account(request, user_id)
     return bool(account and account.password_change_required)
+
+
+def _default_credentials(request: Request, settings: DFESettings) -> bool:
+    """Whether the local admin is on the shipped default password as of this request."""
+    local = settings.auth.local
+    return admin_on_default_password(
+        getattr(request.app.state, "account_store", None),
+        admin_account_name(local.admin_name),
+        local.admin_password,
+    )
 
 
 def _token_data(
@@ -219,7 +229,7 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
         expires_in=settings.api.jwt_expire_minutes * 60,
         user_id=auth_ctx.user_id,
         roles=data["roles"],
-        default_credentials=getattr(request.app.state, "default_credentials", False),
+        default_credentials=_default_credentials(request, settings),
         password_change_required=change_required,
     )
 
@@ -245,7 +255,7 @@ async def refresh_token(user: CurrentUser, request: Request, settings: Settings)
         expires_in=settings.api.jwt_expire_minutes * 60,
         user_id=user.user_id,
         roles=data["roles"],
-        default_credentials=getattr(request.app.state, "default_credentials", False),
+        default_credentials=_default_credentials(request, settings),
         password_change_required=change_required,
     )
 

@@ -6,9 +6,8 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
-
 import json
+import secrets
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -16,7 +15,7 @@ from fastapi.testclient import TestClient
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
 from dfe_engine.auth import breakglass
-from dfe_engine.auth.bootstrap import admin_account_name
+from dfe_engine.auth.bootstrap import admin_account_name, admin_account_password
 from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
@@ -64,6 +63,8 @@ def _settings_auth_disabled(tmp_path: Path) -> DFESettings:
 
 MINTED_ADMIN = "a-minted-admin-password"
 MINTED_BREAKGLASS = "a-minted-breakglass-password"
+# The password an unset config issues to the admin.
+SHIPPED_DEFAULT = admin_account_password()
 
 
 def _with_deploy_repo(settings: DFESettings, tmp_path: Path) -> DFESettings:
@@ -105,12 +106,24 @@ def test_setup_status_public_and_incomplete_on_fresh_bootstrap(tmp_path):
         _registries.clear()
 
 
-def test_setup_status_reads_the_configured_password_not_the_stored_hash(tmp_path):
-    """A store-side reset is reverted at the next boot, so it cannot clear the flag.
+def _change_admin_password(client: TestClient, new_password: str) -> None:
+    """The forced change a console makes: log in on the issued default, then replace it."""
+    issued = client.post(
+        "/api/v1/auth/login", json={"username": "admin", "password": SHIPPED_DEFAULT}
+    )
+    assert issued.status_code == 200, issued.text
+    assert issued.json()["password_change_required"] is True
+    changed = client.post(
+        "/api/v1/auth/accounts/reset-password",
+        json={"new_password": new_password},
+        headers={"Authorization": f"Bearer {issued.json()['access_token']}"},
+    )
+    assert changed.status_code == 200, changed.text
 
-    The default password is reported by ``default_credentials`` -- the wizard has
-    no step for it, because every deployment mints its own at deploy time.
-    """
+
+def test_the_forced_change_clears_default_credentials_without_a_restart(tmp_path):
+    """Login, refresh and setup-status all answer from the admin's current password."""
+    owner_password = secrets.token_urlsafe(16)
     app = create_app(settings=_settings(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -118,11 +131,59 @@ def test_setup_status_reads_the_configured_password_not_the_stored_hash(tmp_path
             assert body["default_credentials"] is True
             assert "admin_password" not in body["initial_setup"]["steps"]
 
-            app.state.account_store.reset_password(admin_account_name(), "a-store-only-password")
-            assert client.get("/api/v1/auth/setup-status").json()["default_credentials"] is True
+            _change_admin_password(client, owner_password)
 
-            app.state.settings.auth.local.admin_password = MINTED_ADMIN
+            token = client.post(
+                "/api/v1/auth/login", json={"username": "admin", "password": owner_password}
+            )
+            assert token.status_code == 200, token.text
+            assert token.json()["default_credentials"] is False
+            refreshed = client.post(
+                "/api/v1/auth/refresh",
+                headers={"Authorization": f"Bearer {token.json()['access_token']}"},
+            )
+            assert refreshed.status_code == 200, refreshed.text
+            assert refreshed.json()["default_credentials"] is False
             assert client.get("/api/v1/auth/setup-status").json()["default_credentials"] is False
+    finally:
+        _registries.clear()
+
+
+def test_a_restart_keeps_the_owners_password_and_the_cleared_flag(tmp_path):
+    """Config still carries the default, and the reconcile does not issue it again."""
+    settings = _settings(tmp_path)
+    owner_password = secrets.token_urlsafe(16)
+    try:
+        with TestClient(create_app(settings=settings), raise_server_exceptions=False) as client:
+            _change_admin_password(client, owner_password)
+        _registries.clear()
+
+        with TestClient(create_app(settings=settings), raise_server_exceptions=False) as client:
+            stale = client.post(
+                "/api/v1/auth/login", json={"username": "admin", "password": SHIPPED_DEFAULT}
+            )
+            assert stale.status_code == 401, stale.text
+            token = client.post(
+                "/api/v1/auth/login", json={"username": "admin", "password": owner_password}
+            )
+            assert token.status_code == 200, token.text
+            assert token.json()["default_credentials"] is False
+            assert client.get("/api/v1/auth/setup-status").json()["default_credentials"] is False
+    finally:
+        _registries.clear()
+
+
+def test_an_admin_issued_the_default_again_is_flagged_again(tmp_path):
+    """A store write that issues the default puts the flag back on the next read."""
+    app = create_app(settings=_settings(tmp_path))
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            _change_admin_password(client, secrets.token_urlsafe(16))
+            app.state.account_store.reset_password(
+                admin_account_name(), SHIPPED_DEFAULT, change_required=True
+            )
+
+            assert client.get("/api/v1/auth/setup-status").json()["default_credentials"] is True
     finally:
         _registries.clear()
 
