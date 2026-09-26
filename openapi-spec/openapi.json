@@ -29917,7 +29917,7 @@
           "default_credentials": {
             "type": "boolean",
             "title": "Default Credentials",
-            "description": "True when the deployment is running on the shipped default admin password. Only reachable in a dev posture -- the engine refuses to start on it otherwise -- so the UI banners and forces a change.",
+            "description": "True while the local admin still logs in on the shipped default password, read at this request, so the admin's own change clears it at once. Only reachable in a dev posture -- the engine refuses to start on it otherwise -- so the UI banners and forces a change.",
             "default": false
           },
           "deploy_kind": {
@@ -32773,7 +32773,7 @@
           "default_credentials": {
             "type": "boolean",
             "title": "Default Credentials",
-            "description": "True when this session is running on the shipped default admin password. Only reachable in a dev posture; the UI banners and forces a change.",
+            "description": "True while the local admin still logs in on the shipped default password, read at this request, so the admin's own change clears it at once. Only reachable in a dev posture; the UI banners and forces a change.",
             "default": false
           },
           "password_change_required": {
