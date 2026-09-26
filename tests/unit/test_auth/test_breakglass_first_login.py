@@ -155,6 +155,42 @@ class TestAdminSeed:
         assert store.verify_password("admin", rotated)
         assert store.get("admin").password_change_required is True
 
+    def test_the_owners_password_written_back_into_config_is_kept(self, tmp_path: Path):
+        """A deployment that records the owner's new password as the injected one has not rotated it."""
+        auth_dir = tmp_path / "auth"
+        own = MINTED_ADMIN + "-the-owners-own"
+        store, *_ = bootstrap_auth(auth_dir, default_admin_password=MINTED_ADMIN)
+        store.reset_password("admin", own)
+        owners_hash = store.get("admin").password_hash
+
+        store, *_ = bootstrap_auth(auth_dir, default_admin_password=own)
+
+        admin = store.get("admin")
+        assert admin.password_change_required is False
+        assert admin.password_hash == owners_hash
+        assert store.verify_password("admin", own)
+
+    def test_recording_the_owners_password_does_not_reissue_it_on_recreate(
+        self, tmp_path: Path, crud
+    ):
+        """Each recreate rebuilds the store from the deploy repo and boots on the recorded password."""
+        own = MINTED_ADMIN + "-the-owners-own"
+        store, *_ = bootstrap_auth(
+            tmp_path / "auth", default_admin_password=MINTED_ADMIN, gitcrud=crud
+        )
+        store.reset_password("admin", own)
+        owners_hash = store.get("admin").password_hash
+        account_durability.publish_direct(crud, store.get("admin"), summary="reset password")
+
+        for recreate in range(3):
+            store, *_ = bootstrap_auth(
+                tmp_path / f"recreated-{recreate}", default_admin_password=own, gitcrud=crud
+            )
+            assert store.get("admin").password_change_required is False
+            assert store.get("admin").password_hash == owners_hash
+
+        assert crud.get("accounts", "admin")["password_hash"] == owners_hash
+
     def test_an_admin_from_before_the_flag_is_issued_a_forced_change(self, tmp_path: Path):
         """An upgraded deployment's admin has no flag and no digest, yet serves the minted value."""
         auth_dir = tmp_path / "auth"

@@ -16,8 +16,9 @@ Two accounts are seeded from injected config, through ONE reconcile path:
 ``admin``      the everyday local admin. Its password comes from the deployment's
                secret store (``DFE_AUTH_LOCAL_ADMIN_PASSWORD``) and is issued with
                a forced change: the admin must replace it at first login, in every
-               posture. Until then it is reasserted on every boot, and after that
-               only when the injected value changes (a rotation in the secret store).
+               posture. Until then it is reasserted on every boot. After that it is
+               issued again only when the injected value is neither the owner's
+               password nor the one last issued (a rotation in the secret store).
 ``breakglass`` the recovery admin, seeded from a hash committed in the deploy
                repo (:mod:`dfe_engine.auth.breakglass`).
 
@@ -322,12 +323,19 @@ def _config_password_wins(
     """Whether the reconcile writes the configured *password* over the stored one.
 
     A named seed, and an issued password its owner has not yet replaced, follow
-    config whenever the stored hash no longer verifies. Once the owner has replaced
-    an issued password, config wins only when it differs from the password it last
-    issued -- a rotation in the secret store -- so a restart keeps the owner's choice.
+    config whenever the stored hash no longer verifies. An admin from before the
+    flag was never issued its password, so config issues it. Once the owner has
+    replaced an issued password, config wins only when it differs from both the
+    owner's password and the one last issued -- a rotation in the secret store --
+    so a restart keeps the owner's choice, including when the owner's password is
+    written back into config.
     """
     if not issued or account.password_change_required:
         return not account_store.verify_password(account.username, password)
+    if not account.seeded_password_hash:
+        return True
+    if account_store.verify_password(account.username, password):
+        return False
     return not matches_digest(password, account.seeded_password_hash)
 
 
