@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import secrets
+
 import pytest
 
 
@@ -216,7 +218,7 @@ class TestUpdateGroup:
             "/api/v1/auth/accounts",
             json={
                 "username": "memsync-user",
-                "password": "pw",
+                "password": secrets.token_urlsafe(16),
                 "email": "memsync-user@example.com",
             },
             headers=admin_headers,
@@ -247,7 +249,7 @@ class TestUpdateGroup:
             "/api/v1/auth/accounts",
             json={
                 "username": "rm-sync-user",
-                "password": "pw",
+                "password": secrets.token_urlsafe(16),
                 "email": "rm-sync-user@example.com",
                 "groups": ["rm-sync-group"],
             },

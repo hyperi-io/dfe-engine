@@ -1,5 +1,7 @@
 """Tests for auth router — login, me, permissions, 401/403."""
 
+import secrets
+
 import jwt as pyjwt
 from fastapi.testclient import TestClient
 
@@ -295,7 +297,7 @@ class TestMe:
             "/api/v1/auth/accounts",
             json={
                 "username": "nogrp",
-                "password": "pw",
+                "password": secrets.token_urlsafe(16),
                 "email": "nogrp@example.com",
                 "groups": [],
             },

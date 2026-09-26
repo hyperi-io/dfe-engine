@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.22.4"
+    "version": "1.22.5"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -86,7 +86,7 @@
           "Auth"
         ],
         "summary": "Get Me",
-        "description": "Get the current authenticated user's info.",
+        "description": "Get the current authenticated user's info.\n\nA session on an issued password reports the flag and no roles, permissions,\ngroups or orgs, because its token carries none until the change.",
         "operationId": "get_me_api_v1_auth_me_get",
         "responses": {
           "200": {
@@ -509,7 +509,7 @@
           "Accounts"
         ],
         "summary": "Get Current User Account",
-        "description": "Return the authenticated user's account. No extra scope required.",
+        "description": "Return the authenticated user's account. No extra scope required.\n\nAn account on an issued password reads back with no groups: its session holds\nno standing until the change, and a console copies this read into its session.",
         "operationId": "get_current_user_account_api_v1_auth_accounts_me_get",
         "responses": {
           "200": {
@@ -10417,7 +10417,7 @@
           "SCIM"
         ],
         "summary": "Create User",
-        "description": "Provision a user. IdP-owned; local password is randomised when omitted.",
+        "description": "Provision a user. IdP-owned; local password is randomised when omitted.\n\nA password the IdP does send is held to the same length floor as every other\npassword the API sets, and one under it is refused rather than replaced.",
         "operationId": "create_user_api_v1_scim_v2_Users_post",
         "responses": {
           "200": {
@@ -17793,6 +17793,12 @@
             "title": "External",
             "description": "True when the account authenticates through an identity provider"
           },
+          "password_change_required": {
+            "type": "boolean",
+            "title": "Password Change Required",
+            "description": "True until the account replaces an issued password. The account's own read reports no groups while it is set, as its session holds none.",
+            "default": false
+          },
           "created_at": {
             "type": "string",
             "title": "Created At"
@@ -19958,8 +19964,9 @@
           },
           "password": {
             "type": "string",
+            "minLength": 12,
             "title": "Password",
-            "description": "Plaintext password (bcrypt-hashed before storage)"
+            "description": "Plaintext password (bcrypt-hashed before storage); at least 12 characters"
           },
           "email": {
             "type": "string",
@@ -27271,8 +27278,9 @@
         "properties": {
           "new_password": {
             "type": "string",
+            "minLength": 12,
             "title": "New Password",
-            "description": "New plaintext password"
+            "description": "New plaintext password; at least 12 characters"
           }
         },
         "type": "object",

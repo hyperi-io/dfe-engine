@@ -19,9 +19,12 @@ Covers:
 
 from __future__ import annotations
 
+import secrets
+
 import pytest
 
 from dfe_engine.auth.accounts import Account
+from dfe_engine.auth.bootstrap import MIN_ADMIN_PASSWORD_LENGTH
 from dfe_engine.auth.breakglass import GROUP as RECOVERY_GROUP
 from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS
 from dfe_engine.auth.groups import Group
@@ -117,6 +120,29 @@ class TestScimUsers:
         assert account.enabled is True
         assert account.external_id == "okta-1"
         assert account.source_provider == "scim"
+
+    def test_a_password_under_the_floor_is_refused(self, app, client, admin_headers):
+        short = secrets.token_urlsafe(16)[: MIN_ADMIN_PASSWORD_LENGTH - 1]
+        resp = client.post(
+            f"{BASE}/Users",
+            json={"schemas": [USER_SCHEMA], "userName": "scim-short", "password": short},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["scimType"] == "invalidValue"
+        assert str(MIN_ADMIN_PASSWORD_LENGTH) in resp.json()["detail"]
+        assert short not in resp.text
+        assert app.state.account_store.get("scim-short") is None
+
+    def test_a_password_at_the_floor_is_stored(self, app, client, admin_headers):
+        at_floor = secrets.token_urlsafe(16)[:MIN_ADMIN_PASSWORD_LENGTH]
+        resp = client.post(
+            f"{BASE}/Users",
+            json={"schemas": [USER_SCHEMA], "userName": "scim-floor", "password": at_floor},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        assert app.state.account_store.verify_password("scim-floor", at_floor)
 
     def test_create_duplicate_returns_409(self, client, admin_headers):
         payload = {"schemas": [USER_SCHEMA], "userName": "dup-user"}
@@ -224,6 +250,96 @@ class TestScimUsers:
             headers=viewer_headers,
         )
         assert resp.status_code == 403
+
+
+# ── A refused body never echoes what it carried ──────────────
+
+
+def _echoes(secret: str, text: str, window: int = 8) -> bool:
+    """Whether any run of *window* characters of *secret* appears in *text*.
+
+    pydantic truncates a long input in its error string, so a partial echo counts.
+    """
+    return any(secret[i : i + window] in text for i in range(len(secret) - window + 1))
+
+
+# Bodies scim2_models refuses, each carrying a password.
+_REFUSED_USER_BODIES = {
+    "no_username": lambda pw: {"schemas": [USER_SCHEMA], "password": pw},
+    "password_list": lambda pw: {
+        "schemas": [USER_SCHEMA],
+        "userName": "leak-list",
+        "password": [pw],
+    },
+    "body_list": lambda pw: [{"schemas": [USER_SCHEMA], "userName": "leak-body", "password": pw}],
+    "wrong_urn": lambda pw: {
+        "schemas": ["urn:example:wrong"],
+        "userName": "leak-urn",
+        "password": pw,
+    },
+    "password_object": lambda pw: {
+        "schemas": [USER_SCHEMA],
+        "userName": "leak-object",
+        "password": {"value": pw},
+    },
+}
+
+
+class TestScimRefusalsCarryNoPassword:
+    @pytest.mark.parametrize("shape", sorted(_REFUSED_USER_BODIES))
+    def test_create(self, client, admin_headers, shape):
+        password = secrets.token_urlsafe(24)
+        resp = client.post(
+            f"{BASE}/Users", json=_REFUSED_USER_BODIES[shape](password), headers=admin_headers
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["scimType"] == "invalidValue"
+        assert resp.json()["detail"].startswith("Invalid User")
+        assert not _echoes(password, resp.text)
+        assert "model_fields" not in resp.text
+
+    def test_put(self, client, admin_headers):
+        client.post(
+            f"{BASE}/Users",
+            json={"schemas": [USER_SCHEMA], "userName": "leak-put"},
+            headers=admin_headers,
+        )
+        password = secrets.token_urlsafe(24)
+        resp = client.put(
+            f"{BASE}/Users/leak-put",
+            json=_REFUSED_USER_BODIES["no_username"](password),
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400, resp.text
+        assert not _echoes(password, resp.text)
+
+    def test_patch(self, client, admin_headers):
+        client.post(
+            f"{BASE}/Users",
+            json={"schemas": [USER_SCHEMA], "userName": "leak-patch"},
+            headers=admin_headers,
+        )
+        password = secrets.token_urlsafe(24)
+        resp = client.patch(
+            f"{BASE}/Users/leak-patch",
+            json={
+                "schemas": ["urn:example:wrong"],
+                "Operations": [{"op": "replace", "path": "password", "value": password}],
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400, resp.text
+        assert not _echoes(password, resp.text)
+
+    def test_group_create(self, client, admin_headers):
+        secret = secrets.token_urlsafe(24)
+        resp = client.post(
+            f"{BASE}/Groups",
+            json={"schemas": ["urn:example:wrong"], "displayName": "leak-group", "x": secret},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400, resp.text
+        assert not _echoes(secret, resp.text)
 
 
 # ── Group CRUD via the API ───────────────────────────────────

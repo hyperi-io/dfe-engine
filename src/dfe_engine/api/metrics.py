@@ -10,14 +10,16 @@
 A mutating request on the deploy-repo routers runs off the event loop but waits
 its turn behind any other one in flight, so a write that queued is counted here,
 on the metrics manager the engine serves on ``/metrics``. So is a request refused
-because its account must change its password first. With no manager every record
-call returns without doing anything, which is the state the unit suite runs in.
+because its account must change its password first, and a password write refused
+because the password is shorter than the floor. With no manager every record call
+returns without doing anything, which is the state the unit suite runs in.
 """
 
 from typing import Any
 
 WRITES_HELD = "api_writes_held_total"
 PASSWORD_CHANGE_REFUSALS = "api_password_change_refusals_total"
+PASSWORD_FLOOR_REFUSALS = "api_password_floor_refusals_total"
 
 
 class ApiMetrics:
@@ -39,6 +41,11 @@ class ApiMetrics:
             PASSWORD_CHANGE_REFUSALS,
             "Requests refused because the account must change its password first",
             ["method", "area"],
+        )
+        self._password_floor = manager.counter(
+            PASSWORD_FLOOR_REFUSALS,
+            "Password writes refused because the password is shorter than the floor",
+            ["route"],
         )
 
     @property
@@ -64,5 +71,16 @@ class ApiMetrics:
             return
         self._password_change.labels(method=method, area=area).inc()
 
+    def password_floor_refused(self, route: str) -> None:
+        """Record a password write refused because the password is under the floor.
 
-__all__ = ["PASSWORD_CHANGE_REFUSALS", "WRITES_HELD", "ApiMetrics"]
+        Args:
+            route: The matched route template, so the label is bounded by the
+                route table and never carries a path parameter's value.
+        """
+        if self._manager is None:
+            return
+        self._password_floor.labels(route=route).inc()
+
+
+__all__ = ["PASSWORD_CHANGE_REFUSALS", "PASSWORD_FLOOR_REFUSALS", "WRITES_HELD", "ApiMetrics"]

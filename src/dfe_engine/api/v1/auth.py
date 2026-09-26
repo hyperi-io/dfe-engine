@@ -252,7 +252,11 @@ async def refresh_token(user: CurrentUser, request: Request, settings: Settings)
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(user: CurrentUser, request: Request):
-    """Get the current authenticated user's info."""
+    """Get the current authenticated user's info.
+
+    A session on an issued password reports the flag and no roles, permissions,
+    groups or orgs, because its token carries none until the change.
+    """
     role_config = get_role_config(request)
     permissions = sorted(role_config.resolve_permissions(user.roles))
     account = _session_account(request, user.user_id)

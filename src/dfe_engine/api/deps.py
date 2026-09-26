@@ -713,6 +713,16 @@ async def get_current_user(request: Request) -> AuthContext:
             jwt_groups = []
         account = require_local_account_enabled(request, jwt_user_id)
         refuse_until_password_changed(request, account)
+        if account is not None and account.password_change_required:
+            # Its token carries no roles, groups or orgs, so neither does the session.
+            return AuthContext(
+                org_id=payload.get("org_id", "default"),
+                user_id=jwt_user_id,
+                email=jwt_email,
+                request_id=request_id,
+                client_ip=client_ip,
+                user_agent=user_agent,
+            )
         live = resolve_live_grants_for_user(request, jwt_user_id, fallback_groups=jwt_groups)
         live_groups = resolve_live_groups_for_user(request, jwt_user_id, fallback_groups=jwt_groups)
         claim_org_ids = payload.get("org_ids", [])
