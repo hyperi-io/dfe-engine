@@ -3,6 +3,16 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.7](https://github.com/hyperi-io/dfe-engine/compare/v1.22.6...v1.22.7) (2026-09-26)
+
+### Bug Fixes
+
+* **api:** say setup-status never carries the pending merge ([#551](https://github.com/hyperi-io/dfe-engine/issues/551)) ([92f3edf](https://github.com/hyperi-io/dfe-engine/commit/92f3edffdb8ca4a4122df99ba1f7b7efc145beb5))
+* **auth:** report default credentials from the live admin state ([#555](https://github.com/hyperi-io/dfe-engine/issues/555)) ([a165d43](https://github.com/hyperi-io/dfe-engine/commit/a165d43febfdbb985f7a6305810fc7e21056186c))
+* **tests:** drop the test stats nothing reads ([#552](https://github.com/hyperi-io/dfe-engine/issues/552)) ([840f861](https://github.com/hyperi-io/dfe-engine/commit/840f8614973c6c04af256c5b6bb5faf5c2250b99))
+* **tests:** refuse a temp root inside a checkout ([#550](https://github.com/hyperi-io/dfe-engine/issues/550)) ([5f4f57c](https://github.com/hyperi-io/dfe-engine/commit/5f4f57cd2b0ce055451f2b87f7183550981a1d67)), closes [#548](https://github.com/hyperi-io/dfe-engine/issues/548)
+* **tests:** run the cross-repo contract tests in CI ([#554](https://github.com/hyperi-io/dfe-engine/issues/554)) ([c70f992](https://github.com/hyperi-io/dfe-engine/commit/c70f992e349235f928d03f7124f7912049af794e)), closes [#553](https://github.com/hyperi-io/dfe-engine/issues/553)
+
 ## [1.22.6](https://github.com/hyperi-io/dfe-engine/compare/v1.22.5...v1.22.6) (2026-09-26)
 
 ### Bug Fixes
