@@ -451,8 +451,8 @@ class ClickHouseManager:
                 "host": host,
                 "port": port,
                 "pool_mgr": self._pool_manager,
-                # One client serves every worker thread, and clickhouse-connect
-                # refuses a second query in flight on a shared session.
+                # One client serves every worker thread, and the ClickHouse server
+                # refuses a second query in flight on one session (SESSION_IS_LOCKED).
                 "autogenerate_session_id": False,
             }
 

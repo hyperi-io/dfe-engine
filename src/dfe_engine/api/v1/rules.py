@@ -10,11 +10,13 @@ POST   /api/v1/rules/validate     → Validate SQL/CEL without creating
 
 from __future__ import annotations
 
+import functools
 import re
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator, model_validator
+from scalo.concurrency import run_blocking
 
 from dfe_engine.api.deps import CurrentUser, HuntConfigReg, RuleReg, Settings, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
@@ -301,6 +303,31 @@ async def create_rule_from_hyperdx(
     RBAC: ``rule:write`` (data_analyst) -- ``org_viewer`` has neither this grant nor
     the UI button.
     """
+    raw_sql, search_name = await _resolve_hyperdx_sql(request, body)
+    return await run_blocking(
+        functools.partial(
+            _create_rule_from_sql,
+            body,
+            raw_sql,
+            search_name,
+            user,
+            settings,
+            registry,
+            response,
+        )
+    )
+
+
+def _create_rule_from_sql(
+    body: RuleFromHyperdxRequest,
+    raw_sql: str,
+    search_name: str | None,
+    user: CurrentUser,
+    settings: Settings,
+    registry: RuleReg,
+    response: Response,
+) -> RuleFromHyperdxResponse:
+    """The deploy-repo and ClickHouse half of ``create_rule_from_hyperdx``, on a worker thread."""
     from dfe_engine.hunts.rule_creation_service import (
         RuleCreateRequest as SvcRequest,
     )
@@ -309,7 +336,6 @@ async def create_rule_from_hyperdx(
     )
     from dfe_engine.settings import get_clickhouse_config
 
-    raw_sql, search_name = await _resolve_hyperdx_sql(request, body)
     resolved_from = "raw_sql" if body.raw_sql else "saved_search"
 
     rule_id = _unique_rule_id(registry, search_name)

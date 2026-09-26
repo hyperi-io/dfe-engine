@@ -58,6 +58,7 @@ _MUST_NOT_HAPPEN_SECONDS = 0.5
 _VRL = "/api/v1/apps/dfe-transform-vrl/seedsource"
 _RECEIVER = "/api/v1/apps/dfe-receiver/default"
 _CH_REPLICAS = "/api/v1/backing-services/overlays/clickhouse-cluster/vars/clickhouse.replicas"
+_NEW_PASSWORD = "loop-probe-Passw0rd-2026"
 
 
 class _Park:
@@ -210,6 +211,17 @@ _DEPLOY_REPO_CASES: list[tuple[str, str, dict | None]] = [
     ("PUT", _CH_REPLICAS, {"value": 5}),
     ("PUT", "/api/v1/gitops/auto-merge", {"enabled": True}),
     ("POST", "/api/v1/auth/setup/retire-admin", None),
+    (
+        "POST",
+        "/api/v1/rules/from-hyperdx",
+        {"raw_sql": "SELECT 1 FROM logs WHERE level = 'error'", "saved_search_name": "Loop probe"},
+    ),
+    # The break-glass admin is the one account mirrored into the deploy repo.
+    ("PUT", "/api/v1/auth/accounts/admin", {"name": "Loop Probe"}),
+    ("PUT", "/api/v1/auth/accounts/me", {"name": "Loop Probe"}),
+    ("POST", "/api/v1/auth/accounts/admin/reset-password", {"new_password": _NEW_PASSWORD}),
+    ("POST", "/api/v1/auth/accounts/reset-password", {"new_password": _NEW_PASSWORD}),
+    ("GET", "/api/v1/auth/accounts/admin/git-status", None),
 ]
 
 
