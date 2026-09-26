@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.6](https://github.com/hyperi-io/dfe-engine/compare/v1.22.5...v1.22.6) (2026-09-26)
+
+### Bug Fixes
+
+* **auth:** a password floor on every route that sets one, and no echo in SCIM errors ([#547](https://github.com/hyperi-io/dfe-engine/issues/547)) ([aea175c](https://github.com/hyperi-io/dfe-engine/commit/aea175c32f5fc7350be5645ce7d3a859b32e8cf3))
+
 ## [1.22.5](https://github.com/hyperi-io/dfe-engine/compare/v1.22.4...v1.22.5) (2026-09-26)
 
 ### Bug Fixes
