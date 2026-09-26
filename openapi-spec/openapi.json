@@ -29912,7 +29912,7 @@
                 "type": "null"
               }
             ],
-            "description": "Durability of the LOCAL ADMIN account in the deploy repo (the field name predates the separate breakglass recovery account): enabled/auto_merge/committed/merged, plus pending.pr_url/command/branch when a review PR or CLI merge is still outstanding."
+            "description": "Durability of the LOCAL ADMIN account in the deploy repo (the field name predates the separate breakglass recovery account): enabled/auto_merge/committed/merged. pending is always null here: the review PR URL or CLI merge command comes only in the reset-password response. committed without merged means a change is still waiting on that merge."
           },
           "default_credentials": {
             "type": "boolean",
