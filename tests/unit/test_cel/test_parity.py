@@ -18,17 +18,11 @@ the same results.
 If both tests pass on their respective sides, the Python UI validator and
 the Rust runtime engine agree on tier classification, op extraction, and
 field-reference extraction. If they diverge, the UI will validate filters
-differently from the runtime — this test catches that drift early.
+differently from the runtime -- this test catches that drift early.
 
-The fixture file lives in two places:
-
-* ``/projects/dfe-engine/tests/fixtures/cel_classifier_parity.json`` (this side)
-* ``/projects/scalo-rs/tests/fixtures/cel_classifier_parity.json`` (Rust side)
-
-Keep them byte-identical when adding cases.
+The fixture file lives at ``tests/fixtures/cel_classifier_parity.json`` in both
+repos. Keep the two byte-identical when adding cases.
 """
-
-from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -36,8 +30,10 @@ from pathlib import Path
 import pytest
 
 from dfe_engine.cel.classify import FilterTier, classify_expression
+from tests.support.producer_contract import SCALO_RS, producer_file
 
 FIXTURE_PATH = Path(__file__).parents[2] / "fixtures" / "cel_classifier_parity.json"
+_SCALO_RS_COPY = "tests/fixtures/cel_classifier_parity.json"
 
 
 def _load_cases() -> list[dict]:
@@ -90,43 +86,16 @@ def test_python_classifier_matches_fixture(case: dict) -> None:
         )
 
 
-SCALO_RS_COPY = Path("/projects/scalo-rs/tests/fixtures/cel_classifier_parity.json")
-
-
 def test_fixture_is_in_sync_with_scalo_rs_copy() -> None:
-    """Sanity check: the dfe-engine fixture must be byte-identical to the
-    scalo-rs copy. If this fails, run::
+    """The engine fixture must be byte-identical to the one scalo-rs ships.
 
-        cp tests/fixtures/cel_classifier_parity.json \\
-           /projects/scalo-rs/tests/fixtures/cel_classifier_parity.json
+    The scalo-rs copy comes from a checkout, else from the release pinned in
+    ``tests/support/producer_contract.py``. Against a checkout, a mismatch is an
+    edit on one side only: copy one file over the other. Against the pin, it is a
+    case one repo has and the other has not released: sync the files, then move the
+    pin to the scalo-rs release that carries them.
     """
-    if not SCALO_RS_COPY.exists():
-        pytest.skip("scalo-rs checkout not available; skipping cross-repo sync check")
-
-    local_bytes = FIXTURE_PATH.read_bytes()
-    scalo_rs_bytes = SCALO_RS_COPY.read_bytes()
-    assert local_bytes == scalo_rs_bytes, (
-        "Python and Rust fixtures have diverged — copy one over the other to re-sync"
+    scalo_rs = producer_file(SCALO_RS, _SCALO_RS_COPY)
+    assert FIXTURE_PATH.read_bytes() == scalo_rs.data, (
+        f"{FIXTURE_PATH.name} differs from {scalo_rs.origin} - copy one over the other to re-sync"
     )
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "The sync check keys on the absolute path /projects/scalo-rs/..., which "
-        "resolves only where a sibling checkout happens to sit, so it skips on every CI run "
-        "and the two fixtures can diverge unreported. The Rust copy must be reachable from "
-        "repo state -- a submodule, or a vendored copy under tests/fixtures/ refreshed by a "
-        "release step. Remove this marker once it is."
-    ),
-)
-def test_scalo_rs_fixture_reference_resolves_from_repo_state() -> None:
-    """The cross-repo sync check must not depend on a machine-specific path.
-
-    A guard whose precondition is "someone happens to have cloned another repo
-    next door" is a guard CI never runs. The reference has to come from
-    something the repo carries.
-    """
-    assert not SCALO_RS_COPY.is_absolute() or SCALO_RS_COPY.is_relative_to(
-        Path(__file__).resolve().parents[3]
-    ), f"cross-repo fixture reference is outside the repo: {SCALO_RS_COPY}"
