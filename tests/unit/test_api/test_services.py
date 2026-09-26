@@ -161,6 +161,80 @@ class TestLegacySecretsAreStoredAndMaskedOnTheWayOut:
         assert _saved(api_settings, "customsvc-one")["db"]["password"] == "raw-pw-8814"
 
 
+class TestALegacyMaskedCredentialRestoresOnlyWhereItWasSet:
+    """A masked credential written back beside a changed field has to be typed again."""
+
+    URL = "/api/v1/services/customsvc/conn"
+    TABLE = "customsvc-conn"
+    STORED = {
+        "connections": [
+            {"id": "a", "tenant_url": "https://a.example", "token": "tok-a-8820"},
+            {"id": "b", "tenant_url": "https://b.example", "token": "tok-b-8821"},
+        ]
+    }
+
+    def _shown(self, client, headers) -> dict:
+        assert client.put(self.URL, json=self.STORED, headers=headers).status_code == 200
+        shown = client.get(self.URL, headers=headers).json()["config"]
+        assert [c["token"] for c in shown["connections"]] == [contract.REDACTED] * 2
+        return shown
+
+    def test_a_connection_pointed_elsewhere_is_refused(self, client, admin_headers, api_settings):
+        shown = self._shown(client, admin_headers)
+        shown["connections"][0]["tenant_url"] = "https://evil.example"
+        resp = client.put(self.URL, json=shown, headers=admin_headers)
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "credential_reentry_required"
+        assert "connections[0]" in resp.json()["message"]
+        assert _saved(api_settings, self.TABLE) == self.STORED
+
+    def test_the_change_is_taken_with_the_token_typed_again(
+        self, client, admin_headers, api_settings
+    ):
+        shown = self._shown(client, admin_headers)
+        shown["connections"][0] = {
+            "id": "a",
+            "tenant_url": "https://new.example",
+            "token": "tok-a-8822",
+        }
+        resp = client.put(self.URL, json=shown, headers=admin_headers)
+        assert resp.status_code == 200, resp.text
+        assert _saved(api_settings, self.TABLE)["connections"] == [
+            {"id": "a", "tenant_url": "https://new.example", "token": "tok-a-8822"},
+            self.STORED["connections"][1],
+        ]
+
+    def test_an_untouched_connection_beside_a_changed_one_still_restores(
+        self, client, admin_headers, api_settings
+    ):
+        shown = self._shown(client, admin_headers)
+        shown["connections"][1] = {
+            "id": "b",
+            "tenant_url": "https://b2.example",
+            "token": "tok-b-8823",
+        }
+        resp = client.put(self.URL, json=shown, headers=admin_headers)
+        assert resp.status_code == 200, resp.text
+        assert _saved(api_settings, self.TABLE)["connections"] == [
+            self.STORED["connections"][0],
+            {"id": "b", "tenant_url": "https://b2.example", "token": "tok-b-8823"},
+        ]
+
+    def test_a_typed_config_changed_around_its_masked_password_is_refused(
+        self, client, admin_headers, api_settings
+    ):
+        url = TestLegacySecretsAreStoredAndMaskedOnTheWayOut.URL
+        body = TestLegacySecretsAreStoredAndMaskedOnTheWayOut()._body()
+        assert client.put(url, json=body, headers=admin_headers).status_code == 200
+        shown = client.get(url, headers=admin_headers).json()["config"]
+        shown["kafka"]["sasl"]["username"] = "someone-else"
+        resp = client.put(url, json=shown, headers=admin_headers)
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "credential_reentry_required"
+        assert "kafka.sasl" in resp.json()["message"]
+        assert _saved(api_settings, "receiver-placeholder")["kafka"]["sasl"]["username"] == "dfe"
+
+
 @pytest.fixture
 def stored_before_retirement(api_settings: DFESettings) -> None:
     """Service files as a deployment saved them before ``payload`` and ``format`` were retired."""

@@ -212,7 +212,7 @@ def invoke_action(
     except CommitPolicyError as exc:
         raise HTTPException(403, detail={"code": "policy_violation", "message": str(exc)}) from exc
     except contract.MaskedValueError as exc:
-        raise HTTPException(400, detail={"code": "masked_value", "message": str(exc)}) from exc
+        raise HTTPException(400, detail={"code": exc.code, "message": str(exc)}) from exc
 
     if dry_run:
         return InvokeResponse(dry_run=True, changed=False, commit_sha=None, diff=preview.diff)

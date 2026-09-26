@@ -173,7 +173,7 @@ def set_var_governed(
         value = contract.restore_masked_at(stored, path, value)
     except contract.MaskedValueError as exc:
         raise HTTPException(
-            status_code=400, detail={"code": "masked_value", "message": str(exc)}
+            status_code=400, detail={"code": exc.code, "message": str(exc)}
         ) from exc
     try:
         validate_change(path, value, stored)

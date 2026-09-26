@@ -1006,11 +1006,11 @@ class TestAMaskedListEntryKeepsItsOwnCredential:
         restored = contract.restore_masked([*self._shown("a", "b", "c"), added], self.CONNECTIONS)
         assert restored == [*self.CONNECTIONS, added]
 
-    def test_an_entry_edited_in_place_keeps_its_token(self):
+    def test_an_entry_edited_around_its_masked_token_is_refused(self):
         edited = self._shown("b", "a")
         edited[0]["org"] = "org-b-2"
-        restored = contract.restore_masked(edited, self.CONNECTIONS)
-        assert restored == [{**self.CONNECTIONS[1], "org": "org-b-2"}, self.CONNECTIONS[0]]
+        with pytest.raises(contract.CredentialReentryError, match=r"connections\[0\].*org"):
+            contract.restore_masked(edited, self.CONNECTIONS, path="connections")
 
     def test_a_renamed_entry_is_refused(self):
         renamed = self._shown("a", "b")
@@ -1073,6 +1073,113 @@ class TestAMaskedListEntryKeepsItsOwnCredential:
         path = "config.x.endpoints"
         written = [{"url": "u-1", "token": self.R}, {"url": "u-2"}]
         assert contract.restore_masked_at(doc, path, written) == doc["config"]["x"]["endpoints"]
+
+
+class TestAMaskedCredentialRestoresOnlyWhereItWasSet:
+    """A masked credential restores only while every other field of its object is as stored.
+
+    A writer who cannot read a token could otherwise point its entry at a host they
+    run and have the engine send the real token there.
+    """
+
+    R = contract.REDACTED
+    CONNECTIONS = [
+        {"id": "a", "tenant_url": "https://a.example", "token": "tok-a-4430"},
+        {"id": "b", "tenant_url": "https://b.example", "token": "tok-b-4431"},
+    ]
+
+    def test_a_named_entry_pointed_elsewhere_is_refused(self):
+        written = [
+            {"id": "a", "tenant_url": "https://evil.example", "token": self.R},
+            {**self.CONNECTIONS[1], "token": self.R},
+        ]
+        with pytest.raises(contract.CredentialReentryError, match=r"connections\[0\].*tenant_url"):
+            contract.restore_masked(written, self.CONNECTIONS, path="connections")
+
+    def test_the_change_is_taken_with_the_credential_typed_again(self):
+        written = [
+            {"id": "a", "tenant_url": "https://new.example", "token": "tok-a-4432"},
+            {**self.CONNECTIONS[1], "token": self.R},
+        ]
+        assert contract.restore_masked(written, self.CONNECTIONS) == [
+            written[0],
+            self.CONNECTIONS[1],
+        ]
+
+    def test_an_untouched_entry_beside_a_changed_one_still_restores(self):
+        written = [
+            {**self.CONNECTIONS[0], "token": self.R},
+            {"id": "b", "tenant_url": "https://b2.example", "token": "tok-b-4433"},
+        ]
+        assert contract.restore_masked(written, self.CONNECTIONS) == [
+            self.CONNECTIONS[0],
+            written[1],
+        ]
+
+    def test_an_unnamed_entry_with_a_field_dropped_is_refused(self):
+        stored = [{"url": "https://u-1.example", "tls_verify": True, "token": "tok-4434"}]
+        written = [{"url": "https://u-1.example", "token": self.R}]
+        with pytest.raises(contract.CredentialReentryError, match="tls_verify"):
+            contract.restore_masked(written, stored, path="endpoints")
+
+    def test_a_mapping_changed_around_its_masked_password_is_refused(self):
+        doc = {"config": {"kafka": {"sasl": {"username": "dfe", "password": "kafka-pw-4435"}}}}
+        written = {"sasl": {"username": "someone-else", "password": self.R}}
+        with pytest.raises(contract.CredentialReentryError, match=r"config\.kafka\.sasl"):
+            contract.restore_masked_at(doc, "config.kafka", written)
+
+    def test_a_mapping_left_as_stored_restores(self):
+        doc = {"config": {"kafka": {"sasl": {"username": "dfe", "password": "kafka-pw-4436"}}}}
+        written = {"sasl": {"username": "dfe", "password": self.R}}
+        assert contract.restore_masked_at(doc, "config.kafka", written) == {
+            "sasl": {"username": "dfe", "password": "kafka-pw-4436"}
+        }
+
+    def test_a_second_credential_typed_again_is_not_a_change(self):
+        doc = {
+            "config": {
+                "apps": [
+                    {
+                        "id": "a",
+                        "url": "https://a.example",
+                        "client_secret": "cs-4437",
+                        "refresh_token": "rt-4438",
+                    }
+                ]
+            }
+        }
+        written = [
+            {
+                "id": "a",
+                "url": "https://a.example",
+                "client_secret": self.R,
+                "refresh_token": "rt-4439",
+            }
+        ]
+        assert contract.restore_masked_at(doc, "config.apps", written) == [
+            {**written[0], "client_secret": "cs-4437"}
+        ]
+
+    def test_a_url_moved_in_the_clear_beside_a_masked_token_is_refused(self):
+        doc = {
+            "config": {
+                "hooks": [{"id": "a", "url": "https://u:pw-4440@a.example", "token": "tok-4441"}]
+            }
+        }
+        written = [{"id": "a", "url": "https://u:pw-4442@evil.example", "token": self.R}]
+        with pytest.raises(contract.CredentialReentryError, match="url"):
+            contract.restore_masked_at(doc, "config.hooks", written)
+
+    def test_the_url_password_alone_typed_again_is_not_a_change(self):
+        doc = {
+            "config": {
+                "hooks": [{"id": "a", "url": "https://u:pw-4443@a.example", "token": "tok-4444"}]
+            }
+        }
+        written = [{"id": "a", "url": "https://u:pw-4445@a.example", "token": self.R}]
+        assert contract.restore_masked_at(doc, "config.hooks", written) == [
+            {**written[0], "token": "tok-4444"}
+        ]
 
 
 ABSENT = contract.AppContract(service="", available=False, source=contract.ContractSource.ABSENT)

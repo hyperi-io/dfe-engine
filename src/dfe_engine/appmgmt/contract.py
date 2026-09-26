@@ -330,6 +330,19 @@ class ContractError(ManifestError):
 class MaskedValueError(ValueError):
     """Raised when a write carries the redaction placeholder where nothing is stored."""
 
+    code = "masked_value"
+    """The refusal code a route answers with."""
+
+
+class CredentialReentryError(MaskedValueError):
+    """Raised when a masked credential is written back beside a field that changed.
+
+    Restoring it would send the stored credential wherever the changed field now
+    points, so the caller types the credential again.
+    """
+
+    code = "credential_reentry_required"
+
 
 class ContractSource(StrEnum):
     """Where a contract came from, which is a mount or nowhere."""
@@ -1001,7 +1014,7 @@ def _restore_list(value: list, stored: Any, shown: Any, path: str) -> list:
             continue
         entry, view = next(behind)
         if not _same_but_masked(item, entry):
-            raise MaskedValueError(
+            raise CredentialReentryError(
                 f"{where}[{i}] is masked but no longer matches the stored entry in its "
                 "place, and nothing names it: write its credentials in full"
             )
@@ -1018,6 +1031,80 @@ def _shown_child(shown: Any, key: Any) -> Any:
     return REDACTED
 
 
+def _holds_mask(value: Any) -> bool:
+    """Whether ``value`` is itself a masked credential, or a list of values holding one."""
+    if isinstance(value, str):
+        return REDACTED in value
+    return isinstance(value, list) and any(isinstance(i, str) and REDACTED in i for i in value)
+
+
+def _wholly_masked(shown: Any) -> bool:
+    """Whether a read showed this value as a credential and nothing else."""
+    if isinstance(shown, str):
+        return shown == REDACTED
+    return isinstance(shown, list) and bool(shown) and all(_wholly_masked(i) for i in shown)
+
+
+def _field_unchanged(written: Any, stored: Any, shown: Any) -> bool:
+    """Whether one field beside a masked credential leaves it where it was set.
+
+    A field still masked is judged by its own restore, and one the read showed only
+    as a credential may be typed again. A URL whose password alone was masked may
+    take a new password and nothing else, and a structure holding credentials is
+    judged field by field. Every other field has to be exactly what is stored.
+    """
+    if _carries_mask(written) or _wholly_masked(shown):
+        return True
+    if isinstance(shown, str) and REDACTED in shown:
+        return isinstance(written, str) and _shown_text(written) == shown
+    if isinstance(shown, dict) and _carries_mask(shown):
+        kept = stored if isinstance(stored, dict) else {}
+        return isinstance(written, dict) and all(
+            _field_unchanged(
+                written.get(key, MISSING), kept.get(key, MISSING), shown.get(key, MISSING)
+            )
+            for key in written.keys() | kept.keys()
+        )
+    if isinstance(shown, list) and _carries_mask(shown):
+        if not isinstance(written, list) or len(written) != len(shown):
+            return False
+        kept_list = stored if isinstance(stored, list) and len(stored) == len(shown) else []
+        return all(
+            _field_unchanged(item, kept_list[i] if kept_list else MISSING, shown[i])
+            for i, item in enumerate(written)
+        )
+    return written == stored
+
+
+def _require_unchanged_holder(value: dict, stored: Any, shown: Any, path: str) -> None:
+    """Refuse a mapping that holds a masked credential and changed any other field.
+
+    Raises:
+        CredentialReentryError: A field beside a masked credential was changed,
+            added or dropped.
+    """
+    kept = stored if isinstance(stored, dict) else {}
+    masked = [key for key, item in value.items() if _holds_mask(item) and kept.get(key) is not None]
+    if not masked:
+        return
+    # Only a mapping read back says which fields are credentials; nothing else does.
+    seen = shown if isinstance(shown, dict) else {}
+    changed = sorted(
+        str(key)
+        for key in value.keys() | kept.keys()
+        if not _field_unchanged(
+            value.get(key, MISSING), kept.get(key, MISSING), seen.get(key, MISSING)
+        )
+    )
+    if changed:
+        where = path or "the value"
+        raise CredentialReentryError(
+            f"{where} changed {', '.join(changed)} beside its masked "
+            f"{', '.join(sorted(str(key) for key in masked))}, which would send the stored "
+            "credential somewhere it was not set for: write the credential itself"
+        )
+
+
 def restore_masked(
     value: Any, stored: Any = MISSING, *, path: str = "", shown: Any = MISSING
 ) -> Any:
@@ -1029,12 +1116,17 @@ def restore_masked(
     says, which refuses rather than guess which stored entry a mask stands for.
     A URL whose password alone was masked restores while the rest of it is unchanged.
 
+    A mapping holding a masked credential restores only while every other field in
+    it is as stored: a writer who cannot read a token must not be able to point the
+    entry holding it at another host and have the token sent there.
+
     ``shown`` is ``stored`` as the read showed it, where the caller has it.
 
     Raises:
         MaskedValueError: The placeholder stands where nothing is stored, in a URL
             changed around its masked password, or in a list entry that cannot be
             matched to the stored one it was read from.
+        CredentialReentryError: A field beside a masked credential changed.
     """
     if isinstance(value, str) and value == REDACTED:
         if isinstance(stored, _Missing) or stored is None:
@@ -1053,6 +1145,7 @@ def restore_masked(
     if isinstance(value, list):
         return _restore_list(value, stored, shown, path) if _carries_mask(value) else value
     if isinstance(value, dict):
+        _require_unchanged_holder(value, stored, shown, path)
         kept_map = stored if isinstance(stored, dict) else {}
         return {
             key: restore_masked(

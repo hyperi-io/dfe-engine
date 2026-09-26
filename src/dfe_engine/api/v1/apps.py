@@ -1251,7 +1251,7 @@ def _restored(doc: dict, changes: dict[str, Any]) -> dict[str, Any]:
         try:
             out[path] = contract.restore_masked_at(doc, path, value)
         except contract.MaskedValueError as exc:
-            raise _refuse(400, "masked_value", path, str(exc)) from exc
+            raise _refuse(400, exc.code, path, str(exc)) from exc
     return out
 
 
@@ -1296,7 +1296,9 @@ def set_app_config(
     A secret is written like any other option: it goes into the overlay as the rest
     of this surface writes one, and neither this response nor a read route on this
     surface says what it is. A masked value written back as it was read keeps the
-    stored credential; the mask where nothing is stored is a 400 ``masked_value``.
+    stored credential; the mask where nothing is stored is a 400 ``masked_value``,
+    and the mask beside a changed field of the same entry is a 400
+    ``credential_reentry_required``.
 
     409 where the deployment already decides the value: a config path the chart
     derives, or an `extraEnv` name the chart sets for this app.

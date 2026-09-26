@@ -8,13 +8,13 @@
 """Unit tests for the two GET /api/v1/hyperdx reads.
 
 The handlers are called directly with real fakes (a file-backed secrets store, a
-list-only org registry) - the RBAC gate is a standard require_action dependency
-covered elsewhere. The invariant under test for ``/connection``: a caller only
-ever resolves to its OWN org's credential, and anything ambiguous fails closed.
+list-only org registry). ``/connection`` checks ``query:execute`` inside the
+handler, so its gate is under test here; the ``/sources`` gate is a standard
+require_action dependency covered elsewhere. The invariant under test for
+``/connection``: a caller only ever resolves to its OWN org's credential unless a
+system-scope grant says otherwise, and anything ambiguous fails closed.
 For ``/sources``: an unreachable HyperDX is never reported as an empty listing.
 """
-
-from __future__ import annotations
 
 from types import SimpleNamespace
 
@@ -108,8 +108,21 @@ async def test_platform_role_gets_the_unrestricted_reader(tmp_path):
     assert conn.password == "qr-pw"
 
 
-async def test_any_role_beyond_org_viewer_reads_unrestricted(tmp_path):
-    """Mirrors derive_group_bindings: org_viewer + a platform role -> unrestricted."""
+async def test_a_system_query_role_beside_org_viewer_reads_unrestricted(tmp_path):
+    settings = _settings(tmp_path)
+    store = build_secrets(settings.secrets)
+    store.put("ch/service/query_reader", "qr-pw")
+    store.put("ch/orgs/acme", "acme-pw")
+    user = AuthContext(user_id="u", roles=["org_viewer", "data_analyst"], org_ids=["acme"])
+    req = _request([_org("acme", ["acme"])])
+
+    conn = await hyperdx_connection(req, user, settings)
+
+    assert conn.username == "dfe_query_reader"
+
+
+async def test_a_system_role_that_runs_no_query_does_not_read_unrestricted(tmp_path):
+    # infra_admin holds no query:execute, so only org_viewer passes the gate.
     settings = _settings(tmp_path)
     store = build_secrets(settings.secrets)
     store.put("ch/service/query_reader", "qr-pw")
@@ -119,7 +132,72 @@ async def test_any_role_beyond_org_viewer_reads_unrestricted(tmp_path):
 
     conn = await hyperdx_connection(req, user, settings)
 
-    assert conn.username == "dfe_query_reader"
+    assert conn.username == "dfe_org_acme"
+
+
+@pytest.mark.parametrize("other", ["dfe_operator", "infra_viewer", "data_analyst", "admin"])
+async def test_an_org_scoped_caller_gets_its_org_user_whatever_else_it_holds(tmp_path, other):
+    """Roles bound at one org's scope never reach the cross-org reader."""
+    from dfe_engine.auth import Scope, ScopedGrant
+
+    settings = _settings(tmp_path)
+    store = build_secrets(settings.secrets)
+    store.put("ch/service/query_reader", "qr-pw")
+    store.put("ch/orgs/acme", "acme-pw")
+    acme = Scope(type="org", id="acme")
+    user = AuthContext(
+        user_id="acme-member",
+        roles=["org_viewer", other],
+        org_ids=["acme"],
+        grants=[ScopedGrant(role="org_viewer", scope=acme), ScopedGrant(role=other, scope=acme)],
+    )
+    req = _request([_org("acme", ["acme"]), _org("nerk", ["nerk"])])
+
+    conn = await hyperdx_connection(req, user, settings)
+
+    assert (conn.name, conn.username, conn.password) == ("acme", "dfe_org_acme", "acme-pw")
+
+
+async def test_a_system_scope_data_analyst_grant_reads_unrestricted(tmp_path):
+    from dfe_engine.auth import Scope, ScopedGrant
+
+    settings = _settings(tmp_path)
+    store = build_secrets(settings.secrets)
+    store.put("ch/service/query_reader", "qr-pw")
+    user = AuthContext(
+        user_id="analyst",
+        roles=["data_analyst"],
+        org_ids=[],
+        grants=[ScopedGrant(role="data_analyst", scope=Scope())],
+    )
+    req = _request([_org("acme", ["acme"])])
+
+    conn = await hyperdx_connection(req, user, settings)
+
+    assert (conn.name, conn.username) == ("platform", "dfe_query_reader")
+
+
+async def test_a_caller_with_no_query_execute_anywhere_is_refused(tmp_path):
+    from dfe_engine.auth import Scope, ScopedGrant
+
+    settings = _settings(tmp_path)
+    store = build_secrets(settings.secrets)
+    store.put("ch/service/query_reader", "qr-pw")
+    store.put("ch/orgs/acme", "acme-pw")
+    user = AuthContext(
+        user_id="operator",
+        roles=["dfe_operator", "infra_viewer"],
+        org_ids=["acme"],
+        grants=[
+            ScopedGrant(role="dfe_operator", scope=Scope()),
+            ScopedGrant(role="infra_viewer", scope=Scope(type="org", id="acme")),
+        ],
+    )
+    req = _request([_org("acme", ["acme"])])
+
+    with pytest.raises(HTTPException) as exc:
+        await hyperdx_connection(req, user, settings)
+    assert exc.value.status_code == 403
 
 
 async def test_caller_with_no_resolvable_org_is_refused(tmp_path):

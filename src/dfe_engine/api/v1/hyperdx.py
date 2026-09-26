@@ -17,9 +17,10 @@ only ever receive credentials for their own org and a cross-org ask is a 403.
 This retires the global ``DEFAULT_CONNECTIONS`` blob that handed every team every
 org's connection (dfe-engine#124).
 
-Which identity a caller resolves to mirrors ``governance.ch.bindings`` exactly:
-any role beyond ``org_viewer`` reads UNRESTRICTED (the platform reader); a caller
-holding only ``org_viewer`` is fenced to its single org; anything else fails
+A caller reads UNRESTRICTED (the platform reader) only when a role other than
+``org_viewer`` grants it ``query:execute`` at SYSTEM scope. Every other caller is
+fenced to its single org, whatever else it holds: a role bound at one org's scope
+never reaches every org's rows. A caller that resolves to no single org fails
 closed. The ``query:execute`` gate keeps callers with no data-plane access out.
 
 GET /api/v1/hyperdx/sources - every HyperDX team and the DFE sources on it.
@@ -28,13 +29,11 @@ A deploy writes its source to every team over that team's own connection, so thi
 is the read that says where it landed; ``source:read`` gates it.
 """
 
-from __future__ import annotations
-
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, Settings, is_action_allowed, require_action
-from dfe_engine.auth import Scope
+from dfe_engine.auth import Scope, ScopedGrant
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.governance.ch.bindings import ORG_VIEWER_ROLE
 from dfe_engine.governance.ch.models import org_user_name
@@ -42,7 +41,7 @@ from dfe_engine.governance.ch.models import org_user_name
 router = APIRouter(prefix="/hyperdx", tags=["HyperDX"])
 
 # The minted platform reader (a service role, no tenant role -> reads across orgs,
-# tier-limited). Handed to any caller the binding model treats as unrestricted.
+# tier-limited). Handed only to a caller that passes _reads_every_org.
 _PLATFORM_USERNAME = "dfe_query_reader"
 _PLATFORM_SECRET = "ch/service/query_reader"
 
@@ -86,6 +85,23 @@ def _require_query_execute(request: Request, user) -> None:
     )
 
 
+def _reads_every_org(request: Request, user) -> bool:
+    """Whether a role other than ``org_viewer`` grants ``query:execute`` at SYSTEM scope.
+
+    ``org_viewer`` is the tenant role, so a grant of it never unfences the caller,
+    and a role bound at an org's scope covers that org alone.
+    """
+    # Bare roles are system-scope grants, as authorize() reads a context without grants.
+    grants = user.grants or [ScopedGrant(role=name) for name in user.roles]
+    platform = [grant for grant in grants if grant.role != ORG_VIEWER_ROLE]
+    if not platform:
+        return False
+    beyond_viewer = user.model_copy(
+        update={"roles": [grant.role for grant in platform], "grants": platform}
+    )
+    return is_action_allowed(request, beyond_viewer, scopes_dict["query_execute"])
+
+
 @router.get(
     "/connection",
     response_model=HyperDXConnection,
@@ -97,10 +113,11 @@ async def hyperdx_connection(
 ) -> HyperDXConnection:
     """Return the caller's OWN org connection - never another org's.
 
-    Unrestricted callers (any role beyond ``org_viewer``) get the platform reader;
-    a single-org caller gets its pinned ``dfe_org_<org>`` user; a caller that
-    resolves to zero or several separate orgs is refused (403) so isolation fails
-    closed rather than guessing.
+    A caller granted ``query:execute`` at system scope by a role other than
+    ``org_viewer`` gets the platform reader. Any other caller gets its org's pinned
+    ``dfe_org_<org>`` user, whatever roles it holds at that org's scope. A caller
+    that resolves to zero or several separate orgs is refused (403) so isolation
+    fails closed rather than guessing.
     """
     _require_query_execute(request, user)
 
@@ -112,10 +129,7 @@ async def hyperdx_connection(
     def _secret(path: str) -> str:
         return store.get(path) if store.exists(path) else ""
 
-    # Platform readers: mirrors derive_group_bindings - any role other than the
-    # org-viewer role reads unrestricted. The org filter fences tenants in, never
-    # the platform's own analysts out.
-    if set(user.roles) - {ORG_VIEWER_ROLE}:
+    if _reads_every_org(request, user):
         password = _secret(_PLATFORM_SECRET)
         if not password:
             raise HTTPException(

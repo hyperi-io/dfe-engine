@@ -848,6 +848,42 @@ class TestCredentialsAreNotEchoed:
         stored = gc.get("helmvars", "dfe-fetcher-alpha-values")["config"]["sources"]["github"]
         assert stored["connections"] == [connections[0], connections[2]]
 
+    def test_a_fetcher_connection_pointed_elsewhere_needs_its_token_typed_again(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        _deploy_fetcher(client, admin_headers, "alpha")
+        base = "/api/v1/apps/dfe-fetcher/alpha"
+        path = "config.sources.okta.connections"
+        connections = [
+            {"id": n, "tenant_url": f"https://{n}.okta.example", "token": f"okta-{n}-5530"}
+            for n in "ab"
+        ]
+        resp = client.put(
+            f"{base}/config", json={"changes": {path: connections}}, headers=admin_headers
+        )
+        assert resp.status_code == 200, resp.text
+        read = client.get(f"{base}/config", headers=admin_headers)
+        shown = {f["path"]: f for f in read.json()["fields"]}[path]["value"]
+
+        before = gc.head_revision()
+        moved = [{**shown[0], "tenant_url": "https://evil.example"}, shown[1]]
+        refused = client.put(
+            f"{base}/config", json={"changes": {path: moved}}, headers=admin_headers
+        )
+        assert refused.status_code == 400, refused.text
+        assert refused.json()["code"] == "credential_reentry_required"
+        assert refused.json()["context"]["path"] == path
+        assert gc.head_revision() == before
+
+        retyped = [{**moved[0], "token": "okta-a-5531"}, shown[1]]
+        taken = client.put(
+            f"{base}/config", json={"changes": {path: retyped}}, headers=admin_headers
+        )
+        assert taken.status_code == 200, taken.text
+        stored = gc.get("helmvars", "dfe-fetcher-alpha-values")["config"]["sources"]["okta"]
+        assert stored["connections"] == [retyped[0], connections[1]]
+
     def test_the_helm_vars_route_masks_them_too(self, client, app, admin_headers, tmp_path):
         # The same overlay read through the generic helm-var surface, same privilege.
         _wire(app, tmp_path)
