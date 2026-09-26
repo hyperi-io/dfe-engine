@@ -18,6 +18,8 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.support.accounts import OnboardedClient
+
 # These apps run the production posture, which refuses to start on the shipped
 # admin password, so each injects one the way a deployment's secret store does.
 ADMIN_PASSWORD = "test-admin-pw"
@@ -211,7 +213,7 @@ class TestSchemasRouter:
         )
         headers = {"Authorization": f"Bearer {token}"}
         try:
-            with TestClient(app, raise_server_exceptions=False) as tc:
+            with OnboardedClient(app, raise_server_exceptions=False) as tc:
                 resp = tc.post("/api/v1/sources/dep-src/deploy?dry_run=true", headers=headers)
                 assert resp.status_code == 200, resp.text
                 body = resp.json()
@@ -332,7 +334,7 @@ class TestSchemasRouter:
         )
         headers = {"Authorization": f"Bearer {token}"}
         try:
-            with TestClient(app, raise_server_exceptions=False) as tc:
+            with OnboardedClient(app, raise_server_exceptions=False) as tc:
                 resp = tc.post("/api/v1/sources/dep-src/deploy", headers=headers)
                 assert resp.status_code == 200, resp.text
                 assert resp.json()["applied"] is True
@@ -476,7 +478,7 @@ class TestSchemasRouter:
         base_url = "/api/v1/sources/cols-src/columns"
 
         try:
-            with TestClient(app, raise_server_exceptions=False) as tc:
+            with OnboardedClient(app, raise_server_exceptions=False) as tc:
                 resp = tc.get(base_url, headers=headers)
                 assert resp.status_code == 200
                 body = resp.json()
@@ -617,7 +619,7 @@ class TestSchemasRouter:
         headers = {"Authorization": f"Bearer {token}"}
 
         try:
-            with TestClient(app, raise_server_exceptions=False) as tc:
+            with OnboardedClient(app, raise_server_exceptions=False) as tc:
                 plan_resp = tc.post("/api/v1/sources/plan-src/plan", headers=headers)
                 assert plan_resp.status_code == 200
                 body = plan_resp.json()
@@ -689,7 +691,7 @@ class TestSchemasMetaListRouter:
         headers = {"Authorization": f"Bearer {token}"}
 
         try:
-            with TestClient(app, raise_server_exceptions=False) as tc:
+            with OnboardedClient(app, raise_server_exceptions=False) as tc:
                 resp = tc.get("/api/v1/schemas", headers=headers)
             assert resp.status_code == 503
             assert resp.json()["code"] == "not_configured"
@@ -761,7 +763,7 @@ class TestSchemasMetaListRouter:
         headers = {"Authorization": f"Bearer {token}"}
 
         try:
-            with TestClient(app, raise_server_exceptions=False) as tc:
+            with OnboardedClient(app, raise_server_exceptions=False) as tc:
                 resp = tc.get("/api/v1/schemas?page=1&per_page=10", headers=headers)
             assert resp.status_code == 200
             body = resp.json()
@@ -839,7 +841,7 @@ class TestSchemasMetaListRouter:
         headers = {"Authorization": f"Bearer {token}"}
 
         try:
-            with TestClient(app, raise_server_exceptions=False) as tc:
+            with OnboardedClient(app, raise_server_exceptions=False) as tc:
                 all_resp = tc.get("/api/v1/schemas?per_page=-1", headers=headers)
                 meta_resp = tc.get(
                     "/api/v1/schemas?schema_type=meta&per_page=-1",
@@ -940,7 +942,7 @@ class TestSchemasMetaListRouter:
         headers = {"Authorization": f"Bearer {token}"}
 
         try:
-            with TestClient(app, raise_server_exceptions=False) as tc:
+            with OnboardedClient(app, raise_server_exceptions=False) as tc:
                 columns_url = "/api/v1/schemas/definitions/aws/cloudtrail/versions/columns"
                 resp = tc.get(f"{columns_url}?version=1", headers=headers)
                 assert resp.status_code == 200
@@ -1086,7 +1088,7 @@ class TestSchemasMetaWriteRouter:
 
         url = "/api/v1/schemas/definitions/gcp/audit_log"
         try:
-            with TestClient(app, raise_server_exceptions=False) as tc:
+            with OnboardedClient(app, raise_server_exceptions=False) as tc:
                 invalid_cols = tc.post(
                     "/api/v1/schemas/definitions/gcp/bad_columns",
                     json={
@@ -1208,7 +1210,7 @@ class TestSchemasMetaWriteRouter:
         headers = {"Authorization": f"Bearer {token}"}
 
         try:
-            with TestClient(app, raise_server_exceptions=False) as tc:
+            with OnboardedClient(app, raise_server_exceptions=False) as tc:
                 messy_url = "/api/v1/schemas/definitions/gcp//audit_log"
                 post = tc.post(
                     messy_url,
@@ -1289,7 +1291,7 @@ class TestSchemasMetaWriteRouter:
         headers = {"Authorization": f"Bearer {token}"}
 
         try:
-            with TestClient(app, raise_server_exceptions=False) as tc:
+            with OnboardedClient(app, raise_server_exceptions=False) as tc:
                 resp = tc.post(
                     "/api/v1/schemas/definitions/x/y",
                     json=self._minimal_schema_body(),
@@ -1368,7 +1370,7 @@ class TestSchemasMetaWriteRouter:
         base = "/api/v1/schemas/definitions/aws/cloudtrail"
 
         try:
-            with TestClient(app, raise_server_exceptions=False) as tc:
+            with OnboardedClient(app, raise_server_exceptions=False) as tc:
                 set_current = tc.patch(base, json={"current": "1.1.0"}, headers=headers)
                 assert set_current.status_code == 200
                 set_body = set_current.json()
@@ -1517,7 +1519,7 @@ class TestSchemasMetaWriteRouter:
         base = "/api/v1/schemas/definitions/aws/cloudtrail"
 
         try:
-            with TestClient(app, raise_server_exceptions=False) as tc:
+            with OnboardedClient(app, raise_server_exceptions=False) as tc:
                 deleted = tc.delete(f"{base}/versions/1.0.0", headers=headers)
                 assert deleted.status_code == 204
                 gone = tc.get(f"{base}/versions/columns?version=1.0.0", headers=headers)

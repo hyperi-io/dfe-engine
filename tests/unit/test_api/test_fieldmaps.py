@@ -3,6 +3,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.support.accounts import admin_on_its_own_password
+
 
 @pytest.fixture
 def app_with_fieldmaps(tmp_path):
@@ -46,6 +48,7 @@ def app_with_fieldmaps(tmp_path):
 @pytest.fixture
 def fm_client(app_with_fieldmaps):
     with TestClient(app_with_fieldmaps, raise_server_exceptions=False) as c:
+        admin_on_its_own_password(app_with_fieldmaps)
         yield c
 
 

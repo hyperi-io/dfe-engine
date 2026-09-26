@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import secrets
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from fastapi.testclient import TestClient
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
 from dfe_engine.api.e2e.seed.apps import TRANSFORM_ENGINES
+from dfe_engine.auth.bootstrap import admin_account_password
 from dfe_engine.settings import (
     APISettings,
     AuthSettings,
@@ -245,10 +247,27 @@ def _seed(client: TestClient, script: str) -> None:
     assert resp.json()["success"] is True
 
 
+# The shipped default these settings leave the admin on, issued with a forced change.
+_ISSUED_ADMIN_PASSWORD = admin_account_password()
+_ADMIN_OWN_PASSWORD = f"e2e-admin-{secrets.token_urlsafe(12)}"
+
+
 def _admin(client: TestClient) -> dict[str, str]:
-    login = client.post("/api/v1/auth/login", json={"username": "admin", "password": "changeme"})
+    """Admin headers, after the forced change a fresh deployment's admin is due."""
+    for password in (_ISSUED_ADMIN_PASSWORD, _ADMIN_OWN_PASSWORD):
+        login = client.post("/api/v1/auth/login", json={"username": "admin", "password": password})
+        if login.status_code == 200:
+            break
     assert login.status_code == 200, login.text
-    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    if login.json()["password_change_required"]:
+        changed = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"new_password": _ADMIN_OWN_PASSWORD},
+            headers=headers,
+        )
+        assert changed.status_code == 200, changed.text
+    return headers
 
 
 def _get(client: TestClient, path: str, headers: dict[str, str]) -> dict | list:
@@ -569,6 +588,25 @@ class TestSeedAppScalingState:
         _seed(appmgmt_client, "seed_app_scaling_state")
         _seed(appmgmt_client, "reset_all")
         assert _admin(appmgmt_client)
+
+    def test_reset_all_leaves_the_admin_due_its_forced_change(self, appmgmt_client):
+        """A fresh deployment's admin: the onboarding root logs in, then must change it."""
+        _admin(appmgmt_client)
+        _seed(appmgmt_client, "reset_all")
+
+        login = appmgmt_client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": _ISSUED_ADMIN_PASSWORD},
+        )
+
+        assert login.status_code == 200, login.text
+        assert login.json()["password_change_required"] is True
+
+    def test_setup_complete_leaves_the_admin_on_its_own_password(self, appmgmt_client):
+        _seed(appmgmt_client, "reset_all")
+        _seed(appmgmt_client, "seed_setup_complete")
+
+        assert appmgmt_client.app.state.account_store.get("admin").password_change_required is False
 
 
 _POOLS = ("dfe-receiver", "dfe-loader")
