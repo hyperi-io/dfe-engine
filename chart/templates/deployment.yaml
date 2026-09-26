@@ -206,6 +206,10 @@ spec:
             - name: DFE_KAFKA_TOPIC_CLEANUP_POLICY
               value: {{ .topic_cleanup_policy | quote }}
             {{- end }}
+            {{- if .topic_compression_type }}
+            - name: DFE_KAFKA_TOPIC_COMPRESSION_TYPE
+              value: {{ .topic_compression_type | quote }}
+            {{- end }}
             {{- else }}
             # No broker address configured, so there is nothing for the deploy hook
             # to reach; left on it would spend the admin timeout on every source

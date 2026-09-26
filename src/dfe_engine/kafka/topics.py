@@ -418,9 +418,10 @@ def broker_count(
 def deployment_topic_config(settings: DFESettings) -> dict[str, str]:
     """The alterable topic configs DFE asks for, as librdkafka string values.
 
-    Empty by default: a deployment that sets neither dial gets a topic whose
-    retention and cleanup policy are the broker's, which is what every topic
-    created before these dials existed already has.
+    Retention and cleanup policy stay the broker's unless their dial is set,
+    which is what every topic created before those dials existed already has.
+    Compression defaults to ``producer`` so a batch the producer compressed is
+    stored as sent.
     """
     ks = settings.kafka
     config: dict[str, str] = {}
@@ -428,6 +429,8 @@ def deployment_topic_config(settings: DFESettings) -> dict[str, str]:
         config["retention.ms"] = str(ks.topic_retention_ms)
     if ks.topic_cleanup_policy:
         config["cleanup.policy"] = ks.topic_cleanup_policy
+    if ks.topic_compression_type:
+        config["compression.type"] = ks.topic_compression_type
     return config
 
 

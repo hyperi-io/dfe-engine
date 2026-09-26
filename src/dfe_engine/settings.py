@@ -637,6 +637,14 @@ class KafkaSettings(BaseModel):
             "``compact``). Empty leaves the broker default in place."
         ),
     )
+    topic_compression_type: str = Field(
+        default="producer",
+        description=(
+            "``compression.type`` for topics DFE creates and converges. ``producer`` "
+            "keeps each batch in the codec its producer chose, so the broker never "
+            "recompresses it. Empty leaves the broker default in place."
+        ),
+    )
 
     @model_validator(mode="after")
     def _derive_from_provider(self) -> "KafkaSettings":
@@ -1864,6 +1872,8 @@ def _get_env_overrides() -> dict:
         overrides["kafka"]["topic_retention_ms"] = int(val)
     if val := _get_env("DFE_KAFKA_TOPIC_CLEANUP_POLICY"):
         overrides["kafka"]["topic_cleanup_policy"] = val
+    if val := _get_env("DFE_KAFKA_TOPIC_COMPRESSION_TYPE"):
+        overrides["kafka"]["topic_compression_type"] = val
 
     # Transport: what this deployment can carry a source on. The profile sets
     # both - a brokerless profile is bus_present=false, default=direct.
