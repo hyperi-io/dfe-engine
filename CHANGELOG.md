@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.2](https://github.com/hyperi-io/dfe-engine/compare/v1.22.1...v1.22.2) (2026-09-26)
+
+### Bug Fixes
+
+* **kafka:** create and converge every topic with compression.type=producer ([#542](https://github.com/hyperi-io/dfe-engine/issues/542)) ([1a31443](https://github.com/hyperi-io/dfe-engine/commit/1a3144387a31662d35e45eaae5ed2b6c73246c86))
+* **openapi:** stamp the committed spec from VERSION and regenerate at 1.22.1 ([#543](https://github.com/hyperi-io/dfe-engine/issues/543)) ([f1605bc](https://github.com/hyperi-io/dfe-engine/commit/f1605bcd6ce55cfa4792b83e6c82257153f4ebd9)), closes [#542](https://github.com/hyperi-io/dfe-engine/issues/542) [#542](https://github.com/hyperi-io/dfe-engine/issues/542)
+
 ## [1.22.1](https://github.com/hyperi-io/dfe-engine/compare/v1.22.0...v1.22.1) (2026-09-26)
 
 ### Bug Fixes
