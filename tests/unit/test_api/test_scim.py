@@ -19,9 +19,12 @@ Covers:
 
 from __future__ import annotations
 
+import secrets
+
 import pytest
 
 from dfe_engine.auth.accounts import Account
+from dfe_engine.auth.bootstrap import MIN_ADMIN_PASSWORD_LENGTH
 from dfe_engine.auth.breakglass import GROUP as RECOVERY_GROUP
 from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS
 from dfe_engine.auth.groups import Group
@@ -117,6 +120,29 @@ class TestScimUsers:
         assert account.enabled is True
         assert account.external_id == "okta-1"
         assert account.source_provider == "scim"
+
+    def test_a_password_under_the_floor_is_refused(self, app, client, admin_headers):
+        short = secrets.token_urlsafe(16)[: MIN_ADMIN_PASSWORD_LENGTH - 1]
+        resp = client.post(
+            f"{BASE}/Users",
+            json={"schemas": [USER_SCHEMA], "userName": "scim-short", "password": short},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["scimType"] == "invalidValue"
+        assert str(MIN_ADMIN_PASSWORD_LENGTH) in resp.json()["detail"]
+        assert short not in resp.text
+        assert app.state.account_store.get("scim-short") is None
+
+    def test_a_password_at_the_floor_is_stored(self, app, client, admin_headers):
+        at_floor = secrets.token_urlsafe(16)[:MIN_ADMIN_PASSWORD_LENGTH]
+        resp = client.post(
+            f"{BASE}/Users",
+            json={"schemas": [USER_SCHEMA], "userName": "scim-floor", "password": at_floor},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        assert app.state.account_store.verify_password("scim-floor", at_floor)
 
     def test_create_duplicate_returns_409(self, client, admin_headers):
         payload = {"schemas": [USER_SCHEMA], "userName": "dup-user"}

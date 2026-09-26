@@ -24,6 +24,7 @@ from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
 from dfe_engine.api.metrics import PASSWORD_CHANGE_REFUSALS
 from dfe_engine.api.password_change import ALLOWED_BEFORE_CHANGE, PASSWORD_CHANGE_CLAIM
+from dfe_engine.auth.bootstrap import MIN_ADMIN_PASSWORD_LENGTH
 from dfe_engine.settings import DFESettings
 
 from .conftest import ADMIN_PASSWORD
@@ -31,6 +32,10 @@ from .conftest import ADMIN_PASSWORD
 _LOGIN = "/api/v1/auth/login"
 _CHANGE = "/api/v1/auth/accounts/reset-password"
 _OWN_PASSWORD = f"own-{secrets.token_urlsafe(16)}"
+
+
+def _password_of(length: int) -> str:
+    return secrets.token_urlsafe(length)[:length]
 
 
 @pytest.fixture
@@ -164,7 +169,69 @@ class TestTheChange:
 
         assert resp.status_code == 400
         assert resp.json()["code"] == "password_reused"
+        assert "current password" in resp.json()["message"]
         assert fresh.get("/api/v1/sources", headers=headers).status_code == 403
+
+
+class TestTheFloorOnTheChange:
+    def test_a_short_password_is_refused_and_the_flag_stays_set(self, fresh):
+        headers = _bearer(_login(fresh))
+        short = _password_of(MIN_ADMIN_PASSWORD_LENGTH - 1)
+
+        resp = fresh.post(_CHANGE, json={"new_password": short}, headers=headers)
+
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["errors"][0]["field"] == "new_password"
+        assert str(MIN_ADMIN_PASSWORD_LENGTH) in resp.json()["errors"][0]["message"]
+        assert short not in resp.text
+        assert fresh.app.state.account_store.get("admin").password_change_required is True
+        assert fresh.get("/api/v1/sources", headers=headers).status_code == 403
+        assert fresh.post(_LOGIN, json={"username": "admin", "password": short}).status_code == 401
+
+    def test_a_password_at_the_floor_is_accepted(self, fresh):
+        headers = _bearer(_login(fresh))
+        at_floor = _password_of(MIN_ADMIN_PASSWORD_LENGTH)
+
+        resp = fresh.post(_CHANGE, json={"new_password": at_floor}, headers=headers)
+
+        assert resp.status_code == 200, resp.text
+        assert _login(fresh, at_floor)["password_change_required"] is False
+
+
+class TestWhatAFlaggedSessionReports:
+    """The UI copies these reads into its session, so they report what the token grants."""
+
+    def test_me_reports_the_flag_and_no_standing(self, fresh):
+        me = fresh.get("/api/v1/auth/me", headers=_bearer(_login(fresh)))
+
+        assert me.status_code == 200, me.text
+        body = me.json()
+        assert body["password_change_required"] is True
+        assert body["roles"] == []
+        assert body["permissions"] == []
+        assert body["groups"] == []
+        assert body["org_ids"] == []
+
+    def test_own_account_reports_the_flag_and_no_groups(self, fresh):
+        own = fresh.get("/api/v1/auth/accounts/me", headers=_bearer(_login(fresh)))
+
+        assert own.status_code == 200, own.text
+        assert own.json()["password_change_required"] is True
+        assert own.json()["groups"] == []
+
+    def test_the_standing_is_reported_once_the_password_is_changed(self, fresh):
+        headers = _bearer(_login(fresh))
+        _change(fresh, headers)
+
+        me = fresh.get("/api/v1/auth/me", headers=headers).json()
+        own = fresh.get("/api/v1/auth/accounts/me", headers=headers).json()
+
+        assert me["password_change_required"] is False
+        assert "admin" in me["roles"]
+        assert "*" in me["permissions"]
+        assert "dfe-admins" in me["groups"]
+        assert own["password_change_required"] is False
+        assert "dfe-admins" in own["groups"]
 
 
 class TestAcrossARestart:
@@ -232,6 +299,34 @@ def test_a_refusal_is_counted_by_method_and_area(api_settings):
         _sample(manager.metrics_text, PASSWORD_CHANGE_REFUSALS, {"method": "GET", "area": "auth"})
         is None
     )
+
+
+def test_a_floor_refusal_is_counted_by_route(api_settings):
+    manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+    app = create_app(settings=api_settings, metrics_manager=manager)
+    short = _password_of(MIN_ADMIN_PASSWORD_LENGTH - 1)
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            headers = _bearer(_login(client))
+            client.post(_CHANGE, json={"new_password": short}, headers=headers)
+            client.post(_CHANGE, json={"new_password": short}, headers=headers)
+            _change(client, headers)
+            client.post(
+                "/api/v1/scim/v2/Users",
+                json={
+                    "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+                    "userName": "scim-short",
+                    "password": short,
+                },
+                headers=headers,
+            )
+    finally:
+        _registries.clear()
+
+    name = "api_password_floor_refusals_total"
+    assert _sample(manager.metrics_text, name, {"route": "/accounts/reset-password"}) == 2
+    assert _sample(manager.metrics_text, name, {"route": "/scim/v2/Users"}) == 1
+    assert short not in manager.metrics_text
 
 
 def test_every_allowed_route_is_a_real_route(app):

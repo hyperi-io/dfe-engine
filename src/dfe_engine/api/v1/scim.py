@@ -62,6 +62,7 @@ from scim2_models import (
 )
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.password_floor import FLOOR_MESSAGE, below_floor, count_floor_refusal
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.scim_mapping import (
     account_to_scim_user,
@@ -219,7 +220,11 @@ async def get_user(user_id: str, user: CurrentUser, request: Request) -> Respons
     dependencies=[Depends(require_action(scopes_dict["account_write"]))],
 )
 async def create_user(user: CurrentUser, request: Request) -> Response:
-    """Provision a user. IdP-owned; local password is randomised when omitted."""
+    """Provision a user. IdP-owned; local password is randomised when omitted.
+
+    A password the IdP does send is held to the same length floor as every other
+    password the API sets, and one under it is refused rather than replaced.
+    """
     body = await _parse_body(request)
     if body is None:
         return scim_error(400, "Malformed JSON body", "invalidSyntax")
@@ -237,6 +242,9 @@ async def create_user(user: CurrentUser, request: Request) -> Response:
     fields = scim_user_to_account_fields(inbound)
     username = str(fields["username"])
     password = str(fields.pop("password", generate_provisioning_password()))
+    if below_floor(password):
+        count_floor_refusal(request)
+        return scim_error(400, FLOOR_MESSAGE, "invalidValue")
     store.create(username, password, groups=[])
     # Apply the remaining writable attributes (enabled, external_id, provider).
     store.update(
