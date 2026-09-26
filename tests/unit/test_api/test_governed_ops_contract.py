@@ -390,6 +390,34 @@ class TestActionDiffsMaskCredentials:
         assert "old-pw" not in resp.text
         assert "new-pw" not in resp.text
 
+    def test_a_chart_credential_key_diffs_masked(self, client, app, admin_headers, tmp_path):
+        # The app chart spells its credential keys with hyphens.
+        gc = _wire_gitcrud(app, tmp_path)
+        path = "auth.bearer-tokens"
+        _seed_helmvar(client, admin_headers, value=4)
+        _seed_helmvar(client, admin_headers, path=path, value="old-tok-4440")
+        action = {
+            "name": "rotate-bearer",
+            "description": "rotate the chart's bearer tokens",
+            "changes": [
+                {
+                    "cls": "helmvars",
+                    "name": "receiver-default",
+                    "path": path,
+                    "value": "new-tok-4441",
+                }
+            ],
+        }
+        self._legacy(gc, action)
+        resp = client.post(
+            "/api/v1/governance/actions/rotate-bearer/invoke?dry_run=true", headers=admin_headers
+        )
+        assert resp.status_code == 200, resp.text
+        (diff,) = resp.json()["diff"]
+        assert (diff["old"], diff["new"]) == (contract.REDACTED, contract.REDACTED)
+        assert "old-tok-4440" not in resp.text
+        assert "new-tok-4441" not in resp.text
+
     @pytest.mark.parametrize("dry_run", [True, False])
     def test_the_invoke_diff_masks_and_the_write_keeps_the_value(
         self, client, app, admin_headers, tmp_path, dry_run
@@ -610,7 +638,7 @@ class TestLegacyCredentialActionsReadMasked:
 
         from dfe_engine.governance import actions
 
-        actions._WARNED_CREDENTIAL_ACTIONS.discard("legacy-rotate")
+        actions._warn_stored_credential.cache_clear()
         gc = _wire_gitcrud(app, tmp_path)
         gc.put(ACTION_CLASS, "legacy-rotate", self.ACTION, "tester")
         lines: list[str] = []

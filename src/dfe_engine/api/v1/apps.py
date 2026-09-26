@@ -67,6 +67,7 @@ from dfe_engine.api.deps import (
 )
 from dfe_engine.api.errors import ErrorResponse
 from dfe_engine.api.v1.app_contracts import read_contract
+from dfe_engine.api.v1.helm import conflict_error
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import (
     AppInstance,
@@ -651,23 +652,6 @@ def _etag(gc: GitCrud) -> str | None:
     return gc.head_revision()
 
 
-def _conflict(exc: ConcurrencyConflictError) -> HTTPException:
-    """Map a stale base revision to the 409 the UI reads.
-
-    ``head`` is the revision the caller should re-read against, so a conflict is
-    recoverable without a second round trip.
-    """
-    return HTTPException(
-        409,
-        detail={
-            "code": "conflict",
-            "message": str(exc),
-            "current": exc.current,
-            "head": exc.head,
-        },
-    )
-
-
 def _policy(request: Request) -> PolicyStore | None:
     return getattr(request.app.state, "policy_store", None)
 
@@ -842,7 +826,7 @@ def commit_overlay(
             write=_write,
         )
     except ConcurrencyConflictError as exc:
-        raise _conflict(exc) from exc
+        raise conflict_error(exc) from exc
     except ReviewRequiredError as exc:
         raise HTTPException(409, detail={"code": "review_required", "message": str(exc)}) from exc
 
@@ -1063,7 +1047,7 @@ def remove_overlay(
             write=_write,
         )
     except ConcurrencyConflictError as exc:
-        raise _conflict(exc) from exc
+        raise conflict_error(exc) from exc
     except ReviewRequiredError as exc:
         raise HTTPException(409, detail={"code": "review_required", "message": str(exc)}) from exc
     audit_resource_change(user.user_id, "helmvars", name, "deleted", {})

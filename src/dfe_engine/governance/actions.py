@@ -14,6 +14,7 @@ the protected-var policy, and supports dry-run (returns the diff without writing
 
 import builtins
 import copy
+import functools
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -39,8 +40,19 @@ CREDENTIAL_REFUSAL = (
 )
 """Why a change that would store a credential is refused, in the words the caller reads."""
 
-_WARNED_CREDENTIAL_ACTIONS: set[str] = set()
-"""Stored definitions already reported as carrying a credential, so each warns once."""
+
+@functools.cache
+def _warn_stored_credential(name: str, targets: tuple[str, ...]) -> None:
+    """Log once per process that a stored definition carries a credential.
+
+    Cached on its arguments, so a definition read on every request warns once.
+    ``_warn_stored_credential.cache_clear()`` lets it warn again.
+    """
+    logger.warning(
+        "Action definition stores a credential; move it to the vars routes",
+        action=name,
+        changes=list(targets),
+    )
 
 
 class ActionForbiddenError(PermissionError):
@@ -208,13 +220,9 @@ class ActionStore:
         flagged = [i for i, ch in enumerate(action.changes) if self._credential_change(ch)]
         if not flagged:
             return doc
-        if name not in _WARNED_CREDENTIAL_ACTIONS:
-            _WARNED_CREDENTIAL_ACTIONS.add(name)
-            logger.warning(
-                "Action definition stores a credential; move it to the vars routes",
-                action=name,
-                changes=[f"{action.changes[i].cls}/{action.changes[i].name}" for i in flagged],
-            )
+        _warn_stored_credential(
+            name, tuple(f"{action.changes[i].cls}/{action.changes[i].name}" for i in flagged)
+        )
         shown = copy.deepcopy(doc)
         masked_params: set[str] = set()
         for i in flagged:

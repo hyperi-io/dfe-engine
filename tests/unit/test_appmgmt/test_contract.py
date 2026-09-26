@@ -1059,3 +1059,149 @@ class TestAMaskedListEntryKeepsItsOwnCredential:
         stored = [{"id": "a", "token": "tok-1"}, {"id": "a", "token": "tok-2"}]
         with pytest.raises(contract.MaskedValueError, match="which were removed cannot be told"):
             contract.restore_masked([{"id": "a", "token": self.R}], stored, path="connections")
+
+    @pytest.mark.parametrize("guess", ["tok-1", "tok-wrong"])
+    def test_a_guessed_token_is_refused_right_or_wrong(self, guess):
+        # Accepting a right guess and refusing a wrong one would confirm the token.
+        doc = {"config": {"server": {"auth": {"bearer": {"tokens": ["tok-1", "tok-2", "tok-3"]}}}}}
+        path = "config.server.auth.bearer.tokens"
+        with pytest.raises(contract.MaskedValueError, match="which were removed cannot be told"):
+            contract.restore_masked_at(doc, path, [guess, self.R, self.R])
+
+    def test_an_entry_with_no_credential_still_accounts_for_itself(self):
+        doc = {"config": {"x": {"endpoints": [{"url": "u-1", "token": "tok-1"}, {"url": "u-2"}]}}}
+        path = "config.x.endpoints"
+        written = [{"url": "u-1", "token": self.R}, {"url": "u-2"}]
+        assert contract.restore_masked_at(doc, path, written) == doc["config"]["x"]["endpoints"]
+
+
+ABSENT = contract.AppContract(service="", available=False, source=contract.ContractSource.ABSENT)
+
+
+class TestTheNameRuleReadsEverySpelling:
+    """A credential is found by its words, however the chart or the operator spells them."""
+
+    @pytest.mark.parametrize(
+        ("name", "section"),
+        [
+            ("bearer-tokens", "auth"),
+            ("secret-access-key", "aws"),
+            ("client-secret", "azure"),
+            ("service-account-key", "gcp"),
+            ("rootPassword", "minio"),
+            ("adminPassword", "grafana"),
+            ("clientSecret", "oidc"),
+            ("apiToken", "cloudflare"),
+            ("sasl.jaas.config", "properties"),
+            ("JWT_KEY", ""),
+            ("admin_email", "google_workspace"),
+            ("access_key_id", "s3"),
+        ],
+    )
+    def test_the_name_is_a_credential(self, name, section):
+        assert contract.secret_name(name, section) is True
+
+    @pytest.mark.parametrize(
+        ("name", "section"),
+        [
+            ("existingSecret", "kafka"),
+            ("imagePullSecrets", ""),
+            ("client_auth", "tls"),
+            ("FOO_KEY", ""),
+            ("bind_address", "server"),
+            ("token_url_override", "gcp"),
+            ("password_field", "session_login"),
+            ("session_timeout_ms", "kafka"),
+            ("cert_file", "tls"),
+        ],
+    )
+    def test_a_setting_that_shares_a_word_is_not(self, name, section):
+        assert contract.secret_name(name, section) is False
+
+    @pytest.mark.parametrize(
+        "name",
+        ["KAFKA_SASL_JAAS_CONFIG", "PGPASSWORD", "HTTP_AUTHORIZATION", "REDISCLI_AUTH"],
+    )
+    def test_an_environment_credential_in_any_spelling_is_secret(self, name):
+        assert contract.secret_env_name(name) is True
+
+    def test_the_app_charts_own_keys_are_masked_with_no_contract(self):
+        overlay = {
+            "auth": {"existingSecret": "", "bearer-tokens": "chart-tok-4410"},
+            "aws": {"secret-access-key": "aws-sk-4411"},
+            "azure": {"client-id": "cid", "client-secret": "az-cs-4412"},
+            "gcp": {"service-account-key": "gcp-sa-4413"},
+            "minio": {"rootUser": "admin", "rootPassword": "minio-pw-4414"},
+        }
+        assert contract.redact_overlay(ABSENT, overlay) == {
+            "auth": {"existingSecret": "", "bearer-tokens": contract.REDACTED},
+            "aws": {"secret-access-key": contract.REDACTED},
+            "azure": {"client-id": "cid", "client-secret": contract.REDACTED},
+            "gcp": {"service-account-key": contract.REDACTED},
+            "minio": {"rootUser": "admin", "rootPassword": contract.REDACTED},
+        }
+
+    def test_a_chart_credential_is_a_credential_path_and_is_shown_masked(self):
+        receiver = {"deploy": {"service": "dfe-receiver"}}
+        fetcher = {"deploy": {"service": "dfe-fetcher"}}
+        assert contract.credential_var(receiver, "auth.bearer-tokens") is True
+        assert contract.shown_var(fetcher, "azure.client-secret", "az-cs-4412") == contract.REDACTED
+
+    def test_a_section_named_like_a_credential_is_read_field_by_field(self):
+        overlay = {"auth": {"mode": "bearer", "bearer": {"tokens": ["tok-4415"], "header": "x"}}}
+        assert contract.redact_overlay(ABSENT, overlay) == {
+            "auth": {"mode": "bearer", "bearer": {"tokens": [contract.REDACTED], "header": "x"}}
+        }
+
+    def test_a_scalar_named_by_a_section_word_is_masked(self):
+        overlay = {"extraEnv": {"REDISCLI_AUTH": "redis-pw-4416"}, "proxy": {"auth": "u:p"}}
+        assert contract.redact_overlay(ABSENT, overlay) == {
+            "extraEnv": {"REDISCLI_AUTH": contract.REDACTED},
+            "proxy": {"auth": contract.REDACTED},
+        }
+
+
+class TestAUrlPasswordIsMasked:
+    """A connection string keeps its host and user, and hides only its password."""
+
+    def test_an_environment_url_loses_its_password(self):
+        overlay = {
+            "extraEnv": {
+                "DATABASE_URL": "postgres://dfe:db-pw-4420@db:5432/dfe",
+                "CLICKHOUSE_DSN": "clickhouse://dfe:ch-pw-4421@ch:9000",
+                "PLAIN_URL": "https://example.com/path",
+            }
+        }
+        assert contract.redact_overlay(ABSENT, overlay)["extraEnv"] == {
+            "DATABASE_URL": f"postgres://dfe:{contract.REDACTED}@db:5432/dfe",
+            "CLICKHOUSE_DSN": f"clickhouse://dfe:{contract.REDACTED}@ch:9000",
+            "PLAIN_URL": "https://example.com/path",
+        }
+
+    def test_a_password_holding_an_at_sign_is_masked_whole(self):
+        overlay = {"extraEnv": {"DATABASE_URL": "postgres://dfe:p@ss-4422@db:5432/dfe"}}
+        assert contract.redact_overlay(ABSENT, overlay)["extraEnv"]["DATABASE_URL"] == (
+            f"postgres://dfe:{contract.REDACTED}@db:5432/dfe"
+        )
+
+    def test_a_config_url_with_a_password_is_a_credential_write(self):
+        assert contract.credential_var({}, "config.output.url", "https://u:pw-4423@host") is True
+        assert contract.credential_var({}, "config.output.url", "https://host/path") is False
+
+    def test_the_config_route_masks_a_url_password(self):
+        overlay = {"config": {"clickhouse": {"hosts": ["https://dfe:ch-pw-4424@ch:8443"]}}}
+        view = contract.resolve_config(_contract("dfe-loader"), overlay)
+        hosts = {f.path: f for f in view.fields}["config.clickhouse.hosts"]
+        assert hosts.value == [f"https://dfe:{contract.REDACTED}@ch:8443"]
+
+    def test_a_url_written_back_as_read_keeps_its_password(self):
+        doc = {"extraEnv": {"DATABASE_URL": "postgres://dfe:db-pw-4425@db/dfe"}}
+        shown = f"postgres://dfe:{contract.REDACTED}@db/dfe"
+        restored = contract.restore_masked_at(doc, "extraEnv.DATABASE_URL", shown)
+        assert restored == "postgres://dfe:db-pw-4425@db/dfe"
+
+    def test_a_url_changed_around_its_masked_password_is_refused(self):
+        doc = {"extraEnv": {"DATABASE_URL": "postgres://dfe:db-pw-4426@db/dfe"}}
+        moved = f"postgres://dfe:{contract.REDACTED}@elsewhere/dfe"
+        with pytest.raises(contract.MaskedValueError, match="write it in full"):
+            contract.restore_masked_at(doc, "extraEnv.DATABASE_URL", moved)

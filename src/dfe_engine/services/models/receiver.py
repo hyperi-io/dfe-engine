@@ -48,12 +48,12 @@ class TlsConfig(BaseModel):
 
 
 class AcceptedHeader(BaseModel):
-    """An accepted authentication header definition."""
+    """An accepted authentication header definition, whose values are the credential."""
 
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    values: list[str] = []
+    values: list[SecretStr] = []
 
 
 class BearerConfig(BaseModel):
@@ -73,11 +73,11 @@ class AuthConfig(BaseModel):
 
     mode: str = Field(default="none", description="none, header, bearer, mtls, both")
     accepted_headers: list[AcceptedHeader] = Field(
-        default_factory=lambda: [AcceptedHeader(name="x-hyperi-agent", values=["1.0"])]
+        default_factory=lambda: [AcceptedHeader(name="x-hyperi-agent", values=[SecretStr("1.0")])]
     )
     bearer: BearerConfig = Field(default_factory=BearerConfig)
     header_name: str = ""
-    header_values: list[str] = []
+    header_values: list[SecretStr] = []
 
     @field_validator("mode")
     @classmethod

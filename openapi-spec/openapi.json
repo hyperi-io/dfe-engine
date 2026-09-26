@@ -4868,7 +4868,7 @@
           "Services"
         ],
         "summary": "Get Service Config",
-        "description": "Get a full service config by service + instance.",
+        "description": "Get a full service config by service + instance, every credential masked.",
         "operationId": "get_service_config_api_v1_services__service___instance__get",
         "parameters": [
           {
@@ -4923,7 +4923,7 @@
           "Services"
         ],
         "summary": "Save Service Config",
-        "description": "Create or update a service config.\n\nA read shows every set secret as pydantic's placeholder, so a body carrying it\nis a 400 ``masked_value`` rather than a save of the placeholder as the secret.",
+        "description": "Create or update a service config.\n\nA read shows every set secret masked, so a masked value written back keeps the\nsecret stored there, matched as the app surface matches one. A mask with nothing\nstored behind it, or in a list entry that cannot be told apart, is a 400\n``masked_value`` and nothing is saved.",
         "operationId": "save_service_config_api_v1_services__service___instance__put",
         "parameters": [
           {
@@ -30576,7 +30576,7 @@
           "source": {
             "type": "string",
             "title": "Source",
-            "description": "The _source label \u2014 immutable identifier"
+            "description": "The _source label -- immutable identifier"
           },
           "resource_type": {
             "type": "string",
@@ -31019,7 +31019,7 @@
           "field"
         ],
         "title": "SourceMatch",
-        "description": "Receiver match rule \u2014 how the receiver identifies this source."
+        "description": "Receiver match rule: how the receiver identifies this source."
       },
       "SourceNameConflictErrorResponse": {
         "properties": {

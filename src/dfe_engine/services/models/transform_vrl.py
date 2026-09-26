@@ -6,7 +6,7 @@ Kafka config, a VRL transforms directory or file list, and pipeline
 settings (batch size, timeouts).
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from dfe_engine.services.models.base import BaseServiceConfig
 from dfe_engine.services.models.common import (
@@ -15,6 +15,7 @@ from dfe_engine.services.models.common import (
     LoggingConfig,
     MetricsConfig,
     SaslConfig,
+    without_keys,
 )
 
 
@@ -34,6 +35,12 @@ class VrlSourceConfig(BaseModel):
     commit_interval_ms: int = Field(default=5_000, gt=0)
     librdkafka_options: dict[str, str] = Field(default_factory=dict)
     acknowledgements: AcknowledgementsConfig = Field(default_factory=AcknowledgementsConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _ignore_retired_format(cls, data: object) -> object:
+        """Drop ``format``: a transform-vrl file stored before the key was retired still has it."""
+        return without_keys(data, "format")
 
 
 class VrlSinkConfig(BaseModel):

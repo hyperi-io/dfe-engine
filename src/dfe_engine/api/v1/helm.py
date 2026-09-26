@@ -81,6 +81,25 @@ def forge_of(request: Request):
     return getattr(request.app.state, "forge", None)
 
 
+def conflict_error(exc: ConcurrencyConflictError) -> HTTPException:
+    """The 409 for a write whose base revision is stale, the stored document masked.
+
+    ``head`` is the revision to re-read against. ``current`` is the document as it
+    stands at head, masked as every read of the deploy repo is, so a stale
+    ``If-Match`` never reads a credential back.
+    """
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": "conflict",
+            "message": str(exc),
+            # non-reserved keys become the ErrorResponse.context (current vs theirs)
+            "current": contract.shown_resource(exc.current),
+            "head": exc.head,
+        },
+    )
+
+
 def check_name(name: str) -> None:
     """400 on a resource name that could traverse the tree or forge a trailer."""
     try:
@@ -198,16 +217,7 @@ def set_var_governed(
             write=_write,
         )
     except ConcurrencyConflictError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "conflict",
-                "message": str(exc),
-                # non-reserved keys become the ErrorResponse.context (current vs theirs)
-                "current": exc.current,
-                "head": exc.head,
-            },
-        ) from exc
+        raise conflict_error(exc) from exc
     except ReviewRequiredError as exc:
         raise HTTPException(
             status_code=409, detail={"code": "review_required", "message": str(exc)}

@@ -6,7 +6,7 @@ All defaults match the Rust `impl Default` values exactly.
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 from dfe_engine.services.models.base import BaseServiceConfig
 from dfe_engine.services.models.common import (
@@ -14,6 +14,7 @@ from dfe_engine.services.models.common import (
     KafkaTlsConfig,
     MemoryConfig,
     SaslConfig,
+    without_keys,
 )
 from dfe_engine.source.models import DEFAULT_LANDING_LABEL, landing_topic
 
@@ -387,6 +388,12 @@ class LoaderConfig(BaseServiceConfig):
         alias="schema",
         description="Schema cache config (aliased from 'schema' in YAML)",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _ignore_retired_payload(cls, data: object) -> object:
+        """Drop ``payload``: a loader file stored before the key was retired still has it."""
+        return without_keys(data, "payload")
 
     @field_validator("transport")
     @classmethod

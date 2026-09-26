@@ -29,6 +29,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from scalo.logger.filters import MASK_VALUE, SENSITIVE_FIELDS
+
 from dfe_engine.appmgmt.appconfig import CONFIG_ROOT, ENV_ROOT, custom_env
 from dfe_engine.appmgmt.catalogue import APP_CATALOGUE, DEPLOY_SERVICE_PATH
 from dfe_engine.gitcrud.engine import flatten, get_path, set_path
@@ -55,37 +57,106 @@ The whole point of the block is a name no contract declares, so the name is all
 there is to check; the value is never judged against the app's schema.
 """
 
-SECRET_NAMES = frozenset(
+_NAME_WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
+"""One word of a name: an acronym, a capitalised or lower-case run, or digits.
+
+Every other character separates words, so ``bearer-tokens``, ``bearer_tokens``,
+``bearerTokens`` and ``BEARER_TOKENS`` all read as ``bearer``, ``tokens``.
+"""
+
+
+def _words(name: str) -> tuple[str, ...]:
+    """A name as lower-case words, split at separators and camelCase humps."""
+    return tuple(word.lower() for word in _NAME_WORD.findall(name))
+
+
+_FLOOR_TERMS = frozenset(
     {
-        "password",
-        "secret",
-        "token",
-        "api_key",
-        "private_key",
-        "passphrase",
-        "passwords",
-        "secrets",
-        "tokens",
-        "api_keys",
-        "private_keys",
-        "passphrases",
+        "access_key",
+        "ssh_key",
+        "tls_key",
+        "aws_secret",
+        "gcp_key",
+        "azure_key",
+        "session",
+        "cookie",
+        "csrf",
+        "private",
+        "ssn",
+        "tfn",
+        "medicare",
+        "credit_card",
+        "card_number",
+        "cvv",
+        "email",
+        "phone",
     }
 )
-"""Words that make a name a credential, as the whole name or its last words.
+"""The standard's sensitive-field floor, less what scalo-py's list already holds.
 
-``password`` and ``sasl_password``, ``token`` and ``auth_token`` are all credentials,
-in a config key and an environment name alike: see :func:`secret_name` and
-:func:`secret_env_name`. A ``key`` is judged apart, by :data:`KEY_QUALIFIERS`.
-
-Part of the fleet ships no ``x-dfe-secret`` at all - dfe-transform-vector carries
-none, and dfe-receiver marks none of its Kafka credentials, a plain-string
-password included - so trusting the marker alone would hand an operator's Kafka
-password back over the API. The rule errs towards hiding.
-
-dfe-transform-vrl now marks its SASL password (its PR #61, 2026-09-16), so the
-list shrinks as apps adopt the marker. The rule stays regardless: it has to hold
-for the app that has not adopted it yet.
+``address`` is left out: in an app's config it names a listen or connect address.
 """
+
+_ENGINE_TERMS = frozenset({"passphrase", "jaas_config"})
+"""Credentials the DFE apps and their brokers name that neither list above covers."""
+
+CREDENTIAL_TERMS: frozenset[tuple[str, ...]] = frozenset(
+    _words(term.replace("_", " ")) for term in {*SENSITIVE_FIELDS, *_FLOOR_TERMS, *_ENGINE_TERMS}
+)
+"""Every term that makes a name a credential when the name ends in it, as words.
+
+scalo-py's own ``SENSITIVE_FIELDS``, extended by :data:`_FLOOR_TERMS` and
+:data:`_ENGINE_TERMS`. ``sasl_password``, ``auth-token``, ``rootPassword`` and
+``KAFKA_SASL_JAAS_CONFIG`` each end in one; ``token_url`` and ``password_field``
+do not. A trailing ``s`` is read as the plural of the term's last word.
+
+Part of the fleet ships no ``x-dfe-secret`` at all, so trusting the marker alone
+would hand an operator's Kafka password back over the API. The rule errs towards
+hiding, and holds for an app that has not adopted the marker yet.
+"""
+
+SECTION_TERMS: frozenset[tuple[str, ...]] = frozenset(
+    _words(term.replace("_", " "))
+    for term in {
+        "auth",
+        "authorization",
+        "bearer",
+        "credentials",
+        "cert",
+        "certificate",
+        "ssl_cert",
+        "session",
+        "cookie",
+        "csrf",
+        "private",
+        "email",
+        "phone",
+    }
+)
+"""Terms that name a section as often as a value: a mapping under one is read field by field.
+
+``server.auth`` holds the auth mode beside its bearer tokens, so masking the whole
+mapping for its name would hide settings. A scalar ``REDISCLI_AUTH`` is still masked.
+"""
+
+_COMPACT_STEMS = (
+    "password",
+    "passwords",
+    "passwd",
+    "secret",
+    "secrets",
+    "token",
+    "tokens",
+    "apikey",
+    "passphrase",
+)
+"""Credential words run together into a name's last word, as in ``PGPASSWORD``.
+
+Judged only for a scalar, since ``onepassword`` is also the name of a source section.
+"""
+
+_SHOWN_ENDINGS: frozenset[tuple[str, ...]] = frozenset({("client", "auth")})
+"""Name endings that match a credential term and hold a setting: the TLS client-auth mode."""
 
 KEY_QUALIFIERS = frozenset(
     {
@@ -108,29 +179,45 @@ KEY_QUALIFIERS = frozenset(
         "sasl",
         "credential",
         "credentials",
+        "jwt",
+        "gcp",
+        "azure",
+        "session",
+        "cookie",
+        "csrf",
     }
 )
 """Words that make a ``key`` a credential when they qualify it.
 
 The qualifier is the word before ``key`` in the name - ``secret_access_key``,
-``SIGNING_KEY`` - or, for a bare ``key``, the section holding it, as ``tls.key``.
-A ``key`` nothing qualifies is as often a routing or partition key, and stays shown.
+``SIGNING_KEY``, ``JWT_KEY`` - or, for a bare ``key``, the section holding it, as
+``tls.key``. A ``key`` nothing qualifies is as often a routing or partition key -
+``KAFKA_PARTITION_KEY``, ``sink.key_field`` - and stays shown, as ``FOO_KEY`` does.
 """
 
-SECRET_SOURCE_WORDS = frozenset({"credential", "credentials", "ca", "cert", "key", "config"})
-"""Words that make a config key ending in ``secret`` a secret source, not a secret.
+SECRET_SOURCE_WORDS = frozenset(
+    {"credential", "credentials", "ca", "cert", "key", "config", "existing", "pull"}
+)
+"""Words that make a name ending in ``secret`` a secret source, not a secret.
 
 It names where a credential is fetched from, which an operator needs to see:
 dfe-fetcher's ``credential_secret`` and ``private_key_secret`` and dfe-receiver's
 ``tls.key_secret`` each hold a ``provider:path:key`` spec such as
-``vault:kv/data/github:token``, and a chart's ``config_secret`` names a Secret.
+``vault:kv/data/github:token``; a chart's ``config_secret``, ``existingSecret`` and
+``imagePullSecrets`` name Kubernetes Secrets.
 """
 
-REDACTED = "***REDACTED***"
+REDACTED = MASK_VALUE
 """What stands in for a credential in a document read back over the API.
 
-The placeholder scalo serialises a secret as, so an operator sees one spelling
-for a hidden value wherever it is shown.
+scalo's own mask, so an operator sees one spelling for a hidden value wherever it
+is shown.
+"""
+
+_URL_PASSWORD = re.compile(r"([A-Za-z][A-Za-z0-9+.\-]*://[^\s:/@]*:)([^\s/]+)(?=@)")
+"""The password in a URL's ``user:password@`` userinfo.
+
+It runs to the last ``@`` before the path, so a password holding one is masked whole.
 """
 
 IDENTITY_KEYS = ("id", "name")
@@ -542,70 +629,78 @@ def _branches(node: Any, root: dict) -> list[dict]:
     return out
 
 
-def _qualified_key(words: list[str], section: str) -> bool:
+def _qualified_key(words: tuple[str, ...], section: str) -> bool:
     """Whether a name ending in ``key`` is a credential key, per :data:`KEY_QUALIFIERS`."""
     if words[-1] not in ("key", "keys"):
         return False
-    qualifier = words[-2] if len(words) > 1 else section.lower().rsplit("_", 1)[-1]
-    return qualifier in KEY_QUALIFIERS or qualifier in SECRET_NAMES
+    if len(words) > 1:
+        qualifier = words[-2]
+    else:
+        section_words = _words(section)
+        qualifier = section_words[-1] if section_words else ""
+    return qualifier in KEY_QUALIFIERS or (qualifier,) in CREDENTIAL_TERMS
 
 
-def _secret_word(lowered: str) -> str | None:
-    """The word of :data:`SECRET_NAMES` that ``lowered`` is, or ends in after an underscore."""
-    return next(
-        (word for word in SECRET_NAMES if lowered == word or lowered.endswith(f"_{word}")),
-        None,
-    )
+def _ends_in(words: tuple[str, ...], term: tuple[str, ...]) -> bool:
+    """Whether ``words`` ends in ``term``, or in its plural."""
+    size = len(term)
+    if len(words) < size or words[-size:-1] != term[:-1]:
+        return False
+    return words[-1] in (term[-1], f"{term[-1]}s")
 
 
-def secret_name(name: str, section: str = "") -> bool:
-    """Whether a config key is named as a credential.
+def secret_name(name: str, section: str = "", *, mapping: bool = False) -> bool:
+    """Whether a name says the value under it is a credential.
 
-    It is, or ends in, one of :data:`SECRET_NAMES` - ``auth_token``, ``sasl_password``
-    - unless it is a secret source per :data:`SECRET_SOURCE_WORDS`; or it is a ``key``
-    a credential word qualifies. ``section`` is the name of the mapping holding it,
-    which is what qualifies a bare ``key``.
+    The name ends in one of :data:`CREDENTIAL_TERMS` - ``auth_token``,
+    ``bearer-tokens``, ``rootPassword`` - unless it is a secret source per
+    :data:`SECRET_SOURCE_WORDS` or one of :data:`_SHOWN_ENDINGS`; or it is a ``key``
+    a credential word qualifies, where ``section``, the name of the mapping holding
+    it, qualifies a bare ``key``. A scalar whose last word runs a credential word in,
+    as ``PGPASSWORD`` does, is one too.
+
+    ``mapping`` says the value is a mapping or a list of them, which a name in
+    :data:`SECTION_TERMS` does not hide whole: its fields are judged one by one.
     """
-    lowered = name.lower()
-    words = lowered.split("_")
+    words = _words(name)
+    if not words:
+        return False
     if _qualified_key(words, section):
         return True
-    word = _secret_word(lowered)
-    if word in ("secret", "secrets") and len(words) > 1:
-        return words[-2] not in SECRET_SOURCE_WORDS
-    return word is not None
-
-
-def _holds_secret(
-    node: Any, root: dict, name: str = "", seen: frozenset[str] = frozenset()
-) -> bool:
-    """Whether a value of this schema carries credential material anywhere inside it.
-
-    An array is one option, so a marker on its items, or a secret field of an object
-    it lists, makes the whole option secret: dfe-receiver marks each bearer token and
-    each accepted header value, not the list that holds them.
-    """
-    ref = node.get("$ref") if isinstance(node, dict) else None
-    if isinstance(ref, str):
-        # A definition that refers to itself would otherwise be walked without end.
-        if ref in seen:
+    matched = [term for term in CREDENTIAL_TERMS if _ends_in(words, term)]
+    if matched:
+        if any(_ends_in(words, ending) for ending in _SHOWN_ENDINGS):
             return False
-        seen = seen | {ref}
-    children: list[tuple[Any, str]] = []
+        if all(term == ("secret",) for term in matched) and len(words) > 1:
+            if words[-2] in SECRET_SOURCE_WORDS:
+                return False
+        return not mapping or any(term not in SECTION_TERMS for term in matched)
+    return not mapping and words[-1].endswith(_COMPACT_STEMS)
+
+
+def _object_branch(branch: dict) -> bool:
+    """Whether one resolved schema branch describes a mapping."""
+    declared = branch.get("type")
+    typed = declared == "object" or (isinstance(declared, list) and "object" in declared)
+    return typed or "properties" in branch or isinstance(branch.get("additionalProperties"), dict)
+
+
+def _takes_fields(node: Any, root: dict) -> bool:
+    """Whether a value of this schema is a mapping, or a list of mappings."""
     for branch in _branches(node, root):
-        if branch.get(SECRET_MARKER):
+        if _object_branch(branch):
             return True
-        props = branch.get("properties")
-        if isinstance(props, dict):
-            if any(secret_name(prop, name) for prop in props):
-                return True
-            children.extend((child, prop) for prop, child in props.items())
-        children.extend(
-            (branch[keyword], name)
-            for keyword in ("items", "additionalProperties")
-            if isinstance(branch.get(keyword), dict)
-        )
-    return any(_holds_secret(child, root, below, seen) for child, below in children)
+        items = branch.get("items")
+        if isinstance(items, dict) and any(_object_branch(b) for b in _branches(items, root)):
+            return True
+    return False
+
+
+def _has_fields(value: Any) -> bool:
+    """Whether a value is a mapping, or a list holding one."""
+    if isinstance(value, dict):
+        return True
+    return isinstance(value, list) and any(isinstance(item, dict) for item in value)
 
 
 def _wholly_secret(path: str, node: dict, root: dict) -> bool:
@@ -617,7 +712,7 @@ def _wholly_secret(path: str, node: dict, root: dict) -> bool:
     """
     parts = path.split(".")
     section = parts[-2] if len(parts) > 1 else ""
-    if secret_name(parts[-1], section):
+    if secret_name(parts[-1], section, mapping=_takes_fields(node, root)):
         return True
     for branch in _branches(node, root):
         if branch.get(SECRET_MARKER):
@@ -641,16 +736,28 @@ def _masked(value: Any) -> Any:
     return REDACTED
 
 
+def _shown_text(text: str) -> str:
+    """``text`` with the password of every ``scheme://user:password@`` URL in it masked."""
+    return _URL_PASSWORD.sub(rf"\1{REDACTED}", text)
+
+
 def _redact(value: Any, node: Any, root: dict, name: str, section: str = "") -> Any:
     """``value`` with every part its schema marks, or its name calls, a secret masked.
 
     ``node`` is the schema the value was written against, or None where nothing
     declares it, which leaves only the name rule to judge it. ``section`` is the
-    name of the mapping holding ``value``.
+    name of the mapping holding ``value``. Text that survives both carries its URL
+    passwords masked, as a connection string does.
     """
+    if isinstance(value, _Missing):
+        return value
     branches = _branches(node, root) if node is not None else []
-    if secret_name(name, section) or any(b.get(SECRET_MARKER) for b in branches):
+    if any(b.get(SECRET_MARKER) for b in branches) or secret_name(
+        name, section, mapping=_has_fields(value)
+    ):
         return _masked(value)
+    if isinstance(value, str):
+        return _shown_text(value)
     if isinstance(value, dict):
         props: dict[str, Any] = {}
         extra: Any = None
@@ -675,21 +782,28 @@ def _redact(value: Any, node: Any, root: dict, name: str, section: str = "") -> 
 def secret_env_name(name: str) -> bool:
     """Whether an environment name says it carries a credential.
 
-    Judged by the words :data:`SECRET_NAMES` holds, as the name's last words:
-    ``DFE_LOADER_KAFKA_SASL_PASSWORD``, ``S3_API_KEY`` and ``GITHUB_TOKEN`` each end
-    in one. A trailing ``KEY`` counts only where :data:`KEY_QUALIFIERS` qualifies it,
-    so ``S3_SECRET_KEY`` is masked and ``KAFKA_PARTITION_KEY`` is not.
+    :func:`secret_name` for a scalar: ``DFE_LOADER_KAFKA_SASL_PASSWORD``,
+    ``S3_API_KEY``, ``KAFKA_SASL_JAAS_CONFIG``, ``HTTP_AUTHORIZATION`` and
+    ``PGPASSWORD`` each say so. A trailing ``KEY`` counts only where
+    :data:`KEY_QUALIFIERS` qualifies it, so ``S3_SECRET_KEY`` is masked and
+    ``KAFKA_PARTITION_KEY`` is not.
     """
-    lowered = name.lower()
-    return _secret_word(lowered) is not None or _qualified_key(lowered.split("_"), "")
+    return secret_name(name)
 
 
 def _redact_env(env: Any) -> Any:
-    """An environment block with every value whose name says it is a credential masked."""
+    """An environment block with every credential it carries masked.
+
+    A value whose name says it is one is masked whole. Any other keeps its text,
+    less the password of a URL in it, as ``DATABASE_URL`` would carry.
+    """
     if not isinstance(env, dict):
         return env
     return {
-        key: _masked(value) if secret_env_name(str(key)) else value for key, value in env.items()
+        key: _masked(value)
+        if secret_env_name(str(key))
+        else (_shown_text(value) if isinstance(value, str) else value)
+        for key, value in env.items()
     }
 
 
@@ -759,10 +873,23 @@ def credential_var(doc: dict, path: str, value: Any = MISSING) -> bool:
     return any(shown_var(doc, path, probe) != probe for probe in probes)
 
 
+def shown_resource(doc: dict) -> dict:
+    """:func:`redact_resource` for an error body, where it must never fail.
+
+    An unreadable contract mount leaves the name rule to judge the document.
+    """
+    try:
+        return redact_resource(doc)
+    except ContractError:
+        return redact_overlay(
+            AppContract(service="", available=False, source=ContractSource.ABSENT), doc
+        )
+
+
 def _carries_mask(value: Any) -> bool:
-    """Whether :data:`REDACTED` stands anywhere in ``value``."""
+    """Whether :data:`REDACTED` stands anywhere in ``value``, a URL password included."""
     if isinstance(value, str):
-        return value == REDACTED
+        return REDACTED in value
     if isinstance(value, list):
         return any(_carries_mask(item) for item in value)
     if isinstance(value, dict):
@@ -787,6 +914,8 @@ def _same_but_masked(value: Any, stored: Any) -> bool:
     """Whether ``value`` is ``stored`` as a read shows it: equal wherever it is not masked."""
     if isinstance(value, str) and value == REDACTED:
         return stored is not None and not isinstance(stored, _Missing)
+    if isinstance(value, str) and REDACTED in value:
+        return isinstance(stored, str) and _shown_text(stored) == value
     if isinstance(value, dict):
         return isinstance(stored, dict) and all(
             _same_but_masked(item, stored.get(key, MISSING)) for key, item in value.items()
@@ -800,29 +929,56 @@ def _same_but_masked(value: Any, stored: Any) -> bool:
     return value == stored
 
 
-def _restore_list(value: list, stored: Any, path: str) -> list:
+def _views(kept: list, shown: Any) -> list[tuple[Any, Any]]:
+    """Each stored entry beside the form a read showed it in.
+
+    With no read to go on, the entry itself stands in. A read that showed the list
+    as anything but a list of the same length showed no entry at all.
+    """
+    if isinstance(shown, _Missing):
+        return [(entry, entry) for entry in kept]
+    if isinstance(shown, list) and len(shown) == len(kept):
+        return list(zip(kept, shown, strict=True))
+    return [(entry, REDACTED) for entry in kept]
+
+
+def _restore_list(value: list, stored: Any, shown: Any, path: str) -> list:
     """A written list with each masked entry matched to the stored entry it was read from.
 
     Entries named by one of :data:`IDENTITY_KEYS` are matched by name, so deleting
     or reordering one cannot hand its credential to a neighbour. Unnamed entries are
     matched in stored order, and only while every stored entry is accounted for and
     each masked one is otherwise unchanged; anything else cannot be told apart.
+
+    A written entry accounts for a stored one only when it matches the entry as a read
+    showed it, so a credential typed back in the clear is counted as new and a guess
+    at a stored token is refused whether it is right or wrong.
     """
     kept = stored if isinstance(stored, list) else []
+    pairs = _views(kept, shown)
     masked = [item for item in value if _carries_mask(item)]
     for key in IDENTITY_KEYS:
         wanted, by_name = _named(masked, key), _named(kept, key)
         if wanted is not None and by_name is not None:
+            seen = {entry[key]: view for entry, view in pairs}
             return [
-                restore_masked(item, by_name.get(item[key], MISSING), path=f"{path}[{i}]")
+                restore_masked(
+                    item,
+                    by_name.get(item[key], MISSING),
+                    path=f"{path}[{i}]",
+                    shown=seen.get(item[key], MISSING),
+                )
                 if _carries_mask(item)
                 else item
                 for i, item in enumerate(value)
             ]
-    remaining = list(kept)
+    remaining = list(pairs)
     for item in value:
-        if not _carries_mask(item) and item in remaining:
-            remaining.remove(item)
+        if _carries_mask(item):
+            continue
+        match = next((pair for pair in remaining if pair[1] == item), None)
+        if match is not None:
+            remaining.remove(match)
     if not remaining:
         return [restore_masked(item, MISSING, path=f"{path}[{i}]") for i, item in enumerate(value)]
     where = path or "the list"
@@ -843,27 +999,42 @@ def _restore_list(value: list, stored: Any, path: str) -> list:
         if not _carries_mask(item):
             out.append(item)
             continue
-        entry = next(behind)
+        entry, view = next(behind)
         if not _same_but_masked(item, entry):
             raise MaskedValueError(
                 f"{where}[{i}] is masked but no longer matches the stored entry in its "
                 "place, and nothing names it: write its credentials in full"
             )
-        out.append(restore_masked(item, entry, path=f"{where}[{i}]"))
+        out.append(restore_masked(item, entry, path=f"{where}[{i}]", shown=view))
     return out
 
 
-def restore_masked(value: Any, stored: Any = MISSING, *, path: str = "") -> Any:
+def _shown_child(shown: Any, key: Any) -> Any:
+    """What a read showed under ``key`` of a mapping it showed as ``shown``."""
+    if isinstance(shown, _Missing):
+        return MISSING
+    if isinstance(shown, dict):
+        return shown.get(key, MISSING)
+    return REDACTED
+
+
+def restore_masked(
+    value: Any, stored: Any = MISSING, *, path: str = "", shown: Any = MISSING
+) -> Any:
     """``value`` with every :data:`REDACTED` it carries put back to what is stored there.
 
     A client that reads a masked document and writes it back hands in the mask
     where the credentials were, and writing that literally would replace each
     credential with the placeholder. A list is matched as :func:`_restore_list`
     says, which refuses rather than guess which stored entry a mask stands for.
+    A URL whose password alone was masked restores while the rest of it is unchanged.
+
+    ``shown`` is ``stored`` as the read showed it, where the caller has it.
 
     Raises:
-        MaskedValueError: The placeholder stands where nothing is stored, or in a
-            list entry that cannot be matched to the stored one it was read from.
+        MaskedValueError: The placeholder stands where nothing is stored, in a URL
+            changed around its masked password, or in a list entry that cannot be
+            matched to the stored one it was read from.
     """
     if isinstance(value, str) and value == REDACTED:
         if isinstance(stored, _Missing) or stored is None:
@@ -872,12 +1043,24 @@ def restore_masked(value: Any, stored: Any = MISSING, *, path: str = "") -> Any:
                 "where nothing is stored: write the credential itself"
             )
         return stored
+    if isinstance(value, str) and REDACTED in value:
+        if isinstance(stored, str) and _shown_text(stored) == value:
+            return stored
+        raise MaskedValueError(
+            f"{path or 'the value'} carries the redaction placeholder {REDACTED!r} inside "
+            "it and is not what is stored there with its password masked: write it in full"
+        )
     if isinstance(value, list):
-        return _restore_list(value, stored, path) if _carries_mask(value) else value
+        return _restore_list(value, stored, shown, path) if _carries_mask(value) else value
     if isinstance(value, dict):
         kept_map = stored if isinstance(stored, dict) else {}
         return {
-            key: restore_masked(item, kept_map.get(key, MISSING), path=f"{path}.{key}")
+            key: restore_masked(
+                item,
+                kept_map.get(key, MISSING),
+                path=f"{path}.{key}" if path else str(key),
+                shown=_shown_child(shown, key),
+            )
             for key, item in value.items()
         }
     return value
@@ -885,7 +1068,9 @@ def restore_masked(value: Any, stored: Any = MISSING, *, path: str = "") -> Any:
 
 def restore_masked_at(doc: dict, path: str, value: Any) -> Any:
     """:func:`restore_masked` for a write of ``value`` at dot-path ``path`` in ``doc``."""
-    return restore_masked(value, get_path(doc, path, MISSING), path=path)
+    stored = get_path(doc, path, MISSING)
+    shown = MISSING if isinstance(stored, _Missing) else shown_var(doc, path, stored)
+    return restore_masked(value, stored, path=path, shown=shown)
 
 
 def redact_var(doc: dict, path: str, value: Any) -> Any:
@@ -1129,8 +1314,8 @@ def resolve_config(
 
         value = written if not isinstance(written, _Missing) else default
         # An option holding credential fields shows with only those fields masked.
-        parts = path.split(".")
-        if not secret and _holds_secret(node, app_contract.schema, parts[-1]):
+        if not secret:
+            parts = path.split(".")
             section = parts[-2] if len(parts) > 1 else ""
             default = _redact(default, node, app_contract.schema, parts[-1], section)
             value = _redact(value, node, app_contract.schema, parts[-1], section)

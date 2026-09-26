@@ -973,3 +973,97 @@ class TestCredentialsAreNotEchoed:
         _put_receiver(client, admin_headers, CREDENTIALS)
         doc = gc.get("helmvars", "dfe-receiver-default-values")
         assert doc["config"]["server"]["auth"]["bearer"]["tokens"] == ["tok-1", "tok-2"]
+
+
+STALE = "0" * 40
+RECEIVER_VARS = "/api/v1/helm/files/dfe-receiver-default-values/vars"
+
+
+@pytest.mark.usefixtures("_held")
+class TestAStaleWriteReadsNoCredentialBack:
+    """A 409 carries the document at head, masked as every other read of it is."""
+
+    def _seed(self, client, app, headers, tmp_path) -> None:
+        _wire(app, tmp_path)
+        assert _deploy_receiver(client, headers).status_code == 200
+        assert _put_receiver(client, headers, CREDENTIALS).status_code == 200
+
+    def _assert_masked_conflict(self, resp) -> None:
+        assert resp.status_code == 409, resp.text
+        body = resp.json()
+        assert body["code"] == "conflict"
+        auth = body["context"]["current"]["config"]["server"]["auth"]
+        assert auth["mode"] == "bearer"
+        assert auth["bearer"]["tokens"] == [contract.REDACTED, contract.REDACTED]
+        assert body["context"]["head"]
+        for credential in PLAINTEXT:
+            assert credential not in resp.text
+
+    def test_a_helm_var_write(self, client, app, admin_headers, tmp_path):
+        self._seed(client, app, admin_headers, tmp_path)
+        resp = client.put(
+            f"{RECEIVER_VARS}/keda.maxReplicaCount",
+            json={"value": 4},
+            headers={**admin_headers, "If-Match": STALE},
+        )
+        self._assert_masked_conflict(resp)
+
+    def test_a_scaling_write(self, client, app, admin_headers, tmp_path):
+        self._seed(client, app, admin_headers, tmp_path)
+        resp = client.put(
+            f"{RECEIVER_BASE}/scaling",
+            json={"max_replicas": 7},
+            headers={**admin_headers, "If-Match": STALE},
+        )
+        self._assert_masked_conflict(resp)
+
+    def test_an_undeploy(self, client, app, admin_headers, tmp_path):
+        self._seed(client, app, admin_headers, tmp_path)
+        resp = client.delete(RECEIVER_BASE, headers={**admin_headers, "If-Match": STALE})
+        self._assert_masked_conflict(resp)
+
+
+@pytest.mark.usefixtures("_held")
+class TestTheChartsOwnCredentialKeys:
+    """The app chart's hyphenated credential keys read back masked everywhere."""
+
+    TOKEN = "chart-tok-4410"
+
+    def test_a_chart_token_is_masked_on_every_read(self, client, app, admin_headers, tmp_path):
+        gc = _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        resp = client.put(
+            f"{RECEIVER_VARS}/auth.bearer-tokens", json={"value": self.TOKEN}, headers=admin_headers
+        )
+        assert resp.status_code == 200, resp.text
+        for url in (
+            RECEIVER_VARS,
+            f"{RECEIVER_BASE}/values",
+            "/api/v1/gitops/classes/helmvars/resources/dfe-receiver-default-values/vars",
+        ):
+            got = client.get(url, headers=admin_headers)
+            assert got.status_code == 200, (url, got.text)
+            assert self.TOKEN not in got.text, url
+        stored = gc.get("helmvars", "dfe-receiver-default-values")
+        assert stored["auth"]["bearer-tokens"] == self.TOKEN
+
+    def test_an_action_may_not_carry_one(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        action = {
+            "name": "set-tok",
+            "description": "d",
+            "required_action": "action:invoke:set-tok",
+            "changes": [
+                {
+                    "cls": "helmvars",
+                    "name": "dfe-receiver-default-values",
+                    "path": "auth.bearer-tokens",
+                    "value": "act-tok-3301",
+                }
+            ],
+        }
+        resp = client.post("/api/v1/governance/admin/actions", json=action, headers=admin_headers)
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "credential_in_action"
+        assert "act-tok-3301" not in resp.text

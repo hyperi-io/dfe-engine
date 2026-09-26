@@ -288,7 +288,13 @@ class TestProdTeamPrRouting:
 
     @pytest.mark.parametrize(
         ("path", "credential"),
-        [("config.kafka.sasl.password", "hunter2"), ("extraEnv.DFE_X_API_KEY", "env-key")],
+        [
+            ("config.kafka.sasl.password", "hunter2"),
+            ("extraEnv.DFE_X_API_KEY", "env-key"),
+            ("auth.bearer-tokens", "chart-tok-4410"),
+            ("minio.rootPassword", "minio-pw-4431"),
+            ("extraEnv.PGPASSWORD", "pg-pw-4432"),
+        ],
     )
     def test_a_credential_is_named_not_shown_in_the_pr(
         self, client, app, admin_headers, tmp_path, path, credential

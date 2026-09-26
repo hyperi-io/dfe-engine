@@ -3,6 +3,13 @@
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 
+def without_keys(data: object, *keys: str) -> object:
+    """``data`` less ``keys`` where it is a mapping, so a retired key reads as absent."""
+    if not isinstance(data, dict):
+        return data
+    return {key: value for key, value in data.items() if key not in keys}
+
+
 class SaslConfig(BaseModel):
     """SASL authentication for Kafka connections.
 

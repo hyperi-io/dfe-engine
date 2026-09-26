@@ -38,6 +38,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, R
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.v1.helm import conflict_error
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import library, links, validate_language
 from dfe_engine.auth.audit import audit_resource_change
@@ -64,7 +65,7 @@ _READ = Depends(require_action(scopes_dict["library_read"]))
 _WRITE = Depends(require_action(scopes_dict["library_write"]))
 
 
-# ── request and response models ───────────────────────────────
+# --- request and response models ---
 
 
 class KindModel(BaseModel):
@@ -179,7 +180,7 @@ class UsageModel(BaseModel):
     tag: str = ""
 
 
-# ── shared plumbing ───────────────────────────────────────────
+# --- shared plumbing ---
 
 
 def _gitcrud(request: Request) -> GitCrud:
@@ -413,15 +414,7 @@ def _commit(
             write=_write,
         )
     except ConcurrencyConflictError as exc:
-        raise HTTPException(
-            409,
-            detail={
-                "code": "conflict",
-                "message": str(exc),
-                "current": exc.current,
-                "head": exc.head,
-            },
-        ) from exc
+        raise conflict_error(exc) from exc
     except ReviewRequiredError as exc:
         raise HTTPException(409, detail={"code": "review_required", "message": str(exc)}) from exc
 
@@ -435,7 +428,7 @@ def _commit(
     )
 
 
-# ── kinds ─────────────────────────────────────────────────────
+# --- kinds ---
 
 
 @router.get("/kinds", dependencies=[_READ])
@@ -452,7 +445,7 @@ def list_kinds(user: CurrentUser, request: Request) -> list[KindModel]:
     ]
 
 
-# ── artefacts ─────────────────────────────────────────────────
+# --- artefacts ---
 
 
 @router.get("", dependencies=[_READ])
@@ -641,7 +634,7 @@ def set_state(
     return _commit(request, user, name, doc, summary=f"state {body.state}", protected=protected)
 
 
-# ── versions ──────────────────────────────────────────────────
+# --- versions ---
 
 
 @router.get("/{artifact}/versions", dependencies=[_READ])
@@ -764,7 +757,7 @@ def rollback(
     return result.model_copy(update={"version": body.version})
 
 
-# ── tags ──────────────────────────────────────────────────────
+# --- tags ---
 
 
 @router.put("/{artifact}/tags/{tag}", response_model=WriteResult, dependencies=[_WRITE])
@@ -803,7 +796,7 @@ def delete_tag(artifact: str, tag: str, user: CurrentUser, request: Request) -> 
     return _commit(request, user, name, doc, summary=f"untag {tag}", protected=protected)
 
 
-# ── usage ─────────────────────────────────────────────────────
+# --- usage ---
 
 
 @router.get("/{artifact}/usage", dependencies=[_READ])

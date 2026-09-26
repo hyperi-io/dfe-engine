@@ -57,7 +57,7 @@ from confluent_kafka.admin import (
 )
 from scalo.logger import logger
 
-from dfe_engine.source.models import transformed_topic
+from dfe_engine.source.models import manifest_max_message_bytes, transformed_topic
 
 if TYPE_CHECKING:
     from dfe_engine.settings import DFESettings
@@ -423,9 +423,7 @@ def topic_max_message_bytes(settings: DFESettings) -> int:
     configured = settings.kafka.topic_max_message_bytes
     if configured is not None:
         return configured
-    from dfe_engine.source.models import _topic_policy
-
-    return int(_topic_policy().defaults["max_message_bytes"])
+    return manifest_max_message_bytes()
 
 
 def deployment_topic_config(settings: DFESettings) -> dict[str, str]:
