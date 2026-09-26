@@ -3,6 +3,17 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.1](https://github.com/hyperi-io/dfe-engine/compare/v1.22.0...v1.22.1) (2026-09-26)
+
+### Bug Fixes
+
+* **ci:** give the pip-audit warn its reason, and point two docs at dfe-schemas ([#535](https://github.com/hyperi-io/dfe-engine/issues/535)) ([2e89686](https://github.com/hyperi-io/dfe-engine/commit/2e8968664e3e17b87ee9eea21200d49342d2d954))
+* **ci:** keep the wheel off PyPI under the key that survives ([#536](https://github.com/hyperi-io/dfe-engine/issues/536)) ([965e664](https://github.com/hyperi-io/dfe-engine/commit/965e664fe2eed30e605afb8d3987f57e32284570))
+* correct stale scaling and Valkey docs ([#533](https://github.com/hyperi-io/dfe-engine/issues/533)) ([1b49e5e](https://github.com/hyperi-io/dfe-engine/commit/1b49e5e91303c9cf17cca359dfa4868a58c55302))
+* **deploy:** a generated deployment no longer scales on raw consumer lag ([#532](https://github.com/hyperi-io/dfe-engine/issues/532)) ([5e8e477](https://github.com/hyperi-io/dfe-engine/commit/5e8e477ef4021b9c242e13af186615394b6899a7))
+* OIDC user tracking ([#534](https://github.com/hyperi-io/dfe-engine/issues/534)) ([e4ad076](https://github.com/hyperi-io/dfe-engine/commit/e4ad076cfee5e9fc6209aa241271f47f811e7e53))
+* scope reset_all to the instances it actually seeds ([#541](https://github.com/hyperi-io/dfe-engine/issues/541)) ([2c9435d](https://github.com/hyperi-io/dfe-engine/commit/2c9435dd5985cf52248cb6fca1533c5af75cba96))
+
 ## [1.22.0](https://github.com/hyperi-io/dfe-engine/compare/v1.21.2...v1.22.0) (2026-09-24)
 
 ### Features
