@@ -95,7 +95,7 @@ class UserResponse(BaseModel):
     )
     password_change_required: bool = Field(
         default=False,
-        description="True until the account replaces an issued password; a console "
+        description="True until the account replaces an issued password. A console "
         "shows the change screen before anything else while it is set.",
     )
 

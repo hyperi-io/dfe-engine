@@ -65,8 +65,8 @@ class EngineAPI:
     def _complete_forced_change(self) -> None:
         """Replace the issued password, as the account's owner must before anything else."""
         assert self.new_password, (
-            f"'{self.user}' must change its issued password before the engine serves it; "
-            "set DFE_E2E_ADMIN_NEW_PASSWORD to the password to change it to"
+            f"'{self.user}' must change its issued password before the engine serves it. "
+            "Set DFE_E2E_ADMIN_NEW_PASSWORD to the password to change it to"
         )
         changed = self._request(
             "POST",

@@ -9,7 +9,7 @@
 """Retirement of the bootstrap admin, recorded in the deploy repo.
 
 The deployment mints a random admin password and injects it as
-``DFE_AUTH_LOCAL_ADMIN_PASSWORD``; the engine issues that credential with a forced
+``DFE_AUTH_LOCAL_ADMIN_PASSWORD``. The engine issues that credential with a forced
 change at first login and reasserts it whenever the injected value changes
 (``auth/bootstrap.py``). That is what makes a rebuild restore the account, and it
 is also why the plaintext can never be deleted from the Secret or ``.env`` -- the

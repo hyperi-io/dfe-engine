@@ -146,7 +146,7 @@ class Accounts(Seed):
         Groups must already exist -- ``bootstrap_auth`` seeds them on every
         startup, so guard with ``_ensure_group``. Returns True when created.
         ``change_required`` issues the password, so the account must replace it
-        at its next login; otherwise it is the account's own.
+        at its next login. Otherwise it is the account's own.
         """
         created = self._upsert_local_account(
             name, password, groups=groups, change_required=change_required

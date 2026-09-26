@@ -16,8 +16,8 @@ Two accounts are seeded from injected config, through ONE reconcile path:
 ``admin``      the everyday local admin. Its password comes from the deployment's
                secret store (``DFE_AUTH_LOCAL_ADMIN_PASSWORD``) and is issued with
                a forced change: the admin must replace it at first login, in every
-               posture. Until then it is reasserted on every boot; after that, only
-               when the injected value changes (a rotation in the secret store).
+               posture. Until then it is reasserted on every boot, and after that
+               only when the injected value changes (a rotation in the secret store).
 ``breakglass`` the recovery admin, seeded from a hash committed in the deploy
                repo (:mod:`dfe_engine.auth.breakglass`).
 

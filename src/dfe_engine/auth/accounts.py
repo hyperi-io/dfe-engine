@@ -86,7 +86,7 @@ class Account(BaseModel):
     """The password was issued to the account rather than chosen by its owner.
 
     While set, the API refuses the account everything but changing its own
-    password (:mod:`dfe_engine.api.password_change`); the owner's change clears it."""
+    password (:mod:`dfe_engine.api.password_change`). The owner's change clears it."""
     seeded_password_hash: str = ""
     """Digest of the last password issued with ``password_change_required``.
 
@@ -496,7 +496,7 @@ class DocuStoreAccountStore:
     ) -> None:
         """Replace the stored hash with a fresh bcrypt hash. Raises KeyError if missing.
 
-        ``change_required`` marks the password as issued; False clears a pending change.
+        ``change_required`` marks the password as issued, and False clears a pending change.
         """
         account = self._c.get(username)
         if account is None:
@@ -589,7 +589,7 @@ def _new_account(
 
 
 def _password_update(new_password: str, change_required: bool) -> dict[str, object]:
-    """The fields a password reset writes; an issued password is also the seeded digest."""
+    """The fields a password reset writes. An issued password is also the seeded digest."""
     digest = hash_password(new_password)
     update: dict[str, object] = {
         "password_hash": digest,
@@ -607,7 +607,7 @@ def hash_password(password: str, rounds: int = 12) -> str:
 
 
 def matches_digest(password: str, digest: str) -> bool:
-    """Whether *digest* was made from *password*; an empty or non-bcrypt digest never matches."""
+    """Whether *digest* was made from *password*. An empty or non-bcrypt digest never matches."""
     if not password or not digest.startswith("$2"):
         return False
     return bcrypt.checkpw(password.encode("utf-8"), digest.encode("utf-8"))
