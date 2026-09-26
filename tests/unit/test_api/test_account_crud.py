@@ -10,7 +10,18 @@
 
 from __future__ import annotations
 
+import re
+import secrets
+
 import pytest
+
+from dfe_engine.auth.bootstrap import MIN_ADMIN_PASSWORD_LENGTH
+
+_PASSWORD = secrets.token_urlsafe(16)
+
+
+def _short_password() -> str:
+    return secrets.token_urlsafe(16)[: MIN_ADMIN_PASSWORD_LENGTH - 1]
 
 
 class TestCreateAccount:
@@ -21,7 +32,7 @@ class TestCreateAccount:
             "/api/v1/auth/accounts",
             json={
                 "username": "newuser",
-                "password": "s3cret",
+                "password": _PASSWORD,
                 "email": "newuser@example.com",
                 "groups": ["dfe-viewers"],
             },
@@ -48,7 +59,7 @@ class TestCreateAccount:
             "/api/v1/auth/accounts",
             json={
                 "username": "with-contact",
-                "password": "s3cret",
+                "password": _PASSWORD,
                 "email": "with-contact@example.com",
                 "phone": "+15551212",
                 "name": "With Contact",
@@ -70,7 +81,7 @@ class TestCreateAccount:
     def test_create_without_an_email(self, client, admin_headers):
         resp = client.post(
             "/api/v1/auth/accounts",
-            json={"username": "no-email", "password": "pw"},
+            json={"username": "no-email", "password": _PASSWORD},
             headers=admin_headers,
         )
         assert resp.status_code == 201
@@ -81,7 +92,7 @@ class TestCreateAccount:
         # says what leaving the key out says.
         resp = client.post(
             "/api/v1/auth/accounts",
-            json={"username": "empty-email", "password": "pw", "email": ""},
+            json={"username": "empty-email", "password": _PASSWORD, "email": ""},
             headers=admin_headers,
         )
         assert resp.status_code == 201
@@ -92,7 +103,7 @@ class TestCreateAccount:
             "/api/v1/auth/accounts",
             json={
                 "username": "email-only",
-                "password": "pw",
+                "password": _PASSWORD,
                 "email": "only@example.com",
             },
             headers=admin_headers,
@@ -106,12 +117,16 @@ class TestCreateAccount:
     def test_create_duplicate_returns_409(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "dupuser", "password": "pw1", "email": "dupuser@example.com"},
+            json={"username": "dupuser", "password": _PASSWORD, "email": "dupuser@example.com"},
             headers=admin_headers,
         )
         resp = client.post(
             "/api/v1/auth/accounts",
-            json={"username": "dupuser", "password": "pw2", "email": "dupuser@example.com"},
+            json={
+                "username": "dupuser",
+                "password": secrets.token_urlsafe(16),
+                "email": "dupuser@example.com",
+            },
             headers=admin_headers,
         )
         assert resp.status_code == 409
@@ -133,6 +148,19 @@ class TestCreateAccount:
         )
         assert resp.status_code == 422
 
+    def test_a_password_under_the_floor_is_refused(self, client, app, admin_headers):
+        short = _short_password()
+        resp = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "short-pw", "password": short, "groups": []},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["errors"][0]["field"] == "password"
+        assert str(MIN_ADMIN_PASSWORD_LENGTH) in resp.json()["errors"][0]["message"]
+        assert short not in resp.text
+        assert app.state.account_store.get("short-pw") is None
+
 
 # What the console's CreateAccountForm posts. The setup wizard creates the first
 # user with it, so a field required beyond these leaves a fresh deployment with
@@ -150,7 +178,7 @@ class TestConsoleCreatePayload:
     def test_the_console_payload_creates_an_account(self, client, admin_headers):
         resp = client.post(
             "/api/v1/auth/accounts",
-            json={"username": "wizard-first-user", "password": "s3cret", "groups": []},
+            json={"username": "wizard-first-user", "password": _PASSWORD, "groups": []},
             headers=admin_headers,
         )
         assert resp.status_code == 201
@@ -191,7 +219,7 @@ class TestListAccounts:
             "/api/v1/auth/accounts",
             json={
                 "username": "search-me",
-                "password": "pw",
+                "password": _PASSWORD,
                 "email": "needle@example.com",
                 "name": "Findable Person",
             },
@@ -216,7 +244,7 @@ class TestListAccounts:
     def test_list_blocked_omitted_returns_all(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "listed-blocked", "password": "pw", "email": "lb@example.com"},
+            json={"username": "listed-blocked", "password": _PASSWORD, "email": "lb@example.com"},
             headers=admin_headers,
         )
         client.put(
@@ -234,7 +262,7 @@ class TestListAccounts:
     def test_list_blocked_true_returns_only_blocked(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "only-blocked", "password": "pw", "email": "ob@example.com"},
+            json={"username": "only-blocked", "password": _PASSWORD, "email": "ob@example.com"},
             headers=admin_headers,
         )
         client.put(
@@ -257,7 +285,7 @@ class TestListAccounts:
     def test_list_blocked_false_returns_only_unblocked(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "now-blocked", "password": "pw", "email": "nb@example.com"},
+            json={"username": "now-blocked", "password": _PASSWORD, "email": "nb@example.com"},
             headers=admin_headers,
         )
         client.put(
@@ -376,7 +404,7 @@ class TestAccountExternalFlag:
     def test_list_and_create_include_external(self, client, admin_headers):
         created = client.post(
             "/api/v1/auth/accounts",
-            json={"username": "local-user", "password": "pw", "email": "local@example.com"},
+            json={"username": "local-user", "password": _PASSWORD, "email": "local@example.com"},
             headers=admin_headers,
         )
         assert created.status_code == 201
@@ -394,7 +422,7 @@ class TestUpdateAccount:
         # Create account first
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "updatable", "password": "pw", "email": "updatable@example.com"},
+            json={"username": "updatable", "password": _PASSWORD, "email": "updatable@example.com"},
             headers=admin_headers,
         )
         resp = client.put(
@@ -413,7 +441,7 @@ class TestUpdateAccount:
             "/api/v1/auth/accounts",
             json={
                 "username": "grp-sync",
-                "password": "pw",
+                "password": _PASSWORD,
                 "email": "grp-sync@example.com",
                 "groups": ["dfe-viewers"],
             },
@@ -434,7 +462,7 @@ class TestUpdateAccount:
             "/api/v1/auth/accounts",
             json={
                 "username": "contact-upd",
-                "password": "pw",
+                "password": _PASSWORD,
                 "email": "old@example.com",
                 "phone": "+1000",
                 "name": "Old Name",
@@ -465,7 +493,7 @@ class TestUpdateAccount:
             "/api/v1/auth/accounts",
             json={
                 "username": "contact-omit",
-                "password": "pw",
+                "password": _PASSWORD,
                 "email": "keep@example.com",
                 "phone": "+1111",
                 "name": "Keep Me",
@@ -489,7 +517,7 @@ class TestUpdateAccount:
             "/api/v1/auth/accounts",
             json={
                 "username": "contact-clear",
-                "password": "pw",
+                "password": _PASSWORD,
                 "email": "gone@example.com",
                 "phone": "+9999",
                 "name": "Gone",
@@ -512,7 +540,7 @@ class TestUpdateAccount:
             "/api/v1/auth/accounts",
             json={
                 "username": "email-required",
-                "password": "pw",
+                "password": _PASSWORD,
                 "email": "keep@example.com",
             },
             headers=admin_headers,
@@ -527,7 +555,7 @@ class TestUpdateAccount:
     def test_update_enabled(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "disableme", "password": "pw", "email": "disableme@example.com"},
+            json={"username": "disableme", "password": _PASSWORD, "email": "disableme@example.com"},
             headers=admin_headers,
         )
         resp = client.put(
@@ -551,7 +579,7 @@ class TestUpdateAccount:
     def test_update_blocked(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "blockme", "password": "pw", "email": "blockme@example.com"},
+            json={"username": "blockme", "password": _PASSWORD, "email": "blockme@example.com"},
             headers=admin_headers,
         )
         resp = client.put(
@@ -696,16 +724,31 @@ class TestResetOwnPassword:
     def test_query_username_cannot_reset_another_account(self, client, app, viewer_headers):
         from tests.unit.test_api.conftest import ADMIN_PASSWORD
 
+        hijack = secrets.token_urlsafe(16)
         resp = client.post(
             "/api/v1/auth/accounts/reset-password",
             params={"username": "admin"},
-            json={"new_password": "hijacked-pw"},
+            json={"new_password": hijack},
             headers=viewer_headers,
         )
         assert resp.status_code == 200
         store = app.state.account_store
         assert store.verify_password("admin", ADMIN_PASSWORD)
-        assert store.verify_password("viewer", "hijacked-pw")
+        assert store.verify_password("viewer", hijack)
+
+    def test_a_password_under_the_floor_is_refused(self, client, app, viewer_headers):
+        store = app.state.account_store
+        before = store.get("viewer").password_hash
+        short = _short_password()
+        resp = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"new_password": short},
+            headers=viewer_headers,
+        )
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["errors"][0]["field"] == "new_password"
+        assert short not in resp.text
+        assert store.get("viewer").password_hash == before
 
     def test_requires_authentication(self, client):
         resp = client.post(
@@ -723,7 +766,9 @@ class TestResetOwnPassword:
         assert resp.status_code == 400
         body = resp.json()
         assert body["code"] == "password_reused"
-        assert "current" not in body["message"].lower()
+        # No password history is stored, so the message claims no history depth.
+        assert "current password" in body["message"]
+        assert re.search(r"last \d+", body["message"]) is None
 
     def test_oidc_user_cannot_reset_own_password(self, client, app, api_settings):
         from dfe_engine.api.deps import create_access_token
@@ -764,12 +809,12 @@ class TestResetPassword:
     def test_reset_password(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "pwreset", "password": "oldpw", "email": "pwreset@example.com"},
+            json={"username": "pwreset", "password": _PASSWORD, "email": "pwreset@example.com"},
             headers=admin_headers,
         )
         resp = client.post(
             "/api/v1/auth/accounts/pwreset/reset-password",
-            json={"new_password": "newpw"},
+            json={"new_password": secrets.token_urlsafe(16)},
             headers=admin_headers,
         )
         assert resp.status_code == 200
@@ -778,24 +823,39 @@ class TestResetPassword:
     def test_reset_to_current_password_rejected(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "pwsame", "password": "samepw", "email": "pwsame@example.com"},
+            json={"username": "pwsame", "password": _PASSWORD, "email": "pwsame@example.com"},
             headers=admin_headers,
         )
         resp = client.post(
             "/api/v1/auth/accounts/pwsame/reset-password",
-            json={"new_password": "samepw"},
+            json={"new_password": _PASSWORD},
             headers=admin_headers,
         )
         assert resp.status_code == 400
         body = resp.json()
         assert body["code"] == "password_reused"
-        # Message must not reveal that the match was the current password.
-        assert "current" not in body["message"].lower()
+        # No password history is stored, so the message claims no history depth.
+        assert "current password" in body["message"]
+        assert re.search(r"last \d+", body["message"]) is None
+
+    def test_a_password_under_the_floor_is_refused(self, client, app, admin_headers):
+        store = app.state.account_store
+        before = store.get("viewer").password_hash
+        short = _short_password()
+        resp = client.post(
+            "/api/v1/auth/accounts/viewer/reset-password",
+            json={"new_password": short},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["errors"][0]["field"] == "new_password"
+        assert short not in resp.text
+        assert store.get("viewer").password_hash == before
 
     def test_reset_nonexistent_returns_404(self, client, admin_headers):
         resp = client.post(
             "/api/v1/auth/accounts/ghost/reset-password",
-            json={"new_password": "pw"},
+            json={"new_password": _PASSWORD},
             headers=admin_headers,
         )
         assert resp.status_code == 404
@@ -893,7 +953,7 @@ class TestDeleteAccount:
     def test_delete_account(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "deleteme", "password": "pw", "email": "deleteme@example.com"},
+            json={"username": "deleteme", "password": _PASSWORD, "email": "deleteme@example.com"},
             headers=admin_headers,
         )
         resp = client.delete("/api/v1/auth/accounts/deleteme", headers=admin_headers)
@@ -953,7 +1013,7 @@ class TestProtectedAccounts:
         """A rename is a create plus a delete, and the delete is what refuses."""
         created = client.post(
             "/api/v1/auth/accounts",
-            json={"username": f"{username}-renamed", "password": "s3cret-Pw", "groups": []},
+            json={"username": f"{username}-renamed", "password": _PASSWORD, "groups": []},
             headers=admin_headers,
         )
         assert created.status_code == 201

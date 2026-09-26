@@ -15,6 +15,8 @@ the yaml :class:`AttributeStore`. ``app.state.account_sensitive_attributes`` and
 
 from __future__ import annotations
 
+import secrets
+
 NESTED = {"team": "blue", "profile": {"tz": "Australia/Canberra", "tags": ["a", "b"]}}
 SENSITIVE = {"otp_seed": "abc123", "recovery": {"codes": ["one", "two"]}}
 
@@ -25,7 +27,11 @@ class TestAccountAttributes:
     def _make_account(self, client, admin_headers, username: str) -> None:
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": username, "password": "pw", "email": f"{username}@example.com"},
+            json={
+                "username": username,
+                "password": secrets.token_urlsafe(16),
+                "email": f"{username}@example.com",
+            },
             headers=admin_headers,
         )
 

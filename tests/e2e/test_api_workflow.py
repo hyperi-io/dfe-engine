@@ -236,13 +236,14 @@ class TestAccountGroupWorkflow:
 
     def test_create_account_assign_group_login(self, e2e_client):
         headers = self._login(e2e_client)
+        user_password = secrets.token_urlsafe(16)
 
         # Create account
         resp = e2e_client.post(
             "/api/v1/auth/accounts",
             json={
                 "username": "e2e_user",
-                "password": "e2e-user-pw",
+                "password": user_password,
                 "email": "e2e_user@example.com",
             },
             headers=headers,
@@ -260,7 +261,7 @@ class TestAccountGroupWorkflow:
         # Login as new user
         resp = e2e_client.post(
             "/api/v1/auth/login",
-            json={"username": "e2e_user", "password": "e2e-user-pw"},
+            json={"username": "e2e_user", "password": user_password},
         )
         assert resp.status_code == 200
         new_token = resp.json()["access_token"]

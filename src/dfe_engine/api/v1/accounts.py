@@ -41,7 +41,7 @@ from dfe_engine.api.pagination import (
 )
 from dfe_engine.auth import account_durability
 from dfe_engine.auth.account_durability import AccountGitState
-from dfe_engine.auth.accounts import Account
+from dfe_engine.auth.accounts import Account, matches_digest
 from dfe_engine.auth.audit import audit_account_change
 from dfe_engine.auth.bootstrap import (
     MIN_ADMIN_PASSWORD_LENGTH,
@@ -109,12 +109,6 @@ def _mirror_account(
     return account_durability.state_from_outcome(gc, outcome)
 
 
-# Reuse depth quoted in the rejection message; only the current password is
-# compared, since no password history is stored. The message stays vague so it
-# cannot confirm that a candidate password is the account's current one.
-PASSWORD_REUSE_WINDOW = 5
-
-
 # ── Request / Response models ────────────────────────────────
 
 
@@ -127,7 +121,13 @@ class CreateAccountRequest(BaseModel):
     """
 
     username: str = Field(description="Unique account name")
-    password: str = Field(description="Plaintext password (bcrypt-hashed before storage)")
+    password: str = Field(
+        min_length=MIN_ADMIN_PASSWORD_LENGTH,
+        description=(
+            "Plaintext password (bcrypt-hashed before storage); at least "
+            f"{MIN_ADMIN_PASSWORD_LENGTH} characters"
+        ),
+    )
     email: str = Field(default="", description="Contact email")
     groups: list[str] = Field(default_factory=list, description="Group memberships")
     phone: str = Field(default="", description="Contact phone")
@@ -152,7 +152,10 @@ class UpdateOwnAccountRequest(BaseModel):
 
 
 class ResetPasswordRequest(BaseModel):
-    new_password: str = Field(description="New plaintext password")
+    new_password: str = Field(
+        min_length=MIN_ADMIN_PASSWORD_LENGTH,
+        description=f"New plaintext password; at least {MIN_ADMIN_PASSWORD_LENGTH} characters",
+    )
 
 
 class ResetPasswordResponse(BaseModel):
@@ -214,6 +217,11 @@ class AccountResponse(BaseModel):
     external: bool = Field(
         description="True when the account authenticates through an identity provider",
     )
+    password_change_required: bool = Field(
+        default=False,
+        description="True until the account replaces an issued password. The account's "
+        "own read reports no groups while it is set, as its session holds none.",
+    )
     created_at: str
     updated_at: str
 
@@ -237,6 +245,7 @@ def _account_response(account: Account) -> AccountResponse:
         phone=account.phone,
         name=account.name,
         external=account.external,
+        password_change_required=account.password_change_required,
         created_at=account.created_at,
         updated_at=account.updated_at,
     )
@@ -295,13 +304,18 @@ async def _reset_stored_password(
                 ),
             },
         )
-    if store.verify_password(username, new_password):
+    # No history is stored: the current password and the last one issued are all there is.
+    reused = store.verify_password(username, new_password) or matches_digest(
+        new_password, existing.seeded_password_hash
+    )
+    if reused:
         raise HTTPException(
             status_code=400,
             detail={
                 "code": "password_reused",
                 "message": (
-                    f"New password may not match any of the last {PASSWORD_REUSE_WINDOW} passwords"
+                    "New password must differ from the account's current password "
+                    "and from the password it was last issued"
                 ),
             },
         )
@@ -411,11 +425,19 @@ async def get_current_user_account(
     user: CurrentUser,
     request: Request,
 ):
-    """Return the authenticated user's account. No extra scope required."""
+    """Return the authenticated user's account. No extra scope required.
+
+    An account on an issued password reads back with no groups: its session holds
+    no standing until the change, and a console copies this read into its session.
+    """
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    return _account_response(_require_account(store, user.user_id))
+    account = _require_account(store, user.user_id)
+    response = _account_response(account)
+    if account.password_change_required:
+        response.groups = []
+    return response
 
 
 @router.put("/me", response_model=AccountResponse)
