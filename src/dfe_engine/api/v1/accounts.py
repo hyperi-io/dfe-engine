@@ -537,6 +537,9 @@ async def reset_current_user_password(
     account is refused: it has no local password. The live store takes the new
     password immediately; the ``git`` block reports whether the durable mirror
     merged, is pending review, or is a no-op for a non-git-backed account.
+
+    An account on an issued password may call this and nothing else that
+    changes state, and the reset clears ``password_change_required``.
     """
     return await _reset_stored_password(
         request,
@@ -599,9 +602,10 @@ async def rotate_password(
 
     The store that injects ``DFE_AUTH_LOCAL_ADMIN_PASSWORD`` is the source of that
     password, so the engine writes the new value through the scalo secrets seam
-    and never into its own YAML -- a YAML-only change is reverted by the next boot
-    reconcile. Returns 501 with the store command when the deployment has not
-    declared a secrets path for the password.
+    and never into its own YAML. The next boot reconcile issues the rotated value
+    to the admin, who must replace it at the following login. Returns 501 with the
+    store command when the deployment has not declared a secrets path for the
+    password.
     """
     from dfe_engine.auth.deployment_hints import detect_deploy_kind, rotation_store_command
     from dfe_engine.secrets import build_secrets

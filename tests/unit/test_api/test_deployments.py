@@ -3,6 +3,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.support.accounts import admin_on_its_own_password
+
 
 @pytest.fixture
 def app_with_deployments(tmp_path):
@@ -48,6 +50,7 @@ def app_with_deployments(tmp_path):
 @pytest.fixture
 def deploy_client(app_with_deployments):
     with TestClient(app_with_deployments, raise_server_exceptions=False) as c:
+        admin_on_its_own_password(app_with_deployments)
         account_store = app_with_deployments.state.account_store
         group_store = app_with_deployments.state.group_store
         if account_store.get("viewer") is None:

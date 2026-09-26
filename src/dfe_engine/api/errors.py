@@ -117,6 +117,7 @@ class ErrorCode:
     NOT_FOUND = "not_found"
     CONFLICT = "conflict"
     PROTECTED_ACCOUNT = "protected_account"
+    PASSWORD_CHANGE_REQUIRED = "password_change_required"
     INVALID_SQL = "invalid_sql"
     INTERNAL_ERROR = "internal_error"
     SERVICE_UNAVAILABLE = "service_unavailable"

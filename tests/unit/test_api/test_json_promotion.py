@@ -35,6 +35,7 @@ from dfe_engine.settings import (
 )
 from dfe_engine.source.models import SourceHeader, SourceSchema, SourceVersion
 from dfe_engine.yaml_utils import yaml_dump
+from tests.support.accounts import admin_on_its_own_password
 
 PROMO_SOURCE = "promo-source"
 NOMETA_SOURCE = "nometa-source"
@@ -255,6 +256,7 @@ def app(settings: DFESettings):
 @pytest.fixture
 def client(app) -> TestClient:
     with TestClient(app, raise_server_exceptions=False) as c:
+        admin_on_its_own_password(app)
         yield c
 
 

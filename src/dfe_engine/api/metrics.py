@@ -9,14 +9,15 @@
 
 A mutating request on the deploy-repo routers runs off the event loop but waits
 its turn behind any other one in flight, so a write that queued is counted here,
-on the metrics manager the engine serves on ``/metrics``. With no manager every
-record call returns without doing anything, which is the state the unit suite
-runs in.
+on the metrics manager the engine serves on ``/metrics``. So is a request refused
+because its account must change its password first. With no manager every record
+call returns without doing anything, which is the state the unit suite runs in.
 """
 
 from typing import Any
 
 WRITES_HELD = "api_writes_held_total"
+PASSWORD_CHANGE_REFUSALS = "api_password_change_refusals_total"
 
 
 class ApiMetrics:
@@ -34,6 +35,11 @@ class ApiMetrics:
         self._held = manager.counter(
             WRITES_HELD, "Mutating requests that waited for another to finish", ["method"]
         )
+        self._password_change = manager.counter(
+            PASSWORD_CHANGE_REFUSALS,
+            "Requests refused because the account must change its password first",
+            ["method", "area"],
+        )
 
     @property
     def enabled(self) -> bool:
@@ -46,5 +52,17 @@ class ApiMetrics:
             return
         self._held.labels(method=method).inc()
 
+    def password_change_refused(self, method: str, area: str) -> None:
+        """Record a request refused until its account changes its password.
 
-__all__ = ["WRITES_HELD", "ApiMetrics"]
+        Args:
+            method: The HTTP method.
+            area: The API area the route belongs to -- the first literal segment
+                of the matched route, so the label is bounded by the route table.
+        """
+        if self._manager is None:
+            return
+        self._password_change.labels(method=method, area=area).inc()
+
+
+__all__ = ["PASSWORD_CHANGE_REFUSALS", "WRITES_HELD", "ApiMetrics"]

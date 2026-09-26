@@ -36,6 +36,7 @@ from dfe_engine.settings import (
     SourceSettings,
 )
 from dfe_engine.yaml_utils import yaml_dump
+from tests.support.accounts import OnboardedClient
 from tests.support.core_sources import write_landing_definition
 
 ADMIN_PASSWORD = "test-admin-pw"
@@ -120,7 +121,7 @@ def deployment(tmp_path: Path) -> Deployment:
             data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
             settings=settings,
         )
-        client = TestClient(create_app(settings=settings), raise_server_exceptions=False)
+        client = OnboardedClient(create_app(settings=settings), raise_server_exceptions=False)
         return client, {"Authorization": f"Bearer {token}"}
 
     return build
