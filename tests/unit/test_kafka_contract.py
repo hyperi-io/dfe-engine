@@ -161,7 +161,10 @@ class TestKafkaSettings:
 
 
 class TestTopicConfig:
-    """The alterable topic configs DFE asks for: always the size, the rest off unless set."""
+    """The alterable topic configs DFE asks for: the size and producer compression always.
+
+    Retention and cleanup policy stay off unless a dial sets them.
+    """
 
     SIZE = {"max.message.bytes": "8388608"}
 
@@ -172,26 +175,39 @@ class TestTopicConfig:
         kafka.setdefault("topic_max_message_bytes", 8388608)
         return deployment_topic_config(DFESettings(env="dev", kafka=KafkaSettings(**kafka)))
 
-    def test_nothing_else_set_asks_only_for_the_size(self):
-        # An untouched deployment must keep creating topics on the broker's own
-        # retention, which is what every topic it already has carries.
-        assert self._config() == self.SIZE
+    def test_nothing_set_asks_only_for_the_size_and_producer_compression(self):
+        # An untouched deployment keeps the broker's own retention, which is what
+        # every topic it already has carries, and stores batches as produced.
+        assert self._config() == {**self.SIZE, "compression.type": "producer"}
 
     def test_an_unset_size_is_the_manifest_s(self):
         from dfe_engine.source.models import _topic_policy
 
         manifest = str(_topic_policy().defaults["max_message_bytes"])
-        assert self._config(topic_max_message_bytes=None) == {"max.message.bytes": manifest}
+        assert self._config(topic_max_message_bytes=None) == {
+            "max.message.bytes": manifest,
+            "compression.type": "producer",
+        }
 
     def test_retention_and_cleanup_reach_the_config(self):
         assert self._config(topic_retention_ms=86400000, topic_cleanup_policy="compact") == {
             **self.SIZE,
             "retention.ms": "86400000",
             "cleanup.policy": "compact",
+            "compression.type": "producer",
         }
 
     def test_infinite_retention_is_expressible(self):
-        assert self._config(topic_retention_ms=-1) == {**self.SIZE, "retention.ms": "-1"}
+        assert self._config(topic_retention_ms=-1)["retention.ms"] == "-1"
+
+    def test_compression_type_is_a_dial(self):
+        assert self._config(topic_compression_type="zstd") == {
+            **self.SIZE,
+            "compression.type": "zstd",
+        }
+
+    def test_empty_compression_type_leaves_the_broker_default(self):
+        assert self._config(topic_compression_type="") == self.SIZE
 
 
 class TestEnvWiring:

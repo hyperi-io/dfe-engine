@@ -14,9 +14,11 @@ accounts, and copies the built-in roles.yaml if missing.
 Two accounts are seeded from injected config, through ONE reconcile path:
 
 ``admin``      the everyday local admin. Its password comes from the deployment's
-               secret store (``DFE_AUTH_LOCAL_ADMIN_PASSWORD``) and is reasserted
-               on every boot, so a teardown and rebuild restores exactly the
-               minted credential.
+               secret store (``DFE_AUTH_LOCAL_ADMIN_PASSWORD``) and is issued with
+               a forced change: the admin must replace it at first login, in every
+               posture. Until then it is reasserted on every boot. After that it is
+               issued again only when the injected value is neither the owner's
+               password nor the one last issued (a rotation in the secret store).
 ``breakglass`` the recovery admin, seeded from a hash committed in the deploy
                repo (:mod:`dfe_engine.auth.breakglass`).
 
@@ -33,8 +35,6 @@ Usage::
     account_store, group_store, api_key_store, role_config = stores
 """
 
-from __future__ import annotations
-
 import importlib.resources
 import shutil
 from pathlib import Path
@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING
 
 from scalo.logger import logger
 
-from dfe_engine.auth.accounts import AccountStore, DocuStoreAccountStore
+from dfe_engine.auth.accounts import Account, AccountStore, DocuStoreAccountStore, matches_digest
 from dfe_engine.auth.api_keys import APIKeyStore
 from dfe_engine.auth.groups import DocuStoreGroupStore, GroupStore
 from dfe_engine.auth.role_store import RoleStore
@@ -111,7 +111,42 @@ def default_credentials_in_use(admin_password: str) -> bool:
     return not candidate or candidate == _DEFAULT_PASSWORD
 
 
-def require_admin_password(admin_password: str, environment: str, *, retired: bool = False) -> bool:
+def admin_on_default_password(
+    account_store: AccountStore | DocuStoreAccountStore | None,
+    admin_name: str,
+    admin_password: str,
+) -> bool:
+    """Whether the local admin still logs in on the shipped default password, now.
+
+    THE ``default_credentials`` verdict, read fresh wherever it is reported. The
+    configured password is what the boot reconcile issues, so it decides until the
+    account shows otherwise: an admin that cannot hold a session (retired), or one
+    whose owner has replaced its issued password, is off the default whatever
+    config still says -- the reconcile does not issue that config value again. Both
+    are fields the password-change path writes, so this is a store read, no bcrypt.
+
+    Args:
+        account_store: The live account store; None while bootstrap is in flight.
+        admin_name: The local admin's username.
+        admin_password: The configured admin password.
+
+    Returns:
+        True while the default opens the admin account.
+    """
+    if not default_credentials_in_use(admin_password):
+        return False
+    account = account_store.get(admin_name) if account_store is not None else None
+    if account is None:
+        return True
+    if account.session_denied() is not None:
+        return False
+    # Never issued a password, so the next boot issues config's.
+    if not account.seeded_password_hash:
+        return True
+    return account.password_change_required
+
+
+def require_admin_password(admin_password: str, environment: str, *, retired: bool = False) -> None:
     """Refuse to start on the default admin password outside a dev posture.
 
     The posture predicate is the one gitops auto-merge gates on
@@ -121,23 +156,20 @@ def require_admin_password(admin_password: str, environment: str, *, retired: bo
     ``retired`` lifts the refusal: a retired admin is never seeded, so an absent
     password is the intended end state and the operator has deleted it.
 
-    Returns True when a dev posture is running on the default -- the caller
-    surfaces that as ``default_credentials`` so the UI can banner and force a
-    change.
+    A dev posture on the default starts with a warning; whether the admin is still
+    on it is :func:`admin_on_default_password`, read where it is reported.
 
     Raises:
         DefaultCredentialsError: production posture with no minted password.
     """
-    if retired:
-        return False
-    if not default_credentials_in_use(admin_password):
-        return False
+    if retired or not default_credentials_in_use(admin_password):
+        return
     if is_dev_posture(environment):
         logger.warning(
             f"Local admin is running on the default password '{_DEFAULT_PASSWORD}' "
             f"(DFE_ENV={environment}); change it before this deployment carries data"
         )
-        return True
+        return
     raise DefaultCredentialsError(
         f"DFE_AUTH_LOCAL_ADMIN_PASSWORD is unset or '{_DEFAULT_PASSWORD}' but "
         f"DFE_ENV is '{environment}': set DFE_AUTH_LOCAL_ADMIN_PASSWORD to the "
@@ -255,7 +287,7 @@ def bootstrap_auth(
                 email=seeded_account_email(admin_name, recovery_email),
             ),
         )
-    seeded = _reconcile_seed_accounts(account_store, group_store, specs)
+    seeded = _reconcile_seed_accounts(account_store, group_store, specs, issued={admin_name})
 
     if retired:
         _disable_retired_admin(account_store, admin_name)
@@ -313,23 +345,59 @@ def _seed_groups(group_store: GroupStore | DocuStoreGroupStore) -> None:
         group_store.create(name, roles=roles, description=description)
 
 
+def _config_password_wins(
+    account_store: AccountStore | DocuStoreAccountStore,
+    account: Account,
+    password: str,
+    *,
+    issued: bool,
+) -> bool:
+    """Whether the reconcile writes the configured *password* over the stored one.
+
+    A named seed, and an issued password its owner has not yet replaced, follow
+    config whenever the stored hash no longer verifies. An admin from before the
+    flag was never issued its password, so config issues it. Once the owner has
+    replaced an issued password, config wins only when it differs from both the
+    owner's password and the one last issued -- a rotation in the secret store --
+    so a restart keeps the owner's choice, including when the owner's password is
+    written back into config.
+    """
+    if not issued or account.password_change_required:
+        return not account_store.verify_password(account.username, password)
+    if not account.seeded_password_hash:
+        return True
+    if account_store.verify_password(account.username, password):
+        return False
+    return not matches_digest(password, account.seeded_password_hash)
+
+
 def _reconcile_seed_accounts(
     account_store: AccountStore | DocuStoreAccountStore,
     group_store: GroupStore | DocuStoreGroupStore,
     seed_accounts: list[SeedAccount],
+    *,
+    issued: set[str] | None = None,
 ) -> list[str]:
     """Create or reconcile config-owned accounts so config wins on every boot.
 
-    For each spec: create it if absent, else reset the password when the
-    configured one no longer verifies and align its groups to the config. Group
+    For each spec: create it if absent, else reset the password when config wins
+    (:func:`_config_password_wins`) and align its groups to the config. Group
     rosters are reconciled to match exactly -- added to the config's groups,
     removed from any other.
+
+    Args:
+        account_store: The live account store.
+        group_store: The live group store.
+        seed_accounts: The config-owned accounts.
+        issued: Usernames whose configured password is issued with a forced
+            change -- the owner must replace it at first login.
 
     Returns:
         The usernames whose stored credential this pass wrote -- created or
         reset. The caller mirrors those into the deploy repo, so the durable copy
         tracks the hash the live store is actually serving.
     """
+    issued = issued or set()
     known_groups = {g.name for g in group_store.list()}
     seeded: list[str] = []
 
@@ -343,16 +411,25 @@ def _reconcile_seed_accounts(
                     f"Seed account '{spec.username}' references unknown group '{gname}'; skipped"
                 )
 
+        change_required = spec.username in issued
         account = account_store.get(spec.username)
         if account is None:
             account_store.create(
-                spec.username, spec.password, groups=wanted_groups, email=spec.email
+                spec.username,
+                spec.password,
+                groups=wanted_groups,
+                email=spec.email,
+                change_required=change_required,
             )
             seeded.append(spec.username)
             logger.info(f"Seeded named account '{spec.username}'")
         else:
-            if spec.password and not account_store.verify_password(spec.username, spec.password):
-                account_store.reset_password(spec.username, spec.password)
+            if spec.password and _config_password_wins(
+                account_store, account, spec.password, issued=change_required
+            ):
+                account_store.reset_password(
+                    spec.username, spec.password, change_required=change_required
+                )
                 seeded.append(spec.username)
                 logger.info(f"Reconciled password for seed account '{spec.username}'")
             updates: dict[str, object] = {}

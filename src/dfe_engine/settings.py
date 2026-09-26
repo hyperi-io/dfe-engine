@@ -637,6 +637,14 @@ class KafkaSettings(BaseModel):
             "``compact``). Empty leaves the broker default in place."
         ),
     )
+    topic_compression_type: str = Field(
+        default="producer",
+        description=(
+            "``compression.type`` for topics DFE creates and converges. ``producer`` "
+            "keeps each batch in the codec its producer chose, so the broker never "
+            "recompresses it. Empty leaves the broker default in place."
+        ),
+    )
     topic_max_message_bytes: int | None = Field(
         default=None,
         gt=0,
@@ -986,9 +994,10 @@ class DeploymentSettings(BaseModel):
         description=(
             "Directory the engine writes each app's custom environment into, as "
             "<service>.custom.env, for a deployer whose containers read env files "
-            "from the host. Empty means something else delivers the overlay's "
-            "extraEnv block, which on Kubernetes is the app's own chart. "
-            "DFE_DEPLOYMENT_APP_ENV_DIR."
+            "from the host. Each file is written 0640 with the directory's group, "
+            "so the engine must hold that group. Empty means something else "
+            "delivers the overlay's extraEnv block, which on Kubernetes is the "
+            "app's own chart. DFE_DEPLOYMENT_APP_ENV_DIR."
         ),
     )
 
@@ -1876,6 +1885,8 @@ def _get_env_overrides() -> dict:
         overrides["kafka"]["topic_retention_ms"] = int(val)
     if val := _get_env("DFE_KAFKA_TOPIC_CLEANUP_POLICY"):
         overrides["kafka"]["topic_cleanup_policy"] = val
+    if val := _get_env("DFE_KAFKA_TOPIC_COMPRESSION_TYPE"):
+        overrides["kafka"]["topic_compression_type"] = val
     if val := _get_env("DFE_KAFKA_TOPIC_MAX_MESSAGE_BYTES"):
         overrides["kafka"]["topic_max_message_bytes"] = int(val)
 

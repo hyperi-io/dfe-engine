@@ -3,6 +3,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.support.accounts import admin_on_its_own_password
+
 
 @pytest.fixture
 def app_with_alerts(tmp_path):
@@ -49,6 +51,7 @@ def app_with_alerts(tmp_path):
 @pytest.fixture
 def alert_client(app_with_alerts):
     with TestClient(app_with_alerts, raise_server_exceptions=False) as c:
+        admin_on_its_own_password(app_with_alerts)
         yield c
 
 

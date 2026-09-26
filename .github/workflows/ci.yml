@@ -44,4 +44,5 @@ jobs:
       tag: ${{ inputs.tag || '' }}
       from-head: ${{ inputs.from-head || '' }}
       bump: ${{ inputs.bump || 'auto' }}
+      runner-test: arc-native-16cpu
     secrets: inherit

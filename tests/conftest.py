@@ -28,11 +28,14 @@ Docker Integration:
 
 import os
 import subprocess
+import tempfile
 import time
 import uuid
 from pathlib import Path
 
 import pytest
+from dulwich.errors import NotGitRepository
+from dulwich.repo import Repo
 from scalo.logger import logger
 
 # Shared RBAC test fixtures (client_as + the canonical fixture identities).
@@ -149,9 +152,6 @@ try:
     stamina.set_testing(True, attempts=1)
 except ImportError:  # stamina ships with scalo[http]; skip if absent
     pass
-
-# Test statistics tracking
-test_stats = {"total": 0, "passed": 0, "failed": 0, "skipped": 0, "test_files": {}}
 
 # Docker configuration
 DOCKER_COMPOSE_FILE = Path(__file__).parent.parent / "docker-compose.yml"
@@ -283,6 +283,37 @@ def _ensure_docker_services() -> dict[str, bool]:
     return status
 
 
+def _enclosing_repository(path: Path) -> Path | None:
+    """Return the repository a DirectoryConfigStore under ``path`` would commit to."""
+    try:
+        with Repo.discover(str(path.resolve())) as repo:
+            return Path(repo.path)
+    except NotGitRepository:
+        return None
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Refuse a run whose temp roots sit inside a git repository.
+
+    scalo's DirectoryConfigStore walks up to the nearest repository, so every
+    registry write under such a root commits onto that repository's branch.
+    """
+    basetemp = config.option.basetemp
+    pytest_root = os.environ.get("PYTEST_DEBUG_TEMPROOT") or tempfile.gettempdir()
+    roots = [
+        ("--basetemp", basetemp) if basetemp else ("the pytest temp root", pytest_root),
+        ("TMPDIR", tempfile.gettempdir()),
+    ]
+    for label, root in roots:
+        repository = _enclosing_repository(Path(root))
+        if repository is not None:
+            raise pytest.UsageError(
+                f"{label} {root} is inside the git repository at {repository}, so every "
+                "registry write under it would commit onto that repository's branch. "
+                "Point --basetemp and TMPDIR outside any git checkout."
+            )
+
+
 def pytest_collection_modifyitems(config, items):
     """Auto-mark tests based on their location."""
     for item in items:
@@ -296,33 +327,6 @@ def pytest_collection_modifyitems(config, items):
         else:
             # Default to unit tests
             item.add_marker(pytest.mark.unit)
-
-
-def pytest_runtest_logreport(report):
-    """Collect test statistics."""
-    if report.when == "call":
-        test_stats["total"] += 1
-
-        test_file = report.nodeid.split("::")[0]
-        if test_file not in test_stats["test_files"]:
-            test_stats["test_files"][test_file] = {
-                "total": 0,
-                "passed": 0,
-                "failed": 0,
-                "skipped": 0,
-            }
-
-        if report.passed:
-            test_stats["passed"] += 1
-            test_stats["test_files"][test_file]["passed"] += 1
-        elif report.failed:
-            test_stats["failed"] += 1
-            test_stats["test_files"][test_file]["failed"] += 1
-        elif report.skipped:
-            test_stats["skipped"] += 1
-            test_stats["test_files"][test_file]["skipped"] += 1
-
-        test_stats["test_files"][test_file]["total"] += 1
 
 
 # Markers whose tests talk to real ClickHouse / Kafka. In-process tests under

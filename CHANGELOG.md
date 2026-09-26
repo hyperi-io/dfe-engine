@@ -3,6 +3,58 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.7](https://github.com/hyperi-io/dfe-engine/compare/v1.22.6...v1.22.7) (2026-09-26)
+
+### Bug Fixes
+
+* **api:** say setup-status never carries the pending merge ([#551](https://github.com/hyperi-io/dfe-engine/issues/551)) ([92f3edf](https://github.com/hyperi-io/dfe-engine/commit/92f3edffdb8ca4a4122df99ba1f7b7efc145beb5))
+* **auth:** report default credentials from the live admin state ([#555](https://github.com/hyperi-io/dfe-engine/issues/555)) ([a165d43](https://github.com/hyperi-io/dfe-engine/commit/a165d43febfdbb985f7a6305810fc7e21056186c))
+* **tests:** drop the test stats nothing reads ([#552](https://github.com/hyperi-io/dfe-engine/issues/552)) ([840f861](https://github.com/hyperi-io/dfe-engine/commit/840f8614973c6c04af256c5b6bb5faf5c2250b99))
+* **tests:** refuse a temp root inside a checkout ([#550](https://github.com/hyperi-io/dfe-engine/issues/550)) ([5f4f57c](https://github.com/hyperi-io/dfe-engine/commit/5f4f57cd2b0ce055451f2b87f7183550981a1d67)), closes [#548](https://github.com/hyperi-io/dfe-engine/issues/548)
+* **tests:** run the cross-repo contract tests in CI ([#554](https://github.com/hyperi-io/dfe-engine/issues/554)) ([c70f992](https://github.com/hyperi-io/dfe-engine/commit/c70f992e349235f928d03f7124f7912049af794e)), closes [#553](https://github.com/hyperi-io/dfe-engine/issues/553)
+
+## [1.22.6](https://github.com/hyperi-io/dfe-engine/compare/v1.22.5...v1.22.6) (2026-09-26)
+
+### Bug Fixes
+
+* **auth:** a password floor on every route that sets one, and no echo in SCIM errors ([#547](https://github.com/hyperi-io/dfe-engine/issues/547)) ([aea175c](https://github.com/hyperi-io/dfe-engine/commit/aea175c32f5fc7350be5645ce7d3a859b32e8cf3))
+
+## [1.22.5](https://github.com/hyperi-io/dfe-engine/compare/v1.22.4...v1.22.5) (2026-09-26)
+
+### Bug Fixes
+
+* **auth:** force a password change at first login ([#546](https://github.com/hyperi-io/dfe-engine/issues/546)) ([6e94858](https://github.com/hyperi-io/dfe-engine/commit/6e948587e2d5ba05719616b0907a7a3995daabb6))
+
+## [1.22.4](https://github.com/hyperi-io/dfe-engine/compare/v1.22.3...v1.22.4) (2026-09-26)
+
+### Bug Fixes
+
+* write custom env files 0640 in their directory's group ([#545](https://github.com/hyperi-io/dfe-engine/issues/545)) ([9ce1146](https://github.com/hyperi-io/dfe-engine/commit/9ce1146ae9ffcffcd755368a1e13dd785917db2d))
+
+## [1.22.3](https://github.com/hyperi-io/dfe-engine/compare/v1.22.2...v1.22.3) (2026-09-26)
+
+### Bug Fixes
+
+* k8s e2e -- reset keeps the deployer's pools, one commit per seed, handlers off the event loop ([#544](https://github.com/hyperi-io/dfe-engine/issues/544)) ([e91dbb1](https://github.com/hyperi-io/dfe-engine/commit/e91dbb11f0a91b2cc5883b64a417dbe7037bd968))
+
+## [1.22.2](https://github.com/hyperi-io/dfe-engine/compare/v1.22.1...v1.22.2) (2026-09-26)
+
+### Bug Fixes
+
+* **kafka:** create and converge every topic with compression.type=producer ([#542](https://github.com/hyperi-io/dfe-engine/issues/542)) ([1a31443](https://github.com/hyperi-io/dfe-engine/commit/1a3144387a31662d35e45eaae5ed2b6c73246c86))
+* **openapi:** stamp the committed spec from VERSION and regenerate at 1.22.1 ([#543](https://github.com/hyperi-io/dfe-engine/issues/543)) ([f1605bc](https://github.com/hyperi-io/dfe-engine/commit/f1605bcd6ce55cfa4792b83e6c82257153f4ebd9)), closes [#542](https://github.com/hyperi-io/dfe-engine/issues/542) [#542](https://github.com/hyperi-io/dfe-engine/issues/542)
+
+## [1.22.1](https://github.com/hyperi-io/dfe-engine/compare/v1.22.0...v1.22.1) (2026-09-26)
+
+### Bug Fixes
+
+* **ci:** give the pip-audit warn its reason, and point two docs at dfe-schemas ([#535](https://github.com/hyperi-io/dfe-engine/issues/535)) ([2e89686](https://github.com/hyperi-io/dfe-engine/commit/2e8968664e3e17b87ee9eea21200d49342d2d954))
+* **ci:** keep the wheel off PyPI under the key that survives ([#536](https://github.com/hyperi-io/dfe-engine/issues/536)) ([965e664](https://github.com/hyperi-io/dfe-engine/commit/965e664fe2eed30e605afb8d3987f57e32284570))
+* correct stale scaling and Valkey docs ([#533](https://github.com/hyperi-io/dfe-engine/issues/533)) ([1b49e5e](https://github.com/hyperi-io/dfe-engine/commit/1b49e5e91303c9cf17cca359dfa4868a58c55302))
+* **deploy:** a generated deployment no longer scales on raw consumer lag ([#532](https://github.com/hyperi-io/dfe-engine/issues/532)) ([5e8e477](https://github.com/hyperi-io/dfe-engine/commit/5e8e477ef4021b9c242e13af186615394b6899a7))
+* OIDC user tracking ([#534](https://github.com/hyperi-io/dfe-engine/issues/534)) ([e4ad076](https://github.com/hyperi-io/dfe-engine/commit/e4ad076cfee5e9fc6209aa241271f47f811e7e53))
+* scope reset_all to the instances it actually seeds ([#541](https://github.com/hyperi-io/dfe-engine/issues/541)) ([2c9435d](https://github.com/hyperi-io/dfe-engine/commit/2c9435dd5985cf52248cb6fca1533c5af75cba96))
+
 ## [1.22.0](https://github.com/hyperi-io/dfe-engine/compare/v1.21.2...v1.22.0) (2026-09-24)
 
 ### Features

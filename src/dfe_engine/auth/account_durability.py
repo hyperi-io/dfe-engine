@@ -213,50 +213,6 @@ def publish_account(
         )
 
 
-def remove_account(
-    gc: GitCrud | None,
-    forge: ForgeProvider | None,
-    *,
-    environment: str,
-    mode: str,
-    username: str,
-    actor: str,
-    request_id: str = "",
-) -> WriteOutcome | None:
-    """Delete an account from the deploy repo (routed like publish). None when off."""
-    if gc is None:
-        return None
-
-    message = _commit_message(username, "delete account", actor, request_id)
-
-    def _write(branch: str) -> WriteOutcome:
-        return gc.delete(ACCOUNTS_CLASS, username, actor, message, branch=branch)
-
-    try:
-        return route_write(
-            gc=gc,
-            forge=forge,
-            environment=environment,
-            mode=mode,
-            rbac_class=_RBAC_CLASS,
-            resource=f"account/{username}",
-            actor=actor,
-            title=f"account({username}): delete account",
-            body=f"Delete local account '{username}' by {actor}.",
-            write=_write,
-            request_id=request_id,
-        )
-    except ReviewRequiredError:
-        branch = pr_branch_name(_RBAC_CLASS, username, request_id)
-        res = gc.delete(ACCOUNTS_CLASS, username, actor, message, branch=branch)
-        return WriteOutcome(
-            changed=res.changed,
-            commit_sha=res.commit_sha,
-            review_required=True,
-            branch=branch,
-        )
-
-
 def state_from_outcome(gc: GitCrud | None, outcome: WriteOutcome | None) -> AccountGitState:
     """Build the durability state to return alongside a just-performed write."""
     if gc is None:

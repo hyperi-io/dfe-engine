@@ -80,6 +80,13 @@ def test_every_shipped_archiver_template_uses_a_placeholder_the_archiver_substit
     assert unsupported == set(), f"{name} carries {sorted(unsupported)}"
 
 
+@pytest.mark.parametrize(("name", "text"), _ARCHIVER, ids=[n for n, _ in _ARCHIVER])
+def test_no_shipped_archiver_config_pins_the_roll_interval(name: str, text: str):
+    # dfe-archiver #98 picks the interval from whether it holds offsets; a pin overrides that.
+    archive = (yaml_load_string(text) or {})["archive"]
+    assert "roll_interval_secs" not in archive, f"{name} pins archive.roll_interval_secs"
+
+
 @pytest.mark.parametrize(("name", "text"), _LOADER, ids=[n for n, _ in _LOADER])
 @pytest.mark.parametrize("field", ["group", "client_id", "topics"])
 def test_every_shipped_loader_config_consumes_as_the_loader_does(name: str, text: str, field: str):

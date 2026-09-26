@@ -216,6 +216,14 @@ class GitCrud:
         """
         return self._repo.read_locked()
 
+    def batch(self, message: str) -> AbstractContextManager[None]:
+        """Land every write in the block as one commit and one push (GitopsRepo.batch).
+
+        Every write stays a whole-document operation and reads in the block see it;
+        only the commit and the push wait for the block to end.
+        """
+        return self._repo.batch(message)
+
     def list(self, cls_name: str) -> builtins.list[str]:
         """Enumerate resource names in a class.
 

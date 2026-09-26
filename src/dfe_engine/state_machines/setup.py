@@ -47,11 +47,9 @@ The machine is pure. It reads a :class:`SetupContext` — never a Request — so
 it can be evaluated in a unit test with hand-built stores.
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 from pydantic import BaseModel, Field
 
@@ -60,7 +58,7 @@ from dfe_engine.auth.account_durability import AccountGitState
 from dfe_engine.auth.bootstrap import (
     admin_account_name,
     admin_account_password,
-    default_credentials_in_use,
+    admin_on_default_password,
 )
 from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
 from dfe_engine.auth.deployment_hints import (
@@ -130,7 +128,7 @@ class SetupContext:
     gitops_enabled: bool = False
 
     @classmethod
-    def from_app_state(cls, state: Any) -> SetupContext:
+    def from_app_state(cls, state: Any) -> Self:
         """Build a context from bootstrapped FastAPI app state.
 
         Every store is optional: the app bootstraps them in stages and this
@@ -296,14 +294,17 @@ class SetupStatus(BaseModel):
         default=None,
         description="Durability of the LOCAL ADMIN account in the deploy repo "
         "(the field name predates the separate breakglass recovery account): "
-        "enabled/auto_merge/committed/merged, plus pending.pr_url/command/"
-        "branch when a review PR or CLI merge is still outstanding.",
+        "enabled/auto_merge/committed/merged. pending is always null here: "
+        "the review PR URL or CLI merge command comes only in the "
+        "reset-password response. committed without merged means a change "
+        "is still waiting on that merge.",
     )
     default_credentials: bool = Field(
         default=False,
-        description="True when the deployment is running on the shipped default "
-        "admin password. Only reachable in a dev posture -- the engine refuses to "
-        "start on it otherwise -- so the UI banners and forces a change.",
+        description="True while the local admin still logs in on the shipped default "
+        "password, read at this request, so the admin's own change clears it at once. "
+        "Only reachable in a dev posture -- the engine refuses to start on it "
+        "otherwise -- so the UI banners and forces a change.",
     )
     deploy_kind: str = Field(
         default="",
@@ -392,14 +393,14 @@ def _has_real_user(ctx: SetupContext) -> bool:
 
 
 def default_credentials(ctx: SetupContext) -> bool:
-    """True when the deployment is still running on the shipped admin password.
+    """True while the local admin still logs in on the shipped admin password.
 
-    Read from the configured password, not from a bcrypt verify: the admin is
-    reconciled from that config on every boot, so config is what the deployment
-    is actually running on. A runtime change that config does not carry is
-    reasserted at the next start.
+    The same verdict the login response carries (:func:`admin_on_default_password`),
+    so the admin's own change clears both at once.
     """
-    return default_credentials_in_use(ctx.bootstrap_admin_password)
+    return admin_on_default_password(
+        ctx.account_store, ctx.bootstrap_admin_name, ctx.bootstrap_admin_password
+    )
 
 
 SETUP_STEPS: tuple[StepDefinition, ...] = (

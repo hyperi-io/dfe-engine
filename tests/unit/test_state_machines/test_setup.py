@@ -6,8 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
-
+import secrets
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,6 +14,7 @@ import pytest
 
 from dfe_engine.auth.account_durability import AccountGitState
 from dfe_engine.auth.accounts import AccountStore
+from dfe_engine.auth.bootstrap import admin_account_password
 from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
 from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
@@ -150,10 +150,9 @@ def test_external_account_counts_as_the_first_user(ctx):
 
 
 def test_default_credentials_reads_the_config_not_the_stored_hash(ctx):
-    """The admin is reconciled from config on every boot, so config is the verdict.
+    """An admin never issued its password takes config's at the next start.
 
-    A password changed only in the store is reverted at the next start, so it must
-    not clear the flag.
+    So a password changed only in the store must not clear the flag.
     """
     ctx.account_store.reset_password("admin", "a-store-only-password")
 
@@ -163,6 +162,31 @@ def test_default_credentials_reads_the_config_not_the_stored_hash(ctx):
 def test_default_credentials_clears_once_the_password_is_minted(ctx):
     assert SETUP_MACHINE.status(ctx).default_credentials is True
     assert SETUP_MACHINE.status(_minted(ctx)).default_credentials is False
+
+
+def _issued_admin(tmp_path: Path) -> SetupContext:
+    """The admin as the boot reconcile leaves it: the configured default, issued."""
+    accounts = AccountStore(tmp_path / "issued")
+    accounts.create("admin", admin_account_password(), groups=["dfe-admins"], change_required=True)
+    return SetupContext(account_store=accounts)
+
+
+def test_default_credentials_clears_once_the_admin_replaces_its_issued_password(tmp_path):
+    """The owner's change survives the next boot, so it clears the flag at once."""
+    ctx = _issued_admin(tmp_path)
+    assert SETUP_MACHINE.status(ctx).default_credentials is True
+
+    ctx.account_store.reset_password("admin", secrets.token_urlsafe(16))
+
+    assert SETUP_MACHINE.status(ctx).default_credentials is False
+
+
+def test_a_retired_admin_is_not_on_the_default_password(tmp_path):
+    """Retirement disables the admin, and an operator may then delete its password."""
+    ctx = _issued_admin(tmp_path)
+    ctx.account_store.update("admin", enabled=False, allow_protected=True)
+
+    assert SETUP_MACHINE.status(ctx).default_credentials is False
 
 
 def test_context_takes_the_bootstrap_credential_from_settings(tmp_path):

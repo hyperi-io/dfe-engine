@@ -117,6 +117,7 @@ class ErrorCode:
     NOT_FOUND = "not_found"
     CONFLICT = "conflict"
     PROTECTED_ACCOUNT = "protected_account"
+    PASSWORD_CHANGE_REQUIRED = "password_change_required"
     INVALID_SQL = "invalid_sql"
     INTERNAL_ERROR = "internal_error"
     SERVICE_UNAVAILABLE = "service_unavailable"
@@ -153,6 +154,7 @@ def raise_exchange_http(exc: Exception) -> NoReturn:
 
 def install_exception_handlers(app: FastAPI) -> None:
     """Register all exception handlers on the app."""
+    from dfe_engine.api.password_floor import count_floor_refusal, is_floor_refusal
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(_request: Request, exc: HTTPException):
@@ -174,14 +176,17 @@ def install_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(status_code=exc.status_code, content=_error_response_json(body))
 
     @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(_request: Request, exc: RequestValidationError):
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        errors = exc.errors()
+        if is_floor_refusal(errors):
+            count_floor_refusal(request)
         field_errors = [
             FieldError(
                 field=".".join(str(loc) for loc in err["loc"] if loc != "body"),
                 message=err["msg"],
                 code=err.get("type", "validation_error"),
             )
-            for err in exc.errors()
+            for err in errors
         ]
         body = ErrorResponse(
             code=ErrorCode.VALIDATION_ERROR,

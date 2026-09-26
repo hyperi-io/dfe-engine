@@ -50,6 +50,7 @@ def engine(e2e: E2EConfig) -> EngineAPI:
         user=e2e.engine_user,
         password=e2e.engine_password,
         verify=e2e.verify,
+        new_password=e2e.engine_new_password,
     )
     api.login()
     return api

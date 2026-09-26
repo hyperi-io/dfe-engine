@@ -82,6 +82,18 @@ def _token(settings: DFESettings, username: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _admin_after_its_change(client: TestClient, settings: DFESettings) -> dict[str, str]:
+    """Headers for the bootstrap admin once it has replaced its issued password."""
+    headers = _token(settings, "admin")
+    resp = client.post(
+        "/api/v1/auth/accounts/reset-password",
+        json={"new_password": secrets.token_urlsafe(16)},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    return headers
+
+
 def _complete_setup(app, *, admin_of_our_own: bool = True) -> None:
     """Satisfy every required step, optionally without an admin of the org's own."""
     app.state.org_registry.create("acme", display_name="Acme")
@@ -143,10 +155,21 @@ class TestRetireAdmin:
     def test_the_admin_may_retire_itself(self, wired, tmp_path):
         app, client, settings = wired
 
-        resp = client.post("/api/v1/auth/setup/retire-admin", headers=_token(settings, "admin"))
+        resp = client.post(
+            "/api/v1/auth/setup/retire-admin", headers=_admin_after_its_change(client, settings)
+        )
 
         assert resp.status_code == 200, resp.text
         assert resp.json()["admin_retired"] is True
+
+    def test_the_admin_changes_its_issued_password_before_retiring_itself(self, wired, tmp_path):
+        app, client, settings = wired
+
+        resp = client.post("/api/v1/auth/setup/retire-admin", headers=_token(settings, "admin"))
+
+        assert resp.status_code == 403
+        assert resp.json()["code"] == "password_change_required"
+        assert admin_retirement.is_retired(_deploy_repo_crud(tmp_path)) is False
 
     def test_a_second_call_is_a_no_op(self, wired, tmp_path):
         app, client, settings = wired
@@ -179,7 +202,8 @@ class TestRetireAdmin:
                 assert status["retire_admin_available"] is False
 
                 resp = client.post(
-                    "/api/v1/auth/setup/retire-admin", headers=_token(settings, "admin")
+                    "/api/v1/auth/setup/retire-admin",
+                    headers=_admin_after_its_change(client, settings),
                 )
 
                 assert resp.status_code == 409

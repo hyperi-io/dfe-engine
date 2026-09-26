@@ -134,6 +134,9 @@ config:
     # Empty leaves the broker default, which is what existing topics carry.
     topic_retention_ms: ""
     topic_cleanup_policy: ""
+    # -- compression.type for the topics DFE creates and converges. Empty keeps
+    # the engine default, producer, which stores each batch in its producer's codec.
+    topic_compression_type: ""
   # -- Root config directory — maps to DFE_CONFIG_DIR.
   # Auto-resolves sources/, services/, hunts/, etc. subdirectories.
   # Set to the mount path of your config PVC or git-synced volume.

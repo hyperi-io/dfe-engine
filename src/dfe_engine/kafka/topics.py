@@ -433,7 +433,8 @@ def deployment_topic_config(settings: DFESettings) -> dict[str, str]:
 
     Always the message size, from :func:`topic_max_message_bytes`. Retention and
     cleanup policy only where a dial sets them: unset leaves the broker's, which is
-    what every topic created before those dials existed already has.
+    what every topic created before those dials existed already has. Compression
+    defaults to ``producer`` so a batch the producer compressed is stored as sent.
     """
     ks = settings.kafka
     config: dict[str, str] = {"max.message.bytes": str(topic_max_message_bytes(settings))}
@@ -441,6 +442,8 @@ def deployment_topic_config(settings: DFESettings) -> dict[str, str]:
         config["retention.ms"] = str(ks.topic_retention_ms)
     if ks.topic_cleanup_policy:
         config["cleanup.policy"] = ks.topic_cleanup_policy
+    if ks.topic_compression_type:
+        config["compression.type"] = ks.topic_compression_type
     return config
 
 

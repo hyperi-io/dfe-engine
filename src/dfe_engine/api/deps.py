@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Annotated, Any, NamedTuple
 from fastapi import Depends, HTTPException, Request, status
 from scalo.logger import logger
 
+from dfe_engine.api.password_change import refuse_until_password_changed
 from dfe_engine.auth import AuthContext, AuthorizationError, Scope, ScopedGrant, authorize
 from dfe_engine.auth.api_keys import APIKeyStore
 from dfe_engine.auth.audit import (
@@ -532,25 +533,28 @@ def account_for_session_subject(store: Any, user_id: str):
     return None
 
 
-def require_local_account_enabled(request: Request, user_id: str) -> None:
+def require_local_account_enabled(request: Request, user_id: str) -> Any:
     """Reject a session when the backing account is disabled or blocked.
 
     Looks up the raw subject and the JIT-sanitised stem. Skips ``apikey:…``
     subjects and usernames with no account record.
+
+    Returns:
+        The session's store account, or None when it has none.
     """
     if user_id.startswith("apikey:"):
-        return
+        return None
 
     account_store = getattr(request.app.state, "account_store", None)
     if account_store is None:
-        return
+        return None
 
     account = account_for_session_subject(account_store, user_id)
     if account is None:
-        return
+        return None
     denied = account.session_denied()
     if denied is None:
-        return
+        return account
     code, message = denied
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -707,7 +711,18 @@ async def get_current_user(request: Request) -> AuthContext:
             jwt_groups = _groups_for_local_account(request, jwt_user_id)
         elif not isinstance(jwt_groups, list):
             jwt_groups = []
-        require_local_account_enabled(request, jwt_user_id)
+        account = require_local_account_enabled(request, jwt_user_id)
+        refuse_until_password_changed(request, account)
+        if account is not None and account.password_change_required:
+            # Its token carries no roles, groups or orgs, so neither does the session.
+            return AuthContext(
+                org_id=payload.get("org_id", "default"),
+                user_id=jwt_user_id,
+                email=jwt_email,
+                request_id=request_id,
+                client_ip=client_ip,
+                user_agent=user_agent,
+            )
         live = resolve_live_grants_for_user(request, jwt_user_id, fallback_groups=jwt_groups)
         live_groups = resolve_live_groups_for_user(request, jwt_user_id, fallback_groups=jwt_groups)
         claim_org_ids = payload.get("org_ids", [])

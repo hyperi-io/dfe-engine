@@ -277,9 +277,12 @@ class TestSpecsForSources:
             _deployment(topic_cleanup_policy="compact", topic_max_message_bytes=8388608),
         )
 
-        assert all(
-            s.config == {"cleanup.policy": "compact", "max.message.bytes": "8388608"} for s in specs
-        )
+        expected = {
+            "cleanup.policy": "compact",
+            "compression.type": "producer",
+            "max.message.bytes": "8388608",
+        }
+        assert all(s.config == expected for s in specs)
 
 
 class TestEnsureAllSourceTopics:

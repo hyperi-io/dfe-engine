@@ -37,6 +37,7 @@ import re
 
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 from scalo.logger import logger
 from scim2_models import (
     AuthenticationScheme,
@@ -62,6 +63,7 @@ from scim2_models import (
 )
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.password_floor import FLOOR_MESSAGE, below_floor, count_floor_refusal
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.scim_mapping import (
     account_to_scim_user,
@@ -121,6 +123,25 @@ def scim_error(status_code: int, detail: str, scim_type: str | None = None) -> J
         status_code=status_code,
         media_type=SCIM_MEDIA_TYPE,
     )
+
+
+def _invalid_body(kind: str, exc: Exception) -> JSONResponse:
+    """Answer a body that failed validation, naming what failed but no value it carried.
+
+    ``str()`` of a pydantic ``ValidationError`` repeats the input, which for a
+    model-level error is the whole request, password included. The detail is built
+    from the error locations and messages only. Anything else scim2_models raises on
+    a malformed body is its own internal failure, so it gets a fixed message.
+    """
+    if not isinstance(exc, ValidationError):
+        return scim_error(
+            400, f"Invalid {kind}: the body does not match the {kind} schema", "invalidValue"
+        )
+    problems = []
+    for err in exc.errors(include_url=False, include_context=False, include_input=False):
+        where = ".".join(str(part) for part in err["loc"])
+        problems.append(f"{where}: {err['msg']}" if where else err["msg"])
+    return scim_error(400, f"Invalid {kind}: {'; '.join(problems)}", "invalidValue")
 
 
 async def _parse_body(request: Request):
@@ -219,14 +240,18 @@ async def get_user(user_id: str, user: CurrentUser, request: Request) -> Respons
     dependencies=[Depends(require_action(scopes_dict["account_write"]))],
 )
 async def create_user(user: CurrentUser, request: Request) -> Response:
-    """Provision a user. IdP-owned; local password is randomised when omitted."""
+    """Provision a user. IdP-owned; local password is randomised when omitted.
+
+    A password the IdP does send is held to the same length floor as every other
+    password the API sets, and one under it is refused rather than replaced.
+    """
     body = await _parse_body(request)
     if body is None:
         return scim_error(400, "Malformed JSON body", "invalidSyntax")
     try:
         inbound = ScimUser.model_validate(body, scim_ctx=Context.RESOURCE_CREATION_REQUEST)
     except Exception as exc:
-        return scim_error(400, f"Invalid User: {exc}", "invalidValue")
+        return _invalid_body("User", exc)
     if not inbound.user_name:
         return scim_error(400, "userName is required", "invalidValue")
 
@@ -237,6 +262,9 @@ async def create_user(user: CurrentUser, request: Request) -> Response:
     fields = scim_user_to_account_fields(inbound)
     username = str(fields["username"])
     password = str(fields.pop("password", generate_provisioning_password()))
+    if below_floor(password):
+        count_floor_refusal(request)
+        return scim_error(400, FLOOR_MESSAGE, "invalidValue")
     store.create(username, password, groups=[])
     # Apply the remaining writable attributes (enabled, external_id, provider).
     store.update(
@@ -269,7 +297,7 @@ async def replace_user(user_id: str, user: CurrentUser, request: Request) -> Res
     try:
         inbound = ScimUser.model_validate(body, scim_ctx=Context.RESOURCE_REPLACEMENT_REQUEST)
     except Exception as exc:
-        return scim_error(400, f"Invalid User: {exc}", "invalidValue")
+        return _invalid_body("User", exc)
 
     fields = scim_user_to_account_fields(inbound)
     store.update(
@@ -301,7 +329,7 @@ async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Respo
     try:
         patch = PatchOp[ScimUser].model_validate(body, scim_ctx=Context.RESOURCE_PATCH_REQUEST)
     except Exception as exc:
-        return scim_error(400, f"Invalid PatchOp: {exc}", "invalidValue")
+        return _invalid_body("PatchOp", exc)
 
     for op in patch.operations or []:
         # op.path may be a typed ``Path`` object; coerce to a plain string.
@@ -400,7 +428,7 @@ async def create_group(user: CurrentUser, request: Request) -> Response:
     try:
         inbound = ScimGroup.model_validate(body, scim_ctx=Context.RESOURCE_CREATION_REQUEST)
     except Exception as exc:
-        return scim_error(400, f"Invalid Group: {exc}", "invalidValue")
+        return _invalid_body("Group", exc)
     if not inbound.display_name:
         return scim_error(400, "displayName is required", "invalidValue")
 
@@ -441,7 +469,7 @@ async def replace_group(group_id: str, user: CurrentUser, request: Request) -> R
     try:
         inbound = ScimGroup.model_validate(body, scim_ctx=Context.RESOURCE_REPLACEMENT_REQUEST)
     except Exception as exc:
-        return scim_error(400, f"Invalid Group: {exc}", "invalidValue")
+        return _invalid_body("Group", exc)
 
     fields = scim_group_to_group_fields(inbound)
     new_members = list(fields["members"])  # type: ignore[arg-type]
@@ -480,7 +508,7 @@ async def patch_group(group_id: str, user: CurrentUser, request: Request) -> Res
     try:
         patch = PatchOp[ScimGroup].model_validate(body, scim_ctx=Context.RESOURCE_PATCH_REQUEST)
     except Exception as exc:
-        return scim_error(400, f"Invalid PatchOp: {exc}", "invalidValue")
+        return _invalid_body("PatchOp", exc)
 
     added: set[str] = set()
     removed: set[str] = set()

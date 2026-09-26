@@ -9,7 +9,8 @@ runs rather than changing it.
 
 The values below are pinned to the upstream Rust ``impl Default``. Changing one
 here without changing it there re-opens the drift; the citation is the commit to
-check it against.
+check it against. Where the app's default depends on how it is running, the
+engine writes nothing and the app decides.
 """
 
 import json
@@ -63,10 +64,9 @@ class TestArchiverDefaults:
 
 
 class TestArchiverRollInterval:
-    """dfe-archiver picks 300 s while it holds Kafka offsets and 3600 s otherwise.
+    """dfe-archiver #98: unset is 300 s while offsets are held, 3600 s otherwise.
 
-    It can only pick when the key is absent, and a dump writes every field, so an
-    unset interval has to leave the key out rather than write null or a number.
+    So the engine writes a roll interval only when an operator set one.
     """
 
     def test_the_app_leaves_it_unset(self):
@@ -76,11 +76,6 @@ class TestArchiverRollInterval:
 
     def test_an_untouched_config_dumps_without_it(self):
         assert "roll_interval_secs" not in ArchiverConfig().model_dump(mode="json")["archive"]
-
-    @pytest.mark.parametrize("profile", ["default", "production", "k8s"])
-    def test_no_emitted_template_writes_it(self, profile: str):
-        emitted = generate_template("archiver", profile=profile)
-        assert "roll_interval_secs" not in emitted["archive"]
 
     def test_an_operator_value_is_kept(self):
         config = ArchiverConfig.model_validate({"archive": {"roll_interval_secs": 900}})
@@ -101,9 +96,39 @@ class TestArchiverRollInterval:
         assert written["roll_interval_secs"] == 900
         assert read_back == 900
 
-    def test_a_zero_interval_is_refused(self):
+    @pytest.mark.parametrize("profile", ["default", "production", "k8s"])
+    def test_emitted_template_omits_it(self, profile: str):
+        emitted = generate_template("archiver", profile=profile)
+        assert "roll_interval_secs" not in emitted["archive"]
+
+    def test_saved_config_omits_it(self, tmp_path):
+        """The YAML the registry writes on save, not only the in-memory dump."""
+        services = tmp_path / "services"
+        reg = ServiceConfigRegistry(config_directory=services, refresh_interval=0)
+        try:
+            reg.save_config("archiver", {"archive": {"destination": "file:///var/data/archive"}})
+        finally:
+            reg.close()
+        written = yaml_load(services / "archiver-default.yaml")
+        assert written["archive"]["destination"] == "file:///var/data/archive"
+        assert "roll_interval_secs" not in written["archive"]
+
+    def test_a_set_value_is_saved_as_given(self, tmp_path):
+        services = tmp_path / "services"
+        reg = ServiceConfigRegistry(config_directory=services, refresh_interval=0)
+        try:
+            reg.save_config("archiver", {"archive": {"roll_interval_secs": 1800}})
+            reread = reg.get_config("archiver", "default")
+        finally:
+            reg.close()
+        written = yaml_load(services / "archiver-default.yaml")
+        assert written["archive"]["roll_interval_secs"] == 1800
+        assert reread.archive.roll_interval_secs == 1800
+
+    @pytest.mark.parametrize("bad", [0, -1])
+    def test_a_non_positive_value_is_refused(self, bad: int):
         with pytest.raises(ValueError, match="greater than 0"):
-            ArchiverConfig.model_validate({"archive": {"roll_interval_secs": 0}})
+            ArchiverConfig.model_validate({"archive": {"roll_interval_secs": bad}})
 
 
 class TestLoaderClickHouseDefaults:

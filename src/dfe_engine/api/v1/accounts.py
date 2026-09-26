@@ -25,10 +25,12 @@ a logged-in user. Password hashes are NEVER returned in any response.
 
 from __future__ import annotations
 
+import functools
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
+from scalo.concurrency import run_blocking
 
 from dfe_engine.api.deps import CurrentUser, Settings, require_action
 from dfe_engine.api.pagination import (
@@ -39,7 +41,7 @@ from dfe_engine.api.pagination import (
 )
 from dfe_engine.auth import account_durability
 from dfe_engine.auth.account_durability import AccountGitState
-from dfe_engine.auth.accounts import Account
+from dfe_engine.auth.accounts import Account, matches_digest
 from dfe_engine.auth.audit import audit_account_change
 from dfe_engine.auth.bootstrap import (
     MIN_ADMIN_PASSWORD_LENGTH,
@@ -51,7 +53,7 @@ from dfe_engine.auth.rbac_scopes import scopes_dict
 router = APIRouter(prefix="/accounts", tags=["Accounts"])
 
 
-def _persist_account(
+async def _persist_account(
     request: Request,
     settings: Settings,
     *,
@@ -63,10 +65,34 @@ def _persist_account(
     """Mirror an account write into the durable deploy repo and report the state.
 
     Only the break-glass admin is git-persisted; regular users are durable in their
-    own store (document store/yaml), so they never touch the deploy repo.
+    own store (document store/yaml), so they never touch the deploy repo. The mirror
+    is a commit and a push, so it runs on a worker thread.
     """
     if not account_durability.is_break_glass(username, settings.auth.local.admin_name):
         return account_durability.not_git_backed_state()
+    return await run_blocking(
+        functools.partial(
+            _mirror_account,
+            request,
+            settings,
+            username=username,
+            account=account,
+            summary=summary,
+            actor=actor,
+        )
+    )
+
+
+def _mirror_account(
+    request: Request,
+    settings: Settings,
+    *,
+    username: str,
+    account: Account,
+    summary: str,
+    actor: str,
+) -> AccountGitState:
+    """Commit the break-glass admin's account doc to the deploy repo."""
     gc = getattr(request.app.state, "gitcrud", None)
     forge = getattr(request.app.state, "forge", None)
     outcome = account_durability.publish_account(
@@ -83,12 +109,6 @@ def _persist_account(
     return account_durability.state_from_outcome(gc, outcome)
 
 
-# Reuse depth quoted in the rejection message; only the current password is
-# compared, since no password history is stored. The message stays vague so it
-# cannot confirm that a candidate password is the account's current one.
-PASSWORD_REUSE_WINDOW = 5
-
-
 # ── Request / Response models ────────────────────────────────
 
 
@@ -101,7 +121,13 @@ class CreateAccountRequest(BaseModel):
     """
 
     username: str = Field(description="Unique account name")
-    password: str = Field(description="Plaintext password (bcrypt-hashed before storage)")
+    password: str = Field(
+        min_length=MIN_ADMIN_PASSWORD_LENGTH,
+        description=(
+            "Plaintext password (bcrypt-hashed before storage); at least "
+            f"{MIN_ADMIN_PASSWORD_LENGTH} characters"
+        ),
+    )
     email: str = Field(default="", description="Contact email")
     groups: list[str] = Field(default_factory=list, description="Group memberships")
     phone: str = Field(default="", description="Contact phone")
@@ -126,7 +152,10 @@ class UpdateOwnAccountRequest(BaseModel):
 
 
 class ResetPasswordRequest(BaseModel):
-    new_password: str = Field(description="New plaintext password")
+    new_password: str = Field(
+        min_length=MIN_ADMIN_PASSWORD_LENGTH,
+        description=f"New plaintext password; at least {MIN_ADMIN_PASSWORD_LENGTH} characters",
+    )
 
 
 class ResetPasswordResponse(BaseModel):
@@ -188,6 +217,11 @@ class AccountResponse(BaseModel):
     external: bool = Field(
         description="True when the account authenticates through an identity provider",
     )
+    password_change_required: bool = Field(
+        default=False,
+        description="True until the account replaces an issued password. The account's "
+        "own read reports no groups while it is set, as its session holds none.",
+    )
     created_at: str
     updated_at: str
 
@@ -211,6 +245,7 @@ def _account_response(account: Account) -> AccountResponse:
         phone=account.phone,
         name=account.name,
         external=account.external,
+        password_change_required=account.password_change_required,
         created_at=account.created_at,
         updated_at=account.updated_at,
     )
@@ -240,7 +275,7 @@ def _require_account(store: Any, username: str) -> Account:
     return account
 
 
-def _reset_stored_password(
+async def _reset_stored_password(
     request: Request,
     settings: Settings,
     *,
@@ -269,18 +304,23 @@ def _reset_stored_password(
                 ),
             },
         )
-    if store.verify_password(username, new_password):
+    # No history is stored: the current password and the last one issued are all there is.
+    reused = store.verify_password(username, new_password) or matches_digest(
+        new_password, existing.seeded_password_hash
+    )
+    if reused:
         raise HTTPException(
             status_code=400,
             detail={
                 "code": "password_reused",
                 "message": (
-                    f"New password may not match any of the last {PASSWORD_REUSE_WINDOW} passwords"
+                    "New password must differ from the account's current password "
+                    "and from the password it was last issued"
                 ),
             },
         )
     store.reset_password(username, new_password)
-    git = _persist_account(
+    git = await _persist_account(
         request,
         settings,
         username=username,
@@ -330,7 +370,7 @@ async def create_account(
         body.username,
         added=body.groups,
     )
-    _persist_account(
+    await _persist_account(
         request,
         settings,
         username=account.username,
@@ -385,11 +425,19 @@ async def get_current_user_account(
     user: CurrentUser,
     request: Request,
 ):
-    """Return the authenticated user's account. No extra scope required."""
+    """Return the authenticated user's account. No extra scope required.
+
+    An account on an issued password reads back with no groups: its session holds
+    no standing until the change, and a console copies this read into its session.
+    """
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    return _account_response(_require_account(store, user.user_id))
+    account = _require_account(store, user.user_id)
+    response = _account_response(account)
+    if account.password_change_required:
+        response.groups = []
+    return response
 
 
 @router.put("/me", response_model=AccountResponse)
@@ -410,7 +458,7 @@ async def update_current_user_account(
     existing = _require_account(store, user.user_id)
     fields = _contact_updates(body)
     account = store.update(user.user_id, **fields) if fields else existing
-    _persist_account(
+    await _persist_account(
         request,
         settings,
         username=account.username,
@@ -482,7 +530,7 @@ async def update_account(
         )
     else:
         account = store.update(username, **update_fields)
-    _persist_account(
+    await _persist_account(
         request,
         settings,
         username=account.username,
@@ -511,8 +559,11 @@ async def reset_current_user_password(
     account is refused: it has no local password. The live store takes the new
     password immediately; the ``git`` block reports whether the durable mirror
     merged, is pending review, or is a no-op for a non-git-backed account.
+
+    An account on an issued password may call this and nothing else that
+    changes state, and the reset clears ``password_change_required``.
     """
-    return _reset_stored_password(
+    return await _reset_stored_password(
         request,
         settings,
         username=user.user_id,
@@ -545,7 +596,7 @@ async def reset_password(
     straight away (dev/solo) or is a pending review PR / CLI merge
     (production+team), or is a no-op file share.
     """
-    return _reset_stored_password(
+    return await _reset_stored_password(
         request,
         settings,
         username=username,
@@ -573,9 +624,10 @@ async def rotate_password(
 
     The store that injects ``DFE_AUTH_LOCAL_ADMIN_PASSWORD`` is the source of that
     password, so the engine writes the new value through the scalo secrets seam
-    and never into its own YAML -- a YAML-only change is reverted by the next boot
-    reconcile. Returns 501 with the store command when the deployment has not
-    declared a secrets path for the password.
+    and never into its own YAML. The next boot reconcile issues the rotated value
+    to the admin, who must replace it at the following login. Returns 501 with the
+    store command when the deployment has not declared a secrets path for the
+    password.
     """
     from dfe_engine.auth.deployment_hints import detect_deploy_kind, rotation_store_command
     from dfe_engine.secrets import build_secrets
@@ -644,12 +696,16 @@ async def account_git_status(
         )
     if not account_durability.is_break_glass(username, settings.auth.local.admin_name):
         return account_durability.not_git_backed_state()
-    return account_durability.remote_state(
-        getattr(request.app.state, "gitcrud", None),
-        store,
-        username,
-        environment=settings.env,
-        mode=settings.gitops.mode,
+    # Fetches the deploy repo's remote, so it runs on a worker thread.
+    return await run_blocking(
+        functools.partial(
+            account_durability.remote_state,
+            getattr(request.app.state, "gitcrud", None),
+            store,
+            username,
+            environment=settings.env,
+            mode=settings.gitops.mode,
+        )
     )
 
 
@@ -662,7 +718,6 @@ async def delete_account(
     username: str,
     user: CurrentUser,
     request: Request,
-    settings: Settings,
 ):
     """Delete an account (admin only)."""
     from dfe_engine.auth.accounts import AccountStore
@@ -673,17 +728,8 @@ async def delete_account(
             status_code=404,
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
         )
+    # The store refuses the break-glass admin, the one account the deploy repo carries.
     store.delete(username)
-    if account_durability.is_break_glass(username, settings.auth.local.admin_name):
-        account_durability.remove_account(
-            getattr(request.app.state, "gitcrud", None),
-            getattr(request.app.state, "forge", None),
-            environment=settings.env,
-            mode=settings.gitops.mode,
-            username=username,
-            actor=user.user_id,
-            request_id=request.headers.get("X-Request-ID", ""),
-        )
 
 
 # ── Attributes ───────────────────────────────────────────────

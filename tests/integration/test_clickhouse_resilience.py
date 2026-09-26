@@ -136,6 +136,28 @@ def test_a_real_runner_heartbeat_round_trips_through_the_wrapper(manager, heartb
     assert live_runner_count(client, db, now + 60) == 0
 
 
+def test_two_threads_query_the_shared_client_at_once(manager):
+    """The API's handlers run on worker threads over one client; a session would refuse one."""
+    import threading
+
+    client = manager.get_clickhouse_client()
+    outcomes: list[object] = []
+
+    def query() -> None:
+        try:
+            outcomes.append(client.query("SELECT sleep(0.5)").result_rows[0][0])
+        except Exception as exc:
+            outcomes.append(exc)
+
+    threads = [threading.Thread(target=query) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    assert outcomes == [0, 0]
+
+
 def test_reconnect_rebuilds_a_working_client(manager):
     client = manager.get_clickhouse_client()
     assert client.query("SELECT 1").result_rows[0][0] == 1

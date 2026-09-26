@@ -1,7 +1,8 @@
 """Configuration model for dfe-archiver.
 
-Mirrors the Rust config structs in dfe-archiver/src/config/types.rs.
-All defaults match the Rust `impl Default` values exactly.
+Mirrors the Rust config structs in dfe-archiver crates/core/src/config.rs.
+Defaults match the Rust `impl Default` values, except `archive.roll_interval_secs`,
+which stays unset so the archiver chooses it.
 """
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
@@ -119,14 +120,9 @@ class ArchiveConfig(BaseModel):
     roll_size_bytes: int = Field(
         default=1024 * 1024 * 1024, gt=0, description="1GB final compressed file size"
     )
-    # Unset, the archiver picks by whether it holds Kafka offsets (300 s) or not
-    # (3600 s), so a written value would override that choice.
-    roll_interval_secs: int | None = Field(
-        default=None,
-        gt=0,
-        exclude_if=lambda value: value is None,
-        description="Omitted unless set, so the archiver chooses its own interval",
-    )
+    # Omitted from the dump when unset: the archiver's default depends on whether it
+    # holds offsets until a file lands, and any value written here overrides it.
+    roll_interval_secs: int | None = Field(default=None, gt=0, exclude_if=lambda v: v is None)
     s3: S3Config | None = None
     gcs: GcsConfig | None = None
     azure: AzureConfig | None = None
@@ -208,7 +204,7 @@ class CompressionConfig(BaseModel):
 class ArchiverConfig(BaseServiceConfig):
     """Complete configuration for dfe-archiver.
 
-    Mirrors the Rust Config struct in dfe-archiver/src/config/types.rs.
+    Mirrors the Rust Config struct in dfe-archiver crates/core/src/config.rs.
     """
 
     kafka: ArchiverKafkaConfig = Field(default_factory=ArchiverKafkaConfig)

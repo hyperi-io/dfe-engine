@@ -52,6 +52,7 @@ two in different places.
 | `kafka.topic_replication_factor` | Replication factor for topics DFE creates. A converge reports a difference and changes nothing. |
 | `kafka.topic_retention_ms` | `retention.ms` on the topics DFE creates and converges. Unset leaves the broker default. |
 | `kafka.topic_cleanup_policy` | `cleanup.policy`, same. |
+| `kafka.topic_compression_type` | `compression.type` on the topics DFE creates and converges. Default `producer`: the broker stores each batch in the codec its producer chose (zstd level 3 across DFE) and never recompresses it. Empty leaves the broker default. |
 | `kafka.ensure_topics` | Whether the topics are DFE's to manage. Unset follows `transport.bus_present`. |
 
 Only the configs the spec names are ever compared, so a config an operator set
