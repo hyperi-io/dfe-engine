@@ -11,7 +11,6 @@ Writes:
 
 import json
 import os
-import subprocess
 from pathlib import Path
 
 from dfe_engine.api.app import create_app
@@ -22,6 +21,10 @@ SPEC_DIR = Path(__file__).parent
 SPEC_FILE = SPEC_DIR / "openapi.json"
 E2E_SPEC_FILE = SPEC_DIR / "openapi.e2e.json"
 
+# The release commit-back keeps this at the released number, and the committed-spec
+# test compares against it, so the generator stamps from the same file.
+VERSION_FILE = SPEC_DIR.parent / "VERSION"
+
 # pyproject ships 0.0.0 and semantic-release stamps the real number in CI, so an
 # editable install reports a placeholder rather than the version it is describing.
 PLACEHOLDER_VERSIONS = frozenset({"", "dev", "0.0.0"})
@@ -31,19 +34,12 @@ def _dump(path: Path, spec: dict) -> None:
     path.write_text(json.dumps(spec, indent=2) + "\n")
 
 
-def _latest_release_tag() -> str:
-    """Newest ``vN.N.N`` tag reachable from HEAD, or empty when there is none."""
+def _repo_version() -> str:
+    """The VERSION file's number, or empty when the file is missing."""
     try:
-        out = subprocess.run(
-            ["git", "describe", "--tags", "--abbrev=0", "--match", "v[0-9]*"],
-            cwd=SPEC_DIR,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        return VERSION_FILE.read_text().strip()
     except OSError:
         return ""
-    return out.stdout.strip().lstrip("v") if out.returncode == 0 else ""
 
 
 def _spec_version(reported: str) -> str:
@@ -55,13 +51,12 @@ def _spec_version(reported: str) -> str:
     """
     if reported not in PLACEHOLDER_VERSIONS:
         return reported
-    tag = _latest_release_tag()
-    if tag:
-        return tag
+    version = _repo_version()
+    if version not in PLACEHOLDER_VERSIONS:
+        return version
     raise SystemExit(
         f"refusing to write info.version={reported!r} into the committed spec: "
-        "no release tag to fall back on -- run `git fetch --tags`, or generate "
-        "from an install that carries the real version"
+        f"{VERSION_FILE} carries no release number either"
     )
 
 
