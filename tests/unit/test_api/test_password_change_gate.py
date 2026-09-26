@@ -23,7 +23,7 @@ from scalo.metrics import create_metrics
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
 from dfe_engine.api.metrics import PASSWORD_CHANGE_REFUSALS
-from dfe_engine.api.password_change import ALLOWED_BEFORE_CHANGE
+from dfe_engine.api.password_change import ALLOWED_BEFORE_CHANGE, PASSWORD_CHANGE_CLAIM
 from dfe_engine.settings import DFESettings
 
 from .conftest import ADMIN_PASSWORD
@@ -108,7 +108,18 @@ class TestTheIssuedAdmin:
         assert body["roles"] == []
         assert claims["roles"] == []
         assert claims["groups"] == []
+        assert claims["org_ids"] == []
+        assert "org_id" not in claims
         assert claims["role"] == "member"
+
+    def test_the_token_names_the_pending_change_for_a_peer_to_refuse(self, fresh):
+        """dfe-hyperdx puts a claim-less token in its default team, so it refuses on this claim."""
+        headers = _bearer(_login(fresh))
+        refreshed = fresh.post("/api/v1/auth/refresh", headers=headers).json()
+
+        for token in (headers["Authorization"].removeprefix("Bearer "), refreshed["access_token"]):
+            claims = fresh.app.state.jwt_authority.verify(token)
+            assert claims[PASSWORD_CHANGE_CLAIM] is True
 
 
 class TestTheChangedAccount:
@@ -123,6 +134,7 @@ class TestTheChangedAccount:
         assert "admin" in refreshed["roles"]
         assert "dfe-admins" in claims["groups"]
         assert claims["role"] == "admin"
+        assert PASSWORD_CHANGE_CLAIM not in claims
 
 
 class TestTheChange:

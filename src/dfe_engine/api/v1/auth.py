@@ -24,6 +24,7 @@ from dfe_engine.api.deps import (
     resolve_live_groups_for_user,
     resolve_live_roles_for_user,
 )
+from dfe_engine.api.password_change import PASSWORD_CHANGE_CLAIM
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth import account_durability, admin_retirement, breakglass, hyperdx_role
 from dfe_engine.auth.audit import (
@@ -121,18 +122,39 @@ def _password_change_required(request: Request, user_id: str) -> bool:
     return bool(account and account.password_change_required)
 
 
-def _standing(
-    change_required: bool, roles: list[str], groups: list[str], org_ids: list[str]
-) -> tuple[list[str], list[str], list[str]]:
-    """The roles, groups and orgs a token may carry for this account.
+def _token_data(
+    sub: str,
+    org_id: str | None,
+    roles: list[str],
+    groups: list[str],
+    org_ids: list[str],
+    *,
+    change_required: bool,
+) -> dict:
+    """The claims a session token carries for this account.
 
-    A token on an issued password carries none: the engine refuses it by account,
-    but dfe-hyperdx admits a token by its claims, so empty claims keep the data
-    plane closed too until the password is changed and the token refreshed.
+    A token on an issued password carries no standing and says so in
+    ``PASSWORD_CHANGE_CLAIM``: dfe-hyperdx admits a claim-less token to its default
+    team, so it refuses one carrying that claim instead.
     """
     if change_required:
-        return [], [], []
-    return roles, groups, org_ids
+        return {
+            "sub": sub,
+            "roles": [],
+            "groups": [],
+            "org_ids": [],
+            hyperdx_role.CLAIM: hyperdx_role.role_claim([]),
+            PASSWORD_CHANGE_CLAIM: True,
+        }
+    return {
+        "sub": sub,
+        "org_id": org_id,
+        "roles": roles,
+        "groups": groups,
+        "org_ids": org_ids,
+        # dfe-hyperdx gates changing what a team sees on this one value.
+        hyperdx_role.CLAIM: hyperdx_role.role_claim(roles),
+    }
 
 
 # ── Endpoints ────────────────────────────────────────────────
@@ -182,27 +204,21 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
     audit_login_success(auth_ctx.user_id, "jwt", client_ip, auth_ctx.roles)
 
     change_required = _password_change_required(request, auth_ctx.user_id)
-    roles, groups, org_ids = _standing(
-        change_required, auth_ctx.roles, auth_ctx.groups, auth_ctx.org_ids
+    data = _token_data(
+        auth_ctx.user_id,
+        auth_ctx.org_id,
+        auth_ctx.roles,
+        auth_ctx.groups,
+        auth_ctx.org_ids,
+        change_required=change_required,
     )
-    token = create_access_token(
-        data={
-            "sub": auth_ctx.user_id,
-            "org_id": auth_ctx.org_id,
-            "roles": roles,
-            "groups": groups,
-            "org_ids": org_ids,
-            # dfe-hyperdx gates changing what a team sees on this one value.
-            hyperdx_role.CLAIM: hyperdx_role.role_claim(roles),
-        },
-        settings=settings,
-    )
+    token = create_access_token(data=data, settings=settings)
 
     return TokenResponse(
         access_token=token,
         expires_in=settings.api.jwt_expire_minutes * 60,
         user_id=auth_ctx.user_id,
-        roles=roles,
+        roles=data["roles"],
         default_credentials=getattr(request.app.state, "default_credentials", False),
         password_change_required=change_required,
     )
@@ -213,30 +229,22 @@ async def refresh_token(user: CurrentUser, request: Request, settings: Settings)
     """Refresh the current JWT token. Requires a valid existing token."""
     require_local_account_enabled(request, user.user_id)
     change_required = _password_change_required(request, user.user_id)
-    roles, groups, org_ids = _standing(
-        change_required,
+    # Re-resolved, so a role taken away is gone from the next token too.
+    data = _token_data(
+        user.user_id,
+        user.org_id,
         resolve_live_roles_for_user(request, user.user_id, fallback_groups=user.groups),
         resolve_live_groups_for_user(request, user.user_id, fallback_groups=user.groups),
         user.org_ids,
+        change_required=change_required,
     )
-    token = create_access_token(
-        data={
-            "sub": user.user_id,
-            "org_id": user.org_id,
-            "roles": roles,
-            "groups": groups,
-            "org_ids": org_ids,
-            # Re-resolved, so a role taken away is gone from the next token too.
-            hyperdx_role.CLAIM: hyperdx_role.role_claim(roles),
-        },
-        settings=settings,
-    )
+    token = create_access_token(data=data, settings=settings)
 
     return TokenResponse(
         access_token=token,
         expires_in=settings.api.jwt_expire_minutes * 60,
         user_id=user.user_id,
-        roles=roles,
+        roles=data["roles"],
         default_credentials=getattr(request.app.state, "default_credentials", False),
         password_change_required=change_required,
     )

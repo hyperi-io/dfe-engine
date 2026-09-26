@@ -27,6 +27,9 @@ from fastapi import HTTPException, Request, status
 from dfe_engine.api.errors import ErrorCode
 from dfe_engine.api.metrics import ApiMetrics
 
+# Token claim marking a session on an issued password; dfe-hyperdx refuses such a token.
+PASSWORD_CHANGE_CLAIM = "password_change_required"
+
 # The owner's own password change, which clears the flag.
 CHANGE_PASSWORD_ROUTE = ("POST", "/api/v1/auth/accounts/reset-password")
 
@@ -91,5 +94,6 @@ def refuse_until_password_changed(request: Request, account: Any) -> None:
 __all__ = [
     "ALLOWED_BEFORE_CHANGE",
     "CHANGE_PASSWORD_ROUTE",
+    "PASSWORD_CHANGE_CLAIM",
     "refuse_until_password_changed",
 ]
