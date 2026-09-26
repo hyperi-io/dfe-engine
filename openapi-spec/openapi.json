@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.22.6"
+    "version": "1.22.7"
   },
   "paths": {
     "/api/v1/auth/login": {
