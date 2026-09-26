@@ -12,9 +12,12 @@ the whole point of this layer is that the overlay stopped short of the container
 so proving the overlay changed would prove nothing.
 """
 
-from __future__ import annotations
-
+import os
+import uuid
 from pathlib import Path
+
+import pytest
+from scalo.logger import logger
 
 from dfe_engine.appmgmt import appconfig, files, instances, routing
 from dfe_engine.appmgmt.catalogue import descriptor, file_set
@@ -31,6 +34,15 @@ LOADER = "dfe-loader"
 VRL = "dfe-transform-vrl"
 
 MOUNT = "/etc/dfe/apps"
+
+
+@pytest.fixture
+def captured_logs():
+    """Lines scalo's logger emits during the test, with the fields bound to each."""
+    lines: list[str] = []
+    sink_id = logger.add(lines.append, level="DEBUG", format="{level} {message} {extra}")
+    yield lines
+    logger.remove(sink_id)
 
 
 def _settings(
@@ -414,13 +426,83 @@ class TestCustomEnvironment:
             "DFE_LOADER_HOUSE_KEY=kept\nSECOND=also\n"
         )
 
-    def test_the_file_is_readable_only_by_its_owner(self, crud, tmp_path):
+    def test_the_file_is_readable_by_its_group_and_nobody_else(self, crud, tmp_path):
+        # Compose reads env_file as the operator who runs it, not as the engine.
         settings = _settings(tmp_path)
         _deploy(crud, LOADER, extraEnv__DFE_LOADER_TOKEN="hunter2")
 
         appconfig.render(crud, settings)
 
-        assert _env_file(settings, LOADER).stat().st_mode & 0o777 == 0o600
+        assert _env_file(settings, LOADER).stat().st_mode & 0o777 == 0o640
+
+    def test_a_restrictive_umask_does_not_take_the_group_read_away(self, crud, tmp_path):
+        settings = _settings(tmp_path)
+        _deploy(crud, LOADER, extraEnv__DFE_LOADER_TOKEN="hunter2")
+
+        previous = os.umask(0o077)
+        try:
+            appconfig.render(crud, settings)
+        finally:
+            os.umask(previous)
+
+        assert _env_file(settings, LOADER).stat().st_mode & 0o777 == 0o640
+
+    def test_the_file_takes_the_group_of_the_directory_it_sits_in(self, crud, tmp_path):
+        settings = _settings(tmp_path)
+        env_dir = Path(settings.deployment.app_env_dir)
+        env_dir.mkdir(parents=True)
+        other = next((g for g in os.getgroups() if g != env_dir.stat().st_gid), None)
+        if other is None:
+            pytest.skip("this process holds no second group to give the directory")
+        os.chown(env_dir, -1, other)
+        _deploy(crud, LOADER, extraEnv__DFE_LOADER_TOKEN="hunter2")
+
+        appconfig.render(crud, settings)
+
+        assert _env_file(settings, LOADER).stat().st_gid == other
+
+    def test_a_file_written_owner_only_is_widened_and_recreated(self, crud, tmp_path):
+        # An earlier engine wrote this file 0600, which Compose run by anyone else cannot read.
+        settings = _settings(tmp_path)
+        _deploy(crud, LOADER, extraEnv__DFE_LOADER_HOUSE_KEY="kept")
+        appconfig.render(crud, settings)
+        env_file = _env_file(settings, LOADER)
+        env_file.chmod(0o600)
+
+        rendered = {r.service: r for r in appconfig.render(crud, settings)}
+
+        assert env_file.stat().st_mode & 0o777 == 0o640
+        assert rendered[LOADER].restart_hint == f"recreate required: docker compose up -d {LOADER}"
+
+    def test_a_directory_group_the_engine_does_not_hold_is_named_with_the_fix(
+        self, tmp_path, captured_logs
+    ):
+        # Only root can make a directory with a foreign group, so borrow a writable ancestor.
+        mine = {os.getegid(), *os.getgroups()}
+        foreign = next(
+            (
+                p
+                for p in tmp_path.parents
+                if p.stat().st_gid not in mine and os.access(p, os.W_OK | os.X_OK)
+            ),
+            None,
+        )
+        if os.geteuid() == 0 or foreign is None:
+            pytest.skip("no writable directory here has a group this process lacks")
+        settings = _settings(tmp_path, app_env_dir=str(foreign))
+        service = f"dfe-test-{uuid.uuid4().hex}"
+        written = foreign / f"{service}{appconfig.CUSTOM_ENV_SUFFIX}"
+
+        try:
+            changed = appconfig.write_custom_env(settings, service, {"KEY": "value"})
+        finally:
+            written.unlink(missing_ok=True)
+            written.with_name(f".{written.name}.tmp").unlink(missing_ok=True)
+
+        assert changed
+        warning = [line for line in captured_logs if line.startswith("WARNING ")]
+        assert any("cannot take its directory's group" in line for line in warning)
+        assert any("group_add" in line for line in warning)
 
     def test_a_bool_is_spelled_the_way_an_app_parses_one(self, crud, tmp_path):
         settings = _settings(tmp_path)

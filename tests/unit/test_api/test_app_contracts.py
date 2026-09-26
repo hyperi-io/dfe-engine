@@ -577,8 +577,8 @@ class TestWritingCustomEnv:
 
         written = tmp_path / "app-env" / f"{LOADER}{appconfig.CUSTOM_ENV_SUFFIX}"
         assert written.read_text() == "DFE_LOADER_HOUSE_KEY=kept\nSECOND=also\n"
-        # An operator writes credentials here, so nobody else on the host reads it.
-        assert written.stat().st_mode & 0o777 == 0o600
+        # Credentials: the group Compose runs as reads it, and nobody else on the host.
+        assert written.stat().st_mode & 0o777 == 0o640
         # Compose reads env_file at up time, so a restart would keep the old set.
         assert resp.json()["restart_required"] == [
             f"recreate required: docker compose up -d {LOADER}"

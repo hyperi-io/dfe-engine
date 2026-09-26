@@ -982,9 +982,10 @@ class DeploymentSettings(BaseModel):
         description=(
             "Directory the engine writes each app's custom environment into, as "
             "<service>.custom.env, for a deployer whose containers read env files "
-            "from the host. Empty means something else delivers the overlay's "
-            "extraEnv block, which on Kubernetes is the app's own chart. "
-            "DFE_DEPLOYMENT_APP_ENV_DIR."
+            "from the host. Each file is written 0640 with the directory's group, "
+            "so the engine must hold that group. Empty means something else "
+            "delivers the overlay's extraEnv block, which on Kubernetes is the "
+            "app's own chart. DFE_DEPLOYMENT_APP_ENV_DIR."
         ),
     )
 
