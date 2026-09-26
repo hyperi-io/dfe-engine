@@ -3,9 +3,9 @@
 #
 # TEST DATA. Copied verbatim from hyperi-io/dfe-transform-elastic sources.yaml at
 # commit 97115a1ad21427896d093ee44b5111121a88d564 (2026-08-31). It is never the
-# runtime catalogue: a deployment mounts the release asset that repo publishes,
-# and DFE_SOURCE_CATALOGUE_FILE points at it. Refresh this copy from that repo
-# rather than editing it here.
+# runtime catalogue: a deployment mounts what that repo's image prints with
+# emit-catalogue, and DFE_SOURCE_CATALOGUE_FILE points at it. Refresh this copy
+# from that repo rather than editing it here.
 #
 # Every source this service transforms, and everything about it that its name
 # does not tell you. Four places used to carry their own copy of this and drift
