@@ -403,7 +403,7 @@ class TestOneContainerPerInstance:
 
 
 class TestCustomEnvironment:
-    def test_the_overlay_block_becomes_one_file_per_app(self, crud, tmp_path):
+    def test_the_overlay_block_becomes_one_file_per_compose_service(self, crud, tmp_path):
         settings = _settings(tmp_path)
         _deploy(crud, LOADER, extraEnv__SECOND="also", extraEnv__DFE_LOADER_HOUSE_KEY="kept")
 
@@ -413,6 +413,19 @@ class TestCustomEnvironment:
         assert _env_file(settings, LOADER).read_text() == (
             "DFE_LOADER_HOUSE_KEY=kept\nSECOND=also\n"
         )
+
+    def test_each_instance_writes_the_file_its_own_container_reads(self, crud, tmp_path):
+        # One shared file per app would hand every source the last one written.
+        settings = _settings(tmp_path)
+        _deploy(crud, VRL, "crowdstrike-eu", extraEnv__DFE_VRL_REGION="eu")
+        _deploy(crud, VRL, "crowdstrike-us", extraEnv__DFE_VRL_REGION="us")
+
+        rendered = {r.container: r for r in appconfig.render(crud, settings)}
+
+        assert _env_file(settings, f"{VRL}-crowdstrike-eu").read_text() == "DFE_VRL_REGION=eu\n"
+        assert _env_file(settings, f"{VRL}-crowdstrike-us").read_text() == "DFE_VRL_REGION=us\n"
+        assert not _env_file(settings, VRL).exists()
+        assert rendered[f"{VRL}-crowdstrike-eu"].custom_env_changed
 
     def test_the_file_is_readable_only_by_its_owner(self, crud, tmp_path):
         settings = _settings(tmp_path)
