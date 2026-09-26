@@ -1,4 +1,4 @@
-# DFE Archiver — Development defaults
+# DFE Archiver -- Development defaults
 # Local filesystem archive, small buffers for fast feedback
 # See: dfe-archiver/config.dev.yaml
 
@@ -18,10 +18,9 @@ archive:
   path_template: "{year}/{month}/{day}/{hour}"
   file_extension: jsonl
   roll_size_bytes: 1073741824  # 1 GB
-  roll_interval_secs: 3600
 
 buffer:
-  flush_bytes: 1048576  # 1 MB — smaller for dev
+  flush_bytes: 1048576  # 1 MB -- smaller for dev
   flush_age_secs: 5
   flush_records: 1000
   writer_parallelism: 2
