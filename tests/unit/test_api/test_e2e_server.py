@@ -571,6 +571,209 @@ class TestSeedAppScalingState:
         assert _admin(appmgmt_client)
 
 
+_POOLS = ("dfe-receiver", "dfe-loader")
+_JOB_OVERLAY = (
+    "# Enables {svc} for this deployment (seeded at bootstrap).\n"
+    "deploy:\n  service: {svc}\n  instance: default\n"
+)
+
+
+def _stood_up_as_on_kubernetes(deploy: Path) -> None:
+    """Commit what the Kubernetes setup job writes: the pools' overlays and the marker."""
+    from dulwich import porcelain
+
+    porcelain.init(str(deploy))
+    (deploy / "values").mkdir()
+    paths = []
+    for svc in _POOLS:
+        target = deploy / "values" / f"{svc}-default-values.yaml"
+        target.write_text(_JOB_OVERLAY.format(svc=svc), encoding="utf-8")
+        paths.append(str(target))
+    marker = deploy / ".seeded-apps"
+    marker.write_text("".join(f"{svc}\n" for svc in _POOLS), encoding="utf-8")
+    paths.append(str(marker))
+    porcelain.add(str(deploy), paths=paths)
+    porcelain.commit(str(deploy), message=b"seed", author=b"j <j@j>", committer=b"j <j@j>")
+
+
+def _deploy_commits(client: TestClient) -> int:
+    from dulwich.repo import Repo
+
+    with Repo(str(client.app.state.gitcrud.repo_path)) as repo:
+        return sum(1 for _ in repo.get_walker())
+
+
+@pytest.fixture
+def k8s_client(tmp_path):
+    """An e2e-server process over a deploy repo the Kubernetes setup job stood up."""
+    _stood_up_as_on_kubernetes(tmp_path / "deploy")
+    app = create_app(
+        settings=_settings(tmp_path, e2e_server=True, gitops=True, deployment_target="kubernetes")
+    )
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            yield client
+    finally:
+        _registries.clear()
+
+
+class TestResetKeepsTheDeployersPools:
+    """On Kubernetes the pools are the deployment's own data path, and Argo prunes a deleted one."""
+
+    def test_the_pools_stay_deployed_with_the_seeded_dials_gone(self, k8s_client):
+        _seed(k8s_client, "seed_app_scaling_state")
+        _seed(k8s_client, "reset_all")
+        headers = _admin(k8s_client)
+
+        for service in _POOLS:
+            assert _instances(k8s_client, headers, service) == ["default"]
+            found = _get(k8s_client, f"{_APPS}/{service}/default/scaling", headers)
+            assert (found["min_replicas"], found["max_replicas"]) == (None, None)
+            assert found["cpu_request"] is None
+
+    def test_the_pools_keep_the_deployers_identity_and_nothing_else(self, k8s_client):
+        _seed(k8s_client, "seed_source_with_transform")
+        _seed(k8s_client, "seed_app_scaling_state")
+        _seed(k8s_client, "reset_all")
+
+        gc = k8s_client.app.state.gitcrud
+        doc = gc.get("helmvars", "dfe-receiver-default-values")
+        assert doc["deploy"] == {"service": "dfe-receiver", "instance": "default"}
+        assert "keda" not in doc
+        assert "resources" not in doc
+        # The job wrote no OTel name, so the reset does not invent one.
+        assert "otelServiceName" not in doc
+
+    def test_the_routing_is_recompiled_without_the_seeded_sources(self, k8s_client):
+        _seed(k8s_client, "seed_source_with_transform")
+        headers = _admin(k8s_client)
+        seeded = _get(k8s_client, f"{_APPS}/dfe-receiver/default/routing", headers)
+        assert _SOURCE in [r["source"] for r in seeded["deployed"]["routing"]["source_rules"]]
+
+        _seed(k8s_client, "reset_all")
+        headers = _admin(k8s_client)
+
+        for service in _POOLS:
+            found = _get(k8s_client, f"{_APPS}/{service}/default/routing", headers)
+            assert (found["drift"], found["absent"]) == (False, False)
+        rules = _get(k8s_client, f"{_APPS}/dfe-receiver/default/routing", headers)
+        names = [r["source"] for r in rules["deployed"]["routing"]["source_rules"]]
+        assert _SOURCE not in names
+        assert _FETCHED not in names
+
+    def test_a_pool_a_run_removed_is_deployed_again(self, k8s_client):
+        gc = k8s_client.app.state.gitcrud
+        gc.delete("helmvars", "dfe-loader-default-values", "test", message="test: removed")
+
+        _seed(k8s_client, "reset_all")
+        headers = _admin(k8s_client)
+
+        assert _instances(k8s_client, headers, "dfe-loader") == ["default"]
+
+    def test_the_per_source_instances_still_go(self, k8s_client):
+        _seed(k8s_client, "seed_three_transforms")
+        _seed(k8s_client, "reset_all")
+        headers = _admin(k8s_client)
+
+        for _engine, service, _variant in TRANSFORM_ENGINES:
+            assert _instances(k8s_client, headers, service) == []
+
+
+class TestOneCommitPerSeed:
+    """A write per commit and push costs a remote forge round trip for every one of them."""
+
+    @pytest.mark.parametrize(
+        "script",
+        [
+            "seed_app_scaling_state",
+            "seed_library_artefact",
+            "seed_source_with_transform",
+            "seed_three_transforms",
+            "seed_setup_complete",
+        ],
+    )
+    def test_a_seed_and_the_reset_after_it_are_one_commit_each(self, k8s_client, script):
+        before = _deploy_commits(k8s_client)
+        _seed(k8s_client, script)
+        seeded = _deploy_commits(k8s_client)
+        _seed(k8s_client, "reset_all")
+
+        assert seeded - before == 1
+        assert _deploy_commits(k8s_client) - seeded == 1
+
+    def test_a_seed_with_nothing_left_to_write_commits_nothing(self, k8s_client):
+        _seed(k8s_client, "seed_app_scaling_state")
+        before = _deploy_commits(k8s_client)
+
+        _seed(k8s_client, "seed_app_scaling_state")
+
+        assert _deploy_commits(k8s_client) == before
+
+    def test_a_refused_seed_leaves_nothing_behind(self, tmp_path):
+        """docker-slim refuses the fetcher source after the receiver source was written."""
+        app = create_app(
+            settings=_settings(tmp_path, e2e_server=True, gitops=True, profile="docker-slim")
+        )
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                before = _deploy_commits(client)
+                resp = client.post(_SEED, json={"script": "seed_source_with_transform"})
+                sources = app.state.gitcrud.list("sources")
+                after = _deploy_commits(client)
+        finally:
+            _registries.clear()
+
+        assert resp.status_code == 422, resp.text
+        assert _SOURCE not in sources
+        assert after == before
+
+
+class TestSeedingLeavesTheEventLoopFree:
+    _WAIT_SECONDS = 10.0
+
+    def test_a_seed_in_flight_does_not_hold_up_other_requests(self, appmgmt_client, monkeypatch):
+        """On the event loop, a parked seed would leave the status probe unanswered."""
+        import threading
+
+        from dfe_engine.api.e2e.seed import Seed
+
+        started, release = threading.Event(), threading.Event()
+        real_seed_static = Seed.seed_static
+        wait = self._WAIT_SECONDS
+
+        def parked(seeder, script):
+            started.set()
+            assert release.wait(timeout=wait * 3)
+            return real_seed_static(seeder, script)
+
+        monkeypatch.setattr(Seed, "seed_static", parked)
+        seeded: list[int] = []
+        probed: list[int] = []
+
+        def seed() -> None:
+            resp = appmgmt_client.post(_SEED, json={"script": "seed_app_scaling_state"})
+            seeded.append(resp.status_code)
+
+        def probe() -> None:
+            probed.append(appmgmt_client.get(_STATUS).status_code)
+
+        seeding = threading.Thread(target=seed, daemon=True)
+        seeding.start()
+        assert started.wait(timeout=wait)
+        prober = threading.Thread(target=probe, daemon=True)
+        prober.start()
+        prober.join(timeout=wait)
+        try:
+            assert probed == [200]
+            assert seeded == []
+        finally:
+            release.set()
+            seeding.join(timeout=wait * 3)
+            prober.join(timeout=wait)
+
+        assert seeded == [200]
+
+
 _BACKING = "/api/v1/backing-services"
 _CH_OVERLAY = "clickhouse-cluster"
 

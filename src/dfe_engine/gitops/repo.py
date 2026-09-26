@@ -16,8 +16,6 @@ remote URL verbatim to its ``errstream`` and into its failure messages, and on t
 HTTPS path that URL carries the deploy token (F-GITOPS-TOKEN).
 """
 
-from __future__ import annotations
-
 import os
 import threading
 from collections.abc import Callable, Iterator, Mapping
@@ -31,6 +29,7 @@ from dulwich import porcelain
 from scalo.logger import logger
 
 from .dulwich_auth import RedactingErrStream, redact_credentials, scrub_remote_credentials
+from .metrics import GitopsMetrics
 
 if TYPE_CHECKING:
     import urllib3
@@ -54,7 +53,9 @@ def _as_path_bytes(host_path: str | bytes) -> bytes:
 
 
 # The clones whose head this scope has already taken; None outside a scope.
-_READ_SCOPE: ContextVar[set[GitopsRepo] | None] = ContextVar("dfe_gitops_read_scope", default=None)
+_READ_SCOPE: ContextVar[set["GitopsRepo"] | None] = ContextVar(
+    "dfe_gitops_read_scope", default=None
+)
 
 
 @contextmanager
@@ -110,6 +111,33 @@ class PublishResult:
     branch: str | None = None
 
 
+@dataclass(slots=True)
+class _Batch:
+    """The net writes of an open batch, and the subject of each write that changed a file."""
+
+    message: str
+    owner: int
+    artifacts: dict[str, str | bytes] = field(default_factory=dict)
+    deletions: set[str] = field(default_factory=set)
+    subjects: list[str] = field(default_factory=list)
+
+    def record(self, artifacts: Mapping[str, str | bytes], deletions: list[str]) -> None:
+        """Fold one write into the net set: the last write or removal of a path wins."""
+        for rel, content in artifacts.items():
+            self.artifacts[rel] = content
+            self.deletions.discard(rel)
+        for rel in deletions:
+            self.deletions.add(rel)
+            self.artifacts.pop(rel, None)
+
+    def commit_message(self) -> str:
+        """The batch's own subject, with every write it carries listed in the body."""
+        subjects = list(dict.fromkeys(s for s in self.subjects if s))
+        if not subjects:
+            return self.message
+        return self.message + "\n\n" + "\n".join(f"- {s}" for s in subjects)
+
+
 class GitopsRepo:
     """A local working clone of the deploy-specific gitops repo.
 
@@ -130,6 +158,7 @@ class GitopsRepo:
         token: str = "",
         author_name: str = "dfe-engine",
         author_email: str = "dfe-engine@hyperi.io",
+        metrics: GitopsMetrics | None = None,
     ) -> None:
         self._path = Path(local_path)
         self._repo_url = repo_url
@@ -138,12 +167,19 @@ class GitopsRepo:
         self._username = username
         self._token = token
         self._author = f"{author_name} <{author_email}>".encode()
-        # One working tree, many request threads: a reset must never land between
-        # another thread's staging and its commit.
+        self._metrics = metrics or GitopsMetrics()
+        # The working tree: held to change it or read it, never across a push.
         self._lock = threading.RLock()
+        # One writer at a time, push included: a reset between a commit and its push
+        # drops the commit, so anything that resets the tree takes this first.
+        self._write_lock = threading.RLock()
+        # Set between a tracked-branch commit and the end of its push.
+        self._pushing = False
         # A refresh runs on every read, so an unreachable remote is reported on the
         # transition rather than once per read.
         self._refresh_failed = False
+        # The open batch() block's writes.
+        self._batch: _Batch | None = None
 
     @property
     def path(self) -> Path:
@@ -397,7 +433,7 @@ class GitopsRepo:
         pending = self._pending_remote_head()
         if pending is None:
             return False
-        with self._lock:
+        with self._write_lock, self._lock:
             return self._take_head(pending)
 
     @contextmanager
@@ -406,23 +442,31 @@ class GitopsRepo:
 
         :meth:`publish` stages and commits under this lock and a refresh hard-resets
         under it, so a read that walks the tree outside the block can miss a file
-        that exists or load one mid-rewrite.
+        that exists or load one mid-rewrite. A push runs outside it, so a read never
+        waits for one unless the remote holds a commit this clone must take first.
+        Never publish inside the block: a write takes the writer lock before this one.
 
         The ref advertisement runs BEFORE the lock is taken: a forge slow to answer
         would otherwise queue every reader behind one network call.
         """
         pending = self._pending_remote_head()
-        with self._lock:
-            if pending is not None:
+        if pending is not None:
+            with self._write_lock, self._lock:
                 self._take_head(pending)
+        with self._lock:
             yield
 
     def _pending_remote_head(self) -> str | None:
         """The remote head this clone has not taken yet, or None to stay put.
 
         Runs the ref advertisement, so callers take the tree lock after it, not
-        around it.
+        around it. None inside an open batch, whose staged writes a reset would throw
+        away, and while a push is taking this clone past the remote's head, which a
+        reset would drop mid-push.
         """
+        batch = self._batch
+        if batch is not None and batch.owner == threading.get_ident():
+            return None
         if not (self._push and self._repo_url):
             return None
         scope = _READ_SCOPE.get()
@@ -435,13 +479,34 @@ class GitopsRepo:
         except GitopsRemoteError as exc:
             self._note_unreachable(exc)
             return None
-        if remote is None or remote == self.head_revision():
+        if remote is None or remote == self.head_revision() or self._pushing_past(remote):
             self._note_reachable()
             return None
         return remote
 
+    def _pushing_past(self, remote: str) -> bool:
+        """Whether a push in flight carries everything at ``remote`` already."""
+        if not self._pushing:
+            return False
+        from dulwich.graph import can_fast_forward
+        from dulwich.objects import ObjectID
+        from dulwich.repo import Repo
+
+        head = self.head_revision()
+        if head is None:
+            return False
+        with Repo(str(self._path)) as repo:
+            try:
+                return can_fast_forward(repo, ObjectID(remote.encode()), ObjectID(head.encode()))
+            except KeyError:
+                # A commit this clone has never fetched is one it must take.
+                return False
+
     def _take_head(self, remote: str) -> bool:
-        """Reset onto ``remote``; returns whether this clone moved. Caller holds the lock."""
+        """Reset onto ``remote`` and return whether this clone moved.
+
+        Caller holds the writer lock, then the tree lock.
+        """
         # Re-checked under the lock: a publish may have taken this head.
         if remote == self.head_revision():
             self._note_reachable()
@@ -483,7 +548,8 @@ class GitopsRepo:
 
         The fetch is bounded (see :meth:`_fetch`) because a read reaches this with
         the tree lock held, and raises :class:`GitopsRemoteError` on the bound --
-        which on the read path leaves the clone serving what it has.
+        which on the read path leaves the clone serving what it has. Caller holds the
+        writer lock, then the tree lock.
         """
         if not self._repo_url:
             return False
@@ -508,6 +574,119 @@ class GitopsRepo:
         logger.info("Gitops clone fast-forwarded to the remote head", commit=remote_head.decode())
         return True
 
+    @contextmanager
+    def batch(self, message: str) -> Iterator[None]:
+        """Land every publish in the block as ONE commit and ONE push.
+
+        Each publish inside the block writes and stages its files as usual, so a read
+        in the same block sees them, but nothing is committed until the block exits.
+        The commit carries ``message``, with the subject of every write that changed a
+        file listed in its body. The block holds the working tree until its commit and
+        the writer lock until its push, and a read in the block never refreshes.
+
+        An exception inside the block discards everything it staged, so the deploy
+        repo takes all of the block or none of it. A write routed to a review branch
+        needs a commit to cut the branch from, so it lands what the block holds first
+        and the rest of the block goes into a second commit. A nested block joins the
+        one already open.
+        """
+        with self._write_lock:
+            if self._batch is not None:
+                yield
+                return
+            with self._lock:
+                # Taken once here, because no read or write inside the block refreshes.
+                if self._push and self._repo_url:
+                    self._sync_onto_remote_head()
+                self._batch = _Batch(message=message, owner=threading.get_ident())
+                try:
+                    yield
+                except BaseException:
+                    batch, self._batch = self._batch, None
+                    self._discard_staged(batch)
+                    self._metrics.batch("discarded")
+                    raise
+                batch, self._batch = self._batch, None
+            try:
+                landed = self._land(batch)
+            except BaseException:
+                self._metrics.batch("failed")
+                raise
+            finally:
+                scope = _READ_SCOPE.get()
+                if scope is not None:
+                    scope.discard(self)
+            self._metrics.batch("committed" if landed.changed else "unchanged")
+
+    def _land(self, batch: _Batch) -> PublishResult:
+        """Commit what a batch staged and push it. Caller holds the writer lock.
+
+        The batch keeps its net writes so a push that loses the race to another
+        replica re-applies all of them on the remote's new head.
+        """
+        with self._lock:
+            if not self._has_staged():
+                return PublishResult(changed=False)
+            sha = self._commit(batch.commit_message())
+            self._pushing = self._push and bool(self._repo_url)
+        written = sorted([*batch.artifacts, *batch.deletions])
+        return self._push_tracked(
+            sha, written, dict(batch.artifacts), sorted(batch.deletions), batch.commit_message()
+        )
+
+    def _has_staged(self) -> bool:
+        """Whether the index differs from HEAD."""
+        staged = porcelain.status(str(self._path)).staged
+        return bool(staged["add"] or staged["modify"] or staged["delete"])
+
+    def _discard_staged(self, batch: _Batch) -> None:
+        """Put the tree and index back on HEAD, dropping what a batch staged."""
+        head = self.head_revision()
+        if head is not None:
+            porcelain.reset(str(self._path), "hard", head.encode())
+            return
+        # An empty repo has no commit to reset onto, and nothing the batch wrote was
+        # there before it.
+        for rel in batch.artifacts:
+            target = self._path / rel
+            if target.exists():
+                porcelain.remove(str(self._path), paths=[str(target)], cached=True)
+                target.unlink()
+
+    def _split_batch(self) -> None:
+        """Land what the open batch holds, and open a fresh one for the rest of the block."""
+        batch = cast("_Batch", self._batch)
+        self._batch = None
+        try:
+            self._land(batch)
+        finally:
+            self._batch = _Batch(message=batch.message, owner=batch.owner)
+        self._metrics.batch("split")
+
+    def _stage_into_batch(
+        self,
+        artifacts: Mapping[str, str | bytes],
+        message: str,
+        deletions: list[str] | None,
+    ) -> PublishResult:
+        """Stage one write into the open batch, whose commit waits for the block to end."""
+        batch = cast("_Batch", self._batch)
+        changed = self._differs(artifacts, deletions)
+        written = self._stage(artifacts, deletions)
+        batch.record(artifacts, list(deletions or []))
+        if changed:
+            batch.subjects.append(message.split("\n", 1)[0])
+        return PublishResult(changed=changed, files=written)
+
+    def _differs(self, artifacts: Mapping[str, str | bytes], deletions: list[str] | None) -> bool:
+        """Whether writing these would change the working tree."""
+        for rel, content in artifacts.items():
+            target = self._path / rel
+            data = content if isinstance(content, bytes) else content.encode("utf-8")
+            if not target.is_file() or target.read_bytes() != data:
+                return True
+        return any((self._path / rel).exists() for rel in deletions or [])
+
     def publish(
         self,
         artifacts: Mapping[str, str | bytes],
@@ -528,9 +707,9 @@ class GitopsRepo:
           locally and remotely -- a reviewer merges the PR. This is how a
           production+team write is kept off main (see gitcrud/routing.py).
         """
-        # A reader refreshing this clone resets the working tree, so the whole
-        # write -- sync, stage, commit, push -- holds the tree to itself.
-        with self._lock:
+        # The tree lock is taken inside for the local work only, so a read waits for
+        # the commit and never for the push.
+        with self._write_lock:
             try:
                 return self._publish_locked(artifacts, message, deletions, branch)
             finally:
@@ -547,55 +726,89 @@ class GitopsRepo:
         deletions: list[str] | None,
         branch: str | None,
     ) -> PublishResult:
-        """The publish body; the caller holds the tree lock."""
-        # The write goes on the remote's head, never on whatever this clone last saw.
-        if self._push and self._repo_url:
-            self._sync_onto_remote_head()
+        """The publish body. Caller holds the writer lock."""
+        if self._batch is not None:
+            if not branch:
+                with self._lock:
+                    return self._stage_into_batch(artifacts, message, deletions)
+            self._split_batch()
 
-        # Capture the base BEFORE staging so PR mode can restore the tracked
-        # branch to it after committing. An empty repo has no base to branch from.
-        base_head = self.head_revision()
-        if branch and base_head is None:
-            raise ValueError("cannot open a review branch: the deploy repo has no commits yet")
+        with self._lock:
+            # The write goes on the remote's head, never on whatever this clone last saw.
+            if self._push and self._repo_url:
+                self._sync_onto_remote_head()
 
-        sha_str, written = self._stage_and_commit(artifacts, deletions, message)
-        if sha_str is None:
-            logger.info("Gitops repo unchanged; skipping commit")
-            return PublishResult(changed=False, files=written)
+            # Capture the base BEFORE staging so PR mode can restore the tracked
+            # branch to it after committing. An empty repo has no base to branch from.
+            base_head = self.head_revision()
+            if branch and base_head is None:
+                raise ValueError("cannot open a review branch: the deploy repo has no commits yet")
+
+            sha_str, written = self._stage_and_commit(artifacts, deletions, message)
+            if sha_str is None:
+                logger.info("Gitops repo unchanged; skipping commit")
+                return PublishResult(changed=False, files=written)
+
+            if branch:
+                # base_head is non-None here: the empty-repo case raised above. Moved
+                # under the tree lock, so no read sees the review commit on main.
+                self._move_to_review_branch(sha_str, branch, cast("str", base_head))
+            else:
+                self._pushing = self._push and bool(self._repo_url)
 
         if branch:
-            # base_head is non-None here: the empty-repo case raised above.
-            return self._route_to_branch(sha_str, branch, cast("str", base_head), written)
+            return self._push_review_branch(sha_str, branch, written)
+        return self._push_tracked(sha_str, written, artifacts, deletions, message)
 
-        pushed = False
-        if self._push and self._repo_url:
-            refspec = f"refs/heads/{self._branch}".encode()
+    def _push_tracked(
+        self,
+        sha_str: str,
+        written: list[str],
+        artifacts: Mapping[str, str | bytes],
+        deletions: list[str] | None,
+        message: str,
+    ) -> PublishResult:
+        """Push a tracked-branch commit, re-applying the write once if the remote moved.
+
+        Caller holds the writer lock and not the tree lock, so reads carry on over
+        the committed tree while the push is in flight.
+        """
+        if not (self._push and self._repo_url):
+            logger.info(
+                "Published gitops artifacts", commit=sha_str, files=len(written), pushed=False
+            )
+            return PublishResult(changed=True, files=written, commit_sha=sha_str)
+        refspec = f"refs/heads/{self._branch}".encode()
+        try:
             try:
                 self._push_refspec(refspec)
             except GitopsRemoteError as exc:
                 # The remote moved between the sync and the push, so the local commit
                 # is orphaned: take the remote head and re-apply this write once. A
                 # push the remote rejected for any other reason stays an error.
-                if not self.sync(discard_local=True):
-                    raise
-                logger.warning(
-                    "Gitops push rejected; re-applying the write on the remote head",
-                    error=str(exc),
-                )
-                sha_str, written = self._stage_and_commit(artifacts, deletions, message)
-                if sha_str is None:
+                with self._lock:
+                    if not self.sync(discard_local=True):
+                        raise
+                    logger.warning(
+                        "Gitops push rejected; re-applying the write on the remote head",
+                        error=str(exc),
+                    )
+                    sha, written = self._stage_and_commit(artifacts, deletions, message)
+                if sha is None:
                     logger.info("Gitops repo unchanged after the remote caught up")
                     return PublishResult(changed=False, files=written)
+                sha_str = sha
                 self._push_refspec(refspec)
-            pushed = True
+        finally:
+            self._pushing = False
 
         logger.info(
             "Published gitops artifacts",
             commit=sha_str,
             files=len(written),
-            pushed=pushed,
+            pushed=True,
         )
-        return PublishResult(changed=True, files=written, commit_sha=sha_str, pushed=pushed)
+        return PublishResult(changed=True, files=written, commit_sha=sha_str, pushed=True)
 
     def _sync_onto_remote_head(self) -> None:
         """Fast-forward onto the remote head, dropping a local commit it never took.
@@ -617,16 +830,12 @@ class GitopsRepo:
             )
             self.sync(discard_local=True)
 
-    def _stage_and_commit(
+    def _stage(
         self,
         artifacts: Mapping[str, str | bytes],
         deletions: list[str] | None,
-        message: str,
-    ) -> tuple[str | None, list[str]]:
-        """Write and stage the artifacts; commit when anything changed.
-
-        Returns the commit SHA (None when nothing was staged) and the paths touched.
-        """
+    ) -> list[str]:
+        """Write and stage the artifacts, and stage the removals. Returns the paths touched."""
         written: list[str] = []
         for rel, content in sorted(artifacts.items()):
             target = self._path / rel
@@ -641,22 +850,37 @@ class GitopsRepo:
         for rel in sorted(deletions or []):
             target = self._path / rel
             if target.exists():
-                # porcelain.remove deletes from the working tree AND stages removal.
-                porcelain.remove(str(self._path), paths=[str(target)])
+                # Unstaged by hand: porcelain.remove refuses a file whose staged content
+                # differs from HEAD, which is what an earlier write in a batch leaves.
+                porcelain.remove(str(self._path), paths=[str(target)], cached=True)
+                target.unlink()
                 written.append(rel)
+        return written
 
-        status = porcelain.status(str(self._path))
-        staged = status.staged
-        if not (staged["add"] or staged["modify"] or staged["delete"]):
+    def _stage_and_commit(
+        self,
+        artifacts: Mapping[str, str | bytes],
+        deletions: list[str] | None,
+        message: str,
+    ) -> tuple[str | None, list[str]]:
+        """Write and stage the artifacts; commit when anything changed.
+
+        Returns the commit SHA (None when nothing was staged) and the paths touched.
+        """
+        written = self._stage(artifacts, deletions)
+        if not self._has_staged():
             return None, written
+        return self._commit(message), written
 
+    def _commit(self, message: str) -> str:
+        """Commit the index as it stands and return the new commit's SHA."""
         sha = porcelain.commit(
             str(self._path),
             message=message.encode(),
             author=self._author,
             committer=self._author,
         )
-        return (sha.decode() if isinstance(sha, bytes) else str(sha)), written
+        return sha.decode() if isinstance(sha, bytes) else str(sha)
 
     def _push_refspec(self, refspec: bytes) -> None:
         """Push one refspec as a compare-and-swap, credentials never logged.
@@ -698,16 +922,13 @@ class GitopsRepo:
                 redact_credentials("the remote refused the push -- " + "; ".join(refused))
             )
 
-    def _route_to_branch(
-        self, sha_str: str, branch: str, base_head: str, written: list[str]
-    ) -> PublishResult:
+    def _move_to_review_branch(self, sha_str: str, branch: str, base_head: str) -> None:
         """Move the just-made commit onto a side branch, restore + reset the base.
 
         ``porcelain.commit`` advanced the CURRENT branch (HEAD) to ``sha_str``. We
         re-point that commit at ``refs/heads/<branch>``, wind the tracked branch
-        back to ``base_head``, hard-reset the work tree, and push only the side
-        branch. Net effect: the change lands on a review branch, main is untouched.
-        No git CLI -- pure dulwich porcelain, same as the rest of this module.
+        back to ``base_head`` and hard-reset the work tree, so the change sits on a
+        review branch and main is untouched. Caller holds the tree lock.
         """
         repo_path = str(self._path)
         tracked_ref = b"refs/heads/" + porcelain.active_branch(repo_path)
@@ -716,6 +937,9 @@ class GitopsRepo:
         porcelain.update_ref(repo_path, tracked_ref, base_head.encode())
         porcelain.reset(repo_path, "hard", base_head.encode())
 
+    def _push_review_branch(self, sha_str: str, branch: str, written: list[str]) -> PublishResult:
+        """Push only the side branch a review commit was moved onto."""
+        side_ref = f"refs/heads/{branch}".encode()
         pushed = False
         if self._push and self._repo_url:
             self._push_refspec(side_ref + b":" + side_ref)

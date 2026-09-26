@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from scalo.logger import logger
 
+from dfe_engine.gitops import metrics as gitops_metrics
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance.seed import SEED_COMMIT_MESSAGE, pending_seed
 from dfe_engine.settings import GitopsSettings
@@ -36,6 +37,7 @@ def build_gitcrud(gs: GitopsSettings) -> GitCrud | None:
         token=gs.token,
         author_name=gs.author_name,
         author_email=gs.author_email,
+        metrics=gitops_metrics.create(),
     )
     _seed_governance(repo)
     return GitCrud(repo)
