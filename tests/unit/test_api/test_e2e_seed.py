@@ -12,10 +12,15 @@ from pathlib import Path
 
 import pytest
 
+from dfe_engine.appmgmt import instances
 from dfe_engine.auth.accounts import AccountStore
 from dfe_engine.auth.bootstrap import bootstrap_auth
 from dfe_engine.auth.groups import GroupStore
+from dfe_engine.gitcrud import GitCrud
+from dfe_engine.gitcrud.registry import default_registry
+from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.orgs.registry import OrgRegistry
+from dfe_engine.settings import DFESettings
 
 
 def _stores(tmp_path: Path) -> tuple[AccountStore, GroupStore, OrgRegistry]:
@@ -29,6 +34,25 @@ def _stores(tmp_path: Path) -> tuple[AccountStore, GroupStore, OrgRegistry]:
     """
     account_store, group_store, *_ = bootstrap_auth(tmp_path / "config" / "auth")
     return account_store, group_store, OrgRegistry(tmp_path / "orgs")
+
+
+def _crud(tmp_path: Path) -> GitCrud:
+    """GitCrud over a fresh local (no-remote) deploy repo."""
+    repo = GitopsRepo(local_path=str(tmp_path / "deploy"), push=False)
+    return GitCrud(repo, default_registry())
+
+
+def _deploy(gc: GitCrud, service: str, instance: str) -> instances.AppInstance:
+    """Commit a minimal overlay for one instance, as a seeder would."""
+    app = instances.instance_of(service, instance)
+    gc.put(
+        instances.HELMVARS_CLASS,
+        app.overlay_name,
+        instances.initial_overlay(app),
+        "test",
+        message="test: deploy",
+    )
+    return app
 
 
 def test_seed_refuses_when_env_is_not_test(tmp_path, monkeypatch):
@@ -239,6 +263,52 @@ def test_reset_all_is_safe_without_a_deploy_repo(tmp_path, monkeypatch):
 
     seeder.accounts.seed_dfe_admin_user()
     assert seeder.seed_static("reset_all") is True
+
+
+def test_reset_all_keeps_a_single_deployment_apps_values(tmp_path, monkeypatch):
+    """dfe-engine's own overlay is standing infra no seeder here writes; a source resets."""
+    from dfe_engine.api.e2e.seed import Seed
+
+    monkeypatch.setenv("DFE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    gc = _crud(tmp_path)
+    single = _deploy(gc, "dfe-engine", "default")
+    per_source = _deploy(gc, "dfe-transform-vrl", "crowdstrike")
+    seeder = Seed(
+        account_store=accounts,
+        group_store=groups,
+        org_registry=orgs,
+        gitcrud=gc,
+        settings=DFESettings(env="test", transport={"default": "bus"}),
+    )
+
+    assert seeder.seed_static("reset_all") is True
+
+    assert instances.exists(gc, single)
+    assert not instances.exists(gc, per_source)
+
+
+def test_reset_all_keeps_the_deployers_common_infra_overlay(tmp_path, monkeypatch):
+    """The stack-wide infra baseline predates any run; a per-chart dial does not."""
+    from dfe_engine.api.e2e.seed import Seed
+
+    monkeypatch.setenv("DFE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    gc = _crud(tmp_path)
+    gc.put("infravars", "common", {"clickhouse": {"replicas": 3}}, "test", message="test: deploy")
+    gc.put("infravars", "clickhouse", {"replicas": 5}, "test", message="test: dial")
+    seeder = Seed(
+        account_store=accounts,
+        group_store=groups,
+        org_registry=orgs,
+        gitcrud=gc,
+        settings=DFESettings(env="test", transport={"default": "bus"}),
+    )
+
+    assert seeder.seed_static("reset_all") is True
+
+    assert "common" in gc.list("infravars")
+    assert "clickhouse" not in gc.list("infravars")
 
 
 def test_seeders_never_create_groups_themselves(tmp_path, monkeypatch):
