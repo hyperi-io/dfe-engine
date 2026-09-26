@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.5](https://github.com/hyperi-io/dfe-engine/compare/v1.22.4...v1.22.5) (2026-09-26)
+
+### Bug Fixes
+
+* **auth:** force a password change at first login ([#546](https://github.com/hyperi-io/dfe-engine/issues/546)) ([6e94858](https://github.com/hyperi-io/dfe-engine/commit/6e948587e2d5ba05719616b0907a7a3995daabb6))
+
 ## [1.22.4](https://github.com/hyperi-io/dfe-engine/compare/v1.22.3...v1.22.4) (2026-09-26)
 
 ### Bug Fixes
