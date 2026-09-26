@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.3](https://github.com/hyperi-io/dfe-engine/compare/v1.22.2...v1.22.3) (2026-09-26)
+
+### Bug Fixes
+
+* k8s e2e -- reset keeps the deployer's pools, one commit per seed, handlers off the event loop ([#544](https://github.com/hyperi-io/dfe-engine/issues/544)) ([e91dbb1](https://github.com/hyperi-io/dfe-engine/commit/e91dbb11f0a91b2cc5883b64a417dbe7037bd968))
+
 ## [1.22.2](https://github.com/hyperi-io/dfe-engine/compare/v1.22.1...v1.22.2) (2026-09-26)
 
 ### Bug Fixes
