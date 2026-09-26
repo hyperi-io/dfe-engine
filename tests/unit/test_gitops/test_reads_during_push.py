@@ -115,3 +115,34 @@ def test_a_read_that_must_take_another_replicas_commit_waits_for_the_push(
     # A's push lost the race, re-applied on B's head, and the read took both.
     assert listed == [["mine", "theirs"]]
     assert _clone(tmp_path, "check", remote, branch).list("sources") == ["mine", "theirs"]
+
+
+def test_a_nested_read_does_not_wait_on_a_writer_waiting_on_it(tmp_path: Path) -> None:
+    """The writer holds its lock and waits for the tree, which the outer read holds."""
+    remote, branch = _remote(tmp_path)
+    crud_a = _clone(tmp_path, "a", remote, branch)
+    crud_b = _clone(tmp_path, "b", remote, branch)
+    repo = crud_a.repo
+    writer_waiting = threading.Event()
+    read: list[list[str]] = []
+
+    def writer() -> None:
+        with repo._write_lock:
+            writer_waiting.set()
+            with repo._lock:
+                pass
+
+    def nested_read() -> None:
+        with crud_a.reading():
+            # The remote moves after the outer block took its head.
+            crud_b.put("sources", "theirs", {"source": "theirs"}, actor="kay")
+            threading.Thread(target=writer, daemon=True).start()
+            assert writer_waiting.wait(timeout=_JOIN_SECONDS)
+            read.append(crud_a.list("sources"))
+
+    reader = threading.Thread(target=nested_read, daemon=True)
+    reader.start()
+    reader.join(timeout=_JOIN_SECONDS)
+
+    # Served from the head the outer block took, rather than deadlocked.
+    assert read == [[]]

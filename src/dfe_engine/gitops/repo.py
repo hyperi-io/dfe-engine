@@ -175,6 +175,9 @@ class GitopsRepo:
         self._write_lock = threading.RLock()
         # Set between a tracked-branch commit and the end of its push.
         self._pushing = False
+        # How deep this thread is in read_locked blocks: a nested read must not wait for
+        # the writer lock while holding the tree lock a writer is waiting on.
+        self._reads = threading.local()
         # A refresh runs on every read, so an unreachable remote is reported on the
         # transition rather than once per read.
         self._refresh_failed = False
@@ -449,12 +452,18 @@ class GitopsRepo:
         The ref advertisement runs BEFORE the lock is taken: a forge slow to answer
         would otherwise queue every reader behind one network call.
         """
-        pending = self._pending_remote_head()
+        depth = getattr(self._reads, "depth", 0)
+        # The outer block took the head already, and waiting here could deadlock.
+        pending = self._pending_remote_head() if depth == 0 else None
         if pending is not None:
             with self._write_lock, self._lock:
                 self._take_head(pending)
         with self._lock:
-            yield
+            self._reads.depth = depth + 1
+            try:
+                yield
+            finally:
+                self._reads.depth = depth
 
     def _pending_remote_head(self) -> str | None:
         """The remote head this clone has not taken yet, or None to stay put.
