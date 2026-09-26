@@ -171,7 +171,7 @@ class ActionStore:
         """The document a change writes into, or nothing where there is none yet."""
         try:
             return self._crud.get(change.cls, change.name)
-        except (ResourceNotFoundError, UnknownResourceClassError):
+        except ResourceNotFoundError, UnknownResourceClassError:
             return {}
 
     def _credential_change(self, change: VarChange) -> bool:

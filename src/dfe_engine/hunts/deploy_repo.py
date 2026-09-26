@@ -85,7 +85,7 @@ class DeployRepoStore:
         """
         try:
             return self._crud.get(self._cls_name, name)
-        except (ResourceNotFoundError, CommitPolicyError):
+        except ResourceNotFoundError, CommitPolicyError:
             return None
 
     def put(self, name: str, doc: dict[str, Any], *, actor: str) -> WriteOutcome:

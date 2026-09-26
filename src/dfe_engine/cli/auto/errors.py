@@ -75,7 +75,7 @@ def _extract_error_body(response: httpx.Response) -> tuple[str, str]:
     message = response.reason_phrase or "request failed"
     try:
         body = response.json()
-    except (ValueError, httpx.DecodingError):
+    except ValueError, httpx.DecodingError:
         return code, message
     if isinstance(body, dict):
         # ErrorResponse: {code, message}. FastAPI HTTPException: {detail: {...}}

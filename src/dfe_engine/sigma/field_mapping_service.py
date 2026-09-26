@@ -444,7 +444,7 @@ class FieldMappingService:
                 import json
 
                 rule = json.loads(rule)
-            except (json.JSONDecodeError, TypeError):
+            except json.JSONDecodeError, TypeError:
                 logger.error(
                     f"Failed to parse rule content: {rule[:100] if isinstance(rule, str) else type(rule)}..."
                 )

@@ -516,7 +516,7 @@ class TransportSettings(BaseModel):
         return {self.default}
 
     @model_validator(mode="after")
-    def _a_bus_default_needs_a_bus(self) -> "TransportSettings":
+    def _a_bus_default_needs_a_bus(self) -> TransportSettings:
         # Every source would take a topic no broker holds, and the reason would sit
         # two config keys away from the source being written.
         if self.default == "bus" and not self.bus_present:
@@ -527,7 +527,7 @@ class TransportSettings(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _mesh_needs_a_namespace(self) -> "TransportSettings":
+    def _mesh_needs_a_namespace(self) -> TransportSettings:
         # The address is the manifest's shape plus this namespace, so an unset one
         # compiles every sender a destination with a hole where the host goes.
         if self.mesh_enabled and not self.mesh_namespace:
@@ -659,7 +659,7 @@ class KafkaSettings(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _derive_from_provider(self) -> "KafkaSettings":
+    def _derive_from_provider(self) -> KafkaSettings:
         """Derive protocol + mechanism from provider, then enforce the contract."""
         from dfe_engine.kafka.contract import derive, validate
 
@@ -1415,7 +1415,7 @@ def is_dev_posture(env: str) -> bool:
     return env.strip().lower() in _NON_PROD_ENVS
 
 
-def e2e_routes_enabled(settings: "DFESettings") -> bool:
+def e2e_routes_enabled(settings: DFESettings) -> bool:
     """True when the unauthenticated /api/e2e/* group may be mounted.
 
     Requires both the explicit DFE_E2E_SERVER flag and a non-production posture.
@@ -1639,7 +1639,7 @@ class DFESettings(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _reject_insecure_production_posture(self) -> "DFESettings":
+    def _reject_insecure_production_posture(self) -> DFESettings:
         # Two ways a production posture can enforce nothing. Both are errors here
         # rather than warnings, because a warning leaves the process running.
         is_prod = not is_dev_posture(self.env)

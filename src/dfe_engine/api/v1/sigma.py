@@ -176,7 +176,7 @@ async def get_field_mappings(
     mapper = _get_source_mapper(request)
     try:
         mappings = mapper.get_field_mappings(source_name)
-    except (KeyError, FileNotFoundError, SourceNotFoundError):
+    except KeyError, FileNotFoundError, SourceNotFoundError:
         raise _source_not_found(source_name)
     items = [FieldMapping(sigma_field=k, column_name=v) for k, v in mappings.items()]
     return SourceMappingSummary(
@@ -288,7 +288,7 @@ async def generate_sigma_view(
     mapper = _get_source_mapper(request)
     try:
         ddl = mapper.generate_sigma_view(source_name, database)
-    except (KeyError, FileNotFoundError, SourceNotFoundError):
+    except KeyError, FileNotFoundError, SourceNotFoundError:
         raise _source_not_found(source_name)
     except SigmaViewError as exc:
         raise HTTPException(422, detail={"code": "invalid_view", "message": str(exc)}) from exc

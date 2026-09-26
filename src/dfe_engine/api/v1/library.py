@@ -467,7 +467,7 @@ def list_artifacts(
     for name in gc.list(_CLASS):
         try:
             summary = library.summarise(name, gc.get(_CLASS, name))
-        except (library.InvalidArtifactError, ValueError):
+        except library.InvalidArtifactError, ValueError:
             continue
         if library.matches(summary, kind_name=kind, group=group, state=state, labels=label, text=q):
             out.append(_summary_model(summary))

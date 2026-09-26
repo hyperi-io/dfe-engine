@@ -110,7 +110,7 @@ def crud_source(gc: GitCrud) -> LibrarySource:
     def _envelope(name: str) -> dict | None:
         try:
             return gc.get(LIBRARY_CLASS, name)
-        except (ResourceNotFoundError, ValueError):
+        except ResourceNotFoundError, ValueError:
             return None
 
     def _content(name: str, path: str) -> str:
@@ -261,14 +261,14 @@ def relink(doc: dict, file_set: ConsumedFileSet, source: LibrarySource) -> list[
             continue
         try:
             target = library.resolve_tag(env, link.tag) if link.tag else _current_of(env)
-        except (library.TagNotFoundError, library.VersionNotFoundError):
+        except library.TagNotFoundError, library.VersionNotFoundError:
             continue
         if target is None:
             continue
         try:
             found = library.read_version(env, target)
             content = source.content(link.artifact, found.path)
-        except (library.VersionNotFoundError, ResourceNotFoundError):
+        except library.VersionNotFoundError, ResourceNotFoundError:
             continue
         moved_here = files.upsert_file(doc, file_set, link.name, content)
         if target != link.version or found.digest != link.digest:
@@ -305,13 +305,13 @@ def status(doc: dict, file_set: ConsumedFileSet, source: LibrarySource) -> list[
         try:
             found = library.read_version(env, link.version)
             artifact_kind = library.artifact_kind_of(env)
-        except (library.VersionNotFoundError, library.UnknownKindError):
+        except library.VersionNotFoundError, library.UnknownKindError:
             out.append(LinkStatus(link=link, missing=True))
             continue
         try:
             resolved = files.read_file(doc, file_set, link.name).content
             resolved_digest = library.digest_of(artifact_kind, resolved)
-        except (files.FileNotInSetError, library.InvalidArtifactError):
+        except files.FileNotInSetError, library.InvalidArtifactError:
             resolved_digest = ""
         available = library.tags_of(env).get(link.tag) if link.tag else _current_of(env)
         out.append(
@@ -366,5 +366,5 @@ def _links_of(gc: GitCrud, app: AppInstance, file_set: ConsumedFileSet) -> list[
     """One instance's links, treating an unreadable overlay as carrying none."""
     try:
         return list_links(gc.get(HELMVARS_CLASS, app.overlay_name), file_set)
-    except (ResourceNotFoundError, ValueError):
+    except ResourceNotFoundError, ValueError:
         return []

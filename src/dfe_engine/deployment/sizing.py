@@ -106,7 +106,7 @@ def get_default_size(service: str) -> TShirtSize:
     try:
         plugin = get_plugin(service)
         return TShirtSize(plugin.default_size)
-    except (KeyError, ValueError):
+    except KeyError, ValueError:
         return TShirtSize.small
 
 

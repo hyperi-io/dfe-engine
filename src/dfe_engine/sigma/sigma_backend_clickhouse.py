@@ -155,7 +155,7 @@ class SqlBackend(TextQueryBackend):
         if isinstance(alert_metadata, str):
             try:
                 self.alert_metadata = json.loads(alert_metadata)
-            except (json.JSONDecodeError, TypeError):
+            except json.JSONDecodeError, TypeError:
                 self.alert_metadata = {}
         elif isinstance(alert_metadata, dict):
             self.alert_metadata = alert_metadata
@@ -165,7 +165,7 @@ class SqlBackend(TextQueryBackend):
         if isinstance(dynamic_metadata, str):
             try:
                 self.dynamic_metadata = json.loads(dynamic_metadata)
-            except (json.JSONDecodeError, TypeError):
+            except json.JSONDecodeError, TypeError:
                 self.dynamic_metadata = {}
         elif isinstance(dynamic_metadata, dict):
             self.dynamic_metadata = dynamic_metadata
