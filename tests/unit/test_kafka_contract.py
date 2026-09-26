@@ -170,19 +170,26 @@ class TestTopicConfig:
 
         return deployment_topic_config(SimpleNamespace(kafka=KafkaSettings(**kafka)))
 
-    def test_nothing_set_asks_for_nothing(self):
-        # An untouched deployment must keep creating topics on the broker's own
-        # retention, which is what every topic it already has carries.
-        assert self._config() == {}
+    def test_nothing_set_asks_only_for_producer_compression(self):
+        # An untouched deployment keeps the broker's own retention, which is what
+        # every topic it already has carries, and stores batches as produced.
+        assert self._config() == {"compression.type": "producer"}
 
     def test_retention_and_cleanup_reach_the_config(self):
         assert self._config(topic_retention_ms=86400000, topic_cleanup_policy="compact") == {
             "retention.ms": "86400000",
             "cleanup.policy": "compact",
+            "compression.type": "producer",
         }
 
     def test_infinite_retention_is_expressible(self):
-        assert self._config(topic_retention_ms=-1) == {"retention.ms": "-1"}
+        assert self._config(topic_retention_ms=-1)["retention.ms"] == "-1"
+
+    def test_compression_type_is_a_dial(self):
+        assert self._config(topic_compression_type="zstd") == {"compression.type": "zstd"}
+
+    def test_empty_compression_type_leaves_the_broker_default(self):
+        assert self._config(topic_compression_type="") == {}
 
 
 class TestEnvWiring:
