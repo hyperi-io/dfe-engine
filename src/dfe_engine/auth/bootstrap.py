@@ -111,7 +111,42 @@ def default_credentials_in_use(admin_password: str) -> bool:
     return not candidate or candidate == _DEFAULT_PASSWORD
 
 
-def require_admin_password(admin_password: str, environment: str, *, retired: bool = False) -> bool:
+def admin_on_default_password(
+    account_store: AccountStore | DocuStoreAccountStore | None,
+    admin_name: str,
+    admin_password: str,
+) -> bool:
+    """Whether the local admin still logs in on the shipped default password, now.
+
+    THE ``default_credentials`` verdict, read fresh wherever it is reported. The
+    configured password is what the boot reconcile issues, so it decides until the
+    account shows otherwise: an admin that cannot hold a session (retired), or one
+    whose owner has replaced its issued password, is off the default whatever
+    config still says -- the reconcile does not issue that config value again. Both
+    are fields the password-change path writes, so this is a store read, no bcrypt.
+
+    Args:
+        account_store: The live account store; None while bootstrap is in flight.
+        admin_name: The local admin's username.
+        admin_password: The configured admin password.
+
+    Returns:
+        True while the default opens the admin account.
+    """
+    if not default_credentials_in_use(admin_password):
+        return False
+    account = account_store.get(admin_name) if account_store is not None else None
+    if account is None:
+        return True
+    if account.session_denied() is not None:
+        return False
+    # Never issued a password, so the next boot issues config's.
+    if not account.seeded_password_hash:
+        return True
+    return account.password_change_required
+
+
+def require_admin_password(admin_password: str, environment: str, *, retired: bool = False) -> None:
     """Refuse to start on the default admin password outside a dev posture.
 
     The posture predicate is the one gitops auto-merge gates on
@@ -121,23 +156,20 @@ def require_admin_password(admin_password: str, environment: str, *, retired: bo
     ``retired`` lifts the refusal: a retired admin is never seeded, so an absent
     password is the intended end state and the operator has deleted it.
 
-    Returns True when a dev posture is running on the default -- the caller
-    surfaces that as ``default_credentials`` so the UI can banner and force a
-    change.
+    A dev posture on the default starts with a warning; whether the admin is still
+    on it is :func:`admin_on_default_password`, read where it is reported.
 
     Raises:
         DefaultCredentialsError: production posture with no minted password.
     """
-    if retired:
-        return False
-    if not default_credentials_in_use(admin_password):
-        return False
+    if retired or not default_credentials_in_use(admin_password):
+        return
     if is_dev_posture(environment):
         logger.warning(
             f"Local admin is running on the default password '{_DEFAULT_PASSWORD}' "
             f"(DFE_ENV={environment}); change it before this deployment carries data"
         )
-        return True
+        return
     raise DefaultCredentialsError(
         f"DFE_AUTH_LOCAL_ADMIN_PASSWORD is unset or '{_DEFAULT_PASSWORD}' but "
         f"DFE_ENV is '{environment}': set DFE_AUTH_LOCAL_ADMIN_PASSWORD to the "
