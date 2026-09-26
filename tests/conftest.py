@@ -28,11 +28,14 @@ Docker Integration:
 
 import os
 import subprocess
+import tempfile
 import time
 import uuid
 from pathlib import Path
 
 import pytest
+from dulwich.errors import NotGitRepository
+from dulwich.repo import Repo
 from scalo.logger import logger
 
 # Shared RBAC test fixtures (client_as + the canonical fixture identities).
@@ -281,6 +284,37 @@ def _ensure_docker_services() -> dict[str, bool]:
             logger.warning("PostgreSQL container did not become healthy in time")
 
     return status
+
+
+def _enclosing_repository(path: Path) -> Path | None:
+    """Return the repository a DirectoryConfigStore under ``path`` would commit to."""
+    try:
+        with Repo.discover(str(path.resolve())) as repo:
+            return Path(repo.path)
+    except NotGitRepository:
+        return None
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Refuse a run whose temp roots sit inside a git repository.
+
+    scalo's DirectoryConfigStore walks up to the nearest repository, so every
+    registry write under such a root commits onto that repository's branch.
+    """
+    basetemp = config.option.basetemp
+    pytest_root = os.environ.get("PYTEST_DEBUG_TEMPROOT") or tempfile.gettempdir()
+    roots = [
+        ("--basetemp", basetemp) if basetemp else ("the pytest temp root", pytest_root),
+        ("TMPDIR", tempfile.gettempdir()),
+    ]
+    for label, root in roots:
+        repository = _enclosing_repository(Path(root))
+        if repository is not None:
+            raise pytest.UsageError(
+                f"{label} {root} is inside the git repository at {repository}, so every "
+                "registry write under it would commit onto that repository's branch. "
+                "Point --basetemp and TMPDIR outside any git checkout."
+            )
 
 
 def pytest_collection_modifyitems(config, items):
