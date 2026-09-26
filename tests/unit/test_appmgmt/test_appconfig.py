@@ -427,6 +427,21 @@ class TestCustomEnvironment:
         assert not _env_file(settings, VRL).exists()
         assert rendered[f"{VRL}-crowdstrike-eu"].custom_env_changed
 
+    def test_a_leftover_app_level_file_from_before_per_instance_env_is_emptied(
+        self, crud, tmp_path
+    ):
+        # v1.20.6-v1.22.0 wrote every instance's keys into this name, and a
+        # generated Compose instance still extends the base service that reads it.
+        settings = _settings(tmp_path)
+        leftover = _env_file(settings, VRL)
+        leftover.parent.mkdir(parents=True, exist_ok=True)
+        leftover.write_text("OLD_INSTANCE_KEY=leaked\n", encoding="utf-8")
+        _deploy(crud, VRL, "crowdstrike-eu", extraEnv__DFE_VRL_REGION="eu")
+
+        appconfig.render(crud, settings)
+
+        assert leftover.read_text() == ""
+
     def test_the_file_is_readable_only_by_its_owner(self, crud, tmp_path):
         settings = _settings(tmp_path)
         _deploy(crud, LOADER, extraEnv__DFE_LOADER_TOKEN="hunter2")

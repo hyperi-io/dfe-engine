@@ -455,6 +455,23 @@ def write_instance_index(settings: Any, service: str, names: list[str]) -> None:
         _report_unwritable(target.name, directory, exc)
 
 
+def _clear_app_level_custom_env(settings: Any, app: AppDescriptor) -> None:
+    """Empty a per-config app's app-level custom env file, if one is sitting there.
+
+    Engine versions before per-instance env files wrote every instance's keys
+    into this name, and a generated Compose instance still extends the base
+    service that reads it, so a file left over from one of those versions
+    reaches the base container and every instance under it. A per-config app
+    never writes this name itself once instances exist, so nothing else clears
+    it.
+    """
+    if write_custom_env(settings, app.service, {}):
+        logger.info(
+            "cleared a leftover app-level custom env file superseded by per-instance files",
+            app=app.service,
+        )
+
+
 def _render_one(
     gc: GitCrud,
     app: AppDescriptor,
@@ -578,6 +595,7 @@ def render(gc: GitCrud, settings: Any) -> list[RenderedApp]:
         names = [i.instance for i in found if i is not None]
         _prune_instance_dirs(out_root / app.service, names)
         write_instance_index(settings, app.service, names)
+        _clear_app_level_custom_env(settings, app)
     return written
 
 
