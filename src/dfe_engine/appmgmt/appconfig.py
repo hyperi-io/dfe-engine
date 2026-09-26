@@ -41,10 +41,9 @@ with the command that applies it, because a Compose stack's supervisor is the
 operator and an engine holding the docker socket would be a second one.
 """
 
-from __future__ import annotations
-
 import os
 import shutil
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -77,6 +76,13 @@ about. On Kubernetes the app's chart renders it; here it becomes a file.
 
 CUSTOM_ENV_SUFFIX = ".custom.env"
 """One file per app, named apart from the operator's own ``<app>.env``."""
+
+CUSTOM_ENV_MODE = 0o640
+"""Owner writes, the env directory's group reads, nobody else sees it.
+
+Compose reads ``env_file`` as whichever operator runs it, and that is rarely the
+engine's own user, so the group is how the file reaches it.
+"""
 
 INSTANCE_INDEX_SUFFIX = ".instances"
 """One file per per-config app, listing the instances it has rendered config for.
@@ -212,11 +218,39 @@ def _env_line(key: str, value: Any) -> str:
     return f"{key}={value}\n"
 
 
-def _write_private(path: Path, content: str) -> None:
-    """Replace ``path`` in one step with a file only its owner can read."""
+def _share_with_directory_group(handle: int, directory: Path) -> None:
+    """Give an open file its directory's group, or say how to where this process cannot.
+
+    A directory with the setgid bit has already done it, and then there is nothing
+    to change. Otherwise only a member of that group may hand a file to it, and a
+    file left on the engine's own group is one the operator's Compose cannot read.
+    """
+    group = directory.stat().st_gid
+    if os.fstat(handle).st_gid == group:
+        return
+    try:
+        os.fchown(handle, -1, group)
+    except PermissionError as exc:
+        logger.warning(
+            "an app env file cannot take its directory's group, so Compose run by "
+            "that group cannot read it",
+            directory=str(directory),
+            group=group,
+            error=str(exc),
+            fix=f"run the engine with {group} as a supplementary group "
+            "(Compose: group_add), or give the directory a group the engine holds",
+        )
+
+
+def _write_group_readable(path: Path, content: str) -> None:
+    """Replace ``path`` in one step with a file its directory's group can read."""
     tmp = path.with_name(f".{path.name}.tmp")
-    handle = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    handle = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, CUSTOM_ENV_MODE)
     with os.fdopen(handle, "w", encoding="utf-8") as out:
+        # Set again, because the umask narrows the mode os.open creates with.
+        os.fchmod(handle, CUSTOM_ENV_MODE)
+        # Before the content, so the credentials never sit on a group they are not for.
+        _share_with_directory_group(handle, path.parent)
         out.write(content)
     tmp.replace(path)
 
@@ -243,8 +277,9 @@ def write_custom_env(settings: Any, service: str, env: dict[str, Any]) -> bool:
     env_file on ``up`` and not on ``restart``, so the operator has to be told
     which of the two applies.
 
-    Private mode: an operator writes credentials here, and the file sits in their
-    own checkout rather than in the deploy repo.
+    Group-readable and no wider: an operator writes credentials here, the file
+    sits in their own checkout rather than in the deploy repo, and Compose reads
+    it as that operator rather than as the engine.
     """
     directory = custom_env_dir(settings)
     if directory is None:
@@ -255,11 +290,16 @@ def write_custom_env(settings: Any, service: str, env: dict[str, Any]) -> bool:
     # does not hand its operator one recreate command per app before it has run.
     if not rendered and not target.is_file():
         return False
-    if target.is_file() and target.read_text(encoding="utf-8") == rendered:
+    # Any other mode is rewritten, so a file an earlier engine wrote 0600 reaches Compose.
+    if (
+        target.is_file()
+        and stat.S_IMODE(target.stat().st_mode) == CUSTOM_ENV_MODE
+        and target.read_text(encoding="utf-8") == rendered
+    ):
         return False
     try:
         directory.mkdir(parents=True, exist_ok=True)
-        _write_private(target, rendered)
+        _write_group_readable(target, rendered)
     except OSError as exc:
         _report_unwritable(target.name, directory, exc)
         return False

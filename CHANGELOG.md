@@ -3,6 +3,18 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.4](https://github.com/hyperi-io/dfe-engine/compare/v1.22.3...v1.22.4) (2026-09-26)
+
+### Bug Fixes
+
+* write custom env files 0640 in their directory's group ([#545](https://github.com/hyperi-io/dfe-engine/issues/545)) ([9ce1146](https://github.com/hyperi-io/dfe-engine/commit/9ce1146ae9ffcffcd755368a1e13dd785917db2d))
+
+## [1.22.3](https://github.com/hyperi-io/dfe-engine/compare/v1.22.2...v1.22.3) (2026-09-26)
+
+### Bug Fixes
+
+* k8s e2e -- reset keeps the deployer's pools, one commit per seed, handlers off the event loop ([#544](https://github.com/hyperi-io/dfe-engine/issues/544)) ([e91dbb1](https://github.com/hyperi-io/dfe-engine/commit/e91dbb11f0a91b2cc5883b64a417dbe7037bd968))
+
 ## [1.22.2](https://github.com/hyperi-io/dfe-engine/compare/v1.22.1...v1.22.2) (2026-09-26)
 
 ### Bug Fixes
