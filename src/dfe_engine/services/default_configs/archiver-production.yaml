@@ -1,4 +1,4 @@
-# DFE Archiver — Production (K8s)
+# DFE Archiver -- Production (K8s)
 # S3 archive destination, large buffers, SASL+TLS, tuned compression
 #
 # K8s resource sizing (medium):
@@ -28,7 +28,6 @@ archive:
   path_template: "{year}/{month}/{day}/{hour}"
   file_extension: jsonl
   roll_size_bytes: 1073741824  # 1 GB final compressed
-  roll_interval_secs: 3600
   s3:
     region: ""
     bucket: dfe-archive
