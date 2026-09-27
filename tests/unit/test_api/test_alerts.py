@@ -3,6 +3,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from dfe_engine.api.deps import _registries
+from dfe_engine.appmgmt.contract import REDACTED
 from tests.support.accounts import admin_on_its_own_password
 
 
@@ -293,7 +295,8 @@ class TestAlertDestinationsCRUD:
         assert resp.status_code == 201
         data = resp.json()
         assert data["name"] == "slack-alerts"
-        assert data["url"] == sample_destination["url"]
+        assert data["url"] == REDACTED
+        assert data["url_scheme"] == "slack"
         assert data["enabled"] is True
 
     def test_create_then_list(self, alert_client, alert_admin_headers, sample_destination):
@@ -464,3 +467,136 @@ class TestAlertDestinationsCRUD:
             headers=viewer_headers,
         )
         assert resp.status_code == 403
+
+
+class TestTheDestinationUrlIsACredential:
+    """An Apprise URL carries the credential for its service, so no read shows one."""
+
+    SECRET_URL = "slack://T00000000/B00000000/X0000000000000000000000/"
+
+    @pytest.fixture
+    def analyst_headers(self, app_with_alerts, alert_client):
+        """A session holding data_analyst_viewer, the read-only role that reaches alert:read."""
+        from dfe_engine.api.deps import create_access_token
+        from dfe_engine.settings import APISettings, DFESettings
+
+        groups = app_with_alerts.state.group_store
+        if groups.get("dfe-analyst-viewers") is None:
+            groups.create("dfe-analyst-viewers", roles=["data_analyst_viewer"])
+        app_with_alerts.state.account_store.create(
+            "analyst", "analyst-pw-4901", groups=["dfe-analyst-viewers"]
+        )
+        groups.add_member("dfe-analyst-viewers", "analyst")
+        token = create_access_token(
+            data={"sub": "analyst", "org_id": "test-org"},
+            settings=DFESettings(
+                env="test", api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes")
+            ),
+        )
+        return {"Authorization": f"Bearer {token}"}
+
+    @pytest.fixture
+    def stored(self, alert_client, alert_admin_headers):
+        resp = alert_client.post(
+            "/api/v1/alerts/destinations",
+            json={"name": "slack-alerts", "url": self.SECRET_URL, "enabled": True},
+            headers=alert_admin_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        return "slack-alerts"
+
+    def test_the_analyst_role_can_read_a_destination(self, alert_client, analyst_headers, stored):
+        """The role this masking exists for: it reads the surface, so the mask is the control."""
+        resp = alert_client.get(f"/api/v1/alerts/destinations/{stored}", headers=analyst_headers)
+
+        assert resp.status_code == 200, resp.text
+
+    def test_a_read_shows_the_scheme_and_masks_the_url(self, alert_client, analyst_headers, stored):
+        resp = alert_client.get(f"/api/v1/alerts/destinations/{stored}", headers=analyst_headers)
+
+        assert resp.json()["url"] == REDACTED
+        assert resp.json()["url_scheme"] == "slack"
+        assert self.SECRET_URL not in resp.text
+
+    def test_the_listing_carries_no_url(self, alert_client, analyst_headers, stored):
+        resp = alert_client.get("/api/v1/alerts/destinations", headers=analyst_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert self.SECRET_URL not in resp.text
+
+    @pytest.mark.parametrize("order", ["asc", "desc"])
+    def test_sorting_by_url_cannot_order_on_the_credential(
+        self, alert_client, alert_admin_headers, analyst_headers, order
+    ):
+        """URL order matches name order in neither direction, so ordering on the URL would show."""
+        urls = {
+            "a-dest": "slack://mmm-4903",
+            "b-dest": "slack://zzz-4904",
+            "c-dest": "slack://aaa-4905",
+        }
+        for name, url in urls.items():
+            created = alert_client.post(
+                "/api/v1/alerts/destinations",
+                json={"name": name, "url": url, "enabled": True},
+                headers=alert_admin_headers,
+            )
+            assert created.status_code == 201, created.text
+
+        resp = alert_client.get(
+            "/api/v1/alerts/destinations",
+            params={"sort_by": "url", "sort_order": order},
+            headers=analyst_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert [item["name"] for item in resp.json()["items"]] == ["a-dest", "b-dest", "c-dest"]
+        assert not any(url in resp.text for url in urls.values())
+
+    def test_the_mask_written_back_keeps_the_stored_url(
+        self, alert_client, alert_admin_headers, stored
+    ):
+        resp = alert_client.put(
+            f"/api/v1/alerts/destinations/{stored}",
+            json={"name": stored, "url": REDACTED, "description": "renamed", "enabled": False},
+            headers=alert_admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["description"] == "renamed"
+        assert resp.json()["url"] == REDACTED
+        registry = _registries["alert_destinations"]
+        assert registry.get(stored).url == self.SECRET_URL
+
+    def test_a_new_url_written_in_full_replaces_it(self, alert_client, alert_admin_headers, stored):
+        resp = alert_client.put(
+            f"/api/v1/alerts/destinations/{stored}",
+            json={"name": stored, "url": "pagerduty://key-4902", "enabled": True},
+            headers=alert_admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["url"] == REDACTED
+        registry = _registries["alert_destinations"]
+        assert registry.get(stored).url == "pagerduty://key-4902"
+
+    def test_creating_one_from_the_mask_is_refused(self, alert_client, alert_admin_headers):
+        resp = alert_client.post(
+            "/api/v1/alerts/destinations",
+            json={"name": "from-a-mask", "url": REDACTED, "enabled": True},
+            headers=alert_admin_headers,
+        )
+
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "masked_value"
+        assert (
+            alert_client.get(
+                "/api/v1/alerts/destinations/from-a-mask", headers=alert_admin_headers
+            ).status_code
+            == 404
+        )
+
+    def test_the_hunt_engine_still_resolves_the_real_url(self, stored):
+        """The mask is on the API read alone -- what dispatches an alert reads the store."""
+        registry = _registries["alert_destinations"]
+
+        assert registry.resolve(stored) == self.SECRET_URL

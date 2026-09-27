@@ -7,6 +7,13 @@ comes from the filename). This is the same registry the hunt engine reads
 when dispatching alerts, so a destination created here is resolvable by a
 hunt straight away.
 
+An Apprise URL carries its own credential -- a Slack token, an SMTP password, a
+webhook secret -- and it is whole: the token sits wherever that service's scheme
+puts it, so no part of the URL can be shown safely. ``alert:read`` reaches a
+viewer role, so a stored URL is masked on every read and the scheme is reported
+separately for what a reader actually needs. A PUT that hands the placeholder
+back keeps the stored URL, as every other credential write does.
+
 GET    /api/v1/alerts/destinations            -> Paginated list
 POST   /api/v1/alerts/destinations            -> Create destination
 GET    /api/v1/alerts/destinations/{name}     -> Get destination
@@ -24,6 +31,7 @@ from pydantic import BaseModel, Field
 from dfe_engine.api.deps import AlertDestRegistry, CurrentUser, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.api.review import apply_review_headers
+from dfe_engine.appmgmt import contract
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.hunts.alert import AlertDestination as RegistryAlertDestination
@@ -50,9 +58,17 @@ OptionalHuntConfigReg = Annotated[Any | None, Depends(_get_hunt_config_registry_
 
 class AlertDestination(BaseModel):
     name: str = Field(description="Unique destination identifier (used as filename)")
-    url: str = Field(description="Apprise notification URL (slack://, mailto://, etc.)")
+    url: str = Field(
+        description=(
+            "Apprise notification URL (slack://, mailto://, etc.). Masked on every read; "
+            "write the mask back to keep the stored URL"
+        )
+    )
     description: str = Field(default="", description="Human-readable description")
     enabled: bool = Field(default=True)
+    url_scheme: str = Field(
+        default="", description="URL scheme (slack, mailto, etc.); read-only, set from the URL"
+    )
     hunt_name: str | None = Field(
         default=None,
         description="Hunt file stem when this destination is owned by a hunt (set via API)",
@@ -88,15 +104,16 @@ async def list_destinations(
     sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
     """List alert destinations."""
+    # No URL in the rows, so sort_by cannot order on another destination's credential.
     raw = [
         {
             "name": dest.name,
-            "url": dest.url,
+            "url_scheme": _url_scheme(dest.url),
             "description": dest.description,
             "enabled": dest.enabled,
             "hunt_name": dest.hunt_name,
         }
-        for dest in registry.list()
+        for dest in sorted(registry.list(), key=lambda dest: dest.name)
     ]
 
     if hunt is not None:
@@ -125,7 +142,7 @@ async def list_destinations(
             name=item.get("name", ""),
             description=item.get("description", ""),
             enabled=item.get("enabled", True),
-            url_scheme=_url_scheme(item.get("url", "")),
+            url_scheme=item.get("url_scheme", ""),
         )
         for item in raw
     ]
@@ -158,6 +175,8 @@ async def create_destination(
                 "message": f"Alert destination '{body.name}' already exists",
             },
         )
+    # Nothing is stored yet, so the mask has nothing to restore from and is refused.
+    body.url = _typed_url(body.url, "")
     if body.hunt_name is not None:
         _ensure_hunt_for_link(hunt_registry, body.hunt_name)
     _write_destination(registry, body, hunt_name=body.hunt_name)
@@ -215,6 +234,7 @@ async def update_destination(
         )
     existing = registry.get(name)
     body.name = name
+    body.url = _typed_url(body.url, existing.url)
     hunt_to_link = body.hunt_name
     if hunt_to_link is not None:
         _ensure_hunt_for_link(hunt_registry, hunt_to_link)
@@ -248,14 +268,30 @@ async def delete_destination(name: str, user: CurrentUser, registry: AlertDestRe
 
 
 def _destination_from_registry(dest: RegistryAlertDestination) -> AlertDestination:
-    """Convert a registry destination model to the API response model."""
+    """The API response model for a stored destination, its URL masked."""
     return AlertDestination(
         name=dest.name,
-        url=dest.url,
+        url=contract.REDACTED if dest.url else "",
         description=dest.description,
         enabled=dest.enabled,
+        url_scheme=_url_scheme(dest.url),
         hunt_name=dest.hunt_name,
     )
+
+
+def _typed_url(written: str, stored: str) -> str:
+    """The URL to store: the stored one where the mask was written back, else what was written.
+
+    Raises:
+        HTTPException: 400 when the mask stands where no URL is stored, so a
+            destination is never saved pointing at the placeholder.
+    """
+    try:
+        return contract.restore_masked(written, stored or contract.MISSING, path="url")
+    except contract.MaskedValueError as exc:
+        raise HTTPException(
+            status_code=400, detail={"code": exc.code, "message": str(exc)}
+        ) from exc
 
 
 def _write_destination(

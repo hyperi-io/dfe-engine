@@ -1009,21 +1009,36 @@ def _named(entries: list, key: str) -> dict[Any, Any] | None:
     return found
 
 
-def _same_but_masked(value: Any, stored: Any) -> bool:
-    """Whether ``value`` is ``stored`` as a read shows it: equal wherever it is not masked."""
+def _same_but_masked(value: Any, stored: Any, shown: Any = MISSING) -> bool:
+    """Whether ``value`` is ``stored`` as a read shows it: equal wherever it is not masked.
+
+    A value the read showed only as a credential may be typed again, and a URL whose
+    password alone was masked may take a new password, so neither is compared to what
+    is stored: comparing them would answer a guess at the stored credential
+    differently from a wrong one, which tells a writer who cannot read it that the
+    guess was right. ``shown`` is ``stored`` as the read showed it, where the caller
+    has it.
+    """
+    if _wholly_masked(shown):
+        return True
+    if isinstance(shown, str) and REDACTED in shown:
+        return isinstance(value, str) and _shown_text(value) == shown
     if isinstance(value, str) and value == REDACTED:
         return stored is not None and not isinstance(stored, _Missing)
     if isinstance(value, str) and REDACTED in value:
         return isinstance(stored, str) and _shown_text(stored) == value
     if isinstance(value, dict):
         return isinstance(stored, dict) and all(
-            _same_but_masked(item, stored.get(key, MISSING)) for key, item in value.items()
+            _same_but_masked(item, stored.get(key, MISSING), _shown_child(shown, key))
+            for key, item in value.items()
         )
     if isinstance(value, list):
-        return (
-            isinstance(stored, list)
-            and len(value) == len(stored)
-            and all(_same_but_masked(a, b) for a, b in zip(value, stored, strict=True))
+        if not isinstance(stored, list) or len(value) != len(stored):
+            return False
+        views = shown if isinstance(shown, list) and len(shown) == len(stored) else None
+        return all(
+            _same_but_masked(item, stored[i], views[i] if views else MISSING)
+            for i, item in enumerate(value)
         )
     return value == stored
 
@@ -1099,7 +1114,7 @@ def _restore_list(value: list, stored: Any, shown: Any, path: str) -> list:
             out.append(item)
             continue
         entry, view = next(behind)
-        if not _same_but_masked(item, entry):
+        if not _same_but_masked(item, entry, view):
             raise CredentialReentryError(
                 f"{where}[{i}] is masked but no longer matches the stored entry in its "
                 "place, and nothing names it: write its credentials in full"
