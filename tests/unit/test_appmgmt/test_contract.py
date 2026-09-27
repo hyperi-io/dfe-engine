@@ -77,6 +77,22 @@ def _contract(service: str) -> contract.AppContract:
     return contract.load_contract(service, FIXTURES)
 
 
+def _marked_root(root: Path) -> Path:
+    """A mounted dfe-receiver contract whose one marked field has a name that says nothing."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "server": {
+                "type": "object",
+                "properties": {"banner": {"type": "string", contract.SECRET_MARKER: True}},
+            }
+        },
+    }
+    (root / "dfe-receiver").mkdir()
+    (root / "dfe-receiver" / contract.SCHEMA_FILE).write_text(json.dumps(schema))
+    return root
+
+
 class TestReadingTheMount:
     def test_a_deployment_that_mounts_nothing_says_so(self, tmp_path):
         found = contract.load_contract("dfe-loader", tmp_path)
@@ -839,34 +855,33 @@ class TestRedactingTheOverlay:
         ):
             assert credential not in text
 
-    def test_a_document_naming_its_app_is_read_against_that_app(self, monkeypatch):
-        monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(HELD))
+    def test_a_document_naming_its_app_is_read_against_that_app(self, monkeypatch, tmp_path):
+        monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(_marked_root(tmp_path)))
         contract.reload_contracts()
-        auth = contract.redact_resource(json.loads(json.dumps(self.OVERLAY)))["config"]["server"][
-            "auth"
-        ]
-        # Only the receiver's marker says a header value is secret.
-        assert auth["header_values"] == [contract.REDACTED]
+        doc = {"deploy": {"service": "dfe-receiver"}, "config": {"server": {"banner": "b-1"}}}
+        # Only the app's marker says the banner is secret.
+        assert contract.redact_resource(doc)["config"]["server"]["banner"] == contract.REDACTED
 
-    def test_a_var_about_to_be_written_is_judged_as_its_read_would_be(self, monkeypatch):
-        # Only the receiver's marker says a header value is secret, so the app
-        # the stored document names has to reach the judgement.
-        monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(HELD))
+    def test_a_var_about_to_be_written_is_judged_as_its_read_would_be(self, monkeypatch, tmp_path):
+        # Only the app's marker says the banner is secret, so the app the stored
+        # document names has to reach the judgement.
+        monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(_marked_root(tmp_path)))
         contract.reload_contracts()
         doc = {"deploy": {"service": "dfe-receiver"}}
-        path = "config.server.auth.header_values"
-        assert contract.redact_var(doc, path, ["h-1"]) == [contract.REDACTED]
-        assert contract.redact_var({}, path, ["h-1"]) == ["h-1"]
+        path = "config.server.banner"
+        assert contract.redact_var(doc, path, "b-1") == contract.REDACTED
+        assert contract.redact_var({}, path, "b-1") == "b-1"
         assert contract.redact_var(doc, "config.server.request_timeout_ms", 30000) == 30000
 
-    def test_a_document_naming_no_app_is_judged_by_name(self, monkeypatch):
-        monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(HELD))
+    def test_a_document_naming_no_app_is_judged_by_name(self, monkeypatch, tmp_path):
+        monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(_marked_root(tmp_path)))
         contract.reload_contracts()
         doc = json.loads(json.dumps(self.OVERLAY))
         doc["deploy"]["service"] = "../dfe-receiver"
-        auth = contract.redact_resource(doc)["config"]["server"]["auth"]
-        assert auth["header_values"] == ["legacy-1"]
-        assert auth["bearer"]["tokens"] == [contract.REDACTED, contract.REDACTED]
+        doc["config"]["server"]["banner"] = "b-1"
+        server = contract.redact_resource(doc)["config"]["server"]
+        assert server["banner"] == "b-1"
+        assert server["auth"]["bearer"]["tokens"] == [contract.REDACTED, contract.REDACTED]
 
     def test_with_no_contract_the_name_rule_still_holds(self, tmp_path):
         # Unmounted, the names are all there is to judge by.
@@ -875,6 +890,13 @@ class TestRedactingTheOverlay:
         assert self._redacted(tmp_path)["config"]["kafka"]["sasl"]["password"] == (
             contract.REDACTED
         )
+
+    def test_with_no_contract_header_values_are_masked_by_name(self, tmp_path):
+        auth = self._redacted(tmp_path)["config"]["server"]["auth"]
+        assert auth["accepted_headers"] == [{"name": "x-api-key", "values": [contract.REDACTED]}]
+        assert auth["header_values"] == [contract.REDACTED]
+        assert "hv-1" not in json.dumps(auth)
+        assert "legacy-1" not in json.dumps(auth)
 
     @pytest.mark.parametrize("root", ["held", "unmounted"])
     def test_a_routing_key_shows_and_a_tls_key_masks(self, root, tmp_path):
@@ -1330,3 +1352,136 @@ class TestAUrlPasswordIsMasked:
         moved = f"postgres://dfe:{contract.REDACTED}@elsewhere/dfe"
         with pytest.raises(contract.MaskedValueError, match="write it in full"):
             contract.restore_masked_at(doc, "extraEnv.DATABASE_URL", moved)
+
+
+class TestACredentialInAnotherFormIsStillOne:
+    """A digest, a JSON document or a PEM of a credential is judged as the credential."""
+
+    @pytest.mark.parametrize(
+        ("name", "section"),
+        [
+            ("password_hash", ""),
+            ("seeded_password_hash", ""),
+            ("passwordHash", "breakglass"),
+            ("PASSWORD_DIGEST", ""),
+            ("api_key_hash", ""),
+            ("credentials_json", "auth"),
+            ("ssl.key.pem", "librdkafka_options"),
+            ("key_pem", "tls"),
+        ],
+    )
+    def test_the_name_is_a_credential(self, name, section):
+        assert contract.secret_name(name, section) is True
+
+    @pytest.mark.parametrize(
+        ("name", "section"),
+        [
+            ("config_hash", "deploy"),
+            ("commit_hash", ""),
+            ("SignatureDigest", ""),
+            ("capture_json", "extract"),
+            ("unwrap_nested_json", ""),
+            ("ssl.ca.pem", "librdkafka_options"),
+            ("ssl.key.location", "librdkafka_options"),
+            ("credentials_path", "gcp"),
+            ("hash", ""),
+        ],
+    )
+    def test_a_setting_in_one_of_those_forms_is_not(self, name, section):
+        assert contract.secret_name(name, section) is False
+
+    def test_an_account_s_password_digests_are_masked(self):
+        doc = {
+            "username": "kaz",
+            "password_hash": "$2b$12$abcdefghijklmnopqrstuv",
+            "seeded_password_hash": "$2b$12$wxyzabcdefghijklmnopqr",
+            "groups": ["dfe-admins"],
+        }
+        assert contract.redact_overlay(ABSENT, doc) == {
+            "username": "kaz",
+            "password_hash": contract.REDACTED,
+            "seeded_password_hash": contract.REDACTED,
+            "groups": ["dfe-admins"],
+        }
+
+    def test_a_librdkafka_pem_key_is_masked_and_its_location_shown(self):
+        options = {"ssl.key.pem": "-----BEGIN PRIVATE KEY-----", "ssl.key.location": "/k.pem"}
+        assert contract.redact_overlay(ABSENT, {"librdkafka_options": options}) == {
+            "librdkafka_options": {"ssl.key.pem": contract.REDACTED, "ssl.key.location": "/k.pem"}
+        }
+
+
+class TestCredentialsNamedByWhatHoldsThem:
+    """A credential word, an auth header's values, and the entries of a credentials map."""
+
+    @pytest.mark.parametrize(
+        ("name", "section"),
+        [
+            ("credential", "github"),
+            ("CREDENTIAL", ""),
+            ("header_values", "auth"),
+            ("headerValue", ""),
+            ("HEADER_VALUE", ""),
+            ("values", "accepted_headers"),
+            ("value", "header"),
+            ("ssl_key", "kafka"),
+        ],
+    )
+    def test_the_name_is_a_credential(self, name, section):
+        assert contract.secret_name(name, section) is True
+
+    @pytest.mark.parametrize(
+        ("name", "section"),
+        [
+            ("header_name", "auth"),
+            ("value", "conditions"),
+            ("values", "labels"),
+            ("credential_type", "github"),
+            ("credential_secret", "github"),
+        ],
+    )
+    def test_a_setting_beside_one_is_not(self, name, section):
+        assert contract.secret_name(name, section) is False
+
+    def test_a_credentials_map_masks_each_entry_and_a_list_of_placements_does_not(self):
+        overlay = {
+            "auth": {
+                "mode": "credentials",
+                "credentials": {"github": "vault:kv/gh:token", "pair_a": "pa-4430"},
+            },
+            "profile": {"credentials": [{"header": "X-Key", "from": "pair_a"}]},
+        }
+        assert contract.redact_overlay(ABSENT, overlay) == {
+            "auth": {
+                "mode": "credentials",
+                "credentials": {"github": contract.REDACTED, "pair_a": contract.REDACTED},
+            },
+            "profile": {"credentials": [{"header": "X-Key", "from": "pair_a"}]},
+        }
+
+    def test_a_masked_credentials_map_written_back_restores(self):
+        doc = {"auth": {"credentials": {"github": "gh-4433", "pair_a": "pa-4434"}}}
+        shown = contract.redact_overlay(ABSENT, doc)["auth"]["credentials"]
+        assert contract.restore_masked_at(doc, "auth.credentials", shown) == {
+            "github": "gh-4433",
+            "pair_a": "pa-4434",
+        }
+
+    def test_a_chart_s_secret_key_names_are_shown(self):
+        overlay = {
+            "kafka": {
+                "existingSecret": "kafka-creds",
+                "secretKeys": {"username": "kafka-username", "password": "kafka-password"},
+                "password": "kafka-pw-4435",
+            },
+            "jwt": {"secretKeys": {"signing": "jwt-hmac-4436"}},
+        }
+        assert contract.redact_overlay(ABSENT, overlay) == {
+            "kafka": {
+                "existingSecret": "kafka-creds",
+                "secretKeys": {"username": "kafka-username", "password": "kafka-password"},
+                "password": contract.REDACTED,
+            },
+            # Nothing says these name a Secret's keys, so they are judged as secret keys.
+            "jwt": {"secretKeys": contract.REDACTED},
+        }

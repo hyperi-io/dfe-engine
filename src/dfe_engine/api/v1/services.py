@@ -25,18 +25,18 @@ from dfe_engine.services.registry import ConfigNotFoundError, stored_form
 router = APIRouter(prefix="/services", tags=["Services"])
 
 _SECRET_MASK = str(SecretStr("x"))
-"""What a read of this registry shows for a set secret: pydantic's own placeholder."""
+"""pydantic's own placeholder for a set secret, which a write still reads as the mask."""
 
 
 def _shown(config: Any) -> dict[str, Any]:
-    """A stored config as a read shows it, every credential masked.
+    """A stored config as a read shows it, every credential masked as :data:`contract.REDACTED`.
 
-    A typed config masks what its model declares secret, and a schema-less one
-    has only its names to go on.
+    A typed config's dump masks only what its model declares secret, so a map of
+    plain strings such as ``extra_env`` is judged by name as a schema-less one is.
     """
     if isinstance(config, dict):
         return contract.shown_resource(config)
-    return config.model_dump(mode="json")
+    return contract.shown_resource(_as_redacted(config.model_dump(mode="json")))
 
 
 def _as_redacted(value: Any) -> Any:
@@ -166,7 +166,7 @@ async def save_service_config(
         shown: dict[str, Any] = {}
     else:
         stored = stored_form(current)
-        shown = _as_redacted(_shown(current))
+        shown = _shown(current)
     try:
         config = contract.restore_masked(_as_redacted(body), stored, shown=shown)
     except contract.MaskedValueError as exc:

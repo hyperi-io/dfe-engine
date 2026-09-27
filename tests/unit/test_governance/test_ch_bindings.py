@@ -75,6 +75,19 @@ class TestOrgScopedGroups:
         bindings = derive_group_bindings([group], [_org("acme"), _org("beta")])
         assert [(b.group, b.org) for b in bindings] == [("acme-team", "acme")]
 
+    @pytest.mark.parametrize("role", ["admin", "infra_admin"])
+    def test_an_org_scoped_admin_group_reads_no_platform_telemetry(self, role):
+        """The otel database holds every org's telemetry, so only a system grant reads it."""
+        groups = [
+            _group("acme-admins", scope="org:acme", roles=[role]),
+            _group("platform-admins", roles=[role]),
+        ]
+        bindings = derive_group_bindings(groups, [_org("acme")])
+        assert {b.group: b.ch_roles for b in bindings} == {
+            "acme-admins": [],
+            "platform-admins": ["otel_reader"],
+        }
+
 
 class TestUnrestrictedGroups:
     def test_group_claiming_no_org_is_unrestricted(self):

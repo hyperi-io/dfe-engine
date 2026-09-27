@@ -97,8 +97,11 @@ _FLOOR_TERMS = frozenset(
 ``address`` is left out: in an app's config it names a listen or connect address.
 """
 
-_ENGINE_TERMS = frozenset({"passphrase", "jaas_config"})
-"""Credentials the DFE apps and their brokers name that neither list above covers."""
+_ENGINE_TERMS = frozenset({"passphrase", "jaas_config", "credential"})
+"""Credentials the DFE apps and their brokers name that neither list above covers.
+
+``credential`` is here because a term's plural matches and its singular does not.
+"""
 
 CREDENTIAL_TERMS: frozenset[tuple[str, ...]] = frozenset(
     _words(term.replace("_", " ")) for term in {*SENSITIVE_FIELDS, *_FLOOR_TERMS, *_ENGINE_TERMS}
@@ -121,6 +124,7 @@ SECTION_TERMS: frozenset[tuple[str, ...]] = frozenset(
         "auth",
         "authorization",
         "bearer",
+        "credential",
         "credentials",
         "cert",
         "certificate",
@@ -137,6 +141,21 @@ SECTION_TERMS: frozenset[tuple[str, ...]] = frozenset(
 
 ``server.auth`` holds the auth mode beside its bearer tokens, so masking the whole
 mapping for its name would hide settings. A scalar ``REDISCLI_AUTH`` is still masked.
+"""
+
+CREDENTIAL_MAP = ("credentials",)
+"""A mapping whose name ends in this word holds credentials by name, so each value is one.
+
+dfe-fetcher's ``auth.credentials`` maps a name to the credential its placements read.
+A list of that name holds entries instead, and each entry's fields are judged by name.
+"""
+
+FORM_WORDS = frozenset({"hash", "hashes", "digest", "digests", "json", "pem"})
+"""A last word saying what form a value is held in, so the words before it are judged.
+
+``password_hash`` and ``seeded_password_hash`` are crackable digests of a password,
+``credentials_json`` is a credential document and librdkafka's ``ssl.key.pem`` is a
+private key; ``config_hash`` and ``capture_json`` stay shown.
 """
 
 _COMPACT_STEMS = (
@@ -174,6 +193,7 @@ KEY_QUALIFIERS = frozenset(
         "shared",
         "ssh",
         "tls",
+        "ssl",
         "client",
         "auth",
         "sasl",
@@ -193,6 +213,15 @@ The qualifier is the word before ``key`` in the name - ``secret_access_key``,
 ``SIGNING_KEY``, ``JWT_KEY`` - or, for a bare ``key``, the section holding it, as
 ``tls.key``. A ``key`` nothing qualifies is as often a routing or partition key -
 ``KAFKA_PARTITION_KEY``, ``sink.key_field`` - and stays shown, as ``FOO_KEY`` does.
+``ssl`` is librdkafka's spelling of ``tls``.
+"""
+
+VALUE_QUALIFIERS = frozenset({"header", "headers"})
+"""Words that make a ``value`` a credential when they qualify it, as for a ``key``.
+
+An accepted auth header's values are what a client must present: dfe-receiver's
+``auth.header_values`` and each ``auth.accepted_headers[].values``. A ``value`` under
+a credential word, as ``token.value``, is one too; the loader's DLQ ``value`` is not.
 """
 
 SECRET_SOURCE_WORDS = frozenset(
@@ -205,6 +234,13 @@ dfe-fetcher's ``credential_secret`` and ``private_key_secret`` and dfe-receiver'
 ``tls.key_secret`` each hold a ``provider:path:key`` spec such as
 ``vault:kv/data/github:token``; a chart's ``config_secret``, ``existingSecret`` and
 ``imagePullSecrets`` name Kubernetes Secrets.
+"""
+
+_SECRET_KEY_NAMES = ("secret", "keys")
+_SECRET_REFERENCE = ("existing", "secret")
+"""A chart's ``secretKeys`` beside ``existingSecret``: which key of that Secret holds each value.
+
+Every DFE chart sets the pair together, and the map holds key names, not credentials.
 """
 
 REDACTED = MASK_VALUE
@@ -642,16 +678,20 @@ def _branches(node: Any, root: dict) -> list[dict]:
     return out
 
 
-def _qualified_key(words: tuple[str, ...], section: str) -> bool:
-    """Whether a name ending in ``key`` is a credential key, per :data:`KEY_QUALIFIERS`."""
-    if words[-1] not in ("key", "keys"):
+def _qualified(words: tuple[str, ...], section: str, noun: str, qualifiers: frozenset[str]) -> bool:
+    """Whether a name ending in ``noun`` is a credential, per the word qualifying it.
+
+    The qualifier is the word before ``noun``, or for a bare ``noun`` the last word
+    of ``section``. It counts when it is in ``qualifiers`` or is a credential term.
+    """
+    if words[-1] not in (noun, f"{noun}s"):
         return False
     if len(words) > 1:
         qualifier = words[-2]
     else:
         section_words = _words(section)
         qualifier = section_words[-1] if section_words else ""
-    return qualifier in KEY_QUALIFIERS or (qualifier,) in CREDENTIAL_TERMS
+    return qualifier in qualifiers or (qualifier,) in CREDENTIAL_TERMS
 
 
 def _ends_in(words: tuple[str, ...], term: tuple[str, ...]) -> bool:
@@ -668,17 +708,22 @@ def secret_name(name: str, section: str = "", *, mapping: bool = False) -> bool:
     The name ends in one of :data:`CREDENTIAL_TERMS` - ``auth_token``,
     ``bearer-tokens``, ``rootPassword`` - unless it is a secret source per
     :data:`SECRET_SOURCE_WORDS` or one of :data:`_SHOWN_ENDINGS`; or it is a ``key``
-    a credential word qualifies, where ``section``, the name of the mapping holding
-    it, qualifies a bare ``key``. A scalar whose last word runs a credential word in,
-    as ``PGPASSWORD`` does, is one too.
+    or a ``value`` a credential word qualifies, where ``section``, the name of the
+    mapping holding it, qualifies a bare one. A scalar whose last word runs a
+    credential word in, as ``PGPASSWORD`` does, is one too. A last word in
+    :data:`FORM_WORDS` is dropped first, so ``password_hash`` is judged as ``password``.
 
     ``mapping`` says the value is a mapping or a list of them, which a name in
     :data:`SECTION_TERMS` does not hide whole: its fields are judged one by one.
     """
     words = _words(name)
+    while len(words) > 1 and words[-1] in FORM_WORDS:
+        words = words[:-1]
     if not words:
         return False
-    if _qualified_key(words, section):
+    if _qualified(words, section, "key", KEY_QUALIFIERS) or _qualified(
+        words, section, "value", VALUE_QUALIFIERS
+    ):
         return True
     matched = [term for term in CREDENTIAL_TERMS if _ends_in(words, term)]
     if matched:
@@ -754,13 +799,29 @@ def _shown_text(text: str) -> str:
     return _URL_PASSWORD.sub(rf"\1{REDACTED}", text)
 
 
-def _redact(value: Any, node: Any, root: dict, name: str, section: str = "") -> Any:
+def _secret_key_names(name: str, value: Any, holder: dict) -> bool:
+    """Whether ``value``, held under ``name`` in ``holder``, is a chart's ``secretKeys``."""
+    return (
+        _words(name) == _SECRET_KEY_NAMES
+        and isinstance(value, dict)
+        and all(isinstance(item, str) for item in value.values())
+        and any(_words(str(key)) == _SECRET_REFERENCE for key in holder)
+    )
+
+
+def _redact(
+    value: Any, node: Any, root: dict, name: str, section: str = "", *, entry: bool = False
+) -> Any:
     """``value`` with every part its schema marks, or its name calls, a secret masked.
 
     ``node`` is the schema the value was written against, or None where nothing
     declares it, which leaves only the name rule to judge it. ``section`` is the
-    name of the mapping holding ``value``. Text that survives both carries its URL
-    passwords masked, as a connection string does.
+    name of the mapping holding ``value``, and ``entry`` says ``value`` is an entry
+    of a list of that name. Text that survives both carries its URL passwords
+    masked, as a connection string does.
+
+    A mapping named per :data:`CREDENTIAL_MAP` has each value masked, and a chart's
+    ``secretKeys`` beside ``existingSecret`` is shown: it names keys, not credentials.
     """
     if isinstance(value, _Missing):
         return value
@@ -778,17 +839,23 @@ def _redact(value: Any, node: Any, root: dict, name: str, section: str = "") -> 
             props.update(branch.get("properties") or {})
             if extra is None and isinstance(branch.get("additionalProperties"), dict):
                 extra = branch["additionalProperties"]
-        return {
-            key: _redact(child, props.get(key, extra), root, str(key), name)
-            for key, child in value.items()
-        }
+        by_name = not entry and _ends_in(_words(name), CREDENTIAL_MAP)
+        out: dict[Any, Any] = {}
+        for key, child in value.items():
+            if _secret_key_names(str(key), child, value):
+                out[key] = {item: _shown_text(text) for item, text in child.items()}
+            elif by_name and not _has_fields(child):
+                out[key] = _masked(child)
+            else:
+                out[key] = _redact(child, props.get(key, extra), root, str(key), name)
+        return out
     if isinstance(value, list):
         items = next(
             (b["items"] for b in branches if isinstance(b.get("items"), dict)),
             None,
         )
         # An entry is judged under the list's own name, so its fields have a section.
-        return [_redact(child, items, root, name, section) for child in value]
+        return [_redact(child, items, root, name, section, entry=True) for child in value]
     return value
 
 

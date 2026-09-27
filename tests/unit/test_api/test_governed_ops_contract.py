@@ -119,6 +119,40 @@ class TestVarsListing:
         assert "hunter2" not in resp.text
         assert "env-tok" not in resp.text
 
+    def test_an_account_s_password_digests_come_back_masked(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put(
+            "accounts",
+            "kaz",
+            {
+                "password_hash": "$2b$12$digest-8840",
+                "seeded_password_hash": "$2b$12$digest-8841",
+                "groups": ["dfe-admins"],
+            },
+            "test",
+        )
+        gc.put("gov_settings", "auth", {"breakglass": {"password_hash": "$2b$12$bg-8842"}}, "test")
+
+        accounts = client.get(
+            "/api/v1/gitops/classes/accounts/resources/kaz/vars", headers=admin_headers
+        )
+        assert accounts.status_code == 200, accounts.text
+        by_path = {v["path"]: v["value"] for v in accounts.json()}
+        assert by_path["password_hash"] == contract.REDACTED
+        assert by_path["seeded_password_hash"] == contract.REDACTED
+        assert by_path["groups[0]"] == "dfe-admins"
+        settings = client.get(
+            "/api/v1/gitops/classes/gov_settings/resources/auth/vars", headers=admin_headers
+        )
+        assert settings.status_code == 200, settings.text
+        assert {v["path"]: v["value"] for v in settings.json()} == {
+            "breakglass.password_hash": contract.REDACTED
+        }
+        for digest in ("digest-8840", "digest-8841", "bg-8842"):
+            assert digest not in accounts.text + settings.text
+
     def test_missing_resource_404(self, client, app, admin_headers, tmp_path):
         _wire_gitcrud(app, tmp_path)
         resp = client.get(

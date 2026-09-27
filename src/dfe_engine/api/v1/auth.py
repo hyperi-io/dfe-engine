@@ -19,8 +19,8 @@ from dfe_engine.api.deps import (
     create_access_token,
     get_role_config,
     require_local_account_enabled,
+    resolve_live_grants_for_user,
     resolve_live_groups_for_user,
-    resolve_live_roles_for_user,
 )
 from dfe_engine.api.password_change import PASSWORD_CHANGE_CLAIM
 from dfe_engine.api.write_turn import WRITE_TURN
@@ -33,7 +33,7 @@ from dfe_engine.auth.audit import (
 )
 from dfe_engine.auth.bootstrap import admin_account_name, admin_on_default_password
 from dfe_engine.auth.local_provider import LocalAuthProvider
-from dfe_engine.auth.models import AuthenticationError
+from dfe_engine.auth.models import AuthenticationError, ScopedGrant
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.setup_status import SetupStatus, evaluate_initial_setup
 from dfe_engine.settings import DFESettings
@@ -136,6 +136,7 @@ def _token_data(
     sub: str,
     org_id: str | None,
     roles: list[str],
+    grants: list[ScopedGrant],
     groups: list[str],
     org_ids: list[str],
     *,
@@ -143,9 +144,10 @@ def _token_data(
 ) -> dict:
     """The claims a session token carries for this account.
 
-    A token on an issued password carries no standing and says so in
-    ``PASSWORD_CHANGE_CLAIM``: dfe-hyperdx admits a claim-less token to its default
-    team, so it refuses one carrying that claim instead.
+    ``grants`` are ``roles`` with the scope the group files bind each at, which is
+    what the fork's role claim is decided on. A token on an issued password carries
+    no standing and says so in ``PASSWORD_CHANGE_CLAIM``: dfe-hyperdx admits a
+    claim-less token to its default team, so it refuses one carrying that claim.
     """
     if change_required:
         return {
@@ -163,7 +165,7 @@ def _token_data(
         "groups": groups,
         "org_ids": org_ids,
         # dfe-hyperdx gates changing what a team sees on this one value.
-        hyperdx_role.CLAIM: hyperdx_role.role_claim(roles),
+        hyperdx_role.CLAIM: hyperdx_role.role_claim(grants),
     }
 
 
@@ -214,10 +216,13 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
     audit_login_success(auth_ctx.user_id, "jwt", client_ip, auth_ctx.roles)
 
     change_required = _password_change_required(request, auth_ctx.user_id)
+    # The provider resolves role names only; the claim needs the scope each is bound at.
+    live = resolve_live_grants_for_user(request, auth_ctx.user_id, fallback_groups=auth_ctx.groups)
     data = _token_data(
         auth_ctx.user_id,
         auth_ctx.org_id,
         auth_ctx.roles,
+        live.grants,
         auth_ctx.groups,
         auth_ctx.org_ids,
         change_required=change_required,
@@ -240,10 +245,12 @@ async def refresh_token(user: CurrentUser, request: Request, settings: Settings)
     require_local_account_enabled(request, user.user_id)
     change_required = _password_change_required(request, user.user_id)
     # Re-resolved, so a role taken away is gone from the next token too.
+    live = resolve_live_grants_for_user(request, user.user_id, fallback_groups=user.groups)
     data = _token_data(
         user.user_id,
         user.org_id,
-        resolve_live_roles_for_user(request, user.user_id, fallback_groups=user.groups),
+        live.roles,
+        live.grants,
         resolve_live_groups_for_user(request, user.user_id, fallback_groups=user.groups),
         user.org_ids,
         change_required=change_required,

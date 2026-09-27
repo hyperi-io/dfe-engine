@@ -34,8 +34,8 @@ from .models import GroupChBinding
 # The tenant role: holding it never unfences a group or a caller from its org.
 ORG_VIEWER_ROLE = "org_viewer"
 
-# Engine roles whose groups also read the otel database (platform telemetry);
-# analysts and org-scoped viewers never do.
+# Engine roles whose groups also read the otel database (every org's platform
+# telemetry), held at system scope; analysts and org-scoped groups never do.
 OTEL_READER_ROLES = {"admin", "infra_admin"}
 
 
@@ -43,8 +43,9 @@ def platform_grants(grants: Iterable[ScopedGrant]) -> list[ScopedGrant]:
     """Return the grants that may read across orgs: SYSTEM scope, and not ``org_viewer``.
 
     A role bound at an org's scope covers that org alone, and ``org_viewer`` is the
-    tenant role. The group bindings here and the HyperDX connection read both decide
-    "every org" through this one filter.
+    tenant role. The group bindings and their otel reader here, the HyperDX
+    connection read and the fork's role claim all decide "every org" through this
+    one filter.
     """
     return [g for g in grants if g.scope.type == "system" and g.role != ORG_VIEWER_ROLE]
 
@@ -71,7 +72,8 @@ def derive_group_bindings(groups: list[Any], orgs: list[Any]) -> list[GroupChBin
         # Bound where api.deps binds them: the owning org's scope, else system-wide.
         grant_scope = Scope(type="org", id=group.scope_org) if group.scope_org else Scope()
         grants = [ScopedGrant(role=role, scope=grant_scope) for role in sorted(roles)]
-        if claimed and platform_grants(grants):
+        platform_roles = {grant.role for grant in platform_grants(grants)}
+        if claimed and platform_roles:
             logger.info(
                 "group holds system-scope platform roles; its CH user is unrestricted "
                 "despite org markers",
@@ -102,7 +104,7 @@ def derive_group_bindings(groups: list[Any], orgs: list[Any]) -> list[GroupChBin
             GroupChBinding(
                 group=group.name,
                 org=next(iter(resolved), ""),
-                ch_roles=["otel_reader"] if roles & OTEL_READER_ROLES else [],
+                ch_roles=["otel_reader"] if platform_roles & OTEL_READER_ROLES else [],
             )
         )
 

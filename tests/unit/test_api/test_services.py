@@ -116,9 +116,12 @@ class TestLegacySecretsAreStoredAndMaskedOnTheWayOut:
         resp = client.get(self.URL, headers=admin_headers)
         assert resp.status_code == 200, resp.text
         shown = resp.json()["config"]
-        assert shown["kafka"]["sasl"]["password"] == MASK
-        assert shown["server"]["auth"]["accepted_headers"] == [{"name": "x-key", "values": [MASK]}]
-        assert shown["server"]["auth"]["bearer"]["tokens"] == [MASK]
+        assert shown["kafka"]["sasl"]["password"] == contract.REDACTED
+        assert shown["server"]["auth"]["accepted_headers"] == [
+            {"name": "x-key", "values": [contract.REDACTED]}
+        ]
+        assert shown["server"]["auth"]["bearer"]["tokens"] == [contract.REDACTED]
+        assert MASK not in resp.text
         for secret in SECRETS:
             assert secret not in resp.text
 
@@ -149,6 +152,61 @@ class TestLegacySecretsAreStoredAndMaskedOnTheWayOut:
         assert "server.auth.bearer.tokens[1]" in resp.json()["message"]
         path = Path(api_settings.services.config_yaml_dir) / "receiver-placeholder.yaml"
         assert not path.exists()
+
+    def test_a_read_in_pydantic_s_own_placeholder_still_keeps_every_secret(
+        self, client, admin_headers, api_settings
+    ):
+        # A client holding a read from before the engine spelled every mask one way.
+        assert client.put(self.URL, json=self._body(), headers=admin_headers).status_code == 200
+        read = client.get(self.URL, headers=admin_headers).text
+        body = json.loads(read.replace(contract.REDACTED, MASK))["config"]
+        resp = client.put(self.URL, json=body, headers=admin_headers)
+        assert resp.status_code == 200, resp.text
+        saved = _saved(api_settings, "receiver-placeholder")
+        assert saved["kafka"]["sasl"]["password"] == "sasl-pw-8810"
+        assert saved["server"]["auth"]["accepted_headers"][0]["values"] == ["hdr-8812"]
+        assert saved["server"]["auth"]["bearer"]["tokens"] == ["tok-8813"]
+
+    @pytest.mark.parametrize(
+        ("url", "table", "body", "path", "secret"),
+        [
+            (
+                "/api/v1/services/fetcher/typed",
+                "fetcher-typed",
+                {"extra_env": {"AWS_SECRET_ACCESS_KEY": "aws-sk-8830", "AWS_REGION": "r-1"}},
+                ("extra_env", "AWS_SECRET_ACCESS_KEY"),
+                "aws-sk-8830",
+            ),
+            (
+                "/api/v1/services/transform-vrl/typed",
+                "transform-vrl-typed",
+                {"source": {"librdkafka_options": {"sasl.password": "vrl-pw-8831", "a": "b"}}},
+                ("source", "librdkafka_options", "sasl.password"),
+                "vrl-pw-8831",
+            ),
+        ],
+    )
+    def test_a_typed_string_map_is_masked_by_name_and_restores(
+        self, client, admin_headers, api_settings, url, table, body, path, secret
+    ):
+        # The typed dump masks only the fields its model declares secret; a map of
+        # plain strings has only its keys to go on.
+        assert client.put(url, json=body, headers=admin_headers).status_code == 200
+        resp = client.get(url, headers=admin_headers)
+        assert resp.status_code == 200, resp.text
+        shown = resp.json()["config"]
+        leaf = shown
+        for part in path:
+            leaf = leaf[part]
+        assert leaf == contract.REDACTED
+        assert secret not in resp.text
+
+        written = client.put(url, json=shown, headers=admin_headers)
+        assert written.status_code == 200, written.text
+        saved = _saved(api_settings, table)
+        for part in path:
+            saved = saved[part]
+        assert saved == secret
 
     def test_a_schema_less_config_is_masked_by_name(self, client, admin_headers, api_settings):
         url = "/api/v1/services/customsvc/one"

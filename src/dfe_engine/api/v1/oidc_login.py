@@ -43,7 +43,7 @@ from dfe_engine.api.deps import (
     _get_client_ip,
     jwt_authority_for,
     require_local_account_enabled,
-    resolve_live_roles_for_user,
+    resolve_live_grants_for_user,
 )
 from dfe_engine.auth import hyperdx_role
 from dfe_engine.auth.audit import audit_login_denied, audit_login_success
@@ -265,7 +265,8 @@ async def oidc_callback(
     require_local_account_enabled(request, identity.subject)
 
     # From the group files rather than the IdP token, for the claim and the audit.
-    roles = resolve_live_roles_for_user(request, identity.subject, fallback_groups=identity.groups)
+    live = resolve_live_grants_for_user(request, identity.subject, fallback_groups=identity.groups)
+    roles = live.roles
 
     # RE-MINT: the engine's own ES384 identity token is the ONLY token downstream
     # apps ever see. iss/iat/exp are set by the authority.
@@ -275,7 +276,7 @@ async def oidc_callback(
             "email": identity.email,
             "groups": identity.groups,
             # dfe-hyperdx gates changing what a team sees on this one value.
-            hyperdx_role.CLAIM: hyperdx_role.role_claim(roles),
+            hyperdx_role.CLAIM: hyperdx_role.role_claim(live.grants),
         }
     )
 

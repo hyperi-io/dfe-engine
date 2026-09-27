@@ -355,3 +355,23 @@ class TestTheHyperdxRoleClaim:
         resp = client.post("/api/v1/auth/refresh", headers=viewer_headers)
         assert resp.status_code == 200
         assert _claims(resp.json()["access_token"])[hyperdx_role.CLAIM] == hyperdx_role.MEMBER
+
+    def test_an_org_scoped_admin_carries_a_role_the_fork_refuses(self, client: TestClient, app):
+        # Its admin role binds at one org's scope, and the fork's admin changes
+        # what every team sees.
+        password = secrets.token_urlsafe(16)
+        app.state.account_store.create("acme-lead", password, groups=["acme-admins"])
+        app.state.group_store.create(
+            "acme-admins", ["admin"], members=["acme-lead"], scope="org:acme"
+        )
+        login = client.post(
+            "/api/v1/auth/login", json={"username": "acme-lead", "password": password}
+        )
+        assert login.status_code == 200, login.text
+        assert _claims(login.json()["access_token"])[hyperdx_role.CLAIM] == hyperdx_role.MEMBER
+
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        refreshed = client.post("/api/v1/auth/refresh", headers=headers)
+        assert refreshed.status_code == 200, refreshed.text
+        claim = _claims(refreshed.json()["access_token"])[hyperdx_role.CLAIM]
+        assert claim == hyperdx_role.MEMBER
