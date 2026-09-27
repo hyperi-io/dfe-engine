@@ -19,6 +19,7 @@ from dfe_engine.auth.jit import (
     JitAccountUnavailableError,
     JitIdentityCollisionError,
     JitProvisioner,
+    JitSubjectUnusableError,
 )
 from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
 
@@ -80,6 +81,22 @@ class TestSanitiseUsername:
 
     def test_already_safe(self):
         assert JitProvisioner.sanitise_username("simple-user") == "simple-user"
+
+
+class TestASubjectThatNamesNoAccount:
+    """A stem that is empty or longer than an account name leaves nothing to create."""
+
+    @pytest.mark.parametrize("subject", ["@@@", "a" * 129], ids=["empty-stem", "too-long"])
+    def test_it_is_refused_and_nothing_is_written(self, stores, subject):
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with pytest.raises(JitSubjectUnusableError) as refused:
+            jit.ensure_account(subject, ["dfe-admins"], "entra")
+
+        assert refused.value.reason == "unusable_subject"
+        assert str(refused.value) == "OIDC login refused"
+        assert accounts.list() == []
 
 
 class TestEnsureAccount:

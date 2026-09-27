@@ -4,12 +4,12 @@ Uses FastAPI TestClient with tmp_path isolation for registries.
 Auth stores are bootstrapped via bootstrap_auth() with test accounts.
 """
 
-from __future__ import annotations
-
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from scalo.logger import logger
 
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries, create_access_token
@@ -32,6 +32,24 @@ ADMIN_PASSWORD = "test-admin-pw"
 # The break-glass password the recovery_accounts fixture seeds, standing in for the
 # hash a deployment commits to its deploy repo.
 BREAKGLASS_PASSWORD = "test-breakglass-pw"
+
+
+@pytest.fixture
+def audit_events() -> Iterator[list[dict]]:
+    """Every event the app logs while the test runs, from a real sink on its logger.
+
+    Each entry is the event name under ``event`` plus the structured fields it carried.
+    """
+    events: list[dict] = []
+
+    def record(message) -> None:
+        events.append({"event": message.record["message"], **message.record["extra"]})
+
+    handler = logger.add(record, level="INFO", format="{message}")
+    try:
+        yield events
+    finally:
+        logger.remove(handler)
 
 
 @pytest.fixture
