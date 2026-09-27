@@ -235,6 +235,12 @@ class TestGet:
         long_token = full_key.split("_", maxsplit=3)[3]
         assert long_token not in key_meta.key_hash
 
+    def test_a_name_that_is_a_path_reads_no_file(self, store: APIKeyStore, tmp_path: Path) -> None:
+        """An ``apikey:<name>`` session subject reaches this lookup, so it never resolves a path."""
+        APIKeyStore(tmp_path / "elsewhere").create("outside", groups=["dfe-admins"])
+
+        assert store.get("../elsewhere/outside") is None
+
 
 # ---------------------------------------------------------------------------
 # List

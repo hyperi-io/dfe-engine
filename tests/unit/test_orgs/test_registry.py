@@ -6,8 +6,6 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
-
 import time
 
 import pytest
@@ -243,6 +241,34 @@ class TestDelete:
         registry.delete("acme")
         assert registry.get("beta") is not None
         assert len(registry.list()) == 1
+
+
+class TestANameThatIsAPath:
+    """Every lookup joins the name onto the orgs directory, so one must not climb out."""
+
+    NAME = "../elsewhere/outside"
+
+    @pytest.fixture
+    def outside(self, tmp_path):
+        OrgRegistry(tmp_path / "elsewhere").create("outside", display_name="Not an org here")
+        return tmp_path / "elsewhere" / "outside.yaml"
+
+    def test_get_finds_nothing(self, registry, outside):
+        assert registry.get(self.NAME) is None
+
+    def test_update_leaves_the_file_alone(self, registry, outside):
+        before = outside.read_text()
+
+        with pytest.raises(KeyError):
+            registry.update(self.NAME, display_name="rewritten")
+
+        assert outside.read_text() == before
+
+    def test_delete_leaves_the_file_alone(self, registry, outside):
+        with pytest.raises(KeyError):
+            registry.delete(self.NAME)
+
+        assert outside.exists()
 
 
 # ---------------------------------------------------------------------------

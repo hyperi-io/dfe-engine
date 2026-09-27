@@ -32,7 +32,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 from scalo.concurrency import run_blocking
 
-from dfe_engine.api.deps import CurrentUser, Settings, require_action
+from dfe_engine.api.deps import (
+    CurrentUser,
+    Settings,
+    account_for_session_subject,
+    require_action,
+)
 from dfe_engine.api.pagination import (
     PaginatedResponse,
     PaginationParams,
@@ -275,6 +280,21 @@ def _require_account(store: Any, username: str) -> Account:
     return account
 
 
+def _require_own_account(store: Any, user_id: str) -> Account:
+    """The account the session is bound to, found the way authentication found it.
+
+    A proxied or RP-login subject such as ``jane@corp.com`` is stored under its
+    JIT stem, so looking up the raw subject alone misses the caller's own account.
+    """
+    account = account_for_session_subject(store, user_id)
+    if account is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Account '{user_id}' not found"},
+        )
+    return account
+
+
 async def _reset_stored_password(
     request: Request,
     settings: Settings,
@@ -433,7 +453,7 @@ async def get_current_user_account(
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    account = _require_account(store, user.user_id)
+    account = _require_own_account(store, user.user_id)
     response = _account_response(account)
     if account.password_change_required:
         response.groups = []
@@ -455,9 +475,9 @@ async def update_current_user_account(
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    existing = _require_account(store, user.user_id)
+    existing = _require_own_account(store, user.user_id)
     fields = _contact_updates(body)
-    account = store.update(user.user_id, **fields) if fields else existing
+    account = store.update(existing.username, **fields) if fields else existing
     await _persist_account(
         request,
         settings,
@@ -563,10 +583,11 @@ async def reset_current_user_password(
     An account on an issued password may call this and nothing else that
     changes state, and the reset clears ``password_change_required``.
     """
+    account = _require_own_account(request.app.state.account_store, user.user_id)
     return await _reset_stored_password(
         request,
         settings,
-        username=user.user_id,
+        username=account.username,
         new_password=body.new_password,
         actor=user.user_id,
     )
