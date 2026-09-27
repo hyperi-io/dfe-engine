@@ -867,9 +867,11 @@ class TestTransformInstance:
             "sink": {"topic": "auth_load"},
         }
 
-    def test_on_direct_it_listens_and_pushes_at_the_loader(
+    def test_on_direct_it_listens_and_pushes_at_the_loader_under_its_load_key(
         self, direct_settings, direct_transforms
     ):
+        # The loader takes a record's table from its key when the program left no
+        # _source in it, so an empty key lands the source in the main table.
         registry = FakeRegistry([_matched("auth", transform={"engine": "vrl"})])
 
         compiled = routing.compile_for(
@@ -878,14 +880,40 @@ class TestTransformInstance:
 
         assert compiled == {
             "source": {"transport": "grpc", "listen": "0.0.0.0:6000"},
+            "sink": {"transport": "grpc", "endpoint": LOADER_ENDPOINT, "topic": "auth_load"},
+        }
+
+    def test_the_output_key_is_the_same_on_both_transports(
+        self, settings, direct_settings, direct_transforms
+    ):
+        registry = FakeRegistry([_matched("auth", transform={"engine": "vrl"})])
+        app = catalogue.descriptor(VRL)
+
+        bus = routing.compile_for(app, registry, settings, instance="auth")
+        direct = routing.compile_for(app, registry, direct_settings, instance="auth")
+
+        assert direct["sink"]["topic"] == bus["sink"]["topic"] == "auth_load"
+
+    def test_on_direct_vector_keeps_the_name_it_derives_its_output_key_from(self, direct_settings):
+        # dfe-transform-vector derives sink.topic from dfe_source on either
+        # transport, and its bridge stamps that topic on every record it pushes.
+        registry = FakeRegistry([_matched("auth", transform={"engine": "vector"})])
+
+        compiled = routing.compile_for(
+            catalogue.descriptor("dfe-transform-vector"), registry, direct_settings, instance="auth"
+        )
+
+        assert compiled == {
+            "dfe_source": "auth",
+            "source": {"transport": "grpc", "listen": "0.0.0.0:6000"},
             "sink": {"transport": "grpc", "endpoint": LOADER_ENDPOINT},
         }
 
     def test_moving_a_source_to_direct_clears_its_bus_wiring(
         self, settings, direct_settings, direct_transforms
     ):
-        # The overlay is seeded with the bus binding at deploy, so the direct
-        # blocks have to replace it whole rather than sit beside its topics.
+        # The overlay is seeded with the bus binding at deploy, so the listener
+        # has to replace the source block whole rather than sit beside its topics.
         registry = FakeRegistry([_matched("auth", transform={"engine": "vrl"})])
         app = instances.instance_of(VRL, "auth")
         doc = instances.initial_overlay(app)
@@ -895,7 +923,28 @@ class TestTransformInstance:
         routing.sync(app.descriptor, doc, registry, direct_settings, instance="auth")
 
         assert doc["config"]["source"] == {"transport": "grpc", "listen": "0.0.0.0:6000"}
-        assert doc["config"]["sink"] == {"transport": "grpc", "endpoint": LOADER_ENDPOINT}
+        assert doc["config"]["sink"] == {
+            "transport": "grpc",
+            "endpoint": LOADER_ENDPOINT,
+            "topic": "auth_load",
+        }
+
+    def test_an_overlay_synced_before_the_load_key_is_drift(
+        self, direct_settings, direct_transforms
+    ):
+        # A direct instance deployed without the key has to be re-synced, not left
+        # sending every record the program strips of _source to the main table.
+        registry = FakeRegistry([_matched("auth", transform={"engine": "vrl"})])
+        app = instances.instance_of(VRL, "auth")
+        doc = instances.initial_overlay(app)
+        routing.sync(app.descriptor, doc, registry, direct_settings, instance="auth")
+        del doc["config"]["sink"]["topic"]
+
+        found = routing.status(app.descriptor, doc, registry, direct_settings, instance="auth")
+
+        assert found.drift
+        assert routing.sync(app.descriptor, doc, registry, direct_settings, instance="auth")
+        assert doc["config"]["sink"]["topic"] == "auth_load"
 
     def test_the_variant_lands_where_the_app_names_it(self, settings):
         elastic = catalogue.descriptor("dfe-transform-elastic")
