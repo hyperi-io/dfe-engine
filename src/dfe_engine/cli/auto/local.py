@@ -30,7 +30,8 @@ GitCrud is built standalone (no ``app.state`` - the daemon is dead) from
 ``push=False`` so a break-glass write only commits LOCALLY; pushing is a separate
 deliberate step (``dfe local push``, or the post-write prompt). This matches the
 gitops-survivability model: the mutation is a git commit, publishing it is its own
-act.
+act. In a clone a push-on daemon also uses, push straight after the commit: the
+daemon's next publish or refresh resets the tree and discards an unpushed commit.
 """
 
 import copy
@@ -259,6 +260,12 @@ def _do_push(repo_path: str) -> None:
         click.echo("nothing to push (local branch not ahead of remote).")
 
 
+_UNPUSHED_WARNING = (
+    "Run `dfe local push` now: a daemon that pushes from this same clone discards "
+    "unpushed commits at its next publish or refresh."
+)
+
+
 def _maybe_push(repo_path: Path, *, push: bool | None, yes: bool) -> None:
     """Handle the post-write push: --push pushes, --no-push skips, else prompt.
 
@@ -266,13 +273,13 @@ def _maybe_push(repo_path: Path, *, push: bool | None, yes: bool) -> None:
     the commit local (safe default - publishing stays a deliberate act).
     """
     if push is False:
-        click.echo("committed locally; not pushed (--no-push). Run `dfe local push` to publish.")
+        click.echo(f"committed locally; not pushed (--no-push). {_UNPUSHED_WARNING}")
         return
     do = push is True
     if push is None and not yes:
         do = click.confirm("Push to the remote now?", default=False)
     if not do:
-        click.echo("committed locally; not pushed. Run `dfe local push` to publish.")
+        click.echo(f"committed locally; not pushed. {_UNPUSHED_WARNING}")
         return
     _do_push(str(repo_path))
 

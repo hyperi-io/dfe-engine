@@ -13,6 +13,7 @@ from dulwich import porcelain
 
 from dfe_engine.gitops import repo as repo_module
 from dfe_engine.gitops.repo import GitopsRemoteError, GitopsRepo, PublishResult
+from dfe_engine.settings import GitopsWriteSettings
 
 # The hanging-forge tests must fail on the timeout, not on the machine being slow.
 _HANG_TIMEOUT_SECONDS = 1.0
@@ -326,6 +327,38 @@ def test_refresh_serves_this_clone_when_the_forge_stops_answering(
     assert time.monotonic() - started < _HANG_BOUND_SECONDS
     assert repo.head_revision() == head
     assert (tmp_path / "a" / "README").read_text() == "seed\n"
+
+
+def test_read_remote_file_gives_up_on_a_forge_that_never_answers(
+    tmp_path: Path, black_holed_forge: str
+) -> None:
+    """The review-PR merge poll reads through this; unbounded, it waits out the OS."""
+    repo = _clone_then_point_at(tmp_path, black_holed_forge)
+
+    started = time.monotonic()
+    with pytest.raises(GitopsRemoteError):
+        repo.read_remote_file("README")
+
+    assert time.monotonic() - started < _HANG_BOUND_SECONDS
+
+
+def test_ensure_gives_up_cloning_from_a_forge_that_never_answers(
+    tmp_path: Path, black_holed_forge: str
+) -> None:
+    """A clone runs before the engine serves anything, so a hang here holds startup."""
+    repo = GitopsRepo(
+        local_path=str(tmp_path / "a"),
+        repo_url=black_holed_forge,
+        branch="main",
+        push=True,
+        write=GitopsWriteSettings(timeout_seconds=_HANG_TIMEOUT_SECONDS),
+    )
+
+    started = time.monotonic()
+    with pytest.raises(GitopsRemoteError):
+        repo.ensure()
+
+    assert time.monotonic() - started < _HANG_BOUND_SECONDS
 
 
 def test_a_hanging_forge_is_reported_once_per_outage_not_once_per_read(

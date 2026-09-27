@@ -46,7 +46,7 @@ from .metrics import GitopsMetrics, WriteOp
 if TYPE_CHECKING:
     import urllib3
     from dulwich.client import FetchPackResult, LsRemoteResult, SendPackResult
-    from dulwich.config import Config
+    from dulwich.config import Config, StackedConfig
 
 T = TypeVar("T")
 
@@ -70,6 +70,17 @@ _TRANSIENT_HTTP_STATUS = re.compile(r"unexpected http resp (?:408|429|5\d\d)\b")
 def _as_path_bytes(host_path: str | bytes) -> bytes:
     """dulwich's clients take the remote path as bytes; the transport hands back either."""
     return host_path.encode() if isinstance(host_path, str) else host_path
+
+
+def _default_git_config() -> StackedConfig:
+    """The config porcelain builds for a remote op that has no repo to read one from."""
+    from dulwich.config import StackedConfig, env_config
+
+    config = StackedConfig.default()
+    env_override = env_config(os.environ)
+    if env_override is not None:
+        config.backends.insert(0, env_override)
+    return config
 
 
 def _is_transient(exc: BaseException, *, outer: BaseException | None = None) -> bool:
@@ -340,9 +351,7 @@ class GitopsRepo:
         from dulwich.repo import Repo
 
         result = self._remote_op(
-            lambda errstream: porcelain.fetch(
-                str(self._path), self._authed_url(), errstream=errstream
-            )
+            lambda errstream: self._fetch(errstream, timeout=REMOTE_HEAD_TIMEOUT_SECONDS)
         )
         self._scrub_remote()
         head = result.refs.get(b"refs/heads/" + self._branch.encode())
@@ -466,14 +475,7 @@ class GitopsRepo:
         if self._repo_url:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             logger.info("Cloning gitops deploy repo", repo_url=self._repo_url)
-            self._remote_op(
-                lambda errstream: porcelain.clone(
-                    self._authed_url(),
-                    str(self._path),
-                    branch=self._branch.encode(),
-                    errstream=errstream,
-                )
-            )
+            self._remote_op(self._clone)
             self._scrub_remote()
             return self._path
         self._path.mkdir(parents=True, exist_ok=True)
@@ -505,20 +507,36 @@ class GitopsRepo:
         remote keeps dulwich's own behaviour.
         """
         from dulwich.client import get_transport_and_path
-        from dulwich.config import StackedConfig, env_config
 
         url = self._authed_url()
         if not url.startswith(_BOUNDABLE_SCHEMES):
             return porcelain.ls_remote(url)
 
-        config = StackedConfig.default()
-        env_override = env_config(os.environ)
-        if env_override is not None:
-            config.backends.insert(0, env_override)
+        config = _default_git_config()
         client, host_path = get_transport_and_path(
             url, config=config, pool_manager=self._bounded_pool(config, REMOTE_HEAD_TIMEOUT_SECONDS)
         )
         return client.get_refs(_as_path_bytes(host_path))
+
+    def _clone(self, errstream: RedactingErrStream) -> None:
+        """Clone the tracked branch, with the HTTP(S) transport held to the write timeout.
+
+        The clone runs before the engine serves anything, so a forge that stops
+        answering would otherwise hold startup for the OS timeout. It takes the write
+        timeout rather than the read one because the forge packs the whole repo before
+        it sends the first byte.
+        """
+        url = self._authed_url()
+        pool_manager = None
+        if url.startswith(_BOUNDABLE_SCHEMES):
+            pool_manager = self._bounded_pool(_default_git_config(), self._write.timeout_seconds)
+        porcelain.clone(
+            url,
+            str(self._path),
+            branch=self._branch.encode(),
+            errstream=errstream,
+            pool_manager=pool_manager,
+        )
 
     def _fetch(self, errstream: RedactingErrStream, *, timeout: float) -> FetchPackResult:
         """Fetch objects into the local store, with the HTTP(S) transport bounded.
