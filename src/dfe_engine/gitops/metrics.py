@@ -18,6 +18,7 @@ anything, which is the state the unit suite and the CLI run in.
 from typing import Any, Literal
 
 BATCHES = "gitops_batches_total"
+WRITE_RETRIES = "gitops_write_retries_total"
 
 BatchOutcome = Literal["committed", "unchanged", "split", "discarded", "failed"]
 """How a batch ended.
@@ -27,6 +28,16 @@ BatchOutcome = Literal["committed", "unchanged", "split", "discarded", "failed"]
 - ``split``: landed early, because a review-branch write needed a commit to branch from.
 - ``discarded``: dropped its staged writes on an error inside the block.
 - ``failed``: committed but could not push.
+"""
+
+WriteOp = Literal["fetch", "push"]
+"""The remote call a write makes: the fetch before its commit, or the push after."""
+
+RetryOutcome = Literal["retried", "exhausted"]
+"""What a transient failure of a write's remote call led to.
+
+- ``retried``: the call was attempted again inside the write budget.
+- ``exhausted``: the budget ran out, so the write failed and the API answered 503.
 """
 
 
@@ -45,6 +56,11 @@ class GitopsMetrics:
         self._batches = manager.counter(
             BATCHES, "Batched deploy-repo writes, by how the batch ended", ["outcome"]
         )
+        self._write_retries = manager.counter(
+            WRITE_RETRIES,
+            "Transient failures of a deploy-repo write's remote call, by call and outcome",
+            ["op", "outcome"],
+        )
 
     @property
     def enabled(self) -> bool:
@@ -57,5 +73,18 @@ class GitopsMetrics:
             return
         self._batches.labels(outcome=outcome).inc()
 
+    def write_retry(self, op: WriteOp, outcome: RetryOutcome) -> None:
+        """Record a retry of a write's remote call, or the budget running out on it."""
+        if self._manager is None:
+            return
+        self._write_retries.labels(op=op, outcome=outcome).inc()
 
-__all__ = ["BATCHES", "BatchOutcome", "GitopsMetrics"]
+
+__all__ = [
+    "BATCHES",
+    "WRITE_RETRIES",
+    "BatchOutcome",
+    "GitopsMetrics",
+    "RetryOutcome",
+    "WriteOp",
+]

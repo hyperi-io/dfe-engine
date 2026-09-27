@@ -133,6 +133,22 @@ try:
 except Exception:  # never let a settings refactor break test collection
     pass
 
+# Same guard for a deploy-repo write: a test whose remote is unreachable fails in
+# milliseconds instead of retrying for the production budget. Tests of the retry
+# itself pass their own GitopsWriteSettings.
+try:
+    from dfe_engine.settings import GitopsWriteSettings
+
+    for _gw_field, _gw_val in (
+        ("budget_seconds", 0.05),
+        ("wait_initial", 0.01),
+        ("wait_max", 0.02),
+    ):
+        GitopsWriteSettings.model_fields[_gw_field].default = _gw_val
+    GitopsWriteSettings.model_rebuild(force=True)
+except Exception:  # never let a settings refactor break test collection
+    pass
+
 # --------------------------------------------------------------------------
 # Test-session guard: HTTP calls must FAIL FAST, never wait the retry budget.
 #

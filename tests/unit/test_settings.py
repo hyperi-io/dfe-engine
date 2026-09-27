@@ -696,6 +696,22 @@ class TestGitopsMode:
         overrides = _get_env_overrides()
         assert overrides["gitops"]["mode"] == "solo"
 
+    def test_write_bounds_come_from_the_environment(self, monkeypatch):
+        from dfe_engine.settings import GitopsSettings, _get_env_overrides
+
+        monkeypatch.setenv("DFE_GITOPS_WRITE_TIMEOUT_SECONDS", "30")
+        monkeypatch.setenv("DFE_GITOPS_WRITE_BUDGET_SECONDS", "45.5")
+        write = GitopsSettings(**_get_env_overrides()["gitops"]).write
+        assert write.timeout_seconds == 30.0
+        assert write.budget_seconds == 45.5
+
+    def test_write_timeout_is_longer_than_the_read_bound(self):
+        from dfe_engine.gitops.repo import REMOTE_HEAD_TIMEOUT_SECONDS
+        from dfe_engine.settings import GitopsWriteSettings
+
+        timeout = GitopsWriteSettings.model_fields["timeout_seconds"].default
+        assert timeout > REMOTE_HEAD_TIMEOUT_SECONDS
+
 
 class TestIsDevPosture:
     def test_dev_postures(self):
@@ -801,11 +817,6 @@ class TestEverySettingIsRead:
     # Fields with no reader today. Each needs wiring or deleting -- see #239.
     # Remove an entry when its field gains a reader; never add one to go green.
     KNOWN_UNREAD = {
-        ("ClickHouseResilienceSettings", "wait_initial"),
-        ("ClickHouseResilienceSettings", "wait_max"),
-        ("ClickHouseResilienceSettings", "wait_multiplier"),
-        ("ClickHouseResilienceSettings", "budget_seconds"),
-        ("ClickHouseResilienceSettings", "waking_budget_seconds"),
         ("HuntsSettings", "num_threads"),
         ("HuntsSettings", "jitter_seconds"),
         ("HuntsSettings", "max_concurrent_queries"),

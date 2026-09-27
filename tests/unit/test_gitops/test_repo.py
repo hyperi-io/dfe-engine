@@ -1,7 +1,5 @@
 """Real-git tests for GitopsRepo (dulwich, tempdirs -- no mocks)."""
 
-from __future__ import annotations
-
 import io
 import shutil
 import socket
@@ -116,30 +114,28 @@ def test_a_second_clone_publishes_on_the_remote_head(tmp_path: Path) -> None:
 
 
 def test_a_push_the_remote_moved_under_is_re_applied_once(tmp_path: Path, monkeypatch) -> None:
-    """The remote moves between the sync and the push: the write is redone on its head."""
+    """The remote moves between the fetch and the push: the write is redone on its head."""
     remote, branch = _seeded_remote(tmp_path)
     first = GitopsRepo(local_path=str(tmp_path / "a"), repo_url=remote, branch=branch, push=True)
     second = GitopsRepo(local_path=str(tmp_path / "b"), repo_url=remote, branch=branch, push=True)
     first.ensure()
     second.ensure()
 
-    real_sync = second.sync
-    calls: list[bool] = []
+    real_push = second._push_refspec
+    pushes: list[bytes] = []
 
-    def racing_sync(*, discard_local: bool = False) -> bool:
-        # The first sync sees a quiet remote; the other replica then pushes before
-        # this clone's push goes out.
-        calls.append(discard_local)
-        if len(calls) == 1:
-            moved = real_sync(discard_local=discard_local)
+    def racing_push(refspec: bytes) -> None:
+        # The fetch saw a quiet remote; the other replica then pushes before this
+        # clone's first push goes out.
+        pushes.append(refspec)
+        if len(pushes) == 1:
             first.publish({"a.yaml": "a: 1\n"}, message="from a")
-            return moved
-        return real_sync(discard_local=discard_local)
+        real_push(refspec)
 
-    monkeypatch.setattr(second, "sync", racing_sync)
+    monkeypatch.setattr(second, "_push_refspec", racing_push)
     res = second.publish({"b.yaml": "b: 1\n"}, message="from b")
     assert res.pushed is True
-    assert calls == [False, True]
+    assert len(pushes) == 2
 
     assert _remote_files(tmp_path, remote, "check") == {"a.yaml", "b.yaml"}
 
@@ -344,19 +340,6 @@ def test_a_hanging_forge_is_reported_once_per_outage_not_once_per_read(
         assert repo.refresh() is False
 
     assert len(recorder.warnings) == 1
-
-
-def test_sync_gives_up_on_a_forge_that_never_answers(
-    tmp_path: Path, black_holed_forge: str
-) -> None:
-    """The fetch runs under the tree lock, so unbounded it holds every other reader."""
-    repo = _clone_then_point_at(tmp_path, black_holed_forge)
-
-    started = time.monotonic()
-    with pytest.raises(GitopsRemoteError):
-        repo.sync()
-
-    assert time.monotonic() - started < _HANG_BOUND_SECONDS
 
 
 def test_a_fetch_that_hangs_leaves_the_read_serving_this_clone(
