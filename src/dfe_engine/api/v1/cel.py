@@ -6,21 +6,21 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""CEL router — syntax check + tier classification for UI live validation.
+"""CEL router -- syntax check + tier classification for UI live validation.
 
 Used by the TS UI to validate CEL expressions as the user types. Returns
 structured results with:
 
 - Real CEL parser errors (via ``cel-interpreter`` v0.10.0, same engine
-  scalo-rs uses at runtime — zero drift between UI and runtime)
+  scalo-rs uses at runtime -- zero drift between UI and runtime)
 - Performance tier classification (Tier 1 / 2 / 3)
 - Referenced fields, recognised operation, human-readable description
 - Required config opt-ins for the tier
 
 ## Endpoints
 
-- ``POST /cel/check`` — validate a single expression
-- ``POST /cel/check-batch`` — validate a list of expressions in one call
+- ``POST /cel/check`` -- validate a single expression
+- ``POST /cel/check-batch`` -- validate a list of expressions in one call
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from dfe_engine.cel.syntax import SyntaxCheckResult, check_syntax
 router = APIRouter(prefix="/cel", tags=["cel"])
 
 
-# ── Request/Response models ─────────────────────────────────
+# -- Request/Response models ---------------------------------
 
 
 class CelCheckRequest(BaseModel):
@@ -50,7 +50,7 @@ class CelCheckRequest(BaseModel):
         default=False,
         description=(
             "If true, apply DFE profile restrictions (reject regex/iteration/time). "
-            "Leave false for transport filters — Tier 3 is classification only, "
+            "Leave false for transport filters -- Tier 3 is classification only, "
             "not rejection."
         ),
     )
@@ -139,7 +139,7 @@ class CelCheckBatchResponse(BaseModel):
     )
 
 
-# ── Endpoints ────────────────────────────────────────────────
+# -- Endpoints ------------------------------------------------
 
 
 @router.post(
@@ -149,7 +149,7 @@ class CelCheckBatchResponse(BaseModel):
     description=(
         "Returns syntax validity, performance tier, referenced fields, and a "
         "human-readable description of what the expression matches. "
-        "Designed for live UI validation as the user types — completes in <1ms."
+        "Designed for live UI validation as the user types -- completes in <1ms."
     ),
     dependencies=[Depends(require_action(scopes_dict["cel_check"]))],
 )

@@ -1,4 +1,4 @@
-"""HyperDX SQL sanitizer — strip HyperDX-generated patterns from SQL.
+"""HyperDX SQL sanitizer -- strip HyperDX-generated patterns from SQL.
 
 HyperDX generates SQL with patterns that are not part of user detection
 logic: epoch-millis time bounds, time-bucket columns, SETTINGS clauses,
@@ -21,8 +21,8 @@ Usage::
 
     sanitizer = HdxSanitizer()
     result = sanitizer.sanitize(raw_sql)
-    # result.clean_sql  — SQL with HyperDX patterns removed
-    # result.stripped_time_bounds  — patterns that were removed
+    # result.clean_sql  -- SQL with HyperDX patterns removed
+    # result.stripped_time_bounds  -- patterns that were removed
 """
 
 from __future__ import annotations
@@ -48,12 +48,12 @@ class HdxSanitizeResult:
 class HdxSanitizer:
     """Strip HyperDX-generated SQL patterns.
 
-    Processing order matters — SETTINGS must be stripped first
+    Processing order matters -- SETTINGS must be stripped first
     (always at end of SQL), then LIMIT, then structural patterns
     in SELECT/GROUP BY/ORDER BY, and finally WHERE time bounds.
     """
 
-    # ── Compiled patterns ────────────────────────────────────
+    # -- Compiled patterns ------------------------------------
 
     # SETTINGS clause: always at end of SQL
     _SETTINGS_RE = re.compile(
@@ -97,7 +97,7 @@ class HdxSanitizer:
 
     # Compound time bounds:
     #   toStartOfInterval(fromUnixTimestamp64Milli(N), INTERVAL M unit) [+/- INTERVAL M unit]
-    # These appear as RHS of comparisons — match the full expression
+    # These appear as RHS of comparisons -- match the full expression
     _COMPOUND_TIME_BOUND_RE = re.compile(
         r"""\b\w+\s*(?:>=?|<=?|=)\s*
         toStartOfInterval\s*\(\s*
@@ -108,7 +108,7 @@ class HdxSanitizer:
         re.IGNORECASE | re.VERBOSE,
     )
 
-    # ── Public API ───────────────────────────────────────────
+    # -- Public API -------------------------------------------
 
     def sanitize(self, sql: str) -> HdxSanitizeResult:
         """Strip all HyperDX patterns from SQL.
@@ -126,7 +126,7 @@ class HdxSanitizer:
         if not text:
             return result
 
-        # Phase 1: SETTINGS (always at end — remove first)
+        # Phase 1: SETTINGS (always at end -- remove first)
         text = self._strip_settings(text, result)
 
         # Phase 2: LIMIT/OFFSET
@@ -150,7 +150,7 @@ class HdxSanitizer:
         result.clean_sql = text.strip()
         return result
 
-    # ── Internal methods ─────────────────────────────────────
+    # -- Internal methods -------------------------------------
 
     def _strip_settings(self, text: str, result: HdxSanitizeResult) -> str:
         m = self._SETTINGS_RE.search(text)
@@ -220,7 +220,7 @@ class HdxSanitizer:
         text = re.sub(r"\bAND\s+AND\b", "AND", text, flags=re.IGNORECASE)
         text = re.sub(r"\bOR\s+OR\b", "OR", text, flags=re.IGNORECASE)
 
-        # Remove empty parentheses — but NOT after identifiers (function calls)
+        # Remove empty parentheses -- but NOT after identifiers (function calls)
         # e.g. remove standalone "()" but keep "count()" and "countIf()"
         text = re.sub(r"(?<!\w)\(\s*\)", "", text)
 

@@ -1,7 +1,7 @@
 """Helm values compiler for DFE services.
 
 Merges deployment config + service config + source routing + KEDA wiring
-into complete values.yaml per service. Sits ON TOP of Argo CD — generates
+into complete values.yaml per service. Sits ON TOP of Argo CD -- generates
 what Argo CD consumes, plus handles imperative operations Argo can't do.
 
 Compilation is **pure** (no side effects). Imperative operations (DDL, topics)
@@ -36,11 +36,11 @@ class HelmValuesCompiler:
     """Compiles Helm values.yaml files from DFE registries + environment.
 
     Compilation flow per service:
-    1. Deployment layer → image, replicas, resources, pod, k8s_service
-    2. KEDA wiring → abstract triggers resolved to concrete bootstrap servers
-    3. Service config → runtime config dict with source routing injected
-    4. Secret scrubbing → blank any SecretStr values
-    5. Compose → HelmServiceValues
+    1. Deployment layer -> image, replicas, resources, pod, k8s_service
+    2. KEDA wiring -> abstract triggers resolved to concrete bootstrap servers
+    3. Service config -> runtime config dict with source routing injected
+    4. Secret scrubbing -> blank any SecretStr values
+    5. Compose -> HelmServiceValues
 
     Args:
         deployment_registry: Registry for K8s deployment configs.
@@ -70,7 +70,7 @@ class HelmValuesCompiler:
         """Compile Helm values for all services that have both deployment and service configs.
 
         Args:
-            group_role_mapping: OIDC group → DFE role names (for Argo RBAC generation).
+            group_role_mapping: OIDC group -> DFE role names (for Argo RBAC generation).
             role_config: Role configuration (defaults to built-in roles.yaml).
             argo_project: Argo CD project name for RBAC scoping.
 
@@ -408,7 +408,7 @@ class HelmValuesCompiler:
             if hasattr(values, "model_dump"):
                 data = values.model_dump(mode="json")
             else:
-                data = values  # External component — already a dict
+                data = values  # External component -- already a dict
             yaml_dump(data, path)
             written.append(path)
 

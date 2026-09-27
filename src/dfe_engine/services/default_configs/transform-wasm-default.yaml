@@ -1,4 +1,4 @@
-# DFE Transform WASM — Development defaults
+# DFE Transform WASM -- Development defaults
 # Kafka-to-Kafka transform using WASM modules
 
 kafka:

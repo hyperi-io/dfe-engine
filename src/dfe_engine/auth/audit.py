@@ -9,10 +9,10 @@
 """SOC2 audit logging via structured log events.
 
 Each function emits a single structured log event. Events flow through the
-OTel pipeline automatically: scalo.logger → structured JSON →
-OTel Collector → ClickHouse → HyperDX.
+OTel pipeline automatically: scalo.logger -> structured JSON ->
+OTel Collector -> ClickHouse -> HyperDX.
 
-No custom ClickHouse tables are needed — the log events are the audit trail.
+No custom ClickHouse tables are needed -- the log events are the audit trail.
 
 Event naming convention: ``auth.<domain>.<outcome>``
 - Success events: ``logger.info``

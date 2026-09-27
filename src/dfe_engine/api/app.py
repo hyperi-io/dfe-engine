@@ -1,4 +1,4 @@
-"""DFE Engine API — FastAPI application factory.
+"""DFE Engine API -- FastAPI application factory.
 
 Usage::
 
@@ -518,7 +518,7 @@ def create_app(
         openapi_tags = [E2E_OPENAPI_TAG]
     app = FastAPI(
         title="DFE Engine API",
-        description="Data Fusion Engine — configuration, scheduling, and query API",
+        description="Data Fusion Engine -- configuration, scheduling, and query API",
         version=__version__,
         lifespan=lifespan,
         docs_url=None if e2e_docs else "/docs",

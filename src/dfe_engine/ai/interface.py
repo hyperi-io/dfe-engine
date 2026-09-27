@@ -1,13 +1,13 @@
-"""AI Module Interface — ABC contracts for pluggable AI modules.
+"""AI Module Interface -- ABC contracts for pluggable AI modules.
 
 Engine defines the interface contracts. Implementations live in separate
 repos and register via ``AIModuleRegistry``. Three module types:
 
-1. **QueryOptimiser** — takes a query + execution profile, returns a
+1. **QueryOptimiser** -- takes a query + execution profile, returns a
    proposed optimised query with rationale.
-2. **SchemaOptimiser** — takes a source schema, returns proposed
+2. **SchemaOptimiser** -- takes a source schema, returns proposed
    meta-schema improvements.
-3. **LogParser** — takes raw log samples, returns parsers + proposed
+3. **LogParser** -- takes raw log samples, returns parsers + proposed
    meta-schema.
 
 All modules execute asynchronously. The engine submits work via
@@ -39,7 +39,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
-# ── Enums ──────────────────────────────────────────────────
+# -- Enums --------------------------------------------------
 
 
 class AIModuleType(str, Enum):
@@ -60,7 +60,7 @@ class AIModuleStatus(str, Enum):
     FAILED = "failed"
 
 
-# ── Result model ───────────────────────────────────────────
+# -- Result model -------------------------------------------
 
 
 class AIModuleResult(BaseModel):
@@ -77,17 +77,17 @@ class AIModuleResult(BaseModel):
     )
 
 
-# ── Base ABC ───────────────────────────────────────────────
+# -- Base ABC -----------------------------------------------
 
 
 class AIModuleInterface(ABC):
     """Abstract base class for all AI modules.
 
     Subclasses must implement:
-    - ``name`` — unique module identifier
-    - ``module_type`` — one of AIModuleType
-    - ``submit()`` — accept input and return a task_id
-    - ``get_result()`` — retrieve result by task_id
+    - ``name`` -- unique module identifier
+    - ``module_type`` -- one of AIModuleType
+    - ``submit()`` -- accept input and return a task_id
+    - ``get_result()`` -- retrieve result by task_id
     """
 
     @property
@@ -130,7 +130,7 @@ class AIModuleInterface(ABC):
         return f"{self.name}:{uuid.uuid4().hex[:12]}"
 
 
-# ── Typed module ABCs ──────────────────────────────────────
+# -- Typed module ABCs --------------------------------------
 
 
 class QueryOptimiser(AIModuleInterface):
@@ -246,7 +246,7 @@ class LogParser(AIModuleInterface):
         )
         field_mappings: dict[str, str] = Field(
             default_factory=dict,
-            description="Detected field name → canonical name mappings",
+            description="Detected field name -> canonical name mappings",
         )
         confidence: float = Field(
             default=0.0,
@@ -258,7 +258,7 @@ class LogParser(AIModuleInterface):
         return AIModuleType.LOG_PARSER
 
 
-# ── Registry ───────────────────────────────────────────────
+# -- Registry -----------------------------------------------
 
 
 class AIModuleRegistry:

@@ -219,7 +219,7 @@ class DerivedSchema(BaseModel):
         }
 
 
-# ── Validation against a base ────────────────────────────────
+# -- Validation against a base --------------------------------
 
 
 def validate_against_base(
@@ -273,7 +273,7 @@ def _check_index(column: str, index: str, primitive: str, registry: TypeRegistry
         raise MalformedIndexError(column=column, index=index, detail=str(exc)) from exc
 
 
-# ── Loader capture ───────────────────────────────────────────
+# -- Loader capture -------------------------------------------
 
 CAPTURE_MODE_FULL = "full"
 CAPTURE_MODE_RAW_ONLY = "raw_only"

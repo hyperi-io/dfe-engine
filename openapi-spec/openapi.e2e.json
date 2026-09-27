@@ -1,8 +1,8 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "DFE Engine API \u2014 E2E",
-    "description": "Playwright helpers for `make e2e-server`. Unauthenticated. Mounted and documented only in that mode \u2014 not in the product spec.",
+    "title": "DFE Engine API -- E2E",
+    "description": "Playwright helpers for `make e2e-server`. Unauthenticated. Mounted and documented only in that mode -- not in the product spec.",
     "version": "1.22.9"
   },
   "paths": {
@@ -196,7 +196,7 @@
   "tags": [
     {
       "name": "E2E",
-      "description": "Playwright helpers for `make e2e-server`. Unauthenticated. Mounted and documented only in that mode \u2014 not in the product spec."
+      "description": "Playwright helpers for `make e2e-server`. Unauthenticated. Mounted and documented only in that mode -- not in the product spec."
     }
   ]
 }

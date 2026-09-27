@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         connections/registry.py
-#  Purpose:      ConnectionRegistry — resolve and cache ClickHouse clients per role
+#  Purpose:      ConnectionRegistry -- resolve and cache ClickHouse clients per role
 #  Language:     Python
 #
 #  License:      BUSL-1.1

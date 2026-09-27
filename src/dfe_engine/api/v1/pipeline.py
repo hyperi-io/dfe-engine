@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Pipeline router — Vector pipeline template listing and generation.
+"""Pipeline router -- Vector pipeline template listing and generation.
 
 Wraps ``PipelineBuilderController`` for REST access to pipeline template
 management. Build operations are async (returns 202 + task_id).
@@ -25,7 +25,7 @@ from dfe_engine.auth.rbac_scopes import scopes_dict
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
 
 
-# ── Response models ─────────────────────────────────────────
+# -- Response models -----------------------------------------
 
 
 class PipelineTemplate(BaseModel):
@@ -58,14 +58,14 @@ class PipelineBuildResponse(BaseModel):
     task_id: str = Field(description="Task ID for polling via /tasks/{task_id}")
 
 
-# ── Dependencies ────────────────────────────────────────────
+# -- Dependencies --------------------------------------------
 
 
 def _get_task_manager(request: Request) -> TaskManager:
     return request.app.state.task_manager
 
 
-# ── Endpoints ───────────────────────────────────────────────
+# -- Endpoints -----------------------------------------------
 
 
 @router.get(

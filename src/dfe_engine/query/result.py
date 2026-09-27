@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""QueryResult — dict-native result container with export utilities."""
+"""QueryResult -- dict-native result container with export utilities."""
 
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ class QueryResult:
         """List of column names."""
         return self._columns
 
-    # ── Export ───────────────────────────────────────────────
+    # -- Export -----------------------------------------------
 
     def to_pylist(self) -> list[dict[str, Any]]:
         """Return rows as list of dicts."""
@@ -116,7 +116,7 @@ class QueryResult:
 
         return pd.DataFrame(self._rows, columns=self._columns, **kwargs)
 
-    # ── Iteration ───────────────────────────────────────────
+    # -- Iteration -------------------------------------------
 
     def iter_rows(self) -> Iterator[dict[str, Any]]:
         """Iterate over rows as dicts."""

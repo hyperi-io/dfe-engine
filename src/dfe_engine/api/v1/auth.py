@@ -1,11 +1,11 @@
-"""Auth router — login, token refresh, user info, permissions.
+"""Auth router -- login, token refresh, user info, permissions.
 
-POST /api/v1/auth/login             → JWT token (LocalAuthProvider)
-POST /api/v1/auth/refresh           → Refreshed JWT token
-GET  /api/v1/auth/me                → Current user info
-GET  /api/v1/auth/permissions       → Resolved permissions for current user's roles
-GET  /api/v1/auth/setup-status      → Initial setup required? (public, pre-login)
-POST /api/v1/auth/setup/retire-admin → Retire the bootstrap admin (admin, or itself)
+POST /api/v1/auth/login             -> JWT token (LocalAuthProvider)
+POST /api/v1/auth/refresh           -> Refreshed JWT token
+GET  /api/v1/auth/me                -> Current user info
+GET  /api/v1/auth/permissions       -> Resolved permissions for current user's roles
+GET  /api/v1/auth/setup-status      -> Initial setup required? (public, pre-login)
+POST /api/v1/auth/setup/retire-admin -> Retire the bootstrap admin (admin, or itself)
 """
 
 from fastapi import APIRouter, HTTPException, Request
@@ -41,7 +41,7 @@ from dfe_engine.settings import DFESettings
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
-# ── Request / Response models ─────────────────────────────────
+# -- Request / Response models ---------------------------------
 
 
 class LoginRequest(BaseModel):
@@ -169,7 +169,7 @@ def _token_data(
     }
 
 
-# ── Endpoints ────────────────────────────────────────────────
+# -- Endpoints ------------------------------------------------
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -306,10 +306,10 @@ async def get_permissions(user: CurrentUser, request: Request):
 
 @router.get("/setup-status", response_model=SetupStatus)
 def get_setup_status(request: Request) -> SetupStatus:
-    """Report first-run setup state and what is configured (no auth — pre-login UI).
+    """Report first-run setup state and what is configured (no auth -- pre-login UI).
 
     Driven by the setup state machine (``state_machines/setup.py``). The
-    registries the wizard renders — OIDC providers and organisations — are
+    registries the wizard renders -- OIDC providers and organisations -- are
     returned while setup is outstanding and dropped once it completes, so a
     configured deployment does not serve its inventory to anonymous callers.
     The exception is the name and display name of each enabled OIDC provider,

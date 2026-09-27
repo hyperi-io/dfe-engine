@@ -1,4 +1,4 @@
-"""Rule SQL rewriter — transform user SQL for hunt execution.
+"""Rule SQL rewriter -- transform user SQL for hunt execution.
 
 Takes a user-supplied SQL SELECT statement (typically from HyperDX)
 and rewrites it for hunt execution:
@@ -7,7 +7,7 @@ and rewrites it for hunt execution:
 2. Strip time-bound conditions from WHERE clause
 3. Extract the detection logic (WHERE clause without time bounds)
 
-The rewriter does NOT generate the final INSERT INTO ... SELECT —
+The rewriter does NOT generate the final INSERT INTO ... SELECT --
 that's done by HuntResultSchema.build_insert_select(). This module
 handles the parsing/cleaning of user-supplied SQL.
 
@@ -144,7 +144,7 @@ class RuleRewriter:
         result.had_select_star = bool(_SELECT_STAR_RE.search(sql))
         if result.had_select_star:
             result.warnings.append(
-                "SELECT * detected — hunt output will use lean columns "
+                "SELECT * detected -- hunt output will use lean columns "
                 "(matched_uuid + rule metadata + _json) instead."
             )
 

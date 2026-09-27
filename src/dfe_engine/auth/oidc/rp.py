@@ -275,7 +275,7 @@ class OidcRelyingParty:
 
         Same session state as ``login_redirect`` (state + nonce in
         ``request.session``), but returns the URL for the browser to navigate
-        explicitly—``fetch()`` cannot reliably follow a 302 to a cross-origin IdP.
+        explicitly--``fetch()`` cannot reliably follow a 302 to a cross-origin IdP.
         """
         client = self._client(provider_name)
         rv = await client.create_authorization_url(redirect_uri)

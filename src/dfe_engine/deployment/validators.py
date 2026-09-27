@@ -70,7 +70,7 @@ def _validate_sizing(config, errors: list[str], warnings: list[str]) -> None:
 
     if config.size.value != "custom" and config.resources is not None:
         warnings.append(
-            "Both size and explicit resources set — explicit resources will be ignored "
+            "Both size and explicit resources set -- explicit resources will be ignored "
             "unless size is 'custom'"
         )
 

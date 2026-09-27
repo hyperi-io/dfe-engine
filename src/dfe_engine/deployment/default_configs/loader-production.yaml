@@ -1,4 +1,4 @@
-# DFE Loader — Production Deployment
+# DFE Loader -- Production Deployment
 # KEDA enabled, medium sizing (1-2 CPU, 2Gi-4Gi mem)
 
 size: medium

@@ -14,8 +14,8 @@ that process, ``/docs`` has a spec dropdown: **API** (``/openapi.json``) vs
 **E2E** (``/openapi.e2e.json``). The committed product spec never includes
 them; ``openapi-spec/openapi.e2e.json`` is generated alongside it.
 
-GET  /api/e2e/status       → confirm the group is live
-POST /api/e2e/seed-static  → run a named seed script (e.g. seed_admin)
+GET  /api/e2e/status       -> confirm the group is live
+POST /api/e2e/seed-static  -> run a named seed script (e.g. seed_admin)
 """
 
 import functools
@@ -39,7 +39,7 @@ E2E_OPENAPI_TAG: dict[str, str] = {
     "name": E2E_TAG,
     "description": (
         "Playwright helpers for `make e2e-server`. Unauthenticated. "
-        "Mounted and documented only in that mode — not in the product spec."
+        "Mounted and documented only in that mode -- not in the product spec."
     ),
 }
 

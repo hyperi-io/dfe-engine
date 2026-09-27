@@ -20,7 +20,7 @@ from dfe_engine.deployment.models.common import (
 )
 
 # ---------------------------------------------------------------------------
-# Unified resource table — all services share this
+# Unified resource table -- all services share this
 # ---------------------------------------------------------------------------
 
 RESOURCE_SIZES: dict[str, ResourceSpec] = {
@@ -62,7 +62,7 @@ def get_resources(size: TShirtSize | str) -> ResourceSpec:
     """
     size_str = size.value if isinstance(size, TShirtSize) else size
     if size_str == "custom":
-        msg = "Size 'custom' requires explicit resources — use resources field directly"
+        msg = "Size 'custom' requires explicit resources -- use resources field directly"
         raise ValueError(msg)
     if size_str not in RESOURCE_SIZES:
         msg = f"Unknown size: {size_str}. Valid: {', '.join(sorted(RESOURCE_SIZES))}"

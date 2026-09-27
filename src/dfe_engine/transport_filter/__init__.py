@@ -8,7 +8,7 @@
 
 """Transport filter configuration helpers.
 
-Mirrors the `scalo::transport::filter` module — provides Pydantic
+Mirrors the `scalo::transport::filter` module -- provides Pydantic
 models, CEL syntax classifier, and validation for transport-level message
 filters. Used by the control plane to validate filter configs before they
 reach scalo-rs at service startup.
@@ -17,11 +17,11 @@ See: /projects/scalo-rs/src/transport/filter/
 
 ## Performance Tiers
 
-- **Tier 1** — SIMD field extraction via memmem/sonic-rs (~50-200 ns/msg).
+- **Tier 1** -- SIMD field extraction via memmem/sonic-rs (~50-200 ns/msg).
   Always enabled, no opt-in needed.
-- **Tier 2** — Pre-compiled CEL with extracted fields (~500ns-1us/msg).
+- **Tier 2** -- Pre-compiled CEL with extracted fields (~500ns-1us/msg).
   Requires `expression.allow_cel_filters_in` or `allow_cel_filters_out`.
-- **Tier 3** — Complex CEL with regex/iteration/time (~5-50 us/msg).
+- **Tier 3** -- Complex CEL with regex/iteration/time (~5-50 us/msg).
   Requires `expression.allow_complex_filters_in` or `allow_complex_filters_out`.
 
 ## Example
@@ -44,7 +44,7 @@ if errors:
 ```
 """
 
-# Tier classification lives in dfe_engine.cel (generic — used anywhere CEL appears)
+# Tier classification lives in dfe_engine.cel (generic -- used anywhere CEL appears)
 from dfe_engine.cel import (
     ClassifyResult,
     FilterTier,

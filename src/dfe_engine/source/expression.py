@@ -8,7 +8,7 @@ Directives:
     @source: field              Extract from source data field
     @source: field | fallback   Extract with fallback expression
     @source: first(a/b/c)      First match from multiple candidate fields
-    @generated: expr            ClickHouse generates via DEFAULT — loader omits
+    @generated: expr            ClickHouse generates via DEFAULT -- loader omits
     @captured: what             Captured from raw payload before transforms
     @captured: what as TYPE     Captured and cast to type
     @computed: expr             Computed from other fields during data prep
@@ -28,7 +28,7 @@ Usage:
     expr = ExpressionBuilder.source("timestamp", fallback="now()")
     assert expr == "@source: timestamp | now()"
 
-See dfe-schemas README §DFE Expressions and
+See the dfe-schemas README section "DFE Expressions" and
 dfe-loader DDL-EXPRESSION.md for the full expression language reference.
 """
 
@@ -107,7 +107,7 @@ class ExprValidationResult:
 
     @property
     def field(self) -> str | None:
-        """Alias for source_field — the primary field name."""
+        """Alias for source_field -- the primary field name."""
         return self.source_field
 
     @property
@@ -149,7 +149,7 @@ class ExpressionValidator:
         if not m:
             return ExprValidationResult(
                 valid=False,
-                errors=[f"Expression must start with @directive: — got: {expr[:60]!r}"],
+                errors=[f"Expression must start with @directive: -- got: {expr[:60]!r}"],
             )
 
         directive = m.group("directive").lower()
@@ -196,7 +196,7 @@ class ExpressionValidator:
 
 def _validate_source(body: str, result: ExprValidationResult) -> None:
     """Validate @source directive body."""
-    # Check for first() syntax — including empty first()
+    # Check for first() syntax -- including empty first()
     if re.match(r"^first\s*\(\s*\)\s*$", body, re.IGNORECASE):
         result.valid = False
         result.errors.append("first() has no candidate fields")
@@ -291,7 +291,7 @@ _VALIDATORS = {
 
 
 # ---------------------------------------------------------------------------
-# Builder — programmatic expression construction
+# Builder -- programmatic expression construction
 # ---------------------------------------------------------------------------
 
 
@@ -390,7 +390,7 @@ class ExpressionBuilder:
 
 
 # ---------------------------------------------------------------------------
-# Autocomplete data — for UI typeahead support
+# Autocomplete data -- for UI typeahead support
 # ---------------------------------------------------------------------------
 
 
@@ -408,7 +408,7 @@ def list_directive_types() -> list[dict[str, str]]:
         },
         {
             "name": "generated",
-            "description": "ClickHouse generates via DEFAULT — loader omits",
+            "description": "ClickHouse generates via DEFAULT -- loader omits",
             "syntax": "@generated: expression",
         },
         {
