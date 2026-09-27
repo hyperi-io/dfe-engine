@@ -4,7 +4,7 @@ A fetcher is like a receiver but pulls data from cloud SaaS APIs instead
 of receiving data pushed to it. Otherwise the same architecture: routes
 events to Kafka topics.
 
-Like transforms, a fetcher can have multiple source deployments — each
+Like transforms, a fetcher can have multiple source deployments -- each
 pulling from a different SaaS source with its own auth, polling config,
 ENV settings, and associated files. CRUD-managed via the engine API.
 """
@@ -73,7 +73,7 @@ class FetcherSourceConfig(BaseSourceConfig):
 
 
 # ---------------------------------------------------------------------------
-# Routing (same as receiver — routes to Kafka topics)
+# Routing (same as receiver -- routes to Kafka topics)
 # ---------------------------------------------------------------------------
 
 
@@ -97,7 +97,7 @@ class FetcherRoutingConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Kafka (producer — fetcher sends to Kafka like receiver)
+# Kafka (producer -- fetcher sends to Kafka like receiver)
 # ---------------------------------------------------------------------------
 
 

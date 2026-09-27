@@ -151,7 +151,7 @@ def _walk_mapping(prefix: str, mapping: dict[str, Any], columns: list[SchemaColu
             _walk_mapping(_join_path(prefix, key), sub, columns)
         return
 
-    # Empty object — store as JSON blob at this path
+    # Empty object -- store as JSON blob at this path
     if es_type == "object" and props_dict is None:
         primitive, attrs, use_case = _map_es_type("object")
         fp = prefix
@@ -168,7 +168,7 @@ def _walk_mapping(prefix: str, mapping: dict[str, Any], columns: list[SchemaColu
         )
         return
 
-    # Malformed leaf that still declares properties — descend to salvage
+    # Malformed leaf that still declares properties -- descend to salvage
     if props_dict is not None:
         for key, sub in props_dict.items():
             _walk_mapping(_join_path(prefix, key), sub, columns)

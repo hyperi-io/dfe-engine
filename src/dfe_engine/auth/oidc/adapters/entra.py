@@ -14,7 +14,7 @@ permission and admin consent granted.
 
 The client secret resolves from ``GroupResolutionConfig.client_secret_path`` in
 the DfeSecrets seam before ``client_secret_env``; the tenant id comes from
-``tenant_id_env``.  If any credential is missing the adapter fails open — all
+``tenant_id_env``.  If any credential is missing the adapter fails open -- all
 methods return unfriendly fallbacks rather than raising.
 
 Usage::
@@ -41,7 +41,7 @@ from dfe_engine.auth.oidc.models import GroupInfo
 class EntraAdapter(OIDCGroupAdapter):
     """Entra ID group adapter using the Microsoft Graph API.
 
-    All public methods fail open — missing credentials or API errors log a
+    All public methods fail open -- missing credentials or API errors log a
     warning and return an unfriendly fallback rather than propagating
     exceptions.  This keeps authentication working even when the group
     resolution API is unreachable.
@@ -66,7 +66,7 @@ class EntraAdapter(OIDCGroupAdapter):
             group_ids: List of Entra group object IDs (GUIDs).
 
         Returns:
-            Mapping of group ID → display name.  Falls back to
+            Mapping of group ID -> display name.  Falls back to
             ``{id: id}`` when credentials are missing or the API fails.
         """
         if not group_ids:
@@ -75,7 +75,7 @@ class EntraAdapter(OIDCGroupAdapter):
         token = self._get_token()
         if token is None:
             logger.warning(
-                "Entra resolve_groups: no token available — returning unfriendly fallback",
+                "Entra resolve_groups: no token available -- returning unfriendly fallback",
                 provider=self._provider.issuer,
                 group_count=len(group_ids),
             )
@@ -126,7 +126,7 @@ class EntraAdapter(OIDCGroupAdapter):
         token = self._get_token()
         if token is None:
             logger.warning(
-                "Entra resolve_user_groups: no token available — returning empty list",
+                "Entra resolve_user_groups: no token available -- returning empty list",
                 provider=self._provider.issuer,
             )
             return []
@@ -180,7 +180,7 @@ class EntraAdapter(OIDCGroupAdapter):
         token = self._get_token()
         if token is None:
             logger.warning(
-                "Entra list_all_groups: no token available — returning empty list",
+                "Entra list_all_groups: no token available -- returning empty list",
                 provider=self._provider.issuer,
             )
             return []
@@ -234,7 +234,7 @@ class EntraAdapter(OIDCGroupAdapter):
         if token is None:
             return (
                 False,
-                "Entra credentials not configured — set the env vars for "
+                "Entra credentials not configured -- set the env vars for "
                 "tenant_id, client_id, and client_secret",
             )
 
@@ -248,7 +248,7 @@ class EntraAdapter(OIDCGroupAdapter):
                 response = await client.get(url, headers=headers)
                 data = response.json()
                 count = len(data.get("value", []))
-                return (True, f"Graph API connection successful — {count} group(s) returned")
+                return (True, f"Graph API connection successful -- {count} group(s) returned")
             except Exception as exc:
                 logger.warning(
                     "Entra test_connection: Graph API call failed",

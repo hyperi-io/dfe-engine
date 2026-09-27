@@ -1,10 +1,10 @@
-"""System router — deployment facts, settings summary, default retention.
+"""System router -- deployment facts, settings summary, default retention.
 
-GET /api/v1/system/deployment  → What this deployment IS: profile, transports, mesh, routing, versions
-GET /api/v1/system/version     → What this deployment runs: stack, engine, schemas, ui
-GET /api/v1/system/schema      → What the last schema bootstrap pass did, object by object
-GET /api/v1/system/settings    → Redacted settings summary
-GET /api/v1/system/retention   → The deployment default TTL
+GET /api/v1/system/deployment  -> What this deployment IS: profile, transports, mesh, routing, versions
+GET /api/v1/system/version     -> What this deployment runs: stack, engine, schemas, ui
+GET /api/v1/system/schema      -> What the last schema bootstrap pass did, object by object
+GET /api/v1/system/settings    -> Redacted settings summary
+GET /api/v1/system/retention   -> The deployment default TTL
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from dfe_engine.gitops.pins import UI_COMPONENT, component_overrides, load_pins,
 router = APIRouter(prefix="/system", tags=["System"])
 
 
-# ── Deploy-repo access ───────────────────────────────────────
+# -- Deploy-repo access ---------------------------------------
 
 
 def _optional_gitcrud(request: Request) -> GitCrud | None:
@@ -39,7 +39,7 @@ def _optional_gitcrud(request: Request) -> GitCrud | None:
     return getattr(request.app.state, "gitcrud", None)
 
 
-# ── Response models ──────────────────────────────────────────
+# -- Response models ------------------------------------------
 
 
 class VersionResponse(BaseModel):
@@ -205,7 +205,7 @@ class DeploymentResponse(BaseModel):
 
 
 class SettingsSummary(BaseModel):
-    """Redacted settings — no secrets."""
+    """Redacted settings -- no secrets."""
 
     clickhouse_host: str
     clickhouse_database: str
@@ -223,7 +223,7 @@ class SettingsSummary(BaseModel):
     api_cors_origins: list[str]
 
 
-# ── Endpoints ────────────────────────────────────────────────
+# -- Endpoints ------------------------------------------------
 
 
 def deployment_facts(request: Request, settings: Any) -> DeploymentResponse:
@@ -342,7 +342,7 @@ async def get_settings(user: CurrentUser, settings: Settings):
     )
 
 
-# ── Default retention ────────────────────────────────────────
+# -- Default retention ----------------------------------------
 
 
 class RetentionStatus(BaseModel):
@@ -366,7 +366,7 @@ async def get_retention(user: CurrentUser, settings: Settings) -> RetentionStatu
     return RetentionStatus(default_ttl_days=settings.clickhouse.default_ttl_days)
 
 
-# ── ClickHouse Cloud lifecycle (control plane) ───────────────
+# -- ClickHouse Cloud lifecycle (control plane) ---------------
 
 
 class CloudServiceStateResponse(BaseModel):

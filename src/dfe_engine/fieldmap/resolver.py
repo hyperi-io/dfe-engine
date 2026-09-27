@@ -1,4 +1,4 @@
-"""Field map resolver — two-tier merge of default + source-specific maps.
+"""Field map resolver -- two-tier merge of default + source-specific maps.
 
 Pure function approach: takes FieldMap objects as input, returns merged
 mappings dict. No registry dependency.
@@ -39,7 +39,7 @@ def resolve_field_map(
         source_map: Source-specific map (override layer).
 
     Returns:
-        Merged dict of standard_field → dfe_column_name.
+        Merged dict of standard_field -> dfe_column_name.
     """
     merged: dict[str, str] = {}
 

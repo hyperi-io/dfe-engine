@@ -108,7 +108,7 @@ async def _submit(
     return _to_response(info)
 
 
-# ── endpoints ──────────────────────────────────────────────────
+# -- endpoints --------------------------------------------------
 
 
 @router.post("/sources/{source}/sample", response_model=SampleSubmitResponse, dependencies=[_READ])

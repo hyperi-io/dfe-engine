@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""ViewExecutor — executes parameterized views via restricted ClickHouse connection.
+"""ViewExecutor -- executes parameterized views via restricted ClickHouse connection.
 
 Security enforcement:
 - org_id is ALWAYS injected from AuthContext (clients cannot set it)

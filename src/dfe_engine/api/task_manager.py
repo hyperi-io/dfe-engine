@@ -9,7 +9,7 @@
 """In-memory async task manager.
 
 Provides fire-and-forget task execution with status polling and SSE streaming.
-Tasks are ephemeral — lost on restart. This is intentional: dfe-engine is a
+Tasks are ephemeral -- lost on restart. This is intentional: dfe-engine is a
 control plane, not a job scheduler. If it restarts, pending tasks simply need
 to be re-submitted.
 
@@ -136,7 +136,7 @@ class _Task:
 class TaskManager:
     """In-memory async task manager.
 
-    Not persistent — tasks are lost on restart. Stores are bounded by
+    Not persistent -- tasks are lost on restart. Stores are bounded by
     ``max_completed`` to prevent unbounded memory growth.
     """
 
@@ -147,7 +147,7 @@ class TaskManager:
     def submit(self, kind: str, coro_fn, *args, **kwargs) -> TaskInfo:
         """Submit an async callable for background execution.
 
-        The coroutine function receives a ``task`` keyword argument — a
+        The coroutine function receives a ``task`` keyword argument -- a
         ``_Task`` instance whose ``set_progress()`` method can be called
         to report progress.
 

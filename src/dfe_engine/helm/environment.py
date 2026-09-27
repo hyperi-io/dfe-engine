@@ -137,7 +137,7 @@ class ArgoEnvironment(BaseModel):
     )
     chart_overrides: dict[str, str] = Field(
         default_factory=dict,
-        description="Service name → chart name overrides (default: dfe-{service})",
+        description="Service name -> chart name overrides (default: dfe-{service})",
     )
     ignore_differences: list[dict[str, Any]] = Field(
         default_factory=list,
@@ -196,11 +196,11 @@ class ExternalComponent(BaseModel):
     namespace: str = Field(default="dfe", description="K8s namespace for this component")
     instances: dict[str, str] = Field(
         default_factory=dict,
-        description="Instance name → base values file path",
+        description="Instance name -> base values file path",
     )
     values_overrides: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
-        description="Instance name → values dict deep-merged onto base",
+        description="Instance name -> values dict deep-merged onto base",
     )
     enabled: bool = Field(default=True, description="Whether this component is deployed")
 
@@ -232,14 +232,14 @@ class EnvironmentConfig(BaseModel):
         default_factory=OTelEnvironment, description="OpenTelemetry configuration"
     )
     secret_refs: dict[str, str] = Field(
-        default_factory=dict, description="Logical name → K8s Secret name"
+        default_factory=dict, description="Logical name -> K8s Secret name"
     )
     argo: ArgoEnvironment = Field(
         default_factory=ArgoEnvironment, description="Argo CD configuration"
     )
     components: list[ExternalComponent] = Field(
         default_factory=list,
-        description="External (Mode 2) components — upstream charts with engine overrides",
+        description="External (Mode 2) components -- upstream charts with engine overrides",
     )
 
     @classmethod

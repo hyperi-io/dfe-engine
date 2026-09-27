@@ -289,7 +289,7 @@ def classify(column: SchemaColumn, *, provider: str = "aws") -> Inference:
     return Inference(Semantic.TOKEN)
 
 
-# ── generation ────────────────────────────────────────────────────
+# -- generation ----------------------------------------------------
 
 
 def _port(pool: EntityPool) -> int:

@@ -21,7 +21,7 @@ from dfe_engine.services.models.common import (
 from dfe_engine.services.models.source_common import BaseSourceConfig
 
 # ---------------------------------------------------------------------------
-# Kafka (both consumer and producer — transforms read and write)
+# Kafka (both consumer and producer -- transforms read and write)
 # ---------------------------------------------------------------------------
 
 
@@ -63,7 +63,7 @@ class WasmKafkaConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# WASM source configs (flat list — no tree)
+# WASM source configs (flat list -- no tree)
 # ---------------------------------------------------------------------------
 
 
@@ -74,7 +74,7 @@ class WasmSourceConfig(BaseSourceConfig):
     - wasm_module: path to compiled .wasm file
     - input_topic / output_topic: Kafka routing per source
 
-    Flat list (no tree — tree is vector-only).
+    Flat list (no tree -- tree is vector-only).
     Per-source ENV + files are inherited from BaseSourceConfig.
     """
 
@@ -84,7 +84,7 @@ class WasmSourceConfig(BaseSourceConfig):
 
 
 # ---------------------------------------------------------------------------
-# IPC (dev/test direct mode — no Kafka)
+# IPC (dev/test direct mode -- no Kafka)
 # ---------------------------------------------------------------------------
 
 

@@ -55,21 +55,21 @@ def split_openapi(full: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]
     e2e["tags"] = [tag for tag in tags if tag.get("name") == E2E_TAG_NAME]
 
     info = dict(e2e.get("info", {}))
-    info["title"] = f"{info.get('title', 'DFE Engine API')} — E2E"
+    info["title"] = f"{info.get('title', 'DFE Engine API')} -- E2E"
     e2e["info"] = info
     return api, e2e
 
 
 def build_e2e_spec(*, version: str) -> dict[str, Any]:
-    """OpenAPI document for the Playwright helpers only — no product API paths."""
+    """OpenAPI document for the Playwright helpers only -- no product API paths."""
     from dfe_engine.api.e2e import E2E_OPENAPI_TAG
     from dfe_engine.api.e2e import router as e2e_router
 
     app = FastAPI(
-        title="DFE Engine API — E2E",
+        title="DFE Engine API -- E2E",
         description=(
             "Playwright helpers for `make e2e-server`. Unauthenticated. "
-            "Mounted and documented only in that mode — not in the product spec."
+            "Mounted and documented only in that mode -- not in the product spec."
         ),
         version=version,
         openapi_tags=[E2E_OPENAPI_TAG],

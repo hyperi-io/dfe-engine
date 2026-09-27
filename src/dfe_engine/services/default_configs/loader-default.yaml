@@ -1,4 +1,4 @@
-# DFE Loader — Development defaults
+# DFE Loader -- Development defaults
 # Smaller buffers and debug logging for fast dev iteration
 # See: dfe-loader/config.dev.yaml
 
@@ -47,7 +47,7 @@ routing:
     topic_suffix: .dlq
 
 buffer:
-  flush_bytes: 524288  # 512 KB — smaller for dev
+  flush_bytes: 524288  # 512 KB -- smaller for dev
   flush_rows: 1000
   flush_age_secs: 2
 

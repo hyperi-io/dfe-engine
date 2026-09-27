@@ -81,7 +81,7 @@ class ImperativeOperations:
                     logger.info(f"DDL executed: {stmt[:80]}...")
                 except Exception as e:
                     result.ddl_failed.append((stmt, str(e)))
-                    logger.error(f"DDL failed: {stmt[:80]}... — {e}")
+                    logger.error(f"DDL failed: {stmt[:80]}... -- {e}")
 
         except ImportError:
             for stmt in statements:

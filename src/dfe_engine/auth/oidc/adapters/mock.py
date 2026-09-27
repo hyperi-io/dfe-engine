@@ -138,6 +138,6 @@ class MockDirectoryAdapter(OIDCGroupAdapter):
             return (False, f"mock directory not loaded: {self._load_error}")
         return (
             True,
-            f"mock directory loaded — {len(self._groups)} group(s), "
+            f"mock directory loaded -- {len(self._groups)} group(s), "
             f"{len(self._members)} member mapping(s)",
         )

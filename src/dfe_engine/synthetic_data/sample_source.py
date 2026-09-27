@@ -346,7 +346,7 @@ class SampleEventFactory:
             plan.values = [v for v, _ in kept]
             plan.weights = [w for _, w in kept]
 
-    # ── event construction ────────────────────────────────────────
+    # -- event construction ----------------------------------------
 
     def event(self, when: datetime | None = None) -> dict[str, Any]:
         """Generate one lookalike event."""

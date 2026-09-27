@@ -81,7 +81,7 @@ class GroupStore:
     """YAML-backed store for managing groups with role mappings.
 
     Each group is persisted as ``{name}.yaml`` under the groups directory.
-    The group name is the filename stem — it is NOT stored inside the YAML file.
+    The group name is the filename stem -- it is NOT stored inside the YAML file.
 
     Example layout::
 
@@ -119,7 +119,7 @@ class GroupStore:
         return Group.model_validate(data)
 
     def _write(self, group: Group) -> None:
-        # Exclude the name field — it lives in the filename, not the YAML
+        # Exclude the name field -- it lives in the filename, not the YAML
         data = group.model_dump(exclude={"name"})
         yaml_dump(data, self._path(group.name))
 

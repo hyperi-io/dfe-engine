@@ -6,14 +6,14 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""API key management router — create, list, revoke.
+"""API key management router -- create, list, revoke.
 
-POST   /api/v1/auth/api-keys                       → Create key (returns full key ONCE)
-GET    /api/v1/auth/api-keys                       → List keys (short tokens only)
-DELETE /api/v1/auth/api-keys/{short_token}          → Revoke key
+POST   /api/v1/auth/api-keys                       -> Create key (returns full key ONCE)
+GET    /api/v1/auth/api-keys                       -> List keys (short tokens only)
+DELETE /api/v1/auth/api-keys/{short_token}          -> Revoke key
 
 All endpoints require admin role (org:write).
-The full key is ONLY returned in the create response — it cannot be
+The full key is ONLY returned in the create response -- it cannot be
 recovered from stored metadata.
 
 A key may carry an optional ``expires_at``; once it passes, the key stops
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 router = APIRouter(prefix="/api-keys", tags=["API Keys"])
 
 
-# ── Request / Response models ────────────────────────────────
+# -- Request / Response models --------------------------------
 
 
 class CreateAPIKeyRequest(BaseModel):
@@ -56,7 +56,7 @@ class CreateAPIKeyRequest(BaseModel):
 
 
 class APIKeyResponse(BaseModel):
-    """API key metadata — key_hash is NEVER included."""
+    """API key metadata -- key_hash is NEVER included."""
 
     name: str
     short_token: str
@@ -69,16 +69,16 @@ class APIKeyResponse(BaseModel):
 
 
 class APIKeyCreatedResponse(APIKeyResponse):
-    """Returned exactly once at creation — includes the full key."""
+    """Returned exactly once at creation -- includes the full key."""
 
     full_key: str = Field(description="Full API key (shown once, cannot be recovered)")
 
 
-# ── Helpers ──────────────────────────────────────────────────
+# -- Helpers --------------------------------------------------
 
 
 def _response_fields(key_meta: APIKey) -> dict:
-    """Public metadata for one key — never includes key_hash or the full key."""
+    """Public metadata for one key -- never includes key_hash or the full key."""
     return {
         "name": key_meta.name,
         "short_token": key_meta.short_token,
@@ -91,7 +91,7 @@ def _response_fields(key_meta: APIKey) -> dict:
     }
 
 
-# ── Endpoints ────────────────────────────────────────────────
+# -- Endpoints ------------------------------------------------
 
 
 @router.post(
@@ -122,7 +122,7 @@ async def create_api_key(
             expires_at=body.expires_at,
         )
     except ValueError as exc:
-        # Bad/past expires_at — the duplicate-name case is caught above.
+        # Bad/past expires_at -- the duplicate-name case is caught above.
         raise HTTPException(
             status_code=400,
             detail={"code": "validation_error", "message": str(exc)},

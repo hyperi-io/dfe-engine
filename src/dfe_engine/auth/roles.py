@@ -11,12 +11,12 @@
 Provides YAML-based role definitions with wildcard permission matching.
 
 Wildcard rules:
-    "*"                   — matches any action regardless of segment count
-    "config:*"            — trailing wildcard: matches "config:read", "config:write",
+    "*"                   -- matches any action regardless of segment count
+    "config:*"            -- trailing wildcard: matches "config:read", "config:write",
                             "config:read:sub", etc. (last segment is *, any suffix)
-    "argo:*"              — trailing wildcard: matches "argo:applications:sync" (3 segs)
-    "service:*:config:*"  — mid wildcard: * matches a single segment; last * is trailing
-    "service:*:config:read" — mid wildcard only: exact segment count required (no trailing)
+    "argo:*"              -- trailing wildcard: matches "argo:applications:sync" (3 segs)
+    "service:*:config:*"  -- mid wildcard: * matches a single segment; last * is trailing
+    "service:*:config:read" -- mid wildcard only: exact segment count required (no trailing)
 
 Usage:
     from dfe_engine.auth.roles import RoleConfig
@@ -66,9 +66,9 @@ def permission_matches(permission: str, action: str) -> bool:
     Wildcard rules:
       - Bare "*": matches any action (all segment counts).
       - Last segment is "*" AND pattern has fewer or equal segments than action:
-          trailing wildcard — the "*" absorbs all remaining action segments.
+          trailing wildcard -- the "*" absorbs all remaining action segments.
       - Intermediate "*" segments match exactly one action segment.
-      - If last segment is not "*" and segment counts differ → False.
+      - If last segment is not "*" and segment counts differ -> False.
 
     Args:
         permission: Permission pattern (may contain "*" wildcards).
@@ -77,7 +77,7 @@ def permission_matches(permission: str, action: str) -> bool:
     Returns:
         True if the permission pattern matches the action.
     """
-    # Bare wildcard — matches everything.
+    # Bare wildcard -- matches everything.
     if permission == "*":
         return True
 

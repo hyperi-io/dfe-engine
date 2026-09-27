@@ -239,7 +239,7 @@ class SchemaEventFactory:
             mark_synthetic=mark_synthetic,
         )
 
-    # ── event construction ────────────────────────────────────────
+    # -- event construction ----------------------------------------
 
     def event(self, when: datetime | None = None) -> dict[str, Any]:
         """Generate one source-shaped event.

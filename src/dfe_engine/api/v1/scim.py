@@ -89,7 +89,7 @@ _MEMBER_FILTER_RE = re.compile(r'value\s+eq\s+"([^"]+)"', re.IGNORECASE)
 _EQ_FILTER_RE = re.compile(r'^\s*(\w+)\s+eq\s+"([^"]+)"\s*$', re.IGNORECASE)
 
 
-# ── Response / error helpers ─────────────────────────────────
+# -- Response / error helpers ---------------------------------
 
 
 def _location(request: Request, kind: str, rid: str) -> str:
@@ -176,7 +176,7 @@ def _page_params(request: Request) -> tuple[int, int]:
     return start_index, max(0, count)
 
 
-# ── /Users ───────────────────────────────────────────────────
+# -- /Users ---------------------------------------------------
 
 
 @router.get(
@@ -364,7 +364,7 @@ async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Resp
     return Response(status_code=204)
 
 
-# ── /Groups ──────────────────────────────────────────────────
+# -- /Groups --------------------------------------------------
 
 
 @router.get(
@@ -593,7 +593,7 @@ def _member_values(value) -> list[str]:
     return []
 
 
-# ── Discovery (open - IdPs probe these before presenting a token) ──
+# -- Discovery (open - IdPs probe these before presenting a token) --
 
 
 @router.get("/ServiceProviderConfig")

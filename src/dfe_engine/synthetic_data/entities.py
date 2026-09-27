@@ -110,7 +110,7 @@ class EntityPool:
         self._host_weights = [1.0 / (i + 1) for i in range(len(self._hosts))]
         self._user_weights = [1.0 / (i + 1) for i in range(len(self._users))]
 
-    # ── construction ──────────────────────────────────────────────
+    # -- construction ----------------------------------------------
 
     def _build_hosts(self, count: int) -> list[Host]:
         roles = [role for role, weight, _ in _HOST_ROLES for _ in range(weight)]
@@ -168,7 +168,7 @@ class EntityPool:
             )
         return accounts
 
-    # ── draws ─────────────────────────────────────────────────────
+    # -- draws -----------------------------------------------------
 
     def host(self) -> Host:
         """Draw a host, heavy-tailed."""

@@ -9,7 +9,7 @@
 """YAML-backed registry for OIDC provider configurations.
 
 Each provider is persisted as ``{name}.yaml`` under the providers directory.
-The provider name is the filename stem — it is NOT stored inside the YAML body.
+The provider name is the filename stem -- it is NOT stored inside the YAML body.
 
 Example layout::
 
@@ -52,7 +52,7 @@ class OIDCProviderRegistry:
         data = yaml_load(path)
         if data is None:
             data = {}
-        # Name is the filename stem — not stored in the YAML body
+        # Name is the filename stem -- not stored in the YAML body
         return OIDCProvider.model_validate(data)
 
     def _write(self, name: str, provider: OIDCProvider) -> None:

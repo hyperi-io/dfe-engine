@@ -1,4 +1,4 @@
-"""Alerts router — alert destination CRUD.
+"""Alerts router -- alert destination CRUD.
 
 Alert destinations are Apprise notification URLs persisted one YAML file
 per destination via the ``AlertDestinationRegistry`` (top-level fields:
@@ -7,11 +7,11 @@ comes from the filename). This is the same registry the hunt engine reads
 when dispatching alerts, so a destination created here is resolvable by a
 hunt straight away.
 
-GET    /api/v1/alerts/destinations            → Paginated list
-POST   /api/v1/alerts/destinations            → Create destination
-GET    /api/v1/alerts/destinations/{name}     → Get destination
-PUT    /api/v1/alerts/destinations/{name}     → Update destination
-DELETE /api/v1/alerts/destinations/{name}     → Delete destination
+GET    /api/v1/alerts/destinations            -> Paginated list
+POST   /api/v1/alerts/destinations            -> Create destination
+GET    /api/v1/alerts/destinations/{name}     -> Get destination
+PUT    /api/v1/alerts/destinations/{name}     -> Update destination
+DELETE /api/v1/alerts/destinations/{name}     -> Delete destination
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ def _get_hunt_config_registry_optional() -> Any | None:
 OptionalHuntConfigReg = Annotated[Any | None, Depends(_get_hunt_config_registry_optional)]
 
 
-# ── Models ────────────────────────────────────────────────────
+# -- Models ----------------------------------------------------
 
 
 class AlertDestination(BaseModel):
@@ -66,7 +66,7 @@ class AlertDestinationSummary(BaseModel):
     url_scheme: str = Field(default="", description="URL scheme (slack, mailto, etc.)")
 
 
-# ── Endpoints ────────────────────────────────────────────────
+# -- Endpoints ------------------------------------------------
 
 
 @router.get(
@@ -105,7 +105,7 @@ async def list_destinations(
                 status_code=503,
                 detail={
                     "code": "not_configured",
-                    "message": "Hunt config registry not initialized — set DFE_HUNTS_DIR (hunts.hunt_dir)",
+                    "message": "Hunt config registry not initialized -- set DFE_HUNTS_DIR (hunts.hunt_dir)",
                 },
             )
         try:
@@ -244,7 +244,7 @@ async def delete_destination(name: str, user: CurrentUser, registry: AlertDestRe
     audit_resource_change(user.user_id, "alert_destination", name, "deleted")
 
 
-# ── Helpers ──────────────────────────────────────────────────
+# -- Helpers --------------------------------------------------
 
 
 def _destination_from_registry(dest: RegistryAlertDestination) -> AlertDestination:
@@ -282,7 +282,7 @@ def _ensure_hunt_for_link(hunt_registry: Any | None, hunt_name: str) -> None:
             status_code=503,
             detail={
                 "code": "not_configured",
-                "message": "Hunt config registry not initialized — set DFE_HUNTS_DIR (hunts.hunt_dir)",
+                "message": "Hunt config registry not initialized -- set DFE_HUNTS_DIR (hunts.hunt_dir)",
             },
         )
     try:

@@ -3,11 +3,11 @@
 Registry singletons are initialized in the lifespan handler and resolved
 per-request via ``Depends()``.  Authentication checks four paths in order:
 
-1. OIDC headers (X-Oidc-Subject) — Envoy Gateway fronted; trusted ONLY
+1. OIDC headers (X-Oidc-Subject) -- Envoy Gateway fronted; trusted ONLY
    when auth.trust_proxy_auth_headers is set (else ignored, fail closed)
-2. API key (X-API-Key) — machine-to-machine
-3. JWT Bearer — standalone/Docker users
-4. Auth disabled — dev/test default, root context
+2. API key (X-API-Key) -- machine-to-machine
+3. JWT Bearer -- standalone/Docker users
+4. Auth disabled -- dev/test default, root context
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from dfe_engine.settings import DFESettings, is_dev_posture
 if TYPE_CHECKING:
     from dfe_engine.auth.jwt_authority import JwtAuthority
 
-# ── Settings ──────────────────────────────────────────────────
+# -- Settings --------------------------------------------------
 
 
 def get_app_settings(request: Request) -> DFESettings:
@@ -44,7 +44,7 @@ def get_app_settings(request: Request) -> DFESettings:
 Settings = Annotated[DFESettings, Depends(get_app_settings)]
 
 
-# ── Registry lifecycle ────────────────────────────────────────
+# -- Registry lifecycle ----------------------------------------
 
 _registries: dict[str, Any] = {}
 
@@ -148,7 +148,7 @@ def get_schema_registry():
             status_code=503,
             detail={
                 "code": "not_configured",
-                "message": "SchemaRegistry not initialized — set DFE_SCHEMAS_DIR (schemas.schemas_dir)",
+                "message": "SchemaRegistry not initialized -- set DFE_SCHEMAS_DIR (schemas.schemas_dir)",
             },
         )
     return reg
@@ -163,7 +163,7 @@ def get_derived_schema_registry():
             detail={
                 "code": "not_configured",
                 "message": (
-                    "DerivedSchemaRegistry not initialized — set DFE_SCHEMAS_DIR "
+                    "DerivedSchemaRegistry not initialized -- set DFE_SCHEMAS_DIR "
                     "(schemas.schemas_dir) or enable gitops"
                 ),
             },
@@ -179,7 +179,7 @@ def get_source_registry():
             status_code=503,
             detail={
                 "code": "not_configured",
-                "message": "SourceRegistry not initialized — set DFE_SOURCES_DIR",
+                "message": "SourceRegistry not initialized -- set DFE_SOURCES_DIR",
             },
         )
     return reg
@@ -199,7 +199,7 @@ def get_service_config_registry():
             detail={
                 "code": "not_configured",
                 "message": "ServiceConfigRegistry not initialized"
-                " — set DFE_SERVICES_CONFIG_YAML_DIR",
+                " -- set DFE_SERVICES_CONFIG_YAML_DIR",
             },
         )
     return reg
@@ -213,7 +213,7 @@ def get_field_map_registry():
             status_code=503,
             detail={
                 "code": "not_configured",
-                "message": "FieldMapRegistry not initialized — set DFE_FIELDMAPS_DIR",
+                "message": "FieldMapRegistry not initialized -- set DFE_FIELDMAPS_DIR",
             },
         )
     return reg
@@ -228,7 +228,7 @@ def get_alert_destinations_registry():
             detail={
                 "code": "not_configured",
                 "message": "Alert destinations not initialized"
-                " — set DFE_HUNTS_ALERT_DESTINATIONS_DIR",
+                " -- set DFE_HUNTS_ALERT_DESTINATIONS_DIR",
             },
         )
     return reg
@@ -248,7 +248,7 @@ def get_deployment_config_registry():
             detail={
                 "code": "not_configured",
                 "message": "DeploymentConfigRegistry not initialized"
-                " — set DFE_DEPLOYMENT_CONFIG_DIR",
+                " -- set DFE_DEPLOYMENT_CONFIG_DIR",
             },
         )
     return reg
@@ -262,7 +262,7 @@ def get_rule_registry():
             status_code=503,
             detail={
                 "code": "not_configured",
-                "message": "RuleRegistry not initialized — set DFE_HUNTS_RULES_DIR (hunts.rules_dir)",
+                "message": "RuleRegistry not initialized -- set DFE_HUNTS_RULES_DIR (hunts.rules_dir)",
             },
         )
     return reg
@@ -276,7 +276,7 @@ def get_hunt_config_registry():
             status_code=503,
             detail={
                 "code": "not_configured",
-                "message": "HuntConfigRegistry not initialized — set DFE_HUNTS_DIR (hunts.hunt_dir)",
+                "message": "HuntConfigRegistry not initialized -- set DFE_HUNTS_DIR (hunts.hunt_dir)",
             },
         )
     return reg
@@ -294,7 +294,7 @@ RuleReg = Annotated[Any, Depends(get_rule_registry)]
 HuntConfigReg = Annotated[Any, Depends(get_hunt_config_registry)]
 
 
-# ── ClickHouse client ─────────────────────────────────────────
+# -- ClickHouse client -----------------------------------------
 
 
 def get_clickhouse_client(settings: Settings) -> Any:
@@ -314,7 +314,7 @@ def get_clickhouse_client(settings: Settings) -> Any:
 ClickHouseClient = Annotated[Any, Depends(get_clickhouse_client)]
 
 
-# ── Authentication ────────────────────────────────────────────
+# -- Authentication --------------------------------------------
 
 
 def _get_client_ip(request: Request) -> str | None:
@@ -356,7 +356,7 @@ def _resolve_group_grants(
     Each identifier is looked up by group NAME first, then by provider
     ``source_id`` (so a token carrying Entra GUIDs or Google group keys resolves
     against the sync-populated group files). Unknown identifiers are silently
-    skipped (no error — the user just gets fewer roles). A system group's roles
+    skipped (no error -- the user just gets fewer roles). A system group's roles
     bind at system scope; an org-scoped group's roles bind at that org's scope
     only. org_ids collects the caller's org memberships (the owning org of each
     org-scoped group, plus each group's org_ids list).
@@ -397,7 +397,7 @@ def _resolve_roles_from_groups(
     groups: list[str],
     group_store: GroupStore,
 ) -> tuple[list[str], list[str]]:
-    """Resolve (roles, org_ids) from group names — see _resolve_group_grants."""
+    """Resolve (roles, org_ids) from group names -- see _resolve_group_grants."""
     resolution = _resolve_group_grants(groups, group_store)
     return resolution.roles, resolution.org_ids
 
@@ -536,7 +536,7 @@ def account_for_session_subject(store: Any, user_id: str):
 def require_local_account_enabled(request: Request, user_id: str) -> Any:
     """Reject a session when the backing account is disabled or blocked.
 
-    Looks up the raw subject and the JIT-sanitised stem. Skips ``apikey:…``
+    Looks up the raw subject and the JIT-sanitised stem. Skips ``apikey:...``
     subjects and usernames with no account record.
 
     Returns:
@@ -566,11 +566,11 @@ def require_local_account_enabled(request: Request, user_id: str) -> Any:
 async def get_current_user(request: Request) -> AuthContext:
     """Authenticate the request via one of four paths (checked in order).
 
-    1. OIDC headers (X-Oidc-Subject) — set by Envoy Gateway, trusted only
+    1. OIDC headers (X-Oidc-Subject) -- set by Envoy Gateway, trusted only
        when auth.trust_proxy_auth_headers is set (else ignored, fail closed)
-    2. API key (X-API-Key) — machine-to-machine
-    3. JWT Bearer token — standalone/Docker users
-    4. Auth disabled — dev/test root context
+    2. API key (X-API-Key) -- machine-to-machine
+    3. JWT Bearer token -- standalone/Docker users
+    4. Auth disabled -- dev/test root context
 
     When ``auth.enabled=False`` (dev/test default), returns a root AuthContext
     that bypasses authorization if no credentials are provided.
@@ -583,7 +583,7 @@ async def get_current_user(request: Request) -> AuthContext:
     client_ip = _get_client_ip(request)
     user_agent = request.headers.get("User-Agent")
 
-    # ── Path 1: OIDC headers (Envoy Gateway) ────────────────────
+    # -- Path 1: OIDC headers (Envoy Gateway) --------------------
     # SECURITY: X-Oidc-* are trusted ONLY when the deployment declares it runs
     # behind a trusted proxy that authenticates the user and injects them
     # (auth.trust_proxy_auth_headers). Unfronted, these headers are
@@ -599,7 +599,7 @@ async def get_current_user(request: Request) -> AuthContext:
         roles, org_ids = resolution.roles, resolution.org_ids
         logger.debug("OIDC auth", user_id=oidc_subject, groups=groups, roles=roles)
 
-        # JIT provisioning — create shadow account on first OIDC login
+        # JIT provisioning -- create shadow account on first OIDC login
         jit = getattr(request.app.state, "jit_provisioner", None)
         if jit:
             try:
@@ -644,7 +644,7 @@ async def get_current_user(request: Request) -> AuthContext:
             user_agent=user_agent,
         )
 
-    # ── Path 2: API key ─────────────────────────────────────────
+    # -- Path 2: API key -----------------------------------------
     api_key_header = request.headers.get("X-API-Key")
     if api_key_header:
         api_key_store: APIKeyStore = request.app.state.api_key_store
@@ -687,7 +687,7 @@ async def get_current_user(request: Request) -> AuthContext:
             user_agent=user_agent,
         )
 
-    # ── Path 3: JWT Bearer token ────────────────────────────────
+    # -- Path 3: JWT Bearer token --------------------------------
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
         token = auth_header[7:]
@@ -740,7 +740,7 @@ async def get_current_user(request: Request) -> AuthContext:
             user_agent=user_agent,
         )
 
-    # ── Path 4: Auth disabled (dev/test) ────────────────────────
+    # -- Path 4: Auth disabled (dev/test) ------------------------
     # Gated on the POSTURE as well as the flag. `auth.enabled` alone handed an
     # anonymous request roles=["admin"], and `env` defaults to "production" while
     # `auth.enabled` defaults to False, so the pairing that grants anonymous
@@ -761,7 +761,7 @@ async def get_current_user(request: Request) -> AuthContext:
 CurrentUser = Annotated[AuthContext, Depends(get_current_user)]
 
 
-# ── Authorization ─────────────────────────────────────────────
+# -- Authorization ---------------------------------------------
 
 
 def is_action_allowed(
@@ -847,7 +847,7 @@ def require_action(action: str, *, scope: Scope | None = None):
     return _check
 
 
-# ── JWT helpers ──────────────────────────────────────────────
+# -- JWT helpers ----------------------------------------------
 
 
 # One JwtAuthority per distinct (secrets + jwt) config, reused: the app's

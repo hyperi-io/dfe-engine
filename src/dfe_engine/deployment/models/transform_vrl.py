@@ -14,7 +14,7 @@ from dfe_engine.deployment.models.common import (
 class TransformVrlDeploymentConfig(BaseDeploymentConfig):
     """Deployment configuration for dfe-transform-vrl.
 
-    Simpler than transform-vector — no extra YAML volumes or source
+    Simpler than transform-vector -- no extra YAML volumes or source
     file volumes. Just the binary, config, and VRL transforms directory.
     """
 

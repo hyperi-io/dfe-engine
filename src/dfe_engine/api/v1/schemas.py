@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Schemas router — schema versioning and DDL generation.
+"""Schemas router -- schema versioning and DDL generation.
 
 Wraps ``SchemaManager`` for version management and ``SchemaBuilderV2``
 for DDL pipeline execution.
@@ -97,7 +97,7 @@ async def _read_upload_capped(upload: UploadFile, *, max_bytes: int, read_chunk_
     return b"".join(chunks)
 
 
-# ── Response models ─────────────────────────────────────────
+# -- Response models -----------------------------------------
 
 
 class SchemaColumn(BaseModel):
@@ -167,7 +167,7 @@ class DDLResult(BaseModel):
 
     source_name: str
     create_table: str = Field(description="CREATE TABLE DDL")
-    views: dict[str, str] = Field(default_factory=dict, description="View name → DDL")
+    views: dict[str, str] = Field(default_factory=dict, description="View name -> DDL")
 
 
 class SchemaBuildResult(BaseModel):
@@ -188,7 +188,7 @@ class SourceSchemaColumnsResponse(PaginatedResponse[SchemaColumn]):
     )
 
 
-# ── JSON field promotion models ─────────────────────────────
+# -- JSON field promotion models -----------------------------
 
 
 class DraftColumn(BaseModel):
@@ -389,7 +389,7 @@ class SampleRowsResponse(BaseModel):
     )
     match_operator: str | None = Field(
         default=None,
-        description="Match operator used when filtering (equals, exists, includes, …).",
+        description="Match operator used when filtering (equals, exists, includes, ...).",
     )
     columns: list[str] = Field(description="Column names present in the sampled rows.")
     rows: list[dict[str, Any]] = Field(
@@ -513,7 +513,7 @@ class PromoteFieldResponse(BaseModel):
     )
 
 
-# ── Endpoints ───────────────────────────────────────────────
+# -- Endpoints -----------------------------------------------
 @router.get(
     "",
     response_model=PaginatedSchemaSummaryResponse,
@@ -773,7 +773,7 @@ async def delete_meta_schema_version(
     """Delete a specific meta-schema version.
 
     Core schemas are blocked by the core-resource guard (HTTP 409). The last
-    remaining version cannot be deleted — delete the schema instead.
+    remaining version cannot be deleted -- delete the schema instead.
     """
     from dfe_engine.schema.registry import (
         SchemaNotFoundError,
@@ -1281,7 +1281,7 @@ async def build_schema(
 ) -> SchemaBuildResult:
     """Build complete schema (DDL) from a source version snapshot.
 
-    Runs the v2 YAML → DDL pipeline and returns the generated DDL
+    Runs the v2 YAML -> DDL pipeline and returns the generated DDL
     without executing it against ClickHouse.
     """
     from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
@@ -1351,7 +1351,7 @@ async def build_schema(
     )
 
 
-# ── JSON field promotion ────────────────────────────────────
+# -- JSON field promotion ------------------------------------
 
 
 def _resolve_meta_schema(rel, source_name, schema_registry):

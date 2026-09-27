@@ -128,7 +128,7 @@ class RepositoryStore:
         self._client = client
         self._db = database
 
-    # ── Schema ────────────────────────────────────────────────
+    # -- Schema ------------------------------------------------
 
     def ensure_schema(self) -> None:
         """Assert the table exists. The engine's schema phase makes it.
@@ -148,7 +148,7 @@ class RepositoryStore:
         RepositoryStore._ensured_databases.add(self._db)
         logger.debug(f"RepositoryStore: {self._db} carries the repository table")
 
-    # ── CRUD ──────────────────────────────────────────────────
+    # -- CRUD --------------------------------------------------
 
     def get(self, scope: str, scope_id: str, namespace: str, key: str) -> dict[str, Any] | None:
         """Return the current record for a key, or None (tombstones hidden)."""

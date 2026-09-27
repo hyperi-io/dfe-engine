@@ -1,4 +1,4 @@
-"""Rule Registry — CRUD for hunt detection rules (API-persisted YAML).
+"""Rule Registry -- CRUD for hunt detection rules (API-persisted YAML).
 
 Separate from ``hunts.rule_repo_dir`` (Jinja2 templates for scheduled hunts).
 Each rule is stored as ``{name}.yaml``, in one of two interchangeable backends:
@@ -6,7 +6,7 @@ Each rule is stored as ``{name}.yaml``, in one of two interchangeable backends:
 - **deploy repo** (when gitops is on): the deploy repo's ``config/rules`` is the
   SSoT and every mutation is one gitcrud commit, because that is the directory
   the k8s hunt runner git-syncs. Pass ``deploy_repo=DeployRepoStore(...)``.
-- **DirectoryConfigStore**: ``hunts.rules_dir`` as SSoT — the shared config
+- **DirectoryConfigStore**: ``hunts.rules_dir`` as SSoT -- the shared config
   volume the docker hunt runner reads.
 """
 
@@ -136,7 +136,7 @@ class RuleRegistry:
         """
         if self._deploy is not None:
             outcome = self._deploy.put(name, doc, actor=created_by or "engine")
-            logger.info(f"Saved rule '{name}' → deploy repo config/rules")
+            logger.info(f"Saved rule '{name}' -> deploy repo config/rules")
             return outcome
 
         store = self._require_store()
@@ -147,7 +147,7 @@ class RuleRegistry:
             if store._git_push:
                 store._git_push_remote()
         store._refresh_all()
-        logger.info(f"Saved rule '{name}' → {yaml_path}")
+        logger.info(f"Saved rule '{name}' -> {yaml_path}")
         return None
 
     def _delete_raw(self, name: str, *, created_by: str | None) -> tuple[bool, WriteOutcome | None]:

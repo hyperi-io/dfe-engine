@@ -16,7 +16,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 # =============================================================================
-# Exceptions — re-exported from auth.models for backward compat
+# Exceptions -- re-exported from auth.models for backward compat
 # =============================================================================
 from dfe_engine.auth.models import AuthorizationError as AuthorizationError
 
@@ -189,7 +189,7 @@ class ExplainPlan(BaseModel):
 # =============================================================================
 
 
-# AuthContext moved to auth.models — re-export for backward compat
+# AuthContext moved to auth.models -- re-export for backward compat
 from dfe_engine.auth.models import AuthContext as AuthContext
 
 # =============================================================================
@@ -225,7 +225,7 @@ class ViewParameter(BaseModel):
     """Parameter discovered from a ClickHouse parameterized view.
 
     Extracted from the view's CREATE SQL by parsing {param:Type} patterns.
-    Provides type metadata across the full stack (ClickHouse → Python → TypeScript → HTML).
+    Provides type metadata across the full stack (ClickHouse -> Python -> TypeScript -> HTML).
     """
 
     name: str = Field(..., description="Parameter name as declared in the view")
@@ -265,7 +265,7 @@ class ViewDefinition(BaseModel):
     """A parameterized view discovered from ClickHouse system.tables.
 
     Views follow the naming convention: dfe_v_{namespace}_{name}
-    e.g. dfe_v_analytics_user_activity → label: analytics/user_activity
+    e.g. dfe_v_analytics_user_activity -> label: analytics/user_activity
     """
 
     name: str = Field(..., description="Full view name (e.g. dfe_v_analytics_user_activity)")

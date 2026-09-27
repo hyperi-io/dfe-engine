@@ -85,7 +85,7 @@ class OktaAdapter(OIDCGroupAdapter):
                 return groups
         except Exception as exc:
             logger.warning(
-                "Okta resolve_user_groups failed — default deny",
+                "Okta resolve_user_groups failed -- default deny",
                 provider=self._provider.issuer,
                 error=str(exc),
             )
@@ -128,8 +128,8 @@ class OktaAdapter(OIDCGroupAdapter):
         if mode != "api":
             return (
                 True,
-                f"Okta {mode} mode — no directory API to test "
-                "(use GET …/verify-login for OIDC login configuration)",
+                f"Okta {mode} mode -- no directory API to test "
+                "(use GET .../verify-login for OIDC login configuration)",
             )
 
         base, headers = self._api_base_and_headers()
@@ -150,7 +150,7 @@ class OktaAdapter(OIDCGroupAdapter):
                 response = await client.get(url, headers=headers)
                 data = response.json()
                 count = len(data) if isinstance(data, list) else 0
-                return True, f"Okta Groups API connection successful — {count} group(s) returned"
+                return True, f"Okta Groups API connection successful -- {count} group(s) returned"
         except Exception as exc:
             logger.warning(
                 "Okta test_connection failed",

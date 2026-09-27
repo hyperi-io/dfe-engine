@@ -6,16 +6,16 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""OIDC provider management router — CRUD, sync, and connectivity test.
+"""OIDC provider management router -- CRUD, sync, and connectivity test.
 
-POST   /api/v1/auth/oidc-providers                        → Create provider
-GET    /api/v1/auth/oidc-providers                        → List providers
-GET    /api/v1/auth/oidc-providers/{name}                 → Get provider config
-PUT    /api/v1/auth/oidc-providers/{name}                 → Update provider
-DELETE /api/v1/auth/oidc-providers/{name}                 → Detach provider
-POST   /api/v1/auth/oidc-providers/{name}/sync            → Force group sync
-GET    /api/v1/auth/oidc-providers/{name}/test             → Test directory connectivity
-GET    /api/v1/auth/oidc-providers/{name}/verify-login      → Verify login config
+POST   /api/v1/auth/oidc-providers                        -> Create provider
+GET    /api/v1/auth/oidc-providers                        -> List providers
+GET    /api/v1/auth/oidc-providers/{name}                 -> Get provider config
+PUT    /api/v1/auth/oidc-providers/{name}                 -> Update provider
+DELETE /api/v1/auth/oidc-providers/{name}                 -> Detach provider
+POST   /api/v1/auth/oidc-providers/{name}/sync            -> Force group sync
+GET    /api/v1/auth/oidc-providers/{name}/test             -> Test directory connectivity
+GET    /api/v1/auth/oidc-providers/{name}/verify-login      -> Verify login config
 
 All endpoints require admin role (org:write).
 
@@ -66,7 +66,7 @@ def _reject_non_env_name(value: str) -> str:
     return value
 
 
-# ── Request / Response models ────────────────────────────────
+# -- Request / Response models --------------------------------
 
 
 class GroupResolutionRequest(BaseModel):
@@ -188,7 +188,7 @@ class GroupResolutionResponse(BaseModel):
 
 
 class ProviderResponse(BaseModel):
-    """Provider config — env var names and secret paths, never a secret value."""
+    """Provider config -- env var names and secret paths, never a secret value."""
 
     name: str
     type: str
@@ -252,7 +252,7 @@ class LoginConfigResponse(BaseModel):
     checks: list[LoginConfigCheck]
 
 
-# ── Helpers ──────────────────────────────────────────────────
+# -- Helpers --------------------------------------------------
 
 
 def _provider_to_response(name: str, provider: OIDCProvider) -> ProviderResponse:
@@ -373,7 +373,7 @@ def _refresh_rp(request: Request) -> None:
     )
 
 
-# ── Endpoints ────────────────────────────────────────────────
+# -- Endpoints ------------------------------------------------
 
 
 @router.post(
@@ -574,7 +574,7 @@ async def delete_provider(
 ):
     """Detach an OIDC provider and report orphaned groups (admin only).
 
-    Does NOT delete groups — they become orphaned with their source_provider
+    Does NOT delete groups -- they become orphaned with their source_provider
     still set to the deleted provider name. The provider's stored credentials
     ARE removed: nothing is left that can authenticate as a detached provider.
     """

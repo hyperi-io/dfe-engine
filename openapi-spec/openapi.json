@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "DFE Engine API",
-    "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.22.8"
+    "description": "Data Fusion Engine -- configuration, scheduling, and query API",
+    "version": "1.22.9"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -140,7 +140,7 @@
           "Auth"
         ],
         "summary": "Get Setup Status",
-        "description": "Report first-run setup state and what is configured (no auth \u2014 pre-login UI).\n\nDriven by the setup state machine (``state_machines/setup.py``). The\nregistries the wizard renders \u2014 OIDC providers and organisations \u2014 are\nreturned while setup is outstanding and dropped once it completes, so a\nconfigured deployment does not serve its inventory to anonymous callers.\nThe exception is the name and display name of each enabled OIDC provider,\nwhich stay (no configuration) because the login screen needs to know which\nIdPs to offer and what to call them. Accounts are never returned; the\n``first_user`` step reports whether a real (non break-glass) user exists.",
+        "description": "Report first-run setup state and what is configured (no auth -- pre-login UI).\n\nDriven by the setup state machine (``state_machines/setup.py``). The\nregistries the wizard renders -- OIDC providers and organisations -- are\nreturned while setup is outstanding and dropped once it completes, so a\nconfigured deployment does not serve its inventory to anonymous callers.\nThe exception is the name and display name of each enabled OIDC provider,\nwhich stay (no configuration) because the login screen needs to know which\nIdPs to offer and what to call them. Accounts are never returned; the\n``first_user`` step reports whether a real (non break-glass) user exists.",
         "operationId": "get_setup_status_api_v1_auth_setup_status_get",
         "responses": {
           "200": {
@@ -2579,7 +2579,7 @@
           "OIDC Providers"
         ],
         "summary": "Delete Provider",
-        "description": "Detach an OIDC provider and report orphaned groups (admin only).\n\nDoes NOT delete groups \u2014 they become orphaned with their source_provider\nstill set to the deleted provider name. The provider's stored credentials\nARE removed: nothing is left that can authenticate as a detached provider.",
+        "description": "Detach an OIDC provider and report orphaned groups (admin only).\n\nDoes NOT delete groups -- they become orphaned with their source_provider\nstill set to the deleted provider name. The provider's stored credentials\nARE removed: nothing is left that can authenticate as a detached provider.",
         "operationId": "delete_provider_api_v1_auth_oidc_providers__name__delete",
         "parameters": [
           {
@@ -6231,7 +6231,7 @@
           "Rules"
         ],
         "summary": "Create Rule",
-        "description": "Create a new hunt rule via RuleCreationService.\n\nThe service sanitizes the SQL, applies CEL\u2192SQL transpilation,\nvalidates column references, and optionally estimates query cost.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so.",
+        "description": "Create a new hunt rule via RuleCreationService.\n\nThe service sanitizes the SQL, applies CEL->SQL transpilation,\nvalidates column references, and optionally estimates query cost.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so.",
         "operationId": "create_rule_api_v1_rules_post",
         "requestBody": {
           "required": true,
@@ -6908,7 +6908,7 @@
           "Service Surfaces"
         ],
         "summary": "Refresh Service Manifest",
-        "description": "Re-fetch the metrics manifest from a running service.\n\nContacts the service's ``manifest_url`` to update its metrics_surface.\nReturns the refresh result.  Does not fail if the service is unreachable\n\u2014 returns ``refreshed=false`` instead.",
+        "description": "Re-fetch the metrics manifest from a running service.\n\nContacts the service's ``manifest_url`` to update its metrics_surface.\nReturns the refresh result.  Does not fail if the service is unreachable\n-- returns ``refreshed=false`` instead.",
         "operationId": "refresh_service_manifest_api_v1_service_surfaces__name__metrics_refresh_post",
         "parameters": [
           {
@@ -7777,7 +7777,7 @@
           "queries"
         ],
         "summary": "Execute View",
-        "description": "Execute a parameterized view and return JSON results.\n\nThe ``org_id`` parameter is always injected from the authenticated\nuser's context \u2014 it cannot be overridden by the client.",
+        "description": "Execute a parameterized view and return JSON results.\n\nThe ``org_id`` parameter is always injected from the authenticated\nuser's context -- it cannot be overridden by the client.",
         "operationId": "execute_view_api_v1_queries_views__label__execute_post",
         "parameters": [
           {
@@ -7835,7 +7835,7 @@
           "queries"
         ],
         "summary": "Execute Raw Query",
-        "description": "Execute a raw query against a registered datasource adapter.\n\nThis is the lower-level query path \u2014 for ad-hoc queries against\ndatasource adapters rather than parameterized views. Requires\n``query:execute`` permission.",
+        "description": "Execute a raw query against a registered datasource adapter.\n\nThis is the lower-level query path -- for ad-hoc queries against\ndatasource adapters rather than parameterized views. Requires\n``query:execute`` permission.",
         "operationId": "execute_raw_query_api_v1_queries_raw_post",
         "requestBody": {
           "content": {
@@ -9570,7 +9570,7 @@
           "schemas"
         ],
         "summary": "Delete Meta Schema Version",
-        "description": "Delete a specific meta-schema version.\n\nCore schemas are blocked by the core-resource guard (HTTP 409). The last\nremaining version cannot be deleted \u2014 delete the schema instead.",
+        "description": "Delete a specific meta-schema version.\n\nCore schemas are blocked by the core-resource guard (HTTP 409). The last\nremaining version cannot be deleted -- delete the schema instead.",
         "operationId": "delete_meta_schema_version_api_v1_schemas_definitions__schema_path__versions__version__delete",
         "parameters": [
           {
@@ -10062,7 +10062,7 @@
           "schemas"
         ],
         "summary": "Build Schema",
-        "description": "Build complete schema (DDL) from a source version snapshot.\n\nRuns the v2 YAML \u2192 DDL pipeline and returns the generated DDL\nwithout executing it against ClickHouse.",
+        "description": "Build complete schema (DDL) from a source version snapshot.\n\nRuns the v2 YAML -> DDL pipeline and returns the generated DDL\nwithout executing it against ClickHouse.",
         "operationId": "build_schema_api_v1_schemas__source_name__build_post",
         "parameters": [
           {
@@ -12546,7 +12546,7 @@
           "cel"
         ],
         "summary": "Validate a CEL expression and classify its performance tier",
-        "description": "Returns syntax validity, performance tier, referenced fields, and a human-readable description of what the expression matches. Designed for live UI validation as the user types \u2014 completes in <1ms.",
+        "description": "Returns syntax validity, performance tier, referenced fields, and a human-readable description of what the expression matches. Designed for live UI validation as the user types -- completes in <1ms.",
         "operationId": "check_cel_expression_api_v1_cel_check_post",
         "requestBody": {
           "content": {
@@ -17596,7 +17596,7 @@
           "full_key"
         ],
         "title": "APIKeyCreatedResponse",
-        "description": "Returned exactly once at creation \u2014 includes the full key."
+        "description": "Returned exactly once at creation -- includes the full key."
       },
       "APIKeyResponse": {
         "properties": {
@@ -17656,7 +17656,7 @@
           "created_at"
         ],
         "title": "APIKeyResponse",
-        "description": "API key metadata \u2014 key_hash is NEVER included."
+        "description": "API key metadata -- key_hash is NEVER included."
       },
       "AccountGitPending": {
         "properties": {
@@ -17822,7 +17822,7 @@
           "updated_at"
         ],
         "title": "AccountResponse",
-        "description": "Account detail \u2014 password_hash is NEVER included."
+        "description": "Account detail -- password_hash is NEVER included."
       },
       "ActionDef": {
         "properties": {
@@ -19117,7 +19117,7 @@
           "check_profile": {
             "type": "boolean",
             "title": "Check Profile",
-            "description": "If true, apply DFE profile restrictions (reject regex/iteration/time). Leave false for transport filters \u2014 Tier 3 is classification only, not rejection.",
+            "description": "If true, apply DFE profile restrictions (reject regex/iteration/time). Leave false for transport filters -- Tier 3 is classification only, not rejection.",
             "default": false
           }
         },
@@ -20300,6 +20300,34 @@
         "title": "CustomEnvModel",
         "description": "An environment key written under `extraEnv`, which no contract declares."
       },
+      "DDLResult": {
+        "properties": {
+          "source_name": {
+            "type": "string",
+            "title": "Source Name"
+          },
+          "create_table": {
+            "type": "string",
+            "title": "Create Table",
+            "description": "CREATE TABLE DDL"
+          },
+          "views": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Views",
+            "description": "View name -> DDL"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_name",
+          "create_table"
+        ],
+        "title": "DDLResult",
+        "description": "Generated DDL output."
+      },
       "DatabaseInfo": {
         "properties": {
           "name": {
@@ -21173,7 +21201,7 @@
             },
             "type": "object",
             "title": "Mappings",
-            "description": "standard_field \u2192 dfe_column_name"
+            "description": "standard_field -> dfe_column_name"
           }
         },
         "type": "object",
@@ -21181,7 +21209,7 @@
           "standard"
         ],
         "title": "FieldMap",
-        "description": "A mapping from a detection/analytics standard's fields to DFE columns.\n\nTwo-tier resolution: a default map applies to all sources for a\nstandard, and source-specific maps override individual entries.\n\nAttributes:\n    standard: Standard identifier (e.g. \"sigma\", \"ecs\", \"cim\").\n    source: Source name this map applies to, or None for default map.\n    version: Standard version (e.g. \"8.11\" for ECS). Informational.\n    description: Human-readable description.\n    inherits: Reference to base map (e.g. \"_default\"). Declarative\n        \u2014 the resolver does not auto-fetch, caller is responsible.\n    mappings: Dict of standard_field \u2192 dfe_column_name."
+        "description": "A mapping from a detection/analytics standard's fields to DFE columns.\n\nTwo-tier resolution: a default map applies to all sources for a\nstandard, and source-specific maps override individual entries.\n\nAttributes:\n    standard: Standard identifier (e.g. \"sigma\", \"ecs\", \"cim\").\n    source: Source name this map applies to, or None for default map.\n    version: Standard version (e.g. \"8.11\" for ECS). Informational.\n    description: Human-readable description.\n    inherits: Reference to base map (e.g. \"_default\"). Declarative\n        -- the resolver does not auto-fetch, caller is responsible.\n    mappings: Dict of standard_field -> dfe_column_name."
       },
       "FieldMapSummary": {
         "properties": {
@@ -21696,7 +21724,7 @@
         },
         "type": "object",
         "title": "GroupResolutionConfig",
-        "description": "Configuration for how group membership is resolved from a provider.\n\nFields that are provider-specific are only relevant when the matching\nprovider type is active.  They are stored in the same model for\nsimplicity \u2014 unused fields default to empty strings."
+        "description": "Configuration for how group membership is resolved from a provider.\n\nFields that are provider-specific are only relevant when the matching\nprovider type is active.  They are stored in the same model for\nsimplicity -- unused fields default to empty strings."
       },
       "GroupResolutionRequest": {
         "properties": {
@@ -22767,7 +22795,7 @@
               }
             ],
             "title": "Current Step",
-            "description": "First unsatisfied required step id \u2014 the screen to land on. None once setup is complete."
+            "description": "First unsatisfied required step id -- the screen to land on. None once setup is complete."
           },
           "steps": {
             "items": {
@@ -24288,7 +24316,7 @@
           "display_name": {
             "type": "string",
             "title": "Display Name",
-            "description": "Human-readable label for the login button. Empty when the provider does not set one \u2014 fall back to ``name``.",
+            "description": "Human-readable label for the login button. Empty when the provider does not set one -- fall back to ``name``.",
             "default": ""
           }
         },
@@ -26897,7 +26925,7 @@
           "sync_error"
         ],
         "title": "ProviderResponse",
-        "description": "Provider config \u2014 env var names and secret paths, never a secret value."
+        "description": "Provider config -- env var names and secret paths, never a secret value."
       },
       "PublishVersionRequest": {
         "properties": {
@@ -28452,7 +28480,7 @@
               }
             ],
             "title": "Match Operator",
-            "description": "Match operator used when filtering (equals, exists, includes, \u2026)."
+            "description": "Match operator used when filtering (equals, exists, includes, ...)."
           },
           "columns": {
             "items": {
@@ -28913,7 +28941,7 @@
               }
             ],
             "title": "Ch Override",
-            "description": "Exact ClickHouse type \u2014 bypasses primitive mapping"
+            "description": "Exact ClickHouse type -- bypasses primitive mapping"
           },
           "codec": {
             "anyOf": [
@@ -28925,7 +28953,7 @@
               }
             ],
             "title": "Codec",
-            "description": "Explicit CODEC contents \u2014 required to set a codec with ch_override"
+            "description": "Explicit CODEC contents -- required to set a codec with ch_override"
           },
           "matched_searchable": {
             "items": {
@@ -29063,7 +29091,7 @@
               }
             ],
             "title": "Ch Override",
-            "description": "Exact ClickHouse type \u2014 bypasses primitive mapping"
+            "description": "Exact ClickHouse type -- bypasses primitive mapping"
           },
           "codec": {
             "anyOf": [
@@ -29075,7 +29103,7 @@
               }
             ],
             "title": "Codec",
-            "description": "Explicit CODEC contents \u2014 required to set a codec with ch_override"
+            "description": "Explicit CODEC contents -- required to set a codec with ch_override"
           },
           "matched_searchable": {
             "items": {
@@ -29874,13 +29902,13 @@
           "api_cors_origins"
         ],
         "title": "SettingsSummary",
-        "description": "Redacted settings \u2014 no secrets."
+        "description": "Redacted settings -- no secrets."
       },
       "SetupStatus": {
         "properties": {
           "initial_setup": {
             "$ref": "#/components/schemas/InitialSetupState",
-            "description": "Wizard state \u2014 completion, current step and per-step detail."
+            "description": "Wizard state -- completion, current step and per-step detail."
           },
           "oidc_providers": {
             "items": {
@@ -31085,7 +31113,7 @@
           "ddl": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/dfe_engine__api__v1__sources__DDLResult"
+                "$ref": "#/components/schemas/DDLResult"
               },
               {
                 "type": "null"
@@ -33988,7 +34016,7 @@
           "short_name"
         ],
         "title": "ViewDefinition",
-        "description": "A parameterized view discovered from ClickHouse system.tables.\n\nViews follow the naming convention: dfe_v_{namespace}_{name}\ne.g. dfe_v_analytics_user_activity \u2192 label: analytics/user_activity"
+        "description": "A parameterized view discovered from ClickHouse system.tables.\n\nViews follow the naming convention: dfe_v_{namespace}_{name}\ne.g. dfe_v_analytics_user_activity -> label: analytics/user_activity"
       },
       "ViewExecuteRequest": {
         "properties": {
@@ -34100,7 +34128,7 @@
           "python_type"
         ],
         "title": "ViewParameter",
-        "description": "Parameter discovered from a ClickHouse parameterized view.\n\nExtracted from the view's CREATE SQL by parsing {param:Type} patterns.\nProvides type metadata across the full stack (ClickHouse \u2192 Python \u2192 TypeScript \u2192 HTML)."
+        "description": "Parameter discovered from a ClickHouse parameterized view.\n\nExtracted from the view's CREATE SQL by parsing {param:Type} patterns.\nProvides type metadata across the full stack (ClickHouse -> Python -> TypeScript -> HTML)."
       },
       "VrlRequest": {
         "properties": {
@@ -34578,34 +34606,6 @@
         ],
         "title": "TestResponse"
       },
-      "dfe_engine__api__v1__schemas__DDLResult": {
-        "properties": {
-          "source_name": {
-            "type": "string",
-            "title": "Source Name"
-          },
-          "create_table": {
-            "type": "string",
-            "title": "Create Table",
-            "description": "CREATE TABLE DDL"
-          },
-          "views": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object",
-            "title": "Views",
-            "description": "View name \u2192 DDL"
-          }
-        },
-        "type": "object",
-        "required": [
-          "source_name",
-          "create_table"
-        ],
-        "title": "DDLResult",
-        "description": "Generated DDL output."
-      },
       "dfe_engine__api__v1__schemas__SchemaBuildResult": {
         "properties": {
           "source_name": {
@@ -34627,7 +34627,7 @@
           "ddl": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/dfe_engine__api__v1__schemas__DDLResult"
+                "$ref": "#/components/schemas/DDLResult"
               },
               {
                 "type": "null"
@@ -34773,34 +34773,6 @@
         "title": "SyncResponse",
         "description": "Submit/poll envelope for a provider sync (submit -> poll, like the sampler)."
       },
-      "dfe_engine__api__v1__sources__DDLResult": {
-        "properties": {
-          "source_name": {
-            "type": "string",
-            "title": "Source Name"
-          },
-          "create_table": {
-            "type": "string",
-            "title": "Create Table",
-            "description": "CREATE TABLE DDL"
-          },
-          "views": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object",
-            "title": "Views",
-            "description": "View name -> DDL"
-          }
-        },
-        "type": "object",
-        "required": [
-          "source_name",
-          "create_table"
-        ],
-        "title": "DDLResult",
-        "description": "Generated DDL output."
-      },
       "dfe_engine__api__v1__sources__SchemaBuildResult": {
         "properties": {
           "source_name": {
@@ -34822,7 +34794,7 @@
           "ddl": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/dfe_engine__api__v1__sources__DDLResult"
+                "$ref": "#/components/schemas/DDLResult"
               },
               {
                 "type": "null"
@@ -35079,7 +35051,7 @@
               }
             ],
             "title": "Ch Override",
-            "description": "Exact ClickHouse type \u2014 bypasses primitive mapping"
+            "description": "Exact ClickHouse type -- bypasses primitive mapping"
           },
           "codec": {
             "anyOf": [
@@ -35091,7 +35063,7 @@
               }
             ],
             "title": "Codec",
-            "description": "Explicit CODEC contents \u2014 required to set a codec with ch_override"
+            "description": "Explicit CODEC contents -- required to set a codec with ch_override"
           },
           "_matched_searchable": {
             "items": {

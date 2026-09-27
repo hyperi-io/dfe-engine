@@ -88,7 +88,7 @@ def _bad_request(exc: SyntheticDataError) -> HTTPException:
     return HTTPException(400, detail={"code": "bad_synthetic_data_request", "message": str(exc)})
 
 
-# ── endpoints ──────────────────────────────────────────────────
+# -- endpoints --------------------------------------------------
 
 
 @router.get("/synthetic-data/packs", response_model=list[PackInfo], dependencies=[_READ])

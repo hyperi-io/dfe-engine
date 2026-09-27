@@ -332,7 +332,7 @@ class SchemaRegistry:
             self._git_commit_and_push(yaml_path, commit_msg, created_by)
 
         self._store._refresh_all()
-        logger.info(f"Schema file updated {table!r} → {yaml_path}")
+        logger.info(f"Schema file updated {table!r} -> {yaml_path}")
         return self.get_schema(path)
 
     def delete_schema(

@@ -1,21 +1,21 @@
-"""Hunt alert grouping + cooldown — read-time aggregation for alerts.
+"""Hunt alert grouping + cooldown -- read-time aggregation for alerts.
 
 DEFERRED (unwired): part of the alerting track (auto-memory project_alerting), NOT
 dead code. AlertStateManager + build_grouping_query have no caller today; they drop in
 when the alerting build lands. Retained deliberately.
 
 All matched rows are written to the results table at full fidelity.
-Grouping happens at READ TIME when building alerts — a post-INSERT
+Grouping happens at READ TIME when building alerts -- a post-INSERT
 aggregation query groups by configurable fields and produces one alert
 per group with count, time range, and sample data.
 
 Two layers:
 
-Layer 1 — Alert Grouping (group_by):
+Layer 1 -- Alert Grouping (group_by):
     After hunt results are written, query the results table with GROUP BY
-    on configured fields. 10,000 identical matches → 1 alert per group.
+    on configured fields. 10,000 identical matches -> 1 alert per group.
 
-Layer 2 — Dispatcher Cooldown (cooldown):
+Layer 2 -- Dispatcher Cooldown (cooldown):
     Per (hunt, rule, customer, group_key) tracking of last_fired_at.
     Prevents re-alerting within the cooldown window. Cooldown is
     per-group: group A can fire while group B is still in cooldown.
@@ -47,7 +47,7 @@ from dfe_engine.settings import default_data_database
 # The cooldown table, by manifest id. The engine's schema phase creates it.
 _ALERT_STATE_ID = "data.alert_state"
 
-# ── Duration Parser ──────────────────────────────────────────────
+# -- Duration Parser ----------------------------------------------
 
 _DURATION_RE = re.compile(r"^(\d+)\s*(s|m|h|d)$", re.IGNORECASE)
 _UNITS = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days"}
@@ -64,7 +64,7 @@ def parse_duration(s: str) -> timedelta:
     return timedelta(**{_UNITS[match.group(2).lower()]: int(match.group(1))})
 
 
-# ── Alert Grouping Config ───────────────────────────────────────
+# -- Alert Grouping Config ---------------------------------------
 
 
 class AlertGroupingConfig(BaseModel):
@@ -104,7 +104,7 @@ class AlertGroupingConfig(BaseModel):
         return len(self.group_by) > 0
 
 
-# ── Group Key Builder ──────────────────────────────────────────
+# -- Group Key Builder ------------------------------------------
 
 
 def build_group_key(group_by: list[str], group_values: dict[str, str]) -> str:
@@ -127,7 +127,7 @@ def build_group_key(group_by: list[str], group_values: dict[str, str]) -> str:
     return "|".join(parts)
 
 
-# ── Grouping Query Builder ──────────────────────────────────────
+# -- Grouping Query Builder --------------------------------------
 
 
 def _field_select_expr(field: str, results_table_columns: Collection[str]) -> tuple[str, str]:
@@ -209,7 +209,7 @@ def build_grouping_query(
     )
 
 
-# ── Alert State Manager ─────────────────────────────────────────
+# -- Alert State Manager -----------------------------------------
 
 _CHECK_COOLDOWN_SQL = """\
 SELECT last_fired_at

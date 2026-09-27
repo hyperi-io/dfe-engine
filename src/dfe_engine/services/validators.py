@@ -2,7 +2,7 @@
 
 Mirrors the Rust `validate()` methods to catch configuration errors
 before they reach the services. Validation logic is dispatched via
-the plugin system — each plugin carries its own validate_config callback.
+the plugin system -- each plugin carries its own validate_config callback.
 """
 
 from __future__ import annotations

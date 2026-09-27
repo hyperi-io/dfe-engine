@@ -54,7 +54,7 @@ ACCOUNTS_CLASS = "accounts"
 _RBAC_CLASS = "governance"
 
 
-# ── Response / state models ──────────────────────────────────
+# -- Response / state models ----------------------------------
 
 
 class AccountGitPending(BaseModel):
@@ -120,7 +120,7 @@ def is_break_glass(username: str, admin_name: str) -> bool:
     return username == admin_account_name(admin_name)
 
 
-# ── Helpers ──────────────────────────────────────────────────
+# -- Helpers --------------------------------------------------
 
 
 def _cli_merge_command(gc: GitCrud, branch: str) -> str:
@@ -147,7 +147,7 @@ def _commit_message(username: str, summary: str, actor: str, request_id: str) ->
     )
 
 
-# ── Write path ───────────────────────────────────────────────
+# -- Write path -----------------------------------------------
 
 
 def publish_account(
@@ -237,7 +237,7 @@ def state_from_outcome(gc: GitCrud | None, outcome: WriteOutcome | None) -> Acco
     )
 
 
-# ── Steady-state read (setup-status) ─────────────────────────
+# -- Steady-state read (setup-status) -------------------------
 
 
 def steady_state(
@@ -313,7 +313,7 @@ def remote_state(
     )
 
 
-# ── Boot hydration ───────────────────────────────────────────
+# -- Boot hydration -------------------------------------------
 
 
 def hydrate_from_deploy_repo(

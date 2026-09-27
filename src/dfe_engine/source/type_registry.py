@@ -1,4 +1,4 @@
-"""Type Registry — Canonical primitive-to-ClickHouse type mapping.
+"""Type Registry -- Canonical primitive-to-ClickHouse type mapping.
 
 Maps simplified primitives (string, integer, text, etc.) to ClickHouse
 implementation details (types, codecs, nullable defaults). Validates
@@ -130,7 +130,7 @@ class TypeRegistry:
     """Canonical registry mapping primitives to ClickHouse types.
 
     Loaded from dfe-schemas ``registries/types.yaml``. Provides:
-    - resolve(): primitive → full CH type with wrapping + codec
+    - resolve(): primitive -> full CH type with wrapping + codec
     - validate_use_case(): enforce 1:M use_case↔primitive constraint
     - validate_attribute(): enforce 1:M attribute↔primitive constraint
     - validate_ch_override(): check against supported CH types catalogue

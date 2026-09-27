@@ -1,4 +1,4 @@
-"""DDL File Writer — generates reference DDL SQL files for dfe-schemas.
+"""DDL File Writer -- generates reference DDL SQL files for dfe-schemas.
 
 Produces standalone, runnable SQL files from schema YAML definitions.
 QoL tool for devs and sysops who want to see actual ClickHouse table

@@ -1,6 +1,6 @@
 """Authentication and authorization models.
 
-AuthContext is the canonical identity model for DFE — extracted from JWT
+AuthContext is the canonical identity model for DFE -- extracted from JWT
 claims by dfe-control-plane and passed into engine for Cedar evaluation.
 """
 

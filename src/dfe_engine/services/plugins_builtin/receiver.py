@@ -21,7 +21,7 @@ descriptor = ServiceDescriptor(
     kafka_role=KafkaRole.PRODUCER,
     liveness_paths=("/livez",),
     readiness_paths=("/readyz",),
-    description="HTTP/gRPC ingestion gateway — receives events and routes to Kafka.",
+    description="HTTP/gRPC ingestion gateway -- receives events and routes to Kafka.",
     extra_ports={"grpc": 6000},
 )
 
@@ -150,6 +150,6 @@ def _make_plugin() -> ServicePlugin:
     )
 
 
-# Entry point callable — returns a ServicePlugin
+# Entry point callable -- returns a ServicePlugin
 def plugin() -> ServicePlugin:
     return _make_plugin()

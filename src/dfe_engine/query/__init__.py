@@ -1,7 +1,7 @@
-"""DFE Query API — unified query interface with JSON output.
+"""DFE Query API -- unified query interface with JSON output.
 
 Queries execute via ClickHouse parameterized views discovered from system.tables.
-Clients reference views by label (e.g. "analytics/user_activity") — never raw SQL.
+Clients reference views by label (e.g. "analytics/user_activity") -- never raw SQL.
 """
 
 from dfe_engine.query.catalog import ViewCatalog

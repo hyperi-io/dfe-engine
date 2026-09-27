@@ -9,7 +9,7 @@
 """Validate filter rules against tier gate configuration.
 
 Mirrors the validation logic in
-``scalo::transport::filter::TransportFilterEngine::new()`` —
+``scalo::transport::filter::TransportFilterEngine::new()`` --
 called by the control plane before filter configs reach scalo-rs, so
 operators get immediate feedback in the UI/CLI.
 """
@@ -49,7 +49,7 @@ class FilterValidationError:
     """The tier the expression was classified as (if classification succeeded)."""
 
     def __str__(self) -> str:
-        return f"filter_{self.index}: '{self.expression}' — {self.error}"
+        return f"filter_{self.index}: '{self.expression}' -- {self.error}"
 
 
 def validate_filter_rules(
@@ -64,7 +64,7 @@ def validate_filter_rules(
 
     Args:
         rules: Filter rules to validate.
-        direction: "in" (inbound) or "out" (outbound) — determines which
+        direction: "in" (inbound) or "out" (outbound) -- determines which
             tier gate config applies.
         tier_config: Tier gate configuration (which tiers are enabled).
         has_dlq_configured: Whether the transport has a DLQ configured.
@@ -180,7 +180,7 @@ def warn_suboptimal_ordering(rules: list[FilterRule]) -> list[str]:
     Matches the ordering warning in scalo-rs's TransportFilterEngine::new().
     Returns a list of warning messages (empty if ordering is optimal).
 
-    Example: `[Tier2, Tier1]` → warns because Tier 2 precedes Tier 1.
+    Example: `[Tier2, Tier1]` -> warns because Tier 2 precedes Tier 1.
     Running Tier 1 first short-circuits before hitting the CEL engine.
     """
     warnings: list[str] = []
@@ -204,7 +204,7 @@ def warn_suboptimal_ordering(rules: list[FilterRule]) -> list[str]:
             if later_val < my_val:
                 warnings.append(
                     f"filter[{idx}] '{expr}' is {_tier_display(tier)} "
-                    f"but precedes a lower-tier filter. Consider reordering — "
+                    f"but precedes a lower-tier filter. Consider reordering -- "
                     f"Tier 1 filters are faster and may short-circuit before "
                     f"the CEL engine runs."
                 )

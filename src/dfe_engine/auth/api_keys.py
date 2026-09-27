@@ -16,7 +16,7 @@ API keys use a prefix+short_token+long_token format:
 - long_token:  32 hex chars stored as a SHA-384 hash ("sha384:{hex}", CNSA;
   pre-existing "sha256:" keys still verify)
 
-The full key is shown exactly once — at creation time. Only the hash is
+The full key is shown exactly once -- at creation time. Only the hash is
 persisted on disk; there is no way to reconstruct the full key from
 stored metadata.
 
@@ -46,8 +46,8 @@ _KEY_PREFIX = "dfe_ak"
 # API key name becomes the filename stem ({name}.yaml) - reject path traversal.
 # \Z (not $) anchors the true end of string so no trailing newline slips through.
 _VALID_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}\Z")
-_SHORT_BYTES = 4  # 4 bytes → 8 hex chars
-_LONG_BYTES = 16  # 16 bytes → 32 hex chars
+_SHORT_BYTES = 4  # 4 bytes -> 8 hex chars
+_LONG_BYTES = 16  # 16 bytes -> 32 hex chars
 
 
 def parse_expiry(value: str) -> datetime:
@@ -75,7 +75,7 @@ def parse_expiry(value: str) -> datetime:
 class APIKey(BaseModel):
     """Stored metadata for an API key.
 
-    The full plaintext long token is NEVER stored here — only the hash.
+    The full plaintext long token is NEVER stored here -- only the hash.
     """
 
     name: str
@@ -90,7 +90,7 @@ class APIKey(BaseModel):
     def is_expired(self, now: datetime | None = None) -> bool:
         """True when the key carries an expiry that has already passed.
 
-        An unparseable stored expiry counts as expired — a corrupted or
+        An unparseable stored expiry counts as expired -- a corrupted or
         hand-edited value must not silently grant an unbounded key.
         """
         if not self.expires_at:
@@ -170,7 +170,7 @@ class APIKeyStore:
             expires_at=expiry,
         )
 
-        # Write to disk — name is the filename stem, not in the YAML body
+        # Write to disk -- name is the filename stem, not in the YAML body
         data = key_meta.model_dump()
         data.pop("name")  # name is the filename stem
         yaml_dump(data, key_file)

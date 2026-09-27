@@ -1,4 +1,4 @@
-"""Schema v2 YAML loader — replaces CSV-based loading in schema_util.py.
+"""Schema v2 YAML loader -- replaces CSV-based loading in schema_util.py.
 
 Loads schema definitions from YAML files into SchemaColumn models.
 Handles meta_schema, derived_schema, additional_fields, and common
@@ -11,7 +11,7 @@ version; the engine returns the exact column snapshot for that version.
 
 Profile resolution order (first match wins):
 1. Explicit ``profiles_dir`` argument
-2. ``DFE_SCHEMAS_DIR`` env var → ``{dir}/common-header/``
+2. ``DFE_SCHEMAS_DIR`` env var -> ``{dir}/common-header/``
 3. ``common-header/`` under the installed ``dfe-schemas`` package
 4. ``common-header/`` under the image's schema seed directory
 
@@ -229,7 +229,7 @@ def _profile_file_stem(profile_name: str) -> str | None:
 
     Empty, whitespace, a bare ``.yml``/``.yaml`` suffix, and the
     ``common-header`` directory (with or without a trailing slash) are not
-    profiles — appending ``.yaml`` would look for ``.yaml`` or
+    profiles -- appending ``.yaml`` would look for ``.yaml`` or
     ``common-header.yaml``.
     """
     normalized = profile_name.replace("\\", "/").strip()
@@ -255,7 +255,7 @@ def _resolve_profile_yaml_path(
     profile_name: str,
     profiles_dir: str | Path | None = None,
 ) -> Path:
-    """Map a profile ref (short name or ``common-header/…`` registry path) to a YAML file."""
+    """Map a profile ref (short name or ``common-header/...`` registry path) to a YAML file."""
     stem = _profile_file_stem(profile_name)
     if stem is None:
         raise SchemaLoadError(f"Profile {profile_name!r} is empty")
@@ -519,7 +519,7 @@ class SchemaLoader:
         """Load version metadata from a schema YAML file.
 
         Returns a dict with ``current`` (str) and ``versions`` (dict of
-        version → metadata without columns).  Returns an empty dict for
+        version -> metadata without columns).  Returns an empty dict for
         unversioned files.
 
         Raises:
@@ -580,7 +580,7 @@ class SchemaLoader:
 
         Resolution order (first match wins):
         1. Explicit ``profiles_dir`` argument
-        2. ``DFE_SCHEMAS_DIR`` env var → ``{dir}/common-header/``
+        2. ``DFE_SCHEMAS_DIR`` env var -> ``{dir}/common-header/``
         3. ``common-header/`` under the installed ``dfe-schemas`` package
         4. ``common-header/`` under the image's schema seed directory
 

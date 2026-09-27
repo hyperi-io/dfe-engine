@@ -6,11 +6,11 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""SurfaceRegistry — loads service surface YAML files and provides CRUD.
+"""SurfaceRegistry -- loads service surface YAML files and provides CRUD.
 
 Each YAML file in the surfaces directory describes one Rust service's
 configurable settings and metrics.  Adding a new dfe-* service requires
-adding a YAML file — zero Python code.
+adding a YAML file -- zero Python code.
 
 Built-in surface definitions are seeded from package resources on first
 load when the target directory is empty.
@@ -44,7 +44,7 @@ class SurfaceRegistry:
         self._dir.mkdir(parents=True, exist_ok=True)
         self._seed_if_empty()
 
-    # ── Read operations ──────────────────────────────────────
+    # -- Read operations --------------------------------------
 
     def get(self, service_name: str) -> ServiceSurface | None:
         """Get a service surface by name.  Returns None if not found."""
@@ -62,7 +62,7 @@ class SurfaceRegistry:
                 surfaces.append(surface)
         return surfaces
 
-    # ── Write operations ─────────────────────────────────────
+    # -- Write operations -------------------------------------
 
     def create(self, surface: ServiceSurface) -> None:
         """Write a new surface YAML file.
@@ -104,13 +104,13 @@ class SurfaceRegistry:
         path.unlink()
         logger.info("Deleted service surface", service=service_name)
 
-    # ── Manifest refresh ─────────────────────────────────────
+    # -- Manifest refresh -------------------------------------
 
     async def refresh_manifest(self, service_name: str) -> ServiceSurface | None:
         """Fetch /metrics/manifest from the service and update the surface.
 
         Returns None if the service is unreachable or has no manifest_url.
-        This is a placeholder for Phase 1.5 of scalo-rs — when scalo-rs
+        This is a placeholder for Phase 1.5 of scalo-rs -- when scalo-rs
         exposes a /metrics/manifest endpoint, this method will fetch it
         and update the metrics_surface.
         """
@@ -162,7 +162,7 @@ class SurfaceRegistry:
         logger.info("Refreshed manifest", service=service_name)
         return surface
 
-    # ── Internal helpers ─────────────────────────────────────
+    # -- Internal helpers -------------------------------------
 
     def _path_for(self, service_name: str) -> Path:
         """Return the YAML file path for a service name."""

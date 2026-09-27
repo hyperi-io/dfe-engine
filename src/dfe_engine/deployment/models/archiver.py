@@ -16,7 +16,7 @@ class ArchiverDeploymentConfig(BaseDeploymentConfig):
     """Deployment configuration for dfe-archiver.
 
     Controls K8s resource sizing, autoscaling, and pod configuration.
-    Service config (what the binary reads) is separate — see services/ module.
+    Service config (what the binary reads) is separate -- see services/ module.
     """
 
     size: TShirtSize = Field(

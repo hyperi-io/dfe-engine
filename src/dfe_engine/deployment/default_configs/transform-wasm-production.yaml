@@ -1,4 +1,4 @@
-# DFE Transform WASM — Production Deployment
+# DFE Transform WASM -- Production Deployment
 # KEDA enabled, medium sizing, autoscaling
 
 size: medium

@@ -62,7 +62,7 @@ class Sampler:
             self._gate = asyncio.Semaphore(self._cfg.max_concurrent)
         return self._gate
 
-    # ── public entry point ─────────────────────────────────────
+    # -- public entry point -------------------------------------
 
     async def run(
         self, req: SampleRequest, ch: Any, source_registry: Any, *, task: Any = None
@@ -104,7 +104,7 @@ class Sampler:
         target, _ = self._resolve_target(req, source_registry)
         return target
 
-    # ── target resolution ──────────────────────────────────────
+    # -- target resolution --------------------------------------
 
     def _resolve_target(self, req: SampleRequest, source_registry: Any) -> tuple[str, str | None]:
         """Return (target, source_label) for the request.
@@ -137,7 +137,7 @@ class Sampler:
         except SourceNotFoundError as exc:
             raise SamplerError(f"Source not found: {name!r}") from exc
 
-    # ── fast modes (recent / random), run in a worker thread ───
+    # -- fast modes (recent / random), run in a worker thread ---
 
     def _fast_sample(
         self, req: SampleRequest, ch: Any, target: str, source_label: str | None, limit: int
@@ -191,7 +191,7 @@ class Sampler:
         note = "random over a bounded tail window, not the whole topic"
         return lines, {"window": len(window), "truncated": len(window) > limit}, note
 
-    # ── gated modes (smart / anomaly) via logreducer ───────────
+    # -- gated modes (smart / anomaly) via logreducer -----------
 
     def _reduce_sample(
         self, req: SampleRequest, ch: Any, target: str, source_label: str | None, limit: int
@@ -250,7 +250,7 @@ class Sampler:
             settings={"max_execution_time": self._cfg.max_execution_time},
         )
 
-    # ── formatting ─────────────────────────────────────────────
+    # -- formatting ---------------------------------------------
 
     def _format(
         self,

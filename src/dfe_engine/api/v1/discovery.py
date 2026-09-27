@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Discovery router — ClickHouse table and column introspection.
+"""Discovery router -- ClickHouse table and column introspection.
 
 Provides REST access to database metadata without needing direct
 ClickHouse connectivity from the UI. Requires a configured
@@ -26,7 +26,7 @@ from dfe_engine.auth.rbac_scopes import scopes_dict
 router = APIRouter(prefix="/discovery", tags=["discovery"])
 
 
-# ── Response models ─────────────────────────────────────────
+# -- Response models -----------------------------------------
 
 
 class TableInfo(BaseModel):
@@ -57,7 +57,7 @@ class DatabaseInfo(BaseModel):
     engine: str = ""
 
 
-# ── Dependencies ────────────────────────────────────────────
+# -- Dependencies --------------------------------------------
 
 
 def _get_ch_client(request: Request):
@@ -84,7 +84,7 @@ def _get_ch_client(request: Request):
         )
 
 
-# ── Endpoints ───────────────────────────────────────────────
+# -- Endpoints -----------------------------------------------
 
 
 @router.get(

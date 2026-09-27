@@ -6,17 +6,17 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Account management router — CRUD for local user accounts.
+"""Account management router -- CRUD for local user accounts.
 
-POST   /api/v1/auth/accounts                        → Create account
-GET    /api/v1/auth/accounts                        → List accounts
-GET    /api/v1/auth/accounts/{username}             → Get account detail
-GET    /api/v1/auth/accounts/me                     → Get own account (session)
-PUT    /api/v1/auth/accounts/me                     → Update own contact fields (session)
-PUT    /api/v1/auth/accounts/{username}             → Update account (admin)
-POST   /api/v1/auth/accounts/reset-password         → Reset own password (session)
-POST   /api/v1/auth/accounts/{username}/reset-password → Reset password (admin)
-DELETE /api/v1/auth/accounts/{username}             → Delete account
+POST   /api/v1/auth/accounts                        -> Create account
+GET    /api/v1/auth/accounts                        -> List accounts
+GET    /api/v1/auth/accounts/{username}             -> Get account detail
+GET    /api/v1/auth/accounts/me                     -> Get own account (session)
+PUT    /api/v1/auth/accounts/me                     -> Update own contact fields (session)
+PUT    /api/v1/auth/accounts/{username}             -> Update account (admin)
+POST   /api/v1/auth/accounts/reset-password         -> Reset own password (session)
+POST   /api/v1/auth/accounts/{username}/reset-password -> Reset password (admin)
+DELETE /api/v1/auth/accounts/{username}             -> Delete account
 
 Admin endpoints require account write/reset scopes. ``GET/PUT /me`` and
 ``POST /reset-password`` are the session-owner's own account and only require
@@ -109,7 +109,7 @@ def _mirror_account(
     return account_durability.state_from_outcome(gc, outcome)
 
 
-# ── Request / Response models ────────────────────────────────
+# -- Request / Response models --------------------------------
 
 
 class CreateAccountRequest(BaseModel):
@@ -203,7 +203,7 @@ class RotatePasswordResponse(BaseModel):
 
 
 class AccountResponse(BaseModel):
-    """Account detail — password_hash is NEVER included."""
+    """Account detail -- password_hash is NEVER included."""
 
     username: str
     enabled: bool
@@ -331,7 +331,7 @@ async def _reset_stored_password(
     return ResetPasswordResponse(git=git)
 
 
-# ── Endpoints ────────────────────────────────────────────────
+# -- Endpoints ------------------------------------------------
 
 
 @router.post(
@@ -732,7 +732,7 @@ async def delete_account(
     store.delete(username)
 
 
-# ── Attributes ───────────────────────────────────────────────
+# -- Attributes -----------------------------------------------
 #
 # Non-sensitive attributes ride inline on the Account model, so they are read
 # and written through the account store. Sensitive attributes live in a separate

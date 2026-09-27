@@ -1,7 +1,7 @@
-"""Schema version management — write operations for versioned schema YAML files.
+"""Schema version management -- write operations for versioned schema YAML files.
 
 Complements SchemaLoader (read-only) with functions to create new versions
-and clone schemas.  All operations are file-level — the caller handles
+and clone schemas.  All operations are file-level -- the caller handles
 git operations if needed.
 
 The version tree format stores complete column snapshots per version::
@@ -16,7 +16,7 @@ The version tree format stores complete column snapshots per version::
           - name: _timestamp
             type: datetime
 
-Published version entries are **immutable** — no function here modifies
+Published version entries are **immutable** -- no function here modifies
 an existing version's columns.  The only way to change a schema is to
 add a new version.
 
@@ -79,7 +79,7 @@ SchemaVersionType = Literal["model", "addition", "revision"]
 def next_version_for_type(current: str, version_type: SchemaVersionType) -> str:
     """Compute the next ``x.x.x`` semver from ``current`` and a version change type.
 
-    ``model`` → major bump, ``addition`` → minor bump, ``revision`` → patch bump.
+    ``model`` -> major bump, ``addition`` -> minor bump, ``revision`` -> patch bump.
     """
     if version_type not in _VERSION_TYPES:
         raise SchemaVersionError(
@@ -98,7 +98,7 @@ def next_version_for_type(current: str, version_type: SchemaVersionType) -> str:
     return f"{major}.{minor}.{patch + 1}"
 
 
-# ── Column normalisation ───────────────────────────────────────────
+# -- Column normalisation -------------------------------------------
 
 
 def _with_current_use_cases(columns: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -155,9 +155,9 @@ def _apply_modifications(
 
     Each modification is a dict with an ``action`` key:
 
-    - ``{"action": "add", "column": {...}}`` — append a new column
-    - ``{"action": "remove", "name": "col_name"}`` — remove by name
-    - ``{"action": "update", "name": "col_name", "column": {...}}`` — merge
+    - ``{"action": "add", "column": {...}}`` -- append a new column
+    - ``{"action": "remove", "name": "col_name"}`` -- remove by name
+    - ``{"action": "update", "name": "col_name", "column": {...}}`` -- merge
       the provided fields into the existing column dict
     """
     cols = copy.deepcopy(columns)
@@ -199,7 +199,7 @@ def _apply_modifications(
     return cols
 
 
-# ── SchemaManager ──────────────────────────────────────────────────
+# -- SchemaManager --------------------------------------------------
 
 
 class SchemaManager:
@@ -256,7 +256,7 @@ class SchemaManager:
 
         If the deleted version is ``current``, ``current`` is moved to the last
         remaining version (insertion order). The last remaining version cannot
-        be deleted — remove the schema instead.
+        be deleted -- remove the schema instead.
 
         Raises:
             SchemaVersionError: If the version is missing or is the last version.
@@ -318,7 +318,7 @@ class SchemaManager:
             path: Path to the schema YAML file.
             new_version: Version string (semver, e.g. ``"1.1.0"``).
             columns: Column definitions (dicts or SchemaColumn models).
-            type: Version type — ``model``, ``addition``, or ``revision``.
+            type: Version type -- ``model``, ``addition``, or ``revision``.
             summary: Human-readable summary of the change.
             set_current: Whether to update the ``current`` marker.
             validate: Whether to validate columns against TypeRegistry.

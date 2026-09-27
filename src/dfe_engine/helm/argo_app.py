@@ -4,7 +4,7 @@ Generates Kubernetes-ready manifests from DFE compilation state.
 Application CRDs are generated per service-instance. One AppProject CRD
 is generated per environment, reusing roles from ``argo_rbac.py``.
 
-All functions are pure — they accept data and return dicts. No side effects.
+All functions are pure -- they accept data and return dicts. No side effects.
 """
 
 from __future__ import annotations
@@ -146,7 +146,7 @@ def generate_applications(
         values_path_prefix: Directory prefix for values files (default: "values").
         destination_server: K8s API server URL.
         sync_policy: Override sync policy for all Applications.
-        chart_overrides: Service name → chart name overrides.
+        chart_overrides: Service name -> chart name overrides.
         extra_labels: Additional labels for all Application CRDs.
         ignore_differences: Argo CD ignoreDifferences for all Applications.
 

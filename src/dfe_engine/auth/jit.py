@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         auth/jit.py
-#  Purpose:      JIT provisioner — creates shadow accounts on first OIDC login
+#  Purpose:      JIT provisioner -- creates shadow accounts on first OIDC login
 #  Language:     Python
 #
 #  License:      BUSL-1.1

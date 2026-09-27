@@ -13,9 +13,9 @@ field, the UI POSTs the string, and gets back a structured result with:
 
 - Whether the syntax is valid (via real CEL parser from scalo)
 - Profile violations (DFE-disallowed functions)
-- The performance tier (Tier 1 / 2 / 3) — unique to dfe-engine
+- The performance tier (Tier 1 / 2 / 3) -- unique to dfe-engine
 - Referenced fields (for Tier 2/3)
-- Recognised operation (for Tier 1) — useful for showing a human-friendly
+- Recognised operation (for Tier 1) -- useful for showing a human-friendly
   description of what the filter will do
 - Suggested config changes if the expression needs an opt-in tier
 
@@ -23,20 +23,20 @@ field, the UI POSTs the string, and gets back a structured result with:
 
 This module layers THREE independent checks:
 
-1. **Syntax** — delegated to ``scalo.expression.validate()`` which
+1. **Syntax** -- delegated to ``scalo.expression.validate()`` which
    wraps the real ``common-expression-language`` package (same Rust
    ``cel-interpreter`` v0.10.0 that scalo-rs uses at runtime). Zero drift
    between UI validation and runtime behaviour.
 
-2. **DFE profile** — also from ``scalo.expression`` — rejects
+2. **DFE profile** -- also from ``scalo.expression`` -- rejects
    disallowed functions (regex, iteration, time) when the profile is
    strict.
 
-3. **Tier classification** — unique to dfe-engine, mirrors scalo-rs's
+3. **Tier classification** -- unique to dfe-engine, mirrors scalo-rs's
    ``src/transport/filter/classify.rs`` byte-for-byte. Classifies
    expressions into performance tiers for transport filter gating.
 
-All checks are fast (<1ms) — suitable for live validation as the user
+All checks are fast (<1ms) -- suitable for live validation as the user
 types in the UI.
 """
 
@@ -89,7 +89,7 @@ def check_syntax(
     """Perform a one-shot syntax check + tier classification on a CEL expression.
 
     This is the recommended entry point for UI live validation. Returns a
-    `SyntaxCheckResult` with everything the UI needs to render feedback —
+    `SyntaxCheckResult` with everything the UI needs to render feedback --
     syntax errors, tier badge, field references, plain-English description,
     and any opt-in required.
 
@@ -128,13 +128,13 @@ def check_syntax(
     # Step 2: For Tier 2/3 (expressions that actually run through the CEL engine
     # at runtime), validate syntax via the real CEL parser. Tier 1 expressions
     # bypass the CEL engine entirely in scalo-rs, so we skip the strict CEL
-    # parser check for them — scalo-rs accepts `has(bareword)` even though real
+    # parser check for them -- scalo-rs accepts `has(bareword)` even though real
     # CEL requires `has(qualified.path)`.
     if classification.tier != FilterTier.TIER1:
         scalo_errors = scalo_validate(expression)
         if scalo_errors:
             if not check_profile:
-                # Filter out profile violations — we want to classify Tier 3
+                # Filter out profile violations -- we want to classify Tier 3
                 # expressions, not reject them.
                 profile_errors = [
                     e for e in scalo_errors if "not allowed in the DFE expression profile" in e
@@ -191,11 +191,11 @@ def _describe_tier1(op: Tier1Op) -> str:
 
 def _describe_tier2(fields: list[str]) -> str:
     if not fields:
-        return "compound CEL expression (Tier 2 — requires CEL engine)"
-    return f"compound CEL on {', '.join(fields)} (Tier 2 — requires CEL engine)"
+        return "compound CEL expression (Tier 2 -- requires CEL engine)"
+    return f"compound CEL on {', '.join(fields)} (Tier 2 -- requires CEL engine)"
 
 
 def _describe_tier3(fields: list[str]) -> str:
     if not fields:
         return "complex CEL expression with regex/iteration/time (Tier 3)"
-    return f"complex CEL on {', '.join(fields)} (Tier 3 — regex/iteration/time)"
+    return f"complex CEL on {', '.join(fields)} (Tier 3 -- regex/iteration/time)"

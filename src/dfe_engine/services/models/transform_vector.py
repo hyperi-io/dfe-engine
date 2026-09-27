@@ -27,7 +27,7 @@ from dfe_engine.services.models.common import (
 from dfe_engine.services.models.source_common import BaseSourceConfig
 
 # ---------------------------------------------------------------------------
-# Kafka (both consumer and producer — transforms read and write)
+# Kafka (both consumer and producer -- transforms read and write)
 # ---------------------------------------------------------------------------
 
 
@@ -69,7 +69,7 @@ class TransformKafkaConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Vector source configs (the multi-source tree — vector-specific)
+# Vector source configs (the multi-source tree -- vector-specific)
 # ---------------------------------------------------------------------------
 
 
@@ -78,7 +78,7 @@ class VectorSourceConfig(BaseSourceConfig):
 
     Extends BaseSourceConfig with vector-specific fields:
     - config_file: the vector.dev YAML config
-    - parent: tree structure (one YAML → multiple child transforms)
+    - parent: tree structure (one YAML -> multiple child transforms)
 
     The tree of YAML config files is specific to vector transforms and
     is NOT a reused pattern across other multi-source services.
@@ -92,7 +92,7 @@ class VectorSourceConfig(BaseSourceConfig):
 
 
 # ---------------------------------------------------------------------------
-# IPC (dev/test direct mode — no Kafka)
+# IPC (dev/test direct mode -- no Kafka)
 # ---------------------------------------------------------------------------
 
 

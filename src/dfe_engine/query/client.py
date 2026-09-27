@@ -9,7 +9,7 @@
 """Query API client.
 
 Clients reference queries by label and pass parameters.
-SQL is never exposed to clients — it's resolved server-side
+SQL is never exposed to clients -- it's resolved server-side
 via ClickHouse parameterized views.
 """
 
@@ -30,7 +30,7 @@ class QueryClient:
     """Client for DFE Query API.
 
     Supports both direct (in-process) and HTTP modes.
-    Clients specify query labels and parameters — never raw SQL.
+    Clients specify query labels and parameters -- never raw SQL.
     """
 
     def __init__(
@@ -172,7 +172,7 @@ class QueryClient:
         executor = self._get_view_executor()
         if executor is None:
             raise RuntimeError(
-                "ViewExecutor not available — check ClickHouse connection "
+                "ViewExecutor not available -- check ClickHouse connection "
                 "and restricted user configuration"
             )
 

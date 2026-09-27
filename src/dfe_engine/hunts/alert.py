@@ -1,4 +1,4 @@
-"""Hunt alert dispatcher — send notifications when hunts produce results.
+"""Hunt alert dispatcher -- send notifications when hunts produce results.
 
 Uses Apprise (https://github.com/caronc/apprise) for multi-channel
 notification dispatch. Supports Slack, email, PagerDuty, Teams, and 90+
@@ -10,10 +10,10 @@ Alert destinations are defined once and referenced by name:
     registry.add(AlertDestination(
         name="slack-dfe-alerts",
         url="slack://TokenA/TokenB/TokenC/#alerts",
-        description="DFE alerts → #dfe-alerts",
+        description="DFE alerts -> #dfe-alerts",
     ))
 
-    # Hunt YAML references by name — CEL trigger syntax
+    # Hunt YAML references by name -- CEL trigger syntax
     alerts:
       destinations:
         - slack-dfe-alerts
@@ -23,10 +23,10 @@ Alert destinations are defined once and referenced by name:
         - when: 'severity == "critical" && result_count > 0'
 
 Triggers use CEL expressions evaluated against {result_count, ...row_fields}:
-- "result_count > 0" — fire when any result rows are returned
-- "result_count >= 10" — fire when result count meets a threshold
-- 'severity == "critical"' — fire when a field in results matches a condition
-- 'severity == "critical" && result_count > 0' — compound conditions
+- "result_count > 0" -- fire when any result rows are returned
+- "result_count >= 10" -- fire when result count meets a threshold
+- 'severity == "critical"' -- fire when a field in results matches a condition
+- 'severity == "critical" && result_count > 0' -- compound conditions
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ from scalo.expression import (
 )
 from scalo.logger import logger
 
-# ── Destination Registry ──────────────────────────────────────────
+# -- Destination Registry ------------------------------------------
 
 
 class AlertDestination(BaseModel):
@@ -110,7 +110,7 @@ class AlertDestinationRegistry:
         if self._store is not None:
             from dfe_engine.yaml_utils import yaml_dump
 
-            # Store url/description/enabled/hunt_name — name comes from the filename.
+            # Store url/description/enabled/hunt_name -- name comes from the filename.
             # exclude_none drops hunt_name when unset so unowned destinations stay clean.
             data = destination.model_dump(exclude={"name"}, exclude_none=True)
             yaml_path = Path(self._store._directory) / f"{destination.name}.yaml"
@@ -125,7 +125,7 @@ class AlertDestinationRegistry:
             data = self._store.get(name)
             if data is None:
                 raise KeyError(name)
-            # Inject name from table key (filename) — not stored inside YAML
+            # Inject name from table key (filename) -- not stored inside YAML
             data["name"] = name
             return AlertDestination.model_validate(data)
         return self._memory[name]
@@ -204,7 +204,7 @@ class AlertDestinationRegistry:
         return name in self._memory
 
 
-# ── Trigger Models ───────────────────────────────────────────────
+# -- Trigger Models -----------------------------------------------
 
 
 class AlertTrigger(BaseModel):
@@ -270,7 +270,7 @@ class _SafeFormatDict(dict):
         return f"{{{key}}}"
 
 
-# ── Dispatcher ────────────────────────────────────────────────────
+# -- Dispatcher ----------------------------------------------------
 
 
 class AlertDispatcher:
@@ -387,7 +387,7 @@ class AlertDispatcher:
             return False
 
 
-# ── Factory ───────────────────────────────────────────────────────
+# -- Factory -------------------------------------------------------
 
 
 def build_alert_config(
@@ -400,7 +400,7 @@ def build_alert_config(
     Hunt YAML format::
 
         alerts:
-          destinations:          # named refs → resolved via registry
+          destinations:          # named refs -> resolved via registry
             - slack-dfe-alerts
             - pagerduty-oncall
           channels:              # raw Apprise URLs
@@ -410,7 +410,7 @@ def build_alert_config(
             - when: 'severity == "critical" && result_count > 0'
 
     Resolution order:
-    1. Resolve destination names via registry → Apprise URLs
+    1. Resolve destination names via registry -> Apprise URLs
     2. Append any raw channel URLs from hunt YAML
     3. Append global_channels (deduplicated)
 

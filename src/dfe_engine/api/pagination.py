@@ -188,11 +188,11 @@ class PathTree(BaseModel, Generic[TreeItemT]):
         return cls.model_validate(root)
 
 
-# ── Helpers ──────────────────────────────────────────────────
+# -- Helpers --------------------------------------------------
 
 
 def schema_path_top_level(path: str) -> str:
-    """First path segment of a schema registry key (e.g. ``meta/foo`` → ``meta``)."""
+    """First path segment of a schema registry key (e.g. ``meta/foo`` -> ``meta``)."""
     parts = [p for p in path.split("/") if p]
     return parts[0] if parts else ""
 

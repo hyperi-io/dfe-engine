@@ -9,7 +9,7 @@
 """YAML-backed org registry for customer organisation management.
 
 Orgs are stored as individual YAML files: ``{orgs_dir}/{name}.yaml``.
-The org name is the filename stem — it is NOT written into the YAML body.
+The org name is the filename stem -- it is NOT written into the YAML body.
 
 Usage::
 
@@ -174,7 +174,7 @@ class OrgRegistry:
     def _read(self, path: Path) -> Org:
         """Load an Org from a YAML file.
 
-        The name is derived from the filename stem — it is not stored
+        The name is derived from the filename stem -- it is not stored
         inside the YAML body.
         """
         data: dict = yaml_load(path)

@@ -6,20 +6,20 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""CEL expression classifier — mirrors the Rust classify.rs logic.
+"""CEL expression classifier -- mirrors the Rust classify.rs logic.
 
 Classifies a CEL expression into one of three performance tiers:
 
-- **Tier 1** — SIMD field ops (has, ==, !=, startsWith, endsWith, contains).
+- **Tier 1** -- SIMD field ops (has, ==, !=, startsWith, endsWith, contains).
   Executed as direct byte operations, no CEL engine.
-- **Tier 2** — Standard CEL (compound logic, size(), numeric comparison).
+- **Tier 2** -- Standard CEL (compound logic, size(), numeric comparison).
   Requires ``allow_cel_filters_in/out`` opt-in.
-- **Tier 3** — Complex CEL (regex via matches, iteration via exists/all,
+- **Tier 3** -- Complex CEL (regex via matches, iteration via exists/all,
   time functions). Requires ``allow_complex_filters_in/out`` opt-in.
 
 This Python implementation MUST match the Rust classification in
 ``/projects/scalo-rs/src/transport/filter/classify.rs`` byte-for-byte
-— divergence means the UI validates differently from the runtime engine.
+-- divergence means the UI validates differently from the runtime engine.
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ class ClassifyResult:
 
 
 # ---------------------------------------------------------------------------
-# Tier 1 regex patterns — MUST match src/transport/filter/classify.rs
+# Tier 1 regex patterns -- MUST match src/transport/filter/classify.rs
 # ---------------------------------------------------------------------------
 
 _RE_HAS = re.compile(r"^\s*has\(\s*([\w.]+)\s*\)\s*$")
@@ -224,14 +224,14 @@ def _extract_field_references(expr: str) -> list[str]:
             continue
 
         ident = m.group(0)
-        # If followed by '(', it's a function call — strip the last segment
+        # If followed by '(', it's a function call -- strip the last segment
         after = expr[m.end() :].lstrip()
         if after.startswith("("):
             if "." in ident:
-                # Method call on a field — keep the receiver
+                # Method call on a field -- keep the receiver
                 ident = ident.rsplit(".", 1)[0]
             else:
-                # Bare function call (e.g., has(), size()) — not a field
+                # Bare function call (e.g., has(), size()) -- not a field
                 continue
 
         if not ident:

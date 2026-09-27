@@ -1,4 +1,4 @@
-"""Rule Creation Service — HyperDX-aware rule creation pipeline.
+"""Rule Creation Service -- HyperDX-aware rule creation pipeline.
 
 Orchestrates the full rule creation workflow:
 1. HyperDX SQL sanitization (if source_type="hyperdx")
@@ -7,7 +7,7 @@ Orchestrates the full rule creation workflow:
 4. Optional EXPLAIN cost estimation against ClickHouse
 5. AI analysis stub for async TS runner consumption
 
-dfe-engine is a library — no HTTP endpoints here. The control-plane
+dfe-engine is a library -- no HTTP endpoints here. The control-plane
 wraps this service in API routes.
 
 Usage::
@@ -26,9 +26,9 @@ Usage::
         ),
         rule_id="win_cert_01",
     )
-    # result.rule — Rule instance
-    # result.sql_errors — validation issues
-    # result.sanitize_summary — what was stripped
+    # result.rule -- Rule instance
+    # result.sql_errors -- validation issues
+    # result.sanitize_summary -- what was stripped
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ from .hdx_sanitizer import HdxSanitizer, HdxSanitizeResult
 from .rule_model import Rule, RuleCreate
 from .rule_rewriter import RuleRewriter
 
-# ── Request / Response models ──────────────────────────────
+# -- Request / Response models ------------------------------
 
 
 class RuleCreateRequest(BaseModel):
@@ -99,7 +99,7 @@ class CostEstimate(BaseModel):
 
 
 class AIAnalysisStub(BaseModel):
-    """Context for async AI analysis — consumed by TS runner, not processed here."""
+    """Context for async AI analysis -- consumed by TS runner, not processed here."""
 
     rule_id: str
     original_sql: str = ""
@@ -120,7 +120,7 @@ class RuleCreateResult(BaseModel):
     ai_context: AIAnalysisStub | None = None
 
 
-# ── DDL/DML keywords that should never appear in detection SQL ──
+# -- DDL/DML keywords that should never appear in detection SQL --
 
 _FORBIDDEN_KEYWORDS_RE = re.compile(
     r"\b(?:INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|MERGE)\b",
@@ -128,7 +128,7 @@ _FORBIDDEN_KEYWORDS_RE = re.compile(
 )
 
 
-# ── Service ────────────────────────────────────────────────
+# -- Service ------------------------------------------------
 
 
 class RuleCreationService:
@@ -152,7 +152,7 @@ class RuleCreationService:
         self._hdx_sanitizer = hdx_sanitizer or HdxSanitizer()
         self._ch_config = ch_config
 
-    # ── Public API ────────────────────────────────────────
+    # -- Public API ----------------------------------------
 
     def create_rule(
         self,
@@ -225,7 +225,7 @@ class RuleCreationService:
         """Standalone SQL validation without rule creation."""
         return self._validate_sql_syntax(sql)
 
-    # ── Internal methods ──────────────────────────────────
+    # -- Internal methods ----------------------------------
 
     def _validate_sql_syntax(self, sql: str) -> list[SqlValidationError]:
         """Structural SQL validation with helpful error messages.
@@ -352,7 +352,7 @@ class RuleCreationService:
         warnings: list[str] = []
 
         if not self._ch_config:
-            warnings.append("ClickHouse not configured — cost estimation skipped.")
+            warnings.append("ClickHouse not configured -- cost estimation skipped.")
             return CostEstimate(window_minutes=window_minutes, warnings=warnings)
 
         try:

@@ -1,4 +1,4 @@
-"""Hunt Rule model — Pydantic model for detection rule CRUD.
+"""Hunt Rule model -- Pydantic model for detection rule CRUD.
 
 A Rule represents a user-defined detection query that scans a source
 table and writes lean results (matched_uuid + rule metadata) to the
@@ -69,7 +69,7 @@ class RuleCreate(BaseModel):
     )
     hunt_name: str | None = Field(
         default=None,
-        description="Parent hunt name (optional — may be assigned later)",
+        description="Parent hunt name (optional -- may be assigned later)",
     )
     source: str | None = Field(
         default=None,
@@ -108,7 +108,7 @@ class Rule(BaseModel):
     """A detection rule ready for storage and execution.
 
     Contains the parsed detection logic, metadata, and the original
-    user SQL for reference. Rules are immutable once created — to
+    user SQL for reference. Rules are immutable once created -- to
     modify, create a new version.
 
     The ``where_clause`` is the final SQL WHERE fragment used in hunt
@@ -163,9 +163,9 @@ class Rule(BaseModel):
         """Create a Rule from a RuleCreate input.
 
         Handles three cases:
-        1. SQL only — parses user_sql for detection logic
-        2. CEL only — transpiles cel_filter to SQL WHERE clause
-        3. Both — parses SQL and ANDs transpiled CEL into where_clause
+        1. SQL only -- parses user_sql for detection logic
+        2. CEL only -- transpiles cel_filter to SQL WHERE clause
+        3. Both -- parses SQL and ANDs transpiled CEL into where_clause
 
         Args:
             create: RuleCreate input with SQL and/or CEL filter.
@@ -190,7 +190,7 @@ class Rule(BaseModel):
             cel_sql = transpile_to_clickhouse(create.cel_filter)
 
             if where_clause.strip():
-                # Both SQL and CEL — AND them together
+                # Both SQL and CEL -- AND them together
                 where_clause = f"({where_clause.strip()}) AND ({cel_sql})"
             else:
                 where_clause = cel_sql
@@ -239,7 +239,7 @@ class Rule(BaseModel):
 
         if not self.source_table and not self.source:
             errors.append(
-                "Rule has no source table or source name — cannot determine what to scan."
+                "Rule has no source table or source name -- cannot determine what to scan."
             )
 
         if self.cel_filter:
@@ -250,7 +250,7 @@ class Rule(BaseModel):
                 errors.append(f"CEL filter validation failed: {'; '.join(cel_errors)}")
 
         if self.had_select_star:
-            # Warning, not error — the system rewrites to lean output
+            # Warning, not error -- the system rewrites to lean output
             pass
 
         return errors

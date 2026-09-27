@@ -1,4 +1,4 @@
-"""DFE Engine API — FastAPI application.
+"""DFE Engine API -- FastAPI application.
 
 Usage::
 

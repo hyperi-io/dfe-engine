@@ -1,5 +1,5 @@
-# DFE Fetcher — Development defaults
-# SaaS API fetcher — pulls from cloud APIs and routes to Kafka
+# DFE Fetcher -- Development defaults
+# SaaS API fetcher -- pulls from cloud APIs and routes to Kafka
 
 sources: []
 

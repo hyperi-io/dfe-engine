@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Tasks router — status polling and SSE streaming for background tasks.
+"""Tasks router -- status polling and SSE streaming for background tasks.
 
 Tasks are created by other routers (hunts, pipeline) via the TaskManager.
 This router only provides read access + cancel.
@@ -105,7 +105,7 @@ async def stream_task(
 
     Events:
     - ``progress``: ``{status, progress, message}``
-    - ``complete``: ``{status, result, error}`` (terminal — stream ends)
+    - ``complete``: ``{status, result, error}`` (terminal -- stream ends)
     """
     manager = _get_task_manager(request)
     info = manager.get(task_id)

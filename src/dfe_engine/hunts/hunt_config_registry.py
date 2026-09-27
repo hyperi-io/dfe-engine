@@ -1,4 +1,4 @@
-"""Hunt config registry — CRUD for scheduled hunt YAML definitions.
+"""Hunt config registry -- CRUD for scheduled hunt YAML definitions.
 
 Two interchangeable backends behind one registry surface:
 
@@ -6,7 +6,7 @@ Two interchangeable backends behind one registry surface:
   SSoT and every mutation is one gitcrud commit, because that is the directory
   the k8s hunt runner git-syncs. Pass ``deploy_repo=DeployRepoStore(...)``.
 - **DirectoryConfigStore**: ``hunts.hunt_dir`` (first path when comma-separated)
-  as SSoT — the shared config volume the docker hunt runner reads.
+  as SSoT -- the shared config volume the docker hunt runner reads.
 
 Each hunt is stored as ``{name}.yaml``. The ``display_name`` field inside the YAML is the
 label used by the hunt engine at runtime (legacy YAML may use ``name`` instead).
@@ -157,7 +157,7 @@ class HuntConfigRegistry:
         """
         if self._deploy is not None:
             outcome = self._deploy.put(name, doc, actor=created_by or "engine")
-            logger.info(f"Saved hunt config '{name}' → deploy repo config/hunts")
+            logger.info(f"Saved hunt config '{name}' -> deploy repo config/hunts")
             return outcome
 
         store = self._require_store()
@@ -168,7 +168,7 @@ class HuntConfigRegistry:
             if store._git_push:
                 store._git_push_remote()
         store._refresh_all()
-        logger.info(f"Saved hunt config '{name}' → {yaml_path}")
+        logger.info(f"Saved hunt config '{name}' -> {yaml_path}")
         return None
 
     def _delete_raw(self, name: str, *, created_by: str | None) -> tuple[bool, WriteOutcome | None]:

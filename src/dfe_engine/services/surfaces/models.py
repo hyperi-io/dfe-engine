@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Service surface models — config settings + metrics exposed by Rust services.
+"""Service surface models -- config settings + metrics exposed by Rust services.
 
 Each service surface describes what a Rust service exposes:
 - config_surface: settings the UI can edit (pushed via Helm values)

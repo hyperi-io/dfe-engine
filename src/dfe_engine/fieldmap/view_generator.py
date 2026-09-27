@@ -1,4 +1,4 @@
-"""View generator — produces ClickHouse view DDL from resolved field maps.
+"""View generator -- produces ClickHouse view DDL from resolved field maps.
 
 Generates CREATE VIEW statements for each standard × source combination.
 View naming convention: ``{table_name}_{standard}``
@@ -100,7 +100,7 @@ class ViewGenerator:
             config: DDL configuration.
 
         Returns:
-            Dict of standard → view DDL string.
+            Dict of standard -> view DDL string.
         """
         if standards is None:
             standards = self._discover_standards(source_name)

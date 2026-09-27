@@ -1,4 +1,4 @@
-"""DFE Field Mapping Layer — standard-to-DFE column mappings.
+"""DFE Field Mapping Layer -- standard-to-DFE column mappings.
 
 Supports Sigma, ECS, CIM, and custom standards. Each standard has
 a default field map plus optional source-specific overrides.
