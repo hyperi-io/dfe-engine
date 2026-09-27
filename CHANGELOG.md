@@ -3,6 +3,16 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.10](https://github.com/hyperi-io/dfe-engine/compare/v1.22.9...v1.22.10) (2026-09-27)
+
+### Bug Fixes
+
+* **api:** mask an alert destination's URL, and answer a guess the same way twice ([#578](https://github.com/hyperi-io/dfe-engine/issues/578)) ([f935f04](https://github.com/hyperi-io/dfe-engine/commit/f935f04c104475e08259b8958d84233476cd603d)), closes [#562](https://github.com/hyperi-io/dfe-engine/issues/562)
+* **auth:** bind a proxied subject by the name it can actually reach ([#575](https://github.com/hyperi-io/dfe-engine/issues/575)) ([3bdf728](https://github.com/hyperi-io/dfe-engine/commit/3bdf728766519ddb4cbfecbb65de3bbd66987768)), closes [#564](https://github.com/hyperi-io/dfe-engine/issues/564)
+* **auth:** move platform_grants into auth, drop the unread connection map ([#573](https://github.com/hyperi-io/dfe-engine/issues/573)) ([0f19854](https://github.com/hyperi-io/dfe-engine/commit/0f19854c0d9e8ccacc8c8d2e3460ef883a98d8e9)), closes [#565](https://github.com/hyperi-io/dfe-engine/issues/565)
+* **gitops:** bound the merge-poll fetch and the startup clone ([#572](https://github.com/hyperi-io/dfe-engine/issues/572)) ([704e20b](https://github.com/hyperi-io/dfe-engine/commit/704e20b2374498c046190e06b15b12fbd117a177)), closes [#566](https://github.com/hyperi-io/dfe-engine/issues/566)
+* **tests:** drop the hunts stats hook, keep the .env lookup inside the checkout ([#570](https://github.com/hyperi-io/dfe-engine/issues/570)) ([d63360d](https://github.com/hyperi-io/dfe-engine/commit/d63360de22c3a50864f422d85efe00c0db566a8e)), closes [#569](https://github.com/hyperi-io/dfe-engine/issues/569)
+
 ## [1.22.9](https://github.com/hyperi-io/dfe-engine/compare/v1.22.8...v1.22.9) (2026-09-27)
 
 ### Bug Fixes
