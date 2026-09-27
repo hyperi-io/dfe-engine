@@ -47,8 +47,8 @@ class JitIdentityCollisionError(AuthenticationError):
     Attributes:
         user_id: The IdP-asserted subject.
         source_provider: The provider that asserted it.
-        reason: ``protected_account``, ``local_account``, ``provider_mismatch`` or
-            ``api_key_subject``.
+        reason: ``protected_account``, ``local_account``, ``provider_mismatch``,
+            ``subject_mismatch`` or ``api_key_subject``.
     """
 
     def __init__(self, user_id: str, source_provider: str, reason: str) -> None:
@@ -91,7 +91,11 @@ class JitProvisioner:
 
     @staticmethod
     def sanitise_username(user_id: str) -> str:
-        """Convert email/OIDC subject to safe filename stem."""
+        """Convert email/OIDC subject to safe filename stem.
+
+        Case and punctuation fold, so several subjects can share one stem; the
+        account's recorded ``subject`` is what tells them apart.
+        """
         return re.sub(r"[^a-z0-9-]", "-", user_id.lower()).strip("-")
 
     def ensure_account(
@@ -111,24 +115,24 @@ class JitProvisioner:
         Raises:
             JitIdentityCollisionError: The asserted subject is in the API-key
                 namespace, or resolved onto a recovery credential or onto an
-                account this provider does not own. Nothing is written.
+                account this provider or this subject does not own. Nothing is
+                written.
         """
         if user_id.startswith(API_KEY_SUBJECT_PREFIX):
             audit_jit_login_refused(user_id, source_provider, "api_key_subject")
             raise JitIdentityCollisionError(user_id, source_provider, "api_key_subject")
         safe_name = self.sanitise_username(user_id)
         self._refuse_protected(safe_name, user_id, source_provider)
-        self._refuse_account_named_by_subject(safe_name, user_id, source_provider)
         now = datetime.now(UTC).isoformat()
         wanted_email = email.strip()
         wanted_name = name.strip()
 
-        existing = self._accounts.get(safe_name)
+        key, existing = self._session_account(safe_name, user_id)
         if existing is not None:
             self._require_same_identity(existing, user_id, source_provider)
             self._require_available(existing, user_id, source_provider)
             # Subsequent login -- update groups if changed + last_login_at
-            updates: dict[str, object] = {"last_login_at": now}
+            updates: dict[str, object] = {"last_login_at": now, "subject": user_id}
             if set(existing.groups) != set(oidc_groups):
                 added = [g for g in oidc_groups if g not in existing.groups]
                 removed = [g for g in existing.groups if g not in oidc_groups]
@@ -138,8 +142,8 @@ class JitProvisioner:
                 updates["email"] = wanted_email
             if wanted_name and existing.name != wanted_name:
                 updates["name"] = wanted_name
-            self._accounts.update(safe_name, **updates)
-            return self._accounts.get(safe_name)
+            self._accounts.update(key, **updates)
+            return self._accounts.get(key)
 
         # First login -- create shadow account
         try:
@@ -154,6 +158,7 @@ class JitProvisioner:
                 safe_name,
                 external=True,
                 source_provider=source_provider,
+                subject=user_id,
                 last_login_at=now,
             )
         except ValueError:
@@ -165,7 +170,11 @@ class JitProvisioner:
                 raise
             self._require_same_identity(raced, user_id, source_provider)
             self._require_available(raced, user_id, source_provider)
-            race_updates: dict[str, object] = {"groups": oidc_groups, "last_login_at": now}
+            race_updates: dict[str, object] = {
+                "groups": oidc_groups,
+                "last_login_at": now,
+                "subject": user_id,
+            }
             if wanted_email:
                 race_updates["email"] = wanted_email
             if wanted_name:
@@ -223,38 +232,38 @@ class JitProvisioner:
         audit_jit_login_refused(user_id, source_provider, "protected_account")
         raise JitIdentityCollisionError(user_id, source_provider, "protected_account")
 
-    def _refuse_account_named_by_subject(
-        self, safe_name: str, user_id: str, source_provider: str
-    ) -> None:
-        """Refuse when the raw subject is the name of an account this identity does not own.
+    def _session_account(self, safe_name: str, user_id: str) -> tuple[str, Account | None]:
+        """The account a session for *user_id* binds to, and the name it is stored under.
 
-        The session binds to the account stored under the raw subject before the
-        sanitised one (``api.deps.account_for_session_subject``), so a subject that
-        is another account's exact name would otherwise sign in as that account.
-
-        Raises:
-            JitIdentityCollisionError: The raw subject names a local account, or
-                another provider's.
+        The session looks the raw subject up before the sanitised one
+        (``api.deps.account_for_session_subject``), so an account stored under the
+        raw subject is the one this login reconciles. A stem-named shadow beside it
+        would be a second account for one identity.
         """
-        if user_id == safe_name:
-            return
-        named = self._accounts.get(user_id)
-        if named is not None:
-            self._require_same_identity(named, user_id, source_provider)
+        if user_id != safe_name:
+            named = self._accounts.get(user_id)
+            if named is not None:
+                return user_id, named
+        return safe_name, self._accounts.get(safe_name)
 
     def _require_same_identity(self, existing: Account, user_id: str, source_provider: str) -> None:
         """Refuse when the stored account is not this IdP identity's own.
 
         The account key is a sanitised subject with no provider in it, so without
         this a provider asserting somebody else's subject would rewrite their
-        groups, email and display name.
+        groups, email and display name. Two subjects from one provider can share a
+        stem, so the account's recorded subject must be this one too.
 
         Raises:
-            JitIdentityCollisionError: The account is local, or another provider's.
+            JitIdentityCollisionError: The account is local, another provider's,
+                or another subject's.
         """
-        if self._may_adopt(existing, source_provider):
+        if not self._may_adopt(existing, source_provider):
+            reason = "provider_mismatch" if existing.source_provider else "local_account"
+        elif existing.subject and existing.subject != user_id:
+            reason = "subject_mismatch"
+        else:
             return
-        reason = "provider_mismatch" if existing.source_provider else "local_account"
         audit_jit_login_refused(user_id, source_provider, reason)
         raise JitIdentityCollisionError(user_id, source_provider, reason)
 
