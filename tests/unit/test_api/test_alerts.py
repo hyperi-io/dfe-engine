@@ -524,6 +524,34 @@ class TestTheDestinationUrlIsACredential:
         assert resp.status_code == 200, resp.text
         assert self.SECRET_URL not in resp.text
 
+    @pytest.mark.parametrize("order", ["asc", "desc"])
+    def test_sorting_by_url_cannot_order_on_the_credential(
+        self, alert_client, alert_admin_headers, analyst_headers, order
+    ):
+        """URL order matches name order in neither direction, so ordering on the URL would show."""
+        urls = {
+            "a-dest": "slack://mmm-4903",
+            "b-dest": "slack://zzz-4904",
+            "c-dest": "slack://aaa-4905",
+        }
+        for name, url in urls.items():
+            created = alert_client.post(
+                "/api/v1/alerts/destinations",
+                json={"name": name, "url": url, "enabled": True},
+                headers=alert_admin_headers,
+            )
+            assert created.status_code == 201, created.text
+
+        resp = alert_client.get(
+            "/api/v1/alerts/destinations",
+            params={"sort_by": "url", "sort_order": order},
+            headers=analyst_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert [item["name"] for item in resp.json()["items"]] == ["a-dest", "b-dest", "c-dest"]
+        assert not any(url in resp.text for url in urls.values())
+
     def test_the_mask_written_back_keeps_the_stored_url(
         self, alert_client, alert_admin_headers, stored
     ):

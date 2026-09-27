@@ -104,15 +104,16 @@ async def list_destinations(
     sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
     """List alert destinations."""
+    # No URL in the rows, so sort_by cannot order on another destination's credential.
     raw = [
         {
             "name": dest.name,
-            "url": dest.url,
+            "url_scheme": _url_scheme(dest.url),
             "description": dest.description,
             "enabled": dest.enabled,
             "hunt_name": dest.hunt_name,
         }
-        for dest in registry.list()
+        for dest in sorted(registry.list(), key=lambda dest: dest.name)
     ]
 
     if hunt is not None:
@@ -141,7 +142,7 @@ async def list_destinations(
             name=item.get("name", ""),
             description=item.get("description", ""),
             enabled=item.get("enabled", True),
-            url_scheme=_url_scheme(item.get("url", "")),
+            url_scheme=item.get("url_scheme", ""),
         )
         for item in raw
     ]
