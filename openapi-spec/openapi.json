@@ -17887,7 +17887,7 @@
           "url": {
             "type": "string",
             "title": "Url",
-            "description": "Apprise notification URL (slack://, mailto://, etc.)"
+            "description": "Apprise notification URL (slack://, mailto://, etc.). Masked on every read; write the mask back to keep the stored URL"
           },
           "description": {
             "type": "string",
@@ -17899,6 +17899,12 @@
             "type": "boolean",
             "title": "Enabled",
             "default": true
+          },
+          "url_scheme": {
+            "type": "string",
+            "title": "Url Scheme",
+            "description": "URL scheme (slack, mailto, etc.); read-only, set from the URL",
+            "default": ""
           },
           "hunt_name": {
             "anyOf": [
