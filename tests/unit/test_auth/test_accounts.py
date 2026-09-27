@@ -6,8 +6,6 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
-
 import time
 
 import bcrypt
@@ -204,6 +202,20 @@ class TestANameThatIsAPath:
 
     def test_a_password_checked_against_it_never_matches(self, store, outside):
         assert store.verify_password(self.OUTSIDE, "password123") is False
+
+
+class TestANameThatDiffersOnlyInCase:
+    """A case-blind filesystem opens bob.yaml for Bob, which would make Bob's session bob's."""
+
+    def test_it_finds_nothing(self, store, tmp_path):
+        store.create("bob", "password123", phone="+61 2 5550 0001")
+        if not (tmp_path / "accounts" / "BOB.yaml").exists():
+            pytest.skip("this filesystem tells names apart by case")
+
+        assert store.get("Bob") is None
+        with pytest.raises(KeyError):
+            store.update("Bob", phone="+61 2 5550 9999")
+        assert store.get("bob").phone == "+61 2 5550 0001"
 
 
 # ---------------------------------------------------------------------------

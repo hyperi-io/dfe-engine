@@ -3,8 +3,10 @@
 import secrets
 
 import jwt as pyjwt
+import pytest
 from fastapi.testclient import TestClient
 
+from dfe_engine.api.deps import create_access_token
 from dfe_engine.auth import hyperdx_role
 
 
@@ -375,3 +377,103 @@ class TestTheHyperdxRoleClaim:
         assert refreshed.status_code == 200, refreshed.text
         claim = _claims(refreshed.json()["access_token"])[hyperdx_role.CLAIM]
         assert claim == hyperdx_role.MEMBER
+
+
+def _bearer(api_settings, sub: str, **claims) -> dict[str, str]:
+    """Headers for an engine token with *sub* and whatever claims the test names."""
+    token = create_access_token(
+        data={"sub": sub, "org_id": "test-org", **claims}, settings=api_settings
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+class TestRolesFollowTheBoundAccount:
+    """A session's store roles are those of the account it binds to, and no other's."""
+
+    @pytest.mark.parametrize("held_by", ["account", "membership"])
+    def test_a_token_whose_subject_is_anothers_stem_gets_none_of_their_roles(
+        self, client: TestClient, app, api_settings, held_by
+    ):
+        """alice-smith-corp records Alice.Smith@corp, so a token for the bare stem binds nothing."""
+        signed_in = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "Alice.Smith@corp", "X-Oidc-Groups": "dfe-admins"},
+        )
+        assert signed_in.status_code == 200, signed_in.text
+        if held_by == "membership":
+            app.state.account_store.update("alice-smith-corp", groups=[])
+            app.state.group_store.add_member("dfe-admins", "alice-smith-corp")
+
+        resp = client.get("/api/v1/auth/me", headers=_bearer(api_settings, "alice-smith-corp"))
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["roles"] == []
+        assert resp.json()["groups"] == []
+
+    def test_a_token_whose_subject_is_anothers_stem_sees_none_of_their_groups(
+        self, client: TestClient, app, api_settings
+    ):
+        """Members see their own groups, and the bare stem is not a member of Alice's."""
+        client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "Alice.Smith@corp", "X-Oidc-Groups": "dfe-analysts"},
+        )
+        app.state.group_store.add_member("dfe-analysts", "alice-smith-corp")
+
+        resp = client.get("/api/v1/auth/groups", headers=_bearer(api_settings, "alice-smith-corp"))
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["items"] == []
+
+    def test_a_proxied_user_with_no_local_account_gets_its_claim_groups(self, client: TestClient):
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "nia@example.com", "X-Oidc-Groups": "dfe-analysts"},
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["roles"] == ["data_analyst"]
+
+    def test_a_token_with_no_account_behind_it_gets_its_claim_groups(
+        self, client: TestClient, app, api_settings
+    ):
+        headers = _bearer(api_settings, "omar@example.com", groups=["dfe-analysts"])
+
+        resp = client.get("/api/v1/auth/me", headers=headers)
+
+        assert app.state.account_store.get("omar-example-com") is None
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["roles"] == ["data_analyst"]
+
+    def test_a_local_login_gets_its_accounts_roles(self, client: TestClient):
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "operator", "password": "test-operator-pw"},
+        )
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+        resp = client.get("/api/v1/auth/me", headers=headers)
+
+        assert resp.status_code == 200, resp.text
+        assert sorted(resp.json()["roles"]) == ["data_analyst", "infra_admin"]
+
+    def test_a_scim_account_bound_by_stem_gets_its_roles(
+        self, client: TestClient, app, api_settings
+    ):
+        """jane.doe stems onto the SCIM record jane-doe, which records her as its subject."""
+        store = app.state.account_store
+        store.create("jane-doe", secrets.token_urlsafe(16), groups=["dfe-analysts"])
+        store.update("jane-doe", source_provider="scim", subject="jane.doe")
+
+        resp = client.get("/api/v1/auth/me", headers=_bearer(api_settings, "jane.doe"))
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["roles"] == ["data_analyst"]
+
+    def test_an_api_key_keeps_its_own_groups(self, client: TestClient, app):
+        _, key = app.state.api_key_store.create("ci-analyst", groups=["dfe-analysts"])
+
+        resp = client.get("/api/v1/auth/me", headers={"X-API-Key": key})
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["roles"] == ["data_analyst"]

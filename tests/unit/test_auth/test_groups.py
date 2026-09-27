@@ -6,8 +6,6 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
-
 import pytest
 
 from dfe_engine.auth.groups import Group, GroupStore
@@ -25,6 +23,12 @@ class TestGroupModel:
         g = Group(name="ops", description="Ops team", roles=["operator"], members=["alice"])
         assert g.roles == ["operator"]
         assert g.members == ["alice"]
+
+    @pytest.mark.parametrize("scope", ["org:../elsewhere/outside", "org:a/b", "org:acme\n"])
+    def test_an_org_scope_names_an_org_the_registry_could_hold(self, scope):
+        """The org part is looked up in the org registry, so it follows the org name rule."""
+        with pytest.raises(ValueError, match="Group scope"):
+            Group(name="climber", scope=scope)
 
 
 class TestGroupStoreCreate:

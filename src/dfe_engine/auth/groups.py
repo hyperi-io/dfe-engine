@@ -6,6 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -13,6 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from dfe_engine.auth.protected_accounts import resolve_floor
 from dfe_engine.auth.store_names import VALID_NAME, store_key
+from dfe_engine.orgs.models import ORG_NAME_PATTERN
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 if TYPE_CHECKING:
@@ -25,11 +27,14 @@ _ORG_SCOPE_PREFIX = "org:"
 def validate_group_scope(scope: str) -> str:
     """Validate a group scope string: ``system`` or ``org:<name>``.
 
+    ``<name>`` follows the org name rule, since it is looked up in the org registry.
+
     Returns the scope unchanged; raises ValueError otherwise.
     """
     if scope == GROUP_SCOPE_SYSTEM:
         return scope
-    if scope.startswith(_ORG_SCOPE_PREFIX) and scope[len(_ORG_SCOPE_PREFIX) :].strip():
+    org = scope.removeprefix(_ORG_SCOPE_PREFIX)
+    if org != scope and re.fullmatch(ORG_NAME_PATTERN, org):
         return scope
     raise ValueError(f"Group scope must be 'system' or 'org:<name>', got '{scope}'")
 

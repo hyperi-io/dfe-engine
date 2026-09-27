@@ -15,6 +15,7 @@ from dfe_engine.api.deps import (
     CurrentUser,
     Settings,
     _get_client_ip,
+    bound_account,
     check_action,
     create_access_token,
     get_role_config,
@@ -106,19 +107,9 @@ class PermissionsResponse(BaseModel):
     permissions: list[str] = Field(description="Resolved permissions from all roles")
 
 
-def _session_account(request: Request, user_id: str):
-    """The store account for a session subject, including the JIT-sanitised stem."""
-    from dfe_engine.api.deps import account_for_session_subject
-
-    store = getattr(request.app.state, "account_store", None)
-    if store is None:
-        return None
-    return account_for_session_subject(store, user_id)
-
-
 def _password_change_required(request: Request, user_id: str) -> bool:
     """Whether the session's account must replace an issued password first."""
-    account = _session_account(request, user_id)
+    account = bound_account(request, user_id)
     return bool(account and account.password_change_required)
 
 
@@ -276,7 +267,7 @@ async def get_me(user: CurrentUser, request: Request):
     """
     role_config = get_role_config(request)
     permissions = sorted(role_config.resolve_permissions(user.roles))
-    account = _session_account(request, user.user_id)
+    account = bound_account(request, user.user_id)
     return UserResponse(
         org_id=user.org_id,
         user_id=user.user_id,

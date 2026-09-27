@@ -24,14 +24,18 @@ the same rule, plus members always see the groups they belong to --
 org-local groups are never listed outside their org.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from dfe_engine.api.deps import CurrentUser, check_action, is_action_allowed, require_action
+from dfe_engine.api.deps import (
+    CurrentUser,
+    bound_account,
+    check_action,
+    is_action_allowed,
+    require_action,
+)
 from dfe_engine.api.pagination import (
     PaginatedResponse,
     PaginationParams,
@@ -96,10 +100,16 @@ def _scope_of(group: Group) -> Scope:
     return Scope(type="org", id=org) if org else Scope()
 
 
-def _visible(request: Request, user, group: Group) -> bool:
+def _member_name(request: Request, user) -> str | None:
+    """The username the session's own account is listed under in group members, if any."""
+    account = bound_account(request, user.user_id)
+    return account.username if account is not None else None
+
+
+def _visible(request: Request, user, group: Group, member: str | None) -> bool:
     """Members always see their own groups; otherwise group:read at the
     group's scope decides (org-local groups stay invisible outside their org)."""
-    if user.user_id in group.members:
+    if member is not None and member in group.members:
         return True
     return is_action_allowed(request, user, scopes_dict["group_read"], scope=_scope_of(group))
 
@@ -168,7 +178,8 @@ async def create_group(
 
     org = target.scope_org
     org_registry = getattr(request.app.state, "org_registry", None)
-    if org and org_registry is not None and org_registry.get(org) is None:
+    # With no registry to check against, no org is known to exist.
+    if org and (org_registry is None or org_registry.get(org) is None):
         raise HTTPException(
             status_code=422,
             detail={"code": "invalid_scope", "message": f"Org '{org}' not found"},
@@ -210,7 +221,8 @@ async def list_groups(
     from dfe_engine.auth.groups import GroupStore
 
     store: GroupStore = request.app.state.group_store
-    visible = [g for g in store.list() if _visible(request, user, g)]
+    member = _member_name(request, user)
+    visible = [g for g in store.list() if _visible(request, user, g, member)]
     rows = [_response(g).model_dump() for g in visible]
     rows = apply_search(rows, search, ["name", "description"])
     rows = apply_sort(rows, sort_by, sort_order)
@@ -229,7 +241,7 @@ async def get_group(
 
     store: GroupStore = request.app.state.group_store
     group = store.get(name)
-    if group is None or not _visible(request, user, group):
+    if group is None or not _visible(request, user, group, _member_name(request, user)):
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
