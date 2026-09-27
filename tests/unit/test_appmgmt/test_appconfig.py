@@ -626,6 +626,31 @@ class TestWhatTakingTheChangeCosts:
 
         assert rendered[RECEIVER].restart_required
 
+    @pytest.mark.parametrize(
+        ("path", "value"),
+        [
+            ("config.server.ip_filter.mode", "allowlist"),
+            ("config.server.rate_limit.enabled", True),
+            ("config.server.auth.mode", "bearer"),
+            ("config.server.max_body_size", 1024),
+        ],
+    )
+    def test_a_server_setting_the_http_listener_binds_restarts_the_receiver(
+        self, crud, tmp_path, path, value
+    ):
+        # The HTTP listener reads these once when it starts serving; only the
+        # bearer tokens reload.
+        settings = _settings(tmp_path)
+        app = _deploy(crud, RECEIVER, config__routing__default_source="main")
+        appconfig.render(crud, settings)
+        doc = instances.read_overlay(crud, app)
+        set_path(doc, path, value)
+        _put(crud, app, doc)
+
+        rendered = {r.service: r for r in appconfig.render(crud, settings)}
+
+        assert rendered[RECEIVER].restart_required
+
     def test_a_routing_change_is_still_taken_where_it_stands(self, crud, tmp_path):
         # The router is rebuilt in place, so the restart paths leave it hot.
         settings = _settings(tmp_path)
