@@ -8,8 +8,6 @@ scope and delete-with-members semantics must hold against a real store exactly a
 they do for the YAML backend.
 """
 
-from __future__ import annotations
-
 import os
 import uuid
 
@@ -17,7 +15,7 @@ import pytest
 
 from dfe_engine.auth.breakglass import GROUP as RECOVERY_GROUP
 from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS
-from dfe_engine.auth.groups import DocuStoreGroupStore
+from dfe_engine.auth.groups import DocuStoreGroupStore, Group
 from dfe_engine.auth.protected_accounts import ProtectedAccountError
 from dfe_engine.store.documents import DocuStore
 
@@ -27,17 +25,56 @@ _URI = os.environ.get("DFE_TEST_MONGO_URI", "")
 
 
 @pytest.fixture
-def store():
+def docu():
     if not _URI:
         pytest.skip("DFE_TEST_MONGO_URI not set (needs a reachable document store)")
     db_name = f"dfe_engine_test_{uuid.uuid4().hex[:8]}"
     doc = DocuStore(_URI, db_name)
     doc.ping()  # fail fast if the server is unreachable / auth wrong
     try:
-        yield DocuStoreGroupStore(doc, collection="groups")
+        yield doc
     finally:
         doc.drop_database(db_name)
         doc.close()
+
+
+@pytest.fixture
+def store(docu):
+    return DocuStoreGroupStore(docu, collection="groups")
+
+
+class TestANameNoGroupCanHave:
+    """Both backends share one name rule, so a lookup here never matches a name create refuses."""
+
+    NAME = "../groups/dfe-admins"
+
+    @pytest.fixture
+    def planted(self, docu, store):
+        """A record no create() could make, as a hand edit or an older engine leaves it."""
+        docu.collection("groups").insert_one(Group(name=self.NAME, roles=["admin"]).model_dump())
+        return store
+
+    def test_get_misses(self, planted):
+        assert planted.get(self.NAME) is None
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            pytest.param(lambda s, n: s.update(n, roles=[]), id="update"),
+            pytest.param(lambda s, n: s.set_attributes(n, {"k": "v"}), id="set_attributes"),
+            pytest.param(lambda s, n: s.delete(n), id="delete"),
+            pytest.param(lambda s, n: s.add_member(n, "mallory"), id="add_member"),
+            pytest.param(lambda s, n: s.remove_member(n, "mallory"), id="remove_member"),
+        ],
+    )
+    def test_a_change_raises_and_leaves_the_record(self, planted, docu, change):
+        before = docu.collection("groups").find_one({"name": self.NAME}, {"_id": 0})
+
+        with pytest.raises(KeyError):
+            change(planted, self.NAME)
+
+        after = docu.collection("groups").find_one({"name": self.NAME}, {"_id": 0})
+        assert after == before
 
 
 class TestDocuStoreGroupStore:

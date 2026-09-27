@@ -6,8 +6,6 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -393,7 +391,10 @@ class DocuStoreGroupStore:
 
     def get(self, name: str) -> Group | None:
         """Return the named group, or None if it does not exist."""
-        return self._c.get(name)
+        try:
+            return self._c.get(store_key(name))
+        except KeyError:
+            return None
 
     def list(self) -> list[Group]:
         """Return all groups sorted by name."""
@@ -420,7 +421,7 @@ class DocuStoreGroupStore:
         group's members with a list that drops a recovery credential; reserved for
         the reconcile paths. Raises ProtectedAccountError otherwise.
         """
-        group = self._c.get(name)
+        group = self.get(name)
         if group is None:
             raise KeyError(f"Group '{name}' not found")
         if "scope" in fields:
@@ -435,7 +436,7 @@ class DocuStoreGroupStore:
 
     def set_attributes(self, name: str, attributes: dict) -> Group:
         """Full-replace the non-sensitive ``attributes`` blob. Raises KeyError if missing."""
-        group = self._c.get(name)
+        group = self.get(name)
         if group is None:
             raise KeyError(f"Group '{name}' not found")
         updated = group.model_copy(update={"attributes": attributes})
@@ -444,7 +445,7 @@ class DocuStoreGroupStore:
 
     def delete(self, name: str) -> None:
         """Delete the named group. Raises KeyError if missing, ValueError if it has members."""
-        group = self._c.get(name)
+        group = self.get(name)
         if group is None:
             raise KeyError(f"Group '{name}' not found")
         if group.members:
@@ -455,7 +456,7 @@ class DocuStoreGroupStore:
 
     def add_member(self, group_name: str, username: str) -> None:
         """Add a username to the group's member list (idempotent). Raises KeyError if missing."""
-        group = self._c.get(group_name)
+        group = self.get(group_name)
         if group is None:
             raise KeyError(f"Group '{group_name}' not found")
         if username not in group.members:
@@ -471,7 +472,7 @@ class DocuStoreGroupStore:
         group; reserved for the reconcile paths. Raises ProtectedAccountError
         otherwise.
         """
-        group = self._c.get(group_name)
+        group = self.get(group_name)
         if group is None:
             raise KeyError(f"Group '{group_name}' not found")
         if not allow_protected:
