@@ -1345,6 +1345,37 @@ class HyperDXSettings(BaseModel):
     enabled: bool = Field(default=False, description="Enable HyperDX integration")
 
 
+class GitopsWriteSettings(BaseModel):
+    """Timeout and retry budget for the remote calls a deploy-repo write makes.
+
+    A write fetches the remote head before it commits and pushes after, and both
+    get this bound instead of the short one reads use: a push to a small forge under
+    load, or its pre-receive hooks, can legitimately take longer. A transient
+    failure (timeout, refused or reset connection, 5xx) is retried with jittered
+    exponential back-off inside ``budget_seconds``, then answers 503. Field names
+    mirror scalo's :class:`~scalo.resilience.ResilienceConfig`; a budget of 0 makes
+    one attempt.
+
+    Environment variables:
+    - DFE_GITOPS_WRITE_TIMEOUT_SECONDS -> gitops.write.timeout_seconds
+    - DFE_GITOPS_WRITE_BUDGET_SECONDS -> gitops.write.budget_seconds
+    """
+
+    timeout_seconds: float = Field(
+        default=15.0,
+        gt=0.0,
+        description="Connect and per-read timeout for a write's fetch and push, seconds.",
+    )
+    wait_initial: float = Field(default=0.5, gt=0.0, description="First back-off, seconds.")
+    wait_max: float = Field(default=4.0, gt=0.0, description="Per-attempt back-off cap, seconds.")
+    wait_multiplier: float = Field(default=2.0, ge=1.0, description="Exponential back-off factor.")
+    budget_seconds: float = Field(
+        default=10.0,
+        ge=0.0,
+        description="How long a transient failure is retried before the write answers 503, seconds.",
+    )
+
+
 class GitopsSettings(BaseModel):
     """Deploy-specific gitops repo the engine renders artifacts into.
 
@@ -1364,6 +1395,7 @@ class GitopsSettings(BaseModel):
     - DFE_GITOPS_MODE -> gitops.mode
     - DFE_GITOPS_FORGE_PROVIDER -> gitops.forge_provider (review-PR seam)
     - DFE_GITOPS_FORGE_API_BASE -> gitops.forge_api_base
+    - DFE_GITOPS_WRITE_* -> gitops.write (see GitopsWriteSettings)
     """
 
     enabled: bool = Field(default=False, description="Enable gitops publishing")
@@ -1399,6 +1431,7 @@ class GitopsSettings(BaseModel):
             "Forgejo/GitHub Enterprise). Empty = derive from repo_url."
         ),
     )
+    write: GitopsWriteSettings = Field(default_factory=GitopsWriteSettings)
 
 
 # Known placeholder JWT secret - fine for local dev, REJECTED in a production
@@ -2197,6 +2230,10 @@ def _get_env_overrides() -> dict:
         overrides["gitops"]["forge_provider"] = val.strip().lower()
     if val := _get_env("DFE_GITOPS_FORGE_API_BASE"):
         overrides["gitops"]["forge_api_base"] = val
+    if val := _get_env("DFE_GITOPS_WRITE_TIMEOUT_SECONDS"):
+        overrides["gitops"].setdefault("write", {})["timeout_seconds"] = float(val)
+    if val := _get_env("DFE_GITOPS_WRITE_BUDGET_SECONDS"):
+        overrides["gitops"].setdefault("write", {})["budget_seconds"] = float(val)
 
     # API settings
     if val := _get_env("DFE_API_HOST"):

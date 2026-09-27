@@ -12,8 +12,6 @@ and the Governed Ops routers degrade to 503 (not_configured) like other optional
 features.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from scalo.logger import logger
@@ -44,6 +42,7 @@ def build_gitcrud(gs: GitopsSettings, metrics_manager: Any | None = None) -> Git
         author_name=gs.author_name,
         author_email=gs.author_email,
         metrics=GitopsMetrics(metrics_manager),
+        write=gs.write,
     )
     _seed_governance(repo)
     return GitCrud(repo)
