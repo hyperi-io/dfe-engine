@@ -75,15 +75,7 @@ it stands; a parallel name would mean two groups granting one role.
 
 ## org_viewer -- the org-tied exception role
 
-`org_viewer` (renamed from `customer_viewer`) is the one role hard-tied to
-the org_id CRUD: a user/group carrying it is associated with one or more
-`org_ids`, and that association IS the grant. When such a user browses data
-through the HyperDX iframe inside dfe-ui, the pinned ClickHouse identity
-(`tenant_reader` via `role_connections`, `current_tenant_id` row policies)
-auto-appends the org filter -- effectively `WHERE org_id = '<org id>'` on
-every query, always. There is no unfiltered path: the scoping lives in the
-ClickHouse role, not in anything the UI or the user sends. See
-[rbac.md](rbac.md) sections 5-6 for the mechanism.
+`org_viewer` (renamed from `customer_viewer`) is the one role hard-tied to the org_id CRUD: a user or group carrying it is associated with one or more `org_ids`, and that association IS the grant. When such a user browses data through the HyperDX iframe inside dfe-ui, HyperDX connects as that org's pinned ClickHouse user, whose READONLY tenant setting and the shared RESTRICTIVE row policies filter every query to the org's `_org_id` values, always. There is no unfiltered path: the scoping lives in the ClickHouse user, not in anything the UI or the user sends. See [rbac.md](rbac.md) sections 5-6 for the mechanism.
 
 ## Naming conventions
 
@@ -94,10 +86,7 @@ ClickHouse role, not in anything the UI or the user sends. See
 - **Per-org groups**: `dfe-<org>-viewers`, paired with `scope: org:<org>`.
 - **Permissions**: `resource:action`, colon-separated, `*` wildcards -
   `hunt:read`, `service:*:config:*`.
-- **Orgs / tenants**: the term is **org** everywhere in the product surface
-  (`org_id`, `org_ids`, `scope: org:<name>`). "Tenant" appears only where
-  ClickHouse's own vocabulary demands it (`current_tenant_id` row policies).
-  One concept, and the boundary between the two words is exactly that setting.
+- **Orgs / tenants**: the term is **org** everywhere in the product surface (`org_id`, `org_ids`, `scope: org:<name>`). "Tenant" appears only inside the ClickHouse isolation model (the tenant role, the tenant setting and its row policies). One concept, and the boundary between the two words is exactly that model.
 
 ## Who consumes what
 
