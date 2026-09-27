@@ -6,11 +6,11 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Service surfaces router — discover Rust service config + metrics.
+"""Service surfaces router -- discover Rust service config + metrics.
 
-GET  /api/v1/service-surfaces                          → List all surfaces
-GET  /api/v1/service-surfaces/{name}                   → Get surface detail
-POST /api/v1/service-surfaces/{name}/metrics/refresh   → Re-fetch manifest
+GET  /api/v1/service-surfaces                          -> List all surfaces
+GET  /api/v1/service-surfaces/{name}                   -> Get surface detail
+POST /api/v1/service-surfaces/{name}/metrics/refresh   -> Re-fetch manifest
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from dfe_engine.services.surfaces.registry import SurfaceRegistry
 router = APIRouter(prefix="/service-surfaces", tags=["Service Surfaces"])
 
 
-# ── Dependencies ────────────────────────────────────────────
+# -- Dependencies --------------------------------------------
 
 
 def get_surface_registry(request: Request) -> SurfaceRegistry:
@@ -39,7 +39,7 @@ def get_surface_registry(request: Request) -> SurfaceRegistry:
             status_code=503,
             detail={
                 "code": "not_configured",
-                "message": "SurfaceRegistry not initialized — set DFE_CONFIG_DIR",
+                "message": "SurfaceRegistry not initialized -- set DFE_CONFIG_DIR",
             },
         )
     return reg
@@ -48,7 +48,7 @@ def get_surface_registry(request: Request) -> SurfaceRegistry:
 SurfaceReg = Annotated[SurfaceRegistry, Depends(get_surface_registry)]
 
 
-# ── Response models ─────────────────────────────────────────
+# -- Response models -----------------------------------------
 
 
 class SurfaceSummary(BaseModel):
@@ -70,7 +70,7 @@ class ManifestRefreshResponse(BaseModel):
     metrics_count: int = 0
 
 
-# ── Endpoints ───────────────────────────────────────────────
+# -- Endpoints -----------------------------------------------
 
 
 @router.get(
@@ -133,7 +133,7 @@ async def refresh_service_manifest(
 
     Contacts the service's ``manifest_url`` to update its metrics_surface.
     Returns the refresh result.  Does not fail if the service is unreachable
-    — returns ``refreshed=false`` instead.
+    -- returns ``refreshed=false`` instead.
     """
     surface = registry.get(name)
     if surface is None:

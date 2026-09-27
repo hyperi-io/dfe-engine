@@ -93,7 +93,7 @@ async def sync_provider(
 
     # Skip disabled providers
     if not provider.enabled:
-        logger.debug("OIDC sync skipped — provider disabled", provider=provider_name)
+        logger.debug("OIDC sync skipped -- provider disabled", provider=provider_name)
         return {
             "created": 0,
             "updated": 0,
@@ -106,7 +106,7 @@ async def sync_provider(
     if provider.groups.mode != "api":
         mode = provider.groups.mode
         logger.debug(
-            "OIDC sync skipped — mode is not api",
+            "OIDC sync skipped -- mode is not api",
             provider=provider_name,
             mode=mode,
         )

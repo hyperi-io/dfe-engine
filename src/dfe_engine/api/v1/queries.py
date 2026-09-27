@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Queries router — parameterized view catalog + execution.
+"""Queries router -- parameterized view catalog + execution.
 
 Absorbs the functionality of ``query/endpoint.py`` and adds:
 - View catalog browsing (namespaces, definitions, parameters)
@@ -68,7 +68,7 @@ class QueryResponse(BaseModel):
     request_id: str | None = Field(default=None, description="Request correlation ID")
 
 
-# ── Dependencies ────────────────────────────────────────────
+# -- Dependencies --------------------------------------------
 
 
 def _get_view_executor(request: Request):
@@ -84,7 +84,7 @@ def _require_view_executor(request: Request):
             status_code=503,
             detail={
                 "code": "not_configured",
-                "message": "Query engine not configured — ClickHouse connection required",
+                "message": "Query engine not configured -- ClickHouse connection required",
             },
         )
     return executor
@@ -93,7 +93,7 @@ def _require_view_executor(request: Request):
 ViewExec = Annotated[Any, Depends(_require_view_executor)]
 
 
-# ── View catalog ────────────────────────────────────────────
+# -- View catalog --------------------------------------------
 
 
 @router.get(
@@ -143,7 +143,7 @@ async def get_view(
         )
 
 
-# ── View execution ──────────────────────────────────────────
+# -- View execution ------------------------------------------
 
 
 @router.post(
@@ -160,7 +160,7 @@ async def execute_view(
     """Execute a parameterized view and return JSON results.
 
     The ``org_id`` parameter is always injected from the authenticated
-    user's context — it cannot be overridden by the client.
+    user's context -- it cannot be overridden by the client.
     """
     from dfe_engine.query.executor import ViewExecutionError
 
@@ -195,7 +195,7 @@ async def execute_view(
     )
 
 
-# ── Raw query execution (absorbs query/endpoint.py) ────────
+# -- Raw query execution (absorbs query/endpoint.py) --------
 
 
 @router.post(
@@ -209,7 +209,7 @@ async def execute_raw_query(
 ) -> QueryResponse:
     """Execute a raw query against a registered datasource adapter.
 
-    This is the lower-level query path — for ad-hoc queries against
+    This is the lower-level query path -- for ad-hoc queries against
     datasource adapters rather than parameterized views. Requires
     ``query:execute`` permission.
     """

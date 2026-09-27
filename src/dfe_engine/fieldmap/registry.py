@@ -1,4 +1,4 @@
-"""Field Map Registry — CRUD management for field map definitions.
+"""Field Map Registry -- CRUD management for field map definitions.
 
 Backed by DirectoryConfigStore (YAML directory as SSoT).
 
@@ -207,7 +207,7 @@ class FieldMapRegistry:
         # Refresh cache
         self._store._refresh_all()
 
-        logger.info(f"Saved field map '{table}' → {yaml_path}")
+        logger.info(f"Saved field map '{table}' -> {yaml_path}")
         return field_map
 
     def delete_map(self, standard: str, source: str | None = None) -> None:

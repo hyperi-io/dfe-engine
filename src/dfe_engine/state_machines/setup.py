@@ -18,7 +18,7 @@ Wizard order (declared in :data:`SETUP_STEPS`)::
     organisations    required   create the first customer organisation
     first_user       required   create a real user (NOT a seeded credential)
 
-A step applies when the thing it configures actually exists — not when a
+A step applies when the thing it configures actually exists -- not when a
 settings toggle says so. ``app.py`` bootstraps the account store and seeds the
 local admin unconditionally, and ``POST /auth/login`` authenticates against it
 with neither ``auth.enabled`` nor ``auth.local.enabled`` consulted. So the
@@ -26,7 +26,7 @@ seeded credential is live even in a deployment that believes auth is off, and
 the wizard has to say so.
 
 ``first_user`` may be satisfied by a local account or by an OIDC identity that
-JIT-provisioned at first login — hence OIDC comes first, so an operator who
+JIT-provisioned at first login -- hence OIDC comes first, so an operator who
 wants IdP-only users can configure it before creating anyone.
 
 The admin password is not a wizard step: every deployment mints one at deploy
@@ -43,7 +43,7 @@ deployment has an admin of its own, the operator retires the bootstrap admin
 (:mod:`dfe_engine.auth.admin_retirement`) and deletes the minted password from
 the Secret or ``.env``.
 
-The machine is pure. It reads a :class:`SetupContext` — never a Request — so
+The machine is pure. It reads a :class:`SetupContext` -- never a Request -- so
 it can be evaluated in a unit test with hand-built stores.
 """
 
@@ -75,7 +75,7 @@ if TYPE_CHECKING:
     from dfe_engine.orgs.registry import OrgRegistry
 
 # The bootstrap-seeded LOCAL ADMIN (see auth/bootstrap.py::_seed_admin) does not
-# count as the "first user" — that step is about getting off the shared admin
+# count as the "first user" -- that step is about getting off the shared admin
 # credential and onto a real identity.
 
 # Stable step ids. These are an API contract: the UI keys its wizard screens
@@ -85,7 +85,7 @@ STEP_ORGANISATIONS = "organisations"
 STEP_FIRST_USER = "first_user"
 
 
-# ── Context ──────────────────────────────────────────────────
+# -- Context --------------------------------------------------
 
 
 def _attr_path(root: Any, *names: str) -> Any:
@@ -200,7 +200,7 @@ def _break_glass_git_state(
     )
 
 
-# ── Response models ──────────────────────────────────────────
+# -- Response models ------------------------------------------
 
 
 class SetupStep(BaseModel):
@@ -221,7 +221,7 @@ class InitialSetupState(BaseModel):
     )
     current_step: str | None = Field(
         default=None,
-        description="First unsatisfied required step id — the screen to land on. "
+        description="First unsatisfied required step id -- the screen to land on. "
         "None once setup is complete.",
     )
     steps: list[str] = Field(
@@ -253,7 +253,7 @@ class OIDCProviderLoginOption(BaseModel):
     display_name: str = Field(
         default="",
         description="Human-readable label for the login button. Empty when the "
-        "provider does not set one — fall back to ``name``.",
+        "provider does not set one -- fall back to ``name``.",
     )
 
 
@@ -277,7 +277,7 @@ class SetupStatus(BaseModel):
     """
 
     initial_setup: InitialSetupState = Field(
-        description="Wizard state — completion, current step and per-step detail.",
+        description="Wizard state -- completion, current step and per-step detail.",
     )
     oidc_providers: list[OIDCProviderSummary | OIDCProviderLoginOption] = Field(
         default_factory=list,
@@ -346,7 +346,7 @@ class SetupStatus(BaseModel):
     )
 
 
-# ── Step definitions ─────────────────────────────────────────
+# -- Step definitions -----------------------------------------
 
 
 @dataclass(frozen=True)
@@ -376,7 +376,7 @@ def _has_organisation(ctx: SetupContext) -> bool:
 def _has_real_user(ctx: SetupContext) -> bool:
     """True once an enabled account exists that is neither seeded credential.
 
-    Local or external (OIDC/JIT/SCIM-provisioned) both count — the step is
+    Local or external (OIDC/JIT/SCIM-provisioned) both count -- the step is
     about having a real identity, not about how it authenticates.
 
     Neither the local admin nor ``breakglass`` clears it. Both are seeded by
@@ -409,7 +409,7 @@ SETUP_STEPS: tuple[StepDefinition, ...] = (
         title="Connect an identity provider",
         description=(
             "Register an OIDC provider so users sign in with your IdP. "
-            "Optional — local accounts work without it."
+            "Optional -- local accounts work without it."
         ),
         applies=lambda ctx: ctx.oidc_registry is not None,
         required=lambda _ctx: False,
@@ -430,7 +430,7 @@ SETUP_STEPS: tuple[StepDefinition, ...] = (
         id=STEP_FIRST_USER,
         title="Create your first user",
         description=(
-            "Add a real user — local or from your IdP — separate from the "
+            "Add a real user -- local or from your IdP -- separate from the "
             "shared admin account, so day-to-day work is attributable."
         ),
         applies=lambda ctx: ctx.account_store is not None,
@@ -440,7 +440,7 @@ SETUP_STEPS: tuple[StepDefinition, ...] = (
 )
 
 
-# ── The machine ──────────────────────────────────────────────
+# -- The machine ----------------------------------------------
 
 
 def retire_admin_available(ctx: SetupContext, setup_complete: bool) -> bool:
@@ -506,19 +506,19 @@ class SetupStateMachine:
         returned in full only while setup is still outstanding (a fresh
         deployment, where there is nothing yet to disclose) and cut back once
         it is done, so a configured deployment does not serve its org and IdP
-        inventory to anonymous callers. Accounts are never included at all —
+        inventory to anonymous callers. Accounts are never included at all --
         the ``first_user`` step reports whether one exists.
 
         What survives completion is the name and display name of each enabled
         OIDC provider: the login screen has to know which IdPs to offer and
         what to call them, and neither discloses any configuration. Disabled
-        providers drop out — they cannot be logged in with, so listing them
+        providers drop out -- they cannot be logged in with, so listing them
         would be inventory disclosure with nothing to render.
 
         ``deploy_kind`` and ``credential_fetch_command`` survive too (#301). The
         login page shows the fetch command to an operator who has lost the admin
         password, which is exactly the case that arises long after setup is
-        complete. It names where the password is kept, never the password —
+        complete. It names where the password is kept, never the password --
         running it needs cluster or host credentials of its own.
 
         Args:
@@ -586,4 +586,4 @@ class SetupStateMachine:
 
 
 SETUP_MACHINE = SetupStateMachine()
-"""Shared instance — the machine is stateless, so one is enough."""
+"""Shared instance -- the machine is stateless, so one is enough."""

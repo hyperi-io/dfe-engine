@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from dfe_engine.services.plugin import ServicePlugin
 
-# Internal registry — populated on first access
+# Internal registry -- populated on first access
 _plugins: dict[str, ServicePlugin] | None = None
 
 # Entry point group name

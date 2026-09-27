@@ -1,4 +1,4 @@
-# DFE Archiver — Production Deployment
+# DFE Archiver -- Production Deployment
 # KEDA enabled, small sizing (500m-1 CPU, 1Gi-2Gi mem)
 
 size: small

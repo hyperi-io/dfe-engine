@@ -1,4 +1,4 @@
-"""Hunt output schema — dynamic column generation from common header profile.
+"""Hunt output schema -- dynamic column generation from common header profile.
 
 The hunt results table schema is composed from two sources:
 1. Common header columns (loaded from a profile, default 'timeseries')
@@ -30,9 +30,9 @@ from scalo.logger import logger
 
 from ..schema.schema_loader import SchemaLoader
 
-# Common header columns to copy from source → hunt results.
+# Common header columns to copy from source -> hunt results.
 # These are the columns we SELECT from the source table.
-# Other profile columns (like _raw, _tags) are NOT copied —
+# Other profile columns (like _raw, _tags) are NOT copied --
 # the full record is available via _json.
 _HEADER_COLUMNS_TO_COPY = frozenset(
     {
@@ -46,7 +46,7 @@ _HEADER_COLUMNS_TO_COPY = frozenset(
 # by ClickHouse defaults (not from the source SELECT).
 _HEADER_COLUMNS_GENERATED = frozenset(
     {
-        "_uuid",  # generateUUIDv7() — new UUID for the hunt result row
+        "_uuid",  # generateUUIDv7() -- new UUID for the hunt result row
         "_source",  # set by the hunt engine to identify the hunt
     }
 )
@@ -95,7 +95,7 @@ HUNT_DETECTION_COLUMNS: tuple[HuntDetectionColumn, ...] = (
 )
 
 
-# Column names present on the hunt results table — used by alert grouping
+# Column names present on the hunt results table -- used by alert grouping
 # to distinguish direct column references from _json field extraction.
 RESULTS_TABLE_COLUMNS: frozenset[str] = (
     _HEADER_COLUMNS_TO_COPY
@@ -112,7 +112,7 @@ class HuntResultSchema:
     column lists for INSERT and SELECT operations. The _json column
     is always included for a full copy of the matched record.
 
-    The schema is driven by the profile YAML, not hardcoded — if the
+    The schema is driven by the profile YAML, not hardcoded -- if the
     common header changes, hunt output adapts automatically.
     """
 
@@ -226,7 +226,7 @@ class HuntResultSchema:
         """Build a complete INSERT INTO ... SELECT statement.
 
         This is the primary method for generating hunt rule SQL.
-        The WHERE clause should contain the detection logic only —
+        The WHERE clause should contain the detection logic only --
         time bounds are injected via the timestamp placeholder.
 
         Args:
@@ -279,7 +279,7 @@ class HuntResultSchema:
 
         # Full profile columns (including generated ones like _uuid)
         for col in self._profile_columns:
-            # Skip _raw and _tags — not needed in hunt results
+            # Skip _raw and _tags -- not needed in hunt results
             if col.name in ("_raw", "_tags"):
                 continue
             columns.append(

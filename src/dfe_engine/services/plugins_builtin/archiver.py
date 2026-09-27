@@ -26,7 +26,7 @@ descriptor = ServiceDescriptor(
     # and shipped a full metrics payload every period.
     liveness_paths=("/livez",),
     readiness_paths=("/readyz",),
-    description="Kafka consumer — archives events to S3/file storage.",
+    description="Kafka consumer -- archives events to S3/file storage.",
 )
 
 

@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Service surface discovery — YAML-defined config + metrics for Rust services.
+"""Service surface discovery -- YAML-defined config + metrics for Rust services.
 
 Adding a new dfe-* Rust service = adding a YAML surface file.  Zero Python code.
 """
