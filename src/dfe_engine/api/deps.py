@@ -520,7 +520,8 @@ def account_for_session_subject(store: Any, user_id: str):
 
     Tries the raw subject first, then the JIT-sanitised stem an OIDC login
     writes, so a JWT ``sub`` of ``alice@example.com`` matches
-    ``alice-example-com.yaml``.
+    ``alice-example-com.yaml``. Several subjects sanitise to one stem, so a stem
+    account that records another subject is not this session's.
     """
     account = store.get(user_id)
     if account is not None:
@@ -528,9 +529,12 @@ def account_for_session_subject(store: Any, user_id: str):
     from dfe_engine.auth.jit import JitProvisioner
 
     stem = JitProvisioner.sanitise_username(user_id)
-    if stem and stem != user_id:
-        return store.get(stem)
-    return None
+    if not stem or stem == user_id:
+        return None
+    shadow = store.get(stem)
+    if shadow is not None and shadow.subject and shadow.subject != user_id:
+        return None
+    return shadow
 
 
 def require_local_account_enabled(request: Request, user_id: str) -> Any:

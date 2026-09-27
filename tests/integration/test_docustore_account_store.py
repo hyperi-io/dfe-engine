@@ -184,6 +184,19 @@ class TestJitIdentityGuardOnTheDocumentStore:
         assert account.last_login_at != ""
         assert account.source_provider == SCIM_SOURCE_PROVIDER
 
+    def test_a_second_subject_on_the_stem_is_refused(self, store, tmp_path):
+        """The guard reads the recorded subject off this backend, so it must round-trip."""
+        groups = GroupStore(tmp_path / "groups")
+        groups.create("dfe-admins", roles=["admin"])
+        jit = JitProvisioner(account_store=store, group_store=groups)
+        jit.ensure_account("Jane.Doe@corp.com", [], "entra")
+
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account("jane-doe@corp.com", ["dfe-admins"], "entra")
+
+        assert refused.value.reason == "subject_mismatch"
+        assert store.get("jane-doe-corp-com").groups == []
+
     def test_an_unbound_provider_is_still_refused(self, store, tmp_path):
         groups = GroupStore(tmp_path / "groups")
         groups.create("dfe-admins", roles=["admin"])
