@@ -44,7 +44,7 @@ from dfe_engine.api.deps import (
     resolve_live_grants_for_user,
 )
 from dfe_engine.auth import hyperdx_role
-from dfe_engine.auth.audit import audit_login_denied, audit_login_success
+from dfe_engine.auth.audit import audit_jit_failed, audit_login_denied, audit_login_success
 from dfe_engine.auth.jit import (
     JitAccountUnavailableError,
     JitIdentityCollisionError,
@@ -263,7 +263,7 @@ async def oidc_callback(
         except Exception as exc:
             # A token minted with no account behind it cannot be disabled locally.
             logger.exception("JIT provisioning failed", user_id=identity.subject)
-            audit_login_denied(identity.subject, "oidc", _get_client_ip(request), "jit_failed")
+            audit_jit_failed(identity.subject, repr(exc))
             raise HTTPException(
                 status_code=503,
                 detail={

@@ -294,7 +294,9 @@ class TestAJitFailureRefusesTheLogin:
     """A proxied session with no account behind it could not be disabled locally."""
 
     @pytest.mark.parametrize("subject", ["@@@", "a" * 129], ids=["empty-stem", "too-long"])
-    def test_a_subject_that_names_no_account_is_refused(self, client: TestClient, subject):
+    def test_a_subject_that_names_no_account_is_refused(
+        self, client: TestClient, audit_events, subject
+    ):
         resp = client.get(
             "/api/v1/auth/me",
             headers={"X-Oidc-Subject": subject, "X-Oidc-Groups": "dfe-admins"},
@@ -302,8 +304,13 @@ class TestAJitFailureRefusesTheLogin:
 
         assert resp.status_code == 401, resp.text
         assert resp.json()["code"] == "unauthorized"
+        denied = [e for e in audit_events if e["event"] == "auth.login.denied"]
+        assert [(e["user_id"], e["reason"]) for e in denied] == [(subject, "unusable_subject")]
+        assert not [e for e in audit_events if e["event"] == "auth.jit.provision_failed"]
 
-    def test_a_login_the_account_store_cannot_record_is_refused(self, client: TestClient, app):
+    def test_a_login_the_account_store_cannot_record_is_refused(
+        self, client: TestClient, app, audit_events
+    ):
         accounts_dir = app.state.account_store._dir
         shutil.rmtree(accounts_dir)
         accounts_dir.write_text("")
@@ -315,3 +322,6 @@ class TestAJitFailureRefusesTheLogin:
 
         assert resp.status_code == 503, resp.text
         assert resp.json()["code"] == "service_unavailable"
+        failed = [e for e in audit_events if e["event"] == "auth.jit.provision_failed"]
+        assert [e["user_id"] for e in failed] == ["kim@example.com"]
+        assert not [e for e in audit_events if e["event"] == "auth.login.denied"]

@@ -20,6 +20,7 @@ from dfe_engine.api.password_change import refuse_until_password_changed
 from dfe_engine.auth import AuthContext, AuthorizationError, Scope, ScopedGrant, authorize
 from dfe_engine.auth.api_keys import APIKeyStore
 from dfe_engine.auth.audit import (
+    audit_jit_failed,
     audit_login_denied,
     audit_permission_denied,
 )
@@ -632,7 +633,7 @@ async def get_current_user(request: Request) -> AuthContext:
             except Exception as exc:
                 # A session with no account behind it cannot be disabled locally.
                 logger.exception("JIT provisioning failed", user_id=oidc_subject)
-                audit_login_denied(oidc_subject, "oidc", client_ip, "jit_failed")
+                audit_jit_failed(oidc_subject, repr(exc))
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail={
