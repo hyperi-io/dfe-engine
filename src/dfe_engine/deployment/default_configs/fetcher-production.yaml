@@ -1,4 +1,4 @@
-# DFE Fetcher — Production Deployment
+# DFE Fetcher -- Production Deployment
 # KEDA disabled (no Kafka consumer trigger), small sizing
 
 size: small

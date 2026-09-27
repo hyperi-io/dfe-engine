@@ -9,7 +9,7 @@
 """YAML-backed account store for local user management.
 
 Accounts are stored as individual YAML files: ``{accounts_dir}/{username}.yaml``.
-The username is the filename stem — it is NOT written into the YAML body.
+The username is the filename stem -- it is NOT written into the YAML body.
 Passwords are bcrypt-hashed (cost=12) before storage.
 
 Usage::
@@ -139,7 +139,7 @@ class AccountStore:
 
         Args:
             username: Unique account name.
-            password: Plaintext password — bcrypt-hashed before storage.
+            password: Plaintext password -- bcrypt-hashed before storage.
             groups: Optional list of group memberships.
             email: Optional contact email.
             phone: Optional contact phone.
@@ -328,7 +328,7 @@ class AccountStore:
     def verify_password(self, username: str, password: str) -> bool:
         """Check whether *password* matches the stored hash.
 
-        Always performs a bcrypt check — even for unknown users — to
+        Always performs a bcrypt check -- even for unknown users -- to
         prevent timing-based username enumeration.
 
         Args:
@@ -367,7 +367,7 @@ class AccountStore:
     def _read(self, path: Path) -> Account:
         """Load an Account from a YAML file.
 
-        The username is derived from the filename stem — it is not stored
+        The username is derived from the filename stem -- it is not stored
         inside the YAML body.
         """
         data: dict = yaml_load(path)

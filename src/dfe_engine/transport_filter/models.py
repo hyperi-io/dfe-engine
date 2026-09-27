@@ -33,7 +33,7 @@ class FilterAction(str, Enum):
 
 
 class FilterRule(BaseModel):
-    """A single filter rule — CEL expression + disposition action.
+    """A single filter rule -- CEL expression + disposition action.
 
     Matches `scalo::transport::filter::FilterRule`.
 
@@ -59,7 +59,7 @@ class FilterRule(BaseModel):
 
 
 class TransportFilterTierConfig(BaseModel):
-    """Tier gate configuration — controls which filter tiers are enabled.
+    """Tier gate configuration -- controls which filter tiers are enabled.
 
     Lives under the `expression` config cascade key. Tier 1 (SIMD field ops)
     is always enabled. Tier 2 (standard CEL) and Tier 3 (complex CEL with

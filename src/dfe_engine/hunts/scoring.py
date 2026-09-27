@@ -1,4 +1,4 @@
-"""Hunt scoring — generic conditional score computation.
+"""Hunt scoring -- generic conditional score computation.
 
 Scoring is opt-in. When a hunt YAML includes a ``scoring`` section,
 factors are evaluated against matched data to adjust the base score.
@@ -7,7 +7,7 @@ Order of operations:
 1. Start with base_score
 2. Apply all matching ``add`` factors (additions first)
 3. Apply all matching ``multiply`` factors
-4. Clamp to 0–100
+4. Clamp to 0-100
 
 Condition expressions use **CEL (Common Expression Language)** via
 ``scalo.expression``. See ``docs/data-plane/expressions-cel.md`` for the
@@ -43,7 +43,7 @@ from scalo.expression import (
     validate as validate_condition,
 )
 
-# ── Models ─────────────────────────────────────────────────────
+# -- Models -----------------------------------------------------
 
 
 class ScoreFactor(BaseModel):
@@ -88,7 +88,7 @@ class ScoringConfig(BaseModel):
     )
 
 
-# ── Score Computation ─────────────────────────────────────────
+# -- Score Computation -----------------------------------------
 
 
 def compute_score(
@@ -101,7 +101,7 @@ def compute_score(
     1. Start with base_score
     2. Apply all matching ``add`` factors
     3. Apply all matching ``multiply`` factors
-    4. Clamp to 0–100
+    4. Clamp to 0-100
     """
     if config is None:
         return 50

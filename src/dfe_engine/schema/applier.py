@@ -138,7 +138,7 @@ class SchemaApplier:
         self._dry_run = dry_run
         self.report = ApplyReport()
 
-    # ── databases ───────────────────────────────────────────────────
+    # -- databases ---------------------------------------------------
 
     def ensure_database(self, database: str) -> bool:
         """Create *database* if absent. Returns whether this pass created it.
@@ -153,7 +153,7 @@ class SchemaApplier:
         self.report.databases_created.append(database)
         return True
 
-    # ── tables ──────────────────────────────────────────────────────
+    # -- tables ------------------------------------------------------
 
     def table_exists(self, database: str, table: str) -> bool:
         """Whether *table* exists in *database*, read from ``system.tables``."""
@@ -276,7 +276,7 @@ class SchemaApplier:
         self._run(f"ALTER TABLE {target}{on_cluster} MODIFY {clause}")
         return move
 
-    # ── materialised views ──────────────────────────────────────────
+    # -- materialised views ------------------------------------------
 
     def ensure_view(self, database: str, name: str, ddl: str) -> TableChange:
         """Create a materialised view if absent.
@@ -290,7 +290,7 @@ class SchemaApplier:
         self._run(ddl)
         return self._record(TableChange(database=database, table=name, action="created"))
 
-    # ── internals ───────────────────────────────────────────────────
+    # -- internals ---------------------------------------------------
 
     def _record(self, change: TableChange) -> TableChange:
         self.report.tables.append(change)

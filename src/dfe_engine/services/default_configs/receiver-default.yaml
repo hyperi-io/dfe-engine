@@ -1,4 +1,4 @@
-# DFE Receiver — Development defaults
+# DFE Receiver -- Development defaults
 # Matches Rust defaults with dev-friendly overrides
 # See: dfe-receiver/config.example.yaml
 

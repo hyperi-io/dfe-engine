@@ -6,14 +6,14 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Organisation management router — CRUD for customer organisations.
+"""Organisation management router -- CRUD for customer organisations.
 
-POST   /api/v1/orgs                → Create org
-GET    /api/v1/orgs                → List orgs
-GET    /api/v1/orgs/available-ids  → Tenant ids the data carries
-GET    /api/v1/orgs/{name}         → Get org
-PUT    /api/v1/orgs/{name}         → Update org
-DELETE /api/v1/orgs/{name}         → Delete org
+POST   /api/v1/orgs                -> Create org
+GET    /api/v1/orgs                -> List orgs
+GET    /api/v1/orgs/available-ids  -> Tenant ids the data carries
+GET    /api/v1/orgs/{name}         -> Get org
+PUT    /api/v1/orgs/{name}         -> Update org
+DELETE /api/v1/orgs/{name}         -> Delete org
 
 Write endpoints require admin role (org:write).
 Read endpoints require org:read.

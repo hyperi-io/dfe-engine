@@ -6,14 +6,14 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Role management router — CRUD for RBAC role definitions.
+"""Role management router -- CRUD for RBAC role definitions.
 
-GET    /api/v1/auth/roles              → List roles
-GET    /api/v1/auth/roles/scopes       → Casbin permission scopes for role editors
-POST   /api/v1/auth/roles              → Create role
-GET    /api/v1/auth/roles/{name}       → Get role
-PUT    /api/v1/auth/roles/{name}       → Update role
-DELETE /api/v1/auth/roles/{name}       → Delete role
+GET    /api/v1/auth/roles              -> List roles
+GET    /api/v1/auth/roles/scopes       -> Casbin permission scopes for role editors
+POST   /api/v1/auth/roles              -> Create role
+GET    /api/v1/auth/roles/{name}       -> Get role
+PUT    /api/v1/auth/roles/{name}       -> Update role
+DELETE /api/v1/auth/roles/{name}       -> Delete role
 
 All endpoints require admin role (org:write).
 """

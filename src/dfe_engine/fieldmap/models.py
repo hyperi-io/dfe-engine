@@ -1,4 +1,4 @@
-"""Field map model — Pydantic model for standard-to-DFE field mappings.
+"""Field map model -- Pydantic model for standard-to-DFE field mappings.
 
 A FieldMap defines how fields from a detection/analytics standard
 (Sigma, ECS, CIM) map to DFE ClickHouse column names.
@@ -36,8 +36,8 @@ class FieldMap(BaseModel):
         version: Standard version (e.g. "8.11" for ECS). Informational.
         description: Human-readable description.
         inherits: Reference to base map (e.g. "_default"). Declarative
-            — the resolver does not auto-fetch, caller is responsible.
-        mappings: Dict of standard_field → dfe_column_name.
+            -- the resolver does not auto-fetch, caller is responsible.
+        mappings: Dict of standard_field -> dfe_column_name.
     """
 
     standard: str = Field(..., description="Standard identifier (sigma, ecs, cim)")
@@ -56,7 +56,7 @@ class FieldMap(BaseModel):
     )
     mappings: dict[str, str] = Field(
         default_factory=dict,
-        description="standard_field → dfe_column_name",
+        description="standard_field -> dfe_column_name",
     )
 
     @field_validator("standard")

@@ -101,11 +101,11 @@ class SchemaColumn(BaseModel):
     )
     ch_override: str | None = Field(
         default=None,
-        description="Exact ClickHouse type — bypasses primitive mapping",
+        description="Exact ClickHouse type -- bypasses primitive mapping",
     )
     codec: str | None = Field(
         default=None,
-        description="Explicit CODEC contents — required to set a codec with ch_override",
+        description="Explicit CODEC contents -- required to set a codec with ch_override",
     )
     matched_searchable: list[str] = Field(
         default_factory=list,
@@ -386,7 +386,7 @@ def meta_schema_version_write_response(
     )
 
 
-# ── Response models ──────────────────────────────────────────
+# -- Response models ------------------------------------------
 
 
 class SchemaSummaryObject(BaseModel):

@@ -1,7 +1,7 @@
-"""DDL Generator v2 — ClickHouse DDL from SchemaColumn models + TypeRegistry.
+"""DDL Generator v2 -- ClickHouse DDL from SchemaColumn models + TypeRegistry.
 
 Replaces the DataFrame-based ClickHouseSchema in schema_ch.py.
-Uses TypeRegistry for primitive→CH type resolution and generates
+Uses TypeRegistry for primitive->CH type resolution and generates
 complete CREATE TABLE statements.
 
 Usage:
@@ -173,10 +173,10 @@ def with_default_ttl(spec: TableSpec, days: int | None) -> TableSpec:
     return replace(spec, config=replace(spec.config, ttl_days=days))
 
 
-# ── Index templates ─────────────────────────────────────────────────
+# -- Index templates -------------------------------------------------
 # A use case names the question a column is asked; the template is the engine's
 # answer, and changes without the vocabulary changing.
-# GA text index (v26.2+) — deterministic inverted index, row-level filtering
+# GA text index (v26.2+) -- deterministic inverted index, row-level filtering
 # ClickHouse rewrites a text index's GRANULARITY to 100000000 whatever is asked
 # for, so a read-back that disagrees with the 1 below is the server, not drift.
 _INDEX_TEMPLATES: dict[str, str] = {
@@ -186,7 +186,7 @@ _INDEX_TEMPLATES: dict[str, str] = {
     "substring_search": "INDEX {name} {col} TYPE text(tokenizer=ngrams(3)) GRANULARITY 1",
 }
 
-# Legacy fallback (pre-v25.10) — bloom-filter based indexes
+# Legacy fallback (pre-v25.10) -- bloom-filter based indexes
 _INDEX_TEMPLATES_LEGACY: dict[str, str] = {
     "dimension": "INDEX {name} {col} TYPE set(0) GRANULARITY 4",
     "range": "INDEX {name} {col} TYPE minmax GRANULARITY 4",
@@ -249,7 +249,7 @@ def _build_column_comment(expr: str | None, comment: str | None) -> str | None:
 class DDLGenerator:
     """Generates ClickHouse DDL from SchemaColumn models.
 
-    Uses TypeRegistry for primitive → ClickHouse type resolution.
+    Uses TypeRegistry for primitive -> ClickHouse type resolution.
     Produces CREATE TABLE, ALTER TABLE, and Sigma view DDL.
     """
 
@@ -281,7 +281,7 @@ class DDLGenerator:
         )
         self._resolver = resolver
 
-    # ── engine resolution ───────────────────────────────────────────
+    # -- engine resolution -------------------------------------------
 
     def _resolve_engine(self, cfg: DDLConfig) -> ResolvedEngine:
         """Resolve the engine for *cfg*, preferring an injected resolver.
@@ -310,7 +310,7 @@ class DDLGenerator:
             return f" ON CLUSTER {cfg.cluster}"
         return self._resolve_engine(cfg).on_cluster
 
-    # ── CREATE TABLE ────────────────────────────────────────────────
+    # -- CREATE TABLE ------------------------------------------------
 
     def generate_create_table(
         self,
@@ -425,7 +425,7 @@ class DDLGenerator:
 
         return "\n".join(lines) + ";\n"
 
-    # ── ALTER TABLE ─────────────────────────────────────────────────
+    # -- ALTER TABLE -------------------------------------------------
 
     def generate_alter_add_column(
         self,
@@ -497,7 +497,7 @@ class DDLGenerator:
             f"ALTER TABLE {qualified}{on_cluster} ADD {idx};\n" for idx in self._index_defs(column)
         ]
 
-    # ── Standard Views ─────────────────────────────────────────────
+    # -- Standard Views ---------------------------------------------
 
     def generate_view(
         self,
@@ -513,7 +513,7 @@ class DDLGenerator:
 
         Args:
             table_name: Base table name.
-            mappings: standard_field → column_name mapping.
+            mappings: standard_field -> column_name mapping.
             suffix: View name suffix (e.g. "sigma", "ecs", "cim").
             config: DDL configuration.
 
@@ -551,7 +551,7 @@ class DDLGenerator:
         """Generate Sigma view (convenience wrapper for generate_view)."""
         return self.generate_view(table_name, mappings, "sigma", config)
 
-    # ── Internal: PARTITION BY ──────────────────────────────────────
+    # -- Internal: PARTITION BY --------------------------------------
 
     _PARTITION_FUNCS = {"day": "toYYYYMMDD", "month": "toYYYYMM"}
 
@@ -570,7 +570,7 @@ class DDLGenerator:
             )
         return f"{func}({cfg.partition_column})"
 
-    # ── Internal: body lines ────────────────────────────────────────
+    # -- Internal: body lines ----------------------------------------
 
     def _build_schema_header(
         self, cfg: DDLConfig, table_name: str, generated_at: str | None = None
@@ -624,7 +624,7 @@ class DDLGenerator:
 
         return body
 
-    # ── Internal: column definition ─────────────────────────────────
+    # -- Internal: column definition ---------------------------------
 
     def _column_def(self, col: SchemaColumn) -> str:
         """Generate a single column definition line.
@@ -640,7 +640,7 @@ class DDLGenerator:
         if expr:
             parts.append(expr)
 
-        # COMMENT — combines expr (DFE directive) + comment (human description)
+        # COMMENT -- combines expr (DFE directive) + comment (human description)
         comment_text = _build_column_comment(col.expr, col.comment)
         if comment_text:
             escaped = comment_text.replace("'", "\\'")
@@ -667,11 +667,11 @@ class DDLGenerator:
             else:
                 logger.warning(
                     f"Column {col.name!r}: enum type without ch_override "
-                    f"or default values — using Enum8('') placeholder"
+                    f"or default values -- using Enum8('') placeholder"
                 )
                 ch_override = "Enum8('')"
 
-        # Note: use_case is NOT passed to resolve() — it doesn't affect type
+        # Note: use_case is NOT passed to resolve() -- it doesn't affect type
         # resolution (only index generation). Use-case validation is handled
         # separately by SchemaLoader.validate_columns().
         resolved = self._registry.resolve(
@@ -707,7 +707,7 @@ class DDLGenerator:
             return f"ALIAS {col.default}"
         return f"DEFAULT {col.default}"
 
-    # ── Internal: index definition ──────────────────────────────────
+    # -- Internal: index definition ----------------------------------
 
     def _index_defs(self, col: SchemaColumn) -> list[str]:
         """The INDEX definitions a column asks for -- none, one, or two.
@@ -753,7 +753,7 @@ class DDLGenerator:
             return []
         return [template.format(name=index_name, col=quoted)]
 
-    # ── Internal: ORDER BY ──────────────────────────────────────────
+    # -- Internal: ORDER BY ------------------------------------------
 
     def _order_by_columns(self, columns: list[SchemaColumn]) -> list[str]:
         """Extract ORDER BY column names sorted by order field.
@@ -788,7 +788,7 @@ class DDLGenerator:
 
         return result
 
-    # ── Internal: TTL ───────────────────────────────────────────────
+    # -- Internal: TTL -----------------------------------------------
 
     @staticmethod
     def _ttl_drops_whole_parts(cfg: DDLConfig, partition: str | None) -> bool:
@@ -832,7 +832,7 @@ class DDLGenerator:
         ]
         return "TTL " + ",\n    ".join(parts)
 
-    # ── Internal: table comment ─────────────────────────────────────
+    # -- Internal: table comment -------------------------------------
 
     @staticmethod
     def _table_comment(table_name: str, cfg: DDLConfig) -> str | None:

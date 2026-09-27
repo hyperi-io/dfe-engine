@@ -1,7 +1,7 @@
 """Built-in plugin for dfe-fetcher.
 
 Consolidates descriptor, validation, sizing, and template overrides
-for the fetcher service. Type 2 service (multi-source) — pulls from
+for the fetcher service. Type 2 service (multi-source) -- pulls from
 SaaS APIs and routes events to Kafka like a receiver.
 """
 
@@ -21,7 +21,7 @@ descriptor = ServiceDescriptor(
     kafka_role=KafkaRole.PRODUCER,
     liveness_paths=("/livez",),
     readiness_paths=("/readyz",),
-    description="SaaS API fetcher — pulls from cloud APIs and routes to Kafka.",
+    description="SaaS API fetcher -- pulls from cloud APIs and routes to Kafka.",
 )
 
 

@@ -90,7 +90,7 @@ class PromotionOutcome:
     column: SchemaColumn | None = field(default=None)
 
 
-# ── Naming / type helpers (pure) ─────────────────────────────────────
+# -- Naming / type helpers (pure) -------------------------------------
 
 
 def qualified_table(db: str, source: str) -> str:
@@ -325,7 +325,7 @@ def match_condition(
     raise JsonPromotionError(f"Unsupported match operator: {op!r}")
 
 
-# ── Discovery (I/O) ──────────────────────────────────────────────────
+# -- Discovery (I/O) --------------------------------------------------
 
 
 def discover_paths(
@@ -466,7 +466,7 @@ def _fetch_stats(
     )
 
 
-# ── Row sampling (I/O) ───────────────────────────────────────────────
+# -- Row sampling (I/O) -----------------------------------------------
 
 
 def sample_rows(
@@ -514,7 +514,7 @@ def sample_rows(
     return list(columns), records
 
 
-# ── Column building (pure) ───────────────────────────────────────────
+# -- Column building (pure) -------------------------------------------
 
 
 def build_promotion_columns(

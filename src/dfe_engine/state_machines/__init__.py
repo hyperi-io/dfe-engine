@@ -10,6 +10,6 @@
 
 Each module here declares the steps of a flow, the predicate that marks a
 step done, and an evaluator that turns live state into a snapshot the UI can
-render. The machines are pure — they take a context object, never a Request —
+render. The machines are pure -- they take a context object, never a Request --
 so they are testable without a running app.
 """

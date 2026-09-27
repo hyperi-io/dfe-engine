@@ -50,7 +50,7 @@ from dfe_engine.source.type_registry import TypeRegistry
 router = APIRouter(prefix="/schemas/definitions/derived", tags=["schemas"])
 
 
-# ── Request / response models ────────────────────────────────
+# -- Request / response models --------------------------------
 
 
 class DerivedSchemaWriteRequest(BaseModel):
@@ -109,7 +109,7 @@ def _response(schema: DerivedSchema, *, path: str) -> DerivedSchemaResponse:
     )
 
 
-# ── Helpers ──────────────────────────────────────────────────
+# -- Helpers --------------------------------------------------
 
 
 def _validation_error(message: str, *, code: str = "validation_error") -> HTTPException:
@@ -199,7 +199,7 @@ def _checked(
     return schema
 
 
-# ── Routes ───────────────────────────────────────────────────
+# -- Routes ---------------------------------------------------
 
 
 @router.get(

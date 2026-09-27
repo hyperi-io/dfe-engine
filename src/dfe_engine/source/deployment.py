@@ -1,4 +1,4 @@
-"""Source ClickHouse plan/deploy — build artifacts, dry-run plans, and deploy execution."""
+"""Source ClickHouse plan/deploy -- build artifacts, dry-run plans, and deploy execution."""
 
 from __future__ import annotations
 
@@ -150,7 +150,7 @@ class SourcePlanDocument(VersionedSourceArtifactDocument):
 
 
 class SourceDeployDocument(BaseModel):
-    """Deploy history file — includes ``deployed_version`` like ``Source``."""
+    """Deploy history file -- includes ``deployed_version`` like ``Source``."""
 
     source: str
     deployed_version: str | None = Field(
