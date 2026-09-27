@@ -19,6 +19,9 @@ A read's remote calls are held to ``REMOTE_HEAD_TIMEOUT_SECONDS`` and a failure
 leaves the clone serving what it has. A write's fetch and push take the longer
 ``gitops.write`` timeout, and a transient failure is retried inside that budget
 before the write raises :class:`GitopsUnavailableError`, which the API answers 503.
+Once enough writes in a row run out of budget, a circuit breaker answers the next
+ones the same way at once, without calling the forge, until a probe write gets
+through.
 """
 
 import math
@@ -37,7 +40,14 @@ from typing import TYPE_CHECKING, TypeVar, cast
 
 from dulwich import porcelain
 from scalo.logger import logger
-from scalo.resilience import ReconnectingResilience, ResilienceConfig, ServiceUnavailable
+from scalo.resilience import (
+    CircuitBreaker,
+    CircuitBreakerConfig,
+    CircuitState,
+    ReconnectingResilience,
+    ResilienceConfig,
+    ServiceUnavailable,
+)
 
 from ..settings import GitopsWriteSettings
 from .dulwich_auth import RedactingErrStream, redact_credentials, scrub_remote_credentials
@@ -65,6 +75,10 @@ _MIN_ATTEMPT_TIMEOUT_SECONDS = 0.05
 # dulwich reports a non-200 answer only in its message; these are the ones a forge or
 # its proxy gives while restarting or overloaded.
 _TRANSIENT_HTTP_STATUS = re.compile(r"unexpected http resp (?:408|429|5\d\d)\b")
+
+# Writes already run one at a time under the writer lock, so a second probe slot
+# could never be used.
+_BREAKER_PROBES = 1
 
 
 def _as_path_bytes(host_path: str | bytes) -> bytes:
@@ -167,8 +181,9 @@ class GitopsRemoteError(RuntimeError):
 class GitopsUnavailableError(GitopsRemoteError, ServiceUnavailable):
     """A write's remote call kept failing transiently until its retry budget ran out.
 
-    The API answers it 503 with ``Retry-After``: the deploy repo is unreachable, the
-    request was not wrong.
+    Also raised without calling the forge while the write breaker is open. The API
+    answers it 503 with ``Retry-After``: the deploy repo is unreachable, the request
+    was not wrong.
 
     Attributes:
         remote: The deploy repo URL, credentials stripped.
@@ -246,7 +261,8 @@ class GitopsRepo:
     fresh local repo when ``repo_url`` is empty). ``publish()`` writes a
     ``{path: content}`` artifact map, stages, commits only on change, and pushes
     when ``push`` is set and a remote is configured. ``write`` bounds and retries
-    the fetch and push a write makes; None takes the ``gitops.write`` defaults.
+    the fetch and push a write makes, and sets when its breaker opens; None takes
+    the ``gitops.write`` defaults.
     """
 
     def __init__(
@@ -289,6 +305,16 @@ class GitopsRepo:
             unavailable_exc=GitopsUnavailableError,
             sleep=_jittered_sleep,
         )
+        self._write_breaker = CircuitBreaker(
+            "gitops.write",
+            CircuitBreakerConfig(
+                failure_threshold=self._write.failure_threshold,
+                reset_timeout=self._write.reset_timeout,
+                half_open_max_calls=_BREAKER_PROBES,
+            ),
+        )
+        # When the write breaker last opened, so a rejection can say when to come back.
+        self._breaker_opened_at = 0.0
         # The working tree: held to change it or read it, never across a push.
         self._lock = threading.RLock()
         # One writer at a time, push included: a reset between a commit and its push
@@ -413,10 +439,20 @@ class GitopsRepo:
         the first failure, as scalo's retry loop counts it, and a retry's timeout is
         capped at what is left of it, so the retries end with the budget.
 
+        The write breaker counts a call that runs out of budget as a failure. A call
+        the forge answers -- a success, or a refusal, bad credentials or a missing
+        repo -- counts as a success, because the breaker tracks whether the forge is
+        reachable and those answers prove it is. While it is open no call is made.
+
         Raises:
-            GitopsUnavailableError: every attempt failed transiently until the budget ran out.
+            GitopsUnavailableError: every attempt failed transiently until the budget ran
+                out, or the breaker is open and the forge was not called.
             GitopsRemoteError: a failure another attempt cannot fix, raised at once.
         """
+        if not self._write_breaker.try_acquire_probe():
+            self._metrics.write_breaker("rejected")
+            raise self._breaker_rejection()
+        probing = self._write_breaker.state is CircuitState.HALF_OPEN
         deadline: float | None = None
 
         def attempt() -> T:
@@ -434,13 +470,72 @@ class GitopsRepo:
                 raise
 
         try:
-            return self._write_resilience.run(attempt)
+            result = self._write_resilience.run(attempt)
         except GitopsUnavailableError as exc:
             self._metrics.write_retry(op, "exhausted")
             exc.remote = redact_credentials(self._repo_url)
             # About one back-off step: the pace this clone was retrying at itself.
             exc.retry_after_seconds = max(1, math.ceil(self._write.wait_max))
+            if self._record_forge(reachable=False):
+                exc.retry_after_seconds = self._breaker_retry_after()
             raise
+        except GitopsRemoteError:
+            self._record_forge(reachable=True)
+            raise
+        except BaseException:
+            # Not an answer from the forge, so it counts for nothing, but a probe must
+            # still end or the breaker never leaves half-open.
+            if probing:
+                self._record_forge(reachable=False)
+            raise
+        self._record_forge(reachable=True)
+        return result
+
+    def _record_forge(self, *, reachable: bool) -> bool:
+        """Feed one write call's outcome to the breaker; returns whether it is now open.
+
+        Called under the writer lock, so nothing moves the breaker between the reads
+        of its state either side of the record.
+        """
+        before = self._write_breaker.state
+        if reachable:
+            self._write_breaker.record_success()
+        else:
+            self._write_breaker.record_failure()
+        after = self._write_breaker.state
+        if reachable:
+            if before is CircuitState.HALF_OPEN:
+                self._metrics.write_breaker("closed")
+                logger.info("Deploy repo answered a probe write; writes call it again")
+            return False
+        opened = before is CircuitState.HALF_OPEN or after is not CircuitState.CLOSED
+        if not opened:
+            return False
+        self._breaker_opened_at = time.monotonic()
+        self._metrics.write_breaker("opened")
+        if before is CircuitState.CLOSED:
+            logger.warning(
+                "Deploy repo writes ran out of retry budget repeatedly: answering 503 "
+                "without calling it until a probe write gets through",
+                failures=self._write.failure_threshold,
+                probe_after_seconds=self._write.reset_timeout,
+            )
+        return True
+
+    def _breaker_retry_after(self) -> int:
+        """Whole seconds until the open breaker lets a probe write through."""
+        left = self._write.reset_timeout - (time.monotonic() - self._breaker_opened_at)
+        return max(1, math.ceil(left))
+
+    def _breaker_rejection(self) -> GitopsUnavailableError:
+        """The 503 an open breaker answers with, the forge never called."""
+        exc = GitopsUnavailableError(
+            "gitops deploy repo unreachable: recent writes ran out of retry budget, so "
+            "this one was not sent"
+        )
+        exc.remote = redact_credentials(self._repo_url)
+        exc.retry_after_seconds = self._breaker_retry_after()
+        return exc
 
     def _scrub_remote(self) -> None:
         """Rewrite the stored remote back to the credential-free URL.

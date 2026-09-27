@@ -35,7 +35,7 @@ from prometheus_client.parser import text_string_to_metric_families
 from scalo.metrics import create_metrics
 
 from dfe_engine.gitops import repo as repo_module
-from dfe_engine.gitops.metrics import WRITE_RETRIES, GitopsMetrics
+from dfe_engine.gitops.metrics import WRITE_BREAKER, WRITE_RETRIES, GitopsMetrics
 from dfe_engine.gitops.repo import GitopsRemoteError, GitopsRepo, GitopsUnavailableError
 from dfe_engine.settings import GitopsWriteSettings
 
@@ -185,17 +185,23 @@ def _manager():
     return create_metrics("test", backend="prometheus", enable_auto_update=False)
 
 
-def _retries(manager, op: str, outcome: str) -> float:
-    """The write-retry counter for one call and outcome, read off the real exposition."""
+def _sample(manager, name: str, labels: dict[str, str]) -> float:
+    """One counter sample, read off the real exposition."""
     for family in text_string_to_metric_families(manager.metrics_text):
         for sample in family.samples:
-            if (
-                sample.name == WRITE_RETRIES
-                and sample.labels.get("op") == op
-                and sample.labels.get("outcome") == outcome
-            ):
+            if sample.name == name and all(sample.labels.get(k) == v for k, v in labels.items()):
                 return sample.value
     return 0.0
+
+
+def _retries(manager, op: str, outcome: str) -> float:
+    """The write-retry counter for one call and outcome."""
+    return _sample(manager, WRITE_RETRIES, {"op": op, "outcome": outcome})
+
+
+def _breaker(manager, event: str) -> float:
+    """The write-breaker counter for one event."""
+    return _sample(manager, WRITE_BREAKER, {"event": event})
 
 
 def _head(bare: Path, branch: str) -> bytes:
@@ -490,3 +496,254 @@ def test_the_budget_bounds_a_call_to_a_silent_forge(tmp_path: Path, no_proxy) ->
         listener.close()
 
     assert elapsed < timeout + budget + 0.5
+
+
+class _CountingBlackHole:
+    """A listener that takes every connection and never answers on it, counting each.
+
+    The wedged-forge shape from the black-holed forge in test_repo.py, with the
+    connections accepted so a test can tell whether a write dialled at all.
+    """
+
+    def __init__(self) -> None:
+        self._listener = socket.socket()
+        self._listener.bind(("127.0.0.1", 0))
+        self._listener.listen(16)
+        self._held: list[socket.socket] = []
+        self._lock = threading.Lock()
+        self._thread = threading.Thread(target=self._accept, daemon=True)
+        self._thread.start()
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self._listener.getsockname()[1]}/deploy.git"
+
+    @property
+    def connections(self) -> int:
+        with self._lock:
+            return len(self._held)
+
+    def _accept(self) -> None:
+        while True:
+            try:
+                conn, _addr = self._listener.accept()
+            except OSError:
+                return
+            with self._lock:
+                self._held.append(conn)
+
+    def close(self) -> None:
+        self._listener.close()
+        self._thread.join(timeout=5)
+        with self._lock:
+            for conn in self._held:
+                conn.close()
+
+
+@pytest.fixture
+def black_hole(no_proxy: None) -> Iterator[_CountingBlackHole]:
+    hole = _CountingBlackHole()
+    try:
+        yield hole
+    finally:
+        hole.close()
+
+
+def test_the_breaker_opens_after_spent_budgets_and_answers_without_dialling(
+    tmp_path: Path, black_hole: _CountingBlackHole
+) -> None:
+    """Two writes spend their budget on a wedged forge; the third is a 503 at once.
+
+    Without the breaker every write against a forge that is down for minutes costs
+    its full timeout and budget, with the writer lock held and later writes queued.
+    """
+    timeout, reset = 0.5, 60.0
+    bare, branch = _seed(tmp_path)
+    manager = _manager()
+    repo = _clone(
+        tmp_path,
+        bare,
+        branch,
+        black_hole.url,
+        metrics=GitopsMetrics(manager),
+        write=GitopsWriteSettings(
+            timeout_seconds=timeout, budget_seconds=0.0, failure_threshold=2, reset_timeout=reset
+        ),
+    )
+
+    for _ in range(2):
+        with pytest.raises(GitopsUnavailableError):
+            repo.publish({"x.yaml": "v: 1\n"}, message="wedged forge")
+    dialled = black_hole.connections
+    assert dialled >= 2
+    assert _breaker(manager, "opened") == 1
+
+    started = time.monotonic()
+    with pytest.raises(GitopsUnavailableError) as caught:
+        repo.publish({"x.yaml": "v: 1\n"}, message="breaker open")
+    elapsed = time.monotonic() - started
+
+    assert elapsed < timeout
+    assert black_hole.connections == dialled
+    assert caught.value.remote == black_hole.url
+    assert reset - 5 <= caught.value.retry_after_seconds <= reset
+    assert "gitops deploy repo" in str(caught.value)
+    assert _breaker(manager, "rejected") == 1
+    assert _retries(manager, "fetch", "exhausted") == 2
+
+
+def test_the_write_that_opens_the_breaker_says_when_to_come_back(
+    tmp_path: Path, no_proxy: None
+) -> None:
+    """Retry-After on the write that trips it is the breaker's window, not one back-off."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    bare, branch = _seed(tmp_path)
+    repo = _clone(
+        tmp_path,
+        bare,
+        branch,
+        f"http://127.0.0.1:{port}/deploy.git",
+        write=GitopsWriteSettings(budget_seconds=0.0, failure_threshold=1, reset_timeout=45.0),
+    )
+
+    with pytest.raises(GitopsUnavailableError) as caught:
+        repo.publish({"x.yaml": "v: 1\n"}, message="refused")
+
+    assert caught.value.retry_after_seconds >= 40
+
+
+class _Outage:
+    """WSGI layer in front of the real git server: a forge that is down, or answering.
+
+    ``answer`` is None to pass requests through, or the status every request gets
+    instead -- a 503 is a forge restarting behind its proxy, a 404 a forge that is
+    up and has no such repo. Every request is counted, served or not.
+    """
+
+    def __init__(self, app: Callable) -> None:
+        self._app = app
+        self._lock = threading.Lock()
+        self.answer: str | None = "503 Service Unavailable"
+        self.requests = 0
+
+    def __call__(self, environ: Environ, start_response: Callable) -> Any:
+        with self._lock:
+            self.requests += 1
+            answer = self.answer
+        if answer is None:
+            return self._app(environ, start_response)
+        start_response(answer, [("Content-Type", "text/plain")])
+        return [b"not now\n"]
+
+
+def _outage_clone(
+    tmp_path: Path, serve, manager, *, reset: float
+) -> tuple[GitopsRepo, _Outage, Path, str]:
+    """A pushing clone of a real forge that starts out down."""
+    bare, branch = _seed(tmp_path)
+    outages: list[_Outage] = []
+
+    def wrap(app: Callable) -> _Outage:
+        outages.append(_Outage(app))
+        return outages[0]
+
+    url = serve(bare, wrap)
+    repo = _clone(
+        tmp_path,
+        bare,
+        branch,
+        url,
+        metrics=GitopsMetrics(manager),
+        write=GitopsWriteSettings(
+            timeout_seconds=2.0, budget_seconds=0.0, failure_threshold=2, reset_timeout=reset
+        ),
+    )
+    return repo, outages[0], bare, branch
+
+
+def _open_the_breaker(repo: GitopsRepo, outage: _Outage) -> None:
+    for _ in range(2):
+        with pytest.raises(GitopsUnavailableError):
+            repo.publish({"x.yaml": "v: 0\n"}, message="forge down")
+    requests = outage.requests
+    with pytest.raises(GitopsUnavailableError):
+        repo.publish({"x.yaml": "v: 0\n"}, message="breaker open")
+    assert outage.requests == requests
+
+
+def test_a_probe_the_forge_answers_closes_the_breaker(tmp_path: Path, serve) -> None:
+    """The forge comes back: the first write after the window lands, and so do the rest."""
+    reset = 0.3
+    manager = _manager()
+    repo, outage, bare, branch = _outage_clone(tmp_path, serve, manager, reset=reset)
+    _open_the_breaker(repo, outage)
+
+    outage.answer = None
+    time.sleep(reset + 0.1)
+    probe = repo.publish({"x.yaml": "v: 1\n"}, message="probe")
+
+    assert probe.pushed is True
+    assert _head(bare, branch).decode() == probe.commit_sha
+    assert _breaker(manager, "closed") == 1
+
+    requests = outage.requests
+    after = repo.publish({"y.yaml": "v: 1\n"}, message="after the probe")
+    assert after.pushed is True
+    assert outage.requests > requests
+    assert _breaker(manager, "rejected") == 1
+
+
+def test_a_probe_that_spends_its_budget_reopens_the_breaker(tmp_path: Path, serve) -> None:
+    """The forge is still down at the probe: the breaker opens again for a new window."""
+    reset = 0.3
+    manager = _manager()
+    repo, outage, _bare, _branch = _outage_clone(tmp_path, serve, manager, reset=reset)
+    _open_the_breaker(repo, outage)
+
+    time.sleep(reset + 0.1)
+    requests = outage.requests
+    with pytest.raises(GitopsUnavailableError):
+        repo.publish({"x.yaml": "v: 1\n"}, message="probe")
+    assert outage.requests > requests
+    assert _breaker(manager, "opened") == 2
+
+    requests = outage.requests
+    with pytest.raises(GitopsUnavailableError):
+        repo.publish({"x.yaml": "v: 1\n"}, message="reopened")
+    assert outage.requests == requests
+    assert _breaker(manager, "closed") == 0
+
+
+def test_a_forge_that_answers_no_never_opens_the_breaker(tmp_path: Path, serve) -> None:
+    """A missing repo is the forge up and answering: every write reports it, none is a 503."""
+    manager = _manager()
+    repo, outage, _bare, _branch = _outage_clone(tmp_path, serve, manager, reset=60.0)
+    outage.answer = "404 Not Found"
+
+    for _ in range(4):
+        requests = outage.requests
+        with pytest.raises(GitopsRemoteError) as caught:
+            repo.publish({"x.yaml": "v: 1\n"}, message="no such repo")
+        assert not isinstance(caught.value, GitopsUnavailableError)
+        assert outage.requests > requests
+    assert _breaker(manager, "opened") == 0
+
+
+def test_a_probe_the_forge_refuses_closes_the_breaker_and_reports_the_refusal(
+    tmp_path: Path, serve
+) -> None:
+    """Back up but answering 404: the probe surfaces the real error, not another 503."""
+    reset = 0.3
+    manager = _manager()
+    repo, outage, _bare, _branch = _outage_clone(tmp_path, serve, manager, reset=reset)
+    _open_the_breaker(repo, outage)
+
+    outage.answer = "404 Not Found"
+    time.sleep(reset + 0.1)
+    with pytest.raises(GitopsRemoteError) as caught:
+        repo.publish({"x.yaml": "v: 1\n"}, message="probe")
+
+    assert not isinstance(caught.value, GitopsUnavailableError)
+    assert _breaker(manager, "closed") == 1

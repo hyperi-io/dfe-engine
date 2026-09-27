@@ -701,9 +701,13 @@ class TestGitopsMode:
 
         monkeypatch.setenv("DFE_GITOPS_WRITE_TIMEOUT_SECONDS", "30")
         monkeypatch.setenv("DFE_GITOPS_WRITE_BUDGET_SECONDS", "45.5")
+        monkeypatch.setenv("DFE_GITOPS_WRITE_FAILURE_THRESHOLD", "5")
+        monkeypatch.setenv("DFE_GITOPS_WRITE_RESET_TIMEOUT", "90")
         write = GitopsSettings(**_get_env_overrides()["gitops"]).write
         assert write.timeout_seconds == 30.0
         assert write.budget_seconds == 45.5
+        assert write.failure_threshold == 5
+        assert write.reset_timeout == 90.0
 
     def test_write_timeout_is_longer_than_the_read_bound(self):
         from dfe_engine.gitops.repo import REMOTE_HEAD_TIMEOUT_SECONDS

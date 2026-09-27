@@ -19,6 +19,7 @@ from typing import Any, Literal
 
 BATCHES = "gitops_batches_total"
 WRITE_RETRIES = "gitops_write_retries_total"
+WRITE_BREAKER = "gitops_write_breaker_total"
 
 BatchOutcome = Literal["committed", "unchanged", "split", "discarded", "failed"]
 """How a batch ended.
@@ -38,6 +39,14 @@ RetryOutcome = Literal["retried", "exhausted"]
 
 - ``retried``: the call was attempted again inside the write budget.
 - ``exhausted``: the budget ran out, so the write failed and the API answered 503.
+"""
+
+BreakerEvent = Literal["opened", "rejected", "closed"]
+"""What the write breaker did.
+
+- ``opened``: calls in a row ran out of budget, or a probe did, so writes fail at once.
+- ``rejected``: a write was answered 503 without calling the forge.
+- ``closed``: the forge answered a probe, so writes call it again.
 """
 
 
@@ -61,6 +70,12 @@ class GitopsMetrics:
             "Transient failures of a deploy-repo write's remote call, by call and outcome",
             ["op", "outcome"],
         )
+        self._write_breaker = manager.counter(
+            WRITE_BREAKER,
+            "Deploy-repo write breaker transitions, and the writes it answered without "
+            "calling the forge",
+            ["event"],
+        )
 
     @property
     def enabled(self) -> bool:
@@ -79,11 +94,19 @@ class GitopsMetrics:
             return
         self._write_retries.labels(op=op, outcome=outcome).inc()
 
+    def write_breaker(self, event: BreakerEvent) -> None:
+        """Record the write breaker opening or closing, or a write it turned away."""
+        if self._manager is None:
+            return
+        self._write_breaker.labels(event=event).inc()
+
 
 __all__ = [
     "BATCHES",
+    "WRITE_BREAKER",
     "WRITE_RETRIES",
     "BatchOutcome",
+    "BreakerEvent",
     "GitopsMetrics",
     "RetryOutcome",
     "WriteOp",
