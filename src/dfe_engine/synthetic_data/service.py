@@ -53,7 +53,7 @@ class SyntheticDataService:
     def __init__(self, settings: SyntheticDataSettings) -> None:
         self.settings = settings
 
-    # ── schema resolution ─────────────────────────────────────────
+    # -- schema resolution -----------------------------------------
 
     def _schemas_root(self) -> Path:
         root = _resolve_schemas_root()
@@ -114,7 +114,7 @@ class SyntheticDataService:
             path, version=version, seed=seed, tags=tags, mark_synthetic=mark_synthetic
         )
 
-    # ── operations ────────────────────────────────────────────────
+    # -- operations ------------------------------------------------
 
     def generate(self, req: GenerateRequest) -> GenerateResult:
         """Generate a bounded batch inline."""

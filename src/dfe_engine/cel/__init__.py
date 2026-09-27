@@ -10,17 +10,17 @@
 
 Generic CEL handling used by:
 
-- **Transport filters** — classify expressions into performance tiers,
+- **Transport filters** -- classify expressions into performance tiers,
   validate against tier gates
-- **CEL field-mapping rules** — pre-validate before pushing to runtime
-- **UI live validation** — TS UI POSTs CEL strings, gets back syntax errors
+- **CEL field-mapping rules** -- pre-validate before pushing to runtime
+- **UI live validation** -- TS UI POSTs CEL strings, gets back syntax errors
   and tier classification in real-time (~milliseconds, no Rust roundtrip)
-- **Sigma/hunt rule transformation** — when CEL is used as a transformation
+- **Sigma/hunt rule transformation** -- when CEL is used as a transformation
   predicate inside hunts/sigma, validate before deploying
 
 The classifier mirrors the Rust implementation in
 ``scalo::transport::filter::classify`` byte-for-byte. This means
-the UI validates with the same rules the runtime engine enforces — no
+the UI validates with the same rules the runtime engine enforces -- no
 divergence between "looks valid in UI" and "rejected at startup".
 
 ## Tier Classification

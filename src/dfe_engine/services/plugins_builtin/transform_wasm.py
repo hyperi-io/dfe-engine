@@ -2,7 +2,7 @@
 
 Consolidates descriptor, validation, sizing, and template overrides
 for the WASM-based transform service. Type 2 service (multi-source)
-with flat source list (no config tree — tree is vector-only).
+with flat source list (no config tree -- tree is vector-only).
 """
 
 from __future__ import annotations

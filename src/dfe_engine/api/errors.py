@@ -1,6 +1,6 @@
 """Unified error handling for DFE Engine API.
 
-All errors return ``ErrorResponse`` — a single shape the UI can parse uniformly.
+All errors return ``ErrorResponse`` -- a single shape the UI can parse uniformly.
 Pydantic 422 errors are reshaped into the same format with field-level detail.
 """
 
@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
-# ── Response models ──────────────────────────────────────────
+# -- Response models ------------------------------------------
 
 
 class FieldError(BaseModel):
@@ -103,7 +103,7 @@ def _error_response_json(body: ErrorResponse) -> dict[str, Any]:
     return body.model_dump(mode="json", exclude_none=True)
 
 
-# ── Error codes ──────────────────────────────────────────────
+# -- Error codes ----------------------------------------------
 
 
 class ErrorCode:
@@ -147,7 +147,7 @@ def raise_exchange_http(exc: Exception) -> NoReturn:
     ) from exc
 
 
-# ── Exception handlers ───────────────────────────────────────
+# -- Exception handlers ---------------------------------------
 
 
 def install_exception_handlers(app: FastAPI) -> None:

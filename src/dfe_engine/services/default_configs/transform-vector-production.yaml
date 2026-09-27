@@ -1,4 +1,4 @@
-# DFE Transform Vector — Production defaults
+# DFE Transform Vector -- Production defaults
 # Kafka-to-Kafka transform using vector.dev pipelines
 
 kafka:

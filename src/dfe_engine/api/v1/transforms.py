@@ -7,8 +7,8 @@
 # Copyright: (c) 2026 HYPERI PTY LIMITED
 """WASM transform compilation and test endpoints.
 
-POST /api/v1/transforms/compile  → Compile source code to WASM via compiler service
-POST /api/v1/transforms/test     → Run a compiled WASM against sample records
+POST /api/v1/transforms/compile  -> Compile source code to WASM via compiler service
+POST /api/v1/transforms/test     -> Run a compiled WASM against sample records
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ router = APIRouter(prefix="/transforms", tags=["Transforms"])
 Language = Literal["rust", "go", "assemblyscript"]
 
 
-# ── Request / response models ─────────────────────────────────
+# -- Request / response models ---------------------------------
 
 
 class CompileRequest(BaseModel):
@@ -68,7 +68,7 @@ class TestResponse(BaseModel):
     wasm_memory_bytes: int
 
 
-# ── Endpoints ─────────────────────────────────────────────────
+# -- Endpoints -------------------------------------------------
 
 
 @router.post(

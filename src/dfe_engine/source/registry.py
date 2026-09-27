@@ -1,4 +1,4 @@
-"""Source Registry — CRUD management for Source definitions.
+"""Source Registry -- CRUD management for Source definitions.
 
 Two interchangeable backends behind one registry surface:
 
@@ -936,7 +936,7 @@ class SourceRegistry:
 
         Copy-on-adopt: the definitions are data in dfe-schemas' ``sources/`` and
         are copied into the deployment's sources store. Non-destructive by
-        default — skips sources that already exist. On the gitcrud backend all
+        default -- skips sources that already exist. On the gitcrud backend all
         seeds land in ONE commit.
 
         Args:

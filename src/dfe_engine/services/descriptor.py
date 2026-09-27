@@ -23,7 +23,7 @@ class KafkaRole(str, Enum):
 class ServiceDescriptor:
     """Immutable metadata about a DFE service.
 
-    This is compile-time data — not user-editable config. It describes
+    This is compile-time data -- not user-editable config. It describes
     the service's identity, container image, networking, and health probes.
 
     Attributes:

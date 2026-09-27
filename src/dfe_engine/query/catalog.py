@@ -22,7 +22,7 @@ _PARAM_PATTERN = re.compile(r"\{(\w+):(\w+(?:\([^)]*\))?)\}")
 # View name prefix
 VIEW_PREFIX = "dfe_v_"
 
-# ClickHouse type → (python_type, typescript_type, input_type)
+# ClickHouse type -> (python_type, typescript_type, input_type)
 _TYPE_MAP: dict[str, tuple[str, str, str]] = {
     "String": ("string", "string", "text"),
     "UUID": ("uuid", "string", "text"),
@@ -41,7 +41,7 @@ _TYPE_PREFIX_MAP: dict[str, tuple[str, str, str]] = {
     "Array": ("array", "string[]", "multiselect"),
 }
 
-# Reserved parameter names — injected server-side, hidden from UI
+# Reserved parameter names -- injected server-side, hidden from UI
 RESERVED_PARAMS = frozenset({"org_id"})
 
 
@@ -58,7 +58,7 @@ def map_clickhouse_type(ch_type: str) -> tuple[str, str, str]:
     if ch_type in _TYPE_MAP:
         return _TYPE_MAP[ch_type]
 
-    # Array type — refine typescript_type based on element type
+    # Array type -- refine typescript_type based on element type
     if ch_type.startswith("Array("):
         inner = ch_type[6:-1]  # Extract inner type
         inner_py, inner_ts, _ = map_clickhouse_type(inner)
@@ -116,7 +116,7 @@ def parse_view_parameters(create_sql: str) -> list[ViewParameter]:
 def view_name_to_label(name: str) -> str:
     """Convert a view name to an API label.
 
-    dfe_v_analytics_user_activity → analytics/user_activity
+    dfe_v_analytics_user_activity -> analytics/user_activity
 
     The first segment after the prefix is the namespace, the rest is the name
     joined with underscores.
@@ -137,7 +137,7 @@ def view_name_to_label(name: str) -> str:
     parts = suffix.split("_", 1)
 
     if len(parts) < 2:
-        # Single segment — namespace is the name
+        # Single segment -- namespace is the name
         return parts[0]
 
     namespace, short_name = parts
@@ -147,7 +147,7 @@ def view_name_to_label(name: str) -> str:
 def label_to_view_name(label: str) -> str:
     """Convert an API label to a view name.
 
-    analytics/user_activity → dfe_v_analytics_user_activity
+    analytics/user_activity -> dfe_v_analytics_user_activity
 
     Args:
         label: API label (e.g. analytics/user_activity)

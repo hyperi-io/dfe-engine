@@ -59,7 +59,7 @@ _PREFS_NAMESPACE = "preferences"
 _PREFS_KEY = "default"
 
 
-# ── Response models ──────────────────────────────────────────
+# -- Response models ------------------------------------------
 
 
 class PreferencesResponse(BaseModel):
@@ -94,7 +94,7 @@ class ObjectEntry(BaseModel):
     etag: str
 
 
-# ── Helpers ──────────────────────────────────────────────────
+# -- Helpers --------------------------------------------------
 
 
 def _store(client: Any, settings: Any) -> RepositoryStore:
@@ -240,7 +240,7 @@ def _precondition_failed(current_etag: str | None) -> JSONResponse:
     )
 
 
-# ── Preferences (dfe-ui fast path) ───────────────────────────
+# -- Preferences (dfe-ui fast path) ---------------------------
 
 
 @router.get("/preferences", response_model=PreferencesResponse, openapi_extra=CLI_HIDDEN)
@@ -299,7 +299,7 @@ async def patch_preferences(
     )
 
 
-# ── Objects (generic) ────────────────────────────────────────
+# -- Objects (generic) ----------------------------------------
 
 
 @router.get(

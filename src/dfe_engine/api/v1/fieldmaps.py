@@ -1,11 +1,11 @@
-"""Field maps router — FieldMapRegistry CRUD.
+"""Field maps router -- FieldMapRegistry CRUD.
 
-GET    /api/v1/field-maps                  → Paginated list
-POST   /api/v1/field-maps                  → Create field map
-GET    /api/v1/field-maps/{standard}       → Default map for standard
-GET    /api/v1/field-maps/{standard}/{source} → Source-specific map
-DELETE /api/v1/field-maps/{standard}/{source} → Delete source-specific map
-POST   /api/v1/field-maps/seed             → Seed built-in defaults
+GET    /api/v1/field-maps                  -> Paginated list
+POST   /api/v1/field-maps                  -> Create field map
+GET    /api/v1/field-maps/{standard}       -> Default map for standard
+GET    /api/v1/field-maps/{standard}/{source} -> Source-specific map
+DELETE /api/v1/field-maps/{standard}/{source} -> Delete source-specific map
+POST   /api/v1/field-maps/seed             -> Seed built-in defaults
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from dfe_engine.git_identity import git_author
 router = APIRouter(prefix="/field-maps", tags=["Field Maps"])
 
 
-# ── Response models ──────────────────────────────────────────
+# -- Response models ------------------------------------------
 
 
 class FieldMapSummary(BaseModel):
@@ -39,7 +39,7 @@ class SeedResponse(BaseModel):
     seeded: int
 
 
-# ── Endpoints ────────────────────────────────────────────────
+# -- Endpoints ------------------------------------------------
 
 
 @router.get(

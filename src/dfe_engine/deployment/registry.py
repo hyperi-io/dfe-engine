@@ -169,7 +169,7 @@ class DeploymentConfigRegistry:
                 validated = classes[service].model_validate(config)
                 config_data = validated.model_dump(mode="json")
             else:
-                # Unknown service — store raw dict (schema-less mode)
+                # Unknown service -- store raw dict (schema-less mode)
                 config_data = config
         else:
             config_data = config.model_dump(mode="json")
@@ -187,7 +187,7 @@ class DeploymentConfigRegistry:
                 self._store._git_push_remote()
 
         self._store._refresh_all()
-        logger.info(f"Saved deployment config for {service}/{instance} → {yaml_path}")
+        logger.info(f"Saved deployment config for {service}/{instance} -> {yaml_path}")
 
     def delete_config(self, service: str, instance: str = "default") -> None:
         """Delete a deployment configuration."""
@@ -387,7 +387,7 @@ class DeploymentConfigRegistry:
     def export_helm_values(self, service: str, instance: str, path: Path) -> Path:
         """Export a deployment config as Helm values file.
 
-        Strips the ``size`` field (Helm doesn't need it — resources are
+        Strips the ``size`` field (Helm doesn't need it -- resources are
         already expanded) and writes clean YAML.
 
         Args:
@@ -401,7 +401,7 @@ class DeploymentConfigRegistry:
         config = self.get_config(service, instance)
         config_data = config.model_dump(mode="json")
 
-        # Strip size — Helm uses the expanded resources directly
+        # Strip size -- Helm uses the expanded resources directly
         config_data.pop("size", None)
 
         path = Path(path)

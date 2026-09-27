@@ -6,21 +6,21 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Group management router — CRUD for RBAC groups.
+"""Group management router -- CRUD for RBAC groups.
 
-POST   /api/v1/auth/groups                           → Create group
-GET    /api/v1/auth/groups                           → List groups
-GET    /api/v1/auth/groups/{name}                    → Get group detail
-PUT    /api/v1/auth/groups/{name}                    → Update group
-POST   /api/v1/auth/groups/{name}/members            → Add member
-DELETE /api/v1/auth/groups/{name}/members/{username}  → Remove member
-DELETE /api/v1/auth/groups/{name}                    → Delete group
+POST   /api/v1/auth/groups                           -> Create group
+GET    /api/v1/auth/groups                           -> List groups
+GET    /api/v1/auth/groups/{name}                    -> Get group detail
+PUT    /api/v1/auth/groups/{name}                    -> Update group
+POST   /api/v1/auth/groups/{name}/members            -> Add member
+DELETE /api/v1/auth/groups/{name}/members/{username}  -> Remove member
+DELETE /api/v1/auth/groups/{name}                    -> Delete group
 
 Groups carry a scope: ``system`` (spans orgs) or ``org:<name>``
 (exists only inside that org). Checks run at the group's scope, so a
 system-scope group:write holder manages everything, while an org-scope
 group:write holder manages only that org's groups. Visibility follows
-the same rule, plus members always see the groups they belong to —
+the same rule, plus members always see the groups they belong to --
 org-local groups are never listed outside their org.
 """
 
@@ -45,7 +45,7 @@ from dfe_engine.auth.rbac_scopes import scopes_dict
 router = APIRouter(prefix="/groups", tags=["Groups"])
 
 
-# ── Request / Response models ────────────────────────────────
+# -- Request / Response models --------------------------------
 
 
 class CreateGroupRequest(BaseModel):
@@ -87,7 +87,7 @@ class AttributesRequest(BaseModel):
     attributes: dict[str, Any] = Field(default_factory=dict)
 
 
-# ── Helpers ──────────────────────────────────────────────────
+# -- Helpers --------------------------------------------------
 
 
 def _scope_of(group: Group) -> Scope:
@@ -139,7 +139,7 @@ def _check_role_assignment(request: Request, user, roles: list[str], scope: Scop
         )
 
 
-# ── Endpoints ────────────────────────────────────────────────
+# -- Endpoints ------------------------------------------------
 
 
 @router.post("", response_model=GroupResponse, status_code=201)
@@ -383,7 +383,7 @@ async def delete_group(
         ) from exc
 
 
-# ── Attributes ───────────────────────────────────────────────
+# -- Attributes -----------------------------------------------
 #
 # Non-sensitive attributes ride inline on the Group model; sensitive attributes
 # live in the separate keyed store (never inline, so a broad group read cannot
