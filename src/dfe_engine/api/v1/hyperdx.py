@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field
 from dfe_engine.api.deps import CurrentUser, Settings, is_action_allowed, require_action
 from dfe_engine.auth import Scope, ScopedGrant
 from dfe_engine.auth.rbac_scopes import scopes_dict
-from dfe_engine.governance.ch.bindings import ORG_VIEWER_ROLE
+from dfe_engine.governance.ch.bindings import platform_grants
 from dfe_engine.governance.ch.models import org_user_name
 
 router = APIRouter(prefix="/hyperdx", tags=["HyperDX"])
@@ -88,12 +88,12 @@ def _require_query_execute(request: Request, user) -> None:
 def _reads_every_org(request: Request, user) -> bool:
     """Whether a role other than ``org_viewer`` grants ``query:execute`` at SYSTEM scope.
 
-    ``org_viewer`` is the tenant role, so a grant of it never unfences the caller,
-    and a role bound at an org's scope covers that org alone.
+    ``platform_grants`` decides which grants may read across orgs, the same filter
+    the CH group bindings use; this adds the ``query:execute`` check on top.
     """
     # Bare roles are system-scope grants, as authorize() reads a context without grants.
     grants = user.grants or [ScopedGrant(role=name) for name in user.roles]
-    platform = [grant for grant in grants if grant.role != ORG_VIEWER_ROLE]
+    platform = platform_grants(grants)
     if not platform:
         return False
     beyond_viewer = user.model_copy(
