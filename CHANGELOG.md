@@ -3,6 +3,14 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.9](https://github.com/hyperi-io/dfe-engine/compare/v1.22.8...v1.22.9) (2026-09-27)
+
+### Bug Fixes
+
+* default images to ghcr, scrub estate values ([#559](https://github.com/hyperi-io/dfe-engine/issues/559)) ([5da5ab3](https://github.com/hyperi-io/dfe-engine/commit/5da5ab38247d57294fafb9537908b7140b5e455d))
+* **gitops:** bound and retry deploy-repo writes ([#560](https://github.com/hyperi-io/dfe-engine/issues/560)) ([76fa08d](https://github.com/hyperi-io/dfe-engine/commit/76fa08d0779b47488b2cd17485939b659698be53))
+* **routing:** keep the _load key on direct sinks ([#561](https://github.com/hyperi-io/dfe-engine/issues/561)) ([9aa48ca](https://github.com/hyperi-io/dfe-engine/commit/9aa48ca5029880647cdb56fb49684223c56d17f0))
+
 ## [1.22.8](https://github.com/hyperi-io/dfe-engine/compare/v1.22.7...v1.22.8) (2026-09-27)
 
 ### Bug Fixes
