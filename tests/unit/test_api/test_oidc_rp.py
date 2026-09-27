@@ -461,6 +461,18 @@ def test_callback_refuses_an_idp_asserting_a_local_account(client, app):
     assert store.get("bob").email == "bob@dfe.local"
 
 
+def test_callback_refuses_a_subject_in_the_api_key_namespace(client, app):
+    """A token with sub apikey:<name> takes that key's groups, so the IdP never mints one."""
+    app.state.api_key_store.create("ci", groups=["dfe-admins"])
+    app.state.oidc_rp = _SubjectOidcRp("apikey:ci")
+
+    resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+
+    assert resp.status_code == 401, resp.text
+    assert "access_token" not in resp.json()
+    assert app.state.account_store.get("apikey-ci") is None
+
+
 def test_callback_refuses_a_disabled_external_account(client, app):
     app.state.oidc_rp = _SubjectOidcRp("stub-user")
     store = app.state.account_store

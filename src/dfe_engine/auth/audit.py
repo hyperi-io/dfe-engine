@@ -287,7 +287,8 @@ def audit_jit_login_refused(user_id: str, source_provider: str, reason: str) -> 
     Args:
         user_id: The IdP-asserted subject that was refused.
         source_provider: OIDC provider name that asserted it.
-        reason: ``protected_account``, ``local_account`` or ``provider_mismatch``.
+        reason: ``protected_account``, ``local_account``, ``provider_mismatch`` or
+            ``api_key_subject``.
     """
     logger.warning(
         "auth.jit.login_refused",

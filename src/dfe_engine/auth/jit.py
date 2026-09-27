@@ -37,6 +37,9 @@ _ROLE_TO_TEAM = {
 # to the client and the collision detail would say which local names are taken.
 _REFUSED_MESSAGE = "OIDC login refused"
 
+# A subject here takes an API key's groups (api/deps.py), so no IdP may assert one.
+API_KEY_SUBJECT_PREFIX = "apikey:"
+
 
 class JitIdentityCollisionError(AuthenticationError):
     """An IdP assertion resolved onto an account that identity does not own.
@@ -44,7 +47,8 @@ class JitIdentityCollisionError(AuthenticationError):
     Attributes:
         user_id: The IdP-asserted subject.
         source_provider: The provider that asserted it.
-        reason: ``protected_account``, ``local_account`` or ``provider_mismatch``.
+        reason: ``protected_account``, ``local_account``, ``provider_mismatch`` or
+            ``api_key_subject``.
     """
 
     def __init__(self, user_id: str, source_provider: str, reason: str) -> None:
@@ -105,12 +109,16 @@ class JitProvisioner:
         and reconciled on later logins when present.
 
         Raises:
-            JitIdentityCollisionError: The asserted subject resolved onto a
-                recovery credential, or onto an account this provider does not
-                own. Nothing is written.
+            JitIdentityCollisionError: The asserted subject is in the API-key
+                namespace, or resolved onto a recovery credential or onto an
+                account this provider does not own. Nothing is written.
         """
+        if user_id.startswith(API_KEY_SUBJECT_PREFIX):
+            audit_jit_login_refused(user_id, source_provider, "api_key_subject")
+            raise JitIdentityCollisionError(user_id, source_provider, "api_key_subject")
         safe_name = self.sanitise_username(user_id)
         self._refuse_protected(safe_name, user_id, source_provider)
+        self._refuse_account_named_by_subject(safe_name, user_id, source_provider)
         now = datetime.now(UTC).isoformat()
         wanted_email = email.strip()
         wanted_name = name.strip()
@@ -203,14 +211,36 @@ class JitProvisioner:
         The floor under :meth:`_require_same_identity`, and unconditional: these
         two accounts are how an operator gets in when federation is broken or
         hostile, so no IdP may read, create or rewrite one whatever it claims.
+        The raw subject is checked as well as the sanitised one, because the
+        session binds to an account stored under the raw subject first.
 
         Raises:
-            JitIdentityCollisionError: ``safe_name`` is the admin or break-glass name.
+            JitIdentityCollisionError: ``safe_name`` or ``user_id`` is the admin or
+                break-glass name.
         """
-        if safe_name not in self._protected:
+        if safe_name not in self._protected and user_id not in self._protected:
             return
         audit_jit_login_refused(user_id, source_provider, "protected_account")
         raise JitIdentityCollisionError(user_id, source_provider, "protected_account")
+
+    def _refuse_account_named_by_subject(
+        self, safe_name: str, user_id: str, source_provider: str
+    ) -> None:
+        """Refuse when the raw subject is the name of an account this identity does not own.
+
+        The session binds to the account stored under the raw subject before the
+        sanitised one (``api.deps.account_for_session_subject``), so a subject that
+        is another account's exact name would otherwise sign in as that account.
+
+        Raises:
+            JitIdentityCollisionError: The raw subject names a local account, or
+                another provider's.
+        """
+        if user_id == safe_name:
+            return
+        named = self._accounts.get(user_id)
+        if named is not None:
+            self._require_same_identity(named, user_id, source_provider)
 
     def _require_same_identity(self, existing: Account, user_id: str, source_provider: str) -> None:
         """Refuse when the stored account is not this IdP identity's own.
