@@ -267,11 +267,16 @@ async def delete_destination(name: str, user: CurrentUser, registry: AlertDestRe
 # -- Helpers --------------------------------------------------
 
 
+def _destination_url_shown(url: str) -> str:
+    """A stored destination URL as every read shows it: the whole URL is the credential."""
+    return contract.REDACTED if url else ""
+
+
 def _destination_from_registry(dest: RegistryAlertDestination) -> AlertDestination:
     """The API response model for a stored destination, its URL masked."""
     return AlertDestination(
         name=dest.name,
-        url=contract.REDACTED if dest.url else "",
+        url=_destination_url_shown(dest.url),
         description=dest.description,
         enabled=dest.enabled,
         url_scheme=_url_scheme(dest.url),
@@ -284,10 +289,14 @@ def _typed_url(written: str, stored: str) -> str:
 
     Raises:
         HTTPException: 400 when the mask stands where no URL is stored, so a
-            destination is never saved pointing at the placeholder.
+            destination is never saved pointing at the placeholder, or masks only
+            part of a URL every read shows whole, whether the rest is right or not.
     """
+    shown = _destination_url_shown(stored)
     try:
-        return contract.restore_masked(written, stored or contract.MISSING, path="url")
+        return contract.restore_masked(
+            written, stored or contract.MISSING, path="url", shown=shown or contract.MISSING
+        )
     except contract.MaskedValueError as exc:
         raise HTTPException(
             status_code=400, detail={"code": exc.code, "message": str(exc)}

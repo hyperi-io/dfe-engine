@@ -600,3 +600,28 @@ class TestTheDestinationUrlIsACredential:
         registry = _registries["alert_destinations"]
 
         assert registry.resolve(stored) == self.SECRET_URL
+
+    def test_a_guess_around_a_masked_password_is_answered_the_same_way(
+        self, alert_client, alert_admin_headers
+    ):
+        """Every read shows the URL whole as the mask, so its host and user are never shown."""
+        url = "json://svc-4906:pw-4907@hooks.example/notify"
+        created = alert_client.post(
+            "/api/v1/alerts/destinations",
+            json={"name": "json-hook", "url": url, "enabled": True},
+            headers=alert_admin_headers,
+        )
+        assert created.status_code == 201, created.text
+
+        answers = []
+        for guess in ("svc-4906@hooks.example", "svc-wrong@elsewhere.example"):
+            user, host = guess.split("@")
+            resp = alert_client.put(
+                "/api/v1/alerts/destinations/json-hook",
+                json={"name": "json-hook", "url": f"json://{user}:{REDACTED}@{host}/notify"},
+                headers=alert_admin_headers,
+            )
+            answers.append((resp.status_code, resp.json().get("code")))
+
+        assert answers[0] == answers[1] == (400, "credential_reentry_required")
+        assert _registries["alert_destinations"].get("json-hook").url == url
