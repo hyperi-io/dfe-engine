@@ -43,6 +43,7 @@ from .render import (
     render_tenant_axis,
     render_tier,
 )
+from .trigger import ReconcileMetrics, ReconcileTrigger, request_ch_rbac_reconcile
 
 __all__ = [
     "DEFAULT_SERVICE_ROLES",
@@ -53,13 +54,16 @@ __all__ = [
     "ChServiceRole",
     "ChTier",
     "GroupChBinding",
+    "ReconcileMetrics",
     "ReconcileResult",
+    "ReconcileTrigger",
     "ch_admin_client",
     "compute_drops",
     "derive_group_bindings",
     "org_user_name",
     "reconcile_ch_rbac",
     "reconcile_from_stores",
+    "request_ch_rbac_reconcile",
     "tenant_isolation_enabled",
     "render_materialise",
     "render_pinned_user",

@@ -425,6 +425,40 @@ def _no_kafka_broker_calls(request):
         _kt.AdminClient = original
 
 
+@pytest.fixture(autouse=True)
+def _no_ch_rbac_reconcile_against_a_real_clickhouse(request):
+    """Test-session guard: no unit test reconciles CH RBAC against a real ClickHouse.
+
+    The app reconciles at startup and after every org or group write, against
+    ``settings.clickhouse`` -- ``localhost:8123`` by default, which is where a
+    developer's local stack publishes its ClickHouse. The reconcile drops users and
+    rewrites row policies, so a unit run would rewrite that stack.
+
+    Refusing the admin client rather than switching the reconcile off keeps the
+    path under test: startup and the change trigger still run it, and see it fail
+    as they would a ClickHouse that is down. The lifespan and the governance
+    endpoint import the name at call time, so the package attribute is what they
+    get.
+    """
+    if any(request.node.get_closest_marker(m) for m in REAL_INFRA_MARKERS):
+        yield
+        return
+
+    import dfe_engine.governance.ch as _ch_rbac
+    import dfe_engine.governance.ch.bootstrap as _ch_rbac_bootstrap
+
+    def _refuse(*_args, **_kwargs):
+        raise RuntimeError("unit tests do not reconcile against a ClickHouse (conftest guard)")
+
+    originals = (_ch_rbac.ch_admin_client, _ch_rbac_bootstrap.ch_admin_client)
+    _ch_rbac.ch_admin_client = _refuse
+    _ch_rbac_bootstrap.ch_admin_client = _refuse
+    try:
+        yield
+    finally:
+        _ch_rbac.ch_admin_client, _ch_rbac_bootstrap.ch_admin_client = originals
+
+
 @pytest.fixture(scope="session")
 def resources_path():
     """Path to test resources directory."""
