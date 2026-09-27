@@ -72,6 +72,20 @@ class JitAccountUnavailableError(AuthenticationError):
         self.reason = reason
 
 
+class JitSubjectUnusableError(AuthenticationError):
+    """The IdP subject sanitises to no account name: empty, or longer than one may be.
+
+    Attributes:
+        user_id: The IdP-asserted subject.
+        reason: ``unusable_subject``.
+    """
+
+    def __init__(self, user_id: str) -> None:
+        super().__init__(_REFUSED_MESSAGE)
+        self.user_id = user_id
+        self.reason = "unusable_subject"
+
+
 class JitProvisioner:
     def __init__(
         self,
@@ -112,6 +126,8 @@ class JitProvisioner:
             JitIdentityCollisionError: The asserted subject is in the API-key
                 namespace, or resolved onto a recovery credential or onto an
                 account this provider does not own. Nothing is written.
+            JitSubjectUnusableError: The subject sanitises to no account name.
+                Nothing is written.
         """
         if user_id.startswith(API_KEY_SUBJECT_PREFIX):
             audit_jit_login_refused(user_id, source_provider, "api_key_subject")
@@ -156,13 +172,13 @@ class JitProvisioner:
                 source_provider=source_provider,
                 last_login_at=now,
             )
-        except ValueError:
+        except ValueError as exc:
             # Race condition: another request created it. The identity guard runs
             # again because the account it created is the one about to be written.
             raced = self._accounts.get(safe_name)
             if raced is None:
                 # Not a race - create refused the name itself (empty or too long).
-                raise
+                raise JitSubjectUnusableError(user_id) from exc
             self._require_same_identity(raced, user_id, source_provider)
             self._require_available(raced, user_id, source_provider)
             race_updates: dict[str, object] = {"groups": oidc_groups, "last_login_at": now}

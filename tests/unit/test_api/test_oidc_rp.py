@@ -16,9 +16,10 @@ IdP) is out of scope here and validated against a real dex in integration - no
 Authlib network calls are mocked.
 """
 
-from __future__ import annotations
+import shutil
 
 import jwt as pyjwt
+import pytest
 
 from dfe_engine.auth.jwt_authority import JwtAuthority
 from dfe_engine.auth.oidc.models import OIDCProvider
@@ -499,3 +500,27 @@ def test_callback_refuses_a_blocked_external_account(client, app):
     assert "access_token" not in resp.json()
     assert resp.json()["message"] == "Account blocked"
     assert store.get("stub-user").last_login_at == ""
+
+
+@pytest.mark.parametrize("subject", ["@@@", "a" * 129], ids=["empty-stem", "too-long"])
+def test_callback_refuses_a_subject_that_names_no_account(client, app, subject):
+    """No account means nothing to disable, so no token is minted."""
+    app.state.oidc_rp = _SubjectOidcRp(subject)
+
+    resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+
+    assert resp.status_code == 401, resp.text
+    assert "access_token" not in resp.json()
+
+
+def test_callback_refuses_a_login_the_account_store_cannot_record(client, app):
+    accounts_dir = app.state.account_store._dir
+    shutil.rmtree(accounts_dir)
+    accounts_dir.write_text("")
+    app.state.oidc_rp = _SubjectOidcRp("kim@example.com")
+
+    resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+
+    assert resp.status_code == 503, resp.text
+    assert resp.json()["code"] == "service_unavailable"
+    assert "access_token" not in resp.json()

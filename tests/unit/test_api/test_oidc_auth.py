@@ -1,7 +1,8 @@
 """Tests for OIDC header authentication path in get_current_user()."""
 
-from __future__ import annotations
+import shutil
 
+import pytest
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.deps import create_access_token
@@ -287,3 +288,30 @@ class TestOidcAuthentication:
         assert resp.status_code == 401
         assert resp.json()["message"] == "Account blocked"
         assert store.get("locked-sso-example-com").last_login_at == ""
+
+
+class TestAJitFailureRefusesTheLogin:
+    """A proxied session with no account behind it could not be disabled locally."""
+
+    @pytest.mark.parametrize("subject", ["@@@", "a" * 129], ids=["empty-stem", "too-long"])
+    def test_a_subject_that_names_no_account_is_refused(self, client: TestClient, subject):
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": subject, "X-Oidc-Groups": "dfe-admins"},
+        )
+
+        assert resp.status_code == 401, resp.text
+        assert resp.json()["code"] == "unauthorized"
+
+    def test_a_login_the_account_store_cannot_record_is_refused(self, client: TestClient, app):
+        accounts_dir = app.state.account_store._dir
+        shutil.rmtree(accounts_dir)
+        accounts_dir.write_text("")
+
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "kim@example.com", "X-Oidc-Groups": "dfe-admins"},
+        )
+
+        assert resp.status_code == 503, resp.text
+        assert resp.json()["code"] == "service_unavailable"

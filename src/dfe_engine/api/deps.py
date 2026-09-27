@@ -10,8 +10,6 @@ per-request via ``Depends()``.  Authentication checks four paths in order:
 4. Auth disabled -- dev/test default, root context
 """
 
-from __future__ import annotations
-
 from datetime import timedelta
 from typing import TYPE_CHECKING, Annotated, Any, NamedTuple
 
@@ -26,7 +24,11 @@ from dfe_engine.auth.audit import (
     audit_permission_denied,
 )
 from dfe_engine.auth.groups import Group, GroupStore
-from dfe_engine.auth.jit import JitAccountUnavailableError, JitIdentityCollisionError
+from dfe_engine.auth.jit import (
+    JitAccountUnavailableError,
+    JitIdentityCollisionError,
+    JitSubjectUnusableError,
+)
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.settings import DFESettings, is_dev_posture
 
@@ -612,9 +614,8 @@ async def get_current_user(request: Request) -> AuthContext:
                     settings.auth.proxy_provider,
                     email=oidc_email or "",
                 )
-            except JitIdentityCollisionError as exc:
-                # Ordered before the catch-all: a refused identity must reach the
-                # caller as a 401, never be logged and waved through with a token.
+            except (JitIdentityCollisionError, JitSubjectUnusableError) as exc:
+                # Ordered before the catch-all: a refused identity is a 401, not a 503.
                 audit_login_denied(oidc_subject, "oidc", client_ip, exc.reason)
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -628,8 +629,17 @@ async def get_current_user(request: Request) -> AuthContext:
                     detail={"code": exc.reason, "message": str(exc)},
                     headers={"WWW-Authenticate": "Bearer"},
                 ) from exc
-            except Exception:
+            except Exception as exc:
+                # A session with no account behind it cannot be disabled locally.
                 logger.exception("JIT provisioning failed", user_id=oidc_subject)
+                audit_login_denied(oidc_subject, "oidc", client_ip, "jit_failed")
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={
+                        "code": "service_unavailable",
+                        "message": "The login could not be recorded. Try again.",
+                    },
+                ) from exc
 
         require_local_account_enabled(request, oidc_subject)
         return AuthContext(
