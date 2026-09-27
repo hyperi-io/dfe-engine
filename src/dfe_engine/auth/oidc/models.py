@@ -8,19 +8,19 @@
 
 """Pydantic models for OIDC provider registry.
 
-Providers are stored as YAML files — one per provider.  The provider name
+Providers are stored as YAML files -- one per provider.  The provider name
 is the filename stem and is NOT stored inside the YAML body.
 
 Supported provider types:
-    generic   — Any OIDC-compliant IdP; groups resolved from token claims only.
-    google    — Google Workspace; supports admin SDK group enumeration.
-    entra_id  — Microsoft Entra ID (Azure AD); supports Graph API group sync.
-    okta      — Okta; supports API-based group resolution.
+    generic   -- Any OIDC-compliant IdP; groups resolved from token claims only.
+    google    -- Google Workspace; supports admin SDK group enumeration.
+    entra_id  -- Microsoft Entra ID (Azure AD); supports Graph API group sync.
+    okta      -- Okta; supports API-based group resolution.
 
 Group resolution modes:
-    manual       — Group membership managed manually in dfe-engine; no sync.
-    token_claim  — Groups extracted from a named OIDC token claim at login time.
-    api          — Groups fetched from the provider's admin API on a schedule.
+    manual       -- Group membership managed manually in dfe-engine; no sync.
+    token_claim  -- Groups extracted from a named OIDC token claim at login time.
+    api          -- Groups fetched from the provider's admin API on a schedule.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ class GroupResolutionConfig(BaseModel):
 
     Fields that are provider-specific are only relevant when the matching
     provider type is active.  They are stored in the same model for
-    simplicity — unused fields default to empty strings.
+    simplicity -- unused fields default to empty strings.
     """
 
     mode: _GroupResolutionMode = "manual"
@@ -126,7 +126,7 @@ class GroupResolutionConfig(BaseModel):
 class OIDCProvider(BaseModel):
     """An OIDC identity provider configuration.
 
-    The provider name is the filename stem of the YAML file — it is NOT
+    The provider name is the filename stem of the YAML file -- it is NOT
     stored as a field here.  Secret material is stored as a PATH into the
     DfeSecrets seam or as the NAME of an env var, never as the value itself.
     """

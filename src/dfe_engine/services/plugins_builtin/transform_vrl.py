@@ -2,7 +2,7 @@
 
 Consolidates descriptor, validation, sizing, and template overrides
 for the embedded VRL transform service. Unlike transform-vector, this
-service embeds the VRL crate directly — no subprocess, no Vector binary.
+service embeds the VRL crate directly -- no subprocess, no Vector binary.
 Simpler config: flat source/sink Kafka, VRL transforms directory.
 """
 

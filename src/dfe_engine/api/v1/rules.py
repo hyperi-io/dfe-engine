@@ -1,11 +1,11 @@
-"""Rules router — RuleCreationService create + validate + CRUD.
+"""Rules router -- RuleCreationService create + validate + CRUD.
 
-GET    /api/v1/rules              → Paginated list (search)
-POST   /api/v1/rules              → Create rule via RuleCreationService
-GET    /api/v1/rules/{name}    → Rule detail
-PUT    /api/v1/rules/{name}    → Update rule
-DELETE /api/v1/rules/{name}    → Delete rule
-POST   /api/v1/rules/validate     → Validate SQL/CEL without creating
+GET    /api/v1/rules              -> Paginated list (search)
+POST   /api/v1/rules              -> Create rule via RuleCreationService
+GET    /api/v1/rules/{name}    -> Rule detail
+PUT    /api/v1/rules/{name}    -> Update rule
+DELETE /api/v1/rules/{name}    -> Delete rule
+POST   /api/v1/rules/validate     -> Validate SQL/CEL without creating
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ _RULE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 router = APIRouter(prefix="/rules", tags=["Rules"], dependencies=[WRITE_TURN])
 
 
-# ── Request/response models ───────────────────────────────────
+# -- Request/response models -----------------------------------
 
 
 class _RuleWriteFields(BaseModel):
@@ -181,7 +181,7 @@ class RuleFromHyperdxResponse(BaseModel):
     sql_errors: list[SqlValidationError] = Field(default_factory=list)
 
 
-# ── Endpoints ────────────────────────────────────────────────
+# -- Endpoints ------------------------------------------------
 
 
 @router.get(
@@ -236,7 +236,7 @@ def create_rule(
 ):
     """Create a new hunt rule via RuleCreationService.
 
-    The service sanitizes the SQL, applies CEL→SQL transpilation,
+    The service sanitizes the SQL, applies CEL->SQL transpilation,
     validates column references, and optionally estimates query cost.
 
     A production+team write is routed to a review branch instead of the branch the
@@ -522,7 +522,7 @@ def delete_rule(
     audit_resource_change(user.user_id, "rule", name, "deleted", review_audit_detail(outcome))
 
 
-# ── Helpers ──────────────────────────────────────────────────
+# -- Helpers --------------------------------------------------
 
 
 def _sql_errors_for_original_sql(settings: Settings, original_sql: str) -> list[SqlValidationError]:

@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Hunts router — scheduling status + hunt config CRUD + per-hunt run state.
+"""Hunts router -- scheduling status + hunt config CRUD + per-hunt run state.
 
 Hunts execute in the separate dfe-hunt-runner service (pull-based, coordinated via
 ClickHouse), not in this API process. This router provides:
@@ -108,7 +108,7 @@ def _validate_hunt_config(config: dict[str, Any], settings: Any) -> None:
 router = APIRouter(prefix="/hunts", tags=["hunts"], dependencies=[WRITE_TURN])
 
 
-# ── Response models ─────────────────────────────────────────
+# -- Response models -----------------------------------------
 
 
 class HuntEngineStatus(BaseModel):
@@ -266,7 +266,7 @@ class HuntRunQueued(BaseModel):
     )
 
 
-# ── Dependencies ────────────────────────────────────────────
+# -- Dependencies --------------------------------------------
 
 
 def _data_database_client() -> tuple[Any, str]:
@@ -354,7 +354,7 @@ def _hunt_row_to_summary(row: dict[str, Any], status: RunStatus | None, now: int
     )
 
 
-# ── Endpoints ───────────────────────────────────────────────
+# -- Endpoints -----------------------------------------------
 
 
 @router.get(

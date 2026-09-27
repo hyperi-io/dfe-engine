@@ -1,4 +1,4 @@
-"""DFE Source model — the top-level data abstraction.
+"""DFE Source model -- the top-level data abstraction.
 
 A Source represents a data stream entering the DFE platform. It contains
 identity, schema, naming-standard views, and optional fetcher/transform

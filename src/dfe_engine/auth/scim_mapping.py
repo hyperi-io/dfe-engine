@@ -54,7 +54,7 @@ def _parse_dt(value: str) -> datetime | None:
         return None
 
 
-# ── Account <-> SCIM User ────────────────────────────────────
+# -- Account <-> SCIM User ------------------------------------
 
 
 def account_to_scim_user(
@@ -128,7 +128,7 @@ def generate_provisioning_password() -> str:
     return secrets.token_urlsafe(32)
 
 
-# ── Group <-> SCIM Group ─────────────────────────────────────
+# -- Group <-> SCIM Group -------------------------------------
 
 
 def group_to_scim_group(group: Group, *, location: str | None = None) -> ScimGroup:

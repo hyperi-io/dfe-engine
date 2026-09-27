@@ -1,4 +1,4 @@
-# DFE Loader — Production (K8s)
+# DFE Loader -- Production (K8s)
 # Tuned buffers, SASL+TLS, K8s service DNS, JSON logging
 #
 # K8s resource sizing (medium):

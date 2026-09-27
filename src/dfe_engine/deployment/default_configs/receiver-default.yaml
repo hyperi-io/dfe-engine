@@ -1,4 +1,4 @@
-# DFE Receiver — Development Deployment
+# DFE Receiver -- Development Deployment
 # KEDA disabled, xs sizing, single replica
 
 size: xs

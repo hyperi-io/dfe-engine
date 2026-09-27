@@ -30,7 +30,7 @@ class GoogleAdapter(OIDCGroupAdapter):
     provider.groups.service_account_json_path in the DfeSecrets seam, falling
     back to the env var named in service_account_json_env.
 
-    Falls back gracefully when credentials are missing or the API is unavailable —
+    Falls back gracefully when credentials are missing or the API is unavailable --
     all public methods return safe empty/identity values rather than raising.
     """
 
@@ -54,14 +54,14 @@ class GoogleAdapter(OIDCGroupAdapter):
 
         service = self._get_service()
         if service is None:
-            # No credentials — return identity map so callers still have usable keys
+            # No credentials -- return identity map so callers still have usable keys
             return {g: g for g in group_ids}
 
         try:
             all_groups = await asyncio.to_thread(self._fetch_all_groups_sync, service)
         except Exception as exc:
             logger.warning(
-                "Google Admin SDK group fetch failed — using identity fallback",
+                "Google Admin SDK group fetch failed -- using identity fallback",
                 provider=self._provider.issuer,
                 error=str(exc),
             )
@@ -99,7 +99,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             raw = await asyncio.to_thread(self._fetch_user_groups_sync, service, directory_id)
         except Exception as exc:
             logger.warning(
-                "Google Admin SDK resolve_user_groups failed — default deny",
+                "Google Admin SDK resolve_user_groups failed -- default deny",
                 provider=self._provider.issuer,
                 error=str(exc),
             )
@@ -196,7 +196,7 @@ class GoogleAdapter(OIDCGroupAdapter):
         if not raw_json:
             return None
 
-        # Parse the service account JSON — bad JSON or wrong type returns None
+        # Parse the service account JSON -- bad JSON or wrong type returns None
         try:
             sa_info = json.loads(raw_json)
         except (json.JSONDecodeError, ValueError) as exc:
@@ -216,7 +216,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             return None
 
         try:
-            # Lazy import — google packages may not be installed in all deployments
+            # Lazy import -- google packages may not be installed in all deployments
             from google.oauth2 import service_account  # type: ignore[import-untyped]
             from googleapiclient.discovery import build  # type: ignore[import-untyped]
 

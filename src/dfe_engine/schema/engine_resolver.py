@@ -142,7 +142,7 @@ class EngineResolver:
         self._topology_setting = topology_setting
         self._sensed: dict[str, Topology] = {}
 
-    # ── public API ──────────────────────────────────────────────────
+    # -- public API --------------------------------------------------
 
     def resolve(self, spec: EngineSpec, database: str) -> ResolvedEngine:
         """Resolve ``spec`` for ``database`` down the cascade."""
@@ -161,7 +161,7 @@ class EngineResolver:
             clause=clause, on_cluster=on_cluster, topology=ddl_topology, origin=origin
         )
 
-    # ── cascade ─────────────────────────────────────────────────────
+    # -- cascade -----------------------------------------------------
 
     def _cascade(self, database: str) -> tuple[Topology, str]:
         # 1. explicit config override
@@ -184,7 +184,7 @@ class EngineResolver:
         # ON CLUSTER intent - that only comes from sensing an Atomic cluster.
         return Topology.SINGLE if name.strip().lower() == "single" else Topology.REPLICATED
 
-    # ── sensing (live introspection) ────────────────────────────────
+    # -- sensing (live introspection) --------------------------------
 
     def _sense(self, database: str) -> Topology | None:
         """Introspect the live server and classify the topology. Cached per db.
@@ -236,7 +236,7 @@ class EngineResolver:
             logger.warning(f"cluster-name sensing failed for db={database}: {e}")
             return None
 
-    # ── client helpers ──────────────────────────────────────────────
+    # -- client helpers ----------------------------------------------
 
     def _cache(self, database: str, topology: Topology) -> Topology:
         self._sensed[database] = topology
