@@ -3,6 +3,14 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.8](https://github.com/hyperi-io/dfe-engine/compare/v1.22.7...v1.22.8) (2026-09-27)
+
+### Bug Fixes
+
+* let the archiver pick its own roll interval ([#556](https://github.com/hyperi-io/dfe-engine/issues/556)) ([2ff12e6](https://github.com/hyperi-io/dfe-engine/commit/2ff12e6735be6886deb8f57510c7b824bff5e5b5)), closes [#98](https://github.com/hyperi-io/dfe-engine/issues/98) [#539](https://github.com/hyperi-io/dfe-engine/issues/539)
+* rebuild on scalo 2.30.5 ([228a9f3](https://github.com/hyperi-io/dfe-engine/commit/228a9f31374bf97db1870a3b2d4a8716dbc857d9))
+* take held-ack keys, stop echoing credentials ([#537](https://github.com/hyperi-io/dfe-engine/issues/537)) ([7c668f7](https://github.com/hyperi-io/dfe-engine/commit/7c668f705d2b55bf0813d820625c827229be726b))
+
 ## [1.22.7](https://github.com/hyperi-io/dfe-engine/compare/v1.22.6...v1.22.7) (2026-09-26)
 
 ### Bug Fixes
