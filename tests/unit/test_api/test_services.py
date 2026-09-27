@@ -132,15 +132,32 @@ class TestLegacySecretsAreStoredAndMaskedOnTheWayOut:
         shown = client.get(self.URL, headers=admin_headers).json()["config"]
         retries = shown["kafka"]["producer"]["retries"]
         shown["kafka"]["producer"]["retries"] = retries + 7
+        # A setting of kafka changes only with the credential kafka holds typed again.
+        shown["kafka"]["sasl"]["password"] = "sasl-pw-8814"
 
         resp = client.put(self.URL, json=shown, headers=admin_headers)
         assert resp.status_code == 200, resp.text
         saved = _saved(api_settings, "receiver-placeholder")
         assert saved["kafka"]["producer"]["retries"] == retries + 7
-        assert saved["kafka"]["sasl"]["password"] == "sasl-pw-8810"
+        assert saved["kafka"]["sasl"]["password"] == "sasl-pw-8814"
         assert saved["server"]["auth"]["accepted_headers"][0]["values"] == ["hdr-8812"]
         assert saved["server"]["auth"]["bearer"]["tokens"] == ["tok-8813"]
         assert MASK not in json.dumps(saved)
+
+    def test_a_kafka_setting_changed_beside_its_masked_password_is_refused(
+        self, client, admin_headers, api_settings
+    ):
+        """The check runs at kafka, the nearest mapping holding the credential."""
+        assert client.put(self.URL, json=self._body(), headers=admin_headers).status_code == 200
+        before = _saved(api_settings, "receiver-placeholder")
+        shown = client.get(self.URL, headers=admin_headers).json()["config"]
+        shown["kafka"]["brokers"] = ["attacker.example:9092"]
+
+        resp = client.put(self.URL, json=shown, headers=admin_headers)
+
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "credential_reentry_required"
+        assert _saved(api_settings, "receiver-placeholder") == before
 
     def test_the_placeholder_with_nothing_stored_is_refused(
         self, client, admin_headers, api_settings

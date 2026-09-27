@@ -21,6 +21,7 @@ one the app accepts. A deployment that mounts nothing answers
 that has not been given one still serves every other route.
 """
 
+import copy
 import json
 import re
 from collections.abc import Callable, Iterator
@@ -261,6 +262,13 @@ IDENTITY_KEYS = ("id", "name")
 
 dfe-fetcher requires an ``id`` on each of its ``connections``; dfe-receiver names
 each accepted header by ``name``.
+"""
+
+_DOCUMENT_ROOTS = frozenset({"", CONFIG_ROOT, ENV_ROOT})
+"""Paths that are a document's own root, where a field beside a credential may still change.
+
+``config`` is the root of the app's config file and ``extraEnv`` of its env file,
+so two settings in either are no more tied to each other than two top-level keys.
 """
 
 _TRANSFORM_CHART_ENV = {
@@ -1009,15 +1017,15 @@ def _named(entries: list, key: str) -> dict[Any, Any] | None:
     return found
 
 
-def _same_but_masked(value: Any, stored: Any, shown: Any = MISSING) -> bool:
+def _same_but_masked(value: Any, stored: Any, shown: Any) -> bool:
     """Whether ``value`` is ``stored`` as a read shows it: equal wherever it is not masked.
 
     A value the read showed only as a credential may be typed again, and a URL whose
     password alone was masked may take a new password, so neither is compared to what
     is stored: comparing them would answer a guess at the stored credential
     differently from a wrong one, which tells a writer who cannot read it that the
-    guess was right. ``shown`` is ``stored`` as the read showed it, where the caller
-    has it.
+    guess was right. ``shown`` is ``stored`` as the read showed it, or :data:`MISSING`
+    where no read showed it.
     """
     if _wholly_masked(shown):
         return True
@@ -1094,7 +1102,10 @@ def _restore_list(value: list, stored: Any, shown: Any, path: str) -> list:
         if match is not None:
             remaining.remove(match)
     if not remaining:
-        return [restore_masked(item, MISSING, path=f"{path}[{i}]") for i, item in enumerate(value)]
+        return [
+            restore_masked(item, MISSING, path=f"{path}[{i}]", shown=MISSING)
+            for i, item in enumerate(value)
+        ]
     where = path or "the list"
     if len(masked) > len(remaining):
         raise MaskedValueError(
@@ -1176,22 +1187,38 @@ def _field_unchanged(written: Any, stored: Any, shown: Any) -> bool:
     return written == stored
 
 
-def _require_unchanged_holder(value: dict, stored: Any, shown: Any, path: str) -> None:
+def _require_unchanged_holder(
+    value: dict,
+    stored: Any,
+    shown: Any,
+    path: str,
+    *,
+    remedy: str = "write the credential itself",
+) -> None:
     """Refuse a mapping that holds a masked credential and changed any other field.
+
+    A field holds one when a mask stands anywhere in it, so ``brokers`` beside a
+    ``sasl`` mapping holding a masked password counts. What changed inside such a
+    field is judged at that field's own level. A document root never counts, per
+    :data:`_DOCUMENT_ROOTS`. ``remedy`` ends the refusal with what the caller can do.
 
     Raises:
         CredentialReentryError: A field beside a masked credential was changed,
             added or dropped.
     """
+    if path in _DOCUMENT_ROOTS:
+        return
     kept = stored if isinstance(stored, dict) else {}
-    masked = [key for key, item in value.items() if _holds_mask(item) and kept.get(key) is not None]
+    masked = {
+        key for key, item in value.items() if _carries_mask(item) and kept.get(key) is not None
+    }
     if not masked:
         return
     # Only a mapping read back says which fields are credentials; nothing else does.
     seen = shown if isinstance(shown, dict) else {}
     changed = sorted(
         str(key)
-        for key in value.keys() | kept.keys()
+        for key in (value.keys() | kept.keys()) - masked
         if not _field_unchanged(
             value.get(key, MISSING), kept.get(key, MISSING), seen.get(key, MISSING)
         )
@@ -1201,13 +1228,11 @@ def _require_unchanged_holder(value: dict, stored: Any, shown: Any, path: str) -
         raise CredentialReentryError(
             f"{where} changed {', '.join(changed)} beside its masked "
             f"{', '.join(sorted(str(key) for key in masked))}, which would send the stored "
-            "credential somewhere it was not set for: write the credential itself"
+            f"credential somewhere it was not set for: {remedy}"
         )
 
 
-def restore_masked(
-    value: Any, stored: Any = MISSING, *, path: str = "", shown: Any = MISSING
-) -> Any:
+def restore_masked(value: Any, stored: Any = MISSING, *, path: str = "", shown: Any) -> Any:
     """``value`` with every :data:`REDACTED` it carries put back to what is stored there.
 
     A client that reads a masked document and writes it back hands in the mask
@@ -1220,13 +1245,20 @@ def restore_masked(
     it is as stored: a writer who cannot read a token must not be able to point the
     entry holding it at another host and have the token sent there.
 
-    ``shown`` is ``stored`` as the read showed it, where the caller has it.
+    A value the read showed as one mask comes back as that mask or in full. Masking
+    part of it would leave the rest compared to what is stored, which answers a
+    right guess at a value the writer never saw differently from a wrong one.
+
+    ``shown`` is ``stored`` as the read showed it, or :data:`MISSING` where no read
+    showed it. It is required because without it every stored value is compared in
+    the clear.
 
     Raises:
         MaskedValueError: The placeholder stands where nothing is stored, in a URL
             changed around its masked password, or in a list entry that cannot be
             matched to the stored one it was read from.
-        CredentialReentryError: A field beside a masked credential changed.
+        CredentialReentryError: A field beside a masked credential changed, or a
+            value read as one mask came back partly masked.
     """
     if isinstance(value, str) and value == REDACTED:
         if isinstance(stored, _Missing) or stored is None:
@@ -1235,6 +1267,12 @@ def restore_masked(
                 "where nothing is stored: write the credential itself"
             )
         return stored
+    if isinstance(shown, str) and shown == REDACTED and _carries_mask(value):
+        raise CredentialReentryError(
+            f"{path or 'the value'} was read as {REDACTED!r} whole, so a write that masks "
+            f"only part of it cannot be matched to what is stored: write back {REDACTED!r} "
+            "whole, or write it in full"
+        )
     if isinstance(value, str) and REDACTED in value:
         if isinstance(stored, str) and _shown_text(stored) == value:
             return stored
@@ -1260,10 +1298,66 @@ def restore_masked(
 
 
 def restore_masked_at(doc: dict, path: str, value: Any) -> Any:
-    """:func:`restore_masked` for a write of ``value`` at dot-path ``path`` in ``doc``."""
+    """:func:`restore_masked` for a write of ``value`` at dot-path ``path`` in ``doc``.
+
+    A write that is not itself a credential is judged again at the nearest mapping
+    above ``path`` that holds a stored credential, as a write of that whole mapping
+    would be. Without that, a PUT to ``kafka.brokers`` moves where
+    ``kafka.sasl.password`` is sent while never touching the password. A credential
+    typed in beside another sends neither anywhere new.
+
+    Raises:
+        MaskedValueError: As :func:`restore_masked` raises it.
+        CredentialReentryError: As :func:`restore_masked` raises it, or ``value``
+            changes that mapping beside the credential it holds.
+    """
     stored = get_path(doc, path, MISSING)
     shown = MISSING if isinstance(stored, _Missing) else shown_var(doc, path, stored)
-    return restore_masked(value, stored, path=path, shown=shown)
+    restored = restore_masked(value, stored, path=path, shown=shown)
+    if not credential_var(doc, path):
+        _require_unchanged_enclosing_holder(doc, path, value)
+    return restored
+
+
+def _require_unchanged_enclosing_holder(doc: dict, path: str, value: Any) -> None:
+    """Refuse a write at ``path`` that changes the nearest mapping above it holding a credential.
+
+    Walks up from the parent of ``path`` and stops at a document root, per
+    :data:`_DOCUMENT_ROOTS`. The mapping is judged as a read showed it with
+    ``value`` written in, so every credential in it stands masked beside the change.
+
+    Raises:
+        CredentialReentryError: ``value`` changes a field beside that credential, or
+            lands inside a mapping the read showed as one mask.
+    """
+    parts = path.split(".")
+    for depth in range(len(parts) - 1, 0, -1):
+        holder = ".".join(parts[:depth])
+        if holder in _DOCUMENT_ROOTS:
+            return
+        stored = get_path(doc, holder, MISSING)
+        if isinstance(stored, _Missing):
+            continue
+        if not isinstance(stored, dict):
+            return
+        shown = shown_var(doc, holder, stored)
+        if not _carries_mask(shown):
+            continue
+        if not isinstance(shown, dict):
+            raise CredentialReentryError(
+                f"{holder} was read as {REDACTED!r} whole, so {path} inside it cannot be "
+                f"written alone: write {holder} in full"
+            )
+        written = copy.deepcopy(shown)
+        set_path(written, ".".join(parts[depth:]), value)
+        _require_unchanged_holder(
+            written,
+            stored,
+            shown,
+            holder,
+            remedy=f"write {holder} whole, with its credentials typed again",
+        )
+        return
 
 
 def redact_var(doc: dict, path: str, value: Any) -> Any:
