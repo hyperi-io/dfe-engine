@@ -3312,7 +3312,7 @@
           "Sources"
         ],
         "summary": "List Catalogue",
-        "description": "List the sources the deployed transforms already handle.\n\nEmpty when no catalogue is mounted, which is a deployment without one rather\nthan an error: the catalogue is a release asset of the app that ships it.",
+        "description": "List the sources the deployed transforms already handle.\n\nEmpty when no catalogue is mounted, which is a deployment without one rather\nthan an error: the app that ships the catalogue prints it from its own image.",
         "operationId": "list_catalogue_api_v1_sources_catalogue_get",
         "parameters": [
           {

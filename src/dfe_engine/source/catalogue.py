@@ -14,9 +14,10 @@ about it is ours - so the file is DATA the engine reads, exactly as apps.yaml is
 and creating a source from an entry compiles the same write body a person would
 otherwise have typed.
 
-The catalogue is never the engine's own: it reaches a deployment as a release
-asset from the app that ships it, mounted where ``DFE_SOURCE_CATALOGUE_FILE``
-says. A deployment that mounts none simply offers none.
+The catalogue is never the engine's own: the app that ships it prints it from
+its own image (``dfe-transform-elastic emit-catalogue``), and the deployment
+mounts the result where ``DFE_SOURCE_CATALOGUE_FILE`` says. A deployment that
+mounts none offers none.
 
 An INTAKE is a way the entry's data reaches the platform, and the three are three
 different source definitions rather than three values of one: a pushed source is
