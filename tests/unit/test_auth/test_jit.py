@@ -386,7 +386,7 @@ class TestOneStemTwoSubjects:
         assert account.groups == ["dfe-analysts"]
         assert account.subject == self.FIRST
 
-    def test_an_account_with_no_subject_takes_the_next_login_s(self, stores):
+    def test_an_account_with_no_subject_binds_to_the_next_login(self, stores):
         """An account made before the subject was recorded binds to whoever signs in next."""
         accounts, groups = stores
         external_account(accounts, self.STEM, "entra", ["acme-viewers"])
@@ -420,6 +420,15 @@ class TestOneStemTwoSubjects:
 
         assert account_for_session_subject(accounts, self.FIRST).username == self.STEM
         assert account_for_session_subject(accounts, self.SECOND) is None
+
+    def test_a_session_whose_subject_is_the_stem_binds_no_account(self, stores):
+        """The stem is itself a subject an IdP can assert, so the raw lookup checks the record."""
+        accounts, groups = stores
+        JitProvisioner(account_store=accounts, group_store=groups).ensure_account(
+            self.FIRST, ["acme-viewers"], "entra"
+        )
+
+        assert account_for_session_subject(accounts, self.STEM) is None
 
 
 class TestSourceProviderBinding:
