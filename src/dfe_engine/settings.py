@@ -1362,9 +1362,19 @@ class GitopsWriteSettings(BaseModel):
     pushes. Field names mirror scalo's :class:`~scalo.resilience.ResilienceConfig`;
     a budget of 0 makes one attempt.
 
+    After ``failure_threshold`` calls in a row run out of budget, a circuit breaker
+    opens: writes answer 503 at once without calling the forge, with ``Retry-After``
+    set to what is left of ``reset_timeout``. Then one write probes the forge, and
+    the breaker closes if the forge answers it or reopens if it runs out of budget
+    too. A refusal, bad credentials or a missing repo is the forge answering, so it
+    never opens the breaker. These two mirror scalo's
+    :class:`~scalo.resilience.CircuitBreakerConfig`.
+
     Environment variables:
     - DFE_GITOPS_WRITE_TIMEOUT_SECONDS -> gitops.write.timeout_seconds
     - DFE_GITOPS_WRITE_BUDGET_SECONDS -> gitops.write.budget_seconds
+    - DFE_GITOPS_WRITE_FAILURE_THRESHOLD -> gitops.write.failure_threshold
+    - DFE_GITOPS_WRITE_RESET_TIMEOUT -> gitops.write.reset_timeout
     """
 
     timeout_seconds: float = Field(
@@ -1379,6 +1389,20 @@ class GitopsWriteSettings(BaseModel):
         default=10.0,
         ge=0.0,
         description="How long a call keeps retrying after its first transient failure, seconds.",
+    )
+    # Three spent budgets is at least 30 s of outage at the defaults, where one forge
+    # restart can spend a single budget on its own.
+    failure_threshold: int = Field(
+        default=3,
+        ge=1,
+        description="Calls in a row that run out of budget before writes fail at once.",
+    )
+    # scalo's default: a forge still down costs one probe's budget per window, not one
+    # per write, and a recovered one is back in use within the window.
+    reset_timeout: float = Field(
+        default=30.0,
+        gt=0.0,
+        description="How long writes fail at once before one probes the forge again, seconds.",
     )
 
 
@@ -2240,6 +2264,10 @@ def _get_env_overrides() -> dict:
         overrides["gitops"].setdefault("write", {})["timeout_seconds"] = float(val)
     if val := _get_env("DFE_GITOPS_WRITE_BUDGET_SECONDS"):
         overrides["gitops"].setdefault("write", {})["budget_seconds"] = float(val)
+    if val := _get_env("DFE_GITOPS_WRITE_FAILURE_THRESHOLD"):
+        overrides["gitops"].setdefault("write", {})["failure_threshold"] = int(val)
+    if val := _get_env("DFE_GITOPS_WRITE_RESET_TIMEOUT"):
+        overrides["gitops"].setdefault("write", {})["reset_timeout"] = float(val)
 
     # API settings
     if val := _get_env("DFE_API_HOST"):
