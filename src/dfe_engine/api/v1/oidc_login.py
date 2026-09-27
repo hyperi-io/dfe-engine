@@ -28,8 +28,6 @@ These endpoints are deliberately unauthenticated - they ARE the login. Unknown
 or disabled providers return 404.
 """
 
-from __future__ import annotations
-
 from typing import Literal
 from urllib.parse import urlencode, urlsplit
 
@@ -46,8 +44,12 @@ from dfe_engine.api.deps import (
     resolve_live_grants_for_user,
 )
 from dfe_engine.auth import hyperdx_role
-from dfe_engine.auth.audit import audit_login_denied, audit_login_success
-from dfe_engine.auth.jit import JitAccountUnavailableError, JitIdentityCollisionError
+from dfe_engine.auth.audit import audit_jit_failed, audit_login_denied, audit_login_success
+from dfe_engine.auth.jit import (
+    JitAccountUnavailableError,
+    JitIdentityCollisionError,
+    JitSubjectUnusableError,
+)
 
 router = APIRouter(prefix="/auth/oidc", tags=["OIDC Login"])
 
@@ -245,9 +247,8 @@ async def oidc_callback(
                 email=identity.email,
                 name=identity.name,
             )
-        except JitIdentityCollisionError as exc:
-            # Ordered before the catch-all: a refused identity must not go on to
-            # be minted an engine token.
+        except (JitIdentityCollisionError, JitSubjectUnusableError) as exc:
+            # Ordered before the catch-all: a refused identity is a 401, not a 503.
             audit_login_denied(identity.subject, "oidc", _get_client_ip(request), exc.reason)
             raise HTTPException(
                 status_code=401,
@@ -259,8 +260,17 @@ async def oidc_callback(
                 status_code=401,
                 detail={"code": exc.reason, "message": str(exc)},
             ) from exc
-        except Exception:
+        except Exception as exc:
+            # A token minted with no account behind it cannot be disabled locally.
             logger.exception("JIT provisioning failed", user_id=identity.subject)
+            audit_jit_failed(identity.subject, repr(exc))
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "service_unavailable",
+                    "message": "The login could not be recorded. Try again.",
+                },
+            ) from exc
 
     require_local_account_enabled(request, identity.subject)
 
