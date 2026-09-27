@@ -8,8 +8,6 @@
 
 """Tests for POST/GET/PUT/DELETE /api/v1/auth/oidc-providers endpoints."""
 
-from __future__ import annotations
-
 from pathlib import Path
 
 import pytest
@@ -606,3 +604,21 @@ class TestEnvNameFieldsRejectPastedSecrets:
         """The name is a filename stem and a secret-store path segment."""
         resp = _create_provider(client, admin_headers, name=name)
         assert resp.status_code == 422
+
+    @pytest.mark.parametrize("name", ["a" * 129, "okta\n"], ids=["too-long", "trailing-newline"])
+    def test_a_name_the_registry_refuses_writes_no_secret(
+        self, client, app, api_settings, admin_headers, name
+    ):
+        """Create stores the secret before the YAML, so the registry's rule must refuse first."""
+        written = [
+            Path(api_settings.secrets.path),
+            Path(api_settings.auth.auth_dir) / "oidc-providers",
+        ]
+        before = [sorted(path.rglob("*")) for path in written]
+
+        resp = _create_provider(client, admin_headers, name=name, client_secret="rp-client-secret")
+
+        assert resp.status_code == 422, resp.text
+        assert _field_errors(resp) == ["name"]
+        assert [sorted(path.rglob("*")) for path in written] == before
+        assert not app.state.dfe_secrets.exists(f"oidc/{name}/client_secret")
