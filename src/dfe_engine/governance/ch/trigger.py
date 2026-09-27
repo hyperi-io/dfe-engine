@@ -11,8 +11,8 @@ The reconcile mints the org's pinned ClickHouse user and each group's user, and
 until it runs a new org's users get 503 ``org_unprovisioned`` from the HyperDX
 connection endpoint. A write asks for a run here and returns at once: the run
 happens on a background thread, one at a time, with a burst of writes folded
-into one run. A run that fails is logged and counted, and the next write asks
-again.
+into one run. A run that fails is logged, counted and run again after a capped
+back-off.
 """
 
 import threading
@@ -30,12 +30,19 @@ ReconcileOutcome = Literal["ok", "partial", "failed"]
 
 - ``ok``: every statement applied.
 - ``partial``: it ran, and at least one statement failed; the rest applied.
-- ``failed``: it raised -- ClickHouse unreachable, say -- and waits for the next change.
+- ``failed``: it raised -- ClickHouse unreachable, say -- and runs again after a back-off.
 """
 
 # Long enough to fold the writes of one request and a UI saving several records
 # into one run, short beside the run itself.
 SETTLE_SECONDS = 1.0
+
+# A ClickHouse restart is usually back within this, so the first retry catches it.
+RETRY_INITIAL_SECONDS = 5.0
+
+# Doubling stops here, so a ClickHouse back from a long outage is reconciled within
+# five minutes and a dead one costs one failed run in that time.
+RETRY_MAX_SECONDS = 300.0
 
 
 class ReconcileMetrics:
@@ -71,10 +78,17 @@ class ReconcileTrigger:
     flight gets exactly one more run after it, because that run may have read the
     stores before the write landed.
 
+    A run that raises is run again after ``retry_initial_seconds``, doubling up to
+    ``retry_max_seconds``, until one gets through: the change it carried is still
+    unapplied, and nothing else would ask again. A partial run is not retried; its
+    failed statements fail the same way next time.
+
     Args:
         run: the reconcile, returning its result; it runs on the trigger's thread.
         metrics: where each run's outcome is counted.
         settle_seconds: how long a run waits for the rest of a burst.
+        retry_initial_seconds: the wait before the first retry of a failed run.
+        retry_max_seconds: the longest wait between retries.
     """
 
     def __init__(
@@ -83,10 +97,16 @@ class ReconcileTrigger:
         *,
         metrics: ReconcileMetrics | None = None,
         settle_seconds: float = SETTLE_SECONDS,
+        retry_initial_seconds: float = RETRY_INITIAL_SECONDS,
+        retry_max_seconds: float = RETRY_MAX_SECONDS,
     ) -> None:
         self._run = run
         self._metrics = metrics or ReconcileMetrics()
         self._settle = settle_seconds
+        self._retry_initial = retry_initial_seconds
+        self._retry_max = retry_max_seconds
+        # Failed runs in a row, which sets the next wait; touched by the worker only.
+        self._failures = 0
         self._lock = threading.Lock()
         self._idle = threading.Condition(self._lock)
         # Set by close(): no run starts after it, and a settling one stands down.
@@ -133,9 +153,10 @@ class ReconcileTrigger:
         return self.wait_idle(timeout)
 
     def _work(self) -> None:
-        """Settle, run while changes keep arriving, then stand down."""
+        """Settle, run while changes keep arriving or a run keeps failing, then stand down."""
+        wait = self._settle
         while True:
-            self._closed.wait(self._settle)
+            self._closed.wait(wait)
             with self._lock:
                 if not self._pending or self._closed.is_set():
                     self._pending = False
@@ -143,17 +164,30 @@ class ReconcileTrigger:
                     self._idle.notify_all()
                     return
                 self._pending = False
-            self._run_once()
+            if self._run_once():
+                self._failures = 0
+                wait = self._settle
+                continue
+            self._failures += 1
+            wait = min(self._retry_initial * 2 ** (self._failures - 1), self._retry_max)
+            with self._lock:
+                self._pending = True
 
-    def _run_once(self) -> None:
-        """Run one reconcile and count how it ended; a failure waits for the next change."""
+    def _run_once(self) -> bool:
+        """Run one reconcile and count how it ended; returns False when it raised."""
         try:
             result = self._run()
-        except Exception:
+        except Exception as exc:
             self._metrics.reconcile("failed")
-            logger.exception("CH RBAC reconcile after an org or group change failed")
-            return
+            if self._failures == 0:
+                logger.exception("CH RBAC reconcile after an org or group change failed")
+            else:
+                logger.warning(
+                    "CH RBAC reconcile still failing", failures=self._failures + 1, error=str(exc)
+                )
+            return False
         self._metrics.reconcile("partial" if result.errors else "ok")
+        return True
 
 
 def request_ch_rbac_reconcile(state: Any) -> None:
@@ -169,6 +203,8 @@ def request_ch_rbac_reconcile(state: Any) -> None:
 
 __all__ = [
     "RECONCILES",
+    "RETRY_INITIAL_SECONDS",
+    "RETRY_MAX_SECONDS",
     "SETTLE_SECONDS",
     "ReconcileMetrics",
     "ReconcileOutcome",

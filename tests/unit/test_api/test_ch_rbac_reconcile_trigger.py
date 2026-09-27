@@ -13,7 +13,9 @@ endpoint until one of them did. The app's trigger is swapped for one whose
 reconcile is a call recorder, so each test counts the runs a write caused.
 """
 
+import socket
 import threading
+import time
 
 import pytest
 
@@ -25,17 +27,19 @@ _SCIM_GROUP = "urn:ietf:params:scim:schemas:core:2.0:Group"
 
 
 class _Recorder:
-    """A reconcile that counts its calls, and fails them while ``down`` is set."""
+    """A reconcile that counts its calls, and fails the next ``failures`` of them."""
 
     def __init__(self) -> None:
         self.calls = 0
-        self.down = False
+        self.failures = 0
         self._lock = threading.Lock()
 
     def __call__(self) -> ReconcileResult:
         with self._lock:
             self.calls += 1
-        if self.down:
+            failing = self.failures > 0
+            self.failures -= int(failing)
+        if failing:
             raise ConnectionRefusedError("clickhouse is down")
         return ReconcileResult()
 
@@ -45,7 +49,9 @@ def reconciles(app, client):
     """The app's trigger, reconciling into a recorder; settles long enough for a burst."""
     assert app.state.ch_rbac_reconcile is not None
     recorder = _Recorder()
-    app.state.ch_rbac_reconcile = ReconcileTrigger(recorder, settle_seconds=1.0)
+    app.state.ch_rbac_reconcile = ReconcileTrigger(
+        recorder, settle_seconds=1.0, retry_initial_seconds=0.2
+    )
     return recorder
 
 
@@ -86,23 +92,18 @@ class TestOrgs:
         _settled(app)
         assert reconciles.calls == 3
 
-    def test_a_failed_reconcile_does_not_fail_the_create(
+    def test_an_org_created_while_clickhouse_is_down_is_provisioned_when_it_is_back(
         self, app, client, admin_headers, reconciles
     ):
-        """ClickHouse down: the org is created, and the next change runs the reconcile again."""
-        reconciles.down = True
+        """The create answers 201 at once; the reconcile retries on its own, no second write."""
+        reconciles.failures = 2
 
         resp = client.post("/api/v1/orgs", json={"name": "acme"}, headers=admin_headers)
 
         assert resp.status_code == 201, resp.text
         assert app.state.org_registry.get("acme") is not None
         _settled(app)
-        assert reconciles.calls == 1
-
-        reconciles.down = False
-        client.put("/api/v1/orgs/acme", json={"display_name": "Acme"}, headers=admin_headers)
-        _settled(app)
-        assert reconciles.calls == 2
+        assert reconciles.calls == 3
 
     def test_a_refused_create_does_not_reconcile(self, app, client, admin_headers, reconciles):
         client.post("/api/v1/orgs", json={"name": "acme"}, headers=admin_headers)
@@ -194,6 +195,92 @@ class TestGroups:
         assert again.json()["created"] == 0
         _settled(app)
         assert reconciles.calls == 1
+
+
+class _ListeningClickHouse:
+    """A listener where a ClickHouse would be, counting every connection made to it.
+
+    Each connection is closed at once, so a client that does dial fails fast rather
+    than waiting on an answer.
+    """
+
+    def __init__(self) -> None:
+        self._listener = socket.socket()
+        self._listener.bind(("127.0.0.1", 0))
+        self._listener.listen(16)
+        self._lock = threading.Lock()
+        self.connections = 0
+        self._thread = threading.Thread(target=self._accept, daemon=True)
+        self._thread.start()
+
+    @property
+    def port(self) -> int:
+        return self._listener.getsockname()[1]
+
+    def _accept(self) -> None:
+        while True:
+            try:
+                conn, _addr = self._listener.accept()
+            except OSError:
+                return
+            with self._lock:
+                self.connections += 1
+            conn.close()
+
+    def close(self) -> None:
+        self._listener.close()
+        self._thread.join(timeout=5)
+
+
+def _failed_runs(manager) -> float:
+    from prometheus_client.parser import text_string_to_metric_families
+
+    from dfe_engine.governance.ch.trigger import RECONCILES
+
+    for family in text_string_to_metric_families(manager.metrics_text):
+        for sample in family.samples:
+            if sample.name == RECONCILES and sample.labels.get("outcome") == "failed":
+                return sample.value
+    return 0.0
+
+
+def test_a_unit_test_app_never_reconciles_against_a_listening_clickhouse(api_settings):
+    """Startup and an org write both reconcile; neither may dial the configured ClickHouse.
+
+    A developer's local stack publishes its ClickHouse on the default address, and
+    the reconcile drops users there. The conftest guard is what keeps a unit run
+    off it, so this fails the moment a reconcile reaches a live address.
+    """
+    from fastapi.testclient import TestClient
+    from scalo.metrics import create_metrics
+
+    from dfe_engine.api.app import create_app
+    from dfe_engine.api.deps import _registries
+    from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+
+    clickhouse = _ListeningClickHouse()
+    api_settings.clickhouse.host = "127.0.0.1"
+    api_settings.clickhouse.port = clickhouse.port
+    api_settings.clickhouse.secure = False
+    # The manager is a process singleton, so one another test built would point elsewhere.
+    ClickHouseManager.reset_instance()
+    manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+    application = create_app(settings=api_settings, metrics_manager=manager)
+    try:
+        with TestClient(application, raise_server_exceptions=False):
+            trigger = application.state.ch_rbac_reconcile
+            assert trigger is not None
+            application.state.org_registry.create("acme")
+            deadline = time.monotonic() + _WAIT
+            while _failed_runs(manager) < 1 and time.monotonic() < deadline:
+                time.sleep(0.05)
+            assert _failed_runs(manager) >= 1
+    finally:
+        _registries.clear()
+        ClickHouseManager.reset_instance()
+        clickhouse.close()
+
+    assert clickhouse.connections == 0
 
 
 def test_tenant_isolation_off_wires_no_trigger(api_settings, monkeypatch):

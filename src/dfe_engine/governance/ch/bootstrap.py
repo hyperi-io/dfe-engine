@@ -14,7 +14,7 @@ bindings, and previously built all four inline; the copies drifted, which is how
 
 Building the client stays a separate call so each caller keeps its own failure
 policy: startup logs and continues, the endpoint returns 503, the trigger counts
-the failure and waits for the next change.
+the failure and retries after a back-off.
 
 Imports are function-local because the rest of the ``governance.ch`` package is
 pure rendering with no cluster or settings dependency.

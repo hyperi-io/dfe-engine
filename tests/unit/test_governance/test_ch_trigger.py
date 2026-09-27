@@ -11,6 +11,7 @@ The reconcile stands in as a recorder of its own calls, so each test counts what
 ran, and a real prometheus manager counts how each run ended.
 """
 
+import itertools
 import threading
 import time
 
@@ -117,33 +118,73 @@ def test_a_change_during_a_run_gets_exactly_one_more_run() -> None:
     assert recorder.most_at_once == 1
 
 
-def test_a_failed_reconcile_is_counted_and_the_next_change_runs_it_again() -> None:
+def _wait_for(check, timeout: float = _WAIT) -> bool:
+    """Poll ``check`` until it holds or ``timeout`` passes; returns whether it held."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if check():
+            return True
+        time.sleep(0.02)
+    return check()
+
+
+def test_a_failed_reconcile_is_counted_and_run_again_without_another_change() -> None:
+    """An org created while ClickHouse is down is provisioned once it is back."""
     manager = _manager()
     recorder = _Recorder()
-    trigger = ReconcileTrigger(recorder, metrics=ReconcileMetrics(manager), settle_seconds=_SETTLE)
+    trigger = ReconcileTrigger(
+        recorder,
+        metrics=ReconcileMetrics(manager),
+        settle_seconds=_SETTLE,
+        retry_initial_seconds=0.1,
+    )
     recorder.raise_next = ConnectionRefusedError("clickhouse is down")
 
     trigger.request()
-    assert trigger.wait_idle(_WAIT)
-    assert _outcomes(manager) == {"failed": 1.0}
 
-    trigger.request()
     assert trigger.wait_idle(_WAIT)
     assert recorder.calls == 2
     assert _outcomes(manager) == {"failed": 1.0, "ok": 1.0}
 
 
-def test_a_reconcile_with_failed_statements_is_counted_partial() -> None:
-    manager = _manager()
+def test_retries_back_off_and_stop_growing_at_the_cap() -> None:
+    calls: list[float] = []
+
+    def down() -> ReconcileResult:
+        calls.append(time.monotonic())
+        raise ConnectionRefusedError("clickhouse is down")
+
     trigger = ReconcileTrigger(
-        _Recorder(errors=["GRANT ...: denied"]),
+        down, settle_seconds=0.0, retry_initial_seconds=0.05, retry_max_seconds=0.2
+    )
+
+    trigger.request()
+    assert _wait_for(lambda: len(calls) >= 6)
+    assert trigger.close(_WAIT)
+
+    # 0.05, 0.1, then 0.2 each; uncapped the fifth gap would be 0.8.
+    gaps = [later - earlier for earlier, later in itertools.pairwise(calls)]
+    assert gaps[0] >= 0.05
+    assert gaps[1] >= 0.1
+    assert all(gap >= 0.2 for gap in gaps[2:5])
+    assert max(gaps[2:5]) < 0.5
+
+
+def test_a_reconcile_with_failed_statements_is_counted_partial_and_not_retried() -> None:
+    # Its failed statements fail the same way on the next run.
+    manager = _manager()
+    recorder = _Recorder(errors=["GRANT ...: denied"])
+    trigger = ReconcileTrigger(
+        recorder,
         metrics=ReconcileMetrics(manager),
         settle_seconds=_SETTLE,
+        retry_initial_seconds=0.05,
     )
 
     trigger.request()
     assert trigger.wait_idle(_WAIT)
     assert _outcomes(manager) == {"partial": 1.0}
+    assert recorder.calls == 1
 
 
 def test_a_reconcile_against_an_unreachable_clickhouse_is_counted_failed() -> None:
@@ -162,11 +203,31 @@ def test_a_reconcile_against_an_unreachable_clickhouse_is_counted_failed() -> No
         return ReconcileResult()
 
     manager = _manager()
-    trigger = ReconcileTrigger(reconcile, metrics=ReconcileMetrics(manager), settle_seconds=0.0)
+    trigger = ReconcileTrigger(
+        reconcile,
+        metrics=ReconcileMetrics(manager),
+        settle_seconds=0.0,
+        retry_initial_seconds=_WAIT * 6,
+    )
 
     trigger.request()
-    assert trigger.wait_idle(_WAIT)
+    assert _wait_for(lambda: _outcomes(manager) == {"failed": 1.0})
+    assert trigger.close(_WAIT)
     assert _outcomes(manager) == {"failed": 1.0}
+
+
+def test_close_ends_the_wait_before_a_retry() -> None:
+    recorder = _Recorder()
+    recorder.raise_next = ConnectionRefusedError("clickhouse is down")
+    trigger = ReconcileTrigger(recorder, settle_seconds=0.0, retry_initial_seconds=_WAIT * 6)
+
+    trigger.request()
+    assert _wait_for(lambda: recorder.calls == 1 and recorder.running == 0)
+    started = time.monotonic()
+
+    assert trigger.close(_WAIT)
+    assert time.monotonic() - started < _WAIT / 2
+    assert recorder.calls == 1
 
 
 def test_close_drops_a_settling_run_and_refuses_new_ones() -> None:
