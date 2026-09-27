@@ -355,6 +355,25 @@ reads, or the chart helper that resolves it - so a refused write names the thing
 that outranks the overlay rather than saying only that something does.
 """
 
+_TRANSFORM_CHART_GATES = {
+    "source.topics": "kafka.sourceTopic",
+    "sink.topic": "kafka.destTopic",
+}
+
+CHART_DERIVED_WHEN: dict[str, dict[str, str]] = {
+    "dfe-transform-vrl": _TRANSFORM_CHART_GATES,
+    "dfe-transform-vector": _TRANSFORM_CHART_GATES,
+}
+"""Chart-derived paths the chart sets only while one of its own values is set.
+
+Each maps to that value's overlay path. The transform charts render
+``DFE_TRANSFORM_SOURCE_TOPICS`` and ``DFE_TRANSFORM_SINK_TOPIC`` inside a
+``with`` on ``kafka.sourceTopic`` and ``kafka.destTopic``, both empty by default,
+so an instance whose overlay leaves them empty reads the topics from its own
+config file. A value set for every instance by a profile, outside the overlay, is
+not seen here.
+"""
+
 _MAX_DEPTH = 25
 """Deeper than any shipped contract - the fetcher's, at five, is the deepest."""
 
@@ -1394,27 +1413,49 @@ def check_env_value(value: Any) -> str:
     return ""
 
 
-def chart_supplier(service: str, path: str) -> str | None:
+def _chart_derived(service: str, overlay: dict) -> dict[str, str]:
+    """The options the chart decides for an instance with this overlay, and what decides each.
+
+    :data:`CHART_DERIVED` less every gated path whose chart value the overlay
+    leaves empty, because the chart renders nothing for it then.
+    """
+    gates = CHART_DERIVED_WHEN.get(service, {})
+    return {
+        inner: supplier
+        for inner, supplier in CHART_DERIVED.get(service, {}).items()
+        if inner not in gates or _chart_value_set(overlay, gates[inner])
+    }
+
+
+def _chart_value_set(overlay: dict, path: str) -> bool:
+    """Whether a chart value is set as a Helm ``with`` reads it: present and not empty."""
+    value = _at(overlay, path)
+    return not isinstance(value, _Missing) and bool(value)
+
+
+def chart_supplier(service: str, path: str, overlay: dict | None = None) -> str | None:
     """What the deployment sets this option with, or None where it sets nothing.
 
     ``path`` is the overlay path, ``config.`` rooted, so a caller compares the
-    request's own keys rather than re-deriving them.
+    request's own keys rather than re-deriving them. ``overlay`` is the
+    instance's, which decides the options the chart sets only on a value of its own.
     """
     inner = path.split(".", 1)[1] if path.startswith(f"{CONFIG_ROOT}.") else path
-    return CHART_DERIVED.get(service, {}).get(inner)
+    return _chart_derived(service, overlay or {}).get(inner)
 
 
-def chart_env_names(service: str) -> dict[str, str]:
+def chart_env_names(service: str, overlay: dict | None = None) -> dict[str, str]:
     """Environment names the chart sets for this app, each with the option it decides.
 
     A supplier in :data:`CHART_DERIVED` is either an environment name or a chart
     helper, and only the names are keys here: ``ENV_NAME`` tells the two apart,
     so what an ``extraEnv`` key is compared against is data rather than prose.
     Where one variable decides several options the first is reported, which is
-    enough to say what the operator would be shadowing.
+    enough to say what the operator would be shadowing. ``overlay`` is the
+    instance's, as for :func:`chart_supplier`.
     """
     out: dict[str, str] = {}
-    for inner, supplier in CHART_DERIVED.get(service, {}).items():
+    for inner, supplier in _chart_derived(service, overlay or {}).items():
         if ENV_NAME.match(supplier):
             out.setdefault(supplier, f"{CONFIG_ROOT}.{inner}")
     return out
@@ -1461,7 +1502,7 @@ def resolve_config(
     """
     block = overlay.get(CONFIG_ROOT)
     block = block if isinstance(block, dict) else {}
-    derived = CHART_DERIVED.get(app_contract.service, {})
+    derived = _chart_derived(app_contract.service, overlay)
     enums = catalogue_enums(app_contract.capabilities)
     protected = is_protected or (lambda _path: False)
 

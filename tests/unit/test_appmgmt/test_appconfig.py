@@ -591,6 +591,92 @@ class TestWhatTakingTheChangeCosts:
         assert not rendered[RECEIVER].restart_required
         assert rendered[RECEIVER].restart_hint == ""
 
+    def test_a_new_destination_restarts_a_receiver_that_reloads_its_routing(self, crud, tmp_path):
+        # The receiver opens one sink per destination at startup, so a destination
+        # added later has none until the container restarts, reload or not.
+        settings = _settings(tmp_path)
+        app = _deploy(crud, RECEIVER, config__routing__default_source="main")
+        appconfig.render(crud, settings)
+        doc = instances.read_overlay(crud, app)
+        set_path(
+            doc,
+            "config.destinations.named.transform",
+            {"grpc": {"endpoint": "http://dfe-transform-vrl-auth:6000"}},
+        )
+        _put(crud, app, doc)
+
+        rendered = {r.service: r for r in appconfig.render(crud, settings)}
+
+        assert rendered[RECEIVER].restart_required
+        assert rendered[RECEIVER].restart_hint == (
+            f"restart required: make apply SERVICES={RECEIVER}"
+        )
+
+    def test_a_restart_path_deep_in_a_block_the_receiver_reloads(self, crud, tmp_path):
+        # The DLQ sits under the routing block the app rebuilds, and is still
+        # built once at startup.
+        settings = _settings(tmp_path)
+        app = _deploy(crud, RECEIVER, config__routing__default_source="main")
+        appconfig.render(crud, settings)
+        doc = instances.read_overlay(crud, app)
+        set_path(doc, "config.routing.dlq.mode", "file")
+        _put(crud, app, doc)
+
+        rendered = {r.service: r for r in appconfig.render(crud, settings)}
+
+        assert rendered[RECEIVER].restart_required
+
+    @pytest.mark.parametrize(
+        ("path", "value"),
+        [
+            ("config.server.ip_filter.mode", "allowlist"),
+            ("config.server.rate_limit.enabled", True),
+            ("config.server.auth.mode", "bearer"),
+            ("config.server.max_body_size", 1024),
+        ],
+    )
+    def test_a_server_setting_the_http_listener_binds_restarts_the_receiver(
+        self, crud, tmp_path, path, value
+    ):
+        # The HTTP listener reads these once when it starts serving; only the
+        # bearer tokens reload.
+        settings = _settings(tmp_path)
+        app = _deploy(crud, RECEIVER, config__routing__default_source="main")
+        appconfig.render(crud, settings)
+        doc = instances.read_overlay(crud, app)
+        set_path(doc, path, value)
+        _put(crud, app, doc)
+
+        rendered = {r.service: r for r in appconfig.render(crud, settings)}
+
+        assert rendered[RECEIVER].restart_required
+
+    def test_a_routing_change_is_still_taken_where_it_stands(self, crud, tmp_path):
+        # The router is rebuilt in place, so the restart paths leave it hot.
+        settings = _settings(tmp_path)
+        app = _deploy(crud, RECEIVER, config__routing__default_source="main")
+        appconfig.render(crud, settings)
+        doc = instances.read_overlay(crud, app)
+        set_path(doc, "config.routing.default_source", "elsewhere")
+        _put(crud, app, doc)
+
+        rendered = {r.service: r for r in appconfig.render(crud, settings)}
+
+        assert rendered[RECEIVER].changed
+        assert not rendered[RECEIVER].restart_required
+        assert rendered[RECEIVER].restart_hint == ""
+
+    def test_a_previous_render_that_no_longer_parses_counts_as_a_change(self, crud, tmp_path):
+        settings = _settings(tmp_path)
+        _deploy(crud, RECEIVER, config__routing__default_source="main")
+        appconfig.render(crud, settings)
+        target = _app_dir(settings, RECEIVER) / descriptor(RECEIVER).config_file
+        target.write_text("destinations: [unclosed\n", encoding="utf-8")
+
+        rendered = {r.service: r for r in appconfig.render(crud, settings)}
+
+        assert rendered[RECEIVER].restart_required
+
     def test_the_loader_is_told_to_watch_the_file_rendered_for_it(self, crud, tmp_path):
         # dfe-loader's watcher ships off; without this key a change reported as
         # needing no restart is never read.

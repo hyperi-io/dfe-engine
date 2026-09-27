@@ -137,6 +137,61 @@ def _deploy_vrl(client, headers, instance: str):
     )
 
 
+def _given_the_chart_topics(app, instance: str) -> None:
+    """Hand a vrl instance's chart its own topic values, as a deploy repo may."""
+    from dfe_engine.appmgmt import instances
+
+    gc = app.state.gitcrud
+    name = instances.instance_of("dfe-transform-vrl", instance).overlay_name
+    doc = gc.get("helmvars", name)
+    doc["kafka"] = {"sourceTopic": f"{instance}_land", "destTopic": f"{instance}_load"}
+    gc.put("helmvars", name, doc, "test", message="test: chart topics")
+
+
+class TestTheConfigRouteNamesWhoSetsATransformTopic:
+    """The chart sets a transform's topics only when its own values name them."""
+
+    def _fields(self, client, headers, instance: str) -> dict:
+        body = client.get(f"/api/v1/apps/dfe-transform-vrl/{instance}/config", headers=headers)
+        assert body.status_code == 200, body.text
+        return {f["path"]: f for f in body.json()["fields"]}
+
+    def test_by_default_the_sink_topic_is_the_one_the_engine_wrote(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy_vrl(client, admin_headers, "edge")
+
+        sink = self._fields(client, admin_headers, "edge")["config.sink.topic"]
+
+        assert (sink["provenance"], sink["value"]) == ("overlay", "edge_load")
+
+    def test_a_sink_topic_the_chart_is_given_is_the_chart_s(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy_vrl(client, admin_headers, "edge")
+        _given_the_chart_topics(app, "edge")
+
+        sink = self._fields(client, admin_headers, "edge")["config.sink.topic"]
+
+        assert sink["provenance"] == "chart"
+
+    def test_a_sink_topic_the_chart_does_not_set_can_be_written(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy_vrl(client, admin_headers, "edge")
+
+        resp = client.put(
+            "/api/v1/apps/dfe-transform-vrl/edge/config",
+            json={"changes": {"config.sink.topic": "edge_elsewhere"}},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+
+
 class TestTheContractRoute:
     def test_it_serves_what_the_image_emitted(self, client, admin_headers):
         body = client.get(CONTRACT, headers=admin_headers).json()
@@ -475,14 +530,31 @@ class TestCustomEnvCannotShadowAChartSetName:
         name = "DFE_FETCHER_KAFKA_SASL_USER"
         self._assert_refused(self._put(client, admin_headers, "dfe-fetcher", "alpha", name), name)
 
-    def test_the_transform_chart_s_source_topics_cannot_be_shadowed(
+    def test_the_transform_chart_s_brokers_cannot_be_shadowed(
         self, client, app, admin_headers, tmp_path
     ):
         _wire(app, tmp_path)
         _deploy_vrl(client, admin_headers, "edge")
-        name = "DFE_TRANSFORM_SOURCE_TOPICS"
+        name = "DFE_TRANSFORM_SOURCE_BROKERS"
         self._assert_refused(
             self._put(client, admin_headers, "dfe-transform-vrl", "edge", name), name
+        )
+
+    def test_the_source_topics_are_the_chart_s_only_once_it_is_given_them(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # The chart renders DFE_TRANSFORM_SOURCE_TOPICS inside a `with` on
+        # kafka.sourceTopic, empty by default, so until then nothing shadows a key here.
+        _wire(app, tmp_path)
+        _deploy_vrl(client, admin_headers, "edge")
+        name = "DFE_TRANSFORM_SOURCE_TOPICS"
+        resp = self._put(client, admin_headers, "dfe-transform-vrl", "edge", name)
+        assert resp.status_code == 200, resp.text
+
+        _deploy_vrl(client, admin_headers, "core")
+        _given_the_chart_topics(app, "core")
+        self._assert_refused(
+            self._put(client, admin_headers, "dfe-transform-vrl", "core", name), name
         )
 
     def test_a_name_no_chart_sets_is_still_the_operator_s(
