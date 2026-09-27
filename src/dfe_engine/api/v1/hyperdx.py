@@ -34,8 +34,8 @@ from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, Settings, is_action_allowed, require_action
 from dfe_engine.auth import Scope, ScopedGrant
+from dfe_engine.auth.models import platform_grants
 from dfe_engine.auth.rbac_scopes import scopes_dict
-from dfe_engine.governance.ch.bindings import platform_grants
 from dfe_engine.governance.ch.models import org_user_name
 
 router = APIRouter(prefix="/hyperdx", tags=["HyperDX"])

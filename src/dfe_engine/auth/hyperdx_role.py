@@ -25,8 +25,7 @@ asserts.
 
 from collections.abc import Iterable
 
-from dfe_engine.auth.models import ScopedGrant
-from dfe_engine.governance.ch.bindings import platform_grants
+from dfe_engine.auth.models import ScopedGrant, platform_grants
 
 CLAIM = "role"
 """The claim name the fork reads (its ``jwt-verify.ts`` takes ``payload.role``)."""

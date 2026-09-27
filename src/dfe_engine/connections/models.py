@@ -20,7 +20,7 @@ class ClickHouseConnection(BaseModel):
     names the environment variable that holds the password at runtime.
 
     Attributes:
-        name: Logical name of this connection (e.g. "default", "tenant_reader").
+        name: Logical name of this connection (e.g. "default").
         host: ClickHouse server hostname.
         port: ClickHouse HTTP port.
         database: Default database.

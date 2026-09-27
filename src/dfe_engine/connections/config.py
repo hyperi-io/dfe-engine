@@ -8,8 +8,8 @@
 
 """Connection configuration loader.
 
-Reads ``connections.yaml`` (role-to-connection mapping + connection
-definitions) and returns a validated ``ConnectionConfig``.
+Reads ``connections.yaml`` (named connection definitions) and returns a
+validated ``ConnectionConfig``.
 """
 
 from __future__ import annotations
@@ -28,11 +28,9 @@ class ConnectionConfig(BaseModel):
 
     Attributes:
         connections: Named connection definitions.
-        role_connections: Maps role names to connection names.
     """
 
     connections: dict[str, ClickHouseConnection] = Field(default_factory=dict)
-    role_connections: dict[str, str] = Field(default_factory=dict)
 
 
 class ConnectionConfigLoader:
@@ -98,11 +96,4 @@ class ConnectionConfigLoader:
             else:
                 raise ValueError(f"Connection '{name}' must be a mapping")
 
-        role_connections = data.get("role_connections", {})
-        if not isinstance(role_connections, dict):
-            raise ValueError("'role_connections' must be a mapping")
-
-        return ConnectionConfig(
-            connections=connections,
-            role_connections=role_connections,
-        )
+        return ConnectionConfig(connections=connections)

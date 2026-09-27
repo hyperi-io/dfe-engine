@@ -23,9 +23,8 @@ from dfe_engine.auth.audit import (
     audit_jit_team_assigned,
 )
 from dfe_engine.auth.groups import Group, GroupStore
-from dfe_engine.auth.models import AuthenticationError, Scope, ScopedGrant
+from dfe_engine.auth.models import AuthenticationError, Scope, ScopedGrant, platform_grants
 from dfe_engine.auth.protected_accounts import resolve_floor
-from dfe_engine.governance.ch.bindings import platform_grants
 
 # Platform teams, broadest first; only a role granted at SYSTEM scope earns one.
 _ROLE_TO_TEAM = {
@@ -175,9 +174,9 @@ class JitProvisioner:
         if team:
             audit_jit_team_assigned(user_id, team, "broadest-wins")
 
-            # Invites ride the machine JWT onto the fork's session-scoped
-            # /team/invitation (the shared default team); org-scoped
-            # email-shaped users only.
+            # POST /team/invitation invites into the calling identity's own team, so
+            # this lands the user in the engine's default HyperDX team, not in
+            # ``team``. Only an email-shaped user resolved to an org team is invited.
             if self._hdx is not None and "@" in user_id and team.startswith("customer-"):
                 try:
                     loop = asyncio.get_running_loop()
@@ -328,7 +327,7 @@ class JitProvisioner:
             audit_jit_hdx_invited(user_id, team_name)
             return
         logger.warning(
-            "JIT HyperDX invite refused - the user has no HyperDX team",
+            "JIT HyperDX invite not sent - HyperDX refused or failed the request",
             user_id=user_id,
             team_name=team_name,
         )
