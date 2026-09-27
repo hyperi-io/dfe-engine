@@ -299,10 +299,20 @@ class TestSecrets:
         stored: dict = {}
         set_path(stored, path, {"primary": {"url": "u", "auth": {"token": "t-1"}}})
         field = {f.path: f for f in contract.resolve_config(found, stored).fields}[path]
-        edited = {"primary": {**field.value["primary"], "url": "u-2"}}
-        assert contract.restore_masked_at(stored, path, edited) == {
-            "primary": {"url": "u-2", "auth": {"token": "t-1"}}
+        assert contract.restore_masked_at(stored, path, field.value) == {
+            "primary": {"url": "u", "auth": {"token": "t-1"}}
         }
+
+    def test_a_masked_map_entry_moved_to_another_url_is_refused(self):
+        """The token nests one mapping below the url it is sent to, and still holds it there."""
+        found = contract.load_contract("dfe-fetcher", HELD)
+        path = "config.sources.rest"
+        stored: dict = {}
+        set_path(stored, path, {"primary": {"url": "u", "auth": {"token": "t-1"}}})
+        field = {f.path: f for f in contract.resolve_config(found, stored).fields}[path]
+        edited = {"primary": {**field.value["primary"], "url": "u-2"}}
+        with pytest.raises(contract.CredentialReentryError, match=r"primary changed url"):
+            contract.restore_masked_at(stored, path, edited)
 
     @pytest.mark.parametrize(("marked", "secret"), [(False, False), (True, True)])
     def test_a_definition_that_lists_itself_is_judged_and_ends(self, marked, secret):
@@ -1073,7 +1083,7 @@ class TestRestoringMaskedValues:
     def test_the_whole_redacted_overlay_restores_to_what_is_stored(self):
         found = contract.load_contract("dfe-receiver", HELD)
         masked = contract.redact_overlay(found, json.loads(json.dumps(self.STORED)))
-        assert contract.restore_masked(masked, self.STORED) == self.STORED
+        assert contract.restore_masked(masked, self.STORED, shown=masked) == self.STORED
 
     @pytest.mark.parametrize(
         ("path", "value", "restored"),
@@ -1128,39 +1138,42 @@ class TestAMaskedListEntryKeepsItsOwnCredential:
         by_id = {entry["id"]: entry for entry in self.CONNECTIONS}
         return [{**by_id[i], "token": self.R} for i in ids]
 
+    def _restore(self, written, stored, path="connections"):
+        return contract.restore_masked(written, stored, path=path, shown=_read(path, stored))
+
     def test_deleting_one_keeps_each_other_token_on_its_own_entry(self):
-        restored = contract.restore_masked(self._shown("a", "c"), self.CONNECTIONS)
+        restored = self._restore(self._shown("a", "c"), self.CONNECTIONS)
         assert restored == [self.CONNECTIONS[0], self.CONNECTIONS[2]]
 
     def test_reordering_keeps_each_token_on_its_own_entry(self):
-        restored = contract.restore_masked(self._shown("c", "a", "b"), self.CONNECTIONS)
+        restored = self._restore(self._shown("c", "a", "b"), self.CONNECTIONS)
         assert restored == [self.CONNECTIONS[2], self.CONNECTIONS[0], self.CONNECTIONS[1]]
 
     def test_an_appended_entry_is_kept_as_written(self):
         added = {"id": "d", "org": "org-d", "token": "tok-d"}
-        restored = contract.restore_masked([*self._shown("a", "b", "c"), added], self.CONNECTIONS)
+        restored = self._restore([*self._shown("a", "b", "c"), added], self.CONNECTIONS)
         assert restored == [*self.CONNECTIONS, added]
 
     def test_an_entry_edited_around_its_masked_token_is_refused(self):
         edited = self._shown("b", "a")
         edited[0]["org"] = "org-b-2"
         with pytest.raises(contract.CredentialReentryError, match=r"connections\[0\].*org"):
-            contract.restore_masked(edited, self.CONNECTIONS, path="connections")
+            self._restore(edited, self.CONNECTIONS)
 
     def test_a_renamed_entry_is_refused(self):
         renamed = self._shown("a", "b")
         renamed[1]["id"] = "b-2"
         with pytest.raises(contract.MaskedValueError, match=r"\[1\]\.token.*nothing is stored"):
-            contract.restore_masked(renamed, self.CONNECTIONS, path="connections")
+            self._restore(renamed, self.CONNECTIONS)
 
     def test_headers_are_matched_by_name(self):
         stored = [{"name": "x-one", "values": ["hv-1"]}, {"name": "x-two", "values": ["hv-2"]}]
         shown = [{"name": "x-two", "values": [self.R]}]
-        assert contract.restore_masked(shown, stored) == [stored[1]]
+        assert self._restore(shown, stored, "accepted_headers") == [stored[1]]
 
     def test_unnamed_masks_restore_while_every_stored_one_is_there(self):
         # Two masks for two stored tokens, and a third written in full.
-        assert contract.restore_masked([self.R, "tok-3", self.R], ["tok-1", "tok-2"]) == [
+        assert self._restore([self.R, "tok-3", self.R], ["tok-1", "tok-2"], "tokens") == [
             "tok-1",
             "tok-3",
             "tok-2",
@@ -1176,24 +1189,24 @@ class TestAMaskedListEntryKeepsItsOwnCredential:
     def test_an_unnamed_deletion_is_refused(self, written):
         # Which token went cannot be told, and guessing could keep a revoked one.
         with pytest.raises(contract.MaskedValueError, match="which were removed cannot be told"):
-            contract.restore_masked(written, ["tok-1", "tok-2"], path="tokens")
+            self._restore(written, ["tok-1", "tok-2"], "tokens")
 
     def test_unnamed_entries_reordered_are_refused(self):
         stored = [{"url": "u-1", "token": "tok-1"}, {"url": "u-2", "token": "tok-2"}]
         shown = [{"url": "u-2", "token": self.R}, {"url": "u-1", "token": self.R}]
         with pytest.raises(contract.MaskedValueError, match=r"\[0\] is masked but no longer"):
-            contract.restore_masked(shown, stored, path="endpoints")
+            self._restore(shown, stored, "endpoints")
 
     def test_unnamed_entries_unchanged_restore(self):
         stored = [{"url": "u-1", "token": "tok-1"}, {"url": "u-2", "token": "tok-2"}]
         shown = [{"url": "u-1", "token": self.R}, {"url": "u-2", "token": self.R}]
-        assert contract.restore_masked(shown, stored) == stored
+        assert self._restore(shown, stored, "endpoints") == stored
 
     def test_a_shared_name_is_not_an_identity(self):
         # Two stored entries under one id: nothing says which a mask came from.
         stored = [{"id": "a", "token": "tok-1"}, {"id": "a", "token": "tok-2"}]
         with pytest.raises(contract.MaskedValueError, match="which were removed cannot be told"):
-            contract.restore_masked([{"id": "a", "token": self.R}], stored, path="connections")
+            self._restore([{"id": "a", "token": self.R}], stored)
 
     @pytest.mark.parametrize("guess", ["tok-1", "tok-wrong"])
     def test_a_guessed_token_is_refused_right_or_wrong(self, guess):
@@ -1237,20 +1250,23 @@ class TestAMaskedCredentialRestoresOnlyWhereItWasSet:
         {"id": "b", "tenant_url": "https://b.example", "token": "tok-b-4431"},
     ]
 
+    def _restore(self, written, stored, path="connections"):
+        return contract.restore_masked(written, stored, path=path, shown=_read(path, stored))
+
     def test_a_named_entry_pointed_elsewhere_is_refused(self):
         written = [
             {"id": "a", "tenant_url": "https://evil.example", "token": self.R},
             {**self.CONNECTIONS[1], "token": self.R},
         ]
         with pytest.raises(contract.CredentialReentryError, match=r"connections\[0\].*tenant_url"):
-            contract.restore_masked(written, self.CONNECTIONS, path="connections")
+            self._restore(written, self.CONNECTIONS)
 
     def test_the_change_is_taken_with_the_credential_typed_again(self):
         written = [
             {"id": "a", "tenant_url": "https://new.example", "token": "tok-a-4432"},
             {**self.CONNECTIONS[1], "token": self.R},
         ]
-        assert contract.restore_masked(written, self.CONNECTIONS) == [
+        assert self._restore(written, self.CONNECTIONS) == [
             written[0],
             self.CONNECTIONS[1],
         ]
@@ -1260,7 +1276,7 @@ class TestAMaskedCredentialRestoresOnlyWhereItWasSet:
             {**self.CONNECTIONS[0], "token": self.R},
             {"id": "b", "tenant_url": "https://b2.example", "token": "tok-b-4433"},
         ]
-        assert contract.restore_masked(written, self.CONNECTIONS) == [
+        assert self._restore(written, self.CONNECTIONS) == [
             self.CONNECTIONS[0],
             written[1],
         ]
@@ -1269,7 +1285,7 @@ class TestAMaskedCredentialRestoresOnlyWhereItWasSet:
         stored = [{"url": "https://u-1.example", "tls_verify": True, "token": "tok-4434"}]
         written = [{"url": "https://u-1.example", "token": self.R}]
         with pytest.raises(contract.CredentialReentryError, match="tls_verify"):
-            contract.restore_masked(written, stored, path="endpoints")
+            self._restore(written, stored, "endpoints")
 
     def test_a_mapping_changed_around_its_masked_password_is_refused(self):
         doc = {"config": {"kafka": {"sasl": {"username": "dfe", "password": "kafka-pw-4435"}}}}
@@ -1335,7 +1351,7 @@ class TestAMaskedCredentialRestoresOnlyWhereItWasSet:
             }
         ]
         with pytest.raises(contract.CredentialReentryError, match="upstream"):
-            contract.restore_masked(written, stored, path="mirrors")
+            self._restore(written, stored, "mirrors")
 
     def test_the_url_password_alone_typed_again_is_not_a_change(self):
         doc = {
@@ -1349,7 +1365,130 @@ class TestAMaskedCredentialRestoresOnlyWhereItWasSet:
         ]
 
 
+class TestTheNearestMappingHoldingACredentialDecides:
+    """A write is judged at the nearest mapping above it that holds a stored credential.
+
+    ``kafka.brokers`` and ``kafka.sasl.password`` sit at different levels, so a check
+    at the credential's own level alone lets a PUT move the host it is sent to.
+    """
+
+    R = contract.REDACTED
+    DOC = {
+        "config": {
+            "log_level": "info",
+            "kafka": {
+                "brokers": ["kafka-1:9092"],
+                "producer": {"retries": 3},
+                "sasl": {"username": "dfe", "password": "kafka-pw-4501"},
+            },
+        },
+        "extraEnv": {"KAFKA_BROKERS": "kafka-1:9092", "KAFKA_SASL_PASSWORD": "env-pw-4502"},
+    }
+
+    def test_a_leaf_put_moving_the_host_is_refused(self):
+        with pytest.raises(contract.CredentialReentryError, match=r"config\.kafka changed brokers"):
+            contract.restore_masked_at(self.DOC, "config.kafka.brokers", ["evil.example:9092"])
+
+    def test_a_section_put_moving_the_host_is_refused(self):
+        written = {
+            "brokers": ["evil.example:9092"],
+            "producer": {"retries": 3},
+            "sasl": {"username": "dfe", "password": self.R},
+        }
+        with pytest.raises(contract.CredentialReentryError, match=r"config\.kafka changed brokers"):
+            contract.restore_masked_at(self.DOC, "config.kafka", written)
+
+    def test_a_setting_below_the_holder_is_judged_there_too(self):
+        with pytest.raises(
+            contract.CredentialReentryError, match=r"config\.kafka changed producer"
+        ):
+            contract.restore_masked_at(self.DOC, "config.kafka.producer.retries", 9)
+
+    def test_the_host_moves_with_the_credential_typed_again(self):
+        written = {
+            "brokers": ["new.example:9092"],
+            "producer": {"retries": 3},
+            "sasl": {"username": "dfe", "password": "kafka-pw-4503"},
+        }
+        assert contract.restore_masked_at(self.DOC, "config.kafka", written) == written
+
+    def test_a_leaf_written_as_stored_is_no_change(self):
+        assert contract.restore_masked_at(self.DOC, "config.kafka.brokers", ["kafka-1:9092"]) == [
+            "kafka-1:9092"
+        ]
+
+    def test_a_credential_typed_in_beside_another_is_no_change(self):
+        assert contract.restore_masked_at(self.DOC, "config.kafka.sasl.token", "tok-4504") == (
+            "tok-4504"
+        )
+
+    @pytest.mark.parametrize(
+        ("path", "value"),
+        [
+            pytest.param("config.log_level", "debug", id="config-root"),
+            pytest.param("extraEnv.KAFKA_BROKERS", "evil.example:9092", id="env-root"),
+        ],
+    )
+    def test_a_document_root_is_never_the_holder(self, path, value):
+        assert contract.restore_masked_at(self.DOC, path, value) == value
+
+    def test_a_whole_document_is_judged_below_its_root(self):
+        stored = self.DOC["config"]
+        shown = _read("config", stored)
+        written = {**shown, "log_level": "debug"}
+        assert contract.restore_masked(written, stored, shown=shown) == {
+            **stored,
+            "log_level": "debug",
+        }
+        moved = {**shown, "kafka": {**shown["kafka"], "brokers": ["evil.example:9092"]}}
+        with pytest.raises(contract.CredentialReentryError, match=r"kafka changed brokers"):
+            contract.restore_masked(moved, stored, shown=shown)
+
+
+class TestAValueReadAsOneMask:
+    """A value the read showed as one mask comes back as that mask or in full."""
+
+    R = contract.REDACTED
+    STORED = {"user": "svc-4601", "token": "tok-4602"}
+
+    @pytest.mark.parametrize("guess", ["svc-4601", "svc-wrong"])
+    def test_a_partly_masked_mapping_is_refused_right_or_wrong(self, guess):
+        """Comparing the unmasked part to what is stored would confirm a right guess."""
+        with pytest.raises(contract.CredentialReentryError, match="read as"):
+            contract.restore_masked(
+                {"user": guess, "token": self.R}, self.STORED, path="password", shown=self.R
+            )
+
+    @pytest.mark.parametrize(
+        "guess", ["https://u:***REDACTED***@a.example", "https://u:***REDACTED***@b.example"]
+    )
+    def test_a_partly_masked_url_is_refused_right_or_wrong(self, guess):
+        with pytest.raises(contract.CredentialReentryError, match="read as"):
+            contract.restore_masked(guess, "https://u:pw-4603@a.example", path="url", shown=self.R)
+
+    def test_the_whole_mask_restores(self):
+        assert contract.restore_masked(self.R, self.STORED, path="password", shown=self.R) == (
+            self.STORED
+        )
+
+    def test_a_value_written_in_full_is_taken(self):
+        written = {"user": "svc-4604", "token": "tok-4605"}
+        assert contract.restore_masked(written, self.STORED, path="password", shown=self.R) == (
+            written
+        )
+
+    def test_what_the_read_showed_has_to_be_said(self):
+        """Without it every stored value is compared in the clear."""
+        with pytest.raises(TypeError, match="shown"):
+            contract.restore_masked(self.R, self.STORED)  # type: ignore[call-arg]
+
+
 ABSENT = contract.AppContract(service="", available=False, source=contract.ContractSource.ABSENT)
+
+
+def _read(path: str, stored):
+    """``stored`` as a read of ``path`` shows it, by the name rule alone."""
+    return contract.redact_var({}, path, stored)
 
 
 class TestTheNameRuleReadsEverySpelling:
