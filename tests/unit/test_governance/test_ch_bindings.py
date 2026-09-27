@@ -16,8 +16,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from dfe_engine.auth.models import Scope, ScopedGrant
-from dfe_engine.governance.ch.bindings import derive_group_bindings, platform_grants
+from dfe_engine.auth.models import Scope, ScopedGrant, platform_grants
+from dfe_engine.governance.ch.bindings import derive_group_bindings
 
 
 def _org(name: str, ids: list[str] | None = None) -> SimpleNamespace:

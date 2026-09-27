@@ -61,16 +61,13 @@ class TestConnectionConfig:
     def test_empty_config(self) -> None:
         config = ConnectionConfig()
         assert config.connections == {}
-        assert config.role_connections == {}
 
     def test_config_with_connections(self) -> None:
         config = ConnectionConfig(
             connections={
                 "default": ClickHouseConnection(name="default"),
-                "tenant": ClickHouseConnection(name="tenant", user="tenant_user"),
+                "analytics": ClickHouseConnection(name="analytics", user="analytics_user"),
             },
-            role_connections={"admin": "default", "org_viewer": "tenant"},
         )
         assert len(config.connections) == 2
-        assert config.role_connections["admin"] == "default"
-        assert config.connections["tenant"].user == "tenant_user"
+        assert config.connections["analytics"].user == "analytics_user"
