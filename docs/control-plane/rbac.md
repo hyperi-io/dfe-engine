@@ -9,7 +9,7 @@
 | Phase | Scope | Status |
 |-------|-------|--------|
 | **Phase 1** | RBAC foundation, account/group/API key CRUD, 4 auth paths, audit | Done |
-| **Phase 2** | ConnectionRegistry, TenantScopedClient, multi-tenant CH | Done |
+| **Phase 2** | Per-org pinned ClickHouse users, shared tenant row policies, quota tiers | Done |
 | **Phase 3** | OrgRegistry, HyperDX team/connection sync | Done |
 | **Phase 4** | Schema-less service discovery, service surfaces | In progress - service surfaces shipped (`services/surfaces/registry.py`, `/api/v1/service-surfaces`); typed plugin removal pending |
 
@@ -602,119 +602,40 @@ manually.
 
 ---
 
-## 5. ClickHouse Multi-Tenant Connection Registry
+## 5. ClickHouse Tenant Isolation
 
-### 5.1 Custom Settings Pattern
+### 5.1 Pinned Org Users, One Shared Policy Set
 
-Instead of creating a CH user per customer org, use the ClickHouse custom
-settings pattern with a small fixed set of users:
+Every registered org gets its own ClickHouse user, and that user is what fences it in. The reconciler in `governance/ch/` renders the whole model from the org registry and the tier catalogue. The role, setting and user names come from the dfe-schemas catalogue, not from engine code.
 
-```sql
--- ONE row policy per tenant-scoped table
-CREATE ROW POLICY tenant_filter ON dfe.events
-    FOR SELECT USING org_id = getSetting('current_tenant_id')
-    TO dfe_reader;
+- **One shared tenant role.** Every org-pinned user holds it and nothing else does.
+- **One RESTRICTIVE row policy per table that carries `_org_id`**, on that role. Its predicate is `has(splitByChar(',', getSetting('<tenant setting>')), _org_id)`.
+- **The tenant setting, pinned READONLY on each org user**, listing that org's `_org_id` values. A `SETTINGS` clause in query text cannot override it: ClickHouse answers 452 (SETTING_CONSTRAINT_VIOLATION).
 
--- dfe-engine injects tenant per query via connection setting
-SET current_tenant_id = 'acme';
-SELECT * FROM dfe.events;  -- automatically filtered to acme rows
-```
+A platform identity does not hold the tenant role, so no policy targets it and it reads every row. RESTRICTIVE-only is deliberate. A PERMISSIVE policy would flip the table to default-deny for everyone. A holder of the tenant role with no pinned setting makes `getSetting` throw, so a bad grant fails closed.
 
-**Benefits:**
-- 3-5 CH users total (by privilege level), not N per org
-- One row policy per tenant-scoped table, not per org
-- Scales to thousands of orgs without CH user sprawl
-- If the setting is omitted, the query fails (fail-closed)
+A tenant-reachable table with no `_org_id` column gets a `USING 0` policy, so a tenant reads nothing from it. The tables are found in `system.columns`.
 
-### 5.2 Connection Architecture
+Adding an org adds one pinned user. The policy set does not change.
+
+### 5.2 Who Reads As Whom
 
 ```mermaid
 flowchart TD
-    subgraph "AuthContext"
-        ROLES["roles: [data_analyst]"]
-    end
-
-    subgraph "ConnectionRegistry"
-        PREC["Privilege Precedence<br/>admin → infra_admin → data_analyst<br/>→ data_analyst_viewer → data_viewer<br/>→ infra_viewer → org_viewer"]
-        CACHE["Client Cache<br/>(lazy-loaded)"]
-    end
-
-    subgraph "ClickHouse Users"
-        ADMIN_CH["dfe_admin<br/>(unrestricted)"]
-        ANALYST_CH["dfe_analyst<br/>(read-write)"]
-        RO_CH["dfe_analyst_ro<br/>(read-only)"]
-        VIEWER_CH["dfe_viewer<br/>(read-only)"]
-        TENANT_CH["dfe_tenant_reader<br/>(row-filtered)"]
-    end
-
-    ROLES --> PREC
-    PREC -->|resolve best| CACHE
-    CACHE --> ADMIN_CH
-    CACHE --> ANALYST_CH
-    CACHE --> RO_CH
-    CACHE --> VIEWER_CH
-    CACHE -->|wrap in TenantScopedClient| TENANT_CH
+    CALLER["Caller's scoped grants"] --> PLAT{"platform_grants:<br/>a SYSTEM-scope role<br/>other than org_viewer?"}
+    PLAT -->|"yes, with query:execute"| READER["Platform reader<br/>no tenant role, reads every org"]
+    PLAT -->|no| ORG{"Resolves to exactly<br/>one registered org?"}
+    ORG -->|yes| PINNED["That org's pinned user<br/>tenant role + pinned setting"]
+    ORG -->|no| DENY["403 no_single_org<br/>fails closed"]
 ```
 
-### 5.3 Connection Config (connections.yaml)
+`platform_grants` (`auth/models.py`) is the one filter for "every org". The ClickHouse group bindings, the HyperDX connection read, the fork's role claim and JIT team assignment all go through it. A role bound at an org's scope covers that org alone, and `org_viewer` never unfences anyone.
 
-```yaml
-connections:
-  default:
-    host: clickhouse.clickhouse.svc.cluster.local
-    port: 8123
-    database: dfe
-    user: dfe_admin
-    password_env: CH_ADMIN_PASSWORD
+Group bindings (`governance/ch/bindings.py`) follow the same rule. An org-scoped group binds to its org's pinned user whatever roles it holds. A system group holding a platform role reads unrestricted, and an `admin` or `infra_admin` group also reads the otel database. A group that claims an unregistered org gets no ClickHouse user at all, because the alternative is an unrestricted one.
 
-  analyst:
-    user: dfe_analyst
-    password_env: CH_ANALYST_PASSWORD
+### 5.3 The Engine's Own Reads
 
-  analyst_ro:
-    user: dfe_analyst_ro
-    password_env: CH_ANALYST_RO_PASSWORD
-
-  viewer:
-    user: dfe_viewer
-    password_env: CH_VIEWER_PASSWORD
-
-  tenant_reader:
-    user: dfe_tenant_reader
-    password_env: CH_TENANT_READER_PASSWORD
-
-role_connections:
-  admin: default
-  data_analyst: analyst
-  data_analyst_viewer: analyst_ro
-  data_viewer: viewer
-  infra_admin: default
-  infra_viewer: analyst_ro
-  org_viewer: tenant_reader
-```
-
-### 5.4 TenantScopedClient
-
-Wraps the clickhouse-connect client to inject `current_tenant_id` into every
-query's settings. For users with multiple `org_ids`, all queries are scoped
-to their permitted orgs.
-
-```python
-class TenantScopedClient:
-    def query(self, sql, ...):
-        settings = {"current_tenant_id": self.tenant_id}
-        return self._client.query(sql, settings=settings, ...)
-```
-
-### 5.5 Row Policies
-
-Only tables with an `org_id` column get row policies. Discovery:
-```sql
-SELECT table FROM system.columns
-WHERE database = 'dfe' AND name = 'org_id'
-```
-
-System, metadata, and audit tables are excluded.
+`connections.yaml` names the engine's own ClickHouse connections, and the engine asks for them by name. Only `default` is asked for, by schema discovery. The query API does not lean on a ClickHouse user for tenancy: the executor injects the caller's `org_id` as a reserved bind parameter that a client cannot override (`query/executor.py`, `RESERVED_PARAMS`).
 
 ---
 
@@ -735,7 +656,7 @@ sequenceDiagram
     API->>OR: create(name, org_ids, display_name)
     OR-->>API: Org YAML created
 
-    Note over API: No CH user creation needed<br/>(custom settings pattern)
+    Note over API: The org's pinned CH user arrives on the<br/>next CH RBAC reconcile, not here
 
     API->>HDX: get_team()
     HDX-->>API: team_id (or None on failure)
@@ -745,9 +666,7 @@ sequenceDiagram
     Note over HDX: HyperDX failures are non-fatal<br/>Background retry reconciliation
 ```
 
-With the custom settings pattern, adding an org does NOT require creating a
-CH user or row policy. The existing `tenant_reader` user + existing row
-policies handle it. dfe-engine just needs to know the org_ids to inject.
+Creating an org does not create its ClickHouse user. The CH RBAC reconcile does, and it runs at engine startup and on `POST /api/v1/governance/ch-rbac/reconcile` (the console's "Reconcile Clickhouse RBAC" drawer). Until one of those runs, the org's users get `503 org_unprovisioned` from `GET /api/v1/hyperdx/connection`. The row policies need no change for a new org.
 
 ---
 
@@ -759,14 +678,10 @@ policies handle it. dfe-engine just needs to know the org_ids to inject.
 - **Runtime:** `HyperDXClient` calls the HyperDX internal API for the team and for per-DFE-source CRUD
 - **Failures:** Non-fatal. First failure sets `_connected=False`, subsequent calls logged as warnings
 
-### 7.2 Team Mapping
+### 7.2 Teams and Connections
 
-| DFE Role Scope | HyperDX Team | CH Connection | Tenant Setting |
-|----------------|-------------|---------------|----------------|
-| admin | `dfe-admin` | `default` | None (unrestricted) |
-| data_analyst | `dfe-analysts` | `analyst` | None |
-| data_viewer | `dfe-viewers` | `viewer` | None |
-| org_viewer (acme) | `customer-acme` | `tenant_reader` | `current_tenant_id=acme` |
+- **Team name.** JIT picks it from the caller's grants (`auth/jit.py`, `resolve_hyperdx_team`): `dfe-admin` for `admin` or `infra_admin` at system scope, `dfe-analysts` for `data_analyst` at system scope, else `customer-<org>` for the caller's first org, else none.
+- **Connection.** A team's ClickHouse connection is whatever `GET /api/v1/hyperdx/connection` returned to the user whose token seeded it (section 5.2): the platform reader, or that user's org's pinned user.
 
 ---
 
@@ -887,7 +802,10 @@ graph TD
 
     subgraph "connections/"
         CONN_REG["registry.py<br/>ConnectionRegistry"]
-        TENANT["tenant.py<br/>TenantScopedClient"]
+    end
+
+    subgraph "governance/ch/"
+        CH_RBAC["reconciler.py<br/>tenant role, row policies,<br/>pinned org users"]
     end
 
     subgraph "orgs/"
@@ -915,8 +833,8 @@ graph TD
     BOOT --> GROUPS
     OIDC_SYNC --> OIDC_REG
     OIDC_SYNC --> GROUPS
-    CONN_REG --> MODELS
-    CONN_REG --> TENANT
+    CH_RBAC --> ORG_REG
+    CH_RBAC --> GROUPS
     ARGO --> ROLES_MOD
     ARGO --> GROUPS
 ```
