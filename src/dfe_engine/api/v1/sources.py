@@ -162,7 +162,7 @@ def _failure_code(exc: Exception) -> str:
     return "internal_error"
 
 
-# ── Response models ──────────────────────────────────────────
+# -- Response models --
 
 
 class SourceResponse(BaseModel):
@@ -701,7 +701,7 @@ class SourceVersionGetDetailResponse(SourceVersionGetResponse):
     )
 
 
-# ── Endpoints ────────────────────────────────────────────────
+# -- Endpoints --
 
 
 @router.get(
@@ -820,7 +820,7 @@ def list_catalogue(
     """List the sources the deployed transforms already handle.
 
     Empty when no catalogue is mounted, which is a deployment without one rather
-    than an error: the catalogue is a release asset of the app that ships it.
+    than an error: the app that ships the catalogue prints it from its own image.
     """
     catalogue = _source_catalogue()
     if catalogue is None:
@@ -2065,7 +2065,7 @@ def import_source(
     )
 
 
-# ── Helpers ──────────────────────────────────────────────────
+# -- Helpers --
 
 
 def _utc_now_iso() -> str:

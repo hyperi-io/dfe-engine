@@ -461,8 +461,8 @@ class TestFlows:
             pytest.skip(
                 f"{shapes.EXPECTED_SKIP} this deployment mounts nothing at "
                 "/etc/dfe/catalogue/sources.yaml (or DFE_SOURCE_CATALOGUE_FILE), so the "
-                "engine offers no entry to compile; the file is a dfe-transform-elastic "
-                "release asset (dfe-transform-elastic#18)"
+                "engine offers no entry to compile; the file comes from the "
+                "dfe-transform-elastic image's emit-catalogue (dfe-transform-elastic#92)"
             )
         entry = str(entries[0]["name"] if isinstance(entries[0], dict) else entries[0])
         created = engine.call("POST", f"/sources/from-catalogue/{entry}", {"transport": transport})
