@@ -8,8 +8,7 @@
 
 """Tests for ConnectionRegistry.
 
-Does NOT create real ClickHouse clients -- covers listing and the
-unknown-name refusal only.
+Does NOT create real ClickHouse clients -- covers the unknown-name refusal only.
 """
 
 import pytest
@@ -20,7 +19,7 @@ from dfe_engine.connections.registry import ConnectionRegistry
 
 
 def _make_config() -> ConnectionConfig:
-    """Build a test ConnectionConfig with default + tenant_reader connections."""
+    """Build a test ConnectionConfig with the default connection."""
     return ConnectionConfig(
         connections={
             "default": ClickHouseConnection(
@@ -29,28 +28,8 @@ def _make_config() -> ConnectionConfig:
                 user="default",
                 password_env="CH_DEFAULT_PW",
             ),
-            "tenant_reader": ClickHouseConnection(
-                name="tenant_reader",
-                host="ch-tenant",
-                user="dfe_tenant_reader",
-                password_env="CH_TENANT_PW",
-            ),
         },
     )
-
-
-class TestListConnections:
-    """Test list_connections."""
-
-    def test_list_returns_all_connections(self) -> None:
-        registry = ConnectionRegistry(_make_config())
-        connections = registry.list_connections()
-        names = {c.name for c in connections}
-        assert names == {"default", "tenant_reader"}
-
-    def test_list_empty_config(self) -> None:
-        registry = ConnectionRegistry(ConnectionConfig())
-        assert registry.list_connections() == []
 
 
 class TestGetClient:

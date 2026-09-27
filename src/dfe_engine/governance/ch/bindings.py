@@ -22,32 +22,17 @@ gets no ClickHouse user at all, because the alternative is an unrestricted user,
 and an unrestricted user reads EVERY org's rows.
 """
 
-from collections.abc import Iterable
 from typing import Any
 
 from scalo.logger import logger
 
-from dfe_engine.auth.models import Scope, ScopedGrant
+from dfe_engine.auth.models import Scope, ScopedGrant, platform_grants
 
 from .models import GroupChBinding
-
-# The tenant role: holding it never unfences a group or a caller from its org.
-ORG_VIEWER_ROLE = "org_viewer"
 
 # Engine roles whose groups also read the otel database (every org's platform
 # telemetry), held at system scope; analysts and org-scoped groups never do.
 OTEL_READER_ROLES = {"admin", "infra_admin"}
-
-
-def platform_grants(grants: Iterable[ScopedGrant]) -> list[ScopedGrant]:
-    """Return the grants that may read across orgs: SYSTEM scope, and not ``org_viewer``.
-
-    A role bound at an org's scope covers that org alone, and ``org_viewer`` is the
-    tenant role. The group bindings and their otel reader here, the HyperDX
-    connection read and the fork's role claim all decide "every org" through this
-    one filter.
-    """
-    return [g for g in grants if g.scope.type == "system" and g.role != ORG_VIEWER_ROLE]
 
 
 def derive_group_bindings(groups: list[Any], orgs: list[Any]) -> list[GroupChBinding]:

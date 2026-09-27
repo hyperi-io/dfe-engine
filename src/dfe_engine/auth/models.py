@@ -6,6 +6,7 @@ claims by dfe-control-plane and passed into engine for Cedar evaluation.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -75,6 +76,21 @@ class ScopedGrant(BaseModel):
 
     role: str
     scope: Scope = Field(default_factory=Scope)
+
+
+# The tenant role: holding it never unfences a group or a caller from its org.
+ORG_VIEWER_ROLE = "org_viewer"
+
+
+def platform_grants(grants: Iterable[ScopedGrant]) -> list[ScopedGrant]:
+    """Return the grants that may read across orgs: SYSTEM scope, and not ``org_viewer``.
+
+    A role bound at an org's scope covers that org alone, and ``org_viewer`` is the
+    tenant role. The ClickHouse group bindings and their otel reader, the HyperDX
+    connection read, the fork's role claim and JIT team assignment all decide
+    "every org" through this one filter.
+    """
+    return [g for g in grants if g.scope.type == "system" and g.role != ORG_VIEWER_ROLE]
 
 
 class AuthContext(BaseModel):

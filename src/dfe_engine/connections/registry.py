@@ -18,7 +18,6 @@ from typing import Any
 from scalo.logger import logger
 
 from dfe_engine.connections.config import ConnectionConfig
-from dfe_engine.connections.models import ClickHouseConnection
 
 
 class ConnectionRegistry:
@@ -78,11 +77,3 @@ class ConnectionRegistry:
             user=conn.user,
         )
         return client
-
-    def list_connections(self) -> list[ClickHouseConnection]:
-        """Return all configured connection definitions.
-
-        Returns:
-            List of ClickHouseConnection models.
-        """
-        return list(self._config.connections.values())
