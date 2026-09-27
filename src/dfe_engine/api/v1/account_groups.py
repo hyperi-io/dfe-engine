@@ -41,6 +41,7 @@ from dfe_engine.api.pagination import (
 from dfe_engine.auth import Scope
 from dfe_engine.auth.groups import Group, validate_group_scope
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.governance.ch import request_ch_rbac_reconcile
 
 router = APIRouter(prefix="/groups", tags=["Groups"])
 
@@ -187,6 +188,7 @@ async def create_group(
         members=body.members,
         scope=body.scope,
     )
+    request_ch_rbac_reconcile(request.app.state)
     sync_account_groups_for_membership_change(
         account_store,
         group.name,
@@ -282,6 +284,7 @@ async def update_group(
         )
     else:
         group = store.update(name, **update_fields)
+    request_ch_rbac_reconcile(request.app.state)
     return _response(group)
 
 
@@ -381,6 +384,7 @@ async def delete_group(
             status_code=409,
             detail={"code": "conflict", "message": str(exc)},
         ) from exc
+    request_ch_rbac_reconcile(request.app.state)
 
 
 # -- Attributes -----------------------------------------------

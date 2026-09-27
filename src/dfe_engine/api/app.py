@@ -375,22 +375,40 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # policies on _org_id into ClickHouse, plus one CH user per RBAC group
     # holding that group's org role. On by default: these policies ARE the tenant
     # fence, so a deployment that skipped them would carry _org_id on every row
-    # and enforce none of it. Fully non-fatal.
+    # and enforce none of it. Fully non-fatal. Every org or group change after
+    # this runs it again in the background, so a new org's users are provisioned
+    # without a restart.
     from dfe_engine.governance.ch import tenant_isolation_enabled
 
     if tenant_isolation_enabled():
-        try:
-            from dfe_engine.governance.ch import ch_admin_client, reconcile_from_stores
+        from dfe_engine.governance.ch import (
+            ReconcileMetrics,
+            ReconcileResult,
+            ReconcileTrigger,
+            ch_admin_client,
+            reconcile_from_stores,
+            request_ch_rbac_reconcile,
+        )
 
-            reconcile_from_stores(
+        def reconcile_ch_rbac_now() -> ReconcileResult:
+            return reconcile_from_stores(
                 ch_admin_client(settings),
                 settings=settings,
                 org_registry=app.state.org_registry,
-                group_store=group_store,
+                group_store=app.state.group_store,
             )
+
+        try:
+            reconcile_ch_rbac_now()
             logger.info("CH RBAC reconcile complete")
         except Exception:
             logger.exception("CH RBAC reconcile failed; continuing without it")
+
+        # Wired after the startup run, which already covers the orgs seeded above.
+        app.state.ch_rbac_reconcile = ReconcileTrigger(
+            reconcile_ch_rbac_now, metrics=ReconcileMetrics(app.state.metrics_manager)
+        )
+        app.state.org_registry.on_change(lambda: request_ch_rbac_reconcile(app.state))
 
     # Bootstrap org lifecycle manager
     from dfe_engine.orgs.lifecycle import OrgLifecycleManager
@@ -469,6 +487,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     logger.info(f"DFE Engine API started (port={settings.api.port})")
     yield
     health.set_ready(False)
+    reconcile_trigger = getattr(app.state, "ch_rbac_reconcile", None)
+    if reconcile_trigger is not None:
+        # A run reads the org and group stores, so it ends before the stores close.
+        await asyncio.to_thread(reconcile_trigger.close, 10.0)
     autostart_tasks = getattr(app.state, "synthetic_autostart", [])
     for task in autostart_tasks:
         task.cancel()

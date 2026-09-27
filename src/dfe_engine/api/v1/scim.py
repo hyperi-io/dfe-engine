@@ -72,6 +72,7 @@ from dfe_engine.auth.scim_mapping import (
     scim_group_to_group_fields,
     scim_user_to_account_fields,
 )
+from dfe_engine.governance.ch import request_ch_rbac_reconcile
 
 router = APIRouter(prefix="/scim/v2", tags=["SCIM"])
 
@@ -442,6 +443,7 @@ async def create_group(user: CurrentUser, request: Request) -> Response:
     members = list(fields["members"])  # type: ignore[arg-type]
     group = store.create(name, roles=[], description="", members=members)
     store.update(name, source_id=fields["source_id"], source_provider=fields["source_provider"])
+    request_ch_rbac_reconcile(request.app.state)
     sync_account_groups_for_membership_change(account_store, name, added=group.members)
     logger.info("SCIM group provisioned", group=name, members=len(group.members))
     group = store.get(name)
@@ -564,6 +566,7 @@ async def delete_group(group_id: str, user: CurrentUser, request: Request) -> Re
         store.remove_member(group_id, username)
     sync_account_groups_for_membership_change(account_store, group_id, removed=members)
     store.delete(group_id)
+    request_ch_rbac_reconcile(request.app.state)
     logger.info("SCIM group deleted", group=group_id)
     return Response(status_code=204)
 
