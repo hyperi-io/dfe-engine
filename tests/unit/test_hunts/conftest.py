@@ -5,7 +5,6 @@ import uuid
 
 import pytest
 import yaml
-from scalo.logger import logger
 
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.settings import get_settings, reset_settings
@@ -192,56 +191,6 @@ def dfe_package(dfe_config_fixtures, setup_paths):
         f.write(executable_rule)
 
     return dfe_package_path
-
-
-test_stats = {"total": 0, "passed": 0, "failed": 0, "skipped": 0, "test_files": {}}
-
-
-def pytest_runtest_logreport(report):
-    """Collect test statistics."""
-    if report.when == "call":
-        test_stats["total"] += 1
-
-        test_file = report.nodeid.split("::")[0]
-        if test_file not in test_stats["test_files"]:
-            test_stats["test_files"][test_file] = {
-                "total": 0,
-                "passed": 0,
-                "failed": 0,
-                "skipped": 0,
-            }
-
-        if report.passed:
-            test_stats["passed"] += 1
-            test_stats["test_files"][test_file]["passed"] += 1
-        elif report.failed:
-            test_stats["failed"] += 1
-            test_stats["test_files"][test_file]["failed"] += 1
-        elif report.skipped:
-            test_stats["skipped"] += 1
-            test_stats["test_files"][test_file]["skipped"] += 1
-
-        test_stats["test_files"][test_file]["total"] += 1
-
-
-def pytest_terminal_summary(terminalreporter, exitstatus):
-    """Print test summary at the end."""
-    logger.info("\n===================== test_schemas Test Summary =====================")
-    logger.info("Overall Statistics:")
-    logger.info(f"Total Tests Run: {test_stats['total']}")
-    logger.info(f"Tests Passed:    {test_stats['passed']}")
-    logger.info(f"Tests Failed:    {test_stats['failed']}")
-    logger.info(f"Tests Skipped:   {test_stats['skipped']}")
-    logger.info("\nBreakdown by Test File:")
-
-    for test_file, stats in test_stats["test_files"].items():
-        logger.info(f"\n{test_file}:")
-        logger.info(f"  Total Tests: {stats['total']}")
-        logger.info(f"  Passed:      {stats['passed']}")
-        logger.info(f"  Failed:      {stats['failed']}")
-        logger.info(f"  Skipped:     {stats['skipped']}")
-
-    logger.info("=================================================================")
 
 
 @pytest.fixture

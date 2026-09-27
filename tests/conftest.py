@@ -78,14 +78,18 @@ os.environ.setdefault("DFE_ENV", "test")
 os.environ.setdefault("DFE_AUTH_ENABLED", "false")
 
 # Load .env file if present (before any other imports that might use settings).
-# The lookup walks up from the repo root so a git worktree under .worktrees/
-# finds the main checkout's .env instead of silently running without one.
+# A git worktree under <checkout>/.worktrees/ falls back to the main checkout's
+# .env; the lookup never leaves the checkout, so an unrelated .env in a parent
+# directory (a home directory's, say) is never loaded into the test process.
 try:
     from dotenv import load_dotenv
 
     _repo_root = Path(__file__).parent.parent
+    _env_dirs = [_repo_root]
+    if _repo_root.parent.name == ".worktrees":
+        _env_dirs.append(_repo_root.parent.parent)
     env_path = next(
-        (p / ".env" for p in (_repo_root, *_repo_root.parents) if (p / ".env").exists()),
+        (p / ".env" for p in _env_dirs if (p / ".env").exists()),
         _repo_root / ".env",
     )
     if env_path.exists():
