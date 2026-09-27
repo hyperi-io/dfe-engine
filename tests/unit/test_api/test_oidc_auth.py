@@ -1,7 +1,5 @@
 """Tests for OIDC header authentication path in get_current_user()."""
 
-from __future__ import annotations
-
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.deps import create_access_token
@@ -232,6 +230,24 @@ class TestOidcAuthentication:
         data = resp.json()
         # OIDC wins — user_id from OIDC, not JWT
         assert data["user_id"] == "oidc-user@example.com"
+
+    def test_a_disabled_account_refuses_a_token_for_its_name_that_another_subject_holds(
+        self, client: TestClient, api_settings, app
+    ):
+        """Roles resolve from the account stored under the token's subject, so its disable bites."""
+        client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "Alice.Smith@corp", "X-Oidc-Groups": "dfe-admins"},
+        )
+        app.state.account_store.update("alice-smith-corp", enabled=False)
+        token = create_access_token(
+            data={"sub": "alice-smith-corp", "org_id": "test-org"}, settings=api_settings
+        )
+
+        resp = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+
+        assert resp.status_code == 401, resp.text
+        assert resp.json()["message"] == "Account disabled"
 
     def test_oidc_whitespace_in_groups_stripped(self, client: TestClient, app):
         """Whitespace around group names is stripped."""

@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
+from dfe_engine.api.deps import account_for_session_subject
 from dfe_engine.auth.accounts import AccountStore
 from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
 from dfe_engine.auth.groups import GroupStore
@@ -263,14 +264,17 @@ class TestCrossIdentityRefusal:
         assert accounts.list() == []
         audited.assert_called_once_with(subject, "entra", "api_key_subject")
 
-    def test_a_subject_that_is_the_providers_own_raw_name_is_admitted(self, stores):
+    def test_a_subject_that_is_the_providers_own_raw_name_reconciles_that_account(self, stores):
+        """The session binds the raw-named account, so a stem-named shadow would be a second."""
         accounts, groups = stores
         external_account(accounts, "jane.doe", "entra", ["acme-viewers"])
         jit = JitProvisioner(account_store=accounts, group_store=groups)
 
-        jit.ensure_account("jane.doe", ["dfe-analysts"], "entra")
+        account = jit.ensure_account("jane.doe", ["dfe-analysts"], "entra")
 
-        assert accounts.get("jane-doe") is not None
+        assert account.username == "jane.doe"
+        assert account.groups == ["dfe-analysts"]
+        assert accounts.get("jane-doe") is None
 
     def test_the_race_branch_refuses_a_local_account(self, tmp_path, stores):
         _, groups = stores
@@ -350,6 +354,83 @@ class TestCrossIdentityRefusal:
         audited.assert_called_once_with("jane@corp.com", "entra", "local_account")
 
 
+class TestOneStemTwoSubjects:
+    """sanitise_username folds case and punctuation, so two people can share a stem."""
+
+    FIRST = "Alice.Smith@corp"
+    SECOND = "alice-smith@corp"
+    STEM = "alice-smith-corp"
+
+    def test_a_second_subject_on_the_stem_is_refused(self, stores):
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+        jit.ensure_account(self.FIRST, ["acme-viewers"], "entra", email="alice.smith@corp")
+
+        with patch("dfe_engine.auth.jit.audit_jit_login_refused") as audited:
+            with pytest.raises(JitIdentityCollisionError) as refused:
+                jit.ensure_account(self.SECOND, ["dfe-admins"], "entra", email="alice-smith@corp")
+
+        assert refused.value.reason == "subject_mismatch"
+        audited.assert_called_once_with(self.SECOND, "entra", "subject_mismatch")
+        stored = accounts.get(self.STEM)
+        assert stored.groups == ["acme-viewers"]
+        assert stored.email == "alice.smith@corp"
+
+    def test_the_first_subject_signs_in_again(self, stores):
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+        jit.ensure_account(self.FIRST, ["acme-viewers"], "entra")
+
+        account = jit.ensure_account(self.FIRST, ["dfe-analysts"], "entra")
+
+        assert account.groups == ["dfe-analysts"]
+        assert account.subject == self.FIRST
+
+    def test_an_account_with_no_subject_binds_to_the_next_login(self, stores):
+        """An account made before the subject was recorded binds to whoever signs in next."""
+        accounts, groups = stores
+        external_account(accounts, self.STEM, "entra", ["acme-viewers"])
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        assert jit.ensure_account(self.FIRST, ["acme-viewers"], "entra").subject == self.FIRST
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account(self.SECOND, ["dfe-admins"], "entra")
+
+        assert refused.value.reason == "subject_mismatch"
+
+    def test_the_race_branch_refuses_a_second_subject(self, tmp_path, stores):
+        _, groups = stores
+        accounts = RacingAccountStore(tmp_path / "accounts", blind_to=self.STEM)
+        external_account(accounts, self.STEM, "entra", ["acme-viewers"])
+        accounts.update(self.STEM, subject=self.FIRST)
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account(self.SECOND, ["dfe-admins"], "entra")
+
+        assert refused.value.reason == "subject_mismatch"
+        assert AccountStore(tmp_path / "accounts").get(self.STEM).groups == ["acme-viewers"]
+
+    def test_a_session_for_the_second_subject_binds_no_account(self, stores):
+        """A token already minted for the second subject must not read the first one's account."""
+        accounts, groups = stores
+        JitProvisioner(account_store=accounts, group_store=groups).ensure_account(
+            self.FIRST, ["acme-viewers"], "entra"
+        )
+
+        assert account_for_session_subject(accounts, self.FIRST).username == self.STEM
+        assert account_for_session_subject(accounts, self.SECOND) is None
+
+    def test_a_session_whose_subject_is_the_stem_binds_no_account(self, stores):
+        """The stem is itself a subject an IdP can assert, so the raw lookup checks the record."""
+        accounts, groups = stores
+        JitProvisioner(account_store=accounts, group_store=groups).ensure_account(
+            self.FIRST, ["acme-viewers"], "entra"
+        )
+
+        assert account_for_session_subject(accounts, self.STEM) is None
+
+
 class TestSourceProviderBinding:
     """SCIM and OIDC from the same IdP are ONE identity source (#506).
 
@@ -387,6 +468,23 @@ class TestSourceProviderBinding:
         assert account.groups == ["acme-viewers", "dfe-admins"]
         assert account.email == "jane@corp.com"
         assert account.last_login_at != ""
+
+    def test_a_scim_account_under_the_raw_subject_is_adopted_without_a_shadow(self, stores):
+        """The binding adopts the SCIM account the session binds, so nothing is duplicated."""
+        accounts, groups = stores
+        scim_account(accounts, "jane.doe")
+        jit = JitProvisioner(
+            account_store=accounts,
+            group_store=groups,
+            source_provider_bindings={SCIM_SOURCE_PROVIDER: "entra"},
+        )
+
+        account = jit.ensure_account("jane.doe", ["dfe-admins"], "entra", email="jane@corp.com")
+
+        assert account.username == "jane.doe"
+        assert account.groups == ["dfe-admins"]
+        assert account.source_provider == SCIM_SOURCE_PROVIDER
+        assert [a.username for a in accounts.list()] == ["jane.doe"]
 
     def test_adoption_leaves_the_scim_stamp_alone(self, stores):
         """SCIM still owns the record, so removing the binding re-closes the door."""
