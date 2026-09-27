@@ -243,3 +243,49 @@ class TestDelete:
         registry.delete("acme")
         assert registry.get("beta") is not None
         assert len(registry.list()) == 1
+
+
+# ---------------------------------------------------------------------------
+# on_change
+# ---------------------------------------------------------------------------
+
+
+class TestOnChange:
+    def test_every_write_tells_the_listener(self, registry):
+        """Create, update and delete each land a call, after the write is on disk."""
+        seen: list[list[str]] = []
+        registry.on_change(lambda: seen.append([o.name for o in registry.list()]))
+
+        registry.create("acme")
+        registry.update("acme", display_name="Acme")
+        registry.delete("acme")
+
+        assert seen == [["acme"], ["acme"], []]
+
+    def test_a_refused_write_tells_nobody(self, registry):
+        calls: list[None] = []
+        registry.on_change(lambda: calls.append(None))
+        registry.create("acme")
+
+        with pytest.raises(ValueError):
+            registry.create("acme")
+        with pytest.raises(KeyError):
+            registry.update("nobody", display_name="x")
+        with pytest.raises(KeyError):
+            registry.delete("nobody")
+
+        assert len(calls) == 1
+
+    def test_a_listener_that_raises_does_not_fail_the_write(self, registry):
+        def broken() -> None:
+            raise RuntimeError("listener down")
+
+        calls: list[None] = []
+        registry.on_change(broken)
+        registry.on_change(lambda: calls.append(None))
+
+        org = registry.create("acme")
+
+        assert org.name == "acme"
+        assert registry.get("acme") is not None
+        assert len(calls) == 1

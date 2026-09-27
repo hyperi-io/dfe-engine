@@ -23,11 +23,12 @@ Usage::
     registry.delete("acme")
 """
 
-from __future__ import annotations
-
 import re
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+
+from scalo.logger import logger
 
 from dfe_engine.orgs.models import ORG_NAME_PATTERN, Org
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
@@ -44,10 +45,28 @@ class OrgRegistry:
     def __init__(self, orgs_dir: Path) -> None:
         self._dir = Path(orgs_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
+        self._listeners: list[Callable[[], None]] = []
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def on_change(self, listener: Callable[[], None]) -> None:
+        """Call ``listener`` after every create, update and delete this registry makes.
+
+        Every writer goes through here -- the API, the org lifecycle, the startup
+        and e2e seeds -- so a listener cannot miss one. A listener that raises is
+        logged and never fails the write.
+        """
+        self._listeners.append(listener)
+
+    def _changed(self, name: str) -> None:
+        """Tell every listener an org changed."""
+        for listener in self._listeners:
+            try:
+                listener()
+            except Exception as exc:
+                logger.warning("org change listener failed", org=name, error=str(exc))
 
     def create(
         self,
@@ -85,6 +104,7 @@ class OrgRegistry:
             updated_at=now,
         )
         self._write(path, org)
+        self._changed(name)
         return org
 
     def get(self, name: str) -> Org | None:
@@ -148,6 +168,7 @@ class OrgRegistry:
         update_dict["updated_at"] = _now()
         org = org.model_copy(update=update_dict)
         self._write(path, org)
+        self._changed(name)
         return org
 
     def delete(self, name: str) -> None:
@@ -163,6 +184,7 @@ class OrgRegistry:
         if not path.exists():
             raise KeyError(name)
         path.unlink()
+        self._changed(name)
 
     # ------------------------------------------------------------------
     # Internal helpers

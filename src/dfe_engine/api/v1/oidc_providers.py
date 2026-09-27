@@ -43,6 +43,7 @@ from dfe_engine.api.pagination import (
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.oidc.credential_env import is_env_var_name, provider_secret_path
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.governance.ch import request_ch_rbac_reconcile
 
 if TYPE_CHECKING:
     from dfe_engine.auth.oidc.models import OIDCProvider
@@ -635,6 +636,9 @@ async def sync_provider_groups(
     result = await sync_provider(
         name, registry, group_store, secrets=getattr(request.app.state, "dfe_secrets", None)
     )
+    # A group the sync created is a new ClickHouse user to provision.
+    if result["created"]:
+        request_ch_rbac_reconcile(request.app.state)
     audit_resource_change(user.user_id, "oidc_provider", name, "executed")
 
     return SyncResponse(

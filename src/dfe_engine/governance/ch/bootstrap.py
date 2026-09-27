@@ -7,20 +7,21 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """The shared assembly between settings/stores and ``reconcile_ch_rbac``.
 
-Both callers - app startup and the governance endpoint - need the same admin
-client, secrets store, orgs and bindings, and previously built all four inline;
-the copies drifted, which is how ``bindings`` came to be passed by neither.
+Every caller - app startup, the governance endpoint, and the trigger an org or
+group change fires - needs the same admin client, secrets store, orgs and
+bindings, and previously built all four inline; the copies drifted, which is how
+``bindings`` came to be passed by neither.
 
 Building the client stays a separate call so each caller keeps its own failure
-policy: startup logs and continues, the endpoint returns 503.
+policy: startup logs and continues, the endpoint returns 503, the trigger counts
+the failure and retries after a back-off.
 
 Imports are function-local because the rest of the ``governance.ch`` package is
 pure rendering with no cluster or settings dependency.
 """
 
-from __future__ import annotations
-
 import os
+import threading
 from typing import Any
 
 from scalo.logger import logger
@@ -30,6 +31,10 @@ from .reconciler import ReconcileResult, reconcile_ch_rbac
 
 _ENABLED_VALUES = ("true", "1", "yes")
 _DISABLED_VALUES = ("false", "0", "no")
+
+# Two runs minting the same new identity at once store one password and give
+# ClickHouse the other, so the endpoint, startup and the change trigger take turns.
+_RECONCILE_LOCK = threading.Lock()
 
 TENANT_ISOLATION_ENV = "DFE_TENANT_ISOLATION_ENABLED"
 LEGACY_TENANT_ISOLATION_ENV = "DFE_ORG_PROVISIONING_ENABLED"
@@ -77,15 +82,17 @@ def reconcile_from_stores(
     """Reconcile CH RBAC from the org registry and the RBAC group store.
 
     A missing store contributes nothing rather than failing: an org registry with
-    no groups still reconciles tiers, roles and row policies.
+    no groups still reconciles tiers, roles and row policies. One run at a time in
+    this process; a caller arriving mid-run waits for it.
     """
     from dfe_engine.secrets import build_secrets
 
-    orgs = org_registry.list() if org_registry is not None else []
-    groups = group_store.list() if group_store is not None else []
-    return reconcile_ch_rbac(
-        admin_client,
-        secrets_store=build_secrets(settings.secrets),
-        orgs=orgs,
-        bindings=derive_group_bindings(groups, orgs),
-    )
+    with _RECONCILE_LOCK:
+        orgs = org_registry.list() if org_registry is not None else []
+        groups = group_store.list() if group_store is not None else []
+        return reconcile_ch_rbac(
+            admin_client,
+            secrets_store=build_secrets(settings.secrets),
+            orgs=orgs,
+            bindings=derive_group_bindings(groups, orgs),
+        )
