@@ -74,6 +74,13 @@ class Account(BaseModel):
     source_provider: str = ""
     external_id: str = ""
     """Provider-specific external identifier (SCIM externalId / IdP object ID)."""
+    subject: str = ""
+    """The IdP subject a JIT login created or adopted this account for.
+
+    Several subjects share one JIT stem (``Alice.Smith@corp`` and
+    ``alice-smith@corp`` both sanitise to ``alice-smith-corp``), so this is what
+    tells the account's own identity from another that sanitises onto it. Empty on
+    an account no IdP login has reached yet."""
     last_login_at: str = ""
     disabled_at: str = ""
     blocked_at: str = ""
@@ -404,6 +411,7 @@ _UPDATABLE_FIELDS = (
     "external",
     "source_provider",
     "external_id",
+    "subject",
     "last_login_at",
     "email",
     "phone",

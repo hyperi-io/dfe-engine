@@ -281,14 +281,14 @@ def audit_jit_login_refused(user_id: str, source_provider: str, reason: str) -> 
     """Emit an audit event when an OIDC login is refused over an account collision.
 
     Warning level: the IdP asserted a subject that resolves onto a local account,
-    a recovery credential, or another provider's account, so an operator needs to
-    see it whether it is a misconfiguration or an attempt.
+    a recovery credential, or another provider's or another subject's account, so
+    an operator needs to see it whether it is a misconfiguration or an attempt.
 
     Args:
         user_id: The IdP-asserted subject that was refused.
         source_provider: OIDC provider name that asserted it.
-        reason: ``protected_account``, ``local_account``, ``provider_mismatch`` or
-            ``api_key_subject``.
+        reason: ``protected_account``, ``local_account``, ``provider_mismatch``,
+            ``subject_mismatch`` or ``api_key_subject``.
     """
     logger.warning(
         "auth.jit.login_refused",

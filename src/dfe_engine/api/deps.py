@@ -527,13 +527,15 @@ def account_for_session_subject(store: Any, user_id: str):
     ``alice-example-com.yaml``. The stem reaches only an account an IdP owns (a
     JIT shadow or a SCIM record): a local credential answers to its own name
     alone, so ``Bob`` never binds the local ``bob``. An API-key subject binds no
-    account.
+    account. Several subjects sanitise to one stem, and a subject can be
+    another's stem, so an account that records another subject is not this
+    session's whichever lookup found it.
     """
     if user_id.startswith(API_KEY_SUBJECT_PREFIX):
         return None
     account = store.get(user_id)
     if account is not None:
-        return account
+        return None if account.subject and account.subject != user_id else account
     from dfe_engine.auth.jit import JitProvisioner
 
     stem = JitProvisioner.sanitise_username(user_id)
@@ -542,6 +544,8 @@ def account_for_session_subject(store: Any, user_id: str):
     shadow = store.get(stem)
     if shadow is None or not shadow.source_provider:
         return None
+    if shadow.subject and shadow.subject != user_id:
+        return None
     return shadow
 
 
@@ -549,7 +553,9 @@ def require_local_account_enabled(request: Request, user_id: str) -> Any:
     """Reject a session when the account it is bound to is disabled or blocked.
 
     The account is the one :func:`account_for_session_subject` binds, so a
-    subject that binds none (an API key, a username with no record) passes.
+    subject that binds none (an API key, a username with no record) passes. An
+    account stored under the raw subject still refuses when disabled or blocked
+    even where it records another subject and so is not bound.
 
     Returns:
         The session's store account, or None when it has none.
@@ -558,12 +564,14 @@ def require_local_account_enabled(request: Request, user_id: str) -> Any:
     if account_store is None:
         return None
 
-    account = account_for_session_subject(account_store, user_id)
+    bound = account_for_session_subject(account_store, user_id)
+    # Role resolution reads the account stored under the raw subject, bound or not.
+    account = bound or account_store.get(user_id)
     if account is None:
         return None
     denied = account.session_denied()
     if denied is None:
-        return account
+        return bound
     code, message = denied
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
