@@ -1348,13 +1348,19 @@ class HyperDXSettings(BaseModel):
 class GitopsWriteSettings(BaseModel):
     """Timeout and retry budget for the remote calls a deploy-repo write makes.
 
-    A write fetches the remote head before it commits and pushes after, and both
-    get this bound instead of the short one reads use: a push to a small forge under
-    load, or its pre-receive hooks, can legitimately take longer. A transient
-    failure (timeout, refused or reset connection, 5xx) is retried with jittered
-    exponential back-off inside ``budget_seconds``, then answers 503. Field names
-    mirror scalo's :class:`~scalo.resilience.ResilienceConfig`; a budget of 0 makes
-    one attempt.
+    A write fetches the remote head before it commits and pushes after. Each call
+    waits up to ``timeout_seconds`` on any one connect or read, longer than reads
+    wait, because a push to a small forge under load or through its pre-receive
+    hooks can take that long.
+
+    A transient failure (timeout, refused or reset connection, 408/429/5xx) is
+    retried with jittered exponential back-off for ``budget_seconds`` after the
+    first failure, and a retry's timeout is capped at the budget left. A forge that
+    stops answering fails a call in about ``timeout_seconds + budget_seconds``, and
+    the API answers 503. The bound is per read, so a forge that keeps answering
+    slowly is not cut off, and a write that must re-apply makes two fetches and two
+    pushes. Field names mirror scalo's :class:`~scalo.resilience.ResilienceConfig`;
+    a budget of 0 makes one attempt.
 
     Environment variables:
     - DFE_GITOPS_WRITE_TIMEOUT_SECONDS -> gitops.write.timeout_seconds
@@ -1372,7 +1378,7 @@ class GitopsWriteSettings(BaseModel):
     budget_seconds: float = Field(
         default=10.0,
         ge=0.0,
-        description="How long a transient failure is retried before the write answers 503, seconds.",
+        description="How long a call keeps retrying after its first transient failure, seconds.",
     )
 
 

@@ -20,11 +20,14 @@ import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from socketserver import ThreadingMixIn
+from typing import Any
 from wsgiref.simple_server import WSGIRequestHandler, WSGIServer, make_server
 
 import pytest
 from dulwich import porcelain
-from dulwich.objects import Commit
+from dulwich.errors import NotGitRepository
+from dulwich.object_store import tree_lookup_path
+from dulwich.objects import Blob, Commit
 from dulwich.repo import Repo
 from dulwich.server import DictBackend
 from dulwich.web import make_wsgi_chain
@@ -344,3 +347,146 @@ def test_a_failure_another_attempt_cannot_fix_is_not_retried(tmp_path: Path, ser
     assert caught.value.transient is False
     assert time.monotonic() - started < 10.0
     assert _retries(manager, "fetch", "retried") == 0
+
+
+def _remote_file(bare: Path, branch: str, rel: str) -> str:
+    """A file's content at the remote branch's head."""
+    with Repo(str(bare)) as repo:
+        commit = repo[repo.refs[f"refs/heads/{branch}".encode()]]
+        assert isinstance(commit, Commit)
+        _mode, sha = tree_lookup_path(repo.get_object, commit.tree, rel.encode())
+        blob = repo[sha]
+        assert isinstance(blob, Blob)
+        return blob.data.decode()
+
+
+def test_a_push_that_landed_is_not_re_applied_over_a_peers_write(tmp_path: Path, monkeypatch):
+    """Our push lands, its answer is lost, and a peer writes the same file on top.
+
+    Re-applying our older content on the peer's head would revert the peer's write
+    while both writers were told they succeeded.
+    """
+    bare, branch = _seed(tmp_path)
+    ours = GitopsRepo(
+        local_path=str(tmp_path / "ours"), repo_url=str(bare), branch=branch, push=True
+    )
+    peer = GitopsRepo(
+        local_path=str(tmp_path / "peer"), repo_url=str(bare), branch=branch, push=True
+    )
+    ours.ensure()
+    peer.ensure()
+
+    real_push = porcelain.push
+    lost: list[bool] = []
+
+    def lose_our_first_answer(path: Any, *args: Any, **kwargs: Any) -> Any:
+        result = real_push(path, *args, **kwargs)
+        if str(path) == str(tmp_path / "ours") and not lost:
+            lost.append(True)
+            peer.publish({"x.yaml": "v: 2\n"}, message="peer, newer")
+            raise TimeoutError("read timed out after the forge applied the push")
+        return result
+
+    monkeypatch.setattr(repo_module.porcelain, "push", lose_our_first_answer)
+    result = ours.publish({"x.yaml": "v: 1\n"}, message="ours, older")
+
+    assert lost == [True]
+    assert result.pushed is True
+    assert _remote_file(bare, branch, "x.yaml") == "v: 2\n"
+    with Repo(str(bare)) as remote:
+        head = remote[remote.refs[f"refs/heads/{branch}".encode()]]
+        assert isinstance(head, Commit)
+        assert head.parents == [(result.commit_sha or "").encode()]
+    assert ours.head_revision() == head.id.decode()
+
+
+def _faked_fetch_clone(tmp_path: Path) -> GitopsRepo:
+    """A pushing clone whose fetch the test replaces, so the URL is never dialled."""
+    bare, branch = _seed(tmp_path)
+    return _clone(
+        tmp_path,
+        bare,
+        branch,
+        "http://127.0.0.1:9/deploy.git",
+        write=GitopsWriteSettings(
+            timeout_seconds=1.0, wait_initial=0.01, wait_max=0.02, budget_seconds=2.0
+        ),
+    )
+
+
+def test_a_hard_failure_on_a_retry_is_not_retried(tmp_path: Path, monkeypatch) -> None:
+    """The first fetch times out and the second finds no repo: fail at once, not 503.
+
+    A retry runs inside the handler for the first failure, so its error carries that
+    timeout as context; read as its cause, it made the missing repo look transient.
+    """
+    repo = _faked_fetch_clone(tmp_path)
+    timeouts: list[float] = []
+
+    def fetch(_errstream: object, *, timeout: float) -> object:
+        timeouts.append(timeout)
+        if len(timeouts) == 1:
+            raise TimeoutError("the first fetch timed out")
+        raise NotGitRepository("no such repo")
+
+    monkeypatch.setattr(repo, "_fetch", fetch)
+    with pytest.raises(GitopsRemoteError) as caught:
+        repo.publish({"x.yaml": "v: 1\n"}, message="gone")
+
+    assert not isinstance(caught.value, GitopsUnavailableError)
+    assert caught.value.transient is False
+    assert len(timeouts) == 2
+
+
+def test_a_callers_own_timeout_does_not_make_a_hard_failure_transient(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """publish called while its caller handles a timeout: a missing repo fails at once."""
+    repo = _faked_fetch_clone(tmp_path)
+    timeouts: list[float] = []
+
+    def fetch(_errstream: object, *, timeout: float) -> object:
+        timeouts.append(timeout)
+        raise NotGitRepository("no such repo")
+
+    monkeypatch.setattr(repo, "_fetch", fetch)
+    try:
+        raise TimeoutError("the caller's own timeout")
+    except TimeoutError:
+        with pytest.raises(GitopsRemoteError) as caught:
+            repo.publish({"x.yaml": "v: 1\n"}, message="gone")
+
+    assert not isinstance(caught.value, GitopsUnavailableError)
+    assert caught.value.transient is False
+    assert len(timeouts) == 1
+
+
+def test_the_budget_bounds_a_call_to_a_silent_forge(tmp_path: Path, no_proxy) -> None:
+    """A retry waits only for what is left of the budget, so the budget ends the call.
+
+    With every retry waiting its full timeout, a forge that accepts and goes silent
+    cost two timeouts plus the budget.
+    """
+    timeout, budget = 2.0, 0.5
+    bare, branch = _seed(tmp_path)
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(16)
+    try:
+        repo = _clone(
+            tmp_path,
+            bare,
+            branch,
+            f"http://127.0.0.1:{listener.getsockname()[1]}/deploy.git",
+            write=GitopsWriteSettings(
+                timeout_seconds=timeout, wait_initial=0.05, wait_max=0.1, budget_seconds=budget
+            ),
+        )
+        started = time.monotonic()
+        with pytest.raises(GitopsUnavailableError):
+            repo.publish({"x.yaml": "v: 1\n"}, message="silent forge")
+        elapsed = time.monotonic() - started
+    finally:
+        listener.close()
+
+    assert elapsed < timeout + budget + 0.5
