@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime
+from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -40,10 +41,20 @@ from dfe_engine.yaml_utils import yaml_dump, yaml_load
 if TYPE_CHECKING:
     from dfe_engine.store.documents import DocuStore
 
-# Dummy hash used for timing-safe rejection of unknown users.
-# Generated once at import time; cost=4 is intentionally low (we just need
-# a valid hash to pass to checkpw so it doesn't short-circuit).
-_DUMMY_HASH: bytes = bcrypt.hashpw(b"dummy-timing-protection", bcrypt.gensalt(rounds=4))
+BCRYPT_ROUNDS = 12
+"""The bcrypt cost every stored password hash is made at."""
+
+
+@cache
+def _dummy_hash() -> bytes:
+    """The hash an unknown or passwordless account is checked against.
+
+    Made at the stored hashes' own cost, so a login for an account that does not
+    exist takes as long as one for an account that does. Built on first use rather
+    than at import, because a hash at that cost takes a noticeable fraction of a second.
+    """
+    return bcrypt.hashpw(b"dummy-timing-protection", bcrypt.gensalt(rounds=BCRYPT_ROUNDS))
+
 
 # Account name becomes the filename stem ({name}.yaml), so it must be a safe
 # stem - reject path traversal / separators. \Z (not $) anchors the true end of
@@ -213,6 +224,9 @@ class AccountStore:
         Returns:
             Account if found, None otherwise.
         """
+        # No account has an invalid name, and joining one would resolve a path outside the store.
+        if not _VALID_NAME.match(username):
+            return None
         path = self._path(username)
         if not path.exists():
             return None
@@ -341,7 +355,7 @@ class AccountStore:
         path = self._path(username)
         if not path.exists():
             # Timing-safe rejection: still run bcrypt to prevent oracle attacks
-            bcrypt.checkpw(password.encode("utf-8"), _DUMMY_HASH)
+            bcrypt.checkpw(password.encode("utf-8"), _dummy_hash())
             return False
 
         account = self._read(path)
@@ -350,7 +364,7 @@ class AccountStore:
         # bcrypt hash - reject both, timing-safely. Prevents an empty or
         # placeholder password from ever matching a stored account.
         if not password or not account.password_hash.startswith("$2"):
-            bcrypt.checkpw(password.encode("utf-8"), _DUMMY_HASH)
+            bcrypt.checkpw(password.encode("utf-8"), _dummy_hash())
             return False
         return bcrypt.checkpw(
             password.encode("utf-8"),
@@ -530,10 +544,10 @@ class DocuStoreAccountStore:
         """Timing-safe password check - identical semantics to the YAML store."""
         account = self._c.get(username)
         if account is None:
-            bcrypt.checkpw(password.encode("utf-8"), _DUMMY_HASH)
+            bcrypt.checkpw(password.encode("utf-8"), _dummy_hash())
             return False
         if not password or not account.password_hash.startswith("$2"):
-            bcrypt.checkpw(password.encode("utf-8"), _DUMMY_HASH)
+            bcrypt.checkpw(password.encode("utf-8"), _dummy_hash())
             return False
         return bcrypt.checkpw(
             password.encode("utf-8"),
@@ -601,7 +615,7 @@ def _password_update(new_password: str, change_required: bool) -> dict[str, obje
     return update
 
 
-def hash_password(password: str, rounds: int = 12) -> str:
+def hash_password(password: str, rounds: int = BCRYPT_ROUNDS) -> str:
     """Bcrypt-hash *password* and return the hash as a UTF-8 string."""
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=rounds)).decode("utf-8")
 
