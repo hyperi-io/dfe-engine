@@ -10,7 +10,8 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
+from scalo.logger import logger
 
 from dfe_engine.auth.protected_accounts import resolve_floor
 from dfe_engine.auth.store_names import VALID_NAME, store_key
@@ -98,6 +99,7 @@ class GroupStore:
         self._dir = Path(groups_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
         self.protected = resolve_floor(admin_name)
+        self._skipped: set[str] = set()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -119,6 +121,11 @@ class GroupStore:
         return self._load(path)
 
     def _load(self, path: Path) -> Group | None:
+        """The group in *path*, or None when there is none or it is not a valid group.
+
+        An invalid file is skipped, not raised, so it cannot take down role resolution
+        for every session. Its members lose that group's roles until it is fixed.
+        """
         if not path.exists():
             return None
         data = yaml_load(path)
@@ -126,7 +133,16 @@ class GroupStore:
             data = {}
         # Name is derived from filename, not stored in the file
         data["name"] = path.stem
-        return Group.model_validate(data)
+        try:
+            return Group.model_validate(data)
+        except ValidationError as exc:
+            # Role resolution lists every group per request, so warn once per file.
+            if path.name not in self._skipped:
+                self._skipped.add(path.name)
+                logger.warning(
+                    "group file skipped: not a valid group", path=str(path), error=str(exc)
+                )
+            return None
 
     def _write(self, group: Group) -> None:
         # Exclude the name field -- it lives in the filename, not the YAML

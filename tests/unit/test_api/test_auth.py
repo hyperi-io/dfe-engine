@@ -477,3 +477,18 @@ class TestRolesFollowTheBoundAccount:
 
         assert resp.status_code == 200, resp.text
         assert resp.json()["roles"] == ["data_analyst"]
+
+    def test_a_group_file_with_a_bad_scope_leaves_other_sessions_their_roles(
+        self, client: TestClient, app, viewer_headers: dict
+    ):
+        """Every session lists the groups, so one unloadable file must not fail them all."""
+        (app.state.group_store._dir / "climber.yaml").write_text(
+            "roles: [admin]\nmembers: [viewer]\nscope: org:../elsewhere/outside\n",
+            encoding="utf-8",
+        )
+
+        resp = client.get("/api/v1/auth/me", headers=viewer_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert "admin" not in resp.json()["roles"]
+        assert "data_viewer" in resp.json()["roles"]

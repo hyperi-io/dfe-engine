@@ -6,7 +6,10 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
+from pathlib import Path
+
 import pytest
+from scalo.logger import logger
 
 from dfe_engine.auth.groups import Group, GroupStore
 
@@ -29,6 +32,43 @@ class TestGroupModel:
         """The org part is looked up in the org registry, so it follows the org name rule."""
         with pytest.raises(ValueError, match="Group scope"):
             Group(name="climber", scope=scope)
+
+
+class TestAStoredGroupFileWithABadScope:
+    """One file no Group can be made from must not take every other group down with it."""
+
+    @pytest.fixture
+    def store(self, tmp_path):
+        store = GroupStore(tmp_path / "groups")
+        store.create("analysts", roles=["data_analyst"], members=["bob"])
+        (tmp_path / "groups" / "climber.yaml").write_text(
+            "roles: [admin]\nmembers: [bob]\nscope: org:../elsewhere/outside\n",
+            encoding="utf-8",
+        )
+        return store
+
+    def test_every_other_group_still_loads_and_the_bad_one_is_absent(self, store):
+        assert [g.name for g in store.list()] == ["analysts"]
+        assert store.get("climber") is None
+        assert store.get("analysts").roles == ["data_analyst"]
+        assert store.resolve_roles_for_member("bob") == ["data_analyst"]
+
+    def test_the_skip_is_logged_once_naming_the_file(self, store):
+        warnings: list[dict] = []
+        handler = logger.add(
+            lambda m: warnings.append({"event": m.record["message"], **m.record["extra"]}),
+            level="WARNING",
+            format="{message}",
+        )
+        try:
+            store.list()
+            store.list()
+            store.get("climber")
+        finally:
+            logger.remove(handler)
+
+        skipped = [w for w in warnings if w["event"] == "group file skipped: not a valid group"]
+        assert [Path(w["path"]).name for w in skipped] == ["climber.yaml"]
 
 
 class TestGroupStoreCreate:
