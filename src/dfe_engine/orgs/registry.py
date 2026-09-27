@@ -116,7 +116,10 @@ class OrgRegistry:
         Returns:
             Org if found, None otherwise.
         """
-        path = self._path(name)
+        try:
+            path = self._path(name)
+        except KeyError:
+            return None
         if not path.exists():
             return None
         return self._read(path)
@@ -191,6 +194,13 @@ class OrgRegistry:
     # ------------------------------------------------------------------
 
     def _path(self, name: str) -> Path:
+        """The file org *name* lives in.
+
+        Raises:
+            KeyError: No org can hold *name*, so it is looked up nowhere.
+        """
+        if re.fullmatch(ORG_NAME_PATTERN, name) is None:
+            raise KeyError(name)
         return self._dir / f"{name}.yaml"
 
     def _read(self, path: Path) -> Org:

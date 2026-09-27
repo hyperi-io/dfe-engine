@@ -26,7 +26,6 @@ Usage::
 
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
@@ -36,6 +35,7 @@ import bcrypt
 from pydantic import BaseModel, Field
 
 from dfe_engine.auth.protected_accounts import resolve_floor
+from dfe_engine.auth.store_names import VALID_NAME, store_key
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 if TYPE_CHECKING:
@@ -55,11 +55,6 @@ def _dummy_hash() -> bytes:
     """
     return bcrypt.hashpw(b"dummy-timing-protection", bcrypt.gensalt(rounds=BCRYPT_ROUNDS))
 
-
-# Account name becomes the filename stem ({name}.yaml), so it must be a safe
-# stem - reject path traversal / separators. \Z (not $) anchors the true end of
-# string so a trailing newline cannot slip into the filename.
-_VALID_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}\Z")
 
 # Stored for accounts with NO usable local password (external / IdP-owned /
 # JIT-provisioned). Not a valid bcrypt hash ($2...), so verify_password never
@@ -171,7 +166,7 @@ class AccountStore:
         Raises:
             ValueError: If an account with this username already exists.
         """
-        if not _VALID_NAME.match(username):
+        if not VALID_NAME.match(username):
             raise ValueError(f"Invalid account name: {username!r}")
         path = self._path(username)
         if path.exists():
@@ -210,7 +205,7 @@ class AccountStore:
             ProtectedAccountError: The record would leave a recovery credential
                 unable to log in.
         """
-        if not _VALID_NAME.match(account.username):
+        if not VALID_NAME.match(account.username):
             raise ValueError(f"Invalid account name: {account.username!r}")
         if not allow_protected:
             self.protected.check_account_state(
@@ -231,10 +226,10 @@ class AccountStore:
         Returns:
             Account if found, None otherwise.
         """
-        # No account has an invalid name, and joining one would resolve a path outside the store.
-        if not _VALID_NAME.match(username):
+        try:
+            path = self._path(username)
+        except KeyError:
             return None
-        path = self._path(username)
         if not path.exists():
             return None
         return self._read(path)
@@ -359,13 +354,12 @@ class AccountStore:
         Returns:
             True if the password matches, False otherwise.
         """
-        path = self._path(username)
-        if not path.exists():
+        account = self.get(username)
+        if account is None:
             # Timing-safe rejection: still run bcrypt to prevent oracle attacks
             bcrypt.checkpw(password.encode("utf-8"), _dummy_hash())
             return False
 
-        account = self._read(path)
         # An empty password never authenticates, and an account carrying the
         # unusable-password sentinel (external / IdP-owned / JIT) has no valid
         # bcrypt hash - reject both, timing-safely. Prevents an empty or
@@ -383,7 +377,12 @@ class AccountStore:
     # ------------------------------------------------------------------
 
     def _path(self, username: str) -> Path:
-        return self._dir / f"{username}.yaml"
+        """The file *username*'s account lives in.
+
+        Raises:
+            KeyError: No account can hold *username*, so it is looked up nowhere.
+        """
+        return self._dir / f"{store_key(username)}.yaml"
 
     def _read(self, path: Path) -> Account:
         """Load an Account from a YAML file.
@@ -455,7 +454,7 @@ class DocuStoreAccountStore:
         change_required: bool = False,
     ) -> Account:
         """Create a new account. Raises ValueError if the name is invalid or taken."""
-        if not _VALID_NAME.match(username):
+        if not VALID_NAME.match(username):
             raise ValueError(f"Invalid account name: {username!r}")
         if self._c.exists(username):
             raise ValueError(f"Account already exists: {username}")
@@ -477,7 +476,7 @@ class DocuStoreAccountStore:
         ``allow_protected`` writes a recovery credential the floor would refuse;
         reserved for the reconcile paths. Raises ProtectedAccountError otherwise.
         """
-        if not _VALID_NAME.match(account.username):
+        if not VALID_NAME.match(account.username):
             raise ValueError(f"Invalid account name: {account.username!r}")
         if not allow_protected:
             self.protected.check_account_state(
@@ -491,7 +490,17 @@ class DocuStoreAccountStore:
 
     def get(self, username: str) -> Account | None:
         """Return the account for *username*, or None if not found."""
-        return self._c.get(username)
+        try:
+            return self._c.get(store_key(username))
+        except KeyError:
+            return None
+
+    def _existing(self, username: str) -> Account:
+        """The account stored under *username*. Raises KeyError where there is none."""
+        account = self.get(username)
+        if account is None:
+            raise KeyError(username)
+        return account
 
     def list(self) -> list[Account]:
         """Return all accounts, sorted by username."""
@@ -503,9 +512,7 @@ class DocuStoreAccountStore:
         ``allow_protected`` disables or de-roles a recovery credential -- admin
         retirement only. Raises ProtectedAccountError otherwise.
         """
-        account = self._c.get(username)
-        if account is None:
-            raise KeyError(username)
+        account = self._existing(username)
         if not allow_protected:
             self.protected.check_account_update(username, fields, account.groups)
         updates = _apply_access_stamps({k: fields[k] for k in _UPDATABLE_FIELDS if k in fields})
@@ -520,17 +527,13 @@ class DocuStoreAccountStore:
 
         ``change_required`` marks the password as issued, and False clears a pending change.
         """
-        account = self._c.get(username)
-        if account is None:
-            raise KeyError(username)
+        account = self._existing(username)
         account = account.model_copy(update=_password_update(new_password, change_required))
         self._c.put(username, account)
 
     def set_attributes(self, username: str, attributes: dict) -> Account:
         """Full-replace the non-sensitive ``attributes`` blob. Raises KeyError if missing."""
-        account = self._c.get(username)
-        if account is None:
-            raise KeyError(username)
+        account = self._existing(username)
         account = account.model_copy(update={"attributes": attributes, "updated_at": _now()})
         self._c.put(username, account)
         return account
@@ -542,15 +545,14 @@ class DocuStoreAccountStore:
         wipe only. Raises ProtectedAccountError otherwise.
         """
         # Existence first, so a missing name answers KeyError on both backends.
-        if self._c.get(username) is None:
-            raise KeyError(username)
+        self._existing(username)
         if not allow_protected:
             self.protected.check_account_delete(username)
         self._c.delete(username)
 
     def verify_password(self, username: str, password: str) -> bool:
         """Timing-safe password check - identical semantics to the YAML store."""
-        account = self._c.get(username)
+        account = self.get(username)
         if account is None:
             bcrypt.checkpw(password.encode("utf-8"), _dummy_hash())
             return False

@@ -3,6 +3,7 @@
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.deps import create_access_token
+from dfe_engine.auth.groups import GroupStore
 
 
 class TestOidcAuthentication:
@@ -121,6 +122,49 @@ class TestOidcAuthentication:
 
         assert resp.status_code == 200
         assert app.state.account_store.get("ken-example-com").source_provider == "oidc"
+
+    def test_a_group_name_that_is_a_path_grants_nothing(self, client: TestClient, app):
+        """The proxy's group names are joined onto the group directory, so one must not climb out."""
+        elsewhere = app.state.group_store._dir.parent / "elsewhere"
+        GroupStore(elsewhere).create("outside", roles=["admin"])
+
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "lena@example.com", "X-Oidc-Groups": "../elsewhere/outside"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["roles"] == []
+
+    def test_the_proxied_caller_reads_their_own_account(self, client: TestClient):
+        """Authentication binds an email-shaped subject to its JIT stem, and so must /me."""
+        resp = client.get(
+            "/api/v1/auth/accounts/me",
+            headers={"X-Oidc-Subject": "mia@example.com", "X-Oidc-Groups": "dfe-viewers"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["username"] == "mia-example-com"
+
+    def test_the_proxied_caller_updates_their_own_contact_fields(self, client: TestClient, app):
+        resp = client.put(
+            "/api/v1/auth/accounts/me",
+            headers={"X-Oidc-Subject": "noah@example.com", "X-Oidc-Groups": "dfe-viewers"},
+            json={"phone": "+61 2 5550 1234"},
+        )
+
+        assert resp.status_code == 200
+        assert app.state.account_store.get("noah-example-com").phone == "+61 2 5550 1234"
+
+    def test_the_proxied_caller_is_told_their_password_lives_at_the_idp(self, client: TestClient):
+        resp = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            headers={"X-Oidc-Subject": "olga@example.com", "X-Oidc-Groups": "dfe-viewers"},
+            json={"new_password": "a-long-enough-password-1"},
+        )
+
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "external_account"
 
     def test_unknown_groups_no_roles(self, client: TestClient):
         """Unknown groups authenticate but yield no roles."""

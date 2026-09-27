@@ -95,6 +95,39 @@ class TestGroupStoreGet:
         assert group.name == "mygroup"
 
 
+class TestAGroupNameThatIsAPath:
+    """X-Oidc-Groups values reach these lookups straight from the proxy."""
+
+    OUTSIDE = "../elsewhere/outside"
+
+    @pytest.fixture
+    def outside(self, tmp_path):
+        """A group file one directory over, where :attr:`OUTSIDE` resolves from the store."""
+        GroupStore(tmp_path / "elsewhere").create("outside", roles=["admin"])
+        return tmp_path / "elsewhere" / "outside.yaml"
+
+    def test_get_reads_no_file(self, tmp_path, outside):
+        assert GroupStore(tmp_path / "groups").get(self.OUTSIDE) is None
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            pytest.param(lambda s, n: s.update(n, roles=["viewer"]), id="update"),
+            pytest.param(lambda s, n: s.set_attributes(n, {"k": "v"}), id="set_attributes"),
+            pytest.param(lambda s, n: s.add_member(n, "mallory"), id="add_member"),
+            pytest.param(lambda s, n: s.remove_member(n, "mallory"), id="remove_member"),
+            pytest.param(lambda s, n: s.delete(n), id="delete"),
+        ],
+    )
+    def test_a_change_raises_and_leaves_the_file(self, tmp_path, outside, change):
+        before = outside.read_bytes()
+
+        with pytest.raises(KeyError):
+            change(GroupStore(tmp_path / "groups"), self.OUTSIDE)
+
+        assert outside.read_bytes() == before
+
+
 class TestGroupStoreList:
     def test_list_empty(self, tmp_path):
         store = GroupStore(tmp_path / "groups")

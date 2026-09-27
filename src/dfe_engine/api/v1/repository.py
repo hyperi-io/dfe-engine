@@ -20,10 +20,7 @@ must be "-" (stored as ""). Reads that are not visible return 404;
 forbidden writes return 403.
 """
 
-from __future__ import annotations
-
 import json
-import re
 from datetime import datetime
 from typing import Any, Literal
 
@@ -43,11 +40,11 @@ from dfe_engine.api.deps import (
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.models import AuthContext, Scope
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.auth.store_names import VALID_NAME
 from dfe_engine.repository.store import ConflictError, RepositoryStore, json_merge_patch
 
 router = APIRouter(prefix="/repository", tags=["Repository"])
 
-_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$")
 _VALID_SCOPES = ("system", "org", "group", "user")
 
 # The closed set in the CONTRACT (path params render as an enum in OpenAPI so
@@ -116,9 +113,9 @@ def _not_found() -> HTTPException:
 
 
 def _validate_names(namespace: str, key: str | None = None) -> None:
-    if not _NAME_RE.match(namespace):
+    if not VALID_NAME.match(namespace):
         raise _validation_error(f"Invalid namespace '{namespace}'")
-    if key is not None and not _NAME_RE.match(key):
+    if key is not None and not VALID_NAME.match(key):
         raise _validation_error(f"Invalid key '{key}'")
 
 

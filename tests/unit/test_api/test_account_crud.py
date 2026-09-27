@@ -8,8 +8,6 @@
 
 """Tests for POST/GET/PUT/DELETE /api/v1/auth/accounts endpoints."""
 
-from __future__ import annotations
-
 import re
 import secrets
 
@@ -788,6 +786,55 @@ class TestResetOwnPassword:
         assert resp.status_code == 409
         assert resp.json()["code"] == "external_account"
         assert not store.verify_password("sso-user", "should-not-apply")
+
+
+class TestTheSessionOwnsOnlyItsOwnAccount:
+    """GET/PUT /me and the own-password reset need no current password, so they bind strictly."""
+
+    def test_an_api_key_owns_no_account(self, client, app):
+        store = app.state.account_store
+        store.create("apikey-ci", _PASSWORD)
+        _, key = app.state.api_key_store.create("ci")
+        headers = {"X-API-Key": key}
+        new_password = secrets.token_urlsafe(16)
+
+        me = client.get("/api/v1/auth/accounts/me", headers=headers)
+        reset = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"new_password": new_password},
+            headers=headers,
+        )
+
+        assert me.status_code == 404, me.text
+        assert reset.status_code == 404, reset.text
+        assert store.verify_password("apikey-ci", _PASSWORD)
+
+    def test_a_subject_that_folds_onto_a_local_account_does_not_own_it(
+        self, client, app, api_settings
+    ):
+        from dfe_engine.api.deps import create_access_token
+
+        store = app.state.account_store
+        store.create("bob", _PASSWORD, phone="+61 2 5550 0001")
+        token = create_access_token(
+            data={"sub": "Bob", "org_id": "test-org"}, settings=api_settings
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        new_password = secrets.token_urlsafe(16)
+
+        me = client.get("/api/v1/auth/accounts/me", headers=headers)
+        put = client.put(
+            "/api/v1/auth/accounts/me", json={"phone": "+61 2 5550 9999"}, headers=headers
+        )
+        reset = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"new_password": new_password},
+            headers=headers,
+        )
+
+        assert (me.status_code, put.status_code, reset.status_code) == (404, 404, 404)
+        assert store.get("bob").phone == "+61 2 5550 0001"
+        assert store.verify_password("bob", _PASSWORD)
 
 
 class TestResetPassword:

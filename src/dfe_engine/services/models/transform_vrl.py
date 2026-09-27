@@ -30,7 +30,8 @@ class VrlSourceConfig(BaseModel):
     max_buffer_bytes: int = Field(default=67_108_864, gt=0, description="Consumer buffer (bytes)")
     sasl: SaslConfig | None = None
     tls: KafkaTlsConfig | None = None
-    auto_offset_reset: str = "latest"
+    # A group's first join on "latest" skips every record already on the topic.
+    auto_offset_reset: str = "earliest"
     session_timeout_ms: int = Field(default=30_000, gt=0)
     commit_interval_ms: int = Field(default=5_000, gt=0)
     librdkafka_options: dict[str, str] = Field(default_factory=dict)
