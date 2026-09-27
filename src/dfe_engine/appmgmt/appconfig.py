@@ -32,9 +32,10 @@ set's ``dir_setting`` (one directory) or ``entries_path`` (one entry per file),
 so an app joins by being declared rather than by a branch here.
 
 The overlay's ``extraEnv:`` block is rendered the same way, into one env file per
-app that Compose reads as a second ``env_file`` entry. Kubernetes needs neither
-step: there the app's chart turns both blocks into a ConfigMap and container
-environment, and this module does nothing at all.
+Compose service - per instance for a per-config app - that Compose reads as a
+second ``env_file`` entry. Kubernetes needs neither step: there the app's chart
+turns both blocks into a ConfigMap and container environment, and this module
+does nothing at all.
 
 Nothing restarts a container. A write the app cannot take in place is REPORTED,
 with the command that applies it, because a Compose stack's supervisor is the
@@ -75,7 +76,7 @@ about. On Kubernetes the app's chart renders it; here it becomes a file.
 """
 
 CUSTOM_ENV_SUFFIX = ".custom.env"
-"""One file per app, named apart from the operator's own ``<app>.env``."""
+"""One file per Compose service, so two instances of one app never share one."""
 
 CUSTOM_ENV_MODE = 0o640
 """Owner writes, the env directory's group reads, nobody else sees it.
@@ -91,15 +92,34 @@ The deployer declares a container per line. A file with no lines is an app with
 no source yet, which is a deployment that starts with none of that app running.
 """
 
-RESTART_HINT = "restart required: docker compose restart {service}"
+APPLY_COMMAND = "make apply SERVICES={service}"
+"""What a Compose operator runs in the deployment's checkout to apply a render.
+
+The target re-resolves the stack before it starts anything, so it names a
+per-source container this render has only just declared, which a plain
+``docker compose`` call cannot: that service lives in a file only ``make``
+chains.
+"""
+
+RESTART_HINT = f"restart required: {APPLY_COMMAND}"
 """What an operator runs to apply a write the running app cannot take in place."""
 
-RECREATE_HINT = "recreate required: docker compose up -d {service}"
+RECREATE_HINT = f"recreate required: {APPLY_COMMAND}"
 """Compose reads env_file at up time, so a restart keeps the old environment."""
 
 
 class AppConfigError(RuntimeError):
     """Raised when a rendered config cannot be written."""
+
+
+def container_name(service: str, instance: str) -> str:
+    """The Compose service one render runs as.
+
+    ``<service>-<instance>`` for an instance of a per-config app, which is what
+    the deployer names the container it declares from the index; the app's own
+    name otherwise. Pass an empty ``instance`` for anything but a per-config app.
+    """
+    return f"{service}-{instance}" if instance else service
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,15 +143,13 @@ class RenderedApp:
     @property
     def container(self) -> str:
         """The Compose service carrying this render, which is what an operator acts on."""
-        if self.per_instance and self.instance:
-            return f"{self.service}-{self.instance}"
-        return self.service
+        return container_name(self.service, self.instance if self.per_instance else "")
 
     @property
     def restart_hint(self) -> str:
         """The command that applies this change, or empty when none is needed."""
-        # An `up` recreates the container, so it applies a config change too, and
-        # it is also what CREATES the container a new instance has yet to get.
+        # A changed env file changes the service definition, which `up` recreates
+        # on, and `up` is also what CREATES the container a new instance lacks.
         if self.custom_env_changed or self.created:
             return RECREATE_HINT.format(service=self.container)
         if not self.restart_required:
@@ -270,8 +288,11 @@ def _report_unwritable(what: str, directory: Path, error: OSError) -> None:
     )
 
 
-def write_custom_env(settings: Any, service: str, env: dict[str, Any]) -> bool:
-    """Write one app's custom environment where its container reads it.
+def write_custom_env(settings: Any, container: str, env: dict[str, Any]) -> bool:
+    """Write one container's custom environment where it reads it.
+
+    ``container`` is the Compose service name (``container_name``), so each
+    instance of a per-config app gets a file of its own.
 
     Returns whether the file changed, because a Compose service takes a new
     env_file on ``up`` and not on ``restart``, so the operator has to be told
@@ -284,7 +305,7 @@ def write_custom_env(settings: Any, service: str, env: dict[str, Any]) -> bool:
     directory = custom_env_dir(settings)
     if directory is None:
         return False
-    target = directory / f"{service}{CUSTOM_ENV_SUFFIX}"
+    target = directory / f"{container}{CUSTOM_ENV_SUFFIX}"
     rendered = "".join(_env_line(key, value) for key, value in sorted(env.items()))
     # An app that has never had a custom key gets no file at all, so a fresh stack
     # does not hand its operator one recreate command per app before it has run.
@@ -474,6 +495,23 @@ def write_instance_index(settings: Any, service: str, names: list[str]) -> None:
         _report_unwritable(target.name, directory, exc)
 
 
+def _clear_app_level_custom_env(settings: Any, app: AppDescriptor) -> None:
+    """Empty a per-config app's app-level custom env file, if one is sitting there.
+
+    Engine versions before per-instance env files wrote every instance's keys
+    into this name, and a generated Compose instance still extends the base
+    service that reads it, so a file left over from one of those versions
+    reaches the base container and every instance under it. A per-config app
+    never writes this name itself once instances exist, so nothing else clears
+    it.
+    """
+    if write_custom_env(settings, app.service, {}):
+        logger.info(
+            "cleared a leftover app-level custom env file superseded by per-instance files",
+            app=app.service,
+        )
+
+
 def _render_one(
     gc: GitCrud,
     app: AppDescriptor,
@@ -504,7 +542,8 @@ def _render_one(
     mount_dir = f"{mount_root}/{leaf}"
     changed_sets = _apply_file_sets(app, doc, config, app_dir, mount_dir)
 
-    env_changed = write_custom_env(settings, app.service, custom_env(doc))
+    container = container_name(app.service, instance.instance if per_instance else "")
+    env_changed = write_custom_env(settings, container, custom_env(doc))
 
     target = app_dir / app.config_file
     rendered = yaml_dump_string(config)
@@ -596,6 +635,7 @@ def render(gc: GitCrud, settings: Any) -> list[RenderedApp]:
         names = [i.instance for i in found if i is not None]
         _prune_instance_dirs(out_root / app.service, names)
         write_instance_index(settings, app.service, names)
+        _clear_app_level_custom_env(settings, app)
     return written
 
 

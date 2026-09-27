@@ -4868,7 +4868,7 @@
           "Services"
         ],
         "summary": "Get Service Config",
-        "description": "Get a full service config by service + instance.",
+        "description": "Get a full service config by service + instance, every credential masked.",
         "operationId": "get_service_config_api_v1_services__service___instance__get",
         "parameters": [
           {
@@ -4923,7 +4923,7 @@
           "Services"
         ],
         "summary": "Save Service Config",
-        "description": "Create or update a service config.",
+        "description": "Create or update a service config.\n\nA read shows every set secret masked, so a masked value written back keeps the\nsecret stored there, matched as the app surface matches one. A mask with nothing\nstored behind it, or in a list entry that cannot be told apart, is a 400\n``masked_value`` and nothing is saved. A mask beside a field of the same object\nthat changed is a 400 ``credential_reentry_required``: the secret is typed again.",
         "operationId": "save_service_config_api_v1_services__service___instance__put",
         "parameters": [
           {
@@ -12671,7 +12671,7 @@
           "Governed Ops: Helm Vars"
         ],
         "summary": "List Vars",
-        "description": "Flattened dot-path vars for a resource, each marked protected or not.",
+        "description": "Flattened dot-path vars for a resource, each marked protected or not.\n\nCredentials come back masked, as the app surface's values route masks them.",
         "operationId": "list_vars_api_v1_helm_files__name__vars_get",
         "parameters": [
           {
@@ -12924,7 +12924,7 @@
           "Governed Ops: Backing Services"
         ],
         "summary": "List Overlay Vars",
-        "description": "Flattened dot-path vars for one overlay, each marked protected or not.",
+        "description": "Flattened dot-path vars for one overlay, each marked protected or not.\n\nCredentials come back masked, as every other read of the deploy repo masks them.",
         "operationId": "list_overlay_vars_api_v1_backing_services_overlays__name__vars_get",
         "parameters": [
           {
@@ -13218,7 +13218,7 @@
           "App Management"
         ],
         "summary": "Create Instance",
-        "description": "Deploy an instance by creating its values overlay.\n\nThe overlay's presence is what the layer2-apps ApplicationSet turns into an Argo\nApplication, so this is the whole deployment step.",
+        "description": "Deploy an instance by creating its values overlay.\n\nThe overlay's presence is what the layer2-apps ApplicationSet turns into an Argo\nApplication, so this is the whole deployment step. A new instance stores nothing,\nso a masked value copied from another instance's read is a 400 ``masked_value``.",
         "operationId": "create_instance_api_v1_apps__service__instances_post",
         "parameters": [
           {
@@ -13507,7 +13507,7 @@
           "App Management"
         ],
         "summary": "Get Values",
-        "description": "The instance's overlay document as stored, with the revision to write against.",
+        "description": "The instance's overlay document, credentials masked, with the revision to write against.\n\nMasked as the config route hides them: by the app's own secret marker in its\nschema, and by name wherever the schema says nothing.",
         "operationId": "get_values_api_v1_apps__service___instance__values_get",
         "parameters": [
           {
@@ -13619,7 +13619,7 @@
           "App Management"
         ],
         "summary": "Set App Config",
-        "description": "Write options the app declares, and environment keys it does not.\n\nJudged against the app's own contract before anything is committed, so a value\nthe app would refuse at startup leaves the deploy repo where it was rather than\nlanding a commit an operator then has to revert.\n\nA secret is written like any other option: it goes into the overlay as the rest\nof this surface writes one, and the read route still never says what it is.\n\n409 where the deployment already decides the value: a config path the chart\nderives, or an `extraEnv` name the chart sets for this app.",
+        "description": "Write options the app declares, and environment keys it does not.\n\nJudged against the app's own contract before anything is committed, so a value\nthe app would refuse at startup leaves the deploy repo where it was rather than\nlanding a commit an operator then has to revert.\n\nA secret is written like any other option: it goes into the overlay as the rest\nof this surface writes one, and neither this response nor a read route on this\nsurface says what it is. A masked value written back as it was read keeps the\nstored credential; the mask where nothing is stored is a 400 ``masked_value``,\nand the mask beside a changed field of the same entry is a 400\n``credential_reentry_required``.\n\n409 where the deployment already decides the value: a config path the chart\nderives, or an `extraEnv` name the chart sets for this app.",
         "operationId": "set_app_config_api_v1_apps__service___instance__config_put",
         "parameters": [
           {
@@ -15816,6 +15816,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "Get Action",
+        "description": "One defined action; a credential a legacy definition still carries comes back masked.",
         "operationId": "get_action_api_v1_governance_actions__name__get",
         "parameters": [
           {
@@ -16062,6 +16063,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "Create Action",
+        "description": "Define or replace an action.\n\n400 ``credential_in_action`` where a change targets a credential: the definition\nis committed to the deploy repo, so a credential in it is plaintext in history.",
         "operationId": "create_action_api_v1_governance_admin_actions_post",
         "requestBody": {
           "content": {
@@ -16418,7 +16420,7 @@
           "Governed Ops: Gitops"
         ],
         "summary": "List Class Resource Vars",
-        "description": "Flattened dot-path vars of one resource - what VarChange.path may name.\n\nValues ride along so a select can show the current value beside each path.",
+        "description": "Flattened dot-path vars of one resource - what VarChange.path may name.\n\nValues ride along so a select can show the current value beside each path, with\ncredentials masked as every other read of the deploy repo masks them.",
         "operationId": "list_class_resource_vars_api_v1_gitops_classes__cls__resources__name__vars_get",
         "parameters": [
           {
@@ -16987,7 +16989,7 @@
           "HyperDX"
         ],
         "summary": "Hyperdx Connection",
-        "description": "Return the caller's OWN org connection - never another org's.\n\nUnrestricted callers (any role beyond ``org_viewer``) get the platform reader;\na single-org caller gets its pinned ``dfe_org_<org>`` user; a caller that\nresolves to zero or several separate orgs is refused (403) so isolation fails\nclosed rather than guessing.",
+        "description": "Return the caller's OWN org connection - never another org's.\n\nA caller granted ``query:execute`` at system scope by a role other than\n``org_viewer`` gets the platform reader. Any other caller gets its org's pinned\n``dfe_org_<org>`` user, whatever roles it holds at that org's scope. A caller\nthat resolves to zero or several separate orgs is refused (403) so isolation\nfails closed rather than guessing.",
         "operationId": "hyperdx_connection_api_v1_hyperdx_connection_get",
         "responses": {
           "200": {
@@ -30574,7 +30576,7 @@
           "source": {
             "type": "string",
             "title": "Source",
-            "description": "The _source label \u2014 immutable identifier"
+            "description": "The _source label -- immutable identifier"
           },
           "resource_type": {
             "type": "string",
@@ -31017,7 +31019,7 @@
           "field"
         ],
         "title": "SourceMatch",
-        "description": "Receiver match rule \u2014 how the receiver identifies this source."
+        "description": "Receiver match rule: how the receiver identifies this source."
       },
       "SourceNameConflictErrorResponse": {
         "properties": {
@@ -32713,24 +32715,6 @@
             "type": "array",
             "title": "Records",
             "description": "Sample input records"
-          },
-          "source_format": {
-            "type": "string",
-            "enum": [
-              "json",
-              "msgpack"
-            ],
-            "title": "Source Format",
-            "default": "json"
-          },
-          "sink_format": {
-            "type": "string",
-            "enum": [
-              "json",
-              "msgpack"
-            ],
-            "title": "Sink Format",
-            "default": "json"
           }
         },
         "type": "object",

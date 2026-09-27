@@ -164,14 +164,14 @@ def _container_name(test: str | None, service: str) -> str:
 def _container_running(docker: list[str], name: str) -> bool:
     try:
         return bool(_run([*docker, "ps", "-q", "-f", f"name=^{name}$"], timeout=30).stdout.strip())
-    except (subprocess.SubprocessError, FileNotFoundError):
+    except subprocess.SubprocessError, FileNotFoundError:
         return False
 
 
 def _container_exists(docker: list[str], name: str) -> bool:
     try:
         return bool(_run([*docker, "ps", "-aq", "-f", f"name=^{name}$"], timeout=30).stdout.strip())
-    except (subprocess.SubprocessError, FileNotFoundError):
+    except subprocess.SubprocessError, FileNotFoundError:
         return False
 
 
@@ -190,7 +190,7 @@ def _reap_stale(docker: list[str], name: str) -> None:
         return
     try:
         _run([*docker, "rm", "-f", name], timeout=60)
-    except (subprocess.SubprocessError, FileNotFoundError):
+    except subprocess.SubprocessError, FileNotFoundError:
         pass
 
 
@@ -236,13 +236,13 @@ def _start_or_join_shared(
             try:
                 _run([*docker, "start", name], timeout=60)
                 return
-            except (subprocess.SubprocessError, FileNotFoundError):
+            except subprocess.SubprocessError, FileNotFoundError:
                 time.sleep(0.5)  # someone else is mid-create, or it is going away
                 continue
         try:
             _run(run_cmd, timeout=240)  # first image pull can be slow
             return
-        except (subprocess.SubprocessError, FileNotFoundError):
+        except subprocess.SubprocessError, FileNotFoundError:
             time.sleep(0.5)  # lost the create race; loop and join the winner
     pytest.skip(f"docker host '{spec}' cannot start or join the shared ClickHouse '{name}'")
 
@@ -292,7 +292,7 @@ def _spin_ch_on_docker(spec: str, *, keep: bool, test: str):
             return  # left running for reuse (DFE_TEST_KEEP)
         try:
             _run([*docker, "rm", "-f", name], timeout=60)
-        except (subprocess.SubprocessError, FileNotFoundError):
+        except subprocess.SubprocessError, FileNotFoundError:
             pass
 
     try:

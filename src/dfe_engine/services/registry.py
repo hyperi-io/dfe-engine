@@ -20,6 +20,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+from pydantic import BaseModel, SecretBytes, SecretStr
+from pydantic_core import to_jsonable_python
 from scalo.config import DirectoryConfigStore
 from scalo.logger import logger
 
@@ -27,6 +29,28 @@ from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file, git_repo_re
 from dfe_engine.services.plugins import get_plugin, valid_services
 from dfe_engine.services.validators import ValidationResult, validate_config
 from dfe_engine.yaml_utils import yaml_dump
+
+
+def _unwrapped(value: Any) -> Any:
+    """``value`` with every pydantic secret replaced by what it holds."""
+    if isinstance(value, SecretStr | SecretBytes):
+        return value.get_secret_value()
+    if isinstance(value, dict):
+        return {key: _unwrapped(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_unwrapped(item) for item in value]
+    return value
+
+
+def stored_form(config: BaseModel | dict[str, Any]) -> dict[str, Any]:
+    """A config as its YAML file holds it, every secret written out in full.
+
+    The Rust services read that file, so a secret in it is the secret itself. The
+    JSON dump a read returns shows pydantic's placeholder instead.
+    """
+    if isinstance(config, dict):
+        return config
+    return to_jsonable_python(_unwrapped(config.model_dump()))
 
 
 class ServiceConfigError(Exception):
@@ -183,7 +207,7 @@ class ServiceConfigRegistry:
             plugin = get_plugin(service)
             return plugin.config_class.model_validate(config_data)
         except KeyError:
-            # Unknown service — return raw dict (schema-less mode)
+            # Unknown service: return the raw dict (schema-less mode)
             return config_data
 
     def save_config(
@@ -210,13 +234,12 @@ class ServiceConfigRegistry:
         if isinstance(config, dict):
             try:
                 plugin = get_plugin(service)
-                validated = plugin.config_class.model_validate(config)
-                config_data = validated.model_dump(mode="json")
+                config_data = stored_form(plugin.config_class.model_validate(config))
             except KeyError:
-                # Unknown service — store as-is
+                # Unknown service: store as-is
                 config_data = config
         else:
-            config_data = config.model_dump(mode="json")
+            config_data = stored_form(config)
 
         table = self._table_name(service, instance)
 
@@ -236,7 +259,7 @@ class ServiceConfigRegistry:
         # Force cache refresh for this table
         self._store._refresh_all()
 
-        logger.info(f"Saved config for {service}/{instance} → {yaml_path}")
+        logger.info(f"Saved config for {service}/{instance} -> {yaml_path}")
 
     def delete_config(self, service: str, instance: str = "default") -> None:
         """Delete a service configuration.
@@ -333,7 +356,7 @@ class ServiceConfigRegistry:
         """
         result = validate_config(service, config_data)
         if not result.valid and result.errors and result.errors[0].startswith("Unknown service:"):
-            # Unknown service — no schema to validate against, treat as valid
+            # Unknown service: no schema to validate against, treat as valid
             return ValidationResult(
                 valid=True, warnings=[f"No schema registered for service '{service}'; stored as-is"]
             )
@@ -403,7 +426,7 @@ class ServiceConfigRegistry:
                         pass  # File was added in this commit
 
                 author_str = commit.author.decode("utf-8", errors="replace")
-                # Parse "Name <email>" format — extract just the name
+                # Parse "Name <email>" format: keep just the name
                 author_name = author_str.split("<")[0].strip() if "<" in author_str else author_str
 
                 history.append(
@@ -436,8 +459,7 @@ class ServiceConfigRegistry:
         Returns:
             Path to the written file
         """
-        config = self.get_config(service, instance)
-        config_data = config.model_dump(mode="json")
+        config_data = stored_form(self.get_config(service, instance))
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         yaml_dump(config_data, path)
@@ -489,7 +511,7 @@ class ServiceConfigRegistry:
         """Seed the config directory with built-in default configurations.
 
         Copies default YAML files from package resources into the config
-        directory. Non-destructive by default — skips files that already exist.
+        directory. Non-destructive by default: skips files that already exist.
 
         Args:
             overwrite: If True, overwrite existing configs with defaults.

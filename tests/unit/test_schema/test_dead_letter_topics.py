@@ -18,19 +18,30 @@ from importlib import resources
 import pytest
 
 from dfe_engine.kafka.topics import TopicAdmin
-from dfe_engine.schema.phase import DeadLetterPathError, require_dead_letter_topics
+from dfe_engine.schema.phase import (
+    DeadLetterPathError,
+    _bootstrap_specs,
+    require_dead_letter_topics,
+)
 from dfe_engine.schema.plan import build_plan
 from dfe_engine.services.models.loader import LoaderRoutingConfig
 from dfe_engine.services.models.receiver import ReceiverRoutingConfig
 from dfe_engine.settings import DFESettings
+from dfe_engine.source.models import _topic_policy
 from dfe_engine.yaml_utils import yaml_load_string
 
 
-def _settings(*, bus: bool = True, bootstrap_topics: bool = True) -> DFESettings:
+def _settings(
+    *, bus: bool = True, bootstrap_topics: bool = True, size: int | None = None
+) -> DFESettings:
     return DFESettings(
         env="dev",
         transport={"default": "bus" if bus else "direct", "bus_present": bus},
-        kafka={"bootstrap_servers": "broker:9092", "bootstrap_topics": bootstrap_topics},
+        kafka={
+            "bootstrap_servers": "broker:9092",
+            "bootstrap_topics": bootstrap_topics,
+            "topic_max_message_bytes": size,
+        },
     )
 
 
@@ -50,6 +61,7 @@ class _Broker(TopicAdmin):
     def __init__(self, present: Iterable[str] = (), refuse: Iterable[str] = ()) -> None:
         self.present: set[str] = set(present)
         self.refuse: set[str] = set(refuse)
+        self.configs: dict[str, dict[str, str]] = {}
 
     def list_topic_names(self, *, timeout: float = 10.0) -> set[str]:
         return set(self.present)
@@ -66,6 +78,7 @@ class _Broker(TopicAdmin):
         if name in self.refuse:
             raise RuntimeError("TOPIC_AUTHORIZATION_FAILED")
         self.present.add(name)
+        self.configs[name] = dict(config or {})
 
 
 class _Untouchable(TopicAdmin):
@@ -132,3 +145,24 @@ class TestTheGate:
         assert (
             require_dead_letter_topics(plan, settings, wait_seconds=0, admin=_Untouchable()) == []
         )
+
+
+class TestTheMessageSize:
+    """Every bootstrap topic carries the deployment's message size, not the manifest's."""
+
+    def test_each_dead_letter_topic_is_created_at_the_configured_size(self, plan, declared):
+        # A managed broker capped at 8 MiB refuses a 16 MiB create, holding the engine NotReady.
+        broker = _Broker()
+        require_dead_letter_topics(plan, _settings(size=8_388_608), wait_seconds=0, admin=broker)
+        assert {name: c["max.message.bytes"] for name, c in broker.configs.items()} == {
+            name: "8388608" for name in declared
+        }
+
+    def test_the_landing_topic_carries_it_too(self, plan):
+        specs = _bootstrap_specs(plan, _settings(size=8_388_608))
+        assert {s.name: s.config["max.message.bytes"] for s in specs}["main_land"] == "8388608"
+
+    def test_unset_falls_back_to_the_manifest(self, plan):
+        manifest = str(_topic_policy().defaults["max_message_bytes"])
+        specs = _bootstrap_specs(plan, _settings())
+        assert {s.config["max.message.bytes"] for s in specs} == {manifest}

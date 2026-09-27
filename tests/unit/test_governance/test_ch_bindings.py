@@ -12,11 +12,12 @@ user, whereas a group emitted with no org role holds no restrictive policy and
 therefore reads EVERY org's rows.
 """
 
-from __future__ import annotations
-
 from types import SimpleNamespace
 
-from dfe_engine.governance.ch.bindings import derive_group_bindings
+import pytest
+
+from dfe_engine.auth.models import Scope, ScopedGrant
+from dfe_engine.governance.ch.bindings import derive_group_bindings, platform_grants
 
 
 def _org(name: str, ids: list[str] | None = None) -> SimpleNamespace:
@@ -57,6 +58,36 @@ class TestOrgScopedGroups:
         bindings = derive_group_bindings([_group("soc-ro", scope="org:acme")], [_org("acme")])
         assert bindings[0].user() == "dfe_grp_soc-ro"
 
+    @pytest.mark.parametrize(
+        "roles",
+        [
+            ["org_viewer", "dfe_operator"],
+            ["org_viewer", "infra_admin"],
+            ["org_viewer", "dfe_operator", "infra_admin"],
+            ["org_viewer", "data_analyst"],
+            ["data_analyst"],
+            ["admin"],
+        ],
+    )
+    def test_org_scoped_group_keeps_its_org_whatever_it_holds(self, roles):
+        """Its roles bind at the org's scope, so none of them reach every org's rows."""
+        group = _group("acme-team", scope="org:acme", roles=roles)
+        bindings = derive_group_bindings([group], [_org("acme"), _org("beta")])
+        assert [(b.group, b.org) for b in bindings] == [("acme-team", "acme")]
+
+    @pytest.mark.parametrize("role", ["admin", "infra_admin"])
+    def test_an_org_scoped_admin_group_reads_no_platform_telemetry(self, role):
+        """The otel database holds every org's telemetry, so only a system grant reads it."""
+        groups = [
+            _group("acme-admins", scope="org:acme", roles=[role]),
+            _group("platform-admins", roles=[role]),
+        ]
+        bindings = derive_group_bindings(groups, [_org("acme")])
+        assert {b.group: b.ch_roles for b in bindings} == {
+            "acme-admins": [],
+            "platform-admins": ["otel_reader"],
+        }
+
 
 class TestUnrestrictedGroups:
     def test_group_claiming_no_org_is_unrestricted(self):
@@ -77,10 +108,18 @@ class TestUnrestrictedGroups:
         assert [(b.group, b.org) for b in bindings] == [("acme-view", "acme")]
 
     def test_mixed_roles_go_unrestricted(self):
-        """org_viewer plus any platform role resolves platform-wards."""
+        """In a system group, org_viewer plus any platform role resolves platform-wards."""
         group = _group("odd", org_ids=["acme"], roles=["org_viewer", "data_viewer"])
         bindings = derive_group_bindings([group], [_org("acme")])
         assert [(b.group, b.org) for b in bindings] == [("odd", "")]
+
+    @pytest.mark.parametrize(
+        "role", ["admin", "data_analyst", "data_analyst_viewer", "data_viewer"]
+    )
+    def test_system_scope_data_role_stays_unrestricted(self, role):
+        group = _group("platform-data", org_ids=["acme"], roles=["org_viewer", role])
+        bindings = derive_group_bindings([group], [_org("acme")])
+        assert [(b.group, b.org) for b in bindings] == [("platform-data", "")]
 
     def test_admin_groups_compose_the_otel_reader(self):
         """Admins and infra admins read platform telemetry; nobody else does."""
@@ -97,6 +136,25 @@ class TestUnrestrictedGroups:
             "analysts": [],
             "acme-view": [],
         }
+
+
+class TestPlatformGrants:
+    """The one filter both the bindings and the HyperDX connection read decide on."""
+
+    def test_a_system_scope_platform_grant_reads_across_orgs(self):
+        grant = ScopedGrant(role="data_analyst", scope=Scope())
+        assert platform_grants([grant]) == [grant]
+
+    def test_an_org_scoped_grant_never_does(self):
+        acme = Scope(type="org", id="acme")
+        grants = [ScopedGrant(role=role, scope=acme) for role in ("admin", "data_analyst")]
+        assert platform_grants(grants) == []
+
+    def test_org_viewer_never_does_even_at_system_scope(self):
+        assert platform_grants([ScopedGrant(role="org_viewer", scope=Scope())]) == []
+
+    def test_no_grants_is_none(self):
+        assert platform_grants([]) == []
 
 
 class TestFailsClosed:

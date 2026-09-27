@@ -72,8 +72,7 @@ def _get_ch_client(request: Request):
             },
         )
     try:
-        # "default" is the registry's fallback connection (see get_connection_name);
-        # discovery is an admin-level cross-database listing.
+        # Discovery is an admin-level cross-database listing, so it reads over "default".
         return conn_registry.get_client("default")
     except Exception as exc:
         raise HTTPException(

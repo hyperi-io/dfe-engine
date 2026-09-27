@@ -50,7 +50,7 @@ def discover_json_keys(samples: list[str], *, max_keys: int = 200) -> list[str]:
     for sample in samples:
         try:
             obj = json.loads(sample)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             continue
         if isinstance(obj, dict):
             keys.update(str(k) for k in obj)

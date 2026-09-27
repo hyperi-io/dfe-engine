@@ -11,31 +11,43 @@ Groups already carry the org axis (``scope: org:<name>`` plus ``org_ids``), so
 bindings are DERIVED rather than configured separately - one source of truth, and
 an org-scoped group cannot drift from its ClickHouse user.
 
-Platform roles win: a group holding any role other than the org viewer
-role reads UNRESTRICTED, even when a domain rule or ``org_ids`` tie it to an org.
-The org filter exists to fence tenants in, not to fence the platform's own
-analysts out.
+Platform roles win at system scope: a SYSTEM group holding any role other than the
+org viewer role reads UNRESTRICTED, even when a domain rule or ``org_ids`` tie it to
+an org. The org filter exists to fence tenants in, not to fence the platform's own
+analysts out. An org-scoped group's roles bind at that org's scope only, so it
+always gets its org's pinned user, whatever roles it holds.
 
 A group claiming an org that is not registered fails closed - it is skipped and
 gets no ClickHouse user at all, because the alternative is an unrestricted user,
 and an unrestricted user reads EVERY org's rows.
 """
 
-from __future__ import annotations
-
+from collections.abc import Iterable
 from typing import Any
 
 from scalo.logger import logger
 
+from dfe_engine.auth.models import Scope, ScopedGrant
+
 from .models import GroupChBinding
 
-# The one role whose holders get the tenant pin. Platform roles (admin,
-# data_analyst, ...) are never org-filtered, whatever the group's org markers say.
+# The tenant role: holding it never unfences a group or a caller from its org.
 ORG_VIEWER_ROLE = "org_viewer"
 
-# Engine roles whose groups also read the otel database (platform telemetry);
-# analysts and org-scoped viewers never do.
+# Engine roles whose groups also read the otel database (every org's platform
+# telemetry), held at system scope; analysts and org-scoped groups never do.
 OTEL_READER_ROLES = {"admin", "infra_admin"}
+
+
+def platform_grants(grants: Iterable[ScopedGrant]) -> list[ScopedGrant]:
+    """Return the grants that may read across orgs: SYSTEM scope, and not ``org_viewer``.
+
+    A role bound at an org's scope covers that org alone, and ``org_viewer`` is the
+    tenant role. The group bindings and their otel reader here, the HyperDX
+    connection read and the fork's role claim all decide "every org" through this
+    one filter.
+    """
+    return [g for g in grants if g.scope.type == "system" and g.role != ORG_VIEWER_ROLE]
 
 
 def derive_group_bindings(groups: list[Any], orgs: list[Any]) -> list[GroupChBinding]:
@@ -57,9 +69,14 @@ def derive_group_bindings(groups: list[Any], orgs: list[Any]) -> list[GroupChBin
         claimed = scoped | set(group.org_ids)
 
         roles = set(getattr(group, "roles", []) or [])
-        if claimed and roles - {ORG_VIEWER_ROLE}:
+        # Bound where api.deps binds them: the owning org's scope, else system-wide.
+        grant_scope = Scope(type="org", id=group.scope_org) if group.scope_org else Scope()
+        grants = [ScopedGrant(role=role, scope=grant_scope) for role in sorted(roles)]
+        platform_roles = {grant.role for grant in platform_grants(grants)}
+        if claimed and platform_roles:
             logger.info(
-                "group holds platform roles; its CH user is unrestricted despite org markers",
+                "group holds system-scope platform roles; its CH user is unrestricted "
+                "despite org markers",
                 group=group.name,
                 roles=sorted(roles),
             )
@@ -87,7 +104,7 @@ def derive_group_bindings(groups: list[Any], orgs: list[Any]) -> list[GroupChBin
             GroupChBinding(
                 group=group.name,
                 org=next(iter(resolved), ""),
-                ch_roles=["otel_reader"] if roles & OTEL_READER_ROLES else [],
+                ch_roles=["otel_reader"] if platform_roles & OTEL_READER_ROLES else [],
             )
         )
 

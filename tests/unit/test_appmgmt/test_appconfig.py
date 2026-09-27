@@ -415,7 +415,7 @@ class TestOneContainerPerInstance:
 
 
 class TestCustomEnvironment:
-    def test_the_overlay_block_becomes_one_file_per_app(self, crud, tmp_path):
+    def test_the_overlay_block_becomes_one_file_per_compose_service(self, crud, tmp_path):
         settings = _settings(tmp_path)
         _deploy(crud, LOADER, extraEnv__SECOND="also", extraEnv__DFE_LOADER_HOUSE_KEY="kept")
 
@@ -425,6 +425,34 @@ class TestCustomEnvironment:
         assert _env_file(settings, LOADER).read_text() == (
             "DFE_LOADER_HOUSE_KEY=kept\nSECOND=also\n"
         )
+
+    def test_each_instance_writes_the_file_its_own_container_reads(self, crud, tmp_path):
+        # One shared file per app would hand every source the last one written.
+        settings = _settings(tmp_path)
+        _deploy(crud, VRL, "crowdstrike-eu", extraEnv__DFE_VRL_REGION="eu")
+        _deploy(crud, VRL, "crowdstrike-us", extraEnv__DFE_VRL_REGION="us")
+
+        rendered = {r.container: r for r in appconfig.render(crud, settings)}
+
+        assert _env_file(settings, f"{VRL}-crowdstrike-eu").read_text() == "DFE_VRL_REGION=eu\n"
+        assert _env_file(settings, f"{VRL}-crowdstrike-us").read_text() == "DFE_VRL_REGION=us\n"
+        assert not _env_file(settings, VRL).exists()
+        assert rendered[f"{VRL}-crowdstrike-eu"].custom_env_changed
+
+    def test_a_leftover_app_level_file_from_before_per_instance_env_is_emptied(
+        self, crud, tmp_path
+    ):
+        # v1.20.6-v1.22.0 wrote every instance's keys into this name, and a
+        # generated Compose instance still extends the base service that reads it.
+        settings = _settings(tmp_path)
+        leftover = _env_file(settings, VRL)
+        leftover.parent.mkdir(parents=True, exist_ok=True)
+        leftover.write_text("OLD_INSTANCE_KEY=leaked\n", encoding="utf-8")
+        _deploy(crud, VRL, "crowdstrike-eu", extraEnv__DFE_VRL_REGION="eu")
+
+        appconfig.render(crud, settings)
+
+        assert leftover.read_text() == ""
 
     def test_the_file_is_readable_by_its_group_and_nobody_else(self, crud, tmp_path):
         # Compose reads env_file as the operator who runs it, not as the engine.
@@ -472,7 +500,7 @@ class TestCustomEnvironment:
         rendered = {r.service: r for r in appconfig.render(crud, settings)}
 
         assert env_file.stat().st_mode & 0o777 == 0o640
-        assert rendered[LOADER].restart_hint == f"recreate required: docker compose up -d {LOADER}"
+        assert rendered[LOADER].restart_hint == f"recreate required: make apply SERVICES={LOADER}"
 
     def test_a_directory_group_the_engine_does_not_hold_is_named_with_the_fix(
         self, tmp_path, captured_logs
@@ -529,7 +557,7 @@ class TestCustomEnvironment:
         rendered = {r.service: r for r in appconfig.render(crud, settings)}
 
         assert rendered[LOADER].custom_env_changed
-        assert rendered[LOADER].restart_hint == f"recreate required: docker compose up -d {LOADER}"
+        assert rendered[LOADER].restart_hint == f"recreate required: make apply SERVICES={LOADER}"
 
     def test_an_unchanged_block_asks_for_nothing(self, crud, tmp_path):
         settings = _settings(tmp_path)
@@ -585,7 +613,7 @@ class TestWhatTakingTheChangeCosts:
         rendered = {r.service: r for r in appconfig.render(crud, settings)}
 
         assert _rendered(settings, LOADER)["hot_reload"] == {"enabled": False}
-        assert rendered[LOADER].restart_hint == f"restart required: docker compose restart {LOADER}"
+        assert rendered[LOADER].restart_hint == f"restart required: make apply SERVICES={LOADER}"
 
     def test_a_startup_bound_app_names_the_command_that_applies_it(self, crud, tmp_path):
         settings = _settings(tmp_path)
@@ -601,7 +629,7 @@ class TestWhatTakingTheChangeCosts:
         # The container carrying this instance, not the app: a per-config app has
         # one per source, so the app's own name would restart the wrong one.
         assert rendered[VRL].restart_hint == (
-            f"restart required: docker compose restart {VRL}-filebeat"
+            f"restart required: make apply SERVICES={VRL}-filebeat"
         )
         assert appconfig.restart_hints(list(rendered.values())) == [rendered[VRL].restart_hint]
 
@@ -624,7 +652,7 @@ class TestWhatTakingTheChangeCosts:
         rendered = {r.container: r for r in appconfig.render(crud, settings)}
 
         assert rendered[f"{VRL}-filebeat"].restart_hint == (
-            f"recreate required: docker compose up -d {VRL}-filebeat"
+            f"recreate required: make apply SERVICES={VRL}-filebeat"
         )
 
     def test_a_rolled_file_set_needs_a_restart_even_on_a_hot_app(self, crud, tmp_path):

@@ -7,8 +7,6 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """The routes the console's app-settings page is built on: two reads and a write."""
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 
@@ -219,9 +217,9 @@ class TestTheConfigRoute:
         self, client, app, admin_headers, tmp_path
     ):
         _wire(app, tmp_path)
-        _deploy(client, admin_headers, values={"config": {"retired": {"key": "value"}}})
+        _deploy(client, admin_headers, values={"config": {"retired": {"setting": "value"}}})
         body = client.get(CONFIG, headers=admin_headers).json()
-        assert body["unknown"] == [{"path": "config.retired.key", "value": "value"}]
+        assert body["unknown"] == [{"path": "config.retired.setting", "value": "value"}]
 
     @pytest.mark.usefixtures("_unmounted")
     def test_nothing_mounted_leaves_the_overlay_unexplained_rather_than_failing(
@@ -503,18 +501,39 @@ class TestWritingCustomEnv:
         _wire(app, tmp_path)
         _deploy(client, admin_headers)
         assert (
-            _write(client, admin_headers, {"extraEnv.DFE_LOADER_HOUSE_KEY": "kept"}).status_code
+            _write(client, admin_headers, {"extraEnv.DFE_LOADER_HOUSE_STYLE": "kept"}).status_code
             == 200
         )
         body = client.get(CONFIG, headers=admin_headers).json()
-        assert body["custom"] == [{"path": "extraEnv.DFE_LOADER_HOUSE_KEY", "value": "kept"}]
+        assert body["custom"] == [{"path": "extraEnv.DFE_LOADER_HOUSE_STYLE", "value": "kept"}]
         assert body["unknown"] == []
 
         assert (
-            _write(client, admin_headers, {"extraEnv.DFE_LOADER_HOUSE_KEY": None}).status_code
+            _write(client, admin_headers, {"extraEnv.DFE_LOADER_HOUSE_STYLE": None}).status_code
             == 200
         )
         assert client.get(CONFIG, headers=admin_headers).json()["custom"] == []
+
+    def test_a_custom_credential_is_written_and_never_read_back(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        resp = _write(client, admin_headers, {"extraEnv.DFE_LOADER_S3_SECRET": "s3-secret"})
+        assert resp.status_code == 200, resp.text
+        assert "s3-secret" not in resp.text
+
+        config = client.get(CONFIG, headers=admin_headers)
+        assert config.json()["custom"] == [
+            {"path": "extraEnv.DFE_LOADER_S3_SECRET", "value": contract.REDACTED}
+        ]
+        values = client.get(f"/api/v1/apps/{LOADER}/default/values", headers=admin_headers)
+        assert values.json()["values"]["extraEnv"] == {"DFE_LOADER_S3_SECRET": contract.REDACTED}
+        for read in (config, values):
+            assert "s3-secret" not in read.text
+        # The container still needs the real value.
+        doc = gc.get("helmvars", "dfe-loader-default-values")
+        assert doc["extraEnv"]["DFE_LOADER_S3_SECRET"] == "s3-secret"
 
     def test_a_custom_key_is_never_judged_against_the_app_schema(
         self, client, app, admin_headers, tmp_path
@@ -581,7 +600,7 @@ class TestWritingCustomEnv:
         assert written.stat().st_mode & 0o777 == 0o640
         # Compose reads env_file at up time, so a restart would keep the old set.
         assert resp.json()["restart_required"] == [
-            f"recreate required: docker compose up -d {LOADER}"
+            f"recreate required: make apply SERVICES={LOADER}"
         ]
         assert "app environment directory" in resp.json()["custom_env"]
         # Nothing rolls a pod on a Compose stack, so the command is the answer.
@@ -600,3 +619,487 @@ class TestWritingCustomEnv:
         _write(client, admin_headers, {"extraEnv.DFE_LOADER_HOUSE_KEY": None})
         written = tmp_path / "app-env" / f"{LOADER}{appconfig.CUSTOM_ENV_SUFFIX}"
         assert written.read_text() == ""
+
+
+class TestANewInstanceRefusesTheMask:
+    """A new instance stores nothing, so the mask in its values has nothing to mean."""
+
+    def test_a_masked_read_redeployed_is_refused(self, client, app, admin_headers, tmp_path):
+        # Undeploy, then deploy again from what /values showed: the password is the mask.
+        gc = _wire(app, tmp_path)
+        _deploy(
+            client, admin_headers, values={"config": {"clickhouse": {"password": "ch-pw-4410"}}}
+        )
+        shown = client.get(f"/api/v1/apps/{LOADER}/default/values", headers=admin_headers).json()
+        assert shown["values"]["config"]["clickhouse"]["password"] == contract.REDACTED
+        assert client.delete(f"/api/v1/apps/{LOADER}/default", headers=admin_headers).is_success
+
+        before = gc.head_revision()
+        resp = _deploy(client, admin_headers, values={"config": shown["values"]["config"]})
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "masked_value"
+        assert resp.json()["context"]["path"] == "config"
+        assert gc.head_revision() == before
+        assert "dfe-loader-default-values" not in gc.list("helmvars")
+
+    def test_a_masked_dot_path_is_refused(self, client, app, admin_headers, tmp_path):
+        gc = _wire(app, tmp_path)
+        before = gc.head_revision()
+        resp = _deploy(
+            client, admin_headers, values={"config.clickhouse.password": contract.REDACTED}
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "masked_value"
+        assert gc.head_revision() == before
+
+    def test_a_real_value_still_deploys(self, client, app, admin_headers, tmp_path):
+        gc = _wire(app, tmp_path)
+        resp = _deploy(client, admin_headers, values={"config.clickhouse.password": "ch-pw-4410"})
+        assert resp.status_code == 200, resp.text
+        stored = gc.get("helmvars", "dfe-loader-default-values")
+        assert stored["config"]["clickhouse"]["password"] == "ch-pw-4410"
+
+
+RECEIVER = "dfe-receiver"
+RECEIVER_BASE = f"/api/v1/apps/{RECEIVER}/default"
+
+# Schemas from the builds that hold each source acknowledgement until delivery.
+HELD = Path(__file__).parents[2] / "fixtures" / "contract-acknowledgements"
+
+CREDENTIALS = {
+    "config.server.auth.mode": "bearer",
+    "config.server.auth.bearer.tokens": ["tok-1", "tok-2"],
+    "config.server.auth.accepted_headers": [{"name": "x-api-key", "values": ["hv-1"]}],
+    "config.server.auth.header_values": ["legacy-1"],
+}
+PLAINTEXT = ("tok-1", "tok-2", "hv-1", "legacy-1")
+
+
+@pytest.fixture
+def _held(monkeypatch):
+    """Mount the schemas that carry the acknowledgements key and the secret marker."""
+    monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(HELD))
+    contract.reload_contracts()
+
+
+def _deploy_receiver(client, headers):
+    return client.post(
+        f"/api/v1/apps/{RECEIVER}/instances",
+        json={"instance": "default"},
+        headers=headers,
+    )
+
+
+def _put_receiver(client, headers, changes: dict):
+    return client.put(f"{RECEIVER_BASE}/config", json={"changes": changes}, headers=headers)
+
+
+@pytest.mark.usefixtures("_held")
+class TestTurningAcknowledgementsOff:
+    @pytest.mark.parametrize("block", ["server", "grpc", "otlp", "webhook"])
+    def test_the_receiver_takes_it_and_reads_it_back(
+        self, client, app, admin_headers, tmp_path, block
+    ):
+        _wire(app, tmp_path)
+        assert _deploy_receiver(client, admin_headers).status_code == 200
+        path = f"config.{block}.acknowledgements.enabled"
+        resp = _put_receiver(client, admin_headers, {path: False})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["changed"] is True
+
+        body = client.get(f"{RECEIVER_BASE}/config", headers=admin_headers).json()
+        held = {f["path"]: f for f in body["fields"]}[path]
+        assert (held["value"], held["provenance"]) == (False, "overlay")
+
+    def test_a_string_where_the_app_takes_a_boolean_is_refused(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        before = gc.head_revision()
+        resp = _put_receiver(
+            client, admin_headers, {"config.server.acknowledgements.enabled": "off"}
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "invalid_value"
+        assert gc.head_revision() == before
+
+
+@pytest.mark.usefixtures("_held")
+class TestCredentialsAreNotEchoed:
+    def test_the_write_response_carries_none_of_them(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        resp = _put_receiver(client, admin_headers, CREDENTIALS)
+        assert resp.status_code == 200, resp.text
+        for credential in PLAINTEXT:
+            assert credential not in resp.text
+
+    def test_the_values_route_masks_tokens_and_header_values(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        assert _put_receiver(client, admin_headers, CREDENTIALS).status_code == 200
+
+        resp = client.get(f"{RECEIVER_BASE}/values", headers=admin_headers)
+        assert resp.status_code == 200, resp.text
+        auth = resp.json()["values"]["config"]["server"]["auth"]
+        assert auth["bearer"]["tokens"] == [contract.REDACTED, contract.REDACTED]
+        assert auth["accepted_headers"] == [{"name": "x-api-key", "values": [contract.REDACTED]}]
+        assert auth["header_values"] == [contract.REDACTED]
+        assert auth["mode"] == "bearer"
+        for credential in PLAINTEXT:
+            assert credential not in resp.text
+
+    def test_the_config_route_reports_them_set_and_says_nothing_else(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        _put_receiver(client, admin_headers, CREDENTIALS)
+
+        resp = client.get(f"{RECEIVER_BASE}/config", headers=admin_headers)
+        by_path = {f["path"]: f for f in resp.json()["fields"]}
+        for path in ("config.server.auth.bearer.tokens", "config.server.auth.header_values"):
+            assert (by_path[path]["secret"], by_path[path]["set"]) == (True, True), path
+            assert by_path[path]["value"] is None, path
+        # A header's name is a setting; only its values are the credential.
+        headers = by_path["config.server.auth.accepted_headers"]
+        assert (headers["secret"], headers["set"]) == (False, True)
+        assert headers["value"] == [{"name": "x-api-key", "values": [contract.REDACTED]}]
+        for credential in PLAINTEXT:
+            assert credential not in resp.text
+
+    def test_a_fetcher_map_entry_shows_and_its_token_survives_a_write_back(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        _deploy_fetcher(client, admin_headers, "alpha")
+        base = "/api/v1/apps/dfe-fetcher/alpha"
+        entry = {"url": "https://api.example", "topic": "t", "auth": {"token": "rest-tok-7731"}}
+        resp = client.put(
+            f"{base}/config",
+            json={"changes": {"config.sources.rest": {"primary": entry}}},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+
+        read = client.get(f"{base}/config", headers=admin_headers)
+        field = {f["path"]: f for f in read.json()["fields"]}["config.sources.rest"]
+        shown = field["value"]["primary"]
+        assert shown["url"] == "https://api.example"
+        assert shown["auth"]["token"] == contract.REDACTED
+        assert "rest-tok-7731" not in read.text
+
+        shown["topic"] = "t-2"
+        written = client.put(
+            f"{base}/config",
+            json={"changes": {"config.sources.rest": {"primary": shown}}},
+            headers=admin_headers,
+        )
+        assert written.status_code == 200, written.text
+        stored = gc.get("helmvars", "dfe-fetcher-alpha-values")["config"]["sources"]["rest"]
+        assert stored == {"primary": {**entry, "topic": "t-2"}}
+
+    def test_the_fetcher_ingest_token_is_masked_on_both_reads(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # The schema carries no marker on it, so the name rule is what hides it.
+        _wire(app, tmp_path)
+        _deploy_fetcher(client, admin_headers, "alpha")
+        base = "/api/v1/apps/dfe-fetcher/alpha"
+        path = "config.ingest.auth_token"
+        resp = client.put(
+            f"{base}/config", json={"changes": {path: "ingest-tok-6620"}}, headers=admin_headers
+        )
+        assert resp.status_code == 200, resp.text
+
+        config = client.get(f"{base}/config", headers=admin_headers)
+        field = {f["path"]: f for f in config.json()["fields"]}[path]
+        assert (field["secret"], field["set"], field["value"]) == (True, True, None)
+        assert "ingest-tok-6620" not in config.text
+        values = client.get(f"{base}/values", headers=admin_headers)
+        assert values.json()["values"]["config"]["ingest"]["auth_token"] == contract.REDACTED
+        assert "ingest-tok-6620" not in values.text
+
+    def test_deleting_a_fetcher_connection_leaves_each_token_on_its_own_account(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        _deploy_fetcher(client, admin_headers, "alpha")
+        base = "/api/v1/apps/dfe-fetcher/alpha"
+        path = "config.sources.github.connections"
+        connections = [{"id": n, "org": f"org-{n}", "token": f"gh-{n}-5521"} for n in "abc"]
+        resp = client.put(
+            f"{base}/config", json={"changes": {path: connections}}, headers=admin_headers
+        )
+        assert resp.status_code == 200, resp.text
+
+        read = client.get(f"{base}/config", headers=admin_headers)
+        shown = {f["path"]: f for f in read.json()["fields"]}[path]["value"]
+        assert [entry["token"] for entry in shown] == [contract.REDACTED] * 3
+        written = client.put(
+            f"{base}/config",
+            json={"changes": {path: [shown[0], shown[2]]}},
+            headers=admin_headers,
+        )
+        assert written.status_code == 200, written.text
+        stored = gc.get("helmvars", "dfe-fetcher-alpha-values")["config"]["sources"]["github"]
+        assert stored["connections"] == [connections[0], connections[2]]
+
+    def test_a_fetcher_connection_pointed_elsewhere_needs_its_token_typed_again(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        _deploy_fetcher(client, admin_headers, "alpha")
+        base = "/api/v1/apps/dfe-fetcher/alpha"
+        path = "config.sources.okta.connections"
+        connections = [
+            {"id": n, "tenant_url": f"https://{n}.okta.example", "token": f"okta-{n}-5530"}
+            for n in "ab"
+        ]
+        resp = client.put(
+            f"{base}/config", json={"changes": {path: connections}}, headers=admin_headers
+        )
+        assert resp.status_code == 200, resp.text
+        read = client.get(f"{base}/config", headers=admin_headers)
+        shown = {f["path"]: f for f in read.json()["fields"]}[path]["value"]
+
+        before = gc.head_revision()
+        moved = [{**shown[0], "tenant_url": "https://evil.example"}, shown[1]]
+        refused = client.put(
+            f"{base}/config", json={"changes": {path: moved}}, headers=admin_headers
+        )
+        assert refused.status_code == 400, refused.text
+        assert refused.json()["code"] == "credential_reentry_required"
+        assert refused.json()["context"]["path"] == path
+        assert gc.head_revision() == before
+
+        retyped = [{**moved[0], "token": "okta-a-5531"}, shown[1]]
+        taken = client.put(
+            f"{base}/config", json={"changes": {path: retyped}}, headers=admin_headers
+        )
+        assert taken.status_code == 200, taken.text
+        stored = gc.get("helmvars", "dfe-fetcher-alpha-values")["config"]["sources"]["okta"]
+        assert stored["connections"] == [retyped[0], connections[1]]
+
+    def test_the_helm_vars_route_masks_them_too(self, client, app, admin_headers, tmp_path):
+        # The same overlay read through the generic helm-var surface, same privilege.
+        _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        _put_receiver(
+            client,
+            admin_headers,
+            {**CREDENTIALS, "extraEnv.DFE_RECEIVER_S3_SECRET": "env-secret"},
+        )
+
+        resp = client.get(
+            "/api/v1/helm/files/dfe-receiver-default-values/vars", headers=admin_headers
+        )
+        assert resp.status_code == 200, resp.text
+        by_path = {v["path"]: v["value"] for v in resp.json()}
+        assert by_path["config.server.auth.bearer.tokens[0]"] == contract.REDACTED
+        assert by_path["config.server.auth.accepted_headers[0].name"] == "x-api-key"
+        assert by_path["config.server.auth.accepted_headers[0].values[0]"] == contract.REDACTED
+        assert by_path["config.server.auth.header_values[0]"] == contract.REDACTED
+        assert by_path["extraEnv.DFE_RECEIVER_S3_SECRET"] == contract.REDACTED
+        assert by_path["config.server.auth.mode"] == "bearer"
+        for credential in (*PLAINTEXT, "env-secret"):
+            assert credential not in resp.text
+
+    def test_a_masked_read_written_back_keeps_the_stored_credentials(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # A client that reads /values, edits one field and writes the rest back
+        # unchanged hands the engine the mask where the credentials were.
+        gc = _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        _put_receiver(
+            client, admin_headers, {**CREDENTIALS, "extraEnv.DFE_RECEIVER_S3_SECRET": "env-secret"}
+        )
+        shown = client.get(f"{RECEIVER_BASE}/values", headers=admin_headers).json()["values"]
+        auth = shown["config"]["server"]["auth"]
+
+        resp = _put_receiver(
+            client,
+            admin_headers,
+            {
+                "config.server.auth.mode": "header",
+                "config.server.auth.bearer.tokens": auth["bearer"]["tokens"],
+                "config.server.auth.accepted_headers": auth["accepted_headers"],
+                "config.server.auth.header_values": auth["header_values"],
+                "extraEnv.DFE_RECEIVER_S3_SECRET": shown["extraEnv"]["DFE_RECEIVER_S3_SECRET"],
+            },
+        )
+        assert resp.status_code == 200, resp.text
+
+        stored = gc.get("helmvars", "dfe-receiver-default-values")
+        assert stored["config"]["server"]["auth"] == {
+            "mode": "header",
+            "bearer": {"tokens": ["tok-1", "tok-2"]},
+            "accepted_headers": [{"name": "x-api-key", "values": ["hv-1"]}],
+            "header_values": ["legacy-1"],
+        }
+        assert stored["extraEnv"]["DFE_RECEIVER_S3_SECRET"] == "env-secret"
+        assert contract.REDACTED not in json.dumps(stored)
+
+    def test_a_masked_entry_added_to_a_list_keeps_the_stored_ones_and_takes_the_new(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        _put_receiver(client, admin_headers, CREDENTIALS)
+        path = "config.server.auth.bearer.tokens"
+        resp = _put_receiver(
+            client, admin_headers, {path: [contract.REDACTED, contract.REDACTED, "tok-3"]}
+        )
+        assert resp.status_code == 200, resp.text
+        stored = gc.get("helmvars", "dfe-receiver-default-values")
+        assert stored["config"]["server"]["auth"]["bearer"]["tokens"] == ["tok-1", "tok-2", "tok-3"]
+
+    def test_the_mask_with_nothing_stored_behind_it_is_refused(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # Writing it would put the placeholder itself in as the credential.
+        gc = _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        before = gc.head_revision()
+        resp = _put_receiver(
+            client, admin_headers, {"config.kafka.sasl.password": contract.REDACTED}
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "masked_value"
+        assert gc.head_revision() == before
+
+    def test_the_helm_vars_route_keeps_a_credential_written_back_masked(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        _put_receiver(client, admin_headers, CREDENTIALS)
+        resp = client.put(
+            "/api/v1/helm/files/dfe-receiver-default-values/vars/config.server.auth.bearer.tokens",
+            json={"value": [contract.REDACTED, contract.REDACTED]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        stored = gc.get("helmvars", "dfe-receiver-default-values")
+        assert stored["config"]["server"]["auth"]["bearer"]["tokens"] == ["tok-1", "tok-2"]
+
+    def test_the_helm_vars_route_refuses_the_mask_with_nothing_behind_it(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        resp = client.put(
+            "/api/v1/helm/files/dfe-receiver-default-values/vars/config.kafka.sasl.password",
+            json={"value": contract.REDACTED},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "masked_value"
+
+    def test_the_stored_overlay_still_holds_what_was_written(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # Masking is on the way out: the app still needs the real tokens.
+        gc = _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        _put_receiver(client, admin_headers, CREDENTIALS)
+        doc = gc.get("helmvars", "dfe-receiver-default-values")
+        assert doc["config"]["server"]["auth"]["bearer"]["tokens"] == ["tok-1", "tok-2"]
+
+
+STALE = "0" * 40
+RECEIVER_VARS = "/api/v1/helm/files/dfe-receiver-default-values/vars"
+
+
+@pytest.mark.usefixtures("_held")
+class TestAStaleWriteReadsNoCredentialBack:
+    """A 409 carries the document at head, masked as every other read of it is."""
+
+    def _seed(self, client, app, headers, tmp_path) -> None:
+        _wire(app, tmp_path)
+        assert _deploy_receiver(client, headers).status_code == 200
+        assert _put_receiver(client, headers, CREDENTIALS).status_code == 200
+
+    def _assert_masked_conflict(self, resp) -> None:
+        assert resp.status_code == 409, resp.text
+        body = resp.json()
+        assert body["code"] == "conflict"
+        auth = body["context"]["current"]["config"]["server"]["auth"]
+        assert auth["mode"] == "bearer"
+        assert auth["bearer"]["tokens"] == [contract.REDACTED, contract.REDACTED]
+        assert body["context"]["head"]
+        for credential in PLAINTEXT:
+            assert credential not in resp.text
+
+    def test_a_helm_var_write(self, client, app, admin_headers, tmp_path):
+        self._seed(client, app, admin_headers, tmp_path)
+        resp = client.put(
+            f"{RECEIVER_VARS}/keda.maxReplicaCount",
+            json={"value": 4},
+            headers={**admin_headers, "If-Match": STALE},
+        )
+        self._assert_masked_conflict(resp)
+
+    def test_a_scaling_write(self, client, app, admin_headers, tmp_path):
+        self._seed(client, app, admin_headers, tmp_path)
+        resp = client.put(
+            f"{RECEIVER_BASE}/scaling",
+            json={"max_replicas": 7},
+            headers={**admin_headers, "If-Match": STALE},
+        )
+        self._assert_masked_conflict(resp)
+
+    def test_an_undeploy(self, client, app, admin_headers, tmp_path):
+        self._seed(client, app, admin_headers, tmp_path)
+        resp = client.delete(RECEIVER_BASE, headers={**admin_headers, "If-Match": STALE})
+        self._assert_masked_conflict(resp)
+
+
+@pytest.mark.usefixtures("_held")
+class TestTheChartsOwnCredentialKeys:
+    """The app chart's hyphenated credential keys read back masked everywhere."""
+
+    TOKEN = "chart-tok-4410"
+
+    def test_a_chart_token_is_masked_on_every_read(self, client, app, admin_headers, tmp_path):
+        gc = _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        resp = client.put(
+            f"{RECEIVER_VARS}/auth.bearer-tokens", json={"value": self.TOKEN}, headers=admin_headers
+        )
+        assert resp.status_code == 200, resp.text
+        for url in (
+            RECEIVER_VARS,
+            f"{RECEIVER_BASE}/values",
+            "/api/v1/gitops/classes/helmvars/resources/dfe-receiver-default-values/vars",
+        ):
+            got = client.get(url, headers=admin_headers)
+            assert got.status_code == 200, (url, got.text)
+            assert self.TOKEN not in got.text, url
+        stored = gc.get("helmvars", "dfe-receiver-default-values")
+        assert stored["auth"]["bearer-tokens"] == self.TOKEN
+
+    def test_an_action_may_not_carry_one(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        _deploy_receiver(client, admin_headers)
+        action = {
+            "name": "set-tok",
+            "description": "d",
+            "required_action": "action:invoke:set-tok",
+            "changes": [
+                {
+                    "cls": "helmvars",
+                    "name": "dfe-receiver-default-values",
+                    "path": "auth.bearer-tokens",
+                    "value": "act-tok-3301",
+                }
+            ],
+        }
+        resp = client.post("/api/v1/governance/admin/actions", json=action, headers=admin_headers)
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "credential_in_action"
+        assert "act-tok-3301" not in resp.text

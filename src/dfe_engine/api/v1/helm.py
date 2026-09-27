@@ -17,8 +17,6 @@ is bound at the class: helmvars:read / helmvars:write (+ helmvars:override for
 protected vars). Optimistic concurrency via the If-Match header (commit SHA).
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -26,6 +24,7 @@ from pydantic import BaseModel
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.write_turn import WRITE_TURN
+from dfe_engine.appmgmt import contract
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -37,9 +36,9 @@ from dfe_engine.gitcrud.commit_policy import (
     validate_change,
     validate_name,
 )
-from dfe_engine.gitcrud.engine import ResourceNotFoundError
+from dfe_engine.gitcrud.engine import ResourceNotFoundError, flatten
 from dfe_engine.gitcrud.routing import ReviewRequiredError, route_write
-from dfe_engine.governance import PolicyStore, ProtectedVarError
+from dfe_engine.governance import ACTION_CLASS, ActionStore, PolicyStore, ProtectedVarError
 
 router = APIRouter(prefix="/helm", tags=["Governed Ops: Helm Vars"], dependencies=[WRITE_TURN])
 
@@ -82,6 +81,25 @@ def forge_of(request: Request):
     return getattr(request.app.state, "forge", None)
 
 
+def conflict_error(exc: ConcurrencyConflictError) -> HTTPException:
+    """The 409 for a write whose base revision is stale, the stored document masked.
+
+    ``head`` is the revision to re-read against. ``current`` is the document as it
+    stands at head, masked as every read of the deploy repo is, so a stale
+    ``If-Match`` never reads a credential back.
+    """
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": "conflict",
+            "message": str(exc),
+            # non-reserved keys become the ErrorResponse.context (current vs theirs)
+            "current": contract.shown_resource(exc.current),
+            "head": exc.head,
+        },
+    )
+
+
 def check_name(name: str) -> None:
     """400 on a resource name that could traverse the tree or forge a trailer."""
     try:
@@ -90,6 +108,27 @@ def check_name(name: str) -> None:
         raise HTTPException(
             status_code=400, detail={"code": "invalid_name", "message": str(exc)}
         ) from exc
+
+
+def shown_vars(gc: GitCrud, cls: str, name: str) -> dict[str, Any]:
+    """One resource's flattened vars, credentials masked, for any route that lists them.
+
+    An action definition's credentials sit in change values the name rule cannot
+    see, so it is masked by the action rule first.
+
+    Raises:
+        ResourceNotFoundError: The resource does not exist; the caller maps it.
+    """
+    doc = gc.get(cls, name)
+    if cls == ACTION_CLASS:
+        doc = ActionStore(gc).shown_doc(name, doc)
+    try:
+        shown = contract.redact_resource(doc)
+    except contract.ContractError as exc:
+        raise HTTPException(
+            500, detail={"code": "contract_unreadable", "message": str(exc)}
+        ) from exc
+    return flatten(shown)
 
 
 def enforce_protected(request: Request, user: Any, cls: str, name: str, path: str) -> bool:
@@ -129,6 +168,13 @@ def set_var_governed(
         stored = gc.get(cls, name)
     except ResourceNotFoundError:
         stored = {}
+    # The vars routes read credentials masked, so one written back as read keeps its value.
+    try:
+        value = contract.restore_masked_at(stored, path, value)
+    except contract.MaskedValueError as exc:
+        raise HTTPException(
+            status_code=400, detail={"code": exc.code, "message": str(exc)}
+        ) from exc
     try:
         validate_change(path, value, stored)
     except CommitPolicyError as exc:
@@ -152,6 +198,8 @@ def set_var_governed(
             cls, name, path, value, user.user_id, message=msg, base_revision=if_match, branch=branch
         )
 
+    # The review PR's text leaves the deploy repo, so a credential is named, not shown.
+    shown = contract.shown_var(stored, path, value)
     try:
         outcome = route_write(
             gc=gc,
@@ -163,22 +211,13 @@ def set_var_governed(
             actor=user.user_id,
             protected=protected,
             title=f"cfg({name}): set {path}",
-            body=f"Governed helm-var change to {name} ({path}={value!r}) "
+            body=f"Governed helm-var change to {name} ({path}={shown!r}) "
             f"by {user.user_id}. Opened for review because production+team may "
             "not commit straight to main.",
             write=_write,
         )
     except ConcurrencyConflictError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "conflict",
-                "message": str(exc),
-                # non-reserved keys become the ErrorResponse.context (current vs theirs)
-                "current": exc.current,
-                "head": exc.head,
-            },
-        ) from exc
+        raise conflict_error(exc) from exc
     except ReviewRequiredError as exc:
         raise HTTPException(
             status_code=409, detail={"code": "review_required", "message": str(exc)}
@@ -249,12 +288,15 @@ def list_files(user: CurrentUser, request: Request) -> list[str]:
     "/files/{name}/vars", dependencies=[Depends(require_action(scopes_dict["helmvars_read"]))]
 )
 def list_vars(name: str, user: CurrentUser, request: Request) -> list[dict[str, Any]]:
-    """Flattened dot-path vars for a resource, each marked protected or not."""
+    """Flattened dot-path vars for a resource, each marked protected or not.
+
+    Credentials come back masked, as the app surface's values route masks them.
+    """
     check_name(name)
     gc = gitcrud_of(request)
     policy = policy_of(request)
     out: list[dict[str, Any]] = []
-    for path, value in gc.vars(_CLASS, name).items():
+    for path, value in shown_vars(gc, _CLASS, name).items():
         protected = bool(policy and policy.is_protected(_CLASS, name, path))
         out.append({"path": path, "value": value, "protected": protected})
     return out

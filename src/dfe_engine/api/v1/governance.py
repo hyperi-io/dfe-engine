@@ -20,8 +20,6 @@ Operators get curated actions via `action:invoke:<name>`; raw class CRUD stays w
 admins (governance:write). Everything commits to gitops via the engine.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -30,6 +28,7 @@ from pydantic import BaseModel
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.review import apply_review_headers
 from dfe_engine.api.write_turn import WRITE_TURN
+from dfe_engine.appmgmt import contract
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -40,6 +39,7 @@ from dfe_engine.governance import (
     ActionDef,
     ActionForbiddenError,
     ActionStore,
+    CredentialInActionError,
     InvalidParamsError,
     PolicyStore,
     ProtectedPolicy,
@@ -139,8 +139,9 @@ def list_actions(user: CurrentUser, request: Request) -> list[str]:
     "/actions/{name}", dependencies=[Depends(require_action(scopes_dict["governance_read"]))]
 )
 def get_action(name: str, user: CurrentUser, request: Request) -> ActionDef:
+    """One defined action; a credential a legacy definition still carries comes back masked."""
     try:
-        return _actions(request).get(name)
+        return _actions(request).get_shown(name)
     except ResourceNotFoundError as exc:
         raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
 
@@ -210,6 +211,8 @@ def invoke_action(
         raise HTTPException(403, detail={"code": "action_forbidden", "message": str(exc)}) from exc
     except CommitPolicyError as exc:
         raise HTTPException(403, detail={"code": "policy_violation", "message": str(exc)}) from exc
+    except contract.MaskedValueError as exc:
+        raise HTTPException(400, detail={"code": exc.code, "message": str(exc)}) from exc
 
     if dry_run:
         return InvokeResponse(dry_run=True, changed=False, commit_sha=None, diff=preview.diff)
@@ -298,7 +301,18 @@ def validate_action(body: ActionDef, user: CurrentUser, request: Request) -> Val
 def create_action(
     body: ActionDef, user: CurrentUser, request: Request, response: Response
 ) -> ActionDef:
+    """Define or replace an action.
+
+    400 ``credential_in_action`` where a change targets a credential: the definition
+    is committed to the deploy repo, so a credential in it is plaintext in history.
+    """
     _check_name(body.name)
+    try:
+        _actions(request).refuse_credentials(body)
+    except CredentialInActionError as exc:
+        raise HTTPException(
+            400, detail={"code": "credential_in_action", "message": str(exc)}
+        ) from exc
 
     def _write(branch: str):
         return _actions(request).save(body, user.user_id, branch=branch)

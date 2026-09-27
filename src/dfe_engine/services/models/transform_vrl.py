@@ -1,21 +1,21 @@
 """Configuration model for dfe-transform-vrl.
 
-A transform-vrl deployment embeds the VRL crate directly — no Vector
+A transform-vrl deployment embeds the VRL crate directly -- no Vector
 subprocess. Config is simpler than transform-vector: flat source/sink
 Kafka config, a VRL transforms directory or file list, and pipeline
 settings (batch size, timeouts).
 """
 
-from __future__ import annotations
-
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from dfe_engine.services.models.base import BaseServiceConfig
 from dfe_engine.services.models.common import (
+    AcknowledgementsConfig,
     KafkaTlsConfig,
     LoggingConfig,
     MetricsConfig,
     SaslConfig,
+    without_keys,
 )
 
 
@@ -27,7 +27,6 @@ class VrlSourceConfig(BaseModel):
     brokers: list[str] = Field(default_factory=lambda: ["localhost:9092"])
     topics: list[str] = Field(default_factory=lambda: ["events"])
     group_id: str = "dfe-transform-vrl"
-    format: str = Field(default="auto", description="auto, json, or msgpack")
     max_buffer_bytes: int = Field(default=67_108_864, gt=0, description="Consumer buffer (bytes)")
     sasl: SaslConfig | None = None
     tls: KafkaTlsConfig | None = None
@@ -35,6 +34,13 @@ class VrlSourceConfig(BaseModel):
     session_timeout_ms: int = Field(default=30_000, gt=0)
     commit_interval_ms: int = Field(default=5_000, gt=0)
     librdkafka_options: dict[str, str] = Field(default_factory=dict)
+    acknowledgements: AcknowledgementsConfig = Field(default_factory=AcknowledgementsConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _ignore_retired_format(cls, data: object) -> object:
+        """Drop ``format``: a transform-vrl file stored before the key was retired still has it."""
+        return without_keys(data, "format")
 
 
 class VrlSinkConfig(BaseModel):
@@ -96,7 +102,7 @@ class TransformVrlConfig(BaseServiceConfig):
     """Complete configuration for dfe-transform-vrl.
 
     Unlike transform-vector, this is a flat config with no multi-source
-    tree — just a single source → VRL transform → sink pipeline.
+    tree -- just a single source -> VRL transform -> sink pipeline.
     """
 
     pipeline: VrlPipelineConfig = Field(default_factory=VrlPipelineConfig)

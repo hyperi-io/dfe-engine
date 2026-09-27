@@ -179,7 +179,7 @@ def _decode_json(record: dict[str, Any]) -> dict[str, Any] | None:
     """Parse a stored value as a JSON object, tolerating junk layers."""
     try:
         doc = json.loads(record["value"])
-    except (ValueError, UnicodeDecodeError):
+    except ValueError, UnicodeDecodeError:
         logger.warning(
             "Repository: unparseable preferences layer skipped",
             scope=record["scope"],

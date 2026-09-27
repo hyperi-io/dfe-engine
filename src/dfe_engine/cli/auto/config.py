@@ -173,7 +173,7 @@ class Store:
             return {}
         try:
             return json.loads(self.credentials_file.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             return {}
 
     def _write_credentials(self, creds: dict[str, dict[str, str]]) -> None:

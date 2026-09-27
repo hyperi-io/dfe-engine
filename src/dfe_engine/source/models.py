@@ -1,4 +1,4 @@
-"""Source model — Pydantic models for the Source top-level data entity.
+"""Source model: Pydantic models for the Source top-level data entity.
 
 A Source represents a data stream entering the DFE platform (e.g. filebeat,
 syslog, crowdstrike_edr). It contains identity, schema, naming-standard views,
@@ -195,7 +195,7 @@ class SchemaColumn(BaseModel):
     )
     ch_override: str | None = Field(
         default=None,
-        description="Exact ClickHouse type — bypasses primitive mapping",
+        description="Exact ClickHouse type -- bypasses primitive mapping",
     )
     codec: str | None = Field(
         default=None,
@@ -325,7 +325,7 @@ class SourceHeader(BaseModel):
 
 
 class SourceMatch(BaseModel):
-    """Receiver match rule — how the receiver identifies this source."""
+    """Receiver match rule: how the receiver identifies this source."""
 
     field: str = Field(
         ...,
@@ -513,6 +513,11 @@ def landing_topic(source_name: str) -> str:
 def transformed_topic(source_name: str) -> str:
     """The topic a source's transform writes, and the loader then reads."""
     return _topic_policy().transformed_topic(source_name)
+
+
+def manifest_max_message_bytes() -> int:
+    """The ``max.message.bytes`` the dfe-schemas topic manifest gives every DFE topic."""
+    return int(_topic_policy().defaults["max_message_bytes"])
 
 
 SOURCE_LABEL_FIELD = "_source"
@@ -868,7 +873,7 @@ def _derive_deployed_version(
 
 
 def _next_major_semver(current: str) -> str:
-    """Bump semver major (``1.2.3`` → ``2.0.0``)."""
+    """Bump semver major (``1.2.3`` -> ``2.0.0``)."""
     parts = current.strip().split(".")
     if len(parts) != 3 or not all(p.isdigit() for p in parts):
         raise ValueError(f"Version {current!r} is not semver (expected x.x.x)")
@@ -1159,7 +1164,7 @@ def apply_source_write_update(existing: Source, write: SourceWriteRequest) -> So
 
 
 # ---------------------------------------------------------------------------
-# Source — Top-Level Model
+# Source: Top-Level Model
 # ---------------------------------------------------------------------------
 
 
@@ -1174,7 +1179,7 @@ class Source(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    source: str = Field(..., description="The _source label — immutable identifier")
+    source: str = Field(..., description="The _source label -- immutable identifier")
     resource_type: ResourceType = Field(
         default="custom",
         description="core for engine-owned sources, custom for operator-created ones",
@@ -1196,7 +1201,7 @@ class Source(BaseModel):
     )
     versions: dict[str, SourceVersion] = Field(
         default_factory=dict,
-        description="Version id → configuration snapshot",
+        description="Version id -> configuration snapshot",
     )
 
     @model_validator(mode="before")
@@ -1432,7 +1437,7 @@ class Source(BaseModel):
         return data
 
 
-# ── Version GET response (API) ───────────────────────────────
+# --- Version GET response (API) ---
 
 
 class SourceVersionGetResponse(BaseModel):
@@ -1468,7 +1473,7 @@ class SourceVersionGetResponse(BaseModel):
     )
 
 
-# ── List / summary response models (API) ─────────────────────
+# --- List / summary response models (API) ---
 
 
 class SourceSummaryObject(BaseModel):

@@ -16,7 +16,7 @@ import pytest
 from dfe_engine.api.v1.sources import _ensure_source_topics, _remove_source_topics
 from dfe_engine.kafka.topics import TopicEnsureResult, TopicRemoveResult
 from dfe_engine.settings import KafkaSettings, TransportSettings
-from dfe_engine.source.models import Source, SourceMatch, SourceTransform
+from dfe_engine.source.models import Source, SourceMatch, SourceTransform, _topic_policy
 
 
 def _settings(*, bus_present: bool = True, **kafka) -> SimpleNamespace:
@@ -103,6 +103,21 @@ class TestReporting:
         monkeypatch.setattr("dfe_engine.kafka.topics.ensure_topics", _capture)
         _ensure_source_topics(_source(), _settings(topic_partitions=6, topic_replication_factor=3))
         assert seen["specs"] == [("filebeat_land", 6, 3), ("filebeat_load", 6, 3)]
+
+    @pytest.mark.parametrize("configured", [8_388_608, None])
+    def test_every_source_topic_carries_the_deployment_message_size(self, monkeypatch, configured):
+        # A _land topic on the broker default refuses what the receiver accepts.
+        seen = {}
+
+        def _capture(specs, **kw):
+            seen["sizes"] = {s.name: s.config.get("max.message.bytes") for s in specs}
+            return TopicEnsureResult(created=[s.name for s in specs])
+
+        monkeypatch.setattr("dfe_engine.kafka.topics.ensure_topics", _capture)
+        kafka = {} if configured is None else {"topic_max_message_bytes": configured}
+        _ensure_source_topics(_source(), _settings(**kafka))
+        size = configured or _topic_policy().defaults["max_message_bytes"]
+        assert seen["sizes"] == {"filebeat_land": str(size), "filebeat_load": str(size)}
 
     def test_a_source_without_a_transform_asks_for_land_only(self, monkeypatch):
         seen = {}

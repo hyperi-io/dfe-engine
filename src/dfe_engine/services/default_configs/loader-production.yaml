@@ -16,10 +16,9 @@ transport: kafka
 kafka:
   brokers:
     - kafka-bootstrap.kafka.svc.cluster.local:9092
-  group: clickhouse-loader
-  topics:
-    - events
-  client_id: clickhouse-loader
+  group: dfe-loader
+  topics: []  # empty = auto-discover every *_load / *_land topic
+  client_id: dfe-loader
   sasl:
     enabled: true
     mechanism: scram_sha_512
@@ -38,10 +37,6 @@ clickhouse:
   username: default
   password: ""
   protocol: http
-
-payload:
-  format: auto
-  mismatch_threshold: 10
 
 # Every key here is one dfe-loader's RoutingConfig deserialises
 # (src/config/pipeline.rs) -- serde ignores anything else without complaint,

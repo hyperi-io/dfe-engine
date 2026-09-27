@@ -265,7 +265,7 @@ class Sampler:
         for line in lines:
             try:
                 obj = json.loads(line)
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 continue
             if isinstance(obj, dict):
                 rows.append(obj)

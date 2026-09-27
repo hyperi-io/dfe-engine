@@ -272,11 +272,17 @@ class TestSpecsForSources:
         }
 
     def test_the_deployment_topic_config_rides_every_spec(self):
-        specs, _ = specs_for_sources([_source()], _deployment(topic_cleanup_policy="compact"))
-
-        assert all(
-            s.config == {"cleanup.policy": "compact", "compression.type": "producer"} for s in specs
+        specs, _ = specs_for_sources(
+            [_source()],
+            _deployment(topic_cleanup_policy="compact", topic_max_message_bytes=8388608),
         )
+
+        expected = {
+            "cleanup.policy": "compact",
+            "compression.type": "producer",
+            "max.message.bytes": "8388608",
+        }
+        assert all(s.config == expected for s in specs)
 
 
 class TestEnsureAllSourceTopics:

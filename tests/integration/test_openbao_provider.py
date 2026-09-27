@@ -86,7 +86,7 @@ def openbao_addr():
                 errors="replace",
                 timeout=60,
             )
-        except (subprocess.SubprocessError, FileNotFoundError):
+        except subprocess.SubprocessError, FileNotFoundError:
             pass
 
     ready = False

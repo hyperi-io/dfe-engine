@@ -389,6 +389,18 @@ def test_callback_token_carries_the_role_the_group_files_resolve(client, app):
     assert claims[hyperdx_role.CLAIM] == hyperdx_role.TEAM_ADMIN
 
 
+def test_callback_token_of_an_org_scoped_admin_carries_the_member_role(client, app):
+    """An admin role bound at one org's scope never changes what every team sees."""
+    from dfe_engine.auth import hyperdx_role
+
+    app.state.oidc_rp = _FakeOidcRp()
+    app.state.group_store.create("g1", ["admin"], members=["stub-user"], scope="org:acme")
+    resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+    assert resp.status_code == 200, resp.text
+    claims = pyjwt.decode(resp.json()["access_token"], options={"verify_signature": False})
+    assert claims[hyperdx_role.CLAIM] == hyperdx_role.MEMBER
+
+
 def test_callback_jit_provisions_account_with_oidc_email(client, app):
     app.state.oidc_rp = _FakeOidcRp()
     resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)

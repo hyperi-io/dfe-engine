@@ -200,7 +200,7 @@ class TestTheReconcileReportsTheRestartsItsOwnWritesNeed:
     """
 
     TRANSFORM = "dfe-transform-elastic"
-    RECREATE = f"recreate required: docker compose up -d {TRANSFORM}-elreg"
+    RECREATE = f"recreate required: make apply SERVICES={TRANSFORM}-elreg"
 
     def _compose(self, app, tmp_path):
         """A deploy repo plus the app-config directory a Compose stack mounts."""

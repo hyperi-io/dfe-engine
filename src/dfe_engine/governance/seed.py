@@ -68,7 +68,7 @@ def _packaged(kind: str) -> dict[str, str]:
     package = f"{_RESOURCE_PACKAGE}.{kind}"
     try:
         root = resources.files(package)
-    except (ModuleNotFoundError, FileNotFoundError):
+    except ModuleNotFoundError, FileNotFoundError:
         logger.warning(f"Governance seed package {package!r} missing; nothing to seed")
         return {}
     return {

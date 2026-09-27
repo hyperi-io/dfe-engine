@@ -25,7 +25,7 @@ from dfe_engine.settings import DFESettings, e2e_routes_enabled, is_dev_posture,
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan: bootstrap registries on startup, cleanup on shutdown."""
     import asyncio
     import os
