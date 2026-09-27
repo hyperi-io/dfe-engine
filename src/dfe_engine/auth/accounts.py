@@ -213,6 +213,9 @@ class AccountStore:
         Returns:
             Account if found, None otherwise.
         """
+        # No account has an invalid name, and joining one would resolve a path outside the store.
+        if not _VALID_NAME.match(username):
+            return None
         path = self._path(username)
         if not path.exists():
             return None

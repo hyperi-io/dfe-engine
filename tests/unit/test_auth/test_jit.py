@@ -235,6 +235,29 @@ class TestCrossIdentityRefusal:
         assert stored.last_login_at == ""
         assert stored.external is False
 
+    @pytest.mark.parametrize("username", ["jane.doe", "Jane_Doe"])
+    def test_a_subject_that_is_a_local_accounts_raw_name_is_refused(self, stores, username):
+        """The session binds to the account under the raw subject before the sanitised one."""
+        accounts, groups = stores
+        accounts.create(username, "localpass", groups=["acme-viewers"])
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account(username, ["dfe-admins"], "entra")
+
+        assert refused.value.reason == "local_account"
+        assert accounts.get(jit.sanitise_username(username)) is None
+        assert accounts.get(username).groups == ["acme-viewers"]
+
+    def test_a_subject_that_is_the_providers_own_raw_name_is_admitted(self, stores):
+        accounts, groups = stores
+        external_account(accounts, "jane.doe", "entra", ["acme-viewers"])
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        jit.ensure_account("jane.doe", ["dfe-analysts"], "entra")
+
+        assert accounts.get("jane-doe") is not None
+
     def test_the_race_branch_refuses_a_local_account(self, tmp_path, stores):
         _, groups = stores
         accounts = RacingAccountStore(tmp_path / "accounts", blind_to="jane-corp-com")
@@ -556,6 +579,20 @@ class TestRecoveryCredentialFloor:
 
         assert refused.value.reason == "protected_account"
         assert accounts.get("operator").groups == ["dfe-admins"]
+
+    @pytest.mark.parametrize("admin_name", ["ops_admin", "Ops.Admin"])
+    def test_the_floor_follows_a_renamed_admin_whose_name_sanitises_away(self, stores, admin_name):
+        """The session looks up the raw name first, so the floor holds the raw form too."""
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups, admin_name=admin_name)
+
+        with patch("dfe_engine.auth.jit.audit_jit_login_refused") as audited:
+            with pytest.raises(JitIdentityCollisionError) as refused:
+                jit.ensure_account(admin_name, ["dfe-admins"], "entra")
+
+        assert refused.value.reason == "protected_account"
+        assert accounts.get(jit.sanitise_username(admin_name)) is None
+        audited.assert_called_once_with(admin_name, "entra", "protected_account")
 
     @pytest.mark.parametrize("subject", ["ADMIN", "_admin_", ".admin.", "admin!"])
     def test_a_subject_that_sanitises_onto_a_recovery_name_is_refused(self, stores, subject):

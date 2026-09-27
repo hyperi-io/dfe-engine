@@ -132,6 +132,12 @@ class TestGet:
         result = store.get("nobody")
         assert result is None
 
+    @pytest.mark.parametrize("name", ["../accounts/alice", "./alice"])
+    def test_get_by_a_name_no_account_can_have_misses(self, store, name):
+        """A session subject reaches this lookup, so it never resolves a path onto an account."""
+        store.create("alice", "password123")
+        assert store.get(name) is None
+
     def test_get_username_from_filename_not_yaml(self, store):
         """Username must come from the filename stem, not YAML content."""
         store.create("alice", "password123")
