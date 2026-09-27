@@ -1179,12 +1179,13 @@ def _refuse(status: int, code: str, path: str, message: str) -> HTTPException:
 
 
 def _checked_changes(
-    service: str, found: contract.AppContract, changes: dict[str, Any]
+    service: str, found: contract.AppContract, changes: dict[str, Any], doc: dict
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Split a request into config paths and environment keys, refusing what the app would.
 
     Every refusal happens here, before the overlay document is touched at all, so
     a rejected write leaves the deploy repo on the revision the caller read.
+    ``doc`` is the overlay as read, which decides what its chart sets.
 
     A `config.*` path the contract does not declare is carried through unchecked:
     there is nothing to check it against, and the read route already reports such
@@ -1207,7 +1208,7 @@ def _checked_changes(
             reason = contract.check_env_value(value)
             if reason:
                 raise _refuse(400, "invalid_env_value", path, reason)
-            decides = contract.chart_env_names(service).get(key)
+            decides = contract.chart_env_names(service, doc).get(key)
             if decides:
                 raise _refuse(
                     409,
@@ -1226,7 +1227,7 @@ def _checked_changes(
                 f"a change addresses {appconfig.CONFIG_ROOT}.<option> or "
                 f"{appconfig.ENV_ROOT}.<NAME>",
             )
-        supplier = contract.chart_supplier(service, path)
+        supplier = contract.chart_supplier(service, path, doc)
         if supplier:
             raise _refuse(
                 409,
@@ -1308,7 +1309,7 @@ def set_app_config(
     doc = _overlay(gc, app)
     _require_fresh(gc, if_match)
     config_changes, env_changes = _checked_changes(
-        service, read_contract(service), _restored(doc, body.changes)
+        service, read_contract(service), _restored(doc, body.changes), doc
     )
     if not config_changes and not env_changes:
         return ConfigWriteResult(changed=False)

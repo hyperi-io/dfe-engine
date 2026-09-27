@@ -285,6 +285,14 @@ class AppDescriptor:
     for an app whose watcher ships off.
     """
 
+    restart_paths: tuple[str, ...] = ()
+    """The config dot-paths a hot-reloading app still binds at startup.
+
+    Overlay paths, ``config.`` rooted. A change at or below one of them needs
+    the process restarted although the app reloads the rest, which is how one
+    app declares both halves rather than spending ``hot_reload`` on one.
+    """
+
     endpoints: dict[str, AppEndpoint] = field(default_factory=dict)
     """The listeners this app runs, by name. Absent means the app has none."""
 
@@ -501,6 +509,7 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
         reload_setting=_reload_setting_from(
             service, raw.get("reload_setting"), hot_reload=hot_reload
         ),
+        restart_paths=_restart_paths_from(service, raw.get("restart_paths"), hot_reload=hot_reload),
         endpoints=_endpoints_from(service, raw.get("endpoints")),
         variant_path=str(raw.get("variant_path", "")),
         catalogue=_catalogue_from(service, raw.get("catalogue")),
@@ -555,6 +564,32 @@ def _reload_setting_from(service: str, raw: object, *, hot_reload: bool) -> str:
             "because it is written into the app's own config file"
         )
     return setting
+
+
+def _restart_paths_from(service: str, raw: object, *, hot_reload: bool) -> tuple[str, ...]:
+    """The config paths this app binds at startup although it reloads the rest.
+
+    Refused on an app that does not reload, where every change is a restart
+    already, and anywhere but under ``config.``: they are compared in the file the
+    app reads, which is that block alone.
+    """
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise CatalogueError(f"{service}: restart_paths must be a list of config dot-paths")
+    if not hot_reload:
+        raise CatalogueError(
+            f"{service}: restart_paths names startup-bound keys on an app that declares "
+            "hot_reload false, where every change is a restart already"
+        )
+    paths = tuple(str(p) for p in raw)
+    for path in paths:
+        if not path.startswith("config.") or path == "config.":
+            raise CatalogueError(
+                f"{service}: restart_paths entry {path!r} must be a config. overlay path, "
+                "because it is compared in the app's own config file"
+            )
+    return paths
 
 
 def _routing_paths_from(service: str, raw: object) -> dict[str, str]:

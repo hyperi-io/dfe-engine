@@ -130,7 +130,7 @@ sequenceDiagram
 
 Without a webhook Argo polls every 300 s with up to 60 s jitter, so a routing change takes 5 to 9 minutes to reach a pod; with the Forgejo-to-Argo webhook it takes seconds plus the kubelet's ConfigMap sync of about a minute.
 
-Every app rolls on every config change, so nothing depends on which app can reload which key: the apps that also apply a change in place (the receiver's routing, Vector's transform files) gain nothing extra from it, and apps.yaml records `hot_reload` only as a fact for the console.
+Every app rolls on every config change, so nothing here depends on which app can reload which key: the apps that also apply a change in place (the receiver's routing, Vector's transform files) gain nothing extra from it. apps.yaml's `hot_reload` and `restart_paths` count only where no chart renders the config, on Compose, where they decide whether a write hands the operator a restart command.
 
 ## Asking what the deployment is, and what a source is doing
 

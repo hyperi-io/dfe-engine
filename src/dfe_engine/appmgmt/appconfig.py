@@ -53,7 +53,13 @@ from scalo.logger import logger
 
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud.engine import ResourceNotFoundError, get_path, set_path
-from dfe_engine.yaml_utils import deep_merge, yaml_dump_string, yaml_load
+from dfe_engine.yaml_utils import (
+    YAMLError,
+    deep_merge,
+    yaml_dump_string,
+    yaml_load,
+    yaml_load_string,
+)
 
 from . import files, instances
 from .catalogue import APP_CATALOGUE, AppDescriptor, ConsumedFileSet, Multiplicity, ReloadMode
@@ -547,7 +553,8 @@ def _render_one(
 
     target = app_dir / app.config_file
     rendered = yaml_dump_string(config)
-    config_changed = not target.is_file() or target.read_text(encoding="utf-8") != rendered
+    previous = target.read_text(encoding="utf-8") if target.is_file() else None
+    config_changed = previous != rendered
     # Rewritten when only a file set changed, so the file's mtime moves: the
     # config file is the app's trigger surface, and a program appearing in a
     # directory it already names is invisible to a watcher polling that file.
@@ -555,11 +562,11 @@ def _render_one(
         app_dir.mkdir(parents=True, exist_ok=True)
         _atomic_write(target, rendered)
 
-    # Only the app knows which of its settings are startup-bound, so the coarse
-    # manifest fact is what is reported: a hot-reloading app takes a config
-    # change where it stands, and every other write needs the process restarted.
+    # The manifest says which settings an app binds at startup: a hot-reloading
+    # app takes a config change where it stands unless the change lands on one
+    # of its restart paths, and every other app needs the process restarted.
     restart = not first_write and (
-        (config_changed and not reloads)
+        (config_changed and (not reloads or _rebinds(app, previous, rendered)))
         or any(fs.reload is not ReloadMode.HOT for fs in changed_sets)
     )
     # A new instance has no container yet, so the deployer creates one rather
@@ -573,6 +580,32 @@ def _render_one(
         custom_env_changed=env_changed,
         per_instance=per_instance,
         created=per_instance and first_write,
+    )
+
+
+_ABSENT = object()
+"""Stands in for a path a rendered config does not carry, so absent and null differ."""
+
+
+def _rebinds(app: AppDescriptor, previous: str | None, rendered: str) -> bool:
+    """Whether a render moves a value the app binds at startup, which its reload keeps.
+
+    Both sides are compared as parsed from their rendered text, so a key-order or
+    quoting difference is not a change. A previous file that no longer parses is
+    one the app may not be running, so it counts as a change.
+    """
+    if not app.restart_paths or previous is None:
+        return False
+    try:
+        before = yaml_load_string(previous)
+    except YAMLError:  # an unreadable previous render is no proof nothing moved
+        return True
+    after = yaml_load_string(rendered)
+    before = before if isinstance(before, dict) else {}
+    after = after if isinstance(after, dict) else {}
+    return any(
+        get_path(before, _inner_path(path), _ABSENT) != get_path(after, _inner_path(path), _ABSENT)
+        for path in app.restart_paths
     )
 
 
