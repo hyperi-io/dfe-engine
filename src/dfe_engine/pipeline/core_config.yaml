@@ -109,8 +109,9 @@ ingestion_pipelines:
     env:
       KAFKA_SOURCE_TOPIC_LIST:
       - ^(logs|context)_.*_load$
-      _207_SINK_AWS_S3_BUCKET_NAME: ghostburner-archive
-      _207_SINK_AWS_S3_REGION: ap-southeast-2
+      # Per-deployment: the 207 sink refuses to start until the deployer sets both.
+      _207_SINK_AWS_S3_BUCKET_NAME: ''
+      _207_SINK_AWS_S3_REGION: ''
     steps:
     - id: hs-xdr-vector-ct-all-main.yml
     - id: hs-xdr-vector-ct-all-prometheus.yml

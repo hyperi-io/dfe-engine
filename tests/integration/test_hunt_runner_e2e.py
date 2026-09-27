@@ -10,8 +10,8 @@
 Proves the runtime on CH only: the worker runs a windowed INSERT and advances the
 watermark so the next window resumes incrementally (no duplicate rows), and a
 runner tick claims + runs a due hunt while NEVER double-running one that is already
-leased (records the too-aggressive overrun instead). Uses the .env / devex pet
-cluster if configured, else a docker ClickHouse; drops its isolated database after.
+leased (records the too-aggressive overrun instead). Uses the ClickHouse the .env
+configures, else a docker ClickHouse; drops its isolated database after.
 """
 
 from __future__ import annotations

@@ -100,7 +100,7 @@ implementation deferred (YAGNI).
 | Reconciler (CD) | Argo Application / AppSet | Argo CD | Argo CD | Argo CD | Argo CD | compose render (none) |
 | Registry | OCI ref | Harbor | ECR | GAR | ACR | Docker Hub / local |
 | Block storage | StorageClass | Longhorn / local-path | EBS | PD | Azure Disk | docker volumes |
-| DNS | external-dns / zone | CoreDNS / devex DNS | Route 53 | Cloud DNS | Azure DNS | /etc/hosts |
+| DNS | external-dns / zone | CoreDNS / site DNS | Route 53 | Cloud DNS | Azure DNS | /etc/hosts |
 | Observability sink | OTel exporter -> dest | HyperDX + CH | HyperDX (keep) or CloudWatch | HyperDX (keep) or Cloud Monitoring | HyperDX (keep) or Azure Monitor | HyperDX / console |
 
 Priority backing services for the first swap passes: secrets, DNS,

@@ -201,7 +201,7 @@ class BaseDeploymentConfig(BaseModel):
         description="T-shirt size for resource allocation",
     )
     replicas: int = Field(default=1, ge=0)
-    image: str = "harbor.hyperi.io/dfe/dfe-service"
+    image: str = "ghcr.io/hyperi-io/dfe-service"
     image_tag: str = "latest"
     resources: ResourceSpec | None = Field(
         default=None,

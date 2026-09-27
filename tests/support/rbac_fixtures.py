@@ -9,9 +9,9 @@ A front-end dev should be able to write::
 and never learn what a group claim, a source_id or an org scope is. That is what
 this module is for.
 
-The identities here MIRROR the shared OIDC test fixture
-(hyperi-infra ``subprojects/dfe-oidc-testing/fixture.yaml``) so the fast in-process
-path and the real dex/entra/okta e2e path assert the SAME users and groups. When
+The identities here MIRROR the shared OIDC test fixture the e2e path renders into
+dex, Entra and Okta, so the fast in-process path and the real e2e path assert the
+SAME users and groups. When
 that fixture changes, update ``FIXTURE_GROUPS`` / ``FIXTURE_USERS`` to match - the
 names are the contract, and drift between them is the bug this shared vocabulary
 exists to prevent.

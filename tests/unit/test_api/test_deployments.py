@@ -81,7 +81,7 @@ def sample_deployment():
     return {
         "size": "small",
         "replicas": 2,
-        "image": "harbor.hyperi.io/dfe/dfe-receiver",
+        "image": "ghcr.io/hyperi-io/dfe-receiver",
         "image_tag": "1.0.0",
         "keda": {
             "enabled": True,

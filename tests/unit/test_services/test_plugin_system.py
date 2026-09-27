@@ -115,7 +115,7 @@ class TestDescriptors:
         d = plugin.descriptor
         assert d.name == service
         assert d.display_name
-        assert d.image.startswith("harbor.hyperi.io/dfe/")
+        assert d.image == f"ghcr.io/hyperi-io/dfe-{service}"
         assert d.default_port > 0
         assert d.metrics_port > 0
         assert isinstance(d.kafka_role, KafkaRole)

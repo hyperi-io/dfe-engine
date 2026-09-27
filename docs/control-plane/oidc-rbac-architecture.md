@@ -232,7 +232,7 @@ What a deployment must provide (dfe-infra owns these; the engine consumes them).
 Two surfaces, each with the honest tool:
 
 - **Surface A - the OIDC login** (auth-code flow + id_token with a groups claim).
-  Emulated in devex by **dex** - a real, standard OIDC IdP, consumed as
+  Emulated by **dex** - a real, standard OIDC IdP, consumed as
   `type: generic` (never dex-specific engine code). dex emits `groups: []string`;
   by shaping it, one dex stands in for the token_claim family (readable names =
   okta/generic; opaque ids = entra-in-token). dex static users cannot carry
@@ -245,8 +245,7 @@ Two surfaces, each with the honest tool:
 The automated e2e runs the token_claim path headless (dex -> engine -> roles ->
 org_ids -> ClickHouse tenant filter). api-mode adapter correctness runs against
 the Surface-B mocks. Real gsuite/okta/entra logins are interactive
-(bot-detection), never in gating CI. Provider-behaviour evidence + the fixture
-design: hyperi-infra `.hyperi-ai/plans/2026-07-23-dfe-oidc-idp-provisioning/`.
+(bot-detection), never in gating CI.
 
 ## 8. Provider-agnostic onboarding recipe
 

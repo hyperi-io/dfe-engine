@@ -1576,7 +1576,10 @@ class DFESettings(BaseModel):
 
     config_dir: str = Field(
         default="",
-        description="Root config directory (dfe-devex submodule). Auto-resolves registry subdirs.",
+        description=(
+            "Root config directory the deployment supplies: a mounted volume, or a checkout "
+            "of the deployment's own config repo. Auto-resolves registry subdirs."
+        ),
     )
     clickhouse: ClickHouseSettings = Field(default_factory=ClickHouseSettings)
     hunts: HuntsSettings = Field(default_factory=HuntsSettings)
@@ -2241,7 +2244,7 @@ def _get_env_overrides() -> dict:
     if val := _get_env("DFE_E2E_SERVER"):
         overrides["e2e_server"] = val.lower() in ("true", "1", "yes")
 
-    # Config directory (dfe-devex submodule) -- auto-resolves registry subdirs
+    # Config directory the deployment supplies -- auto-resolves registry subdirs
     # Individual env vars (DFE_SOURCES_DIR, etc.) take precedence.
     config_dir = _get_env("DFE_CONFIG_DIR")
     if config_dir:

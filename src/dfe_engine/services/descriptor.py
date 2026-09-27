@@ -29,7 +29,7 @@ class ServiceDescriptor:
     Attributes:
         name: Service name (e.g. "receiver", "loader", "transformer").
         display_name: Human-friendly name (e.g. "DFE Receiver").
-        image: Default container image (e.g. "harbor.hyperi.io/dfe/dfe-receiver").
+        image: Default container image (e.g. "ghcr.io/hyperi-io/dfe-receiver").
         default_port: Primary service port.
         metrics_port: Prometheus metrics port.
         kafka_role: Whether the service produces, consumes, or both.

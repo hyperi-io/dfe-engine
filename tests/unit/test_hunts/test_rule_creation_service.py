@@ -263,7 +263,7 @@ class TestSqlValidation:
         assert any("parenthesis" in e.message.lower() for e in errors)
 
     def test_reject_garbage_that_passes_the_keyword_checks(self, service):
-        # Found on the devex VM: SELECT and FROM both present, still not SQL.
+        # SELECT and FROM both present, still not SQL.
         errors = service.validate_sql("SELECT 1SELECT 1 FROM dfe.main LIMIT 1")
         assert errors, "a query that does not parse must not validate"
         assert any("parse" in e.message.lower() for e in errors)

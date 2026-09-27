@@ -19,7 +19,7 @@ from dfe_engine.helm.models import (
 
 def _sv(service="receiver", instance="production", **kw) -> HelmServiceValues:
     """Build a chart-shaped HelmServiceValues with the required deploy meta."""
-    kw.setdefault("image", HelmImage(repository="harbor.hyperi.io/dfe/dfe-receiver", tag="1.2.0"))
+    kw.setdefault("image", HelmImage(repository="ghcr.io/hyperi-io/dfe-receiver", tag="1.2.0"))
     return HelmServiceValues(
         deploy=HelmDeployMeta(service=f"dfe-{service}", instance=instance), **kw
     )
@@ -59,7 +59,7 @@ def deploy_dir(tmp_path):
     (deploy / "receiver-production.yaml").write_text(
         "size: small\n"
         "replicas: 2\n"
-        "image: harbor.hyperi.io/dfe/dfe-receiver\n"
+        "image: ghcr.io/hyperi-io/dfe-receiver\n"
         "image_tag: '1.2.0'\n"
         "keda:\n"
         "  enabled: true\n"
@@ -76,7 +76,7 @@ def deploy_dir(tmp_path):
     (deploy / "loader-production.yaml").write_text(
         "size: medium\n"
         "replicas: 2\n"
-        "image: harbor.hyperi.io/dfe/dfe-loader\n"
+        "image: ghcr.io/hyperi-io/dfe-loader\n"
         "image_tag: '1.2.0'\n"
         "keda:\n"
         "  enabled: true\n"
@@ -377,7 +377,7 @@ class TestWriteAll:
 
         # Verify YAML content -- chart-shaped image block.
         data = yaml_load(written[0])
-        assert data["image"]["repository"] == "harbor.hyperi.io/dfe/dfe-receiver"
+        assert data["image"]["repository"] == "ghcr.io/hyperi-io/dfe-receiver"
         assert data["image"]["tag"] == "1.2.0"
 
     def test_deterministic_output(self, tmp_path, environment):
@@ -624,7 +624,7 @@ class TestMergeOverrides:
         values = _sv(replicaCount=2)
         merged = compiler.merge_overrides(values, {"replicaCount": 5})
         assert merged.replicaCount == 5
-        assert merged.image.repository == "harbor.hyperi.io/dfe/dfe-receiver"
+        assert merged.image.repository == "ghcr.io/hyperi-io/dfe-receiver"
 
 
 # ---------------------------------------------------------------------------

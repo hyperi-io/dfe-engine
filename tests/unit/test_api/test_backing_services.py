@@ -502,7 +502,7 @@ class TestStorageModelIsDecidedAtDeploy:
         ],
     )
     def test_the_shipped_policy_locks_the_disk(self, path):
-        # Derek's call, mandated up front: volumeClaimTemplates are immutable, so a
+        # volumeClaimTemplates are immutable, so a
         # size or class change is a StatefulSet recreate rather than a values edit.
         assert f"infravars:*:{path}" in STORAGE_LOCK
 

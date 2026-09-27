@@ -15,7 +15,7 @@ class TestGenerateApplication:
             "environment_name": "production",
             "namespace": "dfe",
             "argo_project": "dfe",
-            "chart_repo_url": "https://harbor.hyperi.io/chartrepo/dfe",
+            "chart_repo_url": "https://charts.example.com/dfe",
             "chart_name": "dfe-receiver",
             "chart_version": "1.2.0",
             "values_path": "values/receiver-production-values.yaml",
@@ -55,7 +55,7 @@ class TestGenerateApplication:
     def test_source(self):
         app = self._make()
         source = app["spec"]["source"]
-        assert source["repoURL"] == "https://harbor.hyperi.io/chartrepo/dfe"
+        assert source["repoURL"] == "https://charts.example.com/dfe"
         assert source["chart"] == "dfe-receiver"
         assert source["targetRevision"] == "1.2.0"
         assert source["helm"]["valueFiles"] == ["values/receiver-production-values.yaml"]
@@ -123,7 +123,7 @@ class TestGenerateApplications:
             "environment_name": "production",
             "namespace": "dfe",
             "argo_project": "dfe",
-            "chart_repo_url": "https://harbor.hyperi.io/chartrepo/dfe",
+            "chart_repo_url": "https://charts.example.com/dfe",
             "chart_version": "1.2.0",
         }
         defaults.update(overrides)
@@ -183,7 +183,7 @@ class TestGenerateAppproject:
             project_name="dfe",
             environment_name="production",
             namespace="dfe",
-            source_repos=["https://harbor.hyperi.io/chartrepo/dfe"],
+            source_repos=["https://charts.example.com/dfe"],
         )
         assert project["apiVersion"] == "argoproj.io/v1alpha1"
         assert project["kind"] == "AppProject"
@@ -221,7 +221,7 @@ class TestGenerateAppproject:
         assert project["spec"]["destinations"][0]["server"] == "https://k8s.custom.io"
 
     def test_source_repos(self):
-        repos = ["https://harbor.hyperi.io/chartrepo/dfe", "https://git.hyperi.io/config"]
+        repos = ["https://charts.example.com/dfe", "https://git.example.com/config"]
         project = generate_appproject(
             project_name="dfe",
             environment_name="production",

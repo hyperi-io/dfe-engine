@@ -23,7 +23,7 @@ class FetcherDeploymentConfig(BaseDeploymentConfig):
         default=TShirtSize.small,
         description="T-shirt size for resource allocation",
     )
-    image: str = "harbor.hyperi.io/dfe/dfe-fetcher"
+    image: str = "ghcr.io/hyperi-io/dfe-fetcher"
     keda: KedaConfig = Field(
         default_factory=lambda: KedaConfig(
             enabled=False,

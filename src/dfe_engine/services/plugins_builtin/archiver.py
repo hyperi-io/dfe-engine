@@ -14,7 +14,7 @@ from dfe_engine.services.plugin import ServicePlugin
 descriptor = ServiceDescriptor(
     name="archiver",
     display_name="DFE Archiver",
-    image="harbor.hyperi.io/dfe/dfe-archiver",
+    image="ghcr.io/hyperi-io/dfe-archiver",
     default_port=8080,
     metrics_port=9090,
     kafka_role=KafkaRole.CONSUMER,

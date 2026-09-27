@@ -130,7 +130,7 @@ def test_topology_enum_values():
 # with a client so the engine is SENSED; if the generator quietly kept resolving
 # from DDLConfig.topology instead, every table would fall back to the "single"
 # default and a clustered deployment would silently create unreplicated tables
-# per-node (the 2026-07-16 dfe-k8s split-brain).
+# per-node, splitting the data across replicas.
 
 
 class TestGeneratorHonoursInjectedResolver:

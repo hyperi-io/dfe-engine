@@ -16,7 +16,7 @@ from dfe_engine.services.plugin import ServicePlugin
 descriptor = ServiceDescriptor(
     name="transform-vrl",
     display_name="DFE Transform (VRL)",
-    image="harbor.hyperi.io/dfe/dfe-transform-vrl",
+    image="ghcr.io/hyperi-io/dfe-transform-vrl",
     default_port=9000,
     metrics_port=9090,
     kafka_role=KafkaRole.BOTH,

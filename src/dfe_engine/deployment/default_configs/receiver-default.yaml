@@ -3,7 +3,7 @@
 
 size: xs
 replicas: 1
-image: harbor.hyperi.io/dfe/dfe-receiver
+image: ghcr.io/hyperi-io/dfe-receiver
 image_tag: latest
 
 resources:

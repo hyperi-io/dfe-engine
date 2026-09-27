@@ -12,7 +12,7 @@ from dfe_engine.services.plugin import ServicePlugin
 descriptor = ServiceDescriptor(
     name="loader",
     display_name="DFE Loader",
-    image="harbor.hyperi.io/dfe/dfe-loader",
+    image="ghcr.io/hyperi-io/dfe-loader",
     default_port=9000,
     metrics_port=9090,
     kafka_role=KafkaRole.CONSUMER,

@@ -28,12 +28,12 @@ def test_load_env_files_respects_existing_env(tmp_path, monkeypatch):
 
 def test_load_env_files_fills_missing_vars(tmp_path, monkeypatch):
     env_file = tmp_path / ".env"
-    env_file.write_text('OKTA_DEVEX_TEST_2_CLIENT_ID="0oa-test"\n')
+    env_file.write_text('OKTA_TEST_CLIENT_ID="0oa-test"\n')
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("OKTA_DEVEX_TEST_2_CLIENT_ID", raising=False)
+    monkeypatch.delenv("OKTA_TEST_CLIENT_ID", raising=False)
     monkeypatch.delenv("DFE_ENV_FILE", raising=False)
     monkeypatch.delenv("DFE_CONFIG_DIR", raising=False)
 
     load_env_files()
 
-    assert os.environ.get("OKTA_DEVEX_TEST_2_CLIENT_ID") == "0oa-test"
+    assert os.environ.get("OKTA_TEST_CLIENT_ID") == "0oa-test"

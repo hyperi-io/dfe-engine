@@ -3,7 +3,7 @@
 
 size: xs
 replicas: 1
-image: harbor.hyperi.io/dfe/dfe-archiver
+image: ghcr.io/hyperi-io/dfe-archiver
 image_tag: latest
 
 resources:

@@ -22,7 +22,7 @@ class TransformVrlDeploymentConfig(BaseDeploymentConfig):
         default=TShirtSize.small,
         description="T-shirt size for resource allocation",
     )
-    image: str = "harbor.hyperi.io/dfe/dfe-transform-vrl"
+    image: str = "ghcr.io/hyperi-io/dfe-transform-vrl"
     keda: KedaConfig = Field(
         default_factory=lambda: KedaConfig(enabled=False, min_replicas=1, max_replicas=10),
     )
