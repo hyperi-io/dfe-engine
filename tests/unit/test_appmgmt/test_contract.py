@@ -497,14 +497,53 @@ class TestProvenance:
             "config.sink.endpoint",
             "config.source.brokers",
             "config.sink.brokers",
-            "config.source.topics",
-            "config.sink.topic",
             "config.source.group_id",
             "config.source.sasl.username",
             "config.source.sasl.password",
             "config.sink.sasl.username",
             "config.sink.sasl.password",
         } == derived
+
+    @pytest.mark.parametrize("service", ["dfe-transform-vrl", "dfe-transform-vector"])
+    def test_the_topics_are_the_overlay_s_until_the_chart_is_given_its_own(self, service):
+        # The chart renders the topic env vars only inside a `with` on kafka.sourceTopic
+        # and kafka.destTopic, both empty by default, so by default the app reads
+        # the topics the engine wrote into its config file.
+        overlay = {"config": {"source": {"topics": ["auth_land"]}, "sink": {"topic": "auth_load"}}}
+        by_path = {f.path: f for f in contract.resolve_config(_contract(service), overlay).fields}
+
+        assert by_path["config.sink.topic"].provenance == contract.Provenance.OVERLAY
+        assert by_path["config.sink.topic"].value == "auth_load"
+        assert by_path["config.source.topics"].provenance == contract.Provenance.OVERLAY
+        assert contract.chart_supplier(service, "config.sink.topic", overlay) is None
+        assert "DFE_TRANSFORM_SINK_TOPIC" not in contract.chart_env_names(service, overlay)
+
+    @pytest.mark.parametrize("service", ["dfe-transform-vrl", "dfe-transform-vector"])
+    def test_a_topic_the_chart_is_given_is_the_chart_s(self, service):
+        overlay = {
+            "kafka": {"sourceTopic": "auth_land", "destTopic": "auth_load"},
+            "config": {"sink": {"topic": "ignored"}},
+        }
+        by_path = {f.path: f for f in contract.resolve_config(_contract(service), overlay).fields}
+
+        assert by_path["config.sink.topic"].provenance == contract.Provenance.CHART
+        assert by_path["config.source.topics"].provenance == contract.Provenance.CHART
+        assert contract.chart_supplier(service, "config.sink.topic", overlay) == (
+            "DFE_TRANSFORM_SINK_TOPIC"
+        )
+        assert contract.chart_env_names(service, overlay)["DFE_TRANSFORM_SINK_TOPIC"] == (
+            "config.sink.topic"
+        )
+
+    def test_an_empty_chart_value_leaves_the_topic_the_overlay_s(self):
+        # Helm's `with` skips an empty string, which is the chart's own default.
+        overlay = {"kafka": {"destTopic": ""}}
+        by_path = {
+            f.path: f
+            for f in contract.resolve_config(_contract("dfe-transform-vrl"), overlay).fields
+        }
+
+        assert by_path["config.sink.topic"].provenance != contract.Provenance.CHART
 
     def test_a_path_outside_the_table_is_the_overlay_s(self):
         # The table is data: a path nothing names in it is an operator's to write.

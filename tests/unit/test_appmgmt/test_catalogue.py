@@ -91,6 +91,15 @@ class TestShippedManifest:
 
         assert settings == {"dfe-loader": "config.hot_reload.enabled"}
 
+    def test_the_receiver_names_the_destinations_it_builds_at_startup(self):
+        # It reloads its routing in place but opens one sink per destination once,
+        # so a new direct destination needs a restart although the app reloads.
+        receiver = catalogue.descriptor("dfe-receiver")
+
+        assert receiver.hot_reload is True
+        assert "config.destinations" in receiver.restart_paths
+        assert "config.routing" not in receiver.restart_paths
+
     def test_vector_reloads_its_transform_files_in_place(self):
         # It SIGHUPs Vector when only the transform files changed; the enrichment
         # tables are not watched, so they still roll.
@@ -404,6 +413,37 @@ class TestManifestParsing:
     def test_an_idle_when_that_is_not_a_list_is_refused(self, tmp_path):
         with pytest.raises(CatalogueError, match="idle_when must be a list"):
             load_catalogue(self._manifest(tmp_path, {"idle_when": "config.sources"}))
+
+    def test_an_app_naming_no_restart_paths_binds_nothing_at_startup(self, tmp_path):
+        apps = load_catalogue(self._manifest(tmp_path, {"hot_reload": True}))
+
+        assert apps["dfe-thing"].restart_paths == ()
+
+    def test_restart_paths_are_read_in_the_order_the_manifest_gives_them(self, tmp_path):
+        path = self._manifest(
+            tmp_path, {"hot_reload": True, "restart_paths": ["config.sinks", "config.listen"]}
+        )
+
+        assert load_catalogue(path)["dfe-thing"].restart_paths == ("config.sinks", "config.listen")
+
+    def test_restart_paths_on_an_app_that_does_not_reload_are_refused(self, tmp_path):
+        # Every change restarts such an app already, so the list could only mislead.
+        path = self._manifest(tmp_path, {"restart_paths": ["config.sinks"]})
+
+        with pytest.raises(CatalogueError, match="declares hot_reload false"):
+            load_catalogue(path)
+
+    def test_a_restart_path_outside_the_config_block_is_refused(self, tmp_path):
+        path = self._manifest(tmp_path, {"hot_reload": True, "restart_paths": ["replicaCount"]})
+
+        with pytest.raises(CatalogueError, match=r"must be a config\. overlay path"):
+            load_catalogue(path)
+
+    def test_restart_paths_that_are_not_a_list_are_refused(self, tmp_path):
+        path = self._manifest(tmp_path, {"hot_reload": True, "restart_paths": "config.sinks"})
+
+        with pytest.raises(CatalogueError, match="restart_paths must be a list"):
+            load_catalogue(path)
 
     def test_the_manifest_owns_the_port_a_stage_is_sent_to(self, tmp_path):
         apps = load_catalogue(

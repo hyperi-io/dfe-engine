@@ -236,6 +236,35 @@ class TestTheReconcileReportsTheRestartsItsOwnWritesNeed:
         assert resp.json()["changes"] == [f"{self.TRANSFORM}/elreg: deploy instance"]
         assert resp.json()["restart_required"] == [self.RECREATE]
 
+    def test_a_new_variant_on_a_running_instance_names_the_restart(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # The variant is the app's own config.source.name, which the elastic
+        # transform reads once at startup; the instance is already running here.
+        from dfe_engine.appmgmt import appconfig
+
+        gc = self._compose(app, tmp_path)
+        appconfig.render_and_report(gc, app.state.settings)
+        self._deployed_transform_source(client, admin_headers, "elreg")
+        client.post("/api/v1/sources/reconcile-apps", headers=admin_headers)
+
+        resp = client.put(
+            "/api/v1/sources/elreg",
+            json={
+                "source": "elreg",
+                "match": {"field": "_source", "value": "elreg"},
+                "transform": {"engine": "elastic", "variant": "filebeat.cisco_ios.default"},
+            },
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["restart_required"] == [
+            f"restart required: make apply SERVICES={self.TRANSFORM}-elreg"
+        ]
+        doc = gc.get("helmvars", f"{self.TRANSFORM}-elreg-values")
+        assert doc["config"]["source"]["name"] == "filebeat.cisco_ios.default"
+
     def test_the_deploying_write_reports_it_only_once(self, client, app, admin_headers, tmp_path):
         from dfe_engine.appmgmt import appconfig
 
