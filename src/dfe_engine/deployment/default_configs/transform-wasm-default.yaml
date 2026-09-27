@@ -3,7 +3,7 @@
 
 size: xs
 replicas: 1
-image: harbor.hyperi.io/dfe/dfe-transform-wasm
+image: ghcr.io/hyperi-io/dfe-transform-wasm
 image_tag: latest
 
 resources:

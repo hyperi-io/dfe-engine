@@ -47,7 +47,7 @@ class TestEnvironmentConfig:
         )
         assert env.name == "production"
         assert env.namespace == "dfe"
-        assert env.image_registry == "harbor.hyperi.io/dfe"
+        assert env.image_registry == "ghcr.io/hyperi-io"
 
     def test_image_tag_override(self):
         env = EnvironmentConfig(
@@ -215,9 +215,9 @@ class TestArgoEnvironment:
             clickhouse=ClickHouseEnvironment(hosts=["ch:9000"]),
             argo=ArgoEnvironment(
                 enabled=True,
-                chart_repo_url="https://harbor.hyperi.io/chartrepo/dfe",
-                source_repos=["https://harbor.hyperi.io/chartrepo/dfe"],
+                chart_repo_url="https://charts.example.com/dfe",
+                source_repos=["https://charts.example.com/dfe"],
             ),
         )
         assert env.argo.enabled
-        assert env.argo.chart_repo_url == "https://harbor.hyperi.io/chartrepo/dfe"
+        assert env.argo.chart_repo_url == "https://charts.example.com/dfe"

@@ -15,7 +15,7 @@ from dfe_engine.services.plugin import ServicePlugin
 descriptor = ServiceDescriptor(
     name="transform-wasm",
     display_name="DFE Transform (WASM)",
-    image="harbor.hyperi.io/dfe/dfe-transform-wasm",
+    image="ghcr.io/hyperi-io/dfe-transform-wasm",
     default_port=8080,
     metrics_port=9090,
     kafka_role=KafkaRole.BOTH,

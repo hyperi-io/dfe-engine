@@ -196,7 +196,7 @@ def publish_account(
         )
     except ReviewRequiredError:
         # Production+team with no forge: commit to a review branch (never main) and
-        # let the caller surface the CLI merge commands (Derek's "PR if forge, else CLI").
+        # let the caller surface the CLI merge commands: a PR where there is a forge, else CLI.
         branch = pr_branch_name(_RBAC_CLASS, username, request_id)
         res = gc.put(ACCOUNTS_CLASS, username, doc, actor, message, branch=branch)
         logger.warning(

@@ -15,7 +15,7 @@ from dfe_engine.services.plugin import ServicePlugin
 descriptor = ServiceDescriptor(
     name="transform-vector",
     display_name="DFE Transform (Vector)",
-    image="harbor.hyperi.io/dfe/dfe-transform-vector",
+    image="ghcr.io/hyperi-io/dfe-transform-vector",
     default_port=8080,
     metrics_port=9090,
     kafka_role=KafkaRole.BOTH,

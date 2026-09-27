@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Live-ClickHouse tests of the insert-and-resolve claim + watermark + state.
 
-No mocks: runs against the .env / devex pet cluster if configured, else a docker
+No mocks: runs against the ClickHouse the .env configures, else a docker
 ClickHouse (see conftest ch_client), and drops its isolated database after. Covers
 the guarantees the runner leans on: claim exclusivity, lease expiry + reclaim,
 release, the cap input (active_count), crash-safe watermark resume, and the

@@ -15,7 +15,7 @@ from dfe_engine.services.plugin import ServicePlugin
 descriptor = ServiceDescriptor(
     name="receiver",
     display_name="DFE Receiver",
-    image="harbor.hyperi.io/dfe/dfe-receiver",
+    image="ghcr.io/hyperi-io/dfe-receiver",
     default_port=8080,
     metrics_port=9090,
     kafka_role=KafkaRole.PRODUCER,
