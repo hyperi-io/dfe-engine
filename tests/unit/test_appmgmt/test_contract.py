@@ -1096,6 +1096,20 @@ class TestAMaskedListEntryKeepsItsOwnCredential:
         written = [{"url": "u-1", "token": self.R}, {"url": "u-2"}]
         assert contract.restore_masked_at(doc, path, written) == doc["config"]["x"]["endpoints"]
 
+    @pytest.mark.parametrize("guess", ["pw-4801", "pw-wrong"])
+    def test_a_guess_beside_another_masked_credential_is_answered_the_same_way(self, guess):
+        """An unnamed entry is matched against the stored one, so a right guess must not read
+        differently from a wrong one."""
+        doc = {
+            "config": {"x": {"endpoints": [{"url": "u-1", "password": "pw-4801", "token": "t"}]}}
+        }
+
+        restored = contract.restore_masked_at(
+            doc, "config.x.endpoints", [{"url": "u-1", "password": guess, "token": self.R}]
+        )
+
+        assert restored == [{"url": "u-1", "password": guess, "token": "t"}]
+
 
 class TestAMaskedCredentialRestoresOnlyWhereItWasSet:
     """A masked credential restores only while every other field of its object is as stored.
