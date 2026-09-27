@@ -60,10 +60,10 @@ class TestHelmServiceValues:
     def test_full(self):
         v = HelmServiceValues(
             deploy=_meta(),
-            image=HelmImage(repository="harbor.hyperi.io/dfe/dfe-receiver", tag="1.2.0"),
+            image=HelmImage(repository="ghcr.io/hyperi-io/dfe-receiver", tag="1.2.0"),
             replicaCount=2,
             resources={"requests": {"cpu": "500m", "memory": "1Gi"}},
-            nodeScheduling={"nodeSelector": {"dfe.hyperi.io/pool": "dfe-k8s"}},
+            nodeScheduling={"nodeSelector": {"dfe.hyperi.io/pool": "dfe"}},
             config={"server": {"bind_address": "0.0.0.0:8080"}},
             secret_refs={"config-secrets": "dfe-receiver-secrets"},
             extra_env={"LOG_LEVEL": "debug"},
@@ -71,7 +71,7 @@ class TestHelmServiceValues:
         assert v.replicaCount == 2
         assert v.image.tag == "1.2.0"
         assert v.config["server"]["bind_address"] == "0.0.0.0:8080"
-        assert v.nodeScheduling["nodeSelector"]["dfe.hyperi.io/pool"] == "dfe-k8s"
+        assert v.nodeScheduling["nodeSelector"]["dfe.hyperi.io/pool"] == "dfe"
 
     def test_serialization_omits_none_keda_triggers(self):
         v = HelmServiceValues(deploy=_meta())

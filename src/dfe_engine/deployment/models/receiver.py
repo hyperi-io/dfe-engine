@@ -23,7 +23,7 @@ class ReceiverDeploymentConfig(BaseDeploymentConfig):
         default=TShirtSize.small,
         description="T-shirt size for resource allocation",
     )
-    image: str = "harbor.hyperi.io/dfe/dfe-receiver"
+    image: str = "ghcr.io/hyperi-io/dfe-receiver"
     keda: KedaConfig = Field(
         default_factory=lambda: KedaConfig(enabled=False, min_replicas=2, max_replicas=10),
     )

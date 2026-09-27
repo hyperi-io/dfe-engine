@@ -1,7 +1,7 @@
 # RBAC vocabulary - roles, groups and terms
 
 One vocabulary, used verbatim by every moving part: dfe-engine, dfe-ui,
-dfe-infra, dfe-deploy, dfe-schemas, and the devex test environments. If a role
+dfe-infra, dfe-deploy, dfe-schemas, and the test environments. If a role
 or group name appears in two repos it means the same thing in both, or it is a
 bug.
 
@@ -108,7 +108,7 @@ ClickHouse role, not in anything the UI or the user sends. See
 | dfe-infra | groups | ArgoCD RBAC group mappings; ESO secret wiring for providers |
 | dfe-deploy | groups | Deployment-time group seeding |
 | dfe-schemas | orgs | `org_id` column semantics for tenant row policies |
-| devex test env | both | Fixture renders these names into dex/entra/okta - see hyperi-infra `subprojects/dfe-oidc-testing/fixture.yaml` |
+| Test environments | both | The OIDC test fixture renders these names into dex, Entra and Okta |
 
 ## Rules
 

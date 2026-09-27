@@ -3,7 +3,7 @@
 
 size: medium
 replicas: 2
-image: harbor.hyperi.io/dfe/dfe-transform-vector
+image: ghcr.io/hyperi-io/dfe-transform-vector
 image_tag: latest
 
 resources:

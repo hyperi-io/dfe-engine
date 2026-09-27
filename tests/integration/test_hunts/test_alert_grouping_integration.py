@@ -1,6 +1,6 @@
 """Integration tests for alert grouping + per-group cooldown against ClickHouse.
 
-Requires a running ClickHouse instance (Docker or DevEx cluster).
+Requires a running ClickHouse instance (Docker or a configured cluster).
 """
 
 import uuid

@@ -85,8 +85,8 @@ class TestBootstrapMatchesServerTopology:
     """The bootstrap must create tables shaped for the server it is talking to.
 
     Adaptive across the CH target matrix (local single / cluster / cloud): the
-    expectation is derived by sensing the live server, not hardcoded. The 2026-07-16
-    dfe-k8s deploy created plain MergeTree tables on a 3-replica cluster - each node
+    expectation is derived by sensing the live server, not hardcoded. A clustered
+    deploy once created plain MergeTree tables on a 3-replica cluster - each node
     independently, unreplicated - because the bootstrap never sensed. Rows then
     scattered across replicas and reads returned whatever the connection happened to
     land on.

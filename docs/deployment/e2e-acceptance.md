@@ -15,12 +15,12 @@ flowchart LR
     hybrid[/"Local dev hybrid:<br/>engine + capped CH / Kafka"/]
 
     subgraph accept["E2E acceptance - BOTH must pass"]
-        k8s["Full dfe-infra deploy<br/>clustered k8s<br/>(devex DFE carve-out)"]
+        k8s["Full dfe-infra deploy<br/>clustered k8s"]
         docker["Standalone docker<br/>single host"]
     end
 
     hybrid -. "not sufficient" .-> accept
-    k8s -- "state SSoT + creds" --> infra[("hyperi-infra<br/>+ OpenBao")]
+    k8s -- "state SSoT + creds" --> infra[("deployment's private config<br/>+ secrets backend")]
     docker -- "learnings feed" --> dfedocker[("dfe-docker")]
 
     classDef pass fill:#009E73,color:#ffffff,stroke:#004D39
@@ -37,14 +37,13 @@ flowchart LR
 CD reconciling the GitOps artifacts, real backing services, real ingress,
 RBAC and OIDC in front, running on a multi-node cluster.
 
-**Where:** the devex DFE carve-out. hyperi-infra is the authoritative source
-of truth for cluster topology, endpoints and node ownership. Credentials come
-from OpenBao/Vault, never from committed files.
+**Where:** a multi-node cluster the deployment owns. That deployment's private
+config repo is the source of truth for cluster topology, endpoints and node
+ownership. Credentials come from its secrets backend, never from committed
+files.
 
-Operate strictly to the ops runbook so you never touch a pet (non-DFE)
-resource: see `hyperi-io/hyperi-infra` docs and the DFE side at
-`dfe-infra/docs/DEVEX-OPERATIONS.md`. The DFE worker nodes and namespace are
-yours to (re)deploy on. Pet nodes are off limits without an explicit ask.
+On a shared cluster, deploy only onto the nodes and namespace allocated to DFE.
+Everything else is off limits without an explicit ask.
 
 **Sign-off:** the deployed stack comes up healthy, the UI is reachable and a
 login works, and a smoke path through the API/query surface returns. Finish
@@ -79,7 +78,7 @@ acceptance itself - the two scenarios above hold either way.
 
 **Current - patch-loop on main.** While main control is held centrally, a fix
 lands straight on main, is built and published to the container registry
-(GHCR), then deployed to the dfe-k8s carve-out (and to standalone docker) and
+(GHCR), then deployed to a clustered k8s environment (and to standalone docker) and
 verified. Find a bug, patch main again, rebuild, redeploy. It is a fast stopgap
 for a focused hardening cycle, and it serialises everyone on main by design.
 
@@ -91,7 +90,5 @@ intended rather than current practice.
 
 ## Related
 
-- `dfe-infra/docs/DEVEX-OPERATIONS.md` - how and where to operate on the
-  devex carve-out (secret-free; points to the private hyperi-infra SSoT).
 - [index.md](index.md) - the deployment seam (layers, tiers, Argo model).
 - dfe-docker - the standalone-docker distribution this scenario informs.

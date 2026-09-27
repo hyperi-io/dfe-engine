@@ -115,7 +115,7 @@ All configuration is environment variables with the `DFE_` prefix
 
 | Variable | Image default | Local-dev default | Description |
 |----------|---------------|-------------------|-------------|
-| `DFE_CONFIG_DIR` | `/app/config` | `./config` | Config directory - the deployment supplies it (a mounted volume/ConfigMap in k8s; a checkout of the deployment's config repo, e.g. dfe-devex, for local dev). Auto-resolves registry subdirs (`sources/`, `fieldmaps/`, `services/`, `deployment/`, `hunts/`, `hunt-rules/`, `rules/`, `alert-destinations/`, `queries/`). |
+| `DFE_CONFIG_DIR` | `/app/config` | `./config` | Config directory - the deployment supplies it (a mounted volume/ConfigMap in k8s; a checkout of the deployment's own config repo for local dev). Auto-resolves registry subdirs (`sources/`, `fieldmaps/`, `services/`, `deployment/`, `hunts/`, `hunt-rules/`, `rules/`, `alert-destinations/`, `queries/`). |
 | `DFE_SCHEMAS_DIR` | `/app/schemas` | unset | Schema tree root. Unset, the engine reads the trees out of the installed `dfe-schemas` package. |
 
 - The Docker image bakes the `dfe-schemas` package's trees in as a seed at
@@ -192,7 +192,7 @@ durations -- a test job that "passed" in 0s did not run.
 | Treat this as an internal tool | Code to the injected seam | It is a PRODUCT other organisations deploy. Env-specifics -- cluster refs, cred paths, our fleet -- belong in private config repos, never here. |
 | Hand-edit compiled routing | Change the Source | Receiver and loader routing is derived; the API reports a hand edit as DRIFT and re-syncs over it. |
 | Mock a backing service | testcontainers, a real one | No mocks as proof. `pass` and `TODO` are not functionality. |
-| `from typing import List, Dict, Optional` | `list[str]`, `str \| None` | Built-in generics; `requires-python = ">=3.12"`. |
+| `from typing import List, Dict, Optional` | `list[str]`, `str \| None` | Built-in generics; `requires-python = ">=3.14"`. |
 | `datetime.utcnow()` | `datetime.now(UTC)` | Deprecated since 3.12. |
 | stdlib `logging` | `from scalo.logger import logger` | House rule, so every service emits one structured JSON shape. |
 | Raw `httpx` with hand-rolled retry | `scalo.http.HttpClient` | House rule. Importing httpx for its exception and response TYPES is correct and expected. |

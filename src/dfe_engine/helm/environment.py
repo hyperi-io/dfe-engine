@@ -224,9 +224,7 @@ class EnvironmentConfig(BaseModel):
     namespace: str = Field(default="dfe", description="K8s namespace")
     kafka: KafkaEnvironment
     clickhouse: ClickHouseEnvironment
-    image_registry: str = Field(
-        default="harbor.hyperi.io/dfe", description="Container image registry"
-    )
+    image_registry: str = Field(default="ghcr.io/hyperi-io", description="Container image registry")
     image_tag_override: str | None = Field(
         default=None, description="Override image tag for all services"
     )

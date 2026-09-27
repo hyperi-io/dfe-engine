@@ -148,11 +148,11 @@ EXTRACT_IDENTITY_CASES: list[ExtractIdentityCase] = [
     },
     {
         "id": "preferred_username_when_no_name",
-        "claims": {"sub": "XlZ_SJfeaMSC9HM8", "preferred_username": "dfe-admin@ms.hyperi.io"},
+        "claims": {"sub": "entra-subject-1", "preferred_username": "dfe-admin@entra.example.com"},
         "expected_identity": make_normalized_identity(
-            email="dfe-admin@ms.hyperi.io",
-            name="dfe-admin@ms.hyperi.io",
-            subject="XlZ_SJfeaMSC9HM8",
+            email="dfe-admin@entra.example.com",
+            name="dfe-admin@entra.example.com",
+            subject="entra-subject-1",
         ),
         "provider": make_oidc_provider(
             issuer="https://login.microsoftonline.com/tid/v2.0", type="entra_id"
@@ -178,9 +178,9 @@ EXTRACT_IDENTITY_CASES: list[ExtractIdentityCase] = [
     },
     {
         "id": "email_falls_back_to_upn_without_preferred_username",
-        "claims": {"sub": "guid-123", "upn": "dfe-admin@ms.hyperi.io"},
+        "claims": {"sub": "guid-123", "upn": "dfe-admin@entra.example.com"},
         "expected_identity": make_normalized_identity(
-            email="dfe-admin@ms.hyperi.io", subject="guid-123"
+            email="dfe-admin@entra.example.com", subject="guid-123"
         ),
         "provider": make_oidc_provider(
             issuer="https://login.microsoftonline.com/tid/v2.0", type="entra_id"
@@ -191,11 +191,11 @@ EXTRACT_IDENTITY_CASES: list[ExtractIdentityCase] = [
         "claims": {
             "sub": "guid-123",
             "email": "real@acme.com",
-            "preferred_username": "upn@ms.hyperi.io",
-            "upn": "upn@ms.hyperi.io",
+            "preferred_username": "upn@entra.example.com",
+            "upn": "upn@entra.example.com",
         },
         "expected_identity": make_normalized_identity(
-            email="real@acme.com", name="upn@ms.hyperi.io", subject="guid-123"
+            email="real@acme.com", name="upn@entra.example.com", subject="guid-123"
         ),
         "provider": make_oidc_provider(
             issuer="https://login.microsoftonline.com/tid/v2.0", type="entra_id"
@@ -203,9 +203,15 @@ EXTRACT_IDENTITY_CASES: list[ExtractIdentityCase] = [
     },
     {
         "id": "empty_email_claim_falls_through",
-        "claims": {"sub": "guid-123", "email": "", "preferred_username": "dfe-admin@ms.hyperi.io"},
+        "claims": {
+            "sub": "guid-123",
+            "email": "",
+            "preferred_username": "dfe-admin@entra.example.com",
+        },
         "expected_identity": make_normalized_identity(
-            email="dfe-admin@ms.hyperi.io", name="dfe-admin@ms.hyperi.io", subject="guid-123"
+            email="dfe-admin@entra.example.com",
+            name="dfe-admin@entra.example.com",
+            subject="guid-123",
         ),
         "provider": make_oidc_provider(
             issuer="https://login.microsoftonline.com/tid/v2.0", type="entra_id"

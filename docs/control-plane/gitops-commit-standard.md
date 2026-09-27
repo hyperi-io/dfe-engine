@@ -59,7 +59,7 @@ cfg(receiver-default): set replicaCount=3
 
 Scale receiver for ingest backlog.
 
-DFE-Actor: alice@hyperi.io
+DFE-Actor: alice@example.com
 DFE-Role: helmvars:write
 DFE-Action: scale-receiver           # if via a defined action
 DFE-Request-Id: 4f3c...              # correlation id, also in the audit log

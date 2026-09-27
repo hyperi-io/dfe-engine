@@ -50,7 +50,7 @@ def test_subject_over_50_rejected():
 
 
 def test_a_per_instance_overlay_name_still_builds_a_subject():
-    # Found live on devex: this scope plus "set repository" is 53 characters, so
+    # This scope plus "set repository" is 53 characters, so
     # build_message raised and the helm-var write surfaced as a 500. Every
     # multi-instance app hits it, because its overlay is {service}-{instance}-values.
     ctx = CommitContext(

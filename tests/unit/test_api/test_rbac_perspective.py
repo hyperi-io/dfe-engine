@@ -13,8 +13,7 @@ platform actually ALLOWS and DENIES the right actions for each role, which is
 what a UI or CLI user experiences. They use the shared ``client_as`` helper, so
 they double as the worked example a front-end dev copies.
 
-The identities and org ids mirror the shared OIDC fixture
-(hyperi-infra ``subprojects/dfe-oidc-testing/fixture.yaml``); ``test_org`` is the
+The identities and org ids mirror the shared OIDC test fixture; ``test_org`` is the
 standard org id every consumer uses, ``test_org_2`` only exists for the two-org
 boundary case. Role -> scope mappings are the engine's own
 (``auth/resources/roles.yaml``) - see the mapping asserted in

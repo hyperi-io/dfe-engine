@@ -23,7 +23,7 @@ class LoaderDeploymentConfig(BaseDeploymentConfig):
         default=TShirtSize.medium,
         description="T-shirt size for resource allocation",
     )
-    image: str = "harbor.hyperi.io/dfe/dfe-loader"
+    image: str = "ghcr.io/hyperi-io/dfe-loader"
     keda: KedaConfig = Field(
         default_factory=lambda: KedaConfig(enabled=False, min_replicas=2, max_replicas=8),
     )

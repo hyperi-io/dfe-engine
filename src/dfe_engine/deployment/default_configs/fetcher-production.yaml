@@ -3,7 +3,7 @@
 
 size: small
 replicas: 2
-image: harbor.hyperi.io/dfe/dfe-fetcher
+image: ghcr.io/hyperi-io/dfe-fetcher
 image_tag: latest
 
 resources:
