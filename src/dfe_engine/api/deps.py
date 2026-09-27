@@ -26,7 +26,11 @@ from dfe_engine.auth.audit import (
     audit_permission_denied,
 )
 from dfe_engine.auth.groups import Group, GroupStore
-from dfe_engine.auth.jit import JitAccountUnavailableError, JitIdentityCollisionError
+from dfe_engine.auth.jit import (
+    API_KEY_SUBJECT_PREFIX,
+    JitAccountUnavailableError,
+    JitIdentityCollisionError,
+)
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.settings import DFESettings, is_dev_posture
 
@@ -404,7 +408,7 @@ def _resolve_roles_from_groups(
 
 def _groups_for_local_account(request: Request, user_id: str) -> list[str]:
     """Load group names from AccountStore for JWT users (legacy tokens without groups claim)."""
-    if user_id.startswith("apikey:"):
+    if user_id.startswith(API_KEY_SUBJECT_PREFIX):
         return []
     account_store = getattr(request.app.state, "account_store", None)
     if account_store is None:
@@ -444,7 +448,7 @@ def _groups_from_stores(request: Request, user_id: str) -> list[str]:
 
 
 def _has_local_account(request: Request, user_id: str) -> bool:
-    if user_id.startswith("apikey:"):
+    if user_id.startswith(API_KEY_SUBJECT_PREFIX):
         return False
     account_store = getattr(request.app.state, "account_store", None)
     return account_store is not None and account_store.get(user_id) is not None
@@ -461,8 +465,8 @@ def resolve_live_grants_for_user(
     if group_store is None:
         return GroupResolution([], [], [])
 
-    if user_id.startswith("apikey:"):
-        key_name = user_id.removeprefix("apikey:")
+    if user_id.startswith(API_KEY_SUBJECT_PREFIX):
+        key_name = user_id.removeprefix(API_KEY_SUBJECT_PREFIX)
         api_key_store: APIKeyStore | None = getattr(request.app.state, "api_key_store", None)
         groups: list[str] = []
         if api_key_store is not None:
@@ -498,8 +502,8 @@ def resolve_live_groups_for_user(
     fallback_groups: list[str] | None = None,
 ) -> list[str]:
     """Return current group names for a user from stores."""
-    if user_id.startswith("apikey:"):
-        key_name = user_id.removeprefix("apikey:")
+    if user_id.startswith(API_KEY_SUBJECT_PREFIX):
+        key_name = user_id.removeprefix(API_KEY_SUBJECT_PREFIX)
         api_key_store: APIKeyStore | None = getattr(request.app.state, "api_key_store", None)
         if api_key_store is not None:
             key = api_key_store.get(key_name)
@@ -542,7 +546,7 @@ def require_local_account_enabled(request: Request, user_id: str) -> Any:
     Returns:
         The session's store account, or None when it has none.
     """
-    if user_id.startswith("apikey:"):
+    if user_id.startswith(API_KEY_SUBJECT_PREFIX):
         return None
 
     account_store = getattr(request.app.state, "account_store", None)
@@ -677,7 +681,7 @@ async def get_current_user(request: Request) -> AuthContext:
             roles=roles,
         )
         return AuthContext(
-            user_id=f"apikey:{key_meta.name}",
+            user_id=f"{API_KEY_SUBJECT_PREFIX}{key_meta.name}",
             roles=roles,
             grants=resolution.grants,
             groups=key_meta.groups,

@@ -8,13 +8,13 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, field_validator
 
 from dfe_engine.auth.protected_accounts import resolve_floor
+from dfe_engine.auth.store_names import VALID_NAME, store_key
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 if TYPE_CHECKING:
@@ -22,10 +22,6 @@ if TYPE_CHECKING:
 
 GROUP_SCOPE_SYSTEM = "system"
 _ORG_SCOPE_PREFIX = "org:"
-
-# Group name becomes the filename stem ({name}.yaml) - reject path traversal.
-# \Z (not $) anchors the true end of string so no trailing newline slips through.
-_VALID_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}\Z")
 
 
 def validate_group_scope(scope: str) -> str:
@@ -105,10 +101,21 @@ class GroupStore:
     # ------------------------------------------------------------------
 
     def _path(self, name: str) -> Path:
-        return self._dir / f"{name}.yaml"
+        """The file group *name* lives in.
+
+        Raises:
+            KeyError: No group can hold *name*, so it is looked up nowhere.
+        """
+        return self._dir / f"{store_key(name)}.yaml"
 
     def _read(self, name: str) -> Group | None:
-        path = self._path(name)
+        try:
+            path = self._path(name)
+        except KeyError:
+            return None
+        return self._load(path)
+
+    def _load(self, path: Path) -> Group | None:
         if not path.exists():
             return None
         data = yaml_load(path)
@@ -142,7 +149,7 @@ class GroupStore:
             ValueError: If a group with this name already exists, or the
                 scope is not ``system`` / ``org:<name>``.
         """
-        if not _VALID_NAME.match(name):
+        if not VALID_NAME.match(name):
             raise ValueError(f"Invalid group name: {name!r}")
         if self._path(name).exists():
             raise ValueError(f"Group '{name}' already exists")
@@ -171,7 +178,7 @@ class GroupStore:
         """Return all groups sorted by name."""
         groups = []
         for path in sorted(self._dir.glob("*.yaml")):
-            group = self._read(path.stem)
+            group = self._load(path)
             if group is not None:
                 groups.append(group)
         return groups
@@ -363,7 +370,7 @@ class DocuStoreGroupStore:
         scope: str = GROUP_SCOPE_SYSTEM,
     ) -> Group:
         """Create a new group. Raises ValueError if the name is invalid/taken or scope is bad."""
-        if not _VALID_NAME.match(name):
+        if not VALID_NAME.match(name):
             raise ValueError(f"Invalid group name: {name!r}")
         if self._c.exists(name):
             raise ValueError(f"Group '{name}' already exists")

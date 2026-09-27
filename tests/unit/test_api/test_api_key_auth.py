@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 import dfe_engine.yaml_utils as yu
+from dfe_engine.api import deps
 from dfe_engine.api.deps import create_access_token
+from dfe_engine.auth.jit import API_KEY_SUBJECT_PREFIX
 
 
 @pytest.fixture
@@ -111,3 +114,10 @@ class TestApiKeyAuthentication:
         data = resp.json()
         # OIDC wins over API key
         assert data["user_id"] == "oidc-user@example.com"
+
+
+def test_the_api_key_subject_prefix_has_one_spelling():
+    """JIT refuses an IdP subject by this prefix and deps routes a key by it, so both read it."""
+    source = Path(deps.__file__).read_text(encoding="utf-8")
+
+    assert f'"{API_KEY_SUBJECT_PREFIX}' not in source
