@@ -249,6 +249,20 @@ class TestCrossIdentityRefusal:
         assert accounts.get(jit.sanitise_username(username)) is None
         assert accounts.get(username).groups == ["acme-viewers"]
 
+    @pytest.mark.parametrize("subject", ["apikey:ci", "apikey:"])
+    def test_a_subject_in_the_api_key_namespace_is_refused(self, stores, subject):
+        """A session subject there takes an API key's groups, so an IdP must never mint one."""
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with patch("dfe_engine.auth.jit.audit_jit_login_refused") as audited:
+            with pytest.raises(JitIdentityCollisionError) as refused:
+                jit.ensure_account(subject, ["dfe-admins"], "entra")
+
+        assert refused.value.reason == "api_key_subject"
+        assert accounts.list() == []
+        audited.assert_called_once_with(subject, "entra", "api_key_subject")
+
     def test_a_subject_that_is_the_providers_own_raw_name_is_admitted(self, stores):
         accounts, groups = stores
         external_account(accounts, "jane.doe", "entra", ["acme-viewers"])

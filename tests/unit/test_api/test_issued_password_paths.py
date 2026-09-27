@@ -246,11 +246,19 @@ class TestAProxiedIdentity:
 
     @pytest.mark.parametrize("booted", _WALKING_TO_THE_ADMIN, ids=["traversal"], indirect=True)
     def test_a_subject_that_walks_to_the_admin_is_its_own_identity(self, booted):
+        """The raw subject names no account, and its shadow is its own sanitised stem."""
         client, name, subject = booted
+        store = client.app.state.account_store
+        admin_before = store.get(name)
 
         own = client.get("/api/v1/auth/accounts/me", headers=_proxied(subject))
 
-        assert own.json().get("username") != name, own.text
+        assert own.status_code == 404, own.text
+        assert own.json()["code"] == "not_found"
+        shadow = store.get("accounts-admin")
+        assert shadow is not None
+        assert shadow.external is True
+        assert store.get(name) == admin_before
 
     @pytest.mark.parametrize("booted", _NAMING_THE_ADMIN, ids=_NAMING_IDS, indirect=True)
     def test_the_refusal_writes_no_shadow_account(self, booted):

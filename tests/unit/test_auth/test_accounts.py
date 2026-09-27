@@ -13,6 +13,7 @@ import time
 import bcrypt
 import pytest
 
+from dfe_engine.auth import accounts as accounts_module
 from dfe_engine.auth.accounts import Account, AccountStore
 
 # ---------------------------------------------------------------------------
@@ -208,7 +209,34 @@ class TestList:
 # ---------------------------------------------------------------------------
 
 
+def _cost(digest: bytes | str) -> int:
+    """The bcrypt cost a hash was made at (``$2b$<cost>$...``)."""
+    text = digest.decode() if isinstance(digest, bytes) else digest
+    return int(text.split("$")[2])
+
+
+@pytest.fixture
+def production_bcrypt_cost(monkeypatch):
+    """Lift this tree's cost-4 patch, and keep the cost-12 dummy out of every other test."""
+    monkeypatch.undo()
+    accounts_module._dummy_hash.cache_clear()
+    yield
+    accounts_module._dummy_hash.cache_clear()
+
+
 class TestVerifyPassword:
+    def test_an_unknown_user_is_checked_at_the_cost_real_hashes_are_made_at(
+        self, store, monkeypatch, production_bcrypt_cost
+    ):
+        """A cheaper check for a name with no account answers faster, naming it free."""
+        store.create("alice", "secret123")
+        checked: list[bytes] = []
+        monkeypatch.setattr(bcrypt, "checkpw", lambda _pw, digest: checked.append(digest) or False)
+
+        store.verify_password("nobody", "secret123")
+
+        assert _cost(checked[0]) == _cost(store.get("alice").password_hash)
+
     def test_correct_password_returns_true(self, store):
         store.create("alice", "secret123")
         assert store.verify_password("alice", "secret123") is True

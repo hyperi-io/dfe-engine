@@ -37,6 +37,9 @@ _ROLE_TO_TEAM = {
 # to the client and the collision detail would say which local names are taken.
 _REFUSED_MESSAGE = "OIDC login refused"
 
+# A subject here takes an API key's groups (api/deps.py), so no IdP may assert one.
+API_KEY_SUBJECT_PREFIX = "apikey:"
+
 
 class JitIdentityCollisionError(AuthenticationError):
     """An IdP assertion resolved onto an account that identity does not own.
@@ -44,7 +47,8 @@ class JitIdentityCollisionError(AuthenticationError):
     Attributes:
         user_id: The IdP-asserted subject.
         source_provider: The provider that asserted it.
-        reason: ``protected_account``, ``local_account`` or ``provider_mismatch``.
+        reason: ``protected_account``, ``local_account``, ``provider_mismatch`` or
+            ``api_key_subject``.
     """
 
     def __init__(self, user_id: str, source_provider: str, reason: str) -> None:
@@ -105,10 +109,13 @@ class JitProvisioner:
         and reconciled on later logins when present.
 
         Raises:
-            JitIdentityCollisionError: The asserted subject resolved onto a
-                recovery credential, or onto an account this provider does not
-                own. Nothing is written.
+            JitIdentityCollisionError: The asserted subject is in the API-key
+                namespace, or resolved onto a recovery credential or onto an
+                account this provider does not own. Nothing is written.
         """
+        if user_id.startswith(API_KEY_SUBJECT_PREFIX):
+            audit_jit_login_refused(user_id, source_provider, "api_key_subject")
+            raise JitIdentityCollisionError(user_id, source_provider, "api_key_subject")
         safe_name = self.sanitise_username(user_id)
         self._refuse_protected(safe_name, user_id, source_provider)
         self._refuse_account_named_by_subject(safe_name, user_id, source_provider)
