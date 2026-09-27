@@ -335,9 +335,12 @@ def _transform(
 ) -> dict[str, Any]:
     """One transform instance's input and output, for the source it is named for.
 
-    The bus wiring is the manifest's ``source_binding``, because each transform
-    names its topics and consumer group differently. The direct wiring is the
-    same for all of them, being scalo's Push listener and sender.
+    The manifest's ``source_binding`` ties the instance to its source on both
+    transports, because each transform names its topics, consumer group and
+    output key differently. On direct, scalo's Push listener and sender are the
+    same for every transform: the listener replaces the binding's source block
+    whole, and the sender's endpoint joins the sink block beside the output key,
+    which the next stage picks the source's table by as it does a topic on the bus.
     """
     source = _bound_source(registry, instance)
     flow = _flow(source, settings)
@@ -348,19 +351,18 @@ def _transform(
             f"source {instance!r} is transformed by {flow.transform.app}, not {app.service}"
         )
 
-    if flow.transport == "bus":
-        blocks = into_blocks(app, catalogue.render_source_binding(app, source.source))
-    else:
+    blocks = into_blocks(app, catalogue.render_source_binding(app, source.source))
+    if flow.transport != "bus":
         missing = {SOURCE_BLOCK, SINK_BLOCK} - set(app.routing_paths)
         if missing:
             raise CatalogueError(
                 f"{app.service} carries the direct transport but declares no "
                 f"{', '.join(sorted(missing))} block to wire its listener into"
             )
-        blocks = {
-            SOURCE_BLOCK: {"transport": DIRECT_TRANSPORT, "listen": catalogue.push_listen(app)},
-            SINK_BLOCK: {"transport": DIRECT_TRANSPORT, "endpoint": flow.outputs.loader},
-        }
+        # The consumer's topics and group name nothing once the listener takes its place.
+        blocks[SOURCE_BLOCK] = {"transport": DIRECT_TRANSPORT, "listen": catalogue.push_listen(app)}
+        sink = blocks.setdefault(SINK_BLOCK, {})
+        sink.update({"transport": DIRECT_TRANSPORT, "endpoint": flow.outputs.loader})
     if app.variant_path and flow.transform.variant:
         name, inner = app.block_for(app.variant_path)
         set_path(blocks.setdefault(name, {}), inner, flow.transform.variant)
