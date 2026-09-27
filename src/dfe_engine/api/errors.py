@@ -4,8 +4,6 @@ All errors return ``ErrorResponse`` — a single shape the UI can parse uniforml
 Pydantic 422 errors are reshaped into the same format with field-level detail.
 """
 
-from __future__ import annotations
-
 from typing import Annotated, Any, Literal, NoReturn
 
 from fastapi import FastAPI, HTTPException, Request
@@ -239,6 +237,23 @@ def install_exception_handlers(app: FastAPI) -> None:
             context={"waking": waking},
         )
         return JSONResponse(status_code=503, content=_error_response_json(body))
+
+    # The deploy repo stayed unreachable for a write's whole retry budget. Starlette
+    # matches the most derived handler, so this wins over ServiceUnavailable.
+    from dfe_engine.gitops.repo import GitopsUnavailableError
+
+    @app.exception_handler(GitopsUnavailableError)
+    async def gitops_unavailable_handler(_request: Request, exc: GitopsUnavailableError):
+        body = ErrorResponse(
+            code=ErrorCode.SERVICE_UNAVAILABLE,
+            message=str(exc),
+            context={"service": "gitops", "remote": exc.remote},
+        )
+        return JSONResponse(
+            status_code=503,
+            content=_error_response_json(body),
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        )
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):

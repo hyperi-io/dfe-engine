@@ -14,10 +14,20 @@ uses internally) so there is no shell-out to ``git``.
 Every remote op goes through :meth:`GitopsRepo._remote_op`: dulwich writes the
 remote URL verbatim to its ``errstream`` and into its failure messages, and on the
 HTTPS path that URL carries the deploy token (F-GITOPS-TOKEN).
+
+A read's remote calls are held to ``REMOTE_HEAD_TIMEOUT_SECONDS`` and a failure
+leaves the clone serving what it has. A write's fetch and push take the longer
+``gitops.write`` timeout, and a transient failure is retried inside that budget
+before the write raises :class:`GitopsUnavailableError`, which the API answers 503.
 """
 
+import math
 import os
+import random
+import re
+import sys
 import threading
+import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -27,9 +37,11 @@ from typing import TYPE_CHECKING, TypeVar, cast
 
 from dulwich import porcelain
 from scalo.logger import logger
+from scalo.resilience import ReconnectingResilience, ResilienceConfig, ServiceUnavailable
 
+from ..settings import GitopsWriteSettings
 from .dulwich_auth import RedactingErrStream, redact_credentials, scrub_remote_credentials
-from .metrics import GitopsMetrics
+from .metrics import GitopsMetrics, WriteOp
 
 if TYPE_CHECKING:
     import urllib3
@@ -46,10 +58,63 @@ REMOTE_HEAD_TIMEOUT_SECONDS = 3.0
 # Only the HTTP(S) client takes a pool manager, so only these schemes can be bounded.
 _BOUNDABLE_SCHEMES = ("http://", "https://")
 
+# urllib3 refuses a timeout of zero, which is what a retry started at the budget's end
+# would otherwise get.
+_MIN_ATTEMPT_TIMEOUT_SECONDS = 0.05
+
+# dulwich reports a non-200 answer only in its message; these are the ones a forge or
+# its proxy gives while restarting or overloaded.
+_TRANSIENT_HTTP_STATUS = re.compile(r"unexpected http resp (?:408|429|5\d\d)\b")
+
 
 def _as_path_bytes(host_path: str | bytes) -> bytes:
     """dulwich's clients take the remote path as bytes; the transport hands back either."""
     return host_path.encode() if isinstance(host_path, str) else host_path
+
+
+def _is_transient(exc: BaseException, *, outer: BaseException | None = None) -> bool:
+    """Whether a remote op failed in a way another attempt could fix.
+
+    dulwich wraps a urllib3 failure in ``GitProtocolError``, so the chain is walked
+    rather than the outer type alone: every ``__cause__``, and a ``__context__`` only
+    where Python did not suppress it. The walk stops at ``outer`` -- the exception
+    already being handled when the op began, a caller's or an earlier attempt's --
+    and at any GitopsRemoteError below the top, because neither describes this
+    failure. A refusal, a diverged ref, a missing repo or bad credentials are not
+    transient: another attempt fails the same way.
+    """
+    import urllib3.exceptions
+    from dulwich.errors import GitProtocolError, HangupException
+
+    transient_types = (
+        TimeoutError,
+        ConnectionError,
+        HangupException,
+        urllib3.exceptions.TimeoutError,
+        urllib3.exceptions.ProtocolError,
+    )
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and current is not outer and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, GitopsRemoteError):
+            return current is exc and current.transient
+        if isinstance(current, transient_types):
+            return True
+        if isinstance(current, GitProtocolError) and _TRANSIENT_HTTP_STATUS.search(str(current)):
+            return True
+        if current.__cause__ is not None:
+            current = current.__cause__
+        elif current.__suppress_context__:
+            current = None
+        else:
+            current = current.__context__
+    return False
+
+
+def _jittered_sleep(seconds: float) -> None:
+    """Sleep a random share of the back-off, so replicas that failed together retry apart."""
+    time.sleep(random.uniform(seconds / 2, seconds))  # noqa: S311 - schedules a retry, not crypto
 
 
 # The clones whose head this scope has already taken; None outside a scope.
@@ -76,7 +141,34 @@ def read_scope() -> Iterator[None]:
 
 
 class GitopsRemoteError(RuntimeError):
-    """A remote git op failed, with any URL credentials stripped from the message."""
+    """A remote git op failed, with any URL credentials stripped from the message.
+
+    Attributes:
+        transient: Whether another attempt could succeed -- a timeout, a refused or
+            reset connection, a 5xx -- rather than a failure retrying cannot fix.
+    """
+
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
+
+
+class GitopsUnavailableError(GitopsRemoteError, ServiceUnavailable):
+    """A write's remote call kept failing transiently until its retry budget ran out.
+
+    The API answers it 503 with ``Retry-After``: the deploy repo is unreachable, the
+    request was not wrong.
+
+    Attributes:
+        remote: The deploy repo URL, credentials stripped.
+        retry_after_seconds: How long a caller should wait before trying again.
+    """
+
+    def __init__(self, message: str, *, waking: bool = False) -> None:
+        super().__init__(message, transient=True)
+        self.waking = waking
+        self.remote = ""
+        self.retry_after_seconds = 1
 
 
 class GitopsDivergedError(GitopsRemoteError):
@@ -142,7 +234,8 @@ class GitopsRepo:
     ``ensure()`` makes the working tree present (clone ``repo_url``, or init a
     fresh local repo when ``repo_url`` is empty). ``publish()`` writes a
     ``{path: content}`` artifact map, stages, commits only on change, and pushes
-    when ``push`` is set and a remote is configured.
+    when ``push`` is set and a remote is configured. ``write`` bounds and retries
+    the fetch and push a write makes; None takes the ``gitops.write`` defaults.
     """
 
     def __init__(
@@ -157,6 +250,7 @@ class GitopsRepo:
         author_name: str = "dfe-engine",
         author_email: str = "dfe-engine@hyperi.io",
         metrics: GitopsMetrics | None = None,
+        write: GitopsWriteSettings | None = None,
     ) -> None:
         self._path = Path(local_path)
         self._repo_url = repo_url
@@ -166,6 +260,24 @@ class GitopsRepo:
         self._token = token
         self._author = f"{author_name} <{author_email}>".encode()
         self._metrics = metrics or GitopsMetrics()
+        self._write = write if write is not None else GitopsWriteSettings()
+        # No pooled client to rebuild: every dulwich op builds its own, so a retry
+        # only backs off.
+        self._write_resilience = ReconnectingResilience(
+            ResilienceConfig(
+                wait_initial=self._write.wait_initial,
+                wait_max=self._write.wait_max,
+                wait_multiplier=self._write.wait_multiplier,
+                budget_seconds=self._write.budget_seconds,
+                waking_budget_seconds=self._write.budget_seconds,
+            ),
+            name="gitops deploy repo",
+            is_transient=lambda exc: isinstance(exc, GitopsRemoteError) and exc.transient,
+            is_reconnectable=lambda _exc: False,
+            reconnect=lambda: None,
+            unavailable_exc=GitopsUnavailableError,
+            sleep=_jittered_sleep,
+        )
         # The working tree: held to change it or read it, never across a push.
         self._lock = threading.RLock()
         # One writer at a time, push included: a reset between a commit and its push
@@ -270,15 +382,56 @@ class GitopsRepo:
         -- dulwich puts the URL as supplied in both. Chained ``from None`` on purpose:
         the original exception's own text is the thing carrying the token.
         """
+        # A retry runs inside scalo's handler for the first failure, and a caller may
+        # call from inside its own handler; neither exception is this op's.
+        outer = sys.exception()
         stream = RedactingErrStream()
         try:
             return op(stream)
         except Exception as exc:
-            raise GitopsRemoteError(redact_credentials(str(exc))) from None
+            raise GitopsRemoteError(
+                redact_credentials(str(exc)), transient=_is_transient(exc, outer=outer)
+            ) from None
         finally:
             # The stream redacts a line at a time, so closing it flushes whatever
             # the op's last write left unterminated.
             stream.close()
+
+    def _write_op(self, op: WriteOp, call: Callable[[RedactingErrStream, float], T]) -> T:
+        """Run a write's remote call, retrying a transient failure inside the write budget.
+
+        ``call`` takes the stream and the timeout for that attempt. The budget runs from
+        the first failure, as scalo's retry loop counts it, and a retry's timeout is
+        capped at what is left of it, so the retries end with the budget.
+
+        Raises:
+            GitopsUnavailableError: every attempt failed transiently until the budget ran out.
+            GitopsRemoteError: a failure another attempt cannot fix, raised at once.
+        """
+        deadline: float | None = None
+
+        def attempt() -> T:
+            nonlocal deadline
+            timeout = self._write.timeout_seconds
+            if deadline is not None:
+                self._metrics.write_retry(op, "retried")
+                left = max(deadline - time.monotonic(), _MIN_ATTEMPT_TIMEOUT_SECONDS)
+                timeout = min(timeout, left)
+            try:
+                return self._remote_op(lambda errstream: call(errstream, timeout))
+            except GitopsRemoteError:
+                if deadline is None:
+                    deadline = time.monotonic() + self._write.budget_seconds
+                raise
+
+        try:
+            return self._write_resilience.run(attempt)
+        except GitopsUnavailableError as exc:
+            self._metrics.write_retry(op, "exhausted")
+            exc.remote = redact_credentials(self._repo_url)
+            # About one back-off step: the pace this clone was retrying at itself.
+            exc.retry_after_seconds = max(1, math.ceil(self._write.wait_max))
+            raise
 
     def _scrub_remote(self) -> None:
         """Rewrite the stored remote back to the credential-free URL.
@@ -363,18 +516,18 @@ class GitopsRepo:
         if env_override is not None:
             config.backends.insert(0, env_override)
         client, host_path = get_transport_and_path(
-            url, config=config, pool_manager=self._bounded_pool(config)
+            url, config=config, pool_manager=self._bounded_pool(config, REMOTE_HEAD_TIMEOUT_SECONDS)
         )
         return client.get_refs(_as_path_bytes(host_path))
 
-    def _fetch(self, errstream: RedactingErrStream) -> FetchPackResult:
+    def _fetch(self, errstream: RedactingErrStream, *, timeout: float) -> FetchPackResult:
         """Fetch objects into the local store, with the HTTP(S) transport bounded.
 
-        ``porcelain.fetch`` takes no timeout either, and :meth:`sync` runs it under
-        the tree lock on the read path, so a forge that stops answering part way
-        through would hold every other reader with it. This is porcelain's body for
-        the shape this class uses -- a URL remote, which imports no remote-tracking
-        refs and needs no reflog entry.
+        ``porcelain.fetch`` takes no timeout either, and a read runs it under the tree
+        lock, so a forge that stops answering part way through would hold every
+        other reader with it. This is porcelain's body for the shape this class uses
+        -- a URL remote, which imports no remote-tracking refs and needs no reflog
+        entry.
         """
         from dulwich.client import get_transport_and_path
         from dulwich.gc import maybe_auto_gc
@@ -387,7 +540,7 @@ class GitopsRepo:
         with Repo(str(self._path)) as repo:
             config = repo.get_config_stack()
             client, host_path = get_transport_and_path(
-                url, config=config, pool_manager=self._bounded_pool(config)
+                url, config=config, pool_manager=self._bounded_pool(config, timeout)
             )
             result = client.fetch(_as_path_bytes(host_path), repo, progress=errstream.write)
             # porcelain.fetch ends on this, and a clone that lives as long as the pod
@@ -395,8 +548,21 @@ class GitopsRepo:
             maybe_auto_gc(repo)
             return result
 
-    def _bounded_pool(self, config: Config) -> urllib3.PoolManager:
-        """A urllib3 manager whose connect and read both give up at the bound.
+    def _send_pack(
+        self, refspec: bytes, errstream: RedactingErrStream, *, timeout: float
+    ) -> SendPackResult:
+        """Push one refspec, with the HTTP(S) transport held to ``timeout``."""
+        from dulwich.repo import Repo
+
+        url = self._authed_url()
+        if not url.startswith(_BOUNDABLE_SCHEMES):
+            return porcelain.push(str(self._path), url, refspec, errstream=errstream)
+        with Repo(str(self._path)) as repo:
+            pool = self._bounded_pool(repo.get_config_stack(), timeout)
+        return porcelain.push(str(self._path), url, refspec, errstream=errstream, pool_manager=pool)
+
+    def _bounded_pool(self, config: Config, timeout: float) -> urllib3.PoolManager:
+        """A urllib3 manager whose connect and read both give up at ``timeout``.
 
         The read timeout is between reads rather than across the whole transfer, so
         a large pack that keeps moving is not at risk -- only one that stops.
@@ -405,9 +571,7 @@ class GitopsRepo:
 
         # base_url is the credential-free URL: it only selects the http.* config
         # sections and the proxy-bypass decision, neither of which wants the token.
-        manager = default_urllib3_manager(
-            config, base_url=self._repo_url, timeout=REMOTE_HEAD_TIMEOUT_SECONDS
-        )
+        manager = default_urllib3_manager(config, base_url=self._repo_url, timeout=timeout)
         # urllib3 retries a failed connect three times by default, which would make
         # the real bound four times the timeout.
         manager.connection_pool_kw["retries"] = False
@@ -474,7 +638,7 @@ class GitopsRepo:
         batch = self._batch
         if batch is not None and batch.owner == threading.get_ident():
             return None
-        if not (self._push and self._repo_url):
+        if not self._pushes():
             return None
         scope = _READ_SCOPE.get()
         if scope is not None:
@@ -495,18 +659,25 @@ class GitopsRepo:
         """Whether a push in flight carries everything at ``remote`` already."""
         if not self._pushing:
             return False
+        head = self.head_revision()
+        if head is None:
+            return False
+        return self._descends(head.encode(), remote.encode())
+
+    def _descends(self, head: bytes, ancestor: bytes) -> bool:
+        """Whether ``head``'s history holds ``ancestor`` (or is it).
+
+        False for a commit this clone has never fetched: it cannot prove the history,
+        and every caller treats an unproven one as not held.
+        """
         from dulwich.graph import can_fast_forward
         from dulwich.objects import ObjectID
         from dulwich.repo import Repo
 
-        head = self.head_revision()
-        if head is None:
-            return False
         with Repo(str(self._path)) as repo:
             try:
-                return can_fast_forward(repo, ObjectID(remote.encode()), ObjectID(head.encode()))
+                return can_fast_forward(repo, ObjectID(ancestor), ObjectID(head))
             except KeyError:
-                # A commit this clone has never fetched is one it must take.
                 return False
 
     def _take_head(self, remote: str) -> bool:
@@ -519,7 +690,7 @@ class GitopsRepo:
             self._note_reachable()
             return False
         try:
-            self._sync_onto_remote_head()
+            self._settle_onto(self._fetch_head(write=False))
         except GitopsRemoteError as exc:
             self._note_unreachable(exc)
             return False
@@ -544,30 +715,50 @@ class GitopsRepo:
         self._refresh_failed = False
         logger.info("Deploy repo reachable again; reads are current", branch=self._branch)
 
-    def sync(self, *, discard_local: bool = False) -> bool:
-        """Fast-forward the tracked branch to the remote's head.
+    def _fetch_head(self, *, write: bool) -> bytes | None:
+        """Fetch the remote's objects and return its tracked branch head.
 
         Every engine replica holds its own clone of one deploy repo, so the clone a
         write lands on is behind whenever another replica pushed first, and a commit
-        made on that head is a non-fast-forward push. Returns True when the local
-        branch moved. ``discard_local`` drops a local commit the remote never took
-        (a rejected push) so the caller can re-apply the write on the remote head.
+        made on that head is a non-fast-forward push. None when the remote does not
+        carry the branch.
 
-        The fetch is bounded (see :meth:`_fetch`) because a read reaches this with
-        the tree lock held, and raises :class:`GitopsRemoteError` on the bound --
-        which on the read path leaves the clone serving what it has. Caller holds the
-        writer lock, then the tree lock.
+        A read holds the tree lock across this, so its fetch keeps the short read
+        bound and fails once. A write runs it under the writer lock alone -- readers
+        carry on while a slow forge answers -- with the write timeout and retries.
+        Caller holds the writer lock.
+
+        Raises:
+            GitopsUnavailableError: a write's fetch ran out of retry budget.
+            GitopsRemoteError: the fetch failed.
         """
-        if not self._repo_url:
+        if write:
+            result = self._write_op(
+                "fetch", lambda errstream, timeout: self._fetch(errstream, timeout=timeout)
+            )
+        else:
+            result = self._remote_op(
+                lambda errstream: self._fetch(errstream, timeout=REMOTE_HEAD_TIMEOUT_SECONDS)
+            )
+        self._scrub_remote()
+        return result.refs.get(b"refs/heads/" + self._branch.encode())
+
+    def _move_onto(self, remote_head: bytes | None, *, discard_local: bool) -> bool:
+        """Fast-forward the tracked branch to a fetched remote head; returns whether it moved.
+
+        ``discard_local`` drops a local commit the remote never took (a rejected push)
+        so the caller can re-apply the write on the remote head. Caller holds the
+        writer lock, then the tree lock.
+
+        Raises:
+            GitopsDivergedError: this clone holds a commit the remote does not, and
+                ``discard_local`` is unset.
+        """
+        if remote_head is None:
             return False
         from dulwich.graph import can_fast_forward
         from dulwich.repo import Repo
 
-        result = self._remote_op(self._fetch)
-        self._scrub_remote()
-        remote_head = result.refs.get(b"refs/heads/" + self._branch.encode())
-        if remote_head is None:
-            return False
         local = self.head_revision()
         if local == remote_head.decode():
             return False
@@ -601,10 +792,10 @@ class GitopsRepo:
             if self._batch is not None:
                 yield
                 return
+            # Taken once here, because no read or write inside the block refreshes.
+            remote_head = self._fetch_head(write=True) if self._pushes() else None
             with self._lock:
-                # Taken once here, because no read or write inside the block refreshes.
-                if self._push and self._repo_url:
-                    self._sync_onto_remote_head()
+                self._settle_onto(remote_head)
                 self._batch = _Batch(message=message, owner=threading.get_ident())
                 try:
                     yield
@@ -635,7 +826,7 @@ class GitopsRepo:
             if not self._has_staged():
                 return PublishResult(changed=False)
             sha = self._commit(batch.commit_message())
-            self._pushing = self._push and bool(self._repo_url)
+            self._pushing = self._pushes()
         written = sorted([*batch.artifacts, *batch.deletions])
         return self._push_tracked(
             sha, written, dict(batch.artifacts), sorted(batch.deletions), batch.commit_message()
@@ -715,7 +906,7 @@ class GitopsRepo:
           production+team write is kept off main (see gitcrud/routing.py).
         """
         # The tree lock is taken inside for the local work only, so a read waits for
-        # the commit and never for the push.
+        # the commit and never for the fetch or the push.
         with self._write_lock:
             try:
                 return self._publish_locked(artifacts, message, deletions, branch)
@@ -725,6 +916,39 @@ class GitopsRepo:
                 scope = _READ_SCOPE.get()
                 if scope is not None:
                     scope.discard(self)
+
+    def push_local_commits(self) -> PublishResult:
+        """Push commits this clone made with push off, as a fast-forward of the remote.
+
+        :meth:`publish` drops a local commit the remote lacks, because on the write
+        path that is a push which lost its race and whose caller re-applies it. A
+        commit made here on purpose, such as a break-glass edit, has no one to
+        re-apply it, so this pushes it instead, and refuses rather than drop it when
+        the remote has moved on.
+
+        Raises:
+            GitopsDivergedError: the remote holds commits this clone does not; nothing
+                was pushed and the local commits are kept.
+            GitopsUnavailableError: the forge stayed unreachable for the write budget.
+            GitopsRemoteError: the fetch or the push failed.
+        """
+        if not self._repo_url:
+            return PublishResult(changed=False)
+        with self._write_lock:
+            remote_head = self._fetch_head(write=True)
+            with self._lock:
+                local = self.head_revision()
+                if local is None or (remote_head is not None and remote_head.decode() == local):
+                    return PublishResult(changed=False)
+                if remote_head is not None and not self._descends(local.encode(), remote_head):
+                    raise GitopsDivergedError(self._branch, local, remote_head.decode())
+                self._pushing = True
+            try:
+                self._push_refspec(f"refs/heads/{self._branch}".encode())
+            finally:
+                self._pushing = False
+        logger.info("Pushed local gitops commits", commit=local, branch=self._branch)
+        return PublishResult(changed=True, commit_sha=local, pushed=True)
 
     def _publish_locked(
         self,
@@ -740,10 +964,10 @@ class GitopsRepo:
                     return self._stage_into_batch(artifacts, message, deletions)
             self._split_batch()
 
+        # The write goes on the remote's head, never on whatever this clone last saw.
+        remote_head = self._fetch_head(write=True) if self._pushes() else None
         with self._lock:
-            # The write goes on the remote's head, never on whatever this clone last saw.
-            if self._push and self._repo_url:
-                self._sync_onto_remote_head()
+            self._settle_onto(remote_head)
 
             # Capture the base BEFORE staging so PR mode can restore the tracked
             # branch to it after committing. An empty repo has no base to branch from.
@@ -761,7 +985,7 @@ class GitopsRepo:
                 # under the tree lock, so no read sees the review commit on main.
                 self._move_to_review_branch(sha_str, branch, cast("str", base_head))
             else:
-                self._pushing = self._push and bool(self._repo_url)
+                self._pushing = self._pushes()
 
         if branch:
             return self._push_review_branch(sha_str, branch, written)
@@ -777,10 +1001,14 @@ class GitopsRepo:
     ) -> PublishResult:
         """Push a tracked-branch commit, re-applying the write once if the remote moved.
 
+        A refused push is re-applied only when the remote's history lacks the commit.
+        When it holds it, the push landed and only its answer was lost, and a peer may
+        already have written on top: re-applying would revert that write.
+
         Caller holds the writer lock and not the tree lock, so reads carry on over
         the committed tree while the push is in flight.
         """
-        if not (self._push and self._repo_url):
+        if not self._pushes():
             logger.info(
                 "Published gitops artifacts", commit=sha_str, files=len(written), pushed=False
             )
@@ -789,23 +1017,39 @@ class GitopsRepo:
         try:
             try:
                 self._push_refspec(refspec)
+            except GitopsUnavailableError:
+                # The forge stayed unreachable for the whole budget, so a re-fetch
+                # would only spend another one before failing the same way.
+                raise
             except GitopsRemoteError as exc:
-                # The remote moved between the sync and the push, so the local commit
-                # is orphaned: take the remote head and re-apply this write once. A
-                # push the remote rejected for any other reason stays an error.
+                remote_head = self._fetch_head(write=True)
+                reapplied: tuple[str | None, list[str]] | None = None
                 with self._lock:
-                    if not self.sync(discard_local=True):
+                    if remote_head is not None and self._descends(remote_head, sha_str.encode()):
+                        self._move_onto(remote_head, discard_local=False)
+                        logger.info(
+                            "Gitops push had landed; took the remote head past it",
+                            commit=sha_str,
+                            remote=remote_head.decode(),
+                        )
+                    elif self._move_onto(remote_head, discard_local=True):
+                        # The remote moved between the fetch and the push without this
+                        # commit, so it is orphaned: re-apply the write on the new head.
+                        logger.warning(
+                            "Gitops push rejected; re-applying the write on the remote head",
+                            error=str(exc),
+                        )
+                        reapplied = self._stage_and_commit(artifacts, deletions, message)
+                    else:
+                        # A push the remote rejected for any other reason stays an error.
                         raise
-                    logger.warning(
-                        "Gitops push rejected; re-applying the write on the remote head",
-                        error=str(exc),
-                    )
-                    sha, written = self._stage_and_commit(artifacts, deletions, message)
-                if sha is None:
-                    logger.info("Gitops repo unchanged after the remote caught up")
-                    return PublishResult(changed=False, files=written)
-                sha_str = sha
-                self._push_refspec(refspec)
+                if reapplied is not None:
+                    sha, written = reapplied
+                    if sha is None:
+                        logger.info("Gitops repo unchanged after the remote caught up")
+                        return PublishResult(changed=False, files=written)
+                    sha_str = sha
+                    self._push_refspec(refspec)
         finally:
             self._pushing = False
 
@@ -817,15 +1061,19 @@ class GitopsRepo:
         )
         return PublishResult(changed=True, files=written, commit_sha=sha_str, pushed=True)
 
-    def _sync_onto_remote_head(self) -> None:
-        """Fast-forward onto the remote head, dropping a local commit it never took.
+    def _pushes(self) -> bool:
+        """Whether this clone pushes to a remote, and so writes on the remote's head."""
+        return self._push and bool(self._repo_url)
+
+    def _settle_onto(self, remote_head: bytes | None) -> None:
+        """Fast-forward onto a fetched remote head, dropping a local commit it never took.
 
         A push that loses the compare-and-swap leaves this clone holding a commit the
         remote refused, and without this every later write on the replica fails against
-        it.
+        it. Caller holds the writer lock, then the tree lock.
         """
         try:
-            self.sync()
+            self._move_onto(remote_head, discard_local=False)
         except GitopsDivergedError as exc:
             logger.warning(
                 "Gitops clone diverged from the deploy repo: discarding the local commit "
@@ -835,7 +1083,7 @@ class GitopsRepo:
                 local=exc.local,
                 remote=exc.remote,
             )
-            self.sync(discard_local=True)
+            self._move_onto(remote_head, discard_local=True)
 
     def _stage(
         self,
@@ -896,16 +1144,19 @@ class GitopsRepo:
         applies it only while the ref still holds that SHA -- another replica's push
         makes it stale, and the deploy repo keeps what it already has.
 
+        A transient failure pushes the same commit again, never a new one. When the
+        remote took the first attempt and only its answer was lost, the retry finds
+        the ref already at this commit and sends nothing; when a peer has written on
+        top since, the retry is refused and :meth:`_push_tracked` sees the commit in
+        the remote's history.
+
         Raises:
+            GitopsUnavailableError: the push ran out of retry budget.
             GitopsRemoteError: the op failed, or the remote refused a ref.
         """
-        result = self._remote_op(
-            lambda errstream: porcelain.push(
-                str(self._path),
-                self._authed_url(),
-                refspec,
-                errstream=errstream,
-            )
+        result = self._write_op(
+            "push",
+            lambda errstream, timeout: self._send_pack(refspec, errstream, timeout=timeout),
         )
         self._raise_on_refused(result)
 
@@ -948,7 +1199,7 @@ class GitopsRepo:
         """Push only the side branch a review commit was moved onto."""
         side_ref = f"refs/heads/{branch}".encode()
         pushed = False
-        if self._push and self._repo_url:
+        if self._pushes():
             self._push_refspec(side_ref + b":" + side_ref)
             pushed = True
 

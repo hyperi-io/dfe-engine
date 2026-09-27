@@ -15,8 +15,7 @@ break-glass marking (subject prefix + trailers), the required-reason rule, the
 guard confirm, the audit-log flag, and revert/rm/restore/grep.
 """
 
-from __future__ import annotations
-
+import io
 import os
 from pathlib import Path
 
@@ -346,6 +345,74 @@ def test_push_no_remote_is_noop(repo: Path):
     result = _run(repo, ["push"])
     assert result.exit_code == 0, result.output
     assert "no remote" in result.output.lower() or "nothing" in result.output.lower()
+
+
+@pytest.fixture
+def remote(repo: Path, tmp_path_factory, monkeypatch) -> tuple[Path, str]:
+    """A bare deploy repo holding the clone's seed commit, configured as the remote."""
+    bare = tmp_path_factory.mktemp("deploy") / "remote.git"
+    porcelain.init(str(bare), bare=True)
+    branch = porcelain.active_branch(str(repo)).decode()
+    porcelain.push(str(repo), str(bare), f"refs/heads/{branch}".encode(), errstream=io.BytesIO())
+    monkeypatch.setenv("DFE_GITOPS_REPO_URL", str(bare))
+    monkeypatch.setenv("DFE_GITOPS_BRANCH", branch)
+    reset_settings()
+    return bare, branch
+
+
+def _break_glass_set(repo: Path, value: str) -> None:
+    result = _run(
+        repo,
+        ["set", "helmvars", "receiver-default", "keda.maxReplicas", value]
+        + ["--reason", "rogue pod", "--yes", "--no-push"],
+    )
+    assert result.exit_code == 0, result.output
+
+
+def _remote_head(bare: Path, branch: str) -> bytes:
+    with Repo(str(bare)) as r:
+        return r.refs[f"refs/heads/{branch}".encode()]
+
+
+def test_push_lands_break_glass_commits_on_the_remote(repo: Path, remote: tuple[Path, str]):
+    """The commit made with push off is pushed, not reset away as a lost push race."""
+    bare, branch = remote
+    _break_glass_set(repo, "0")
+    with Repo(str(repo)) as r:
+        break_glass = r.head()
+
+    result = _run(repo, ["push"])
+
+    assert result.exit_code == 0, result.output
+    assert "pushed to" in result.output
+    assert _remote_head(bare, branch) == break_glass
+    got = _run(repo, ["get", "helmvars", "receiver-default", "--path", "keda.maxReplicas"])
+    assert got.output.strip() == "0"
+
+
+def test_push_refuses_a_moved_remote_and_keeps_the_commits(
+    repo: Path, remote: tuple[Path, str], tmp_path_factory
+):
+    """Another writer moved the remote: nothing is pushed and the local commit stays."""
+    bare, branch = remote
+    _break_glass_set(repo, "0")
+    with Repo(str(repo)) as r:
+        break_glass = r.head()
+    other = tmp_path_factory.mktemp("other") / "clone"
+    porcelain.clone(str(bare), str(other), branch=branch.encode(), errstream=io.BytesIO())
+    (other / "elsewhere.yaml").write_text("x: 1\n")
+    porcelain.add(str(other), paths=[str(other / "elsewhere.yaml")])
+    porcelain.commit(str(other), message=b"another writer", author=b"t <t@t>", committer=b"t <t@t>")
+    porcelain.push(str(other), str(bare), f"refs/heads/{branch}".encode(), errstream=io.BytesIO())
+    moved = _remote_head(bare, branch)
+
+    result = _run(repo, ["push"])
+
+    assert result.exit_code != 0, result.output
+    assert "Nothing was pushed" in result.output
+    assert _remote_head(bare, branch) == moved
+    with Repo(str(repo)) as r:
+        assert r.head() == break_glass
 
 
 def test_ch_cloud_is_mounted():

@@ -33,8 +33,6 @@ gitops-survivability model: the mutation is a git commit, publishing it is its o
 act.
 """
 
-from __future__ import annotations
-
 import copy
 import difflib
 import functools
@@ -63,7 +61,7 @@ from dfe_engine.gitcrud.commit_policy import (
 )
 from dfe_engine.gitcrud.log import read_log
 from dfe_engine.gitops.dulwich_auth import authed_https_url
-from dfe_engine.gitops.repo import GitopsRepo
+from dfe_engine.gitops.repo import GitopsDivergedError, GitopsRemoteError, GitopsRepo
 from dfe_engine.settings import get_settings
 from dfe_engine.yaml_utils import yaml_dump_string
 
@@ -225,11 +223,10 @@ def _yaml_diff(before: dict | None, after: dict | None) -> str:
 def _do_push(repo_path: str) -> None:
     """Push the local clone's committed break-glass commits to the configured remote.
 
-    Reuses GitopsRepo's exact push mechanics (auth URL, fast-forward reconcile,
-    diverged-branch refusal) by building a push-enabled view over the SAME clone and
-    running an empty publish - GitopsRepo.publish's no-op path pushes a local branch
-    that is ahead of the remote (the stranded-commit path). No remote configured =>
-    a clean no-op.
+    Builds a push-enabled GitopsRepo over the SAME clone, so the auth URL, the write
+    timeout and the retry budget are the daemon's, and pushes the local commits as a
+    fast-forward. A remote that has moved on is refused with the commits kept, never
+    reset away. No remote configured => a clean no-op.
     """
     gs = _gitops()
     if not gs.repo_url:
@@ -244,9 +241,18 @@ def _do_push(repo_path: str) -> None:
         token=gs.token,
         author_name=gs.author_name,
         author_email=gs.author_email,
+        write=gs.write,
     )
     repo.ensure()
-    result = repo.publish({}, "chore: push break-glass commits [skip ci]")
+    try:
+        result = repo.push_local_commits()
+    except GitopsDivergedError as exc:
+        raise click.ClickException(
+            f"{exc}. Nothing was pushed and the local commits are kept: bring {gs.branch} "
+            "from the remote into this clone with git, then run `dfe local push` again."
+        ) from exc
+    except GitopsRemoteError as exc:
+        raise click.ClickException(f"push to {gs.repo_url} failed: {exc}") from exc
     if result.pushed:
         click.echo(f"pushed to {gs.repo_url} ({gs.branch}).")
     else:
