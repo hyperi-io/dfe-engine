@@ -41,7 +41,7 @@ def load_pins(deploy_repo_path: str | Path) -> dict:
         return {}
     try:
         data = yaml_load(path)
-    except (OSError, YAMLError):  # malformed pins.yaml is the operator's problem, not a crash
+    except OSError, YAMLError:  # malformed pins.yaml is the operator's problem, not a crash
         logger.warning(f"could not parse {path}; treating the environment as unpinned")
         return {}
     return data if isinstance(data, dict) else {}

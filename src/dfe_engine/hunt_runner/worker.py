@@ -52,7 +52,7 @@ def _written_rows(result: Any) -> int:
     """
     try:
         return int(getattr(result, "written_rows", 0) or 0)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0
 
 

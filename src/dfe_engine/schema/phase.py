@@ -22,8 +22,6 @@ retries for a bounded window first, which is what a stack whose datastore starts
 in the same wave needs.
 """
 
-from __future__ import annotations
-
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -43,7 +41,7 @@ from dfe_engine.schema.manifest_applier import (
 from dfe_engine.schema.plan import LEDGER_ID, LOCK_ID, SchemaPlan, SchemaPlanError, build_plan
 
 if TYPE_CHECKING:
-    from dfe_engine.kafka.topics import TopicAdmin
+    from dfe_engine.kafka.topics import TopicAdmin, TopicSpec
     from dfe_engine.settings import DFESettings
 
 DEAD_LETTER_TOPIC_KIND = "dlq"
@@ -290,6 +288,29 @@ def _topics_skipped(settings: DFESettings) -> str:
     return ""
 
 
+def _bootstrap_specs(
+    plan: SchemaPlan, settings: DFESettings, *, kind: str | None = None
+) -> list[TopicSpec]:
+    """The declared bootstrap topics, of one kind or all, at the deployment's message size.
+
+    The manifest renders its own size, and a managed broker capped below it refuses
+    the create, which holds the engine NotReady on the dead-letter set.
+    """
+    from dfe_engine.kafka.topics import TopicSpec, topic_max_message_bytes
+
+    size = str(topic_max_message_bytes(settings))
+    return [
+        TopicSpec(
+            name=rendered.topic["name"],
+            partitions=int(rendered.topic["partitions"]),
+            replication_factor=int(rendered.topic["replication_factor"]),
+            config={**rendered.topic["config"], "max.message.bytes": size},
+        )
+        for rendered in plan.topics()
+        if rendered.topic and (kind is None or rendered.topic.get("kind") == kind)
+    ]
+
+
 def _apply_topics(plan: SchemaPlan, settings: DFESettings) -> tuple[list[str], str, list[str]]:
     """Create the declared bootstrap topics, and report any whose shape differs.
 
@@ -302,22 +323,13 @@ def _apply_topics(plan: SchemaPlan, settings: DFESettings) -> tuple[list[str], s
     dry-run converge pass names that difference instead of adopting it silently;
     applying it stays a separate, deliberate operation.
     """
-    from dfe_engine.kafka.topics import TopicSpec, ensure_topics, update_topics
+    from dfe_engine.kafka.topics import ensure_topics, update_topics
 
     skipped = _topics_skipped(settings)
     if skipped:
         return [], skipped, []
 
-    specs = [
-        TopicSpec(
-            name=rendered.topic["name"],
-            partitions=int(rendered.topic["partitions"]),
-            replication_factor=int(rendered.topic["replication_factor"]),
-            config=dict(rendered.topic["config"]),
-        )
-        for rendered in plan.topics()
-        if rendered.topic
-    ]
+    specs = _bootstrap_specs(plan, settings)
     result = ensure_topics(specs, settings=settings)
     for name, error in result.failed:
         logger.warning("bootstrap topic not created", topic=name, error=error)
@@ -365,20 +377,11 @@ def require_dead_letter_topics(
         DeadLetterPathError: A dead-letter topic is still not on the broker when
             the window closes.
     """
-    from dfe_engine.kafka.topics import TopicSpec, ensure_topics
+    from dfe_engine.kafka.topics import ensure_topics
 
     if _topics_skipped(settings):
         return []
-    specs = [
-        TopicSpec(
-            name=rendered.topic["name"],
-            partitions=int(rendered.topic["partitions"]),
-            replication_factor=int(rendered.topic["replication_factor"]),
-            config=dict(rendered.topic["config"]),
-        )
-        for rendered in plan.topics()
-        if rendered.topic and rendered.topic.get("kind") == DEAD_LETTER_TOPIC_KIND
-    ]
+    specs = _bootstrap_specs(plan, settings, kind=DEAD_LETTER_TOPIC_KIND)
     if not specs:
         return []
     deadline = time.monotonic() + max(wait_seconds, 0.0)

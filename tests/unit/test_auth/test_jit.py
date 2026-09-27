@@ -722,6 +722,35 @@ class TestResolveHyperdxTeam:
         jit = JitProvisioner(account_store=None, group_store=groups)
         assert jit.resolve_hyperdx_team(["0295f72c-e3f8-4962-9183-f95ef939e3b8"]) == "dfe-admin"
 
+    @pytest.mark.parametrize("role", ["admin", "infra_admin", "data_analyst"])
+    def test_an_org_scoped_platform_role_gets_the_org_team(self, stores, role):
+        """A role bound at one org's scope covers that org alone, never the platform."""
+        _, groups = stores
+        groups.create("acme-ops", roles=[role], scope="org:acme")
+        groups.update("acme-ops", org_ids=["acme"])
+        jit = JitProvisioner(account_store=None, group_store=groups)
+        assert jit.resolve_hyperdx_team(["acme-ops"]) == "customer-acme"
+
+    def test_an_org_scoped_admin_does_not_outrank_a_system_analyst(self, stores):
+        _, groups = stores
+        groups.create("acme-admins", roles=["admin"], scope="org:acme")
+        jit = JitProvisioner(account_store=None, group_store=groups)
+        assert jit.resolve_hyperdx_team(["acme-admins", "dfe-analysts"]) == "dfe-analysts"
+
+    @pytest.mark.parametrize("role", ["org_viewer", "admin"])
+    def test_an_org_scoped_group_without_org_ids_takes_its_owning_org(self, stores, role):
+        _, groups = stores
+        groups.create("globex-staff", roles=[role], scope="org:globex")
+        jit = JitProvisioner(account_store=None, group_store=groups)
+        assert jit.resolve_hyperdx_team(["globex-staff"]) == "customer-globex"
+
+    def test_a_system_admin_with_org_markers_keeps_the_platform_team(self, stores):
+        """Platform roles win at system scope, as the CH group bindings decide."""
+        _, groups = stores
+        groups.update("dfe-admins", org_ids=["acme"])
+        jit = JitProvisioner(account_store=None, group_store=groups)
+        assert jit.resolve_hyperdx_team(["dfe-admins"]) == "dfe-admin"
+
 
 class TestOrgIdsFromGroupGuids:
     def test_org_ids_resolve_through_the_source_id(self, stores):
@@ -733,3 +762,13 @@ class TestOrgIdsFromGroupGuids:
             jit.ensure_account("guid-123", ["7b1d0f3e-0000-4000-8000-000000000001"], "entra")
 
         assert audit.call_args.args[3] == ["acme"]
+
+    def test_an_org_scoped_group_without_org_ids_audits_its_owning_org(self, stores):
+        accounts, groups = stores
+        groups.create("globex-viewers", roles=["org_viewer"], scope="org:globex")
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with patch("dfe_engine.auth.jit.audit_jit_account_created") as audit:
+            jit.ensure_account("guid-123", ["globex-viewers"], "entra")
+
+        assert audit.call_args.args[3] == ["globex"]

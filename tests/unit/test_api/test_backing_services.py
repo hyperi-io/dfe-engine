@@ -5,12 +5,11 @@ locked it, and that the lock is narrow enough to leave the rest of the same file
 writable. Everything runs against a real dulwich repo, no mocks.
 """
 
-from __future__ import annotations
-
 from importlib import resources
 
 import pytest
 
+from dfe_engine.appmgmt import contract
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import PolicyStore
@@ -170,6 +169,33 @@ class TestOverlayVars:
         assert {v["path"]: v["value"] for v in listed} == {"clickhouse.replicas": 5}
         names = client.get("/api/v1/backing-services/overlays", headers=admin_headers).json()
         assert names == ["clickhouse-cluster"]
+
+    def test_credentials_come_back_masked(self, client, app, admin_headers, tmp_path):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put(
+            "infravars",
+            "clickhouse-cluster",
+            {
+                "clickhouse": {"replicas": 3, "auth": {"password": "ch-pw"}},
+                "extraEnv": {"CLICKHOUSE_ADMIN_SECRET": "ch-secret"},
+            },
+            "tester",
+        )
+        resp = client.get(
+            "/api/v1/backing-services/overlays/clickhouse-cluster/vars", headers=admin_headers
+        )
+        assert resp.status_code == 200, resp.text
+        assert {v["path"]: v["value"] for v in resp.json()} == {
+            "clickhouse.replicas": 3,
+            "clickhouse.auth.password": contract.REDACTED,
+            "extraEnv.CLICKHOUSE_ADMIN_SECRET": contract.REDACTED,
+        }
+        assert "ch-pw" not in resp.text
+        assert "ch-secret" not in resp.text
+        # The chart still reads the real value.
+        assert gc.get("infravars", "clickhouse-cluster")["clickhouse"]["auth"]["password"] == (
+            "ch-pw"
+        )
 
     def test_writes_land_in_the_infra_directory(self, client, app, admin_headers, tmp_path):
         gc = _wire_gitcrud(app, tmp_path)

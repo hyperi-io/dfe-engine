@@ -92,7 +92,7 @@ def _resolve_package_schemas_root() -> Path | None:
     """
     try:
         package_dir = resources.files(_SCHEMAS_PACKAGE)
-    except (ImportError, TypeError):
+    except ImportError, TypeError:
         return None
 
     packaged = Path(str(package_dir / _SCHEMAS_PACKAGE_DATA))

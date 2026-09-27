@@ -161,22 +161,37 @@ class TestKafkaSettings:
 
 
 class TestTopicConfig:
-    """The alterable topic configs DFE asks for, off unless a dial is set."""
+    """The alterable topic configs DFE asks for: the size and producer compression always.
+
+    Retention and cleanup policy stay off unless a dial sets them.
+    """
+
+    SIZE = {"max.message.bytes": "8388608"}
 
     def _config(self, **kafka) -> dict[str, str]:
-        from types import SimpleNamespace
-
         from dfe_engine.kafka.topics import deployment_topic_config
+        from dfe_engine.settings import DFESettings
 
-        return deployment_topic_config(SimpleNamespace(kafka=KafkaSettings(**kafka)))
+        kafka.setdefault("topic_max_message_bytes", 8388608)
+        return deployment_topic_config(DFESettings(env="dev", kafka=KafkaSettings(**kafka)))
 
-    def test_nothing_set_asks_only_for_producer_compression(self):
+    def test_nothing_set_asks_only_for_the_size_and_producer_compression(self):
         # An untouched deployment keeps the broker's own retention, which is what
         # every topic it already has carries, and stores batches as produced.
-        assert self._config() == {"compression.type": "producer"}
+        assert self._config() == {**self.SIZE, "compression.type": "producer"}
+
+    def test_an_unset_size_is_the_manifest_s(self):
+        from dfe_engine.source.models import _topic_policy
+
+        manifest = str(_topic_policy().defaults["max_message_bytes"])
+        assert self._config(topic_max_message_bytes=None) == {
+            "max.message.bytes": manifest,
+            "compression.type": "producer",
+        }
 
     def test_retention_and_cleanup_reach_the_config(self):
         assert self._config(topic_retention_ms=86400000, topic_cleanup_policy="compact") == {
+            **self.SIZE,
             "retention.ms": "86400000",
             "cleanup.policy": "compact",
             "compression.type": "producer",
@@ -186,10 +201,13 @@ class TestTopicConfig:
         assert self._config(topic_retention_ms=-1)["retention.ms"] == "-1"
 
     def test_compression_type_is_a_dial(self):
-        assert self._config(topic_compression_type="zstd") == {"compression.type": "zstd"}
+        assert self._config(topic_compression_type="zstd") == {
+            **self.SIZE,
+            "compression.type": "zstd",
+        }
 
     def test_empty_compression_type_leaves_the_broker_default(self):
-        assert self._config(topic_compression_type="") == {}
+        assert self._config(topic_compression_type="") == self.SIZE
 
 
 class TestEnvWiring:
@@ -257,3 +275,8 @@ class TestTopicEnvWiring:
         monkeypatch.setenv("DFE_KAFKA_TOPIC_CLEANUP_POLICY", "delete")
         ks = KafkaSettings(**_get_env_overrides()["kafka"])
         assert (ks.topic_retention_ms, ks.topic_cleanup_policy) == (604800000, "delete")
+
+    def test_the_message_size_binds(self, monkeypatch):
+        monkeypatch.setenv("DFE_KAFKA_TOPIC_MAX_MESSAGE_BYTES", "8388608")
+        ks = KafkaSettings(**_get_env_overrides()["kafka"])
+        assert ks.topic_max_message_bytes == 8388608

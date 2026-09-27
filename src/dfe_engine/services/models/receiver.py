@@ -4,14 +4,13 @@ Mirrors the Rust config structs in dfe-receiver/src/config/mod.rs.
 All defaults match the Rust `impl Default` values exactly.
 """
 
-from __future__ import annotations
-
-from typing import Literal
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 from dfe_engine.services.models.base import BaseServiceConfig
 from dfe_engine.services.models.common import (
+    AcknowledgementsConfig,
     DlqConfig,
     KafkaTlsConfig,
     SaslConfig,
@@ -49,12 +48,12 @@ class TlsConfig(BaseModel):
 
 
 class AcceptedHeader(BaseModel):
-    """An accepted authentication header definition."""
+    """An accepted authentication header definition, whose values are the credential."""
 
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    values: list[str] = []
+    values: list[SecretStr] = []
 
 
 class BearerConfig(BaseModel):
@@ -74,11 +73,11 @@ class AuthConfig(BaseModel):
 
     mode: str = Field(default="none", description="none, header, bearer, mtls, both")
     accepted_headers: list[AcceptedHeader] = Field(
-        default_factory=lambda: [AcceptedHeader(name="x-hyperi-agent", values=["1.0"])]
+        default_factory=lambda: [AcceptedHeader(name="x-hyperi-agent", values=[SecretStr("1.0")])]
     )
     bearer: BearerConfig = Field(default_factory=BearerConfig)
     header_name: str = ""
-    header_values: list[str] = []
+    header_values: list[SecretStr] = []
 
     @field_validator("mode")
     @classmethod
@@ -100,6 +99,7 @@ class ServerConfig(BaseModel):
     request_timeout_ms: int = Field(default=30_000, ge=0)
     tls: TlsConfig = Field(default_factory=TlsConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
+    acknowledgements: AcknowledgementsConfig = Field(default_factory=AcknowledgementsConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +114,10 @@ class GrpcConfig(BaseModel):
 
     enabled: bool = False
     bind_address: str = "0.0.0.0:6000"
+    max_message_size: int = Field(
+        default=16 * 1024 * 1024, ge=0, description="Largest decoded push accepted, in bytes"
+    )
+    acknowledgements: AcknowledgementsConfig = Field(default_factory=AcknowledgementsConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +264,7 @@ class DestinationsConfig(BaseModel):
     rules: list[DestinationRule] = []
 
     @model_validator(mode="after")
-    def validate_destinations(self) -> DestinationsConfig:
+    def validate_destinations(self) -> Self:
         named = self.__pydantic_extra__ or {}
         for name, entry in named.items():
             grpc = entry.get("grpc") if isinstance(entry, dict) else None
@@ -347,8 +351,9 @@ class LoaderConnectionConfig(BaseModel):
 
     address: str = "dfe-loader:6000"
     transport: str = Field(default="kafka", description="kafka or grpc")
+    # Inside the 25 s a listener holds its answer, so a delivery settles before it.
     timeout_ms: int = Field(
-        default=5000,
+        default=20_000,
         ge=0,
         description="Per-RPC deadline for the receiver's gRPC loader client (0 = none)",
     )

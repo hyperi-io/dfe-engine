@@ -8,7 +8,7 @@ which stays unset so the archiver chooses it.
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from dfe_engine.services.models.base import BaseServiceConfig
-from dfe_engine.services.models.common import MemoryConfig
+from dfe_engine.services.models.common import AcknowledgementsConfig, MemoryConfig
 
 # ---------------------------------------------------------------------------
 # Kafka (Archiver-specific: consumer with flat SASL fields)
@@ -34,6 +34,7 @@ class ArchiverKafkaConfig(BaseModel):
     batch_size: int = Field(default=10_000, gt=0)
     max_poll_interval_ms: int = Field(default=300_000, gt=0)
     session_timeout_ms: int = Field(default=30_000, gt=0)
+    acknowledgements: AcknowledgementsConfig = Field(default_factory=AcknowledgementsConfig)
 
     @field_validator("security_protocol")
     @classmethod
@@ -138,10 +139,11 @@ class ArchiverBufferConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    flush_bytes: int = Field(default=64 * 1024 * 1024, gt=0, description="64MB default")
+    # Pinned to dfe-archiver BufferConfig::default (35f9b49).
+    flush_bytes: int = Field(default=1024 * 1024, gt=0)
     flush_age_secs: int = Field(default=60, gt=0)
     flush_records: int = Field(default=100_000, gt=0)
-    writer_parallelism: int = Field(default=4, ge=1)
+    writer_parallelism: int = Field(default=2, ge=1)
 
 
 # ---------------------------------------------------------------------------

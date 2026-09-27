@@ -40,7 +40,7 @@ class SigmaRuleConverter:
         config: dict,
         input_directory: str,
         output_directory: str,
-    ) -> "SigmaRuleConverter":
+    ) -> SigmaRuleConverter:
         """Create a converter from a pre-loaded config dict (no dfe_package.yaml).
 
         Args:

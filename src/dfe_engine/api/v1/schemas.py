@@ -150,7 +150,7 @@ def _meta_schema_resource_type(
     try:
         canonical = canonical_schema_path(meta_schema_ref.removesuffix(".yaml"))
         return schema_registry.get_schema(canonical).resource_type
-    except (SchemaNotFoundError, ValueError):
+    except SchemaNotFoundError, ValueError:
         return "custom"
 
 

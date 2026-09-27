@@ -11,7 +11,7 @@ GET    /api/v1/apps                                   catalogue + deployed insta
 POST   /api/v1/apps/{service}/instances               deploy an instance
 GET    /api/v1/apps/{service}/{instance}              one instance, summarised
 DELETE /api/v1/apps/{service}/{instance}              undeploy an instance
-GET    /api/v1/apps/{service}/{instance}/values       the instance's overlay values
+GET    /api/v1/apps/{service}/{instance}/values       the instance's overlay values, secrets masked
 GET    /api/v1/apps/{service}/{instance}/config       every declared option, with provenance
 PUT    /api/v1/apps/{service}/{instance}/config       write options, and custom env beside them
 GET    /api/v1/apps/{service}/{instance}/scaling      the scaling dials
@@ -47,8 +47,6 @@ operational surface is ``service:{service}:metrics:read`` - reading telemetry is
 the same privilege as reading configuration.
 """
 
-from __future__ import annotations
-
 import functools
 from dataclasses import asdict
 from typing import Any
@@ -69,6 +67,7 @@ from dfe_engine.api.deps import (
 )
 from dfe_engine.api.errors import ErrorResponse
 from dfe_engine.api.v1.app_contracts import read_contract
+from dfe_engine.api.v1.helm import conflict_error
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import (
     AppInstance,
@@ -125,7 +124,7 @@ _DEPLOY_WRITE = Depends(require_action(scopes_dict["deployment_write"]))
 _DEPLOY_DELETE = Depends(require_action(scopes_dict["deployment_delete"]))
 
 
-# ── request and response models ───────────────────────────────
+# --- request and response models ---
 
 
 class ValidationModel(BaseModel):
@@ -629,7 +628,7 @@ class MetricsResponse(BaseModel):
     rates: dict[str, float]
 
 
-# ── shared plumbing ───────────────────────────────────────────
+# --- shared plumbing ---
 
 
 def _gitcrud(request: Request) -> GitCrud:
@@ -651,23 +650,6 @@ def _etag(gc: GitCrud) -> str | None:
     then 409 a caller who had raced nobody.
     """
     return gc.head_revision()
-
-
-def _conflict(exc: ConcurrencyConflictError) -> HTTPException:
-    """Map a stale base revision to the 409 the UI reads.
-
-    ``head`` is the revision the caller should re-read against, so a conflict is
-    recoverable without a second round trip.
-    """
-    return HTTPException(
-        409,
-        detail={
-            "code": "conflict",
-            "message": str(exc),
-            "current": exc.current,
-            "head": exc.head,
-        },
-    )
 
 
 def _policy(request: Request) -> PolicyStore | None:
@@ -844,7 +826,7 @@ def commit_overlay(
             write=_write,
         )
     except ConcurrencyConflictError as exc:
-        raise _conflict(exc) from exc
+        raise conflict_error(exc) from exc
     except ReviewRequiredError as exc:
         raise HTTPException(409, detail={"code": "review_required", "message": str(exc)}) from exc
 
@@ -872,7 +854,7 @@ def _file_sets(service: str) -> list[FileSetSummary]:
     ]
 
 
-# ── catalogue and lifecycle ───────────────────────────────────
+# --- catalogue and lifecycle ---
 
 
 @router.get("", dependencies=[_DEPLOY_READ])
@@ -929,9 +911,11 @@ def create_instance(
     """Deploy an instance by creating its values overlay.
 
     The overlay's presence is what the layer2-apps ApplicationSet turns into an Argo
-    Application, so this is the whole deployment step.
+    Application, so this is the whole deployment step. A new instance stores nothing,
+    so a masked value copied from another instance's read is a 400 ``masked_value``.
     """
     app = _resolve(service, body.instance)
+    values = _restored({}, body.values)
     gc = _gitcrud(request)
     if instances.exists(gc, app):
         raise HTTPException(
@@ -947,7 +931,7 @@ def create_instance(
         raise HTTPException(409, detail={"code": "single_instance_app", "message": reason})
     _require_source(request, app)
     try:
-        doc = instances.initial_overlay(app, body.values)
+        doc = instances.initial_overlay(app, values)
     except ValueError as exc:
         raise HTTPException(400, detail={"code": "invalid_values", "message": str(exc)}) from exc
     # An instance-routed app is derived state: it exists for an active, deployed
@@ -1063,7 +1047,7 @@ def remove_overlay(
             write=_write,
         )
     except ConcurrencyConflictError as exc:
-        raise _conflict(exc) from exc
+        raise conflict_error(exc) from exc
     except ReviewRequiredError as exc:
         raise HTTPException(409, detail={"code": "review_required", "message": str(exc)}) from exc
     audit_resource_change(user.user_id, "helmvars", name, "deleted", {})
@@ -1111,10 +1095,17 @@ def get_history(
 
 @router.get("/{service}/{instance}/values", dependencies=[_READ])
 def get_values(service: str, instance: str, user: CurrentUser, request: Request) -> ValuesResponse:
-    """The instance's overlay document as stored, with the revision to write against."""
+    """The instance's overlay document, credentials masked, with the revision to write against.
+
+    Masked as the config route hides them: by the app's own secret marker in its
+    schema, and by name wherever the schema says nothing.
+    """
     app = _resolve(service, instance)
     gc = _gitcrud(request)
-    return ValuesResponse(values=_overlay(gc, app), etag=_etag(gc))
+    doc = _overlay(gc, app)
+    return ValuesResponse(
+        values=contract.redact_overlay(read_contract(service), doc), etag=_etag(gc)
+    )
 
 
 @router.get("/{service}/{instance}/config", dependencies=[_READ])
@@ -1253,6 +1244,17 @@ def _checked_changes(
     return config_changes, env_changes
 
 
+def _restored(doc: dict, changes: dict[str, Any]) -> dict[str, Any]:
+    """The requested changes with every masked credential put back to what is stored."""
+    out: dict[str, Any] = {}
+    for path, value in changes.items():
+        try:
+            out[path] = contract.restore_masked_at(doc, path, value)
+        except contract.MaskedValueError as exc:
+            raise _refuse(400, exc.code, path, str(exc)) from exc
+    return out
+
+
 def _custom_env_delivery(request: Request, env_changes: dict[str, Any]) -> str:
     """How the custom environment in this write reaches the app's container."""
     if not env_changes:
@@ -1292,7 +1294,11 @@ def set_app_config(
     landing a commit an operator then has to revert.
 
     A secret is written like any other option: it goes into the overlay as the rest
-    of this surface writes one, and the read route still never says what it is.
+    of this surface writes one, and neither this response nor a read route on this
+    surface says what it is. A masked value written back as it was read keeps the
+    stored credential; the mask where nothing is stored is a 400 ``masked_value``,
+    and the mask beside a changed field of the same entry is a 400
+    ``credential_reentry_required``.
 
     409 where the deployment already decides the value: a config path the chart
     derives, or an `extraEnv` name the chart sets for this app.
@@ -1301,7 +1307,9 @@ def set_app_config(
     gc = _gitcrud(request)
     doc = _overlay(gc, app)
     _require_fresh(gc, if_match)
-    config_changes, env_changes = _checked_changes(service, read_contract(service), body.changes)
+    config_changes, env_changes = _checked_changes(
+        service, read_contract(service), _restored(doc, body.changes)
+    )
     if not config_changes and not env_changes:
         return ConfigWriteResult(changed=False)
 
@@ -1332,7 +1340,7 @@ def set_app_config(
     )
 
 
-# ── scaling ───────────────────────────────────────────────────
+# --- scaling ---
 
 
 @router.get("/{service}/{instance}/scaling", dependencies=[_READ])
@@ -1386,7 +1394,7 @@ def set_scaling(
     )
 
 
-# ── consumed files ────────────────────────────────────────────
+# --- consumed files ---
 
 
 def _file_set(service: str, set_name: str):
@@ -1843,7 +1851,7 @@ def delete_app_file(
     return result.model_copy(update={"reload": str(fs.reload)})
 
 
-# ── source-derived routing ────────────────────────────────────
+# --- source-derived routing ---
 
 
 def _routing_app(service: str, instance: str) -> AppInstance:
@@ -1944,7 +1952,7 @@ def sync_app_routing(
     )
 
 
-# ── dry run ───────────────────────────────────────────────────
+# --- dry run ---
 
 
 def _require_dry_run(request: Request, user: Any) -> None:
@@ -2058,7 +2066,7 @@ async def dry_run_app_file(
     )
 
 
-# ── operational surface ───────────────────────────────────────
+# --- operational surface ---
 
 
 def _reader(request: Request, client: Any) -> OperationalReader:

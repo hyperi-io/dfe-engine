@@ -47,12 +47,6 @@ def _validate_transform_vrl(config: Any, errors: list[str], warnings: list[str])
             "transforms.dir or transforms.files is required (at least one VRL transform source)"
         )
 
-    if config.source.format not in ("auto", "json", "msgpack"):
-        warnings.append(
-            f"source.format '{config.source.format}' is not recognised; "
-            "will default to auto-detection"
-        )
-
 
 _sizing_overrides: dict[str, dict[str, Any]] = {
     "xs": {"pipeline": {"batch_size": 500}},

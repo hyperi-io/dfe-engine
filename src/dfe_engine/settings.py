@@ -516,7 +516,7 @@ class TransportSettings(BaseModel):
         return {self.default}
 
     @model_validator(mode="after")
-    def _a_bus_default_needs_a_bus(self) -> "TransportSettings":
+    def _a_bus_default_needs_a_bus(self) -> TransportSettings:
         # Every source would take a topic no broker holds, and the reason would sit
         # two config keys away from the source being written.
         if self.default == "bus" and not self.bus_present:
@@ -527,7 +527,7 @@ class TransportSettings(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _mesh_needs_a_namespace(self) -> "TransportSettings":
+    def _mesh_needs_a_namespace(self) -> TransportSettings:
         # The address is the manifest's shape plus this namespace, so an unset one
         # compiles every sender a destination with a hole where the host goes.
         if self.mesh_enabled and not self.mesh_namespace:
@@ -645,9 +645,21 @@ class KafkaSettings(BaseModel):
             "recompresses it. Empty leaves the broker default in place."
         ),
     )
+    topic_max_message_bytes: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "``max.message.bytes`` for every topic DFE creates and converges: the "
+            "bootstrap set and each source's _land and _load "
+            "(DFE_KAFKA_TOPIC_MAX_MESSAGE_BYTES). Set it to the deployment's message "
+            "size, the one its broker and producers carry. Unset falls back to the "
+            "dfe-schemas manifest's size, which a managed broker capped below it "
+            "refuses at create."
+        ),
+    )
 
     @model_validator(mode="after")
-    def _derive_from_provider(self) -> "KafkaSettings":
+    def _derive_from_provider(self) -> KafkaSettings:
         """Derive protocol + mechanism from provider, then enforce the contract."""
         from dfe_engine.kafka.contract import derive, validate
 
@@ -1240,7 +1252,7 @@ class AccountStoreSettings(BaseModel):
 class AuthSettings(BaseModel):
     """Authorization settings.
 
-    Bespoke role→permission RBAC. Zero external dependencies.
+    Bespoke role->permission RBAC. Zero external dependencies.
 
     Environment variables:
     - DFE_AUTH_ENABLED -> auth.enabled
@@ -1403,7 +1415,7 @@ def is_dev_posture(env: str) -> bool:
     return env.strip().lower() in _NON_PROD_ENVS
 
 
-def e2e_routes_enabled(settings: "DFESettings") -> bool:
+def e2e_routes_enabled(settings: DFESettings) -> bool:
     """True when the unauthenticated /api/e2e/* group may be mounted.
 
     Requires both the explicit DFE_E2E_SERVER flag and a non-production posture.
@@ -1627,7 +1639,7 @@ class DFESettings(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _reject_insecure_production_posture(self) -> "DFESettings":
+    def _reject_insecure_production_posture(self) -> DFESettings:
         # Two ways a production posture can enforce nothing. Both are errors here
         # rather than warnings, because a warning leaves the process running.
         is_prod = not is_dev_posture(self.env)
@@ -1875,6 +1887,8 @@ def _get_env_overrides() -> dict:
         overrides["kafka"]["topic_cleanup_policy"] = val
     if val := _get_env("DFE_KAFKA_TOPIC_COMPRESSION_TYPE"):
         overrides["kafka"]["topic_compression_type"] = val
+    if val := _get_env("DFE_KAFKA_TOPIC_MAX_MESSAGE_BYTES"):
+        overrides["kafka"]["topic_max_message_bytes"] = int(val)
 
     # Transport: what this deployment can carry a source on. The profile sets
     # both - a brokerless profile is bus_present=false, default=direct.
@@ -2227,7 +2241,7 @@ def _get_env_overrides() -> dict:
     if val := _get_env("DFE_E2E_SERVER"):
         overrides["e2e_server"] = val.lower() in ("true", "1", "yes")
 
-    # Config directory (dfe-devex submodule) — auto-resolves registry subdirs
+    # Config directory (dfe-devex submodule) -- auto-resolves registry subdirs
     # Individual env vars (DFE_SOURCES_DIR, etc.) take precedence.
     config_dir = _get_env("DFE_CONFIG_DIR")
     if config_dir:

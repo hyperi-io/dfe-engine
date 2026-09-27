@@ -14,16 +14,19 @@ team-membership behaviour. So the value is always written - an account with no
 team-admin role carries :data:`MEMBER`, which is a refusal rather than a
 fallback (dfe-hyperdx ``packages/api/src/dfe/middleware/role-claim.ts``).
 
-The engine resolves one role set per account, as the union across its groups, so
+The engine resolves one grant set per account, as the union across its groups, so
 the claim is the account's standing across the deployment; the fork applies it to
-whichever team the token's groups select. Nothing in the engine's own
-authorisation reads the claim back - ``deps.py`` resolves roles from the group
-files on every request and ignores what a token asserts.
+whichever team the token's groups select. That is why only a system-scope grant
+counts: an admin bound at one org's scope must not change what another org's team
+sees. Nothing in the engine's own authorisation reads the claim back - ``deps.py``
+resolves grants from the group files on every request and ignores what a token
+asserts.
 """
 
-from __future__ import annotations
-
 from collections.abc import Iterable
+
+from dfe_engine.auth.models import ScopedGrant
+from dfe_engine.governance.ch.bindings import platform_grants
 
 CLAIM = "role"
 """The claim name the fork reads (its ``jwt-verify.ts`` takes ``payload.role``)."""
@@ -50,6 +53,7 @@ SERVICE_ROLE = TEAM_ADMIN
 """The engine's own machine identity provisions the shipped dashboards."""
 
 
-def role_claim(roles: Iterable[str]) -> str:
-    """The fork's role for an account holding these engine roles."""
-    return TEAM_ADMIN if TEAM_ADMIN_ROLES.intersection(roles) else MEMBER
+def role_claim(grants: Iterable[ScopedGrant]) -> str:
+    """The fork's role for an account holding these grants: admin only at system scope."""
+    platform_roles = {grant.role for grant in platform_grants(grants)}
+    return TEAM_ADMIN if TEAM_ADMIN_ROLES & platform_roles else MEMBER

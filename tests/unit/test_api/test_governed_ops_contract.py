@@ -6,11 +6,12 @@ required_action default is server-derived, and an action definition can be
 validated (with diff) before anything commits.
 """
 
-from __future__ import annotations
+import pytest
 
+from dfe_engine.appmgmt import contract
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
-from dfe_engine.governance import PolicyStore
+from dfe_engine.governance import ACTION_CLASS, PolicyStore
 
 
 def _wire_gitcrud(app, tmp_path):
@@ -99,6 +100,58 @@ class TestVarsListing:
         by_path = {v["path"]: v for v in resp.json()}
         assert by_path["keda.maxReplicas"]["value"] == 6
         assert by_path["keda.maxReplicas"]["protected"] is True
+
+    def test_credentials_come_back_masked(self, client, app, admin_headers, tmp_path):
+        # The same deploy-repo document the helm and app routes mask.
+        _wire_gitcrud(app, tmp_path)
+        _seed_helmvar(client, admin_headers, value=6)
+        _seed_helmvar(client, admin_headers, path="config.kafka.sasl.password", value="hunter2")
+        _seed_helmvar(client, admin_headers, path="extraEnv.DFE_X_TOKEN", value="env-tok")
+        resp = client.get(
+            "/api/v1/gitops/classes/helmvars/resources/receiver-default/vars",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        by_path = {v["path"]: v["value"] for v in resp.json()}
+        assert by_path["config.kafka.sasl.password"] == contract.REDACTED
+        assert by_path["extraEnv.DFE_X_TOKEN"] == contract.REDACTED
+        assert by_path["keda.maxReplicas"] == 6
+        assert "hunter2" not in resp.text
+        assert "env-tok" not in resp.text
+
+    def test_an_account_s_password_digests_come_back_masked(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put(
+            "accounts",
+            "kaz",
+            {
+                "password_hash": "$2b$12$digest-8840",
+                "seeded_password_hash": "$2b$12$digest-8841",
+                "groups": ["dfe-admins"],
+            },
+            "test",
+        )
+        gc.put("gov_settings", "auth", {"breakglass": {"password_hash": "$2b$12$bg-8842"}}, "test")
+
+        accounts = client.get(
+            "/api/v1/gitops/classes/accounts/resources/kaz/vars", headers=admin_headers
+        )
+        assert accounts.status_code == 200, accounts.text
+        by_path = {v["path"]: v["value"] for v in accounts.json()}
+        assert by_path["password_hash"] == contract.REDACTED
+        assert by_path["seeded_password_hash"] == contract.REDACTED
+        assert by_path["groups[0]"] == "dfe-admins"
+        settings = client.get(
+            "/api/v1/gitops/classes/gov_settings/resources/auth/vars", headers=admin_headers
+        )
+        assert settings.status_code == 200, settings.text
+        assert {v["path"]: v["value"] for v in settings.json()} == {
+            "breakglass.password_hash": contract.REDACTED
+        }
+        for digest in ("digest-8840", "digest-8841", "bg-8842"):
+            assert digest not in accounts.text + settings.text
 
     def test_missing_resource_404(self, client, app, admin_headers, tmp_path):
         _wire_gitcrud(app, tmp_path)
@@ -320,6 +373,320 @@ class TestInvokeParamsAPI:
         }
         res = client.post("/api/v1/governance/admin/actions", json=action, headers=admin_headers)
         assert res.status_code == 422
+
+
+class TestActionDiffsMaskCredentials:
+    """An action's diff goes back to its caller, so a credential in it is masked."""
+
+    PATH = "config.kafka.sasl.password"
+
+    def _action(self, value, name: str = "rotate-kafka") -> dict:
+        return {
+            "name": name,
+            "description": "rotate the bus credential",
+            "changes": [
+                {"cls": "helmvars", "name": "receiver-default", "path": self.PATH, "value": value},
+                {
+                    "cls": "helmvars",
+                    "name": "receiver-default",
+                    "path": "keda.maxReplicas",
+                    "value": 12,
+                },
+            ],
+        }
+
+    def _seed(self, client, admin_headers):
+        _seed_helmvar(client, admin_headers, value=4)
+        _seed_helmvar(client, admin_headers, path=self.PATH, value="old-pw")
+
+    def _legacy(self, gc, action: dict) -> None:
+        """A definition stored before credentials were refused, written straight to git."""
+        gc.put(ACTION_CLASS, action["name"], action, "tester")
+
+    def test_the_validate_diff_masks_old_and_new(self, client, app, admin_headers, tmp_path):
+        _wire_gitcrud(app, tmp_path)
+        self._seed(client, admin_headers)
+        resp = client.post(
+            "/api/v1/governance/admin/actions/validate",
+            json=self._action("new-pw"),
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["valid"] is False
+        assert any(self.PATH in e and "vars routes" in e for e in body["errors"])
+        by_path = {d["path"]: d for d in body["diff"]}
+        assert (by_path[self.PATH]["old"], by_path[self.PATH]["new"]) == (
+            contract.REDACTED,
+            contract.REDACTED,
+        )
+        assert (by_path["keda.maxReplicas"]["old"], by_path["keda.maxReplicas"]["new"]) == (4, 12)
+        assert "old-pw" not in resp.text
+        assert "new-pw" not in resp.text
+
+    def test_a_chart_credential_key_diffs_masked(self, client, app, admin_headers, tmp_path):
+        # The app chart spells its credential keys with hyphens.
+        gc = _wire_gitcrud(app, tmp_path)
+        path = "auth.bearer-tokens"
+        _seed_helmvar(client, admin_headers, value=4)
+        _seed_helmvar(client, admin_headers, path=path, value="old-tok-4440")
+        action = {
+            "name": "rotate-bearer",
+            "description": "rotate the chart's bearer tokens",
+            "changes": [
+                {
+                    "cls": "helmvars",
+                    "name": "receiver-default",
+                    "path": path,
+                    "value": "new-tok-4441",
+                }
+            ],
+        }
+        self._legacy(gc, action)
+        resp = client.post(
+            "/api/v1/governance/actions/rotate-bearer/invoke?dry_run=true", headers=admin_headers
+        )
+        assert resp.status_code == 200, resp.text
+        (diff,) = resp.json()["diff"]
+        assert (diff["old"], diff["new"]) == (contract.REDACTED, contract.REDACTED)
+        assert "old-tok-4440" not in resp.text
+        assert "new-tok-4441" not in resp.text
+
+    @pytest.mark.parametrize("dry_run", [True, False])
+    def test_the_invoke_diff_masks_and_the_write_keeps_the_value(
+        self, client, app, admin_headers, tmp_path, dry_run
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        self._seed(client, admin_headers)
+        self._legacy(gc, self._action("new-pw"))
+        resp = client.post(
+            f"/api/v1/governance/actions/rotate-kafka/invoke?dry_run={str(dry_run).lower()}",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        by_path = {d["path"]: d for d in resp.json()["diff"]}
+        assert by_path[self.PATH]["new"] == contract.REDACTED
+        assert "old-pw" not in resp.text
+        assert "new-pw" not in resp.text
+        stored = gc.get("helmvars", "receiver-default")["config"]["kafka"]["sasl"]["password"]
+        assert stored == ("old-pw" if dry_run else "new-pw")
+
+    def test_a_masked_action_value_keeps_the_stored_credential(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # A legacy action authored from a masked listing carries the mask as its value.
+        gc = _wire_gitcrud(app, tmp_path)
+        self._seed(client, admin_headers)
+        self._legacy(gc, self._action(contract.REDACTED))
+        resp = client.post("/api/v1/governance/actions/rotate-kafka/invoke", headers=admin_headers)
+        assert resp.status_code == 200, resp.text
+        stored = gc.get("helmvars", "receiver-default")
+        assert stored["config"]["kafka"]["sasl"]["password"] == "old-pw"
+        assert stored["keda"]["maxReplicas"] == 12
+
+    def test_the_mask_with_nothing_behind_it_is_refused(self, client, app, admin_headers, tmp_path):
+        gc = _wire_gitcrud(app, tmp_path)
+        _seed_helmvar(client, admin_headers, value=4)
+        validated = client.post(
+            "/api/v1/governance/admin/actions/validate",
+            json=self._action(contract.REDACTED),
+            headers=admin_headers,
+        ).json()
+        assert validated["valid"] is False
+        assert any("nothing is stored" in e for e in validated["errors"])
+
+        self._legacy(gc, self._action(contract.REDACTED))
+        before = gc.head_revision()
+        resp = client.post("/api/v1/governance/actions/rotate-kafka/invoke", headers=admin_headers)
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "masked_value"
+        assert gc.head_revision() == before
+
+
+class TestActionsCarryNoCredentials:
+    """A definition is committed to the deploy repo, so it may not hold a credential."""
+
+    def _define(self, client, headers, change: dict, params: dict | None = None):
+        action = {"name": "carrier", "changes": [change], "params": params or {}}
+        return client.post("/api/v1/governance/admin/actions", json=action, headers=headers)
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            {"path": "config.kafka.sasl.password", "value": "pw"},
+            {"path": "extraEnv.DFE_X_API_KEY", "value": "k"},
+            {"path": "config.server.auth.bearer.tokens", "value": ["t-1"]},
+            {"path": "config.sources.rest", "value": {"primary": {"auth": {"token": "t"}}}},
+            {"path": "config.kafka.sasl.password", "value": None},
+        ],
+    )
+    def test_a_change_targeting_a_credential_is_refused(
+        self, client, app, admin_headers, tmp_path, change
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        before = gc.head_revision()
+        resp = self._define(
+            client, admin_headers, {"cls": "helmvars", "name": "receiver-default", **change}
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "credential_in_action"
+        assert "vars routes" in resp.json()["message"]
+        assert gc.head_revision() == before
+        assert gc.list(ACTION_CLASS) == []
+
+    def test_a_param_map_onto_a_credential_is_refused(self, client, app, admin_headers, tmp_path):
+        _wire_gitcrud(app, tmp_path)
+        resp = self._define(
+            client,
+            admin_headers,
+            {
+                "cls": "helmvars",
+                "name": "receiver-default",
+                "path": "config.kafka.sasl.password",
+                "value": {"$param": "which", "map": {"a": "pw-a", "b": "pw-b"}},
+            },
+            params={"which": {"type": "enum", "values": ["a", "b"]}},
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "credential_in_action"
+
+    def test_a_plain_change_defines_and_reads_in_clear(self, client, app, admin_headers, tmp_path):
+        _wire_gitcrud(app, tmp_path)
+        change = {"cls": "helmvars", "name": "receiver-default", "path": "keda.maxReplicas"}
+        resp = self._define(client, admin_headers, {**change, "value": 12})
+        assert resp.status_code == 201, resp.text
+        read = client.get("/api/v1/governance/actions/carrier", headers=admin_headers).json()
+        assert read["changes"] == [{**change, "value": 12}]
+        listed = client.get(
+            f"/api/v1/gitops/classes/{ACTION_CLASS}/resources/carrier/vars", headers=admin_headers
+        ).json()
+        assert {v["path"]: v["value"] for v in listed}["changes[0].value"] == 12
+
+    def test_every_shipped_action_would_define(self, client, app, admin_headers, tmp_path):
+        # The seeded library goes through the same rule an operator's definition does.
+        from importlib import resources
+
+        from dfe_engine.governance import ActionDef, ActionStore
+        from dfe_engine.yaml_utils import yaml_load_string
+
+        gc = _wire_gitcrud(app, tmp_path)
+        store = ActionStore(gc)
+        shipped = resources.files("dfe_engine.governance.resources") / "actions"
+        names = []
+        for entry in shipped.iterdir():
+            if entry.name.endswith(".yaml"):
+                action = ActionDef.model_validate(yaml_load_string(entry.read_text("utf-8")))
+                assert store.credential_changes(action) == [], entry.name
+                names.append(action.name)
+        assert len(names) == 5
+
+
+class TestLegacyCredentialActionsReadMasked:
+    """A definition stored before credentials were refused still runs, and reads masked."""
+
+    ACTION = {
+        "name": "legacy-rotate",
+        "changes": [
+            {
+                "cls": "helmvars",
+                "name": "receiver-default",
+                "path": "config.kafka.sasl.password",
+                "value": "legacy-pw-5521",
+            },
+            {
+                "cls": "helmvars",
+                "name": "receiver-default",
+                "path": "config.kafka.sasl.token",
+                "value": {"$param": "which", "map": {"blue": "map-pw-1", "green": "map-pw-2"}},
+            },
+            {
+                "cls": "helmvars",
+                "name": "receiver-default",
+                "path": "extraEnv.DFE_X_SECRET",
+                "value": {"$param": "direct"},
+            },
+            {"cls": "helmvars", "name": "receiver-default", "path": "keda.maxReplicas", "value": 9},
+        ],
+        "params": {
+            "which": {"type": "enum", "values": ["blue", "green"], "default": "blue"},
+            "direct": {
+                "type": "enum",
+                "values": ["enum-pw-1", "enum-pw-2"],
+                "default": "enum-pw-1",
+            },
+        },
+    }
+    PLAINTEXT = ("legacy-pw-5521", "map-pw-1", "map-pw-2", "enum-pw-1", "enum-pw-2")
+
+    def test_the_action_route_masks_it(self, client, app, admin_headers, tmp_path):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put(ACTION_CLASS, "legacy-rotate", self.ACTION, "tester")
+        resp = client.get("/api/v1/governance/actions/legacy-rotate", headers=admin_headers)
+        assert resp.status_code == 200, resp.text
+        changes = resp.json()["changes"]
+        assert changes[0]["value"] == contract.REDACTED
+        assert changes[1]["value"] == {
+            "$param": "which",
+            "map": {"blue": contract.REDACTED, "green": contract.REDACTED},
+        }
+        assert changes[3]["value"] == 9
+        for credential in self.PLAINTEXT:
+            assert credential not in resp.text
+
+    def test_the_gitops_class_view_masks_it(self, client, app, admin_headers, tmp_path):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put(ACTION_CLASS, "legacy-rotate", self.ACTION, "tester")
+        resp = client.get(
+            f"/api/v1/gitops/classes/{ACTION_CLASS}/resources/legacy-rotate/vars",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        by_path = {v["path"]: v["value"] for v in resp.json()}
+        assert by_path["changes[0].value"] == contract.REDACTED
+        assert by_path["changes[3].value"] == 9
+        for credential in self.PLAINTEXT:
+            assert credential not in resp.text
+
+    def test_invoking_it_still_writes_what_it_stores(self, client, app, admin_headers, tmp_path):
+        gc = _wire_gitcrud(app, tmp_path)
+        _seed_helmvar(client, admin_headers, value=4)
+        gc.put(ACTION_CLASS, "legacy-rotate", self.ACTION, "tester")
+        resp = client.post(
+            "/api/v1/governance/actions/legacy-rotate/invoke",
+            json={"params": {"which": "green", "direct": "enum-pw-2"}},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        for credential in self.PLAINTEXT:
+            assert credential not in resp.text
+        stored = gc.get("helmvars", "receiver-default")
+        assert stored["config"]["kafka"]["sasl"] == {
+            "password": "legacy-pw-5521",
+            "token": "map-pw-2",
+        }
+        assert stored["extraEnv"]["DFE_X_SECRET"] == "enum-pw-2"
+        assert stored["keda"]["maxReplicas"] == 9
+
+    def test_it_warns_once_naming_the_definition(self, client, app, admin_headers, tmp_path):
+        from scalo.logger import logger
+
+        from dfe_engine.governance import actions
+
+        actions._warn_stored_credential.cache_clear()
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put(ACTION_CLASS, "legacy-rotate", self.ACTION, "tester")
+        lines: list[str] = []
+        sink = logger.add(lines.append, level="WARNING", format="{message} {extra}")
+        try:
+            for _ in range(3):
+                client.get("/api/v1/governance/actions/legacy-rotate", headers=admin_headers)
+        finally:
+            logger.remove(sink)
+        warned = [line for line in lines if "stores a credential" in line]
+        assert len(warned) == 1
+        assert "legacy-rotate" in warned[0]
+        for credential in self.PLAINTEXT:
+            assert credential not in warned[0]
 
 
 class TestEnumSourceAnnotations:

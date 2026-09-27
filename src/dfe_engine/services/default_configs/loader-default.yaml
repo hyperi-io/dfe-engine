@@ -11,10 +11,9 @@ transport: kafka
 kafka:
   brokers:
     - localhost:9092
-  group: clickhouse-loader
-  topics:
-    - events
-  client_id: clickhouse-loader
+  group: dfe-loader
+  topics: []  # empty = auto-discover every *_load / *_land topic
+  client_id: dfe-loader
 
 # http on the 8123 port, never native on 9000: the loader's pinned ClickHouse
 # client has no TCP row fetch, so every message stalls pending schema (#115).
@@ -25,10 +24,6 @@ clickhouse:
   username: default
   password: ""
   protocol: http
-
-payload:
-  format: auto
-  mismatch_threshold: 10
 
 # Every key here is one dfe-loader's RoutingConfig deserialises
 # (src/config/pipeline.rs) -- serde ignores anything else without complaint,

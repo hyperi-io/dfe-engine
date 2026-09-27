@@ -92,7 +92,9 @@ the broker's `auto.create.topics.enable`, which yields mis-partitioned
 unmanaged topics and on Confluent Cloud non-Dedicated is not available at all.
 The step never fails a deploy: the schema is already live, and a topic that
 could not be created comes back in `topics_failed`. Width comes from
-`DFE_KAFKA_TOPIC_PARTITIONS` and `DFE_KAFKA_TOPIC_REPLICATION_FACTOR`. A
+`DFE_KAFKA_TOPIC_PARTITIONS` and `DFE_KAFKA_TOPIC_REPLICATION_FACTOR`, and the
+message size from `DFE_KAFKA_TOPIC_MAX_MESSAGE_BYTES`, the same size the
+bootstrap topics carry. A
 brokerless profile (`DFE_TRANSPORT_BUS_PRESENT=false`) skips it, since reaching
 for a broker that is not there costs every deploy the admin timeout;
 `DFE_KAFKA_ENSURE_TOPICS=false` turns it off where a broker does exist.

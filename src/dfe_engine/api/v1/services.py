@@ -1,31 +1,56 @@
-"""Services router — ServiceConfigRegistry CRUD.
+"""Services router -- ServiceConfigRegistry CRUD.
 
-GET    /api/v1/services                        → Paginated list
-GET    /api/v1/services/{service}/{instance}   → Full config
-PUT    /api/v1/services/{service}/{instance}   → Save config
-DELETE /api/v1/services/{service}/{instance}   → Delete config
-POST   /api/v1/services/{service}/{instance}/validate  → Dry-run validate
-GET    /api/v1/services/{service}/{instance}/history   → Git history
-POST   /api/v1/services/seed                   → Seed built-in defaults
+GET    /api/v1/services                        -> Paginated list
+GET    /api/v1/services/{service}/{instance}   -> Full config
+PUT    /api/v1/services/{service}/{instance}   -> Save config
+DELETE /api/v1/services/{service}/{instance}   -> Delete config
+POST   /api/v1/services/{service}/{instance}/validate  -> Dry-run validate
+GET    /api/v1/services/{service}/{instance}/history   -> Git history
+POST   /api/v1/services/seed                   -> Seed built-in defaults
 """
-
-from __future__ import annotations
 
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from dfe_engine.api.deps import CurrentUser, ServiceConfigReg, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
+from dfe_engine.appmgmt import contract
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.git_identity import git_author
+from dfe_engine.services.registry import ConfigNotFoundError, stored_form
 
 router = APIRouter(prefix="/services", tags=["Services"])
 
+_SECRET_MASK = str(SecretStr("x"))
+"""pydantic's own placeholder for a set secret, which a write still reads as the mask."""
 
-# ── Response models ──────────────────────────────────────────
+
+def _shown(config: Any) -> dict[str, Any]:
+    """A stored config as a read shows it, every credential masked as :data:`contract.REDACTED`.
+
+    A typed config's dump masks only what its model declares secret, so a map of
+    plain strings such as ``extra_env`` is judged by name as a schema-less one is.
+    """
+    if isinstance(config, dict):
+        return contract.shown_resource(config)
+    return contract.shown_resource(_as_redacted(config.model_dump(mode="json")))
+
+
+def _as_redacted(value: Any) -> Any:
+    """``value`` with pydantic's secret placeholder read as the engine's own mask."""
+    if isinstance(value, str):
+        return contract.REDACTED if value == _SECRET_MASK else value
+    if isinstance(value, dict):
+        return {key: _as_redacted(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_as_redacted(item) for item in value]
+    return value
+
+
+# --- Response models ---
 
 
 class ServiceConfigSummary(BaseModel):
@@ -58,7 +83,7 @@ class SeedResponse(BaseModel):
     seeded: int
 
 
-# ── Endpoints ────────────────────────────────────────────────
+# --- Endpoints ---
 
 
 @router.get(
@@ -101,9 +126,7 @@ async def get_service_config(
     user: CurrentUser,
     registry: ServiceConfigReg,
 ) -> ServiceConfigDetail:
-    """Get a full service config by service + instance."""
-    from dfe_engine.services.registry import ConfigNotFoundError
-
+    """Get a full service config by service + instance, every credential masked."""
     try:
         config = registry.get_config(service, instance)
     except ConfigNotFoundError:
@@ -114,8 +137,7 @@ async def get_service_config(
                 "message": f"Service config '{service}/{instance}' not found",
             },
         )
-    config_dict = config if isinstance(config, dict) else config.model_dump(mode="json")
-    return ServiceConfigDetail(service=service, instance=instance, config=config_dict)
+    return ServiceConfigDetail(service=service, instance=instance, config=_shown(config))
 
 
 @router.put(
@@ -129,10 +151,31 @@ async def save_service_config(
     user: CurrentUser,
     registry: ServiceConfigReg,
 ):
-    """Create or update a service config."""
+    """Create or update a service config.
+
+    A read shows every set secret masked, so a masked value written back keeps the
+    secret stored there, matched as the app surface matches one. A mask with nothing
+    stored behind it, or in a list entry that cannot be told apart, is a 400
+    ``masked_value`` and nothing is saved. A mask beside a field of the same object
+    that changed is a 400 ``credential_reentry_required``: the secret is typed again.
+    """
+    try:
+        current = registry.get_config(service, instance)
+    except ConfigNotFoundError:
+        stored: dict[str, Any] = {}
+        shown: dict[str, Any] = {}
+    else:
+        stored = stored_form(current)
+        shown = _shown(current)
+    try:
+        config = contract.restore_masked(_as_redacted(body), stored, shown=shown)
+    except contract.MaskedValueError as exc:
+        raise HTTPException(
+            status_code=400, detail={"code": exc.code, "message": str(exc)}
+        ) from exc
     registry.save_config(
         service=service,
-        config=body,
+        config=config,
         instance=instance,
         created_by=git_author(user),
     )
@@ -152,8 +195,6 @@ async def delete_service_config(
     registry: ServiceConfigReg,
 ):
     """Delete a service config."""
-    from dfe_engine.services.registry import ConfigNotFoundError
-
     # Verify existence before delete (delete_config is a no-op on missing)
     try:
         registry.get_config(service, instance)

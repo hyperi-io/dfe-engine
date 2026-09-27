@@ -54,8 +54,6 @@ class SampleRecord(BaseModel):
 class TestRequest(BaseModel):
     wasm_base64: str = Field(description="Base64-encoded WASM binary from /compile")
     records: list[SampleRecord] = Field(description="Sample input records")
-    source_format: Literal["json", "msgpack"] = "json"
-    sink_format: Literal["json", "msgpack"] = "json"
 
 
 class EmittedRecord(BaseModel):
@@ -159,8 +157,9 @@ async def test_transform(
                 json={
                     "wasm_base64": request.wasm_base64,
                     "records": [r.model_dump() for r in request.records],
-                    "source_format": request.source_format,
-                    "sink_format": request.sink_format,
+                    # JSON is the only payload format the engine emits or accepts.
+                    "source_format": "json",
+                    "sink_format": "json",
                 },
             )
         except httpx.ConnectError as exc:

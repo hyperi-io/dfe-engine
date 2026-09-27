@@ -38,7 +38,6 @@ from dfe_engine.services.models.loader import (
     LoaderKafkaConfig,
     LoaderRoutingConfig,
     MetadataConfig,
-    PayloadConfig,
     SchemaConfig,
     TimestampDqConfig,
 )
@@ -152,7 +151,6 @@ __all__ = [
     "LoaderKafkaConfig",
     "LoaderRoutingConfig",
     "MetadataConfig",
-    "PayloadConfig",
     "SchemaConfig",
     "TimestampDqConfig",
     # Archiver

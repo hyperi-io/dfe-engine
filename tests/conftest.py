@@ -180,7 +180,7 @@ def _container_is_running(container_name: str) -> bool:
             timeout=10,
         )
         return result.returncode == 0 and result.stdout.strip() == "true"
-    except (subprocess.SubprocessError, FileNotFoundError):
+    except subprocess.SubprocessError, FileNotFoundError:
         return False
 
 
@@ -194,7 +194,7 @@ def _container_is_healthy(container_name: str) -> bool:
             timeout=10,
         )
         return result.returncode == 0 and result.stdout.strip() == "healthy"
-    except (subprocess.SubprocessError, FileNotFoundError):
+    except subprocess.SubprocessError, FileNotFoundError:
         return False
 
 

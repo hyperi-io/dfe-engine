@@ -8,10 +8,10 @@
 
 """ClickHouse connection resolution for DFE RBAC.
 
-Resolves and caches a ClickHouse client per authenticated user based
-on role precedence (``ConnectionRegistry``), alongside the connection
-config and models. This package decides WHICH client and credentials
-a request uses; it does NOT itself filter rows by org (tenant).
+Resolves and caches a ClickHouse client per named connection
+(``ConnectionRegistry``), alongside the connection config and models.
+This package decides WHICH client and credentials a request uses; it
+does NOT itself filter rows by org (tenant).
 
 Org isolation is enforced by two mechanisms, neither of which lives
 here:
@@ -20,11 +20,10 @@ here:
    ``org_id`` as a RESERVED bind parameter that a client cannot
    override, so a view's SQL always filters to the authenticated org
    (``dfe_engine.query.executor``, ``RESERVED_PARAMS``).
-2. CH RESTRICTIVE row policies (opt-in) -- when
-   ``DFE_ORG_PROVISIONING_ENABLED`` is set, the governance reconciler
-   bakes literal ``_org_id`` predicates into per-table RESTRICTIVE
-   row policies granted to per-org CH roles
-   (``dfe_engine.governance.ch``).
+2. CH RESTRICTIVE row policies, on unless ``DFE_TENANT_ISOLATION_ENABLED``
+   turns them off -- every org-pinned CH user holds ONE shared tenant role,
+   and its READONLY pinned setting names the ``_org_id`` values that role's
+   policies let it read (``dfe_engine.governance.ch``).
 
 Usage::
 
@@ -32,7 +31,7 @@ Usage::
 
     config = ConnectionConfigLoader.load_default()
     registry = ConnectionRegistry(config)
-    client, org_ids = registry.get_client_for_user(auth_context)
+    client = registry.get_client("default")
 """
 
 from dfe_engine.connections.config import ConnectionConfig, ConnectionConfigLoader

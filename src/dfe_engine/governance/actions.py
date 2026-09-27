@@ -12,25 +12,55 @@ in ONE commit (atomic - a protected-var violation fails the whole action), honou
 the protected-var policy, and supports dry-run (returns the diff without writing).
 """
 
-from __future__ import annotations
-
 import builtins
+import copy
+import functools
 from dataclasses import dataclass, field
 from typing import Any
 
+from pydantic import ValidationError
+from scalo.logger import logger
+
+from dfe_engine.appmgmt import contract
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError, get_path, set_path
 from dfe_engine.gitcrud.commit_policy import CommitPolicyError, validate_change
 from dfe_engine.gitcrud.registry import UnknownResourceClassError
 from dfe_engine.gitops.repo import PublishResult
 
-from .models import ActionDef, param_ref
+from .models import ActionDef, VarChange, param_ref
 from .policies import PolicyStore, ProtectedVarError
 
-_ACTION_CLASS = "actions"
+ACTION_CLASS = "actions"
+"""The gitops class action definitions are stored in."""
+
+CREDENTIAL_REFUSAL = (
+    "an action definition is stored in the deploy repo's history, so it may not carry "
+    "a credential: set credentials through the vars routes (PUT "
+    "/api/v1/apps/{service}/{instance}/config or /api/v1/helm/files/{name}/vars/{path})"
+)
+"""Why a change that would store a credential is refused, in the words the caller reads."""
+
+
+@functools.cache
+def _warn_stored_credential(name: str, targets: tuple[str, ...]) -> None:
+    """Log once per process that a stored definition carries a credential.
+
+    Cached on its arguments, so a definition read on every request warns once.
+    ``_warn_stored_credential.cache_clear()`` lets it warn again.
+    """
+    logger.warning(
+        "Action definition stores a credential; move it to the vars routes",
+        action=name,
+        changes=list(targets),
+    )
 
 
 class ActionForbiddenError(PermissionError):
     """Raised when an action tries to do something actions are not allowed to do."""
+
+
+class CredentialInActionError(ValueError):
+    """Raised when an action definition would store a credential in the deploy repo."""
 
 
 class InvalidParamsError(ValueError):
@@ -76,6 +106,40 @@ def _substitute(value: Any, resolved: dict[str, Any]) -> Any:
     return mapping[pvalue] if mapping is not None else pvalue
 
 
+def _masked(target: dict, path: str, value: Any) -> Any:
+    """``value`` as a reader sees it at a credential ``path``.
+
+    Its own credential fields are masked where it has them; otherwise the path is
+    what makes it a credential, and the whole value is masked.
+    """
+    shown = contract.shown_var(target, path, value)
+    if shown != value or value is None or value == "":
+        return shown
+    return contract.REDACTED
+
+
+def _mask_param(doc: dict, pname: str) -> None:
+    """Mask an enum param whose values are credentials, keeping every map on it valid.
+
+    Each value gets its own placeholder, so a map keyed on the param still covers
+    exactly its values and the definition still loads.
+    """
+    spec = (doc.get("params") or {}).get(pname)
+    if not isinstance(spec, dict) or not isinstance(spec.get("values"), list):
+        return
+    table = {value: f"{contract.REDACTED}{i}" for i, value in enumerate(spec["values"])}
+    spec["values"] = [table[value] for value in spec["values"]]
+    if spec.get("default") in table:
+        spec["default"] = table[spec["default"]]
+    for change in doc.get("changes") or ():
+        ref = param_ref(change.get("value"))
+        if ref is not None and ref[0] == pname and ref[1] is not None:
+            change["value"] = {
+                "$param": pname,
+                "map": {table.get(key, key): item for key, item in ref[1].items()},
+            }
+
+
 @dataclass
 class InvokeResult:
     """Outcome of invoking an action."""
@@ -93,14 +157,94 @@ class ActionStore:
         self._crud = crud
 
     def list(self) -> builtins.list[str]:
-        return self._crud.list(_ACTION_CLASS)
+        return self._crud.list(ACTION_CLASS)
 
     def get(self, name: str) -> ActionDef:
-        return ActionDef.model_validate(self._crud.get(_ACTION_CLASS, name))
+        """The stored definition as written, credentials included: for invoking it."""
+        return ActionDef.model_validate(self._crud.get(ACTION_CLASS, name))
+
+    def get_shown(self, name: str) -> ActionDef:
+        """The stored definition for a reader, any credential it carries masked."""
+        return ActionDef.model_validate(self.shown_doc(name, self._crud.get(ACTION_CLASS, name)))
+
+    def _target(self, change: VarChange) -> dict:
+        """The document a change writes into, or nothing where there is none yet."""
+        try:
+            return self._crud.get(change.cls, change.name)
+        except ResourceNotFoundError, UnknownResourceClassError:
+            return {}
+
+    def _credential_change(self, change: VarChange) -> bool:
+        """Whether ``change`` would store a credential, by its path or by any value it can take."""
+        target = self._target(change)
+        if contract.credential_var(target, change.path):
+            return True
+        ref = param_ref(change.value)
+        if ref is None:
+            candidates = [change.value]
+        elif ref[1] is not None:
+            candidates = list(ref[1].values())
+        else:
+            candidates = []
+        return any(contract.credential_var(target, change.path, v) for v in candidates)
+
+    def credential_changes(self, action: ActionDef) -> builtins.list[str]:
+        """Each change of ``action`` that would store a credential, as ``cls/name:path``."""
+        return [
+            f"{ch.cls}/{ch.name}:{ch.path}" for ch in action.changes if self._credential_change(ch)
+        ]
+
+    def refuse_credentials(self, action: ActionDef) -> None:
+        """Raise :class:`CredentialInActionError` where ``action`` would store one.
+
+        Raises:
+            CredentialInActionError: A change targets a credential.
+        """
+        found = self.credential_changes(action)
+        if found:
+            raise CredentialInActionError(
+                f"action {action.name!r} changes {', '.join(found)}: {CREDENTIAL_REFUSAL}"
+            )
+
+    def shown_doc(self, name: str, doc: dict) -> dict:
+        """A stored definition with every credential it carries masked.
+
+        A definition stored before credentials were refused still invokes with
+        what it holds; only what is read back is masked, and each such definition
+        is logged once so an operator can move it to the vars routes.
+        """
+        try:
+            action = ActionDef.model_validate(doc)
+        except ValidationError:
+            return contract.redact_resource(doc)
+        flagged = [i for i, ch in enumerate(action.changes) if self._credential_change(ch)]
+        if not flagged:
+            return doc
+        _warn_stored_credential(
+            name, tuple(f"{action.changes[i].cls}/{action.changes[i].name}" for i in flagged)
+        )
+        shown = copy.deepcopy(doc)
+        masked_params: set[str] = set()
+        for i in flagged:
+            change = action.changes[i]
+            target = self._target(change)
+            ref = param_ref(change.value)
+            if ref is None:
+                shown["changes"][i]["value"] = _masked(target, change.path, change.value)
+            elif ref[1] is not None:
+                shown["changes"][i]["value"] = {
+                    "$param": ref[0],
+                    "map": {k: _masked(target, change.path, v) for k, v in ref[1].items()},
+                }
+            else:
+                masked_params.add(ref[0])
+        for pname in masked_params:
+            _mask_param(shown, pname)
+        return shown
 
     def save(self, action: ActionDef, actor: str, branch: str = "") -> PublishResult:
         return self._crud.put(
-            _ACTION_CLASS,
+            ACTION_CLASS,
             action.name,
             action.model_dump(),
             actor,
@@ -109,7 +253,7 @@ class ActionStore:
         )
 
     def delete(self, name: str, actor: str, branch: str = "") -> PublishResult:
-        return self._crud.delete(_ACTION_CLASS, name, actor, branch=branch)
+        return self._crud.delete(ACTION_CLASS, name, actor, branch=branch)
 
     def _walk(
         self,
@@ -167,16 +311,26 @@ class ActionStore:
                     docs[key] = self._crud.get(ch.cls, ch.name)
                 except ResourceNotFoundError:
                     docs[key] = {}
+            doc = docs[key]
+            # A value copied from a masked listing keeps the credential stored there.
+            try:
+                value = contract.restore_masked_at(doc, ch.path, value)
+            except contract.MaskedValueError as exc:
+                if not collect:
+                    raise
+                errors.append(f"{ch.cls}/{ch.name}:{ch.path}: {exc}")
+                continue
+            # The diff is returned to the caller, so a credential in it is masked.
             diff.append(
                 {
                     "cls": ch.cls,
                     "name": ch.name,
                     "path": ch.path,
-                    "old": get_path(docs[key], ch.path),
-                    "new": value,
+                    "old": contract.shown_var(doc, ch.path, get_path(doc, ch.path)),
+                    "new": contract.shown_var(doc, ch.path, value),
                 }
             )
-            set_path(docs[key], ch.path, value)
+            set_path(doc, ch.path, value)
         return docs, diff, errors
 
     def preview(
@@ -190,7 +344,7 @@ class ActionStore:
 
         Returns (diff, errors): the diff the action would apply, plus every
         violation found - unknown class, governance-class target, commit-policy
-        ban, protected var without override. Params resolve to their default or
+        ban, protected var without override, a credential. Params resolve to their default or
         representative value (closed constraints make one always available), so
         a definition validates without a caller-supplied invocation - and every
         enum map BRANCH is commit-policy checked, not just the representative,
@@ -209,6 +363,7 @@ class ActionStore:
                     validate_change(ch.path, mapped)
                 except CommitPolicyError as exc:
                     errors.append(f"{ch.cls}/{ch.name}:{ch.path}: map branch {enum_value!r}: {exc}")
+        errors.extend(f"{found}: {CREDENTIAL_REFUSAL}" for found in self.credential_changes(action))
         return diff, errors
 
     def invoke(

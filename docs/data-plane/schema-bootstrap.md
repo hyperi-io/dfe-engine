@@ -88,6 +88,7 @@ install with no deploy repo boots core-only.
 | `DFE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS` | `180` | How long to keep retrying an unreachable ClickHouse before reporting the pass failed. |
 | `DFE_KAFKA_BOOTSTRAP_TOPICS` | `true` | Create the declared topic set at startup, create-only. |
 | `DFE_KAFKA_TIERED_STORAGE` | `false` | The brokers tier to object storage, so the landing topic is created with `remote.storage.enable`. Off leaves the key unset rather than false, which is what a broker-level setting needs. |
+| `DFE_KAFKA_TOPIC_MAX_MESSAGE_BYTES` | the manifest's | `max.message.bytes` on every topic the engine creates, this set and each source's `_land` and `_load`. Set it to the deployment's message size: a managed broker capped below the manifest's refuses the create, and the dead-letter set then holds the engine NotReady. |
 | `DFE_SCHEMAS_OVERLAY_DIR` | unset | The deployment's additive overlay tree. |
 
 The two bootstrap dials are separate rather than one: they fail for different

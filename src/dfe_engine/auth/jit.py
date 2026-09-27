@@ -6,9 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""JIT provisioner — creates shadow accounts on first OIDC login."""
-
-from __future__ import annotations
+"""JIT provisioner -- creates shadow accounts on first OIDC login."""
 
 import asyncio
 import re
@@ -25,10 +23,11 @@ from dfe_engine.auth.audit import (
     audit_jit_team_assigned,
 )
 from dfe_engine.auth.groups import Group, GroupStore
-from dfe_engine.auth.models import AuthenticationError
+from dfe_engine.auth.models import AuthenticationError, Scope, ScopedGrant
 from dfe_engine.auth.protected_accounts import resolve_floor
+from dfe_engine.governance.ch.bindings import platform_grants
 
-# Broadest-wins precedence (highest first)
+# Platform teams, broadest first; only a role granted at SYSTEM scope earns one.
 _ROLE_TO_TEAM = {
     "admin": "dfe-admin",
     "infra_admin": "dfe-admin",
@@ -121,7 +120,7 @@ class JitProvisioner:
         if existing is not None:
             self._require_same_identity(existing, user_id, source_provider)
             self._require_available(existing, user_id, source_provider)
-            # Subsequent login — update groups if changed + last_login_at
+            # Subsequent login -- update groups if changed + last_login_at
             updates: dict[str, object] = {"last_login_at": now}
             if set(existing.groups) != set(oidc_groups):
                 added = [g for g in oidc_groups if g not in existing.groups]
@@ -135,7 +134,7 @@ class JitProvisioner:
             self._accounts.update(safe_name, **updates)
             return self._accounts.get(safe_name)
 
-        # First login — create shadow account
+        # First login -- create shadow account
         try:
             self._accounts.create(
                 email=wanted_email,
@@ -167,12 +166,7 @@ class JitProvisioner:
             self._accounts.update(safe_name, **race_updates)
             return self._accounts.get(safe_name)
 
-        # Resolve org_ids from groups
-        org_ids = []
-        for gname in oidc_groups:
-            group = self._resolve_group(gname)
-            if group and group.org_ids:
-                org_ids.extend(group.org_ids)
+        _, org_ids = self._resolve_grants(oidc_groups)
 
         audit_jit_account_created(user_id, source_provider, oidc_groups, org_ids)
 
@@ -275,25 +269,42 @@ class JitProvisioner:
             return group
         return self._groups.by_source_id().get(identifier)
 
-    def resolve_hyperdx_team(self, oidc_groups: list[str]) -> str:
-        """Determine HyperDX team. Broadest role wins."""
-        all_roles: set[str] = set()
-        all_org_ids: list[str] = []
+    def _resolve_grants(self, oidc_groups: list[str]) -> tuple[list[ScopedGrant], list[str]]:
+        """The scoped grants and org ids the token's groups carry.
+
+        Roles bind where ``api/deps.py`` binds them: an org-scoped group's at that
+        org's scope, a system group's system-wide. A group's orgs are its
+        ``org_ids``, else the org that owns it.
+        """
+        grants: list[ScopedGrant] = []
+        org_ids: list[str] = []
         for gname in oidc_groups:
             group = self._resolve_group(gname)
-            if group:
-                all_roles.update(group.roles)
-                all_org_ids.extend(group.org_ids)
+            if group is None:
+                continue
+            scope = Scope(type="org", id=group.scope_org) if group.scope_org else Scope()
+            grants.extend(ScopedGrant(role=role, scope=scope) for role in group.roles)
+            if group.org_ids:
+                org_ids.extend(group.org_ids)
+            elif group.scope_org:
+                org_ids.append(group.scope_org)
+        return grants, org_ids
 
-        # Check broad roles first (precedence order)
-        for role in ("admin", "infra_admin", "data_analyst"):
-            if role in all_roles:
-                return _ROLE_TO_TEAM[role]
+    def resolve_hyperdx_team(self, oidc_groups: list[str]) -> str:
+        """Determine the HyperDX team: a platform team, else the caller's org team.
 
-        # No broad role — org-scoped team
-        if all_org_ids:
-            return f"customer-{all_org_ids[0]}"
-
+        A platform team goes only to a grant ``platform_grants`` keeps, broadest first,
+        which is the filter the CH group bindings and the HyperDX connection read share.
+        An org-scoped group's roles cover its org alone, so its member gets that org's
+        team whatever roles the group holds.
+        """
+        grants, org_ids = self._resolve_grants(oidc_groups)
+        platform_roles = {grant.role for grant in platform_grants(grants)}
+        for role, team in _ROLE_TO_TEAM.items():
+            if role in platform_roles:
+                return team
+        if org_ids:
+            return f"customer-{org_ids[0]}"
         return ""
 
     # ------------------------------------------------------------------

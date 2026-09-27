@@ -212,7 +212,7 @@ omit = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+target-version = "py314"
 extend-exclude = [
     "config",
 ]

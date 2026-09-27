@@ -4,8 +4,6 @@ Consolidates loader-specific descriptor, validation, sizing, and template
 overrides.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from dfe_engine.services.descriptor import KafkaRole, ServiceDescriptor
@@ -18,7 +16,6 @@ descriptor = ServiceDescriptor(
     default_port=9000,
     metrics_port=9090,
     kafka_role=KafkaRole.CONSUMER,
-    consumer_group="clickhouse-loader",
     liveness_paths=("/livez",),
     readiness_paths=("/readyz",),
     description="Kafka consumer or gRPC server -- loads events into ClickHouse.",
@@ -77,8 +74,7 @@ def _validate_loader(config: Any, errors: list[str], warnings: list[str]) -> Non
         if not config.kafka.brokers:
             errors.append("At least one Kafka broker must be configured")
 
-        if not config.kafka.topics and not config.kafka.topic_regex:
-            errors.append("Either kafka.topics or kafka.topic_regex must be configured")
+        # An empty kafka.topics is valid: the loader auto-discovers every *_load/*_land topic.
 
         if config.kafka.sasl and config.kafka.sasl.enabled:
             mechanism = config.kafka.sasl.mechanism.lower().replace("-", "_")

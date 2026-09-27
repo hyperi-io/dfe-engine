@@ -78,7 +78,7 @@ class _Park:
         assert self.release.wait(timeout=_WAIT_SECONDS * 3)
 
     @classmethod
-    def on_deploy_repo(cls, repo: Any, monkeypatch: pytest.MonkeyPatch) -> "_Park":
+    def on_deploy_repo(cls, repo: Any, monkeypatch: pytest.MonkeyPatch) -> _Park:
         """Park the first read or write that reaches the deploy repo."""
         park = cls()
         real_read, real_publish = repo.read_locked, repo.publish
@@ -98,7 +98,7 @@ class _Park:
         return park
 
     @classmethod
-    def on_function(cls, owner: Any, name: str, monkeypatch: pytest.MonkeyPatch) -> "_Park":
+    def on_function(cls, owner: Any, name: str, monkeypatch: pytest.MonkeyPatch) -> _Park:
         """Park the first call to ``owner.name``."""
         park = cls()
         real = getattr(owner, name)

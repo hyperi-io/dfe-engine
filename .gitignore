@@ -77,6 +77,8 @@ cov.xml
 tests/job_outputs/
 tests/test_logs/
 tests/tmp/
+# pytest --basetemp trees named per run.
+.bt-*/
 
 # Generated config files
 dfe_package_testing.yaml

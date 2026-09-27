@@ -53,9 +53,7 @@ def _as_path_bytes(host_path: str | bytes) -> bytes:
 
 
 # The clones whose head this scope has already taken; None outside a scope.
-_READ_SCOPE: ContextVar[set["GitopsRepo"] | None] = ContextVar(
-    "dfe_gitops_read_scope", default=None
-)
+_READ_SCOPE: ContextVar[set[GitopsRepo] | None] = ContextVar("dfe_gitops_read_scope", default=None)
 
 
 @contextmanager
@@ -205,7 +203,7 @@ class GitopsRepo:
         try:
             with Repo(str(self._path)) as repo:
                 return repo.head().decode()
-        except (KeyError, FileNotFoundError):
+        except KeyError, FileNotFoundError:
             return None
 
     @property
