@@ -14,12 +14,11 @@ Proves the two load-bearing properties:
   members always see the groups they belong to.
 """
 
-from __future__ import annotations
-
 import pytest
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.deps import create_access_token
+from dfe_engine.orgs.registry import OrgRegistry
 from dfe_engine.settings import DFESettings
 
 GROUPS = "/api/v1/auth/groups"
@@ -178,6 +177,20 @@ class TestScopeValidation:
             headers=admin_headers,
         )
         assert resp.status_code == 422
+
+    def test_an_org_name_that_is_a_path_finds_no_org(self, scoped_setup, app, admin_headers):
+        """The org is looked up by joining its name onto the orgs directory."""
+        OrgRegistry(app.state.org_registry._dir.parent / "elsewhere").create("outside")
+
+        resp = scoped_setup.post(
+            GROUPS,
+            json={"name": "climber", "roles": [], "scope": "org:../elsewhere/outside"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["code"] == "invalid_scope"
+        assert app.state.group_store.get("climber") is None
 
     def test_viewer_sees_own_membership_only(self, scoped_setup, viewer_headers):
         # dfe-viewers roles carry no group:read - visibility is membership only.

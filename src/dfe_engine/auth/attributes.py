@@ -31,24 +31,16 @@ Usage::
     store.delete("alice")
 """
 
-from __future__ import annotations
-
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
+from dfe_engine.auth.store_names import VALID_NAME
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 if TYPE_CHECKING:
     from dfe_engine.store.documents import DocuStore
-
-# The entity id becomes the filename stem ({entity_id}.yaml), so it must be a safe
-# stem - reject path traversal / separators. \Z (not $) anchors the true end of
-# string so a trailing newline cannot slip into the filename. Identical to the
-# account / group name regex so the same ids are accepted everywhere.
-_VALID_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}\Z")
 
 
 class AttributeStore:
@@ -107,7 +99,8 @@ class AttributeStore:
             path.unlink()
 
     def _path(self, entity_id: str) -> Path:
-        if not _VALID_ID.match(entity_id):
+        # The id is an account or group name, so it follows their rule.
+        if not VALID_NAME.match(entity_id):
             raise ValueError(f"Invalid entity id: {entity_id!r}")
         return self._dir / f"{entity_id}.yaml"
 

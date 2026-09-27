@@ -13,8 +13,6 @@ merge-patch fast path with etags, and the scoped-object RBAC matrix
 (membership reads, owner writes, org-wildcard admins, 404-not-403 hiding).
 """
 
-from __future__ import annotations
-
 import pytest
 from common.fake_repository_ch import FakeRepositoryCH
 from fastapi.testclient import TestClient
@@ -347,6 +345,16 @@ class TestValidation:
     def test_invalid_key_422(self, client: TestClient, fake_ch, admin_headers):
         resp = client.put(f"{OBJECTS}/system/-/ns/bad key", content=b"v", headers=admin_headers)
         assert resp.status_code == 422
+
+    def test_a_trailing_newline_is_not_part_of_a_name(
+        self, client: TestClient, fake_ch, admin_headers
+    ):
+        """``$`` matches before a final newline, so the name rule anchors on ``\\Z``."""
+        listed = client.get(f"{OBJECTS}/system/-/ns%0A", headers=admin_headers)
+        written = client.put(f"{OBJECTS}/system/-/ns/key%0A", content=b"v", headers=admin_headers)
+
+        assert listed.status_code == 422, listed.text
+        assert written.status_code == 422, written.text
 
     def test_object_size_cap_413(self, client: TestClient, app, fake_ch, admin_headers):
         app.state.settings.repository.max_object_bytes = 16

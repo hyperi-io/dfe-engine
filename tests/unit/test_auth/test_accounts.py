@@ -174,6 +174,38 @@ class TestGet:
         assert account.blocked_at == ""
 
 
+class TestANameThatIsAPath:
+    """Every lookup joins the name onto the store directory, so every one refuses a path."""
+
+    OUTSIDE = "../elsewhere/outside"
+
+    @pytest.fixture
+    def outside(self, tmp_path):
+        """An account file one directory over, where :attr:`OUTSIDE` resolves from the store."""
+        AccountStore(tmp_path / "elsewhere").create("outside", "password123")
+        return tmp_path / "elsewhere" / "outside.yaml"
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            pytest.param(lambda s, n: s.update(n, enabled=False), id="update"),
+            pytest.param(lambda s, n: s.reset_password(n, "another-pw"), id="reset_password"),
+            pytest.param(lambda s, n: s.set_attributes(n, {"k": "v"}), id="set_attributes"),
+            pytest.param(lambda s, n: s.delete(n), id="delete"),
+        ],
+    )
+    def test_a_change_raises_and_leaves_the_file(self, store, outside, change):
+        before = outside.read_bytes()
+
+        with pytest.raises(KeyError):
+            change(store, self.OUTSIDE)
+
+        assert outside.read_bytes() == before
+
+    def test_a_password_checked_against_it_never_matches(self, store, outside):
+        assert store.verify_password(self.OUTSIDE, "password123") is False
+
+
 # ---------------------------------------------------------------------------
 # AccountStore.list
 # ---------------------------------------------------------------------------

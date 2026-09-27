@@ -29,17 +29,56 @@ _URI = os.environ.get("DFE_TEST_MONGO_URI", "")
 
 
 @pytest.fixture
-def store():
+def docu():
     if not _URI:
         pytest.skip("DFE_TEST_MONGO_URI not set (needs a reachable document store)")
     db_name = f"dfe_engine_test_{uuid.uuid4().hex[:8]}"
     doc = DocuStore(_URI, db_name)
     doc.ping()  # fail fast if the server is unreachable / auth wrong
     try:
-        yield DocuStoreAccountStore(doc, collection="accounts")
+        yield doc
     finally:
         doc.drop_database(db_name)
         doc.close()
+
+
+@pytest.fixture
+def store(docu):
+    return DocuStoreAccountStore(docu, collection="accounts")
+
+
+class TestANameNoAccountCanHave:
+    """Both backends share one name rule, so a lookup here never matches a name create refuses."""
+
+    NAME = "../accounts/alice"
+
+    @pytest.fixture
+    def planted(self, docu, store):
+        """A record no create() could make, as a hand edit or an older engine leaves it."""
+        record = Account(username=self.NAME, password_hash="!")
+        docu.collection("accounts").insert_one(record.model_dump())
+        return store
+
+    def test_get_misses(self, planted):
+        assert planted.get(self.NAME) is None
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            pytest.param(lambda s, n: s.update(n, enabled=False), id="update"),
+            pytest.param(lambda s, n: s.reset_password(n, "another-Pw-1"), id="reset_password"),
+            pytest.param(lambda s, n: s.set_attributes(n, {"k": "v"}), id="set_attributes"),
+            pytest.param(lambda s, n: s.delete(n), id="delete"),
+        ],
+    )
+    def test_a_change_raises_and_leaves_the_record(self, planted, docu, change):
+        before = docu.collection("accounts").find_one({"username": self.NAME}, {"_id": 0})
+
+        with pytest.raises(KeyError):
+            change(planted, self.NAME)
+
+        after = docu.collection("accounts").find_one({"username": self.NAME}, {"_id": 0})
+        assert after == before
 
 
 class TestDocuStoreAccountStore:

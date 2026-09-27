@@ -24,9 +24,6 @@ provider YAML keeps only the store PATH. A response carries the client id, the
 secret paths and the env var names, never a secret value.
 """
 
-from __future__ import annotations
-
-import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal
 
@@ -43,6 +40,7 @@ from dfe_engine.api.pagination import (
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.oidc.credential_env import is_env_var_name, provider_secret_path
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.auth.store_names import VALID_NAME
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
 
 if TYPE_CHECKING:
@@ -50,9 +48,6 @@ if TYPE_CHECKING:
     from dfe_engine.secrets import DfeSecrets
 
 router = APIRouter(prefix="/oidc-providers", tags=["OIDC Providers"])
-
-# A provider name is a YAML filename stem AND a secret-store path segment.
-_PROVIDER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 _ENV_NAME_HELP = (
     "must be an environment variable name such as OKTA_CLIENT_SECRET, not the "
@@ -138,11 +133,14 @@ class CreateProviderRequest(BaseModel):
     @field_validator("name")
     @classmethod
     def _safe_name(cls, value: str) -> str:
-        """The name becomes a filename stem and a secret-store path segment."""
-        if not _PROVIDER_NAME.match(value):
+        """The name becomes a filename stem and a secret-store path segment.
+
+        Refused here, before any secret is written, on the rule the registry keys on.
+        """
+        if not VALID_NAME.match(value):
             raise ValueError(
-                "must start with a letter or digit and contain only letters, digits, "
-                "dot, underscore or hyphen"
+                "must start with a letter or digit, contain only letters, digits, "
+                "dot, underscore or hyphen, and be at most 128 characters"
             )
         return value
 

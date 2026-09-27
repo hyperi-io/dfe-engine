@@ -253,8 +253,8 @@ class TestAProxiedIdentity:
 
         own = client.get("/api/v1/auth/accounts/me", headers=_proxied(subject))
 
-        assert own.status_code == 404, own.text
-        assert own.json()["code"] == "not_found"
+        assert own.status_code == 200, own.text
+        assert own.json()["username"] == "accounts-admin"
         shadow = store.get("accounts-admin")
         assert shadow is not None
         assert shadow.external is True

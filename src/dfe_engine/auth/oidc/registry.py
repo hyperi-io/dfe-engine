@@ -18,11 +18,10 @@ Example layout::
         entra-id.yaml
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 
 from dfe_engine.auth.oidc.models import OIDCProvider
+from dfe_engine.auth.store_names import VALID_NAME, store_key
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 
@@ -43,10 +42,18 @@ class OIDCProviderRegistry:
     # ------------------------------------------------------------------
 
     def _path(self, name: str) -> Path:
-        return self._dir / f"{name}.yaml"
+        """The file provider *name* lives in.
+
+        Raises:
+            KeyError: No provider can hold *name*, so it is looked up nowhere.
+        """
+        return self._dir / f"{store_key(name)}.yaml"
 
     def _read(self, name: str) -> OIDCProvider | None:
-        path = self._path(name)
+        try:
+            path = self._path(name)
+        except KeyError:
+            return None
         if not path.exists():
             return None
         data = yaml_load(path)
@@ -75,8 +82,11 @@ class OIDCProviderRegistry:
             The stored OIDCProvider.
 
         Raises:
-            ValueError: If a provider with this name already exists.
+            ValueError: If the name is not a valid provider name, or a provider
+                with this name already exists.
         """
+        if not VALID_NAME.match(name):
+            raise ValueError(f"Invalid OIDC provider name: {name!r}")
         if self._path(name).exists():
             raise ValueError(f"OIDC provider '{name}' already exists")
         self._write(name, provider)

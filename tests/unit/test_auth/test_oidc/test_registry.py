@@ -6,8 +6,6 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
-
 import pytest
 
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
@@ -211,3 +209,41 @@ class TestOIDCProviderRegistryDelete:
         registry = OIDCProviderRegistry(tmp_path / "oidc")
         with pytest.raises(KeyError, match="nonexistent"):
             registry.delete("nonexistent")
+
+
+class TestANameThatIsAPath:
+    """Every lookup joins the name onto the providers directory, so one must not climb out."""
+
+    NAME = "../elsewhere/outside"
+
+    @pytest.fixture
+    def outside(self, tmp_path):
+        OIDCProviderRegistry(tmp_path / "elsewhere").create("outside", _make_generic_provider())
+        return tmp_path / "elsewhere" / "outside.yaml"
+
+    @pytest.fixture
+    def registry(self, tmp_path):
+        return OIDCProviderRegistry(tmp_path / "oidc")
+
+    def test_get_finds_nothing(self, registry, outside):
+        assert registry.get(self.NAME) is None
+
+    def test_update_leaves_the_file_alone(self, registry, outside):
+        before = outside.read_text()
+
+        with pytest.raises(KeyError):
+            registry.update(self.NAME, display_name="rewritten")
+
+        assert outside.read_text() == before
+
+    def test_delete_leaves_the_file_alone(self, registry, outside):
+        with pytest.raises(KeyError):
+            registry.delete(self.NAME)
+
+        assert outside.exists()
+
+    def test_create_writes_nothing(self, registry, tmp_path):
+        with pytest.raises(ValueError, match="Invalid OIDC provider name"):
+            registry.create("../elsewhere/planted", _make_generic_provider())
+
+        assert not (tmp_path / "elsewhere" / "planted.yaml").exists()

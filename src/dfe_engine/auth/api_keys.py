@@ -33,19 +33,16 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import re
 import secrets
 from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from dfe_engine.auth.store_names import VALID_NAME, store_key
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 _KEY_PREFIX = "dfe_ak"
-# API key name becomes the filename stem ({name}.yaml) - reject path traversal.
-# \Z (not $) anchors the true end of string so no trailing newline slips through.
-_VALID_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}\Z")
 _SHORT_BYTES = 4  # 4 bytes -> 8 hex chars
 _LONG_BYTES = 16  # 16 bytes -> 32 hex chars
 
@@ -142,7 +139,7 @@ class APIKeyStore:
             ValueError: If a key with this name already exists, or if
                 expires_at is unparseable or not in the future.
         """
-        if not _VALID_NAME.match(name):
+        if not VALID_NAME.match(name):
             raise ValueError(f"Invalid API key name: {name!r}")
         expiry: str | None = None
         if expires_at is not None:
@@ -182,7 +179,10 @@ class APIKeyStore:
 
         Returns None if the key does not exist.
         """
-        key_file = self._keys_dir / f"{name}.yaml"
+        try:
+            key_file = self._keys_dir / f"{store_key(name)}.yaml"
+        except KeyError:
+            return None
         if not key_file.exists():
             return None
         return self._load_key(key_file)
