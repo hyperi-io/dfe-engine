@@ -36,6 +36,7 @@ from dfe_engine.settings import (
 from dfe_engine.source.models import SourceHeader, SourceSchema, SourceVersion
 from dfe_engine.yaml_utils import yaml_dump
 from tests.support.accounts import admin_on_its_own_password
+from tests.support.core_sources import write_landing_definition
 
 PROMO_SOURCE = "promo-source"
 NOMETA_SOURCE = "nometa-source"
@@ -156,6 +157,8 @@ def make_api_settings(tmp_path: Path) -> DFESettings:
         },
         schemas_root / "meta" / "core_tpl.yaml",
     )
+    # Stands in for the image-baked schema seed, so startup seeds the landing source.
+    write_landing_definition(schemas_dir=schemas_root)
 
     sources_dir = tmp_path / "sources"
     sources_dir.mkdir()
@@ -796,3 +799,88 @@ class TestPromoteField:
         )
         assert f"FROM `{db}`.`{landing}`" in discovery_sql
         assert params.get("match_value") == PROMO_SOURCE
+
+
+class TestPromoteFieldOnLandingSource:
+    """The landing source's columns are the fixed common header: nothing promotes into it."""
+
+    def test_promote_is_refused_and_writes_nothing(
+        self, settings: DFESettings, client: TestClient, admin_headers
+    ):
+        landing = settings.clickhouse.landing_table
+        resp = client.post(
+            f"/api/v1/schemas/{landing}/promote-field",
+            json={"json_path": "user.email", "data_type": "string", "schema_path": SCHEMA_PATH},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["code"] == "conflict"
+        assert f"cannot promote a field on source {landing!r}" in body["message"]
+        assert _schema_versions(client, admin_headers, "1.0.0") == ["1.0.0"]
+        src = client.get(f"/api/v1/sources/{landing}", headers=admin_headers).json()
+        assert src["resource_type"] == "core"
+        assert src["versions"][src["current"]]["schema"].get("meta_schema") is None
+
+    def test_a_dry_run_is_refused_too(
+        self, settings: DFESettings, client: TestClient, admin_headers
+    ):
+        resp = client.post(
+            f"/api/v1/schemas/{settings.clickhouse.landing_table}/promote-field",
+            json={"json_path": "user.email", "data_type": "string", "schema_path": SCHEMA_PATH},
+            headers=admin_headers,
+            params={"dry_run": True},
+        )
+
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "conflict"
+
+    def test_a_core_meta_schema_is_not_forked_for_it(
+        self, settings: DFESettings, client: TestClient, admin_headers
+    ):
+        """Naming a core meta-schema would otherwise fork it to ``meta/<landing>_core_tpl``."""
+        landing = settings.clickhouse.landing_table
+        fork_file = Path(settings.schemas.schemas_dir) / "meta" / f"{landing}_core_tpl.yaml"
+
+        resp = client.post(
+            f"/api/v1/schemas/{landing}/promote-field",
+            json={
+                "json_path": "user.email",
+                "data_type": "string",
+                "schema_path": CORE_SCHEMA_PATH,
+            },
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 409
+        assert not fork_file.exists()
+        assert _schema_versions(client, admin_headers, "1.0.0", schema=CORE_SCHEMA_PATH) == [
+            "1.0.0"
+        ]
+
+    def test_json_path_discovery_stays_open(
+        self, app, settings: DFESettings, client: TestClient, admin_headers
+    ):
+        db = get_settings().clickhouse.effective_data_database
+        landing = settings.clickhouse.landing_table
+        app.dependency_overrides[get_clickhouse_client] = lambda: _DiscoveryClient()
+
+        resp = client.get(f"/api/v1/schemas/{landing}/json-paths", headers=admin_headers)
+
+        assert resp.status_code == 200
+        assert resp.json()["table"] == f"{db}.{landing}"
+        assert resp.json()["paths"][0]["path"] == "user.id"
+
+    def test_sample_rows_stay_open(
+        self, app, settings: DFESettings, client: TestClient, admin_headers
+    ):
+        app.dependency_overrides[get_clickhouse_client] = lambda: _SampleClient()
+
+        resp = client.get(
+            f"/api/v1/schemas/{settings.clickhouse.landing_table}/sample-rows",
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["rows"] == [{"_json": {"user": {"id": 1}}}]

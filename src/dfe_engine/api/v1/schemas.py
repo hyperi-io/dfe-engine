@@ -1866,6 +1866,15 @@ async def sample_source_rows(
 @router.post(
     "/{source_name}/promote-field",
     response_model=PromoteFieldResponse,
+    responses={
+        409: {
+            "model": ErrorResponse,
+            "description": (
+                "The source is a core source the engine owns, such as the landing "
+                "source main, whose columns no promotion may change (code conflict)"
+            ),
+        },
+    },
     dependencies=[Depends(require_action(scopes_dict["schema_write"]))],
 )
 async def promote_field(
@@ -1885,7 +1894,9 @@ async def promote_field(
     the next ingest. Existing rows are not backfilled. Core meta-schemas are forked to
     ``{source_name}_{schema_stem}`` under the same parent path before promoting.
     ``?dry_run=true`` returns the proposed diff and DDL without forking core schemas,
-    adding meta-schema versions, or updating the source.
+    adding meta-schema versions, or updating the source. A core source, such as the
+    landing source ``main``, is refused with 409 before any schema is resolved or
+    written, dry run included; its ``json-paths`` and ``sample-rows`` reads stay open.
     """
     from dfe_engine.schema.schema_manager import (
         SchemaManager,
