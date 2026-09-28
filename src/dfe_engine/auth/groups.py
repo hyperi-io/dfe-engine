@@ -300,7 +300,8 @@ class GroupStore:
         """Update one or more fields on an existing group and persist.
 
         Accepted keyword arguments: ``roles``, ``description``, ``members``,
-        ``org_ids``, ``scope``.
+        ``org_ids``, ``scope``, and the ``source_provider`` / ``source_id`` the
+        OIDC group sync and SCIM record.
 
         Args:
             name: Group to update.
@@ -419,15 +420,15 @@ class GroupStore:
         return sorted(roles)
 
 
-# Fields update() may change; the name is the document key and never moves,
-# and source_provider / source_id are owned by the sync path. Kept identical to
-# the documented GroupStore.update contract.
+# Fields update() may change, as GroupStore.update documents; the name is the document key.
 _UPDATABLE_GROUP_FIELDS = (
     "roles",
     "description",
     "members",
     "org_ids",
     "scope",
+    "source_provider",
+    "source_id",
 )
 
 
@@ -533,9 +534,10 @@ class DocuStoreGroupStore:
         """Update permitted fields on a group. Raises KeyError if missing, ValueError on bad scope.
 
         Accepted keyword arguments: ``roles``, ``description``, ``members``,
-        ``org_ids``, ``scope``. ``allow_protected`` replaces the admin-role
-        group's members with a list that drops a recovery credential; reserved for
-        the reconcile paths. Raises ProtectedAccountError otherwise.
+        ``org_ids``, ``scope``, ``source_provider``, ``source_id``. Any other is
+        ignored. ``allow_protected`` replaces the admin-role group's members with a
+        list that drops a recovery credential; reserved for the reconcile paths.
+        Raises ProtectedAccountError otherwise.
         """
         group = self.get(name)
         if group is None:
