@@ -296,6 +296,9 @@ async def create_user(user: CurrentUser, request: Request) -> Response:
         store.create(username, password, groups=[])
     except AccountExistsError:
         return _user_exists(username)
+    except ValueError as exc:
+        # A userName no account can have, or a password the hash refuses.
+        return scim_error(400, str(exc), "invalidValue")
     # Apply the remaining writable attributes (enabled, external_id, provider).
     store.update(
         username,

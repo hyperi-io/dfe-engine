@@ -34,6 +34,7 @@ from dfe_engine.auth.scim_mapping import (
     scim_group_to_group_fields,
     scim_user_to_account_fields,
 )
+from tests.support.failing_stores import StampFailingAccountStore
 from tests.support.racing_stores import RacingAccountStore
 
 BASE = "/api/v1/scim/v2"
@@ -168,6 +169,55 @@ class TestScimUsers:
         assert resp.json()["scimType"] == "uniqueness"
         assert resp.headers["content-type"].startswith("application/scim+json")
         assert replica.get("scim-racer").external_id == ""
+
+    @pytest.mark.parametrize("user_name", ["../evil", "with space", "a" * 129])
+    def test_a_user_name_no_account_can_have_is_an_invalid_value(
+        self, app, client, admin_headers, user_name
+    ):
+        before = [a.username for a in app.state.account_store.list()]
+
+        resp = client.post(
+            f"{BASE}/Users",
+            json={"schemas": [USER_SCHEMA], "userName": user_name},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["scimType"] == "invalidValue"
+        assert resp.headers["content-type"].startswith("application/scim+json")
+        assert [a.username for a in app.state.account_store.list()] == before
+
+    def test_a_password_longer_than_the_hash_takes_is_an_invalid_value(
+        self, app, client, admin_headers
+    ):
+        """bcrypt refuses more than 72 bytes rather than silently truncating."""
+        password = "x" * 73
+
+        resp = client.post(
+            f"{BASE}/Users",
+            json={"schemas": [USER_SCHEMA], "userName": "scim-long-pw", "password": password},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["scimType"] == "invalidValue"
+        assert password not in resp.text
+        assert app.state.account_store.get("scim-long-pw") is None
+
+    def test_a_store_fault_answers_in_the_scim_envelope(self, app, client, admin_headers):
+        """An IdP reads the RFC 7644 envelope on every status, a 500 included."""
+        app.state.account_store = StampFailingAccountStore(app.state.account_store._dir)
+
+        resp = client.post(
+            f"{BASE}/Users",
+            json={"schemas": [USER_SCHEMA], "userName": "scim-fault"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 500, resp.text
+        assert resp.headers["content-type"].startswith("application/scim+json")
+        assert resp.json()["schemas"] == ["urn:ietf:params:scim:api:messages:2.0:Error"]
+        assert "No space left" not in resp.text
 
     def test_get_user(self, client, admin_headers):
         client.post(

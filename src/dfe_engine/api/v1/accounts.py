@@ -406,6 +406,12 @@ async def create_account(
         )
     except AccountExistsError as exc:
         raise conflict from exc
+    except ValueError as exc:
+        # A name no account can have, or a password the hash refuses.
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
     sync_group_members_for_account_groups_change(
         group_store,
         body.username,

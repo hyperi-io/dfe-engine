@@ -152,6 +152,35 @@ class TestCreateAccount:
         assert replica.verify_password("racer", _PASSWORD)
         assert "racer" not in app.state.group_store.get("dfe-viewers").members
 
+    @pytest.mark.parametrize("username", ["../evil", "with space", "a" * 129])
+    def test_a_name_no_account_can_have_is_a_422(self, app, client, admin_headers, username):
+        before = [a.username for a in app.state.account_store.list()]
+
+        resp = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": username, "password": _PASSWORD, "groups": ["dfe-viewers"]},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["code"] == "validation_error"
+        assert [a.username for a in app.state.account_store.list()] == before
+        assert username not in app.state.group_store.get("dfe-viewers").members
+
+    def test_a_password_longer_than_the_hash_takes_is_a_422(self, app, client, admin_headers):
+        """bcrypt refuses more than 72 bytes rather than silently truncating."""
+        password = "x" * 73
+
+        resp = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "long-pw", "password": password},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert password not in resp.text
+        assert app.state.account_store.get("long-pw") is None
+
     def test_create_requires_admin(self, client, viewer_headers):
         resp = client.post(
             "/api/v1/auth/accounts",
