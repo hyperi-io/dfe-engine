@@ -8416,7 +8416,7 @@
           "Rules"
         ],
         "summary": "Validate Rule Sql",
-        "description": "Validate a SQL WHERE fragment without creating a rule.\n\nReturns any syntax errors or validation issues found.",
+        "description": "Validate a detection query (SELECT ... FROM ...) without creating a rule.\n\nReturns any syntax errors or validation issues found.",
         "operationId": "validate_rule_sql_api_v1_rules_validate_post",
         "requestBody": {
           "content": {
@@ -33882,7 +33882,7 @@
           "user_sql": {
             "type": "string",
             "title": "User Sql",
-            "description": "User-authored SQL WHERE fragment"
+            "description": "Full detection query: SELECT ... FROM <db>.<table> WHERE ... (the FROM names the source table)"
           },
           "cel_filter": {
             "anyOf": [
@@ -34342,7 +34342,7 @@
           "user_sql": {
             "type": "string",
             "title": "User Sql",
-            "description": "User-authored SQL WHERE fragment"
+            "description": "Full detection query: SELECT ... FROM <db>.<table> WHERE ... (the FROM names the source table)"
           },
           "cel_filter": {
             "anyOf": [
@@ -38394,7 +38394,7 @@
           "sql": {
             "type": "string",
             "title": "Sql",
-            "description": "SQL WHERE fragment to validate"
+            "description": "Full SELECT ... FROM ... query to validate"
           }
         },
         "type": "object",
