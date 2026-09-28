@@ -25,6 +25,7 @@ from dfe_engine.auth.audit import (
 from dfe_engine.auth.groups import Group, GroupStore
 from dfe_engine.auth.models import AuthenticationError, Scope, ScopedGrant, platform_grants
 from dfe_engine.auth.protected_accounts import resolve_floor
+from dfe_engine.auth.store_names import VALID_NAME
 
 # Platform teams, broadest first; only a role granted at SYSTEM scope earns one.
 _ROLE_TO_TEAM = {
@@ -133,12 +134,16 @@ class JitProvisioner:
                 written.
             JitSubjectUnusableError: The subject sanitises to no account name.
                 Nothing is written.
+            Exception: Any other error is the store failing to record the login,
+                never a refusal of the identity. A first login leaves no account.
         """
         if user_id.startswith(API_KEY_SUBJECT_PREFIX):
             audit_jit_login_refused(user_id, source_provider, "api_key_subject")
             raise JitIdentityCollisionError(user_id, source_provider, "api_key_subject")
         safe_name = self.sanitise_username(user_id)
         self._refuse_protected(safe_name, user_id, source_provider)
+        if not VALID_NAME.match(safe_name):
+            raise JitSubjectUnusableError(user_id)
         now = datetime.now(UTC).isoformat()
         wanted_email = email.strip()
         wanted_name = name.strip()
@@ -170,20 +175,13 @@ class JitProvisioner:
                 password="",
                 username=safe_name,
             )
-            self._accounts.update(
-                safe_name,
-                external=True,
-                source_provider=source_provider,
-                subject=user_id,
-                last_login_at=now,
-            )
-        except ValueError as exc:
+        except ValueError:
             # Race condition: another request created it. The identity guard runs
             # again because the account it created is the one about to be written.
             raced = self._accounts.get(safe_name)
             if raced is None:
-                # Not a race - create refused the name itself (empty or too long).
-                raise JitSubjectUnusableError(user_id) from exc
+                # Nothing holds the name, so this is a store fault, not a race.
+                raise
             self._require_same_identity(raced, user_id, source_provider)
             self._require_available(raced, user_id, source_provider)
             race_updates: dict[str, object] = {
@@ -197,6 +195,19 @@ class JitProvisioner:
                 race_updates["name"] = wanted_name
             self._accounts.update(safe_name, **race_updates)
             return self._accounts.get(safe_name)
+
+        try:
+            self._accounts.update(
+                safe_name,
+                external=True,
+                source_provider=source_provider,
+                subject=user_id,
+                last_login_at=now,
+            )
+        except Exception:
+            # Unstamped, the account reads as a local one and refuses this identity at every login.
+            self._discard(safe_name)
+            raise
 
         _, org_ids = self._resolve_grants(oidc_groups)
 
@@ -229,6 +240,23 @@ class JitProvisioner:
                     task.add_done_callback(self._invite_tasks.discard)
 
         return self._accounts.get(safe_name)
+
+    def _discard(self, safe_name: str) -> None:
+        """Remove the account a first login created and could not stamp.
+
+        A failure to remove it is logged, never raised: the caller re-raises the
+        error that stopped the stamp.
+        """
+        try:
+            self._accounts.delete(safe_name)
+        except KeyError:
+            return
+        except Exception as exc:
+            logger.error(
+                "JIT could not remove an account it failed to stamp",
+                username=safe_name,
+                error=type(exc).__name__,
+            )
 
     def _refuse_protected(self, safe_name: str, user_id: str, source_provider: str) -> None:
         """Refuse any assertion resolving onto a recovery credential.

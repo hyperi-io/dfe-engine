@@ -8,6 +8,7 @@
 
 """Tests for POST/GET/PUT/DELETE /api/v1/auth/oidc-providers endpoints."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -275,6 +276,42 @@ class TestSyncProvider:
         data = resp.json()
         # Generic provider with manual mode gets skipped
         assert data["total"] == 0
+
+    def test_a_skipped_group_is_reported(self, client, app, admin_headers, tmp_path, monkeypatch):
+        """The directory's second group sanitises to no valid group name."""
+        from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+
+        directory = tmp_path / "directory.json"
+        directory.write_text(
+            json.dumps(
+                {
+                    "groups": [
+                        {"id": "g-ops", "name": "operators"},
+                        {"id": "g-bad", "name": "!!!"},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("DFE_TEST_SYNC_DIRECTORY", str(directory))
+        app.state.oidc_provider_registry.create(
+            "mock-dir",
+            OIDCProvider(
+                type="generic",
+                enabled=True,
+                issuer="https://sso.example.com",
+                groups=GroupResolutionConfig(
+                    mode="api",
+                    directory_backend="mock",
+                    mock_directory_env="DFE_TEST_SYNC_DIRECTORY",
+                ),
+            ),
+        )
+
+        resp = client.post("/api/v1/auth/oidc-providers/mock-dir/sync", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert (resp.json()["created"], resp.json()["groups_skipped"]) == (1, 1)
 
     def test_sync_nonexistent_returns_404(self, client, admin_headers):
         resp = client.post("/api/v1/auth/oidc-providers/ghost/sync", headers=admin_headers)

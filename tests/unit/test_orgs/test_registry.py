@@ -6,7 +6,9 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
+import inspect
 import time
+import typing
 
 import pytest
 
@@ -315,3 +317,14 @@ class TestOnChange:
         assert org.name == "acme"
         assert registry.get("acme") is not None
         assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    "method",
+    [name for name, value in vars(OrgRegistry).items() if inspect.isfunction(value)],
+)
+def test_every_method_annotation_evaluates(method):
+    """The class defines ``list``, so an annotation naming the builtin must not resolve to it."""
+    hints = typing.get_type_hints(getattr(OrgRegistry, method))
+
+    assert "return" in hints

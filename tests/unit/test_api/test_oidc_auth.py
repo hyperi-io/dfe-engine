@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 
 from dfe_engine.api.deps import create_access_token
 from dfe_engine.auth.groups import GroupStore
+from dfe_engine.auth.jit import JitProvisioner
+from tests.support.failing_stores import StampFailingAccountStore
 
 
 class TestOidcAuthentication:
@@ -386,4 +388,25 @@ class TestAJitFailureRefusesTheLogin:
         assert resp.json()["code"] == "service_unavailable"
         failed = [e for e in audit_events if e["event"] == "auth.jit.provision_failed"]
         assert [e["user_id"] for e in failed] == ["kim@example.com"]
+        assert not [e for e in audit_events if e["event"] == "auth.login.denied"]
+
+    def test_a_login_whose_account_cannot_be_stamped_is_a_503_and_the_retry_signs_in(
+        self, client: TestClient, app, audit_events
+    ):
+        """An unstamped account would read as a local one and refuse every later login."""
+        healthy = app.state.jit_provisioner
+        app.state.jit_provisioner = JitProvisioner(
+            account_store=StampFailingAccountStore(app.state.account_store._dir),
+            group_store=app.state.group_store,
+        )
+        headers = {"X-Oidc-Subject": "kim@example.com", "X-Oidc-Groups": "dfe-admins"}
+
+        failed = client.get("/api/v1/auth/me", headers=headers)
+        app.state.jit_provisioner = healthy
+        retried = client.get("/api/v1/auth/me", headers=headers)
+
+        assert failed.status_code == 503, failed.text
+        assert failed.json()["code"] == "service_unavailable"
+        assert retried.status_code == 200, retried.text
+        assert retried.json()["roles"] == ["admin"]
         assert not [e for e in audit_events if e["event"] == "auth.login.denied"]

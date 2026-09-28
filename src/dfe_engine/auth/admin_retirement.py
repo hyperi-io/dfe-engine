@@ -90,29 +90,34 @@ def another_admin_exists(
     group_store: GroupStore | DocuStoreGroupStore | None,
     admin_name: str,
 ) -> bool:
-    """True when an enabled account other than the seeded pair carries the admin role.
+    """True when an account other than the seeded pair can sign in holding the admin role.
 
     The precondition for retirement, and the hint the wizard enables its button
     from -- one predicate, so the UI cannot offer what the API refuses. Neither
     the bootstrap admin nor ``breakglass`` counts: retiring onto the recovery
     credential is what this exists to avoid. Only a system-scope group counts --
     an org-scoped group's roles bind inside that org, so its members cannot run
-    the deployment.
+    the deployment. The account must hold that group the way a session does
+    (:func:`~dfe_engine.auth.membership.groups_held`), and be enabled, unblocked
+    and past any issued password, since until then its session holds no roles.
     """
     from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
     from dfe_engine.auth.groups import GROUP_SCOPE_SYSTEM
+    from dfe_engine.auth.membership import groups_held
 
     if account_store is None or group_store is None:
         return False
-    admin_groups = {
-        g.name
-        for g in group_store.list()
-        if ADMIN_ROLE in g.roles and g.scope == GROUP_SCOPE_SYSTEM
-    }
-    if not admin_groups:
+    groups = group_store.list()
+    admin_groups = [g for g in groups if ADMIN_ROLE in g.roles and g.scope == GROUP_SCOPE_SYSTEM]
+    # A session resolves a held identifier by group name, else by provider source_id.
+    admin_ids = {g.name for g in admin_groups} | {g.source_id for g in admin_groups if g.source_id}
+    if not admin_ids:
         return False
     seeded = {admin_name, BREAKGLASS_USERNAME}
     return any(
-        account.enabled and account.username not in seeded and admin_groups & set(account.groups)
+        account.username not in seeded
+        and account.session_denied() is None
+        and not account.password_change_required
+        and admin_ids.intersection(groups_held(account, groups))
         for account in account_store.list()
     )

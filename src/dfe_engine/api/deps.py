@@ -31,6 +31,7 @@ from dfe_engine.auth.jit import (
     JitIdentityCollisionError,
     JitSubjectUnusableError,
 )
+from dfe_engine.auth.membership import groups_held
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.settings import DFESettings, is_dev_posture
 
@@ -428,18 +429,6 @@ def get_role_config(request: Request) -> RoleConfig:
     return RoleConfig.load_builtin()
 
 
-def _groups_of_account(group_store: GroupStore, account: Any) -> list[str]:
-    """Group names from GroupStore membership of *account*, else its own list (never JWT).
-
-    An IdP-owned account takes both: its own list is what its IdP asserts, so a group
-    an operator adds it to by hand is held beside those, not in place of them.
-    """
-    from_membership = sorted(g.name for g in group_store.list() if account.username in g.members)
-    if account.source_provider:
-        return sorted(set(from_membership) | set(account.groups))
-    return from_membership or list(account.groups)
-
-
 def resolve_live_grants_for_user(request: Request, user_id: str) -> GroupResolution:
     """Resolve roles/org_ids/grants from the bound account's groups, never a token claim.
 
@@ -450,18 +439,16 @@ def resolve_live_grants_for_user(request: Request, user_id: str) -> GroupResolut
     account = bound_account(request, user_id)
     if group_store is None or account is None:
         return GroupResolution([], [], [])
-    return _resolve_group_grants(_groups_of_account(group_store, account), group_store)
+    return _resolve_group_grants(groups_held(account, group_store.list()), group_store)
 
 
 def resolve_live_groups_for_user(request: Request, user_id: str) -> list[str]:
-    """Return the bound account's group names from the stores, or none when it binds none."""
+    """The groups the bound account holds (:func:`groups_held`), none when it binds none."""
     account = bound_account(request, user_id)
     if account is None:
         return []
     group_store: GroupStore | None = getattr(request.app.state, "group_store", None)
-    if group_store is None:
-        return list(account.groups)
-    return _groups_of_account(group_store, account)
+    return groups_held(account, group_store.list() if group_store is not None else [])
 
 
 def account_for_session_subject(store: Any, user_id: str):

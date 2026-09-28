@@ -561,11 +561,13 @@ def create_app(
     # The routes reach these through app.state, so each set is built once per app.
     from dfe_engine.api.e2e.seed.metrics import SeedMetrics
     from dfe_engine.api.metrics import ApiMetrics
+    from dfe_engine.auth.oidc.sync import SyncMetrics
     from dfe_engine.yaml_health import YamlWriteMetrics, write_health
 
     app.state.metrics_manager = metrics_manager
     app.state.api_metrics = ApiMetrics(metrics_manager)
     app.state.seed_metrics = SeedMetrics(metrics_manager)
+    app.state.oidc_sync_metrics = SyncMetrics(metrics_manager)
     # Every store writes YAML without the app in reach, so its refusals count process-wide.
     write_health().bind(YamlWriteMetrics(metrics_manager))
 

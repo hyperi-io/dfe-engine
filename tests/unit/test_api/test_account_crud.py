@@ -455,6 +455,71 @@ class TestUpdateAccount:
         assert "grp-sync" not in viewers.json()["members"]
         assert "grp-sync" in analysts.json()["members"]
 
+    def test_resending_the_groups_repairs_a_membership_the_group_file_lost(
+        self, client, app, admin_headers
+    ):
+        """drift's own list names dfe-analysts; the group file, which decides, does not."""
+        app.state.account_store.create("drift", _PASSWORD, groups=["dfe-analysts"])
+
+        resp = client.put(
+            "/api/v1/auth/accounts/drift", json={"groups": ["dfe-analysts"]}, headers=admin_headers
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert "drift" in app.state.group_store.get("dfe-analysts").members
+        assert resp.json()["groups"] == ["dfe-analysts"]
+
+    def test_clearing_the_groups_removes_a_membership_its_own_list_lost(
+        self, client, app, admin_headers
+    ):
+        """drift is listed in dfe-viewers while its own list is empty."""
+        app.state.account_store.create("drift", _PASSWORD, groups=[])
+        app.state.group_store.add_member("dfe-viewers", "drift")
+
+        resp = client.put("/api/v1/auth/accounts/drift", json={"groups": []}, headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert "drift" not in app.state.group_store.get("dfe-viewers").members
+        assert resp.json()["groups"] == []
+
+
+class TestTheGroupsAnAccountShows:
+    """An account shows the groups it holds, which the group files decide for a local account."""
+
+    @pytest.fixture
+    def drift(self, app) -> None:
+        """A local account whose own list names dfe-admins while no group file lists it."""
+        app.state.account_store.create("drift", _PASSWORD, groups=["dfe-admins"])
+
+    def test_a_group_named_only_in_its_own_list_is_not_shown(self, client, admin_headers, drift):
+        resp = client.get("/api/v1/auth/accounts/drift", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["groups"] == []
+
+    def test_the_list_shows_the_same(self, client, admin_headers, drift):
+        resp = client.get(
+            "/api/v1/auth/accounts", params={"search": "drift"}, headers=admin_headers
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert [(a["username"], a["groups"]) for a in resp.json()["items"]] == [("drift", [])]
+
+    def test_scim_shows_the_same(self, client, admin_headers, drift):
+        resp = client.get("/api/v1/scim/v2/Users/drift", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert not resp.json().get("groups")
+
+    def test_an_idp_account_shows_the_groups_its_idp_asserts(self, client, app, admin_headers):
+        app.state.account_store.create("jane-corp-com", "", groups=["dfe-analysts"])
+        app.state.account_store.update("jane-corp-com", external=True, source_provider="entra")
+
+        resp = client.get("/api/v1/auth/accounts/jane-corp-com", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["groups"] == ["dfe-analysts"]
+
     def test_update_contact_fields(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",

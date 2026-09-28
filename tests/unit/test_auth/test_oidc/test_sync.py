@@ -17,7 +17,7 @@ from dfe_engine.auth.groups import GROUPS_SKIPPED, GroupMetrics, GroupStore
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.models import GroupInfo, GroupResolutionConfig, OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
-from dfe_engine.auth.oidc.sync import _safe_name, sync_provider
+from dfe_engine.auth.oidc.sync import SYNC_GROUPS_SKIPPED, SyncMetrics, _safe_name, sync_provider
 
 # ---------------------------------------------------------------------------
 # Fake adapter — dependency injection, not mocking
@@ -270,6 +270,7 @@ class TestSyncOverAGroupFileThatDoesNotLoad:
                 provider_registry,
                 group_store,
                 adapter=FakeAdapter(api_provider, groups),
+                metrics=SyncMetrics(manager),
             )
         finally:
             logger.remove(handler)
@@ -290,6 +291,55 @@ class TestSyncOverAGroupFileThatDoesNotLoad:
             if s.name == GROUPS_SKIPPED
         ]
         assert skipped == [1.0]
+        assert _sync_skips(manager) == {"stored_unloadable": 1.0}
+
+
+def _sync_skips(manager) -> dict[str, float]:
+    """The sync's skip counter, by reason, as the engine's /metrics serves it."""
+    return {
+        s.labels["reason"]: s.value
+        for f in text_string_to_metric_families(manager.metrics_text)
+        for s in f.samples
+        if s.name == SYNC_GROUPS_SKIPPED
+    }
+
+
+class TestSyncOverAGroupWhoseIdentifierMakesNoName:
+    """One provider group that sanitises to no valid group name must not abort the sync."""
+
+    @pytest.mark.parametrize(
+        "identifier",
+        ["!!!", "a" * 129, "_team", ".."],
+        ids=["empty", "too-long", "leading-underscore", "dots"],
+    )
+    async def test_it_is_skipped_counted_and_the_rest_sync(
+        self, registries, api_provider, identifier
+    ):
+        provider_registry, group_store = registries
+        provider_registry.create("test-sso", api_provider)
+        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+        groups = [
+            GroupInfo(id="g-bad", name=identifier, email=""),
+            GroupInfo(id="g2", name="operators", email="ops@example.com"),
+        ]
+
+        result = await sync_provider(
+            "test-sso",
+            provider_registry,
+            group_store,
+            adapter=FakeAdapter(api_provider, groups),
+            metrics=SyncMetrics(manager),
+        )
+
+        assert result["error"] is None
+        assert result["created"] == 1
+        assert result["groups_skipped"] == 1
+        assert [g.name for g in group_store.list()] == ["ops-example.com"]
+        assert group_store.get("ops-example.com").source_id == "g2"
+        assert provider_registry.get("test-sso").last_sync_status == (
+            "partial: 1 of 2 groups skipped, their identifier makes no valid group name"
+        )
+        assert _sync_skips(manager) == {"invalid_name": 1.0}
 
 
 class TestSyncUpdatesProviderStatus:

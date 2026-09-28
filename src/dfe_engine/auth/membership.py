@@ -6,14 +6,35 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Synchronise ``Account.groups`` and ``Group.members``."""
+"""Which groups an account holds, and keeping ``Account.groups`` and ``Group.members`` in step."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 
-from dfe_engine.auth.accounts import AccountStore
-from dfe_engine.auth.groups import GroupStore
+from dfe_engine.auth.accounts import Account, AccountStore
+from dfe_engine.auth.groups import Group, GroupStore
+
+
+def groups_held(account: Account, groups: Iterable[Group]) -> list[str]:
+    """The groups *account* holds, by the identifier its roles resolve from (never a token).
+
+    The group files are the authority, so a member removed there loses the group even
+    while the account's own list still names it. An IdP-owned account also holds its
+    own list: that is what its IdP asserts, as names or as provider ids, so a group an
+    operator adds it to by hand is held beside those, not in place of them.
+
+    Args:
+        account: The account.
+        groups: Every stored group, listed once by the caller.
+
+    Returns:
+        Sorted group identifiers, each a group name or an IdP-asserted provider id.
+    """
+    held = {group.name for group in groups if account.username in group.members}
+    if account.source_provider:
+        held.update(account.groups)
+    return sorted(held)
 
 
 def sync_account_groups_for_membership_change(

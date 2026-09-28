@@ -65,6 +65,7 @@ from scim2_models import (
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.password_floor import FLOOR_MESSAGE, below_floor, count_floor_refusal
 from dfe_engine.auth.groups import GroupExistsError
+from dfe_engine.auth.membership import groups_held
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.scim_mapping import (
     account_to_scim_user,
@@ -199,10 +200,11 @@ async def list_users(user: CurrentUser, request: Request) -> Response:
     total = len(accounts)
     window = accounts[start_index - 1 : start_index - 1 + count] if count else []
 
+    groups = group_store.list()
     resources = [
         account_to_scim_user(
             a,
-            groups=[g.name for g in group_store.list() if a.username in g.members] or a.groups,
+            groups=groups_held(a, groups),
             location=_location(request, "Users", a.username),
         )
         for a in window
@@ -230,7 +232,7 @@ async def get_user(user_id: str, user: CurrentUser, request: Request) -> Respons
     account = store.get(user_id)
     if account is None:
         return scim_error(404, f"User '{user_id}' not found")
-    groups = [g.name for g in group_store.list() if user_id in g.members] or account.groups
+    groups = groups_held(account, group_store.list())
     scim_user = account_to_scim_user(
         account, groups=groups, location=_location(request, "Users", user_id)
     )
@@ -308,7 +310,7 @@ async def replace_user(user_id: str, user: CurrentUser, request: Request) -> Res
         external_id=fields["external_id"],
     )
     account = store.get(user_id)
-    groups = [g.name for g in group_store.list() if user_id in g.members] or account.groups
+    groups = groups_held(account, group_store.list())
     scim_user = account_to_scim_user(
         account, groups=groups, location=_location(request, "Users", user_id)
     )
@@ -345,7 +347,7 @@ async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Respo
         # on /Groups) are ignored - the record stays consistent either way.
 
     account = store.get(user_id)
-    groups = [g.name for g in group_store.list() if user_id in g.members] or account.groups
+    groups = groups_held(account, group_store.list())
     scim_user = account_to_scim_user(
         account, groups=groups, location=_location(request, "Users", user_id)
     )

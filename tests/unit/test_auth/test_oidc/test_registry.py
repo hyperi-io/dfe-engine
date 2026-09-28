@@ -6,6 +6,9 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
+import inspect
+import typing
+
 import pytest
 
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
@@ -247,3 +250,14 @@ class TestANameThatIsAPath:
             registry.create("../elsewhere/planted", _make_generic_provider())
 
         assert not (tmp_path / "elsewhere" / "planted.yaml").exists()
+
+
+@pytest.mark.parametrize(
+    "method",
+    [name for name, value in vars(OIDCProviderRegistry).items() if inspect.isfunction(value)],
+)
+def test_every_method_annotation_evaluates(method):
+    """The class defines ``list``, so an annotation naming the builtin must not resolve to it."""
+    hints = typing.get_type_hints(getattr(OIDCProviderRegistry, method))
+
+    assert "return" in hints
