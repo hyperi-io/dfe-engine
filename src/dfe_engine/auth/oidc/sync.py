@@ -40,7 +40,8 @@ SYNC_GROUPS_SKIPPED = "auth_oidc_sync_groups_skipped_total"
 SyncSkipReason = Literal["invalid_name", "stored_unloadable"]
 """Why the sync left a provider group unsynced.
 
-- ``invalid_name``: its email, name or id makes no valid group name (empty, or too long).
+- ``invalid_name``: its email, name or id makes no valid group name: empty, over 128
+  characters, or not starting with a letter or digit.
 - ``stored_unloadable``: a stored group that does not load already holds its name.
 """
 
