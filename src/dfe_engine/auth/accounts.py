@@ -25,6 +25,7 @@ Usage::
 """
 
 import os
+import tempfile
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
@@ -56,9 +57,18 @@ def _dummy_hash() -> bytes:
 
 
 def _ignores_case(directory: Path) -> bool:
-    """Whether *directory* sits on a filesystem that takes ``Bob`` and ``bob`` as one name."""
-    flipped = directory.with_name(directory.name.swapcase())
-    return flipped != directory and flipped.exists() and flipped.samefile(directory)
+    """Whether *directory* sits on a filesystem that takes ``Bob`` and ``bob`` as one name.
+
+    Probed with a file of its own inside *directory*, since the directory's own name
+    may have no letters to flip. Where no probe can be made the answer is True, so
+    every lookup checks its entry's name, which is right on either kind.
+    """
+    try:
+        with tempfile.NamedTemporaryFile(dir=directory, prefix="case-probe-", suffix=".tmp") as f:
+            probe = Path(f.name)
+            return probe.with_name(probe.name.swapcase()).exists()
+    except OSError:
+        return True
 
 
 # Stored for accounts with NO usable local password (external / IdP-owned /

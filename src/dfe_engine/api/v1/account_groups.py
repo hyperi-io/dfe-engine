@@ -43,7 +43,7 @@ from dfe_engine.api.pagination import (
     apply_sort,
 )
 from dfe_engine.auth import Scope
-from dfe_engine.auth.groups import Group, validate_group_scope
+from dfe_engine.auth.groups import Group, GroupExistsError, validate_group_scope
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
 
@@ -187,18 +187,20 @@ async def create_group(
 
     store: GroupStore = request.app.state.group_store
     account_store: AccountStore = request.app.state.account_store
-    if store.get(body.name) is not None:
+    # create() decides, not get(): get() reports a stored group that does not load as absent.
+    try:
+        group = store.create(
+            body.name,
+            roles=body.roles,
+            description=body.description,
+            members=body.members,
+            scope=body.scope,
+        )
+    except GroupExistsError as exc:
         raise HTTPException(
             status_code=409,
             detail={"code": "conflict", "message": f"Group '{body.name}' already exists"},
-        )
-    group = store.create(
-        body.name,
-        roles=body.roles,
-        description=body.description,
-        members=body.members,
-        scope=body.scope,
-    )
+        ) from exc
     request_ch_rbac_reconcile(request.app.state)
     sync_account_groups_for_membership_change(
         account_store,

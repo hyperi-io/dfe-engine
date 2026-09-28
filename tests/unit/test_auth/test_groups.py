@@ -6,12 +6,22 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+from prometheus_client.parser import text_string_to_metric_families
 from scalo.logger import logger
+from scalo.metrics import create_metrics
 
-from dfe_engine.auth.groups import Group, GroupStore
+from dfe_engine.auth.groups import (
+    GROUPS_SKIPPED,
+    Group,
+    GroupExistsError,
+    GroupMetrics,
+    GroupStore,
+)
 
 
 class TestGroupModel:
@@ -34,41 +44,110 @@ class TestGroupModel:
             Group(name="climber", scope=scope)
 
 
-class TestAStoredGroupFileWithABadScope:
+_SKIPPED = "stored group skipped: not a valid group"
+_BAD_SCOPE = "roles: [admin]\nmembers: [bob]\nscope: org:../elsewhere/outside\n"
+_VALID = "roles: [admin]\nmembers: [bob]\n"
+
+_UNLOADABLE = [
+    pytest.param(_BAD_SCOPE, "invalid", id="bad-scope"),
+    pytest.param("roles: [admin\nmembers: [bob]\n", "unreadable", id="malformed-yaml"),
+    pytest.param("- admin\n- bob\n", "not_a_mapping", id="not-a-mapping"),
+    pytest.param("just a string\n", "not_a_mapping", id="a-scalar"),
+]
+
+
+@contextmanager
+def _warnings() -> Iterator[list[dict]]:
+    """The skip warnings logged inside the block, with their fields."""
+    seen: list[dict] = []
+    handler = logger.add(
+        lambda m: seen.append({"event": m.record["message"], **m.record["extra"]}),
+        level="WARNING",
+        format="{message}",
+    )
+    try:
+        yield seen
+    finally:
+        logger.remove(handler)
+
+
+def _skip_counts(manager) -> dict[str, float]:
+    counts: dict[str, float] = {}
+    for family in text_string_to_metric_families(manager.metrics_text):
+        for sample in family.samples:
+            if sample.name == GROUPS_SKIPPED:
+                counts[sample.labels["reason"]] = sample.value
+    return counts
+
+
+class TestAStoredGroupFileThatDoesNotLoad:
     """One file no Group can be made from must not take every other group down with it."""
 
     @pytest.fixture
-    def store(self, tmp_path):
-        store = GroupStore(tmp_path / "groups")
+    def groups_dir(self, tmp_path) -> Path:
+        return tmp_path / "groups"
+
+    @pytest.fixture
+    def manager(self):
+        return create_metrics("test", backend="prometheus", enable_auto_update=False)
+
+    @pytest.fixture
+    def store(self, groups_dir, manager):
+        store = GroupStore(groups_dir, metrics=GroupMetrics(manager))
         store.create("analysts", roles=["data_analyst"], members=["bob"])
-        (tmp_path / "groups" / "climber.yaml").write_text(
-            "roles: [admin]\nmembers: [bob]\nscope: org:../elsewhere/outside\n",
-            encoding="utf-8",
-        )
         return store
 
-    def test_every_other_group_still_loads_and_the_bad_one_is_absent(self, store):
+    @pytest.mark.parametrize(("content", "reason"), _UNLOADABLE)
+    def test_every_other_group_still_loads_and_the_bad_one_is_absent(
+        self, store, groups_dir, content, reason
+    ):
+        (groups_dir / "climber.yaml").write_text(content, encoding="utf-8")
+
         assert [g.name for g in store.list()] == ["analysts"]
         assert store.get("climber") is None
         assert store.get("analysts").roles == ["data_analyst"]
         assert store.resolve_roles_for_member("bob") == ["data_analyst"]
 
-    def test_the_skip_is_logged_once_naming_the_file(self, store):
-        warnings: list[dict] = []
-        handler = logger.add(
-            lambda m: warnings.append({"event": m.record["message"], **m.record["extra"]}),
-            level="WARNING",
-            format="{message}",
-        )
-        try:
+    @pytest.mark.parametrize(("content", "reason"), _UNLOADABLE)
+    def test_the_skip_is_logged_and_counted_once_naming_the_file(
+        self, store, groups_dir, manager, content, reason
+    ):
+        (groups_dir / "climber.yaml").write_text(content, encoding="utf-8")
+
+        with _warnings() as seen:
             store.list()
             store.list()
             store.get("climber")
-        finally:
-            logger.remove(handler)
 
-        skipped = [w for w in warnings if w["event"] == "group file skipped: not a valid group"]
-        assert [Path(w["path"]).name for w in skipped] == ["climber.yaml"]
+        skipped = [w for w in seen if w["event"] == _SKIPPED]
+        assert [(Path(w["path"]).name, w["reason"]) for w in skipped] == [("climber.yaml", reason)]
+        assert _skip_counts(manager) == {reason: 1.0}
+
+    def test_a_file_that_loads_again_is_reported_again_when_it_next_breaks(
+        self, store, groups_dir, manager
+    ):
+        stored = groups_dir / "climber.yaml"
+
+        with _warnings() as seen:
+            stored.write_text(_BAD_SCOPE, encoding="utf-8")
+            store.list()
+            stored.write_text(_VALID, encoding="utf-8")
+            assert [g.name for g in store.list()] == ["analysts", "climber"]
+            stored.write_text(_BAD_SCOPE, encoding="utf-8")
+            store.list()
+            store.list()
+
+        assert [w["event"] for w in seen].count(_SKIPPED) == 2
+        assert _skip_counts(manager) == {"invalid": 2.0}
+
+    def test_creating_one_over_it_is_refused_as_existing(self, store, groups_dir):
+        """get() reports it absent, so create() is what keeps the file from being replaced."""
+        (groups_dir / "climber.yaml").write_text(_BAD_SCOPE, encoding="utf-8")
+
+        with pytest.raises(GroupExistsError):
+            store.create("climber", roles=[])
+
+        assert (groups_dir / "climber.yaml").read_text(encoding="utf-8") == _BAD_SCOPE
 
 
 class TestGroupStoreCreate:

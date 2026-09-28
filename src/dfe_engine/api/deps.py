@@ -435,9 +435,21 @@ def get_role_config(request: Request) -> RoleConfig:
 
 
 def _groups_of_account(group_store: GroupStore, account: Any) -> list[str]:
-    """Group names from GroupStore membership of *account*, else its own list (never JWT)."""
+    """Group names from GroupStore membership of *account*, else its own list (never JWT).
+
+    An IdP-owned account takes both: its own list is what its IdP asserts, so a group
+    an operator adds it to by hand is held beside those, not in place of them.
+    """
     from_membership = sorted(g.name for g in group_store.list() if account.username in g.members)
+    if account.source_provider:
+        return sorted(set(from_membership) | set(account.groups))
     return from_membership or list(account.groups)
+
+
+def _account_stored_under(request: Request, user_id: str) -> bool:
+    """Whether an account is stored under exactly *user_id*, bound to it or not."""
+    account_store = getattr(request.app.state, "account_store", None)
+    return account_store is not None and account_store.get(user_id) is not None
 
 
 def resolve_live_grants_for_user(
@@ -728,6 +740,9 @@ async def get_current_user(request: Request) -> AuthContext:
         elif not isinstance(jwt_groups, list):
             jwt_groups = []
         account = require_local_account_enabled(request, jwt_user_id)
+        if account is None and _account_stored_under(request, jwt_user_id):
+            # The subject names an account it does not bind, whose groups the claim may carry.
+            jwt_groups = []
         refuse_until_password_changed(request, account)
         if account is not None and account.password_change_required:
             # Its token carries no roles, groups or orgs, so neither does the session.
