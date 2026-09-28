@@ -143,6 +143,10 @@ the overlay; `off` = not deployed.
 - **[4]** dfe-docker is Compose, not k8s - no Argo/operators layer; the
   container brings its own minimal wiring.
 
+### Admin UI links
+
+The deployer lists the admin UIs it stood up in `DFE_ADMIN_LINKS`, a JSON array of `{name, purpose, url, probe_url}`, and `GET /api/v1/deployment/admin-links` serves it to `admin` and `infra_admin`. The engine never discovers one. Any answer below 500 from the optional `probe_url` is `up`; a 5xx, timeout or refusal is `down`; no `probe_url` is `unknown`. A bad entry is dropped and counted on `admin_links_dropped_total`, and a URL carrying credentials is refused.
+
 ## Why the tiers compose that way
 
 `dfe-hunt-runner` is OFF for slim because slim is the bare-minimum k8s tier -
