@@ -90,7 +90,7 @@ forge OIDC headers and impersonate any user.
 ```mermaid
 flowchart LR
     subgraph "YAML Config (safe to commit)"
-        ACC["accounts/*.yaml<br/>username, bcrypt hash,<br/>group memberships"]
+        ACC["accounts/*.yaml<br/>username, bcrypt hash,<br/>groups an IdP asserts"]
         GRP["groups/*.yaml<br/>group name, roles,<br/>member list"]
         KEY["api-keys/*.yaml<br/>short token, SHA-384 hash,<br/>group memberships"]
         ROLES["roles.yaml<br/>role definitions,<br/>permission patterns"]
@@ -105,7 +105,7 @@ flowchart LR
     end
 
     ACC -->|bcrypt verify| API
-    GRP -->|role lookup| API
+    GRP -->|membership +<br/>role lookup| API
     KEY -->|SHA-384 verify| API
     ROLES -->|permission check| API
     ENV -->|JWT signing key,<br/>CH passwords| API
@@ -251,7 +251,9 @@ flowchart TD
 OIDC groups and local groups are unified — an OIDC group name that matches a
 group file in `config/auth/groups/` inherits that group's roles.
 
-For a local account the group files are the authority. The account's own `groups` list is kept in step by the API routes, but it grants nothing: a member removed from a group file, by the API or by a hand edit in gitops, loses that group's roles and orgs on the next request. An account an IdP owns (JIT or SCIM) also holds the groups its record says the IdP asserts, so a group an operator adds it to by hand sits beside those.
+For a local account the group files are the authority. The account's own `groups` list is kept in step by the API routes, but it grants nothing. A member removed from a group file in the live store loses that group's roles and orgs at its next engine request, whether the API removed it, someone edited the file in the engine's auth directory, or the Helm chart's `authConfig.groupsConfigMap` copied a new file in at pod start. The deploy repo's `governance/rbac` classes are neither read nor written at runtime, so an edit there changes nothing. An account an IdP owns (JIT or SCIM) also holds the groups its record says the IdP asserts, so a group an operator adds it to by hand sits beside those.
+
+dfe-hyperdx decides on the `role` claim of the token it holds, so there a role taken away lasts until that token expires or is refreshed (`api.jwt_expire_minutes`).
 
 ### 2.2 Role Definitions
 
@@ -403,7 +405,7 @@ All stores are YAML-backed (one file per entity, filename = identity).
 # config/auth/accounts/analyst1.yaml
 enabled: true
 password_hash: "$2b$12$LJ3m..."
-groups: ["soc-analysts"]
+groups: ["soc-analysts"]        # kept in step with the group files; grants nothing for a local account
 created_at: "2026-03-31T02:00:00Z"
 updated_at: "2026-03-31T02:00:00Z"
 ```

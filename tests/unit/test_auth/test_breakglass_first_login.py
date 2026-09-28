@@ -524,13 +524,49 @@ class TestAnotherAdminExists:
     def test_an_enabled_admin_group_member_counts(self, tmp_path: Path, crud):
         store, groups = self._stores(tmp_path, crud)
         store.create("alice", MINTED_SEED, groups=["dfe-admins"])
+        groups.add_member("dfe-admins", "alice")
 
         assert admin_retirement.another_admin_exists(store, groups, "admin") is True
 
-    def test_a_disabled_account_does_not_count(self, tmp_path: Path, crud):
+    def test_an_admin_group_named_only_in_the_account_record_does_not_count(
+        self, tmp_path: Path, crud
+    ):
+        """The group file is the authority: ops's own list names dfe-admins, the file does not."""
+        store, groups = self._stores(tmp_path, crud)
+        store.create("ops", MINTED_SEED, groups=["dfe-admins"])
+
+        assert admin_retirement.another_admin_exists(store, groups, "admin") is False
+
+    def test_an_idp_account_asserting_the_admin_group_counts(self, tmp_path: Path, crud):
+        """An IdP-owned account holds what its IdP asserts, as a session does."""
+        store, groups = self._stores(tmp_path, crud)
+        store.create("jane-corp-com", "", groups=["dfe-admins"])
+        store.update("jane-corp-com", external=True, source_provider="entra")
+
+        assert admin_retirement.another_admin_exists(store, groups, "admin") is True
+
+    @pytest.mark.parametrize(
+        "state",
+        [
+            pytest.param({"enabled": False}, id="disabled"),
+            pytest.param({"blocked": True}, id="blocked"),
+        ],
+    )
+    def test_an_account_that_cannot_hold_a_session_does_not_count(
+        self, tmp_path: Path, crud, state
+    ):
         store, groups = self._stores(tmp_path, crud)
         store.create("alice", MINTED_SEED, groups=["dfe-admins"])
-        store.update("alice", enabled=False)
+        groups.add_member("dfe-admins", "alice")
+        store.update("alice", **state)
+
+        assert admin_retirement.another_admin_exists(store, groups, "admin") is False
+
+    def test_an_account_on_an_issued_password_does_not_count(self, tmp_path: Path, crud):
+        """Until the change its session holds no roles, so it cannot run the deployment."""
+        store, groups = self._stores(tmp_path, crud)
+        store.create("alice", MINTED_SEED, groups=["dfe-admins"], change_required=True)
+        groups.add_member("dfe-admins", "alice")
 
         assert admin_retirement.another_admin_exists(store, groups, "admin") is False
 
@@ -543,7 +579,7 @@ class TestAnotherAdminExists:
     def test_an_org_scoped_admin_does_not_count(self, tmp_path: Path, crud):
         """Org-scoped roles bind inside that org, so its members cannot run the deployment."""
         store, groups = self._stores(tmp_path, crud)
-        groups.create("acme-admins", roles=["admin"], scope="org:acme")
+        groups.create("acme-admins", roles=["admin"], members=["carol"], scope="org:acme")
         store.create("carol", MINTED_SEED, groups=["acme-admins"])
 
         assert admin_retirement.another_admin_exists(store, groups, "admin") is False
