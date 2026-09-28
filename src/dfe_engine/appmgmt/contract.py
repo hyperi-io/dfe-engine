@@ -312,6 +312,13 @@ CHART_DERIVED: dict[str, dict[str, str]] = {
         # The configmap forces grpc here on direct. The loader.grpc_endpoint and
         # destinations.default it renders beside it are defaults an overlay value beats.
         "loader.transport": "dfe-common.transport",
+        # Merged over the overlay: the pushgrpc listener also opens the container port,
+        # and receiver.buffer.spillover also decides the spool volume the Deployment mounts.
+        "grpc.enabled": "listeners[pushgrpc]",
+        "grpc.bind_address": "listeners[pushgrpc]",
+        "buffer.memory_limit": "receiver.buffer",
+        "buffer.spillover.enabled": "receiver.buffer.spillover",
+        "buffer.spillover.path": "receiver.buffer.spillover",
         "routing.dlq.enabled": "DFE_RECEIVER_DLQ_ENABLED",
         "routing.dlq.topic": "DFE_RECEIVER_DLQ_TOPIC",
         "routing.dlq.mode": "DFE_RECEIVER_DLQ_MODE",

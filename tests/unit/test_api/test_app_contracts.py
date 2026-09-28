@@ -788,6 +788,34 @@ def _put_receiver(client, headers, changes: dict):
     return client.put(f"{RECEIVER_BASE}/config", json={"changes": changes}, headers=headers)
 
 
+class TestTheReceiverConfigmapsOwnKeysAreRefused:
+    """The receiver configmap merges its listener and buffer values over the overlay."""
+
+    @pytest.mark.parametrize(
+        ("path", "value", "supplier"),
+        [
+            ("config.grpc.enabled", False, "listeners[pushgrpc]"),
+            ("config.grpc.bind_address", "127.0.0.1:1", "listeners[pushgrpc]"),
+            ("config.buffer.memory_limit", 1234, "receiver.buffer"),
+            ("config.buffer.spillover.enabled", True, "receiver.buffer.spillover"),
+            ("config.buffer.spillover.path", "/overlay/spool", "receiver.buffer.spillover"),
+        ],
+    )
+    def test_a_write_is_refused_and_names_the_chart_value_to_change(
+        self, client, app, admin_headers, tmp_path, path, value, supplier
+    ):
+        gc = _wire(app, tmp_path)
+        assert _deploy_receiver(client, admin_headers).status_code == 200
+        before = gc.head_revision()
+
+        resp = _put_receiver(client, admin_headers, {path: value})
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "chart_derived"
+        assert supplier in resp.json()["message"]
+        assert gc.head_revision() == before
+
+
 @pytest.mark.usefixtures("_held")
 class TestTurningAcknowledgementsOff:
     @pytest.mark.parametrize("block", ["server", "grpc", "otlp", "webhook"])

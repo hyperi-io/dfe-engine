@@ -416,10 +416,39 @@ class TestProvenance:
             "config.kafka.sasl.mechanism",
             "config.server.bind_address",
             "config.loader.transport",
+            "config.grpc.enabled",
+            "config.grpc.bind_address",
+            "config.buffer.memory_limit",
+            "config.buffer.spillover.enabled",
+            "config.buffer.spillover.path",
             "config.routing.dlq.enabled",
             "config.routing.dlq.topic",
             "config.routing.dlq.mode",
         } == derived
+
+    @pytest.mark.parametrize(
+        ("path", "value", "supplier"),
+        [
+            ("grpc.enabled", False, "listeners[pushgrpc]"),
+            ("grpc.bind_address", "127.0.0.1:1", "listeners[pushgrpc]"),
+            ("buffer.memory_limit", 1234, "receiver.buffer"),
+            ("buffer.spillover.enabled", True, "receiver.buffer.spillover"),
+            ("buffer.spillover.path", "/overlay/spool", "receiver.buffer.spillover"),
+        ],
+    )
+    def test_what_the_receiver_configmap_merges_over_the_overlay_is_the_chart_s(
+        self, path, value, supplier
+    ):
+        # mergeOverwrite puts the chart's value over the overlay's, so a write is shadowed.
+        overlay: dict = {"config": {}}
+        set_path(overlay["config"], path, value)
+        by_path = {
+            f.path: f for f in contract.resolve_config(_contract("dfe-receiver"), overlay).fields
+        }
+
+        assert by_path[f"config.{path}"].provenance == contract.Provenance.CHART
+        assert contract.chart_supplier("dfe-receiver", f"config.{path}", overlay) == supplier
+        assert supplier not in contract.chart_env_names("dfe-receiver", overlay)
 
     def test_the_receiver_s_loader_transport_is_the_chart_s_over_the_overlay(self):
         # The configmap sets grpc on direct after merging the overlay, so it wins.
