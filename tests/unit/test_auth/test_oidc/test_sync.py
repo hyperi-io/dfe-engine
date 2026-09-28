@@ -9,8 +9,11 @@
 from __future__ import annotations
 
 import pytest
+from prometheus_client.parser import text_string_to_metric_families
+from scalo.logger import logger
+from scalo.metrics import create_metrics
 
-from dfe_engine.auth.groups import GroupStore
+from dfe_engine.auth.groups import GROUPS_SKIPPED, GroupMetrics, GroupStore
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.models import GroupInfo, GroupResolutionConfig, OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
@@ -241,6 +244,49 @@ class TestSyncPreservesExistingRoles:
         assert updated.source_provider == "test-sso"
         assert updated.source_id == "new-id-456"
         assert updated.roles == ["infra_viewer"]
+
+
+class TestSyncOverAGroupFileThatDoesNotLoad:
+    """One unloadable file holding a synced group's name must not abort the whole sync."""
+
+    _BAD_SCOPE = "roles: [admin]\nscope: org:../elsewhere/outside\n"
+
+    async def test_that_group_is_skipped_and_the_rest_sync(self, tmp_path, api_provider):
+        provider_registry = OIDCProviderRegistry(tmp_path / "oidc")
+        provider_registry.create("test-sso", api_provider)
+        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+        group_store = GroupStore(tmp_path / "groups", metrics=GroupMetrics(manager))
+        stored = tmp_path / "groups" / "admins-example.com.yaml"
+        stored.write_text(self._BAD_SCOPE, encoding="utf-8")
+        groups = [
+            GroupInfo(id="g1", name="admins", email="admins@example.com"),
+            GroupInfo(id="g2", name="operators", email="ops@example.com"),
+        ]
+        warnings: list[str] = []
+        handler = logger.add(lambda m: warnings.append(m.record["message"]), level="WARNING")
+        try:
+            result = await sync_provider(
+                "test-sso",
+                provider_registry,
+                group_store,
+                adapter=FakeAdapter(api_provider, groups),
+            )
+        finally:
+            logger.remove(handler)
+
+        assert result["error"] is None
+        assert result["created"] == 1
+        assert group_store.get("ops-example.com").source_id == "g2"
+        assert stored.read_text(encoding="utf-8") == self._BAD_SCOPE
+        assert "OIDC group sync skipped a group whose stored copy does not load" in warnings
+        assert provider_registry.get("test-sso").last_sync_status == "ok"
+        skipped = [
+            s.value
+            for f in text_string_to_metric_families(manager.metrics_text)
+            for s in f.samples
+            if s.name == GROUPS_SKIPPED
+        ]
+        assert skipped == [1.0]
 
 
 class TestSyncUpdatesProviderStatus:

@@ -24,6 +24,7 @@ Usage::
     store.delete("alice")
 """
 
+import builtins
 import os
 import tempfile
 from datetime import UTC, datetime
@@ -158,7 +159,7 @@ class AccountStore:
         username: str,
         password: str,
         *,
-        groups: list[str] | None = None,
+        groups: builtins.list[str] | None = None,
         email: str = "",
         phone: str = "",
         name: str = "",
@@ -250,7 +251,7 @@ class AccountStore:
             return None
         return self._read(path)
 
-    def list(self) -> list[Account]:
+    def list(self) -> builtins.list[Account]:
         """Return all accounts in the store.
 
         Returns:
@@ -477,7 +478,7 @@ class DocuStoreAccountStore:
         username: str,
         password: str,
         *,
-        groups: list[str] | None = None,
+        groups: builtins.list[str] | None = None,
         email: str = "",
         phone: str = "",
         name: str = "",
@@ -532,7 +533,7 @@ class DocuStoreAccountStore:
             raise KeyError(username)
         return account
 
-    def list(self) -> list[Account]:
+    def list(self) -> builtins.list[Account]:
         """Return all accounts, sorted by username."""
         return self._c.list()
 

@@ -438,16 +438,72 @@ class TestRolesFollowTheBoundAccount:
         assert resp.status_code == 200, resp.text
         assert resp.json()["roles"] == ["data_analyst"]
 
-    def test_a_token_with_no_account_behind_it_gets_its_claim_groups(
+    def test_a_token_with_no_account_behind_it_gets_no_roles_from_its_claim(
         self, client: TestClient, app, api_settings
     ):
+        """Every real login binds an account, so a claim alone is a token nothing vouches for."""
         headers = _bearer(api_settings, "omar@example.com", groups=["dfe-analysts"])
 
         resp = client.get("/api/v1/auth/me", headers=headers)
 
         assert app.state.account_store.get("omar-example-com") is None
         assert resp.status_code == 200, resp.text
+        assert resp.json()["roles"] == []
+        assert resp.json()["groups"] == []
+
+    def test_a_deleted_accounts_live_token_gets_no_roles(self, client: TestClient, app):
+        password = secrets.token_urlsafe(16)
+        app.state.account_store.create("leaver", password, groups=["dfe-admins"])
+        app.state.group_store.add_member("dfe-admins", "leaver")
+        login = client.post("/api/v1/auth/login", json={"username": "leaver", "password": password})
+        assert "admin" in login.json()["roles"]
+        app.state.group_store.remove_member("dfe-admins", "leaver")
+        app.state.account_store.delete("leaver")
+
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {login.json()['access_token']}"},
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["roles"] == []
+        assert resp.json()["groups"] == []
+
+    def test_a_bound_idp_user_gets_its_accounts_roles(self, client: TestClient, api_settings):
+        """Alice.Smith@corp binds alice-smith-corp through the stem; the claim is not consulted."""
+        client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "Alice.Smith@corp", "X-Oidc-Groups": "dfe-analysts"},
+        )
+
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers=_bearer(api_settings, "Alice.Smith@corp", groups=["dfe-admins"]),
+        )
+
+        assert resp.status_code == 200, resp.text
         assert resp.json()["roles"] == ["data_analyst"]
+
+    def test_a_scim_adopted_local_login_whose_subject_differs_is_unbound(
+        self, client: TestClient, app
+    ):
+        """Pins today's behaviour: login answers with roles, the session holds none and cannot refresh."""
+        password = secrets.token_urlsafe(16)
+        store = app.state.account_store
+        store.create("bob", password, groups=["dfe-analysts"])
+        store.update("bob", source_provider="scim", subject="bob@corp")
+        app.state.group_store.add_member("dfe-analysts", "bob")
+
+        login = client.post("/api/v1/auth/login", json={"username": "bob", "password": password})
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        me = client.get("/api/v1/auth/me", headers=headers)
+        refreshed = client.post("/api/v1/auth/refresh", headers=headers)
+
+        assert login.status_code == 200, login.text
+        assert login.json()["roles"] == ["data_analyst"]
+        assert me.status_code == 200, me.text
+        assert me.json()["roles"] == []
+        assert refreshed.status_code == 401, refreshed.text
 
     def test_a_local_login_gets_its_accounts_roles(self, client: TestClient):
         login = client.post(
@@ -481,6 +537,18 @@ class TestRolesFollowTheBoundAccount:
 
         assert resp.status_code == 200, resp.text
         assert resp.json()["roles"] == ["data_analyst"]
+
+    def test_a_token_minted_for_an_api_key_gets_no_roles(
+        self, client: TestClient, app, api_settings
+    ):
+        """An API-key subject binds no account; the key's groups belong to the key's own session."""
+        app.state.api_key_store.create("ci-analyst", groups=["dfe-analysts"])
+        headers = _bearer(api_settings, "apikey:ci-analyst", groups=["dfe-analysts"])
+
+        resp = client.get("/api/v1/auth/me", headers=headers)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["roles"] == []
 
     @pytest.mark.parametrize(
         "content",

@@ -379,6 +379,32 @@ class TestScimGroups:
         # membership mirrored onto the account
         assert "scim-team" in app.state.account_store.get("gm-1").groups
 
+    def test_create_duplicate_group_returns_409(self, client, admin_headers):
+        payload = {"schemas": [GROUP_SCHEMA], "displayName": "dup-group"}
+        client.post(f"{BASE}/Groups", json=payload, headers=admin_headers)
+
+        resp = client.post(f"{BASE}/Groups", json=payload, headers=admin_headers)
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["scimType"] == "uniqueness"
+
+    def test_create_over_a_group_file_that_does_not_load_returns_409(
+        self, app, client, admin_headers
+    ):
+        """get() reports the file absent, so create() is what keeps it from being replaced."""
+        stored = app.state.group_store._dir / "climber.yaml"
+        stored.write_text("roles: [admin]\nscope: org:../elsewhere/outside\n", encoding="utf-8")
+
+        resp = client.post(
+            f"{BASE}/Groups",
+            json={"schemas": [GROUP_SCHEMA], "displayName": "climber"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["scimType"] == "uniqueness"
+        assert "org:../elsewhere/outside" in stored.read_text(encoding="utf-8")
+
     def test_get_and_list_groups(self, client, admin_headers):
         client.post(
             f"{BASE}/Groups",

@@ -12,7 +12,7 @@ import bcrypt
 import pytest
 
 from dfe_engine.auth import accounts as accounts_module
-from dfe_engine.auth.accounts import Account, AccountStore
+from dfe_engine.auth.accounts import Account, AccountStore, DocuStoreAccountStore
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -235,6 +235,13 @@ class TestANameThatDiffersOnlyInCase:
             pytest.skip("this filesystem tells names apart by case")
 
         assert store.get("Bob") is None
+
+
+def test_the_stores_annotations_can_be_read():
+    """Both stores define list(), which a bare list[...] in their signatures would name."""
+    assert AccountStore.list.__annotations__["return"] == list[Account]
+    assert AccountStore.create.__annotations__["groups"] == list[str] | None
+    assert DocuStoreAccountStore.list.__annotations__["return"] == list[Account]
 
 
 # ---------------------------------------------------------------------------

@@ -208,7 +208,7 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
 
     change_required = _password_change_required(request, auth_ctx.user_id)
     # The provider resolves role names only; the claim needs the scope each is bound at.
-    live = resolve_live_grants_for_user(request, auth_ctx.user_id, fallback_groups=auth_ctx.groups)
+    live = resolve_live_grants_for_user(request, auth_ctx.user_id)
     data = _token_data(
         auth_ctx.user_id,
         auth_ctx.org_id,
@@ -243,13 +243,13 @@ async def refresh_token(user: CurrentUser, request: Request, settings: Settings)
         )
     change_required = _password_change_required(request, user.user_id)
     # Re-resolved, so a role taken away is gone from the next token too.
-    live = resolve_live_grants_for_user(request, user.user_id, fallback_groups=user.groups)
+    live = resolve_live_grants_for_user(request, user.user_id)
     data = _token_data(
         user.user_id,
         user.org_id,
         live.roles,
         live.grants,
-        resolve_live_groups_for_user(request, user.user_id, fallback_groups=user.groups),
+        resolve_live_groups_for_user(request, user.user_id),
         user.org_ids,
         change_required=change_required,
     )

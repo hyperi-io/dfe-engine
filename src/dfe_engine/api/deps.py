@@ -414,12 +414,6 @@ def bound_account(request: Request, user_id: str) -> Any:
     return account_for_session_subject(account_store, user_id)
 
 
-def _groups_for_local_account(request: Request, user_id: str) -> list[str]:
-    """Load group names from AccountStore for JWT users (legacy tokens without groups claim)."""
-    account = bound_account(request, user_id)
-    return list(account.groups) if account is not None else []
-
-
 def get_role_config(request: Request) -> RoleConfig:
     """Load the current role definitions from disk (not a stale in-memory snapshot)."""
     role_store = getattr(request.app.state, "role_store", None)
@@ -446,76 +440,24 @@ def _groups_of_account(group_store: GroupStore, account: Any) -> list[str]:
     return from_membership or list(account.groups)
 
 
-def _account_stored_under(request: Request, user_id: str) -> bool:
-    """Whether an account is stored under exactly *user_id*, bound to it or not."""
-    account_store = getattr(request.app.state, "account_store", None)
-    return account_store is not None and account_store.get(user_id) is not None
+def resolve_live_grants_for_user(request: Request, user_id: str) -> GroupResolution:
+    """Resolve roles/org_ids/grants from the bound account's groups, never a token claim.
 
-
-def resolve_live_grants_for_user(
-    request: Request,
-    user_id: str,
-    *,
-    fallback_groups: list[str] | None = None,
-) -> GroupResolution:
-    """Resolve roles/org_ids/grants from group membership (ignores JWT role claims).
-
-    A session's store groups are its bound account's (:func:`account_for_session_subject`),
-    so a subject that binds none takes only *fallback_groups*, its own claim.
+    The account is the one :func:`account_for_session_subject` binds, so a subject that
+    binds none, an API-key subject among them, resolves to nothing.
     """
     group_store: GroupStore | None = getattr(request.app.state, "group_store", None)
-    if group_store is None:
+    account = bound_account(request, user_id)
+    if group_store is None or account is None:
         return GroupResolution([], [], [])
+    return _resolve_group_grants(_groups_of_account(group_store, account), group_store)
 
-    if user_id.startswith(API_KEY_SUBJECT_PREFIX):
-        key_name = user_id.removeprefix(API_KEY_SUBJECT_PREFIX)
-        api_key_store: APIKeyStore | None = getattr(request.app.state, "api_key_store", None)
-        groups: list[str] = []
-        if api_key_store is not None:
-            key = api_key_store.get(key_name)
-            if key is not None:
-                groups = list(key.groups)
-        if not groups:
-            groups = list(fallback_groups or [])
-        return _resolve_group_grants(groups, group_store)
 
+def resolve_live_groups_for_user(request: Request, user_id: str) -> list[str]:
+    """Return the bound account's group names from the stores, or none when it binds none."""
     account = bound_account(request, user_id)
     if account is None:
-        groups = list(fallback_groups or [])
-    else:
-        groups = _groups_of_account(group_store, account)
-    return _resolve_group_grants(groups, group_store)
-
-
-def resolve_live_roles_for_user(
-    request: Request,
-    user_id: str,
-    *,
-    fallback_groups: list[str] | None = None,
-) -> list[str]:
-    """Resolve roles from group membership and role mappings (ignores JWT role claims)."""
-    return resolve_live_grants_for_user(request, user_id, fallback_groups=fallback_groups).roles
-
-
-def resolve_live_groups_for_user(
-    request: Request,
-    user_id: str,
-    *,
-    fallback_groups: list[str] | None = None,
-) -> list[str]:
-    """Return current group names for a user from stores."""
-    if user_id.startswith(API_KEY_SUBJECT_PREFIX):
-        key_name = user_id.removeprefix(API_KEY_SUBJECT_PREFIX)
-        api_key_store: APIKeyStore | None = getattr(request.app.state, "api_key_store", None)
-        if api_key_store is not None:
-            key = api_key_store.get(key_name)
-            if key is not None:
-                return list(key.groups)
-        return list(fallback_groups or [])
-
-    account = bound_account(request, user_id)
-    if account is None:
-        return list(fallback_groups or [])
+        return []
     group_store: GroupStore | None = getattr(request.app.state, "group_store", None)
     if group_store is None:
         return list(account.groups)
@@ -734,15 +676,7 @@ async def get_current_user(request: Request) -> AuthContext:
 
         jwt_user_id = payload.get("sub", "")
         jwt_email = payload.get("email") or None
-        jwt_groups = payload.get("groups")
-        if jwt_groups is None:
-            jwt_groups = _groups_for_local_account(request, jwt_user_id)
-        elif not isinstance(jwt_groups, list):
-            jwt_groups = []
         account = require_local_account_enabled(request, jwt_user_id)
-        if account is None and _account_stored_under(request, jwt_user_id):
-            # The subject names an account it does not bind, whose groups the claim may carry.
-            jwt_groups = []
         refuse_until_password_changed(request, account)
         if account is not None and account.password_change_required:
             # Its token carries no roles, groups or orgs, so neither does the session.
@@ -754,8 +688,9 @@ async def get_current_user(request: Request) -> AuthContext:
                 client_ip=client_ip,
                 user_agent=user_agent,
             )
-        live = resolve_live_grants_for_user(request, jwt_user_id, fallback_groups=jwt_groups)
-        live_groups = resolve_live_groups_for_user(request, jwt_user_id, fallback_groups=jwt_groups)
+        # The token's own roles and groups claims grant nothing; the bound account decides.
+        live = resolve_live_grants_for_user(request, jwt_user_id)
+        live_groups = resolve_live_groups_for_user(request, jwt_user_id)
         claim_org_ids = payload.get("org_ids", [])
         org_ids = sorted(set(claim_org_ids) | set(live.org_ids)) if claim_org_ids else live.org_ids
         return AuthContext(

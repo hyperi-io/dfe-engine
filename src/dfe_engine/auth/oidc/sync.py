@@ -28,6 +28,8 @@ from typing import TYPE_CHECKING
 
 from scalo.logger import logger
 
+from dfe_engine.auth.groups import GroupExistsError
+
 if TYPE_CHECKING:
     from dfe_engine.auth.groups import GroupStore
     from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
@@ -158,11 +160,20 @@ async def sync_provider(
 
         existing = group_store.get(group_name)
         if existing is None:
-            group_store.create(
-                name=group_name,
-                roles=[],
-                description=group_info.description,
-            )
+            try:
+                group_store.create(
+                    name=group_name,
+                    roles=[],
+                    description=group_info.description,
+                )
+            except GroupExistsError:
+                # A stored group that does not load holds the name; the store counts the skip.
+                logger.warning(
+                    "OIDC group sync skipped a group whose stored copy does not load",
+                    provider=provider_name,
+                    group=group_name,
+                )
+                continue
             group_store.update(
                 group_name,
                 source_provider=provider_name,

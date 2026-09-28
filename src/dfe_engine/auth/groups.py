@@ -6,6 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
+import builtins
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -229,10 +230,10 @@ class GroupStore:
     def create(
         self,
         name: str,
-        roles: list[str],
+        roles: builtins.list[str],
         description: str = "",
         *,
-        members: list[str] | None = None,
+        members: builtins.list[str] | None = None,
         scope: str = GROUP_SCOPE_SYSTEM,
     ) -> Group:
         """Create a new group and persist it to YAML.
@@ -267,7 +268,7 @@ class GroupStore:
         """Return the named group, or None if it does not exist."""
         return self._read(name)
 
-    def list(self) -> list[Group]:
+    def list(self) -> builtins.list[Group]:
         """Return all groups sorted by name."""
         groups = []
         for path in sorted(self._dir.glob("*.yaml")):
@@ -404,7 +405,7 @@ class GroupStore:
             updated = group.model_copy(update={"members": updated_members})
             self._write(updated)
 
-    def resolve_roles_for_member(self, username: str) -> list[str]:
+    def resolve_roles_for_member(self, username: str) -> builtins.list[str]:
         """Return the sorted unique list of roles held by a member across all groups.
 
         Scans every group file; a user accumulates roles from all groups they
@@ -464,10 +465,10 @@ class DocuStoreGroupStore:
     def create(
         self,
         name: str,
-        roles: list[str],
+        roles: builtins.list[str],
         description: str = "",
         *,
-        members: list[str] | None = None,
+        members: builtins.list[str] | None = None,
         scope: str = GROUP_SCOPE_SYSTEM,
     ) -> Group:
         """Create a new group.
@@ -507,7 +508,7 @@ class DocuStoreGroupStore:
             self._skips.loaded(group.name)
         return group
 
-    def list(self) -> list[Group]:
+    def list(self) -> builtins.list[Group]:
         """Return all groups sorted by name, leaving out any that is not a valid group."""
         groups = self._c.list()
         for group in groups:
@@ -596,7 +597,7 @@ class DocuStoreGroupStore:
             updated = group.model_copy(update={"members": updated_members})
             self._c.put(group_name, updated)
 
-    def resolve_roles_for_member(self, username: str) -> list[str]:
+    def resolve_roles_for_member(self, username: str) -> builtins.list[str]:
         """Return the sorted unique list of roles held by a member across all groups."""
         roles: set[str] = set()
         for group in self.list():
