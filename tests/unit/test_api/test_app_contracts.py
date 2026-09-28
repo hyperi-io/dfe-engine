@@ -192,6 +192,28 @@ class TestTheConfigRouteNamesWhoSetsATransformTopic:
         assert resp.status_code == 200, resp.text
 
 
+class TestTheConfigRouteLeavesATransformsLoaderEndpointToTheOverlay:
+    """The chart renders a transform's loader address only where the overlay has none."""
+
+    def test_an_operator_s_endpoint_is_written_and_read_back_as_the_overlay_s(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy_vrl(client, admin_headers, "edge")
+        endpoint = "http://loader.example:6000"
+        route = "/api/v1/apps/dfe-transform-vrl/edge/config"
+
+        resp = client.put(
+            route, json={"changes": {"config.sink.endpoint": endpoint}}, headers=admin_headers
+        )
+
+        assert resp.status_code == 200, resp.text
+        body = client.get(route, headers=admin_headers)
+        assert body.status_code == 200, body.text
+        sink = {f["path"]: f for f in body.json()["fields"]}["config.sink.endpoint"]
+        assert (sink["provenance"], sink["value"]) == ("overlay", endpoint)
+
+
 class TestTheContractRoute:
     def test_it_serves_what_the_image_emitted(self, client, admin_headers):
         body = client.get(CONTRACT, headers=admin_headers).json()

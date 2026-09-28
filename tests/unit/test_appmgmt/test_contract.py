@@ -406,7 +406,7 @@ class TestProvenance:
             "config.routing.dlq.mode",
         } == derived
 
-    def test_the_flat_env_families_the_receiver_chart_sets(self):
+    def test_the_paths_the_receiver_chart_sets(self):
         view = contract.resolve_config(_contract("dfe-receiver"), {})
         derived = {f.path for f in view.fields if f.provenance == contract.Provenance.CHART}
         assert {
@@ -415,10 +415,44 @@ class TestProvenance:
             "config.kafka.sasl.password",
             "config.kafka.sasl.mechanism",
             "config.server.bind_address",
+            "config.loader.transport",
             "config.routing.dlq.enabled",
             "config.routing.dlq.topic",
             "config.routing.dlq.mode",
         } == derived
+
+    def test_the_receiver_s_loader_transport_is_the_chart_s_over_the_overlay(self):
+        # The configmap sets grpc on direct after merging the overlay, so it wins.
+        overlay = {"config": {"loader": {"transport": "kafka"}}}
+        by_path = {
+            f.path: f for f in contract.resolve_config(_contract("dfe-receiver"), overlay).fields
+        }
+
+        assert by_path["config.loader.transport"].provenance == contract.Provenance.CHART
+        assert contract.chart_supplier("dfe-receiver", "config.loader.transport", overlay) == (
+            "dfe-common.transport"
+        )
+        assert "dfe-common.transport" not in contract.chart_env_names("dfe-receiver", overlay)
+
+    def test_the_receiver_s_loader_address_and_default_destination_are_the_overlay_s(self):
+        # The configmap renders each only where the overlay has none.
+        endpoint = "http://loader.example:6000"
+        overlay = {
+            "config": {"loader": {"grpc_endpoint": endpoint}, "destinations": {"default": "bus"}}
+        }
+        by_path = {
+            f.path: f for f in contract.resolve_config(_contract("dfe-receiver"), overlay).fields
+        }
+
+        grpc_endpoint = by_path["config.loader.grpc_endpoint"]
+        default = by_path["config.destinations.default"]
+        assert (grpc_endpoint.provenance, grpc_endpoint.value) == (
+            contract.Provenance.OVERLAY,
+            endpoint,
+        )
+        assert (default.provenance, default.value) == (contract.Provenance.OVERLAY, "bus")
+        for path in ("config.loader.grpc_endpoint", "config.destinations.default"):
+            assert contract.chart_supplier("dfe-receiver", path, overlay) is None
 
     def test_the_flat_env_families_the_fetcher_chart_sets(self):
         view = contract.resolve_config(_contract("dfe-fetcher"), {})
@@ -471,7 +505,7 @@ class TestProvenance:
         assert "DFE_LOADER_HOUSE_KEY" not in names
 
     def test_a_chart_helper_is_not_an_env_name(self):
-        # The transforms resolve four paths through dfe-common.transport, which
+        # The transforms resolve three paths through dfe-common.transport, which
         # names no variable an operator could shadow.
         names = contract.chart_env_names("dfe-transform-vrl")
         assert "dfe-common.transport" not in names
@@ -494,7 +528,6 @@ class TestProvenance:
             "config.source.transport",
             "config.sink.transport",
             "config.source.listen",
-            "config.sink.endpoint",
             "config.source.brokers",
             "config.sink.brokers",
             "config.source.group_id",
@@ -534,6 +567,18 @@ class TestProvenance:
         assert contract.chart_env_names(service, overlay)["DFE_TRANSFORM_SINK_TOPIC"] == (
             "config.sink.topic"
         )
+
+    @pytest.mark.parametrize("service", ["dfe-transform-vrl", "dfe-transform-vector"])
+    def test_the_loader_endpoint_is_the_overlay_s(self, service):
+        # The configmap renders its own loader address only where the overlay has
+        # none, so the routing compiler's endpoint, or an operator's, is what the app dials.
+        endpoint = "http://loader.example:6000"
+        overlay = {"config": {"sink": {"endpoint": endpoint}}}
+        by_path = {f.path: f for f in contract.resolve_config(_contract(service), overlay).fields}
+
+        field = by_path["config.sink.endpoint"]
+        assert (field.provenance, field.value) == (contract.Provenance.OVERLAY, endpoint)
+        assert contract.chart_supplier(service, "config.sink.endpoint", overlay) is None
 
     def test_an_empty_chart_value_leaves_the_topic_the_overlay_s(self):
         # Helm's `with` skips an empty string, which is the chart's own default.

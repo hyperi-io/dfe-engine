@@ -265,11 +265,11 @@ each accepted header by ``name``.
 
 _TRANSFORM_CHART_ENV = {
     # dfe-common.transport resolves these from kafka.mode in the configmap, so the
-    # app never sees what the overlay says about them.
+    # app never sees what the overlay says about them. sink.endpoint is not among
+    # them: the configmap renders the loader address only where the overlay has none.
     "source.transport": "dfe-common.transport",
     "sink.transport": "dfe-common.transport",
     "source.listen": "dfe-common.transport",
-    "sink.endpoint": "dfe-common.transport",
     # The flat DFE_TRANSFORM_* env contract, which outranks the config file.
     "source.brokers": "DFE_TRANSFORM_SOURCE_BROKERS",
     "sink.brokers": "DFE_TRANSFORM_SINK_BROKERS",
@@ -309,6 +309,9 @@ CHART_DERIVED: dict[str, dict[str, str]] = {
         "kafka.sasl.password": "DFE_RECEIVER_KAFKA_SASL_PASSWORD",
         "kafka.sasl.mechanism": "DFE_RECEIVER_KAFKA_SASL_MECHANISM",
         "server.bind_address": "DFE_RECEIVER_BIND_ADDRESS",
+        # The configmap forces grpc here on direct. The loader.grpc_endpoint and
+        # destinations.default it renders beside it are defaults an overlay value beats.
+        "loader.transport": "dfe-common.transport",
         "routing.dlq.enabled": "DFE_RECEIVER_DLQ_ENABLED",
         "routing.dlq.topic": "DFE_RECEIVER_DLQ_TOPIC",
         "routing.dlq.mode": "DFE_RECEIVER_DLQ_MODE",
