@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Request
 
 from dfe_engine.api.v1.account_groups import router as account_groups_router
 from dfe_engine.api.v1.accounts import router as accounts_router
+from dfe_engine.api.v1.admin_links import router as admin_links_router
 from dfe_engine.api.v1.alerts import router as alerts_router
 from dfe_engine.api.v1.api_keys import router as api_keys_router
 from dfe_engine.api.v1.app_contracts import router as app_contracts_router
@@ -95,6 +96,7 @@ v1_router.include_router(sources_router)
 v1_router.include_router(kafka_topics_router)
 v1_router.include_router(services_router)
 v1_router.include_router(deployments_router)
+v1_router.include_router(admin_links_router)
 v1_router.include_router(fieldmaps_router)
 v1_router.include_router(rules_router)
 v1_router.include_router(alerts_router)

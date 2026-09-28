@@ -552,6 +552,15 @@ class TestEnvOverrides:
         # rather than guessing the widest deployment.
         assert load_settings().deployment.profile == ""
 
+    def test_admin_links_override_is_held_as_given(self, monkeypatch):
+        # Parsing is left to dfe_engine.admin_links, so a broken list cannot fail the load.
+        monkeypatch.setenv("DFE_ADMIN_LINKS", ' [{"name": "Argo CD",  ')
+        settings = load_settings()
+        assert settings.deployment.admin_links == '[{"name": "Argo CD",'
+
+    def test_admin_links_default_to_none_listed(self):
+        assert load_settings().deployment.admin_links == []
+
     def test_ui_version_override(self, monkeypatch):
         monkeypatch.setenv("DFE_UI_VERSION", "v1.5.1")
         settings = load_settings()

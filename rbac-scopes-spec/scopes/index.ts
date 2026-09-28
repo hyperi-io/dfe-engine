@@ -57,6 +57,7 @@ const deployment_scopes = {
   deployment_read: "deployment:read",
   deployment_write: "deployment:write",
   deployment_delete: "deployment:delete",
+  deployment_admin_links_read: "deployment:admin_links:read",
 } as const;
 
 const discovery_scopes = {

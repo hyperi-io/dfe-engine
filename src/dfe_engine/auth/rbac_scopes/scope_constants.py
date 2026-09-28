@@ -61,10 +61,12 @@ clickhouse_cloud_scopes = {
 # Not used in API but required for UI & HyperDX
 dashboard_scopes = {"dashboard_read": "dashboard:read"}
 
+# admin_links has three segments so deployment:read misses it and only deployment:* or * grants it.
 deployment_scopes = {
     "deployment_read": "deployment:read",
     "deployment_write": "deployment:write",
     "deployment_delete": "deployment:delete",
+    "deployment_admin_links_read": "deployment:admin_links:read",
 }
 
 discovery_scopes = {
