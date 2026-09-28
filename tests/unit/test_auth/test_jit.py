@@ -24,6 +24,7 @@ from dfe_engine.auth.jit import (
 from dfe_engine.auth.models import AuthenticationError
 from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
 from tests.support.failing_stores import StampFailingAccountStore
+from tests.support.racing_stores import RacingAccountStore
 
 
 @pytest.fixture
@@ -35,24 +36,6 @@ def stores(tmp_path):
     groups.create("dfe-admins", roles=["admin"])
     groups.create("dfe-analysts", roles=["data_analyst"])
     return accounts, groups
-
-
-class RacingAccountStore(AccountStore):
-    """A real store whose first ``get`` of one username misses.
-
-    What a request sees when another creates the account between its own lookup
-    and its create -- the only way into ``ensure_account``'s ValueError branch.
-    """
-
-    def __init__(self, accounts_dir, *, blind_to: str) -> None:
-        super().__init__(accounts_dir)
-        self._blind_to = blind_to
-
-    def get(self, username):
-        if username == self._blind_to:
-            self._blind_to = ""
-            return None
-        return super().get(username)
 
 
 def external_account(store: AccountStore, username: str, provider: str, groups: list[str]):

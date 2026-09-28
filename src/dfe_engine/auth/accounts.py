@@ -37,7 +37,7 @@ from pydantic import BaseModel, Field
 
 from dfe_engine.auth.protected_accounts import resolve_floor
 from dfe_engine.auth.store_names import VALID_NAME, store_key
-from dfe_engine.yaml_utils import yaml_dump, yaml_load
+from dfe_engine.yaml_utils import yaml_dump, yaml_dump_string, yaml_load
 
 if TYPE_CHECKING:
     from dfe_engine.store.documents import DocuStore
@@ -76,6 +76,10 @@ def _ignores_case(directory: Path) -> bool:
 # JIT-provisioned). Not a valid bcrypt hash ($2...), so verify_password never
 # matches - an external identity can only authenticate via its IdP, never local login.
 _UNUSABLE_PASSWORD_HASH = "!"
+
+
+class AccountExistsError(ValueError):
+    """An account is already stored under the name, including one created a moment ago."""
 
 
 class Account(BaseModel):
@@ -181,14 +185,13 @@ class AccountStore:
             The newly created Account.
 
         Raises:
-            ValueError: If an account with this username already exists.
+            AccountExistsError: An account is already stored under *username*,
+                including one another replica created at the same moment.
+            ValueError: *username* is not a name an account can have.
         """
         if not VALID_NAME.match(username):
             raise ValueError(f"Invalid account name: {username!r}")
         path = self._path(username)
-        if path.exists():
-            raise ValueError(f"Account already exists: {username}")
-
         account = _new_account(
             username,
             password,
@@ -198,7 +201,10 @@ class AccountStore:
             name=name,
             change_required=change_required,
         )
-        self._write(path, account)
+        try:
+            self._write_new(path, account)
+        except FileExistsError as exc:
+            raise AccountExistsError(f"Account already exists: {username}") from exc
         return account
 
     def put(self, account: Account, *, allow_protected: bool = False) -> Account:
@@ -430,6 +436,28 @@ class AccountStore:
         data = account.model_dump(exclude={"username"})
         yaml_dump(data, path)
 
+    def _write_new(self, path: Path, account: Account) -> None:
+        """Persist a new Account to *path*, which the filesystem refuses if any file holds it.
+
+        Exclusive-create mode makes the existence check and the create one step, so of
+        two replicas creating one account at once exactly one succeeds.
+
+        Raises:
+            FileExistsError: A file already holds *path*; it is left untouched.
+        """
+        text = yaml_dump_string(account.model_dump(exclude={"username"}), target=str(path))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        f = open(path, "x", encoding="utf-8", newline="\n")
+        try:
+            with f:
+                f.write(text)
+                f.flush()
+                os.fsync(f.fileno())
+        except BaseException:
+            # A partial file would read as a broken account under this name.
+            path.unlink(missing_ok=True)
+            raise
+
 
 # Fields update() may change; username and password_hash are excluded (the
 # password changes only via reset_password). Shared by both store backends.
@@ -484,11 +512,13 @@ class DocuStoreAccountStore:
         name: str = "",
         change_required: bool = False,
     ) -> Account:
-        """Create a new account. Raises ValueError if the name is invalid or taken."""
+        """Create a new account. Raises AccountExistsError if taken, ValueError if invalid.
+
+        Taken includes by another replica at the same moment: the insert, not a prior
+        lookup, decides.
+        """
         if not VALID_NAME.match(username):
             raise ValueError(f"Invalid account name: {username!r}")
-        if self._c.exists(username):
-            raise ValueError(f"Account already exists: {username}")
         account = _new_account(
             username,
             password,
@@ -498,7 +528,8 @@ class DocuStoreAccountStore:
             name=name,
             change_required=change_required,
         )
-        self._c.put(username, account)
+        if not self._c.insert(account):
+            raise AccountExistsError(f"Account already exists: {username}")
         return account
 
     def put(self, account: Account, *, allow_protected: bool = False) -> Account:

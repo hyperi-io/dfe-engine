@@ -148,3 +148,47 @@ class TestServiceUnavailable:
         assert data["code"] == "service_unavailable"
         assert data["context"]["waking"] is True
         assert "warming up" in data["message"].lower()
+
+
+class TestAnUnexpectedFailure:
+    """The catch-all 500 answers in the envelope the caller's client parses."""
+
+    @staticmethod
+    def _client() -> TestClient:
+        from fastapi import FastAPI
+
+        from dfe_engine.api.errors import install_exception_handlers
+        from dfe_engine.api.v1.scim import SCIM_ROOT
+
+        app = FastAPI()
+        install_exception_handlers(app)
+
+        @app.get(f"{SCIM_ROOT}/Users/broken")
+        def _scim_broken():
+            raise RuntimeError("volume went away")
+
+        @app.get("/api/v1/broken")
+        def _native_broken():
+            raise RuntimeError("volume went away")
+
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_a_scim_route_answers_a_scim_error(self):
+        resp = self._client().get("/api/v1/scim/v2/Users/broken")
+
+        assert resp.status_code == 500
+        assert resp.headers["content-type"].startswith("application/scim+json")
+        assert resp.json()["schemas"] == ["urn:ietf:params:scim:api:messages:2.0:Error"]
+        assert resp.json()["detail"] == "An unexpected error occurred"
+        assert "volume went away" not in resp.text
+
+    def test_a_native_route_keeps_the_native_envelope(self):
+        resp = self._client().get("/api/v1/broken")
+
+        assert resp.status_code == 500
+        assert resp.headers["content-type"].startswith("application/json")
+        assert resp.json() == {
+            "code": ErrorCode.INTERNAL_ERROR,
+            "message": "An unexpected error occurred",
+            "errors": [],
+        }

@@ -200,6 +200,10 @@ def install_exception_handlers(app: FastAPI) -> None:
     from dfe_engine.api.v1.scim import SCIM_ROOT, scim_error
     from dfe_engine.auth.models import AuthenticationError, AuthorizationError
 
+    def is_scim(request: Request) -> bool:
+        """Whether *request* came to a SCIM route, whose client reads the RFC 7644 envelope."""
+        return request.url.path.startswith(SCIM_ROOT)
+
     @app.exception_handler(AuthenticationError)
     async def auth_error_handler(_request: Request, exc: AuthenticationError):
         body = ErrorResponse(code=ErrorCode.UNAUTHORIZED, message=str(exc))
@@ -207,8 +211,7 @@ def install_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(AuthorizationError)
     async def authz_error_handler(request: Request, exc: AuthorizationError):
-        # A SCIM client reads the RFC 7644 error envelope, not the native one.
-        if request.url.path.startswith(SCIM_ROOT):
+        if is_scim(request):
             return scim_error(403, str(exc))
         body = ErrorResponse(code=ErrorCode.FORBIDDEN, message=str(exc))
         return JSONResponse(status_code=403, content=_error_response_json(body))
@@ -220,7 +223,7 @@ def install_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(ProtectedAccountError)
     async def protected_account_handler(request: Request, exc: ProtectedAccountError):
-        if request.url.path.startswith(SCIM_ROOT):
+        if is_scim(request):
             # mutability is the nearest RFC 7644 scimType: the attribute is not
             # mutable on this resource, whatever it is on any other.
             return scim_error(403, str(exc), "mutability")
@@ -264,7 +267,10 @@ def install_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
         logger.exception(f"Unhandled exception on {request.method} {request.url.path}")
-        body = ErrorResponse(code=ErrorCode.INTERNAL_ERROR, message="An unexpected error occurred")
+        message = "An unexpected error occurred"
+        if is_scim(request):
+            return scim_error(500, message)
+        body = ErrorResponse(code=ErrorCode.INTERNAL_ERROR, message=message)
         return JSONResponse(status_code=500, content=_error_response_json(body))
 
 
