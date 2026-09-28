@@ -34,9 +34,9 @@ from .catalogue import (
     OTEL_SERVICE_NAME_PATH,
     AppDescriptor,
     Multiplicity,
+    deployed_name,
     descriptor,
     instance_component,
-    instance_name,
     render_source_binding,
     services,
 )
@@ -73,7 +73,7 @@ class AppInstance:
     @property
     def telemetry_name(self) -> str:
         """The OTel ``service.name`` that distinguishes this instance's metrics."""
-        return instance_name(self.descriptor, self.instance)
+        return deployed_name(self.descriptor, self.instance)
 
     @property
     def descriptor(self) -> AppDescriptor:
