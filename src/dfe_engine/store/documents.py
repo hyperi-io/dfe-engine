@@ -25,6 +25,7 @@ from typing import Generic, TypeVar
 from pydantic import BaseModel, ValidationError
 from pymongo import ASCENDING, MongoClient
 from pymongo.collection import Collection as MongoCollection
+from pymongo.errors import DuplicateKeyError
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -116,6 +117,18 @@ class DocumentCollection(Generic[T]):
     def put(self, key_value: str, model: T) -> None:
         """Upsert ``model`` under ``key_value`` (create or full replace)."""
         self._c.replace_one({self._key: key_value}, self._dump(model), upsert=True)
+
+    def insert(self, model: T) -> bool:
+        """Store ``model`` as a new document; False when its key value is already taken.
+
+        The unique index on the key decides, so of two clients inserting one key at
+        once exactly one succeeds.
+        """
+        try:
+            self._c.insert_one(self._dump(model))
+        except DuplicateKeyError:
+            return False
+        return True
 
     def delete(self, key_value: str) -> bool:
         """Delete the document with ``key == key_value``; True if one was removed."""
