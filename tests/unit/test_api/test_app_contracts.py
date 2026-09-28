@@ -192,6 +192,28 @@ class TestTheConfigRouteNamesWhoSetsATransformTopic:
         assert resp.status_code == 200, resp.text
 
 
+class TestTheConfigRouteLeavesATransformsLoaderEndpointToTheOverlay:
+    """The chart renders a transform's loader address only where the overlay has none."""
+
+    def test_an_operator_s_endpoint_is_written_and_read_back_as_the_overlay_s(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy_vrl(client, admin_headers, "edge")
+        endpoint = "http://loader.example:6000"
+        route = "/api/v1/apps/dfe-transform-vrl/edge/config"
+
+        resp = client.put(
+            route, json={"changes": {"config.sink.endpoint": endpoint}}, headers=admin_headers
+        )
+
+        assert resp.status_code == 200, resp.text
+        body = client.get(route, headers=admin_headers)
+        assert body.status_code == 200, body.text
+        sink = {f["path"]: f for f in body.json()["fields"]}["config.sink.endpoint"]
+        assert (sink["provenance"], sink["value"]) == ("overlay", endpoint)
+
+
 class TestTheContractRoute:
     def test_it_serves_what_the_image_emitted(self, client, admin_headers):
         body = client.get(CONTRACT, headers=admin_headers).json()
@@ -764,6 +786,34 @@ def _deploy_receiver(client, headers):
 
 def _put_receiver(client, headers, changes: dict):
     return client.put(f"{RECEIVER_BASE}/config", json={"changes": changes}, headers=headers)
+
+
+class TestTheReceiverConfigmapsOwnKeysAreRefused:
+    """The receiver configmap merges its listener and buffer values over the overlay."""
+
+    @pytest.mark.parametrize(
+        ("path", "value", "supplier"),
+        [
+            ("config.grpc.enabled", False, "listeners[pushgrpc]"),
+            ("config.grpc.bind_address", "127.0.0.1:1", "listeners[pushgrpc]"),
+            ("config.buffer.memory_limit", 1234, "receiver.buffer"),
+            ("config.buffer.spillover.enabled", True, "receiver.buffer.spillover"),
+            ("config.buffer.spillover.path", "/overlay/spool", "receiver.buffer.spillover"),
+        ],
+    )
+    def test_a_write_is_refused_and_names_the_chart_value_to_change(
+        self, client, app, admin_headers, tmp_path, path, value, supplier
+    ):
+        gc = _wire(app, tmp_path)
+        assert _deploy_receiver(client, admin_headers).status_code == 200
+        before = gc.head_revision()
+
+        resp = _put_receiver(client, admin_headers, {path: value})
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "chart_derived"
+        assert supplier in resp.json()["message"]
+        assert gc.head_revision() == before
 
 
 @pytest.mark.usefixtures("_held")
