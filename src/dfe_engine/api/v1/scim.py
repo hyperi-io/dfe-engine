@@ -65,6 +65,7 @@ from scim2_models import (
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.password_floor import FLOOR_MESSAGE, below_floor, count_floor_refusal
 from dfe_engine.api.v1.account_groups import check_group_changes, check_role_assignment, scope_of
+from dfe_engine.auth.accounts import AccountExistsError
 from dfe_engine.auth.groups import GroupExistsError
 from dfe_engine.auth.membership import forget_member, groups_held
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -127,6 +128,11 @@ def scim_error(status_code: int, detail: str, scim_type: str | None = None) -> J
         status_code=status_code,
         media_type=SCIM_MEDIA_TYPE,
     )
+
+
+def _user_exists(username: str) -> JSONResponse:
+    """The 409 a create answers when an account already holds *username*."""
+    return scim_error(409, f"User '{username}' already exists", "uniqueness")
 
 
 def _invalid_body(kind: str, exc: Exception) -> JSONResponse:
@@ -277,7 +283,7 @@ async def create_user(user: CurrentUser, request: Request) -> Response:
 
     store = request.app.state.account_store
     if store.get(inbound.user_name) is not None:
-        return scim_error(409, f"User '{inbound.user_name}' already exists", "uniqueness")
+        return _user_exists(inbound.user_name)
 
     fields = scim_user_to_account_fields(inbound)
     username = str(fields["username"])
@@ -285,7 +291,11 @@ async def create_user(user: CurrentUser, request: Request) -> Response:
     if below_floor(password):
         count_floor_refusal(request)
         return scim_error(400, FLOOR_MESSAGE, "invalidValue")
-    store.create(username, password, groups=[])
+    # The create decides: another replica can take the name after the lookup above.
+    try:
+        store.create(username, password, groups=[])
+    except AccountExistsError:
+        return _user_exists(username)
     # Apply the remaining writable attributes (enabled, external_id, provider).
     store.update(
         username,

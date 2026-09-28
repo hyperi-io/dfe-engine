@@ -45,7 +45,7 @@ from dfe_engine.api.pagination import (
 from dfe_engine.api.v1.account_groups import check_group_changes
 from dfe_engine.auth import account_durability
 from dfe_engine.auth.account_durability import AccountGitState
-from dfe_engine.auth.accounts import Account, matches_digest
+from dfe_engine.auth.accounts import Account, AccountExistsError, matches_digest
 from dfe_engine.auth.attributes import check_attribute_depth
 from dfe_engine.auth.audit import audit_account_change
 from dfe_engine.auth.bootstrap import (
@@ -387,20 +387,25 @@ async def create_account(
 
     store: AccountStore = request.app.state.account_store
     group_store = request.app.state.group_store
-    if store.get(body.username) is not None:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "conflict", "message": f"Account '{body.username}' already exists"},
-        )
-    check_group_changes(request, user, group_store.list(), (), body.groups)
-    account = store.create(
-        body.username,
-        body.password,
-        groups=body.groups,
-        email=body.email,
-        phone=body.phone,
-        name=body.name,
+    conflict = HTTPException(
+        status_code=409,
+        detail={"code": "conflict", "message": f"Account '{body.username}' already exists"},
     )
+    if store.get(body.username) is not None:
+        raise conflict
+    check_group_changes(request, user, group_store.list(), (), body.groups)
+    # The create decides: another replica can take the name after the lookup above.
+    try:
+        account = store.create(
+            body.username,
+            body.password,
+            groups=body.groups,
+            email=body.email,
+            phone=body.phone,
+            name=body.name,
+        )
+    except AccountExistsError as exc:
+        raise conflict from exc
     sync_group_members_for_account_groups_change(
         group_store,
         body.username,

@@ -34,6 +34,7 @@ from dfe_engine.auth.scim_mapping import (
     scim_group_to_group_fields,
     scim_user_to_account_fields,
 )
+from tests.support.racing_stores import RacingAccountStore
 
 BASE = "/api/v1/scim/v2"
 
@@ -150,6 +151,23 @@ class TestScimUsers:
         resp = client.post(f"{BASE}/Users", json=payload, headers=admin_headers)
         assert resp.status_code == 409
         assert resp.json()["scimType"] == "uniqueness"
+
+    def test_a_name_taken_after_the_lookup_is_still_a_409(self, app, client, admin_headers):
+        """Another replica creates the user between this request's lookup and its create."""
+        replica = app.state.account_store
+        replica.create("scim-racer", "", groups=[])
+        app.state.account_store = RacingAccountStore(replica._dir, blind_to="scim-racer")
+
+        resp = client.post(
+            f"{BASE}/Users",
+            json={"schemas": [USER_SCHEMA], "userName": "scim-racer", "externalId": "okta-9"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["scimType"] == "uniqueness"
+        assert resp.headers["content-type"].startswith("application/scim+json")
+        assert replica.get("scim-racer").external_id == ""
 
     def test_get_user(self, client, admin_headers):
         client.post(

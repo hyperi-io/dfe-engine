@@ -78,6 +78,10 @@ def _ignores_case(directory: Path) -> bool:
 _UNUSABLE_PASSWORD_HASH = "!"
 
 
+class AccountExistsError(ValueError):
+    """An account is already stored under the name, including one created a moment ago."""
+
+
 class Account(BaseModel):
     """A local user account."""
 
@@ -181,8 +185,9 @@ class AccountStore:
             The newly created Account.
 
         Raises:
-            ValueError: If an account with this username already exists, including
-                one another replica created at the same moment.
+            AccountExistsError: An account is already stored under *username*,
+                including one another replica created at the same moment.
+            ValueError: *username* is not a name an account can have.
         """
         if not VALID_NAME.match(username):
             raise ValueError(f"Invalid account name: {username!r}")
@@ -199,7 +204,7 @@ class AccountStore:
         try:
             self._write_new(path, account)
         except FileExistsError as exc:
-            raise ValueError(f"Account already exists: {username}") from exc
+            raise AccountExistsError(f"Account already exists: {username}") from exc
         return account
 
     def put(self, account: Account, *, allow_protected: bool = False) -> Account:
@@ -507,7 +512,7 @@ class DocuStoreAccountStore:
         name: str = "",
         change_required: bool = False,
     ) -> Account:
-        """Create a new account. Raises ValueError if the name is invalid or taken.
+        """Create a new account. Raises AccountExistsError if taken, ValueError if invalid.
 
         Taken includes by another replica at the same moment: the insert, not a prior
         lookup, decides.
@@ -524,7 +529,7 @@ class DocuStoreAccountStore:
             change_required=change_required,
         )
         if not self._c.insert(account):
-            raise ValueError(f"Account already exists: {username}")
+            raise AccountExistsError(f"Account already exists: {username}")
         return account
 
     def put(self, account: Account, *, allow_protected: bool = False) -> Account:

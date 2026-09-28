@@ -14,6 +14,7 @@ import secrets
 import pytest
 
 from dfe_engine.auth.bootstrap import MIN_ADMIN_PASSWORD_LENGTH
+from tests.support.racing_stores import RacingAccountStore
 
 _PASSWORD = secrets.token_urlsafe(16)
 
@@ -129,6 +130,27 @@ class TestCreateAccount:
         )
         assert resp.status_code == 409
         assert resp.json()["code"] == "conflict"
+
+    def test_a_name_taken_after_the_lookup_is_still_a_409(self, app, client, admin_headers):
+        """Another replica creates the account between this request's lookup and its create."""
+        replica = app.state.account_store
+        replica.create("racer", _PASSWORD)
+        app.state.account_store = RacingAccountStore(replica._dir, blind_to="racer")
+
+        resp = client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "racer",
+                "password": secrets.token_urlsafe(16),
+                "groups": ["dfe-viewers"],
+            },
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "conflict"
+        assert replica.verify_password("racer", _PASSWORD)
+        assert "racer" not in app.state.group_store.get("dfe-viewers").members
 
     def test_create_requires_admin(self, client, viewer_headers):
         resp = client.post(
