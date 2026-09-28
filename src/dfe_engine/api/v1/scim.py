@@ -64,6 +64,7 @@ from scim2_models import (
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.password_floor import FLOOR_MESSAGE, below_floor, count_floor_refusal
+from dfe_engine.api.v1.account_groups import check_role_assignment, scope_of
 from dfe_engine.auth.groups import GroupExistsError
 from dfe_engine.auth.membership import forget_member, groups_held
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -482,6 +483,9 @@ async def replace_group(group_id: str, user: CurrentUser, request: Request) -> R
     new_members = list(fields["members"])  # type: ignore[arg-type]
     old = set(existing.members)
     new = set(new_members)
+    # An IdP login resolves a group by its provider id, so moving the id moves the roles.
+    if old != new or fields["source_id"] != existing.source_id:
+        check_role_assignment(request, user, existing.roles, scope_of(existing))
     store.update(
         group_id,
         members=new_members,
@@ -517,11 +521,14 @@ async def patch_group(group_id: str, user: CurrentUser, request: Request) -> Res
     except Exception as exc:
         return _invalid_body("PatchOp", exc)
 
+    # Checked before any op applies, so a refusal leaves the membership as it was.
+    if _joining(patch) - set(group.members) or _leaving(patch, group.members):
+        check_role_assignment(request, user, group.roles, scope_of(group))
+
     added: set[str] = set()
     removed: set[str] = set()
     for op in patch.operations or []:
-        # op.op is an ``Op`` enum whose value is the lowercase verb (add/remove/replace).
-        kind = getattr(op.op, "value", str(op.op)).lower()
+        kind = _op_kind(op)
         # op.path may be a typed ``Path`` object; coerce to a plain string.
         path = str(op.path or "")
         value = op.value
@@ -564,6 +571,9 @@ async def delete_group(group_id: str, user: CurrentUser, request: Request) -> Re
     # GroupStore.delete refuses a non-empty group; detach members first and mirror
     # the removal onto each Account.groups.
     members = list(group.members)
+    if members:
+        # Every member loses the roles the group carries.
+        check_role_assignment(request, user, group.roles, scope_of(group))
     # Checked before the first detach, so deleting the admin group with a recovery
     # credential in it refuses whole rather than part-way through.
     store.protected.check_member_removal(group_id, members)
@@ -574,6 +584,33 @@ async def delete_group(group_id: str, user: CurrentUser, request: Request) -> Re
     request_ch_rbac_reconcile(request.app.state)
     logger.info("SCIM group deleted", group=group_id)
     return Response(status_code=204)
+
+
+def _op_kind(op) -> str:
+    """The lowercase verb of a PatchOp operation (add/remove/replace)."""
+    return getattr(op.op, "value", str(op.op)).lower()
+
+
+def _joining(patch) -> set[str]:
+    """Every username a group PatchOp adds or replaces into ``members``."""
+    joining: set[str] = set()
+    for op in patch.operations or []:
+        if _op_kind(op) in ("add", "replace") and str(op.path or "").lower().startswith("members"):
+            joining.update(_member_values(op.value))
+    return joining
+
+
+def _leaving(patch, members: list[str]) -> set[str]:
+    """Every current member a group PatchOp removes; a remove naming no one clears the group."""
+    leaving: set[str] = set()
+    for op in patch.operations or []:
+        path = str(op.path or "")
+        if _op_kind(op) != "remove" or not path.lower().startswith("members"):
+            continue
+        match = _MEMBER_FILTER_RE.search(path)
+        targets = [match.group(1)] if match else _member_values(op.value)
+        leaving.update(targets or members)
+    return leaving & set(members)
 
 
 def _member_values(value) -> list[str]:
