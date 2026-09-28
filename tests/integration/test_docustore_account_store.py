@@ -10,7 +10,9 @@ semantics must hold against a real store exactly as they do for the YAML backend
 from __future__ import annotations
 
 import os
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -152,6 +154,15 @@ class TestDocuStoreAccountStore:
         assert not store.verify_password("ext", "")
         assert not store.verify_password("ext", "anything")
 
+    def test_a_refused_create_leaves_the_stored_account_as_it_was(self, store):
+        store.create("bob", "pw-Aa1")
+        before = store.get("bob")
+
+        with pytest.raises(ValueError, match="Account already exists: bob"):
+            store.create("bob", "other-Pw")
+
+        assert store.get("bob") == before
+
     def test_the_external_stamps_round_trip(self, store):
         # The identity guard decides on these two fields, so a backend that drops
         # either reads every IdP-owned account as a local one.
@@ -160,6 +171,41 @@ class TestDocuStoreAccountStore:
         stored = store.get("stamped")
         assert stored.external is True
         assert stored.source_provider == "entra"
+
+
+class TestReplicasCreatingOneAccountAtOnce:
+    """Each replica holds its own client, so only the store can decide which create wins."""
+
+    REPLICAS = 4
+
+    @pytest.fixture
+    def replicas(self, docu):
+        database = docu.collection("accounts").database.name
+        clients = [DocuStore(_URI, database) for _ in range(self.REPLICAS)]
+        try:
+            yield [DocuStoreAccountStore(client, collection="accounts") for client in clients]
+        finally:
+            for client in clients:
+                client.close()
+
+    def test_exactly_one_create_succeeds_and_its_account_is_the_one_stored(self, replicas):
+        barrier = threading.Barrier(self.REPLICAS)
+
+        def create(index: int) -> str | None:
+            password = f"password-{index}-Aa1"
+            barrier.wait(timeout=30)
+            try:
+                replicas[index].create("alice", password)
+            except ValueError:
+                return None
+            return password
+
+        with ThreadPoolExecutor(max_workers=self.REPLICAS) as pool:
+            created = [p for p in pool.map(create, range(self.REPLICAS)) if p is not None]
+
+        assert len(created) == 1, created
+        assert replicas[0].verify_password("alice", created[0])
+        assert len(replicas[0].list()) == 1
 
 
 class TestJitIdentityGuardOnTheDocumentStore:

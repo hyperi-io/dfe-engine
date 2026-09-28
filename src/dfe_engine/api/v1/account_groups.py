@@ -34,6 +34,7 @@ from dfe_engine.api.deps import (
     CurrentUser,
     bound_account,
     check_action,
+    groups_granting,
     is_action_allowed,
     require_action,
 )
@@ -117,24 +118,24 @@ def _member_name(request: Request, user) -> str | None:
     return account.username if account is not None else None
 
 
-def _held(group: Group, groups: list[str]) -> bool:
-    """Whether the session's groups name *group*, by name or by the provider id the sync recorded.
+def _held(request: Request, user) -> set[str]:
+    """The names of the groups the session's roles come from, resolved as its roles were.
 
-    The same two-step role resolution uses, so a session sees each group its roles came from.
+    An identifier that names one group and is another's provider id holds the first alone.
     """
-    return group.name in groups or bool(group.source_id and group.source_id in groups)
+    return set(groups_granting(user.groups, request.app.state.group_store))
 
 
-def _visible(request: Request, user, group: Group, member: str | None) -> bool:
-    """Members always see their own groups; otherwise group:read at the
-    group's scope decides (org-local groups stay invisible outside their org).
+def _visible(request: Request, user, group: Group, member: str | None, held: set[str]) -> bool:
+    """Whether the session sees *group*: always its own, else by group:read at the group's scope.
 
-    A member is listed in the group file, or holds the group through its session's
-    groups: an identity provider asserts those, and an API key carries its own.
+    Org-local groups stay invisible outside their org. A member is listed in the group
+    file, or holds the group through its session's groups (*held*): an identity provider
+    asserts those, and an API key carries its own.
     """
     if member is not None and member in group.members:
         return True
-    if _held(group, user.groups):
+    if group.name in held:
         return True
     return is_action_allowed(request, user, scopes_dict["group_read"], scope=scope_of(group))
 
@@ -288,7 +289,8 @@ async def list_groups(
 
     store: GroupStore = request.app.state.group_store
     member = _member_name(request, user)
-    visible = [g for g in store.list() if _visible(request, user, g, member)]
+    held = _held(request, user)
+    visible = [g for g in store.list() if _visible(request, user, g, member, held)]
     rows = [_response(g).model_dump() for g in visible]
     rows = apply_search(rows, search, ["name", "description"])
     rows = apply_sort(rows, sort_by, sort_order)
@@ -307,7 +309,8 @@ async def get_group(
 
     store: GroupStore = request.app.state.group_store
     group = store.get(name)
-    if group is None or not _visible(request, user, group, _member_name(request, user)):
+    member = _member_name(request, user)
+    if group is None or not _visible(request, user, group, member, _held(request, user)):
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Group '{name}' not found"},

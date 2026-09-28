@@ -734,6 +734,27 @@ class TestAMemberSeesTheGroupsItHolds:
 
         assert resp.status_code == 404, resp.text
 
+    @pytest.mark.parametrize("session", ["proxied-idp", "api-key"])
+    def test_a_group_whose_provider_id_is_a_held_groups_name_stays_hidden(
+        self, client: TestClient, app, session
+    ):
+        """The identifier resolves by name first, so the other group grants the session nothing."""
+        app.state.group_store.create("shadow-analysts", ["admin"])
+        app.state.group_store.update("shadow-analysts", source_id="dfe-analysts")
+        if session == "api-key":
+            _, key = app.state.api_key_store.create("ci-analyst", groups=["dfe-analysts"])
+            headers = {"X-API-Key": key}
+        else:
+            headers = {"X-Oidc-Subject": "nia@example.com", "X-Oidc-Groups": "dfe-analysts"}
+
+        listed = _listed(client, headers)
+        fetched = client.get("/api/v1/auth/groups/shadow-analysts", headers=headers)
+        me = client.get("/api/v1/auth/me", headers=headers)
+
+        assert listed == ["dfe-analysts"]
+        assert fetched.status_code == 404, fetched.text
+        assert me.json()["roles"] == ["data_analyst"]
+
 
 class TestOnlyASessionBoundToAnAccountRefreshes:
     """A refresh issues a new expiry, so what it refreshes must still be an account."""

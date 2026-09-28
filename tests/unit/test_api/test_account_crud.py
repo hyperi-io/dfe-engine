@@ -14,6 +14,7 @@ import secrets
 import pytest
 
 from dfe_engine.auth.bootstrap import MIN_ADMIN_PASSWORD_LENGTH
+from tests.support.racing_stores import RacingAccountStore
 
 _PASSWORD = secrets.token_urlsafe(16)
 
@@ -129,6 +130,56 @@ class TestCreateAccount:
         )
         assert resp.status_code == 409
         assert resp.json()["code"] == "conflict"
+
+    def test_a_name_taken_after_the_lookup_is_still_a_409(self, app, client, admin_headers):
+        """Another replica creates the account between this request's lookup and its create."""
+        replica = app.state.account_store
+        replica.create("racer", _PASSWORD)
+        app.state.account_store = RacingAccountStore(replica._dir, blind_to="racer")
+
+        resp = client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "racer",
+                "password": secrets.token_urlsafe(16),
+                "groups": ["dfe-viewers"],
+            },
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "conflict"
+        assert replica.verify_password("racer", _PASSWORD)
+        assert "racer" not in app.state.group_store.get("dfe-viewers").members
+
+    @pytest.mark.parametrize("username", ["../evil", "with space", "a" * 129])
+    def test_a_name_no_account_can_have_is_a_422(self, app, client, admin_headers, username):
+        before = [a.username for a in app.state.account_store.list()]
+
+        resp = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": username, "password": _PASSWORD, "groups": ["dfe-viewers"]},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["code"] == "validation_error"
+        assert [a.username for a in app.state.account_store.list()] == before
+        assert username not in app.state.group_store.get("dfe-viewers").members
+
+    def test_a_password_longer_than_the_hash_takes_is_a_422(self, app, client, admin_headers):
+        """bcrypt refuses more than 72 bytes rather than silently truncating."""
+        password = "x" * 73
+
+        resp = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "long-pw", "password": password},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert password not in resp.text
+        assert app.state.account_store.get("long-pw") is None
 
     def test_create_requires_admin(self, client, viewer_headers):
         resp = client.post(

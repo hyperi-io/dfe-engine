@@ -97,27 +97,31 @@ def another_admin_exists(
     the bootstrap admin nor ``breakglass`` counts: retiring onto the recovery
     credential is what this exists to avoid. Only a system-scope group counts --
     an org-scoped group's roles bind inside that org, so its members cannot run
-    the deployment. The account must hold that group the way a session does
-    (:func:`~dfe_engine.auth.membership.groups_held`), and be enabled, unblocked
-    and past any issued password, since until then its session holds no roles.
+    the deployment. The account must hold that group the way a session does: its
+    identifiers (:func:`~dfe_engine.auth.membership.groups_held`) resolved as login
+    resolves them (:func:`~dfe_engine.auth.membership.groups_named`). It must also be
+    enabled, unblocked and past any issued password, since until then its session
+    holds no roles.
     """
     from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
     from dfe_engine.auth.groups import GROUP_SCOPE_SYSTEM
-    from dfe_engine.auth.membership import groups_held
+    from dfe_engine.auth.membership import groups_held, groups_named
 
     if account_store is None or group_store is None:
         return False
     groups = group_store.list()
-    admin_groups = [g for g in groups if ADMIN_ROLE in g.roles and g.scope == GROUP_SCOPE_SYSTEM]
-    # A session resolves a held identifier by group name, else by provider source_id.
-    admin_ids = {g.name for g in admin_groups} | {g.source_id for g in admin_groups if g.source_id}
-    if not admin_ids:
+    admin_names = {
+        g.name for g in groups if ADMIN_ROLE in g.roles and g.scope == GROUP_SCOPE_SYSTEM
+    }
+    if not admin_names:
         return False
     seeded = {admin_name, BREAKGLASS_USERNAME}
-    return any(
-        account.username not in seeded
-        and account.session_denied() is None
-        and not account.password_change_required
-        and admin_ids.intersection(groups_held(account, groups))
-        for account in account_store.list()
-    )
+    for account in account_store.list():
+        if account.username in seeded or account.session_denied() is not None:
+            continue
+        if account.password_change_required:
+            continue
+        held = groups_named(groups_held(account, groups), groups)
+        if any(group.name in admin_names for group in held):
+            return True
+    return False

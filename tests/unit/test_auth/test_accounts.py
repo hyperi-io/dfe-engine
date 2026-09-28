@@ -6,7 +6,9 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import bcrypt
 import pytest
@@ -113,6 +115,41 @@ class TestCreate:
         store = AccountStore(nested)
         store.create("bob", "pass")
         assert (nested / "bob.yaml").exists()
+
+    def test_a_refused_create_leaves_the_stored_account_as_it_was(self, store, tmp_path):
+        store.create("alice", "password123")
+        before = (tmp_path / "accounts" / "alice.yaml").read_bytes()
+
+        with pytest.raises(ValueError, match="Account already exists: alice"):
+            store.create("alice", "other-password")
+
+        assert (tmp_path / "accounts" / "alice.yaml").read_bytes() == before
+        assert list((tmp_path / "accounts").iterdir()) == [tmp_path / "accounts" / "alice.yaml"]
+
+
+class TestReplicasCreatingOneAccountAtOnce:
+    """Replicas share one accounts directory, and each holds its own store."""
+
+    REPLICAS = 8
+
+    def test_exactly_one_create_succeeds_and_its_account_is_the_one_stored(self, tmp_path):
+        replicas = [AccountStore(tmp_path / "accounts") for _ in range(self.REPLICAS)]
+        barrier = threading.Barrier(self.REPLICAS)
+
+        def create(index: int) -> str | None:
+            password = f"password-{index}"
+            barrier.wait(timeout=10)
+            try:
+                replicas[index].create("alice", password)
+            except ValueError:
+                return None
+            return password
+
+        with ThreadPoolExecutor(max_workers=self.REPLICAS) as pool:
+            created = [p for p in pool.map(create, range(self.REPLICAS)) if p is not None]
+
+        assert len(created) == 1, created
+        assert replicas[0].verify_password("alice", created[0])
 
 
 # ---------------------------------------------------------------------------

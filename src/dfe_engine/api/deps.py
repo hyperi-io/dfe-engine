@@ -349,18 +349,20 @@ def _get_client_ip(request: Request) -> str | None:
 
 
 class GroupResolution(NamedTuple):
-    """Roles, org memberships, and scoped grants resolved from groups."""
+    """Roles, org memberships, and scoped grants resolved from groups, and the groups matched."""
 
     roles: list[str]
     org_ids: list[str]
     grants: list[ScopedGrant]
+    groups: list[str]
+    """Names of the stored groups the identifiers resolved to, which the roles came from."""
 
 
 def _resolve_group_grants(
     groups: list[str],
     group_store: GroupStore,
 ) -> GroupResolution:
-    """Resolve roles, org_ids, and scoped grants from a list of group identifiers.
+    """Resolve roles, org_ids, scoped grants and the matched groups from group identifiers.
 
     Each identifier is looked up by group NAME first, then by provider
     ``source_id`` (so a token carrying Entra GUIDs or Google group keys resolves
@@ -372,6 +374,7 @@ def _resolve_group_grants(
     """
     roles: set[str] = set()
     org_ids: set[str] = set()
+    matched: set[str] = set()
     grants: list[ScopedGrant] = []
     seen_grants: set[tuple[str, str]] = set()
     # Providers that emit opaque group identifiers rather than names (Entra sends
@@ -388,6 +391,7 @@ def _resolve_group_grants(
             group = source_index.get(group_name)
         if group is None:
             continue
+        matched.add(group.name)
         scope_org = group.scope_org
         scope = Scope(type="org", id=scope_org) if scope_org else Scope()
         if scope_org:
@@ -399,7 +403,7 @@ def _resolve_group_grants(
             if key not in seen_grants:
                 seen_grants.add(key)
                 grants.append(ScopedGrant(role=role, scope=scope))
-    return GroupResolution(sorted(roles), sorted(org_ids), grants)
+    return GroupResolution(sorted(roles), sorted(org_ids), grants, sorted(matched))
 
 
 def _resolve_roles_from_groups(
@@ -409,6 +413,22 @@ def _resolve_roles_from_groups(
     """Resolve (roles, org_ids) from group names -- see _resolve_group_grants."""
     resolution = _resolve_group_grants(groups, group_store)
     return resolution.roles, resolution.org_ids
+
+
+def groups_granting(identifiers: list[str], group_store: GroupStore) -> list[str]:
+    """The names of the stored groups a session's roles come from.
+
+    The lookup :func:`_resolve_group_grants` makes, so an identifier that names one
+    group and is another's provider ``source_id`` resolves to the group it names alone.
+
+    Args:
+        identifiers: The session's group names or IdP-asserted provider ids.
+        group_store: The group store.
+
+    Returns:
+        Sorted group names, each once.
+    """
+    return _resolve_group_grants(identifiers, group_store).groups
 
 
 def bound_account(request: Request, user_id: str) -> Any:
@@ -442,7 +462,7 @@ def resolve_live_grants_for_user(request: Request, user_id: str) -> GroupResolut
     group_store: GroupStore | None = getattr(request.app.state, "group_store", None)
     account = bound_account(request, user_id)
     if group_store is None or account is None:
-        return GroupResolution([], [], [])
+        return GroupResolution([], [], [], [])
     return _resolve_group_grants(groups_held(account, group_store.list()), group_store)
 
 
