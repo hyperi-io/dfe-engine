@@ -252,7 +252,7 @@
         "displayType": "line",
         "connection": "platform",
         "source": "otel_metrics",
-        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       concat(ServiceName, ' ', replaceOne(MetricName, 'rdkafka_', '')) AS \"Series\",\n       max(Value) AS \"Messages\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName IN ('rdkafka_global_msg_cnt', 'rdkafka_broker_outbuf_cnt', 'rdkafka_broker_waitresp_cnt')\n  AND $__timeFilter(TimeUnix)\nGROUP BY ts, ServiceName, MetricName\nORDER BY ts"
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       arrayStringConcat(arrayFilter(x -> x != '', [ServiceName, Attributes['client_type'], replaceOne(MetricName, 'rdkafka_', '')]), ' ') AS \"Series\",\n       max(Value) AS \"Messages\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName IN ('rdkafka_global_msg_cnt', 'rdkafka_broker_outbuf_cnt', 'rdkafka_broker_waitresp_cnt')\n  AND $__timeFilter(TimeUnix)\nGROUP BY ts, ServiceName, Attributes['client_type'], MetricName\nORDER BY ts"
       }
     },
     {
@@ -269,7 +269,7 @@
         "connection": "platform",
         "source": "otel_metrics",
         "numberFormat": { "output": "duration", "unit": "s", "mantissa": 1 },
-        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       concat(ServiceName, ' ', Attributes['broker']) AS \"Client and broker\",\n       avg(Value) AS \"RTT\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName = 'rdkafka_broker_rtt_avg_seconds' AND $__timeFilter(TimeUnix)\nGROUP BY ts, ServiceName, Attributes['broker']\nORDER BY ts"
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       arrayStringConcat(arrayFilter(x -> x != '', [ServiceName, Attributes['client_type'], Attributes['broker']]), ' ') AS \"Client and broker\",\n       avg(Value) AS \"RTT\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName = 'rdkafka_broker_rtt_avg_seconds' AND $__timeFilter(TimeUnix)\nGROUP BY ts, ServiceName, Attributes['client_type'], Attributes['broker']\nORDER BY ts"
       }
     },
     {
