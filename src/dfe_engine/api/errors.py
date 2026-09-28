@@ -302,18 +302,16 @@ def declare_auth_errors(openapi: dict[str, Any], routes: Sequence[BaseRoute]) ->
 
     Those are the routes whose dependency tree reaches
     :func:`~dfe_engine.api.deps.get_current_user`, through ``CurrentUser`` or
-    ``require_action`` (:func:`~dfe_engine.api.deps.requires_session`), so a new
-    route behind either carries both with nothing listed by hand. A public route
-    carries neither. Both answer :class:`ErrorResponse`, except a refused action
-    on a SCIM route, which the 403 handler answers in the SCIM envelope instead.
+    ``require_action`` (:func:`~dfe_engine.api.deps.guarded_operations`), so a
+    new route behind either carries both with nothing listed by hand. A public
+    route carries neither. Both answer :class:`ErrorResponse`, except a refused
+    action on a SCIM route, which the 403 handler answers in the SCIM envelope.
 
     Args:
         openapi: The generated OpenAPI document, updated in place.
         routes: The application's routes, included routers unexpanded.
     """
-    from fastapi.routing import APIRoute, iter_route_contexts
-
-    from dfe_engine.api.deps import requires_session
+    from dfe_engine.api.deps import guarded_operations
     from dfe_engine.api.v1.scim import SCIM_MEDIA_TYPE, SCIM_ROOT
 
     components = openapi.setdefault("components", {})
@@ -321,27 +319,15 @@ def declare_auth_errors(openapi: dict[str, Any], routes: Sequence[BaseRoute]) ->
     _register_schema(schemas, ErrorResponse)
     components["schemas"] = dict(sorted(schemas.items()))
 
-    paths = openapi.get("paths", {})
-    for route in iter_route_contexts(routes):
-        path, methods = route.path_format, route.methods
-        if not isinstance(route.original_route, APIRoute) or path is None or methods is None:
-            continue
-        # The context's tree, which carries any dependency the include added.
-        if not requires_session(route.dependant):
-            continue
-        scim = path.startswith(SCIM_ROOT)
-        for method in methods:
-            operation = paths.get(path, {}).get(method.lower())
-            if operation is None:
-                continue
-            responses = operation.setdefault("responses", {})
-            responses.setdefault(
-                "401", {"description": _UNAUTHORIZED_DESCRIPTION, "content": _error_content()}
-            )
-            description, content = _FORBIDDEN_DESCRIPTION, _error_content()
-            if scim:
-                description = _SCIM_FORBIDDEN_DESCRIPTION
-                # Unmodelled, as every SCIM body in this spec is.
-                content[SCIM_MEDIA_TYPE] = {"schema": {}}
-            responses.setdefault("403", {"description": description, "content": content})
-            operation["responses"] = dict(sorted(responses.items()))
+    for path, operation in guarded_operations(openapi, routes):
+        responses = operation.setdefault("responses", {})
+        responses.setdefault(
+            "401", {"description": _UNAUTHORIZED_DESCRIPTION, "content": _error_content()}
+        )
+        description, content = _FORBIDDEN_DESCRIPTION, _error_content()
+        if path.startswith(SCIM_ROOT):
+            description = _SCIM_FORBIDDEN_DESCRIPTION
+            # Unmodelled, as every SCIM body in this spec is.
+            content[SCIM_MEDIA_TYPE] = {"schema": {}}
+        responses.setdefault("403", {"description": description, "content": content})
+        operation["responses"] = dict(sorted(responses.items()))

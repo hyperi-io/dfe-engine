@@ -23,6 +23,7 @@ from dfe_engine.api.deps import (
     resolve_live_grants_for_user,
     resolve_live_groups_for_user,
 )
+from dfe_engine.api.errors import ErrorResponse
 from dfe_engine.api.password_change import PASSWORD_CHANGE_CLAIM
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth import account_durability, admin_retirement, breakglass, hyperdx_role
@@ -163,7 +164,21 @@ def _token_data(
 # -- Endpoints ------------------------------------------------
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+    # Public, so the session-derived declaration skips it; the refusals are its own.
+    responses={
+        401: {
+            "model": ErrorResponse,
+            "description": "Invalid username or password, or the account is disabled or blocked",
+        },
+        403: {
+            "model": ErrorResponse,
+            "description": "The break-glass account is disabled in governance settings",
+        },
+    },
+)
 async def login(body: LoginRequest, request: Request, settings: Settings):
     """Authenticate with local credentials and receive a JWT token."""
     provider: LocalAuthProvider = request.app.state.auth_provider

@@ -1,7 +1,8 @@
-"""Every operation a session guards declares the 401 and 403 it answers.
+"""Every operation a session guards declares the token it needs and the 401 and 403 it answers.
 
 dfe-ui generates its client from ``openapi-spec/openapi.json``, so an error the
-spec leaves out has no type there. The app derives the declaration from each
+spec leaves out has no type there, and a mock server built from it demands a
+token wherever the spec says one is needed. The app derives both from each
 route's dependency tree. The public operations are listed here by hand on
 purpose: a test that asked the same tree would agree with it whatever it got
 wrong, and a route that opens without a session deserves the edit below.
@@ -32,8 +33,12 @@ PUBLIC_OPERATIONS = frozenset(
     }
 )
 
+# Public, but it refuses a bad login itself, so it declares both statuses by hand.
+LOGIN = "POST /api/v1/auth/login"
+
 AUTH_STATUSES = ("401", "403")
 ERROR_SCHEMA = {"$ref": "#/components/schemas/ErrorResponse"}
+BEARER = [{"BearerAuth": []}]
 
 
 @pytest.fixture(autouse=True)
@@ -88,11 +93,33 @@ def test_every_public_operation_is_real_and_declares_neither(spec):
     assert PUBLIC_OPERATIONS <= operations.keys(), sorted(PUBLIC_OPERATIONS - operations.keys())
     declared = sorted(
         f"{key} -> {status}"
-        for key in PUBLIC_OPERATIONS
+        for key in PUBLIC_OPERATIONS - {LOGIN}
         for status in AUTH_STATUSES
         if status in operations[key].get("responses", {})
     )
     assert not declared
+
+
+def test_login_declares_the_401_and_403_it_answers(spec):
+    """A wrong password is a 401 and a disabled break-glass account a 403, both native."""
+    responses = dict(_operations(spec))[LOGIN]["responses"]
+
+    for status in AUTH_STATUSES:
+        assert _json_schema(responses.get(status, {})) == ERROR_SCHEMA, status
+
+
+def test_only_a_guarded_operation_requires_the_token(spec):
+    """A public operation needs no token, so a mock built from the spec must not demand one."""
+    wrong = sorted(
+        key
+        for key, operation in _operations(spec)
+        if operation.get("security") != (None if key in PUBLIC_OPERATIONS else BEARER)
+    )
+
+    assert not wrong, (
+        f"{len(wrong)} operation(s) state the wrong security requirement: public ones "
+        f"state none, guarded ones {BEARER}:\n  " + "\n  ".join(wrong)
+    )
 
 
 def test_a_scim_403_also_names_the_scim_envelope(spec):

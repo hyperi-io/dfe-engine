@@ -618,7 +618,7 @@ def create_app(
     )
 
     # Exception handlers
-    from dfe_engine.api.errors import declare_auth_errors, install_exception_handlers
+    from dfe_engine.api.errors import install_exception_handlers
 
     install_exception_handlers(app)
 
@@ -656,6 +656,9 @@ def create_app(
     # disagree -- but 9090 is the authoritative probe target.
 
     # Custom OpenAPI schema with Bearer auth
+    from dfe_engine.api.deps import guarded_operations
+    from dfe_engine.api.errors import declare_auth_errors
+
     def custom_openapi():
         if app.openapi_schema:
             return app.openapi_schema
@@ -674,15 +677,9 @@ def create_app(
                 "description": "JWT Bearer token from /api/v1/auth/login",
             }
         }
-        # Apply BearerAuth to all /api/ routes by default. The e2e-server
-        # helpers are unauthenticated and must stay that way in Swagger.
-        for path_key, path_item in schema.get("paths", {}).items():
-            if path_key.startswith("/api/e2e"):
-                continue
-            if path_key.startswith("/api/"):
-                for method_data in path_item.values():
-                    if isinstance(method_data, dict):
-                        method_data.setdefault("security", [{"BearerAuth": []}])
+        # A public route (login, setup status, OIDC, SCIM discovery) takes no token.
+        for _path, operation in guarded_operations(schema, app.routes):
+            operation.setdefault("security", [{"BearerAuth": []}])
         declare_auth_errors(schema, app.routes)
         if e2e_docs:
             from dfe_engine.api.e2e_docs import split_openapi
