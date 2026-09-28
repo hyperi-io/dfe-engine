@@ -14,7 +14,12 @@ import bcrypt
 import pytest
 
 from dfe_engine.auth import accounts as accounts_module
-from dfe_engine.auth.accounts import Account, AccountStore, DocuStoreAccountStore
+from dfe_engine.auth.accounts import (
+    Account,
+    AccountStore,
+    DocuStoreAccountStore,
+    discard_created,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -570,3 +575,31 @@ class TestDelete:
         store.delete("alice")
         assert store.get("bob") is not None
         assert len(store.list()) == 1
+
+
+class TestDiscardCreated:
+    """A create that could not finish removes its own account and nothing else."""
+
+    def test_it_removes_the_account_the_create_stored(self, store):
+        created = store.create("alice", "password123")
+
+        discard_created(store, created)
+
+        assert store.get("alice") is None
+
+    def test_an_account_stored_under_the_name_since_is_left_alone(self, store):
+        created = store.create("alice", "password123")
+        store.delete("alice")
+        store.create("alice", "another-password")
+
+        discard_created(store, created)
+
+        assert store.verify_password("alice", "another-password")
+
+    def test_an_account_already_gone_is_not_an_error(self, store):
+        created = store.create("alice", "password123")
+        store.delete("alice")
+
+        discard_created(store, created)
+
+        assert store.get("alice") is None

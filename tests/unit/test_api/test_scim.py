@@ -219,6 +219,25 @@ class TestScimUsers:
         assert resp.json()["schemas"] == ["urn:ietf:params:scim:api:messages:2.0:Error"]
         assert "No space left" not in resp.text
 
+    def test_a_store_fault_leaves_no_account_and_the_retry_provisions_it(
+        self, app, client, admin_headers
+    ):
+        """A half-made account would read as a local one and turn the IdP's retry into a 409."""
+        healthy = app.state.account_store
+        app.state.account_store = StampFailingAccountStore(healthy._dir)
+        payload = {"schemas": [USER_SCHEMA], "userName": "scim-fault", "externalId": "okta-7"}
+
+        failed = client.post(f"{BASE}/Users", json=payload, headers=admin_headers)
+        left_behind = healthy.get("scim-fault")
+        app.state.account_store = healthy
+        retried = client.post(f"{BASE}/Users", json=payload, headers=admin_headers)
+
+        assert failed.status_code == 500, failed.text
+        assert left_behind is None
+        assert retried.status_code == 201, retried.text
+        account = healthy.get("scim-fault")
+        assert (account.external_id, account.source_provider) == ("okta-7", "scim")
+
     def test_get_user(self, client, admin_headers):
         client.post(
             f"{BASE}/Users",
