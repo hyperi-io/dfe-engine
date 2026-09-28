@@ -42,6 +42,33 @@ from dfe_engine.yaml_utils import yaml_dump, yaml_load
 if TYPE_CHECKING:
     from dfe_engine.store.documents import DocuStore
 
+MAX_ATTRIBUTE_DEPTH = 64
+"""Deepest an attributes blob may nest; the YAML writer recurses once per level."""
+
+
+def check_attribute_depth(attributes: dict) -> dict:
+    """Return *attributes* unchanged, refusing a blob nested past MAX_ATTRIBUTE_DEPTH.
+
+    The top-level mapping is level one. The walk is iterative, so a blob nested far
+    past the cap is measured without recursing through it.
+
+    Raises:
+        ValueError: The blob nests deeper than MAX_ATTRIBUTE_DEPTH.
+    """
+    pending: list[tuple[object, int]] = [(attributes, 1)]
+    while pending:
+        value, depth = pending.pop()
+        if depth > MAX_ATTRIBUTE_DEPTH:
+            raise ValueError(f"attributes may nest at most {MAX_ATTRIBUTE_DEPTH} levels deep")
+        if isinstance(value, dict):
+            children = value.values()
+        elif isinstance(value, list):
+            children = value
+        else:
+            continue
+        pending.extend((child, depth + 1) for child in children if isinstance(child, dict | list))
+    return attributes
+
 
 class AttributeStore:
     """YAML-backed sensitive-attribute store, keyed by entity id.

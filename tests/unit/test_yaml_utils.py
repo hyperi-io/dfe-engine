@@ -1,10 +1,19 @@
 """Tests for yaml_utils — deep_merge and YAML operations."""
 
-from __future__ import annotations
-
+import os
+import subprocess
+import sys
 import threading
+from enum import StrEnum
 
+import pytest
+from prometheus_client.parser import text_string_to_metric_families
+from ruamel.yaml.scalarstring import LiteralScalarString
+from scalo.metrics import create_metrics
+
+from dfe_engine.yaml_health import WRITE_FAILURES, YamlWriteMetrics, write_health
 from dfe_engine.yaml_utils import (
+    YamlWriteError,
     deep_merge,
     literal_block,
     yaml_dump,
@@ -130,6 +139,166 @@ class TestConcurrentYaml:
         # No stray temp file left beside the target.
         leftovers = [p.name for p in (tmp_path / "sub").iterdir() if p.name != "out.yaml"]
         assert leftovers == []
+
+
+class _Colour(StrEnum):
+    RED = "red"
+
+
+def _nested(depth: int) -> dict:
+    """A mapping nested *depth* levels deep."""
+    doc: dict = {"leaf": "x"}
+    for _ in range(depth - 1):
+        doc = {"k": doc}
+    return doc
+
+
+# Data the writer raises on: a type it cannot represent, and nesting past the recursion limit.
+_UNDUMPABLE = [
+    pytest.param({"v": _Colour.RED}, id="unrepresentable"),
+    pytest.param(_nested(1000), id="nested-past-the-recursion-limit"),
+]
+
+# Dumps cleanly but reads back as something else: a block scalar cannot hold a CR, and NEL
+# is written as a character the reader takes for a line break.
+_UNREADABLE = [
+    pytest.param({"v": LiteralScalarString("a\r\nb\n")}, id="carriage-return-in-a-block"),
+    pytest.param({"v": "\x85"}, id="next-line-character"),
+]
+
+
+@pytest.fixture
+def reported():
+    """A real metrics backend bound to the writer, and every degraded target cleared after."""
+    manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+    write_health().bind(YamlWriteMetrics(manager))
+    try:
+        yield manager
+    finally:
+        write_health().bind(YamlWriteMetrics())
+        for entry in write_health().degraded():
+            write_health().written(entry.target)
+
+
+def _failures(manager, reason: str) -> float:
+    for family in text_string_to_metric_families(manager.metrics_text):
+        for sample in family.samples:
+            if sample.name == WRITE_FAILURES and sample.labels.get("reason") == reason:
+                return sample.value
+    return 0.0
+
+
+class TestAFailedDumpDoesNotBreakLaterWrites:
+    """ruamel keeps a failed dump's open document on the thread's writer.
+
+    Every later dump on that thread then wrote nothing: a file write replaced the file
+    with an empty one and reported success, and a string dump returned ''.
+    """
+
+    @pytest.mark.parametrize("bad", _UNDUMPABLE)
+    def test_the_next_file_write_keeps_its_content(self, tmp_path, reported, bad):
+        path = tmp_path / "groups.yaml"
+
+        with pytest.raises(YamlWriteError) as refused:
+            yaml_dump(bad, tmp_path / "bad.yaml")
+        yaml_dump({"members": ["alice"]}, path)
+
+        assert refused.value.reason == "dump"
+        assert path.read_text(encoding="utf-8") == "members:\n  - alice\n"
+
+    @pytest.mark.parametrize("bad", _UNDUMPABLE)
+    def test_the_next_string_dump_returns_its_text(self, reported, bad):
+        with pytest.raises(YamlWriteError):
+            yaml_dump_string(bad)
+
+        assert yaml_dump_string({"a": 1}) == "a: 1\n"
+
+
+class TestAWriteIsReadBackBeforeItLands:
+    @pytest.mark.parametrize("bad", _UNREADABLE)
+    def test_yaml_that_reads_back_differently_is_refused_and_the_old_file_kept(
+        self, tmp_path, reported, bad
+    ):
+        path = tmp_path / "group.yaml"
+        path.write_text("old: content\n", encoding="utf-8")
+
+        with pytest.raises(YamlWriteError) as refused:
+            yaml_dump(bad, path)
+
+        assert refused.value.reason == "verify"
+        assert path.read_text(encoding="utf-8") == "old: content\n"
+        assert [p.name for p in tmp_path.iterdir()] == ["group.yaml"]
+
+    @pytest.mark.parametrize("bad", _UNREADABLE)
+    def test_a_string_that_reads_back_differently_is_refused(self, reported, bad):
+        with pytest.raises(YamlWriteError) as refused:
+            yaml_dump_string(bad)
+
+        assert refused.value.reason == "verify"
+
+    def test_values_that_read_back_as_equal_data_still_write(self, tmp_path):
+        """A tuple reads back as a list and NaN never equals itself; neither is a refusal."""
+        path = tmp_path / "doc.yaml"
+
+        yaml_dump({"pair": (1, 2), "ratio": float("nan"), "tags": {"a"}}, path)
+
+        back = yaml_load(path)
+        assert back["pair"] == [1, 2]
+        assert back["ratio"] != back["ratio"]
+        assert back["tags"] == {"a"}
+
+
+class TestARefusedWriteIsReported:
+    def test_each_refusal_is_counted_by_reason(self, tmp_path, reported):
+        for bad in ({"v": _Colour.RED}, {"v": "\x85"}, {"v": LiteralScalarString("a\r\n")}):
+            with pytest.raises(YamlWriteError):
+                yaml_dump(bad, tmp_path / "doc.yaml")
+
+        assert _failures(reported, "dump") == 1.0
+        assert _failures(reported, "verify") == 2.0
+
+    def test_a_refused_file_is_degraded_until_it_next_writes(self, tmp_path, reported):
+        path = tmp_path / "doc.yaml"
+
+        with pytest.raises(YamlWriteError):
+            yaml_dump({"v": "\x85"}, path)
+        refused = write_health().degraded()
+        yaml_dump({"v": "fine"}, path)
+
+        assert [(e.target, e.reason) for e in refused] == [(str(path), "verify")]
+        assert write_health().degraded() == []
+
+    def test_a_string_dump_with_no_target_is_counted_but_degrades_nothing(self, reported):
+        with pytest.raises(YamlWriteError):
+            yaml_dump_string({"v": "\x85"})
+
+        assert _failures(reported, "verify") == 1.0
+        assert write_health().degraded() == []
+
+
+def test_files_are_read_and_written_as_utf8_whatever_the_locale(tmp_path):
+    """Under a C locale with UTF-8 mode off, the default text encoding is ASCII."""
+    path = tmp_path / "doc.yaml"
+    script = (
+        "import sys; from dfe_engine.yaml_utils import yaml_dump, yaml_load; "
+        "city = 'Li\\u00e8ge'; yaml_dump({'city': city}, sys.argv[1]); "
+        "print(yaml_load(sys.argv[1])['city'] == city)"
+    )
+    env = {**os.environ, "LC_ALL": "C", "PYTHONUTF8": "0"}
+
+    result = subprocess.run(
+        [sys.executable, "-X", "utf8=0", "-c", script, str(path)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "True"
+    assert path.read_bytes() == b"city: Li\xc3\xa8ge\n"
 
 
 class TestDeepMerge:

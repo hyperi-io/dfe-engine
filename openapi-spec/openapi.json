@@ -7031,6 +7031,33 @@
         ]
       }
     },
+    "/api/v1/system/status": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Get System Status",
+        "description": "Conditions that leave the engine degraded while it keeps serving.\n\nA refused YAML write keeps the old file or the old deploy-repo content, so reads\nstay correct and readiness is not failed; this is where the refusal shows.",
+        "operationId": "get_system_status_api_v1_system_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemStatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/system/settings": {
       "get": {
         "tags": [
@@ -20385,6 +20412,50 @@
         "title": "DeclaredValue",
         "description": "One value as the deploy repo declares it.\n\n``source`` names the overlay file it came from; a null source means the\ndeployment declared nothing and the chart or profile default applies. Those\ndefaults live in dfe-infra, which the engine does not read, so the API says\n\"not declared\" rather than guessing a number."
       },
+      "DegradedCondition": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "yaml_write",
+            "title": "Kind",
+            "description": "yaml_write: a write was refused and its target kept the content it had."
+          },
+          "target": {
+            "type": "string",
+            "title": "Target",
+            "description": "The file path, or deploy-repo:<path> for a file in the deploy repo."
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "dump",
+              "verify"
+            ],
+            "title": "Reason",
+            "description": "dump: turning the data into YAML failed. verify: the YAML produced does not read back as the data."
+          },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "description": "The exception type behind the refusal."
+          },
+          "since": {
+            "type": "string",
+            "title": "Since",
+            "description": "RFC 3339 time of the first refusal since the target last wrote cleanly."
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "target",
+          "reason",
+          "error",
+          "since"
+        ],
+        "title": "DegradedCondition",
+        "description": "One condition the engine keeps serving through, with the old content in place."
+      },
       "DeploymentConfigDetail": {
         "properties": {
           "service": {
@@ -32531,6 +32602,33 @@
         ],
         "title": "SyncReportModel",
         "description": "Counts from a provider sync into the catalogue."
+      },
+      "SystemStatusResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "degraded"
+            ],
+            "title": "Status",
+            "description": "degraded while any condition is listed. Readiness does not follow it."
+          },
+          "degraded": {
+            "items": {
+              "$ref": "#/components/schemas/DegradedCondition"
+            },
+            "type": "array",
+            "title": "Degraded",
+            "description": "Each condition, cleared when its target next writes cleanly."
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "SystemStatusResponse",
+        "description": "Whether the engine is serving degraded, and why."
       },
       "TableEngineObject": {
         "properties": {
