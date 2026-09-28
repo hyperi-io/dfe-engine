@@ -4,13 +4,16 @@ All errors return ``ErrorResponse`` -- a single shape the UI can parse uniformly
 Pydantic 422 errors are reshaped into the same format with field-level detail.
 """
 
+from collections.abc import Sequence
 from typing import Annotated, Any, Literal, NoReturn
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.openapi.constants import REF_TEMPLATE
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from scalo.logger import logger
+from starlette.routing import BaseRoute
 
 # -- Response models ------------------------------------------
 
@@ -263,3 +266,82 @@ def install_exception_handlers(app: FastAPI) -> None:
         logger.exception(f"Unhandled exception on {request.method} {request.url.path}")
         body = ErrorResponse(code=ErrorCode.INTERNAL_ERROR, message="An unexpected error occurred")
         return JSONResponse(status_code=500, content=_error_response_json(body))
+
+
+# -- OpenAPI declarations -------------------------------------
+
+_UNAUTHORIZED_DESCRIPTION = (
+    "No valid session: the credentials are missing, invalid or expired, or the "
+    "account behind them is disabled or blocked"
+)
+_FORBIDDEN_DESCRIPTION = (
+    "Refused: the session lacks the action this route checks, or its account must "
+    "replace an issued password first"
+)
+_SCIM_FORBIDDEN_DESCRIPTION = (
+    f"{_FORBIDDEN_DESCRIPTION}. A refused action answers in the RFC 7644 error envelope."
+)
+
+
+def _register_schema(schemas: dict[str, Any], model: type[BaseModel]) -> None:
+    """Add *model* and the models it nests to the spec, keeping any definition already there."""
+    definition = model.model_json_schema(ref_template=REF_TEMPLATE)
+    for name, nested in definition.pop("$defs", {}).items():
+        schemas.setdefault(name, nested)
+    schemas.setdefault(model.__name__, definition)
+
+
+def _error_content() -> dict[str, Any]:
+    """The native envelope as an OpenAPI response's content."""
+    ref = {"$ref": REF_TEMPLATE.format(model=ErrorResponse.__name__)}
+    return {"application/json": {"schema": ref}}
+
+
+def declare_auth_errors(openapi: dict[str, Any], routes: Sequence[BaseRoute]) -> None:
+    """Declare 401 and 403 on every operation a session guards.
+
+    Those are the routes whose dependency tree reaches
+    :func:`~dfe_engine.api.deps.get_current_user`, through ``CurrentUser`` or
+    ``require_action`` (:func:`~dfe_engine.api.deps.requires_session`), so a new
+    route behind either carries both with nothing listed by hand. A public route
+    carries neither. Both answer :class:`ErrorResponse`, except a refused action
+    on a SCIM route, which the 403 handler answers in the SCIM envelope instead.
+
+    Args:
+        openapi: The generated OpenAPI document, updated in place.
+        routes: The application's routes, included routers unexpanded.
+    """
+    from fastapi.routing import APIRoute, iter_route_contexts
+
+    from dfe_engine.api.deps import requires_session
+    from dfe_engine.api.v1.scim import SCIM_MEDIA_TYPE, SCIM_ROOT
+
+    components = openapi.setdefault("components", {})
+    schemas = components.setdefault("schemas", {})
+    _register_schema(schemas, ErrorResponse)
+    components["schemas"] = dict(sorted(schemas.items()))
+
+    paths = openapi.get("paths", {})
+    for route in iter_route_contexts(routes):
+        path, methods = route.path_format, route.methods
+        if not isinstance(route.original_route, APIRoute) or path is None or methods is None:
+            continue
+        # The context's tree, which carries any dependency the include added.
+        if not requires_session(route.dependant):
+            continue
+        scim = path.startswith(SCIM_ROOT)
+        for method in methods:
+            operation = paths.get(path, {}).get(method.lower())
+            if operation is None:
+                continue
+            responses = operation.setdefault("responses", {})
+            responses.setdefault(
+                "401", {"description": _UNAUTHORIZED_DESCRIPTION, "content": _error_content()}
+            )
+            description, content = _FORBIDDEN_DESCRIPTION, _error_content()
+            if scim:
+                description = _SCIM_FORBIDDEN_DESCRIPTION
+                # Unmodelled, as every SCIM body in this spec is.
+                content[SCIM_MEDIA_TYPE] = {"schema": {}}
+            responses.setdefault("403", {"description": description, "content": content})
+            operation["responses"] = dict(sorted(responses.items()))

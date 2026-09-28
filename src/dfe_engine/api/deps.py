@@ -14,6 +14,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Annotated, Any, NamedTuple
 
 from fastapi import Depends, HTTPException, Request, status
+from fastapi.dependencies.models import Dependant
 from scalo.logger import logger
 
 from dfe_engine.api.password_change import refuse_until_password_changed
@@ -710,6 +711,21 @@ async def get_current_user(request: Request) -> AuthContext:
 
 
 CurrentUser = Annotated[AuthContext, Depends(get_current_user)]
+
+
+def requires_session(dependant: Dependant) -> bool:
+    """Whether a route's dependency tree reaches :func:`get_current_user`.
+
+    The whole tree is walked, so a route guarded only by ``require_action`` counts
+    as well as one taking ``CurrentUser``.
+    """
+    pending = list(dependant.dependencies)
+    while pending:
+        dependency = pending.pop()
+        if dependency.call is get_current_user:
+            return True
+        pending.extend(dependency.dependencies)
+    return False
 
 
 # -- Authorization ---------------------------------------------

@@ -618,7 +618,7 @@ def create_app(
     )
 
     # Exception handlers
-    from dfe_engine.api.errors import install_exception_handlers
+    from dfe_engine.api.errors import declare_auth_errors, install_exception_handlers
 
     install_exception_handlers(app)
 
@@ -683,6 +683,7 @@ def create_app(
                 for method_data in path_item.values():
                     if isinstance(method_data, dict):
                         method_data.setdefault("security", [{"BearerAuth": []}])
+        declare_auth_errors(schema, app.routes)
         if e2e_docs:
             from dfe_engine.api.e2e_docs import split_openapi
 
