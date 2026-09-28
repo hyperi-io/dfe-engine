@@ -64,6 +64,10 @@ POINT_IN_TIME_TILES = {
     "storage-widest",
 }
 
+# The Kafka transport writes a revoked partition's committed offset as 0, because the
+# recorder cannot drop one series.
+COMMITTED_OFFSET_METRIC = "rdkafka_topic_partition_committed_offset"
+
 
 def _tile_sources(dashboard: dict) -> set[str]:
     return {
@@ -182,6 +186,26 @@ def test_raw_sql_tiles_respect_the_time_range(filename):
         sql = tile["config"]["sqlTemplate"]
         assert any(macro in sql for macro in TIME_MACROS), (
             f"{filename}:{tile['id']} has no time-range macro"
+        )
+
+
+def test_committed_offset_tiles_skip_the_revoke_marker():
+    """No tile may read a revoke's 0 as the partition's position.
+
+    ``max(Value) - min(Value)`` over a window holding that 0 reports the partition's
+    whole committed offset as progress.
+    """
+    tiles = [
+        (filename, tile)
+        for filename, dashboard in _dashboards().items()
+        for tile in _sql_tiles(dashboard)
+        if f"'{COMMITTED_OFFSET_METRIC}'" in tile["config"]["sqlTemplate"]
+    ]
+
+    assert tiles, f"no tile reads {COMMITTED_OFFSET_METRIC}, so this guard checks nothing"
+    for filename, tile in tiles:
+        assert "Value > 0" in tile["config"]["sqlTemplate"], (
+            f"{filename}:{tile['id']} counts a revoked partition's 0 as an offset"
         )
 
 
