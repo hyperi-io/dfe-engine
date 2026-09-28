@@ -208,6 +208,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         settings.auth.accounts_store.database,
     )
     app.state.document_store = doc_store
+    from dfe_engine.auth.groups import GroupMetrics
+
+    group_metrics = GroupMetrics(app.state.metrics_manager)
     injected_account_store = None
     injected_group_store = None
     if store_backend == "document":
@@ -222,7 +225,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             admin_name=settings.auth.local.admin_name,
         )
         injected_group_store = DocuStoreGroupStore(
-            doc_store, admin_name=settings.auth.local.admin_name
+            doc_store, admin_name=settings.auth.local.admin_name, metrics=group_metrics
         )
 
     # Refuse to start on the shipped admin password outside a dev posture, unless
@@ -242,6 +245,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         default_admin_name=settings.auth.local.admin_name,
         account_store=injected_account_store,
         group_store=injected_group_store,
+        group_metrics=group_metrics,
         gitcrud=gitcrud,
         seed_accounts=settings.auth.local.seed_accounts,
         breakglass_password=settings.auth.local.breakglass_password,

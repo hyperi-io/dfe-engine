@@ -12,8 +12,6 @@ produces a conforming message (type(scope): summary <=50, ASCII, [skip ci], audi
 trailers). See docs/control-plane/gitops-commit-standard.md.
 """
 
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass, field
 
@@ -39,6 +37,7 @@ SUBJECT_MAX = 50
 # ``fullmatch`` (not ``match``) anchors the whole string, so a trailing newline is
 # rejected -- ``$`` would otherwise match just before it and let a name smuggle a
 # ``DFE-Role:``/``DFE-Action:`` trailer line into the commit body.
+# Not store_names.VALID_NAME: a deploy-repo name has no length cap or leading-character rule.
 _NAME_RE = re.compile(r"[A-Za-z0-9._-]+")
 
 

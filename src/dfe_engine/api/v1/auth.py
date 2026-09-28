@@ -15,6 +15,7 @@ from dfe_engine.api.deps import (
     CurrentUser,
     Settings,
     _get_client_ip,
+    bound_account,
     check_action,
     create_access_token,
     get_role_config,
@@ -106,19 +107,9 @@ class PermissionsResponse(BaseModel):
     permissions: list[str] = Field(description="Resolved permissions from all roles")
 
 
-def _session_account(request: Request, user_id: str):
-    """The store account for a session subject, including the JIT-sanitised stem."""
-    from dfe_engine.api.deps import account_for_session_subject
-
-    store = getattr(request.app.state, "account_store", None)
-    if store is None:
-        return None
-    return account_for_session_subject(store, user_id)
-
-
 def _password_change_required(request: Request, user_id: str) -> bool:
     """Whether the session's account must replace an issued password first."""
-    account = _session_account(request, user_id)
+    account = bound_account(request, user_id)
     return bool(account and account.password_change_required)
 
 
@@ -217,7 +208,7 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
 
     change_required = _password_change_required(request, auth_ctx.user_id)
     # The provider resolves role names only; the claim needs the scope each is bound at.
-    live = resolve_live_grants_for_user(request, auth_ctx.user_id, fallback_groups=auth_ctx.groups)
+    live = resolve_live_grants_for_user(request, auth_ctx.user_id)
     data = _token_data(
         auth_ctx.user_id,
         auth_ctx.org_id,
@@ -242,17 +233,24 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(user: CurrentUser, request: Request, settings: Settings):
     """Refresh the current JWT token. Requires a valid existing token."""
-    require_local_account_enabled(request, user.user_id)
+    account = require_local_account_enabled(request, user.user_id)
+    # Each refresh issues a new expiry, so only a session an account backs may renew.
+    if account is None and settings.auth.enabled:
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "unauthorized", "message": "No account is bound to this session"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     change_required = _password_change_required(request, user.user_id)
-    # Re-resolved, so a role taken away is gone from the next token too.
-    live = resolve_live_grants_for_user(request, user.user_id, fallback_groups=user.groups)
+    # Re-resolved, so a role or org taken away is gone from the next token too.
+    live = resolve_live_grants_for_user(request, user.user_id)
     data = _token_data(
         user.user_id,
         user.org_id,
         live.roles,
         live.grants,
-        resolve_live_groups_for_user(request, user.user_id, fallback_groups=user.groups),
-        user.org_ids,
+        resolve_live_groups_for_user(request, user.user_id),
+        live.org_ids,
         change_required=change_required,
     )
     token = create_access_token(data=data, settings=settings)
@@ -276,7 +274,7 @@ async def get_me(user: CurrentUser, request: Request):
     """
     role_config = get_role_config(request)
     permissions = sorted(role_config.resolve_permissions(user.roles))
-    account = _session_account(request, user.user_id)
+    account = bound_account(request, user.user_id)
     return UserResponse(
         org_id=user.org_id,
         user_id=user.user_id,

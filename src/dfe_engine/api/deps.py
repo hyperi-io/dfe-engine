@@ -406,15 +406,12 @@ def _resolve_roles_from_groups(
     return resolution.roles, resolution.org_ids
 
 
-def _groups_for_local_account(request: Request, user_id: str) -> list[str]:
-    """Load group names from AccountStore for JWT users (legacy tokens without groups claim)."""
-    if user_id.startswith(API_KEY_SUBJECT_PREFIX):
-        return []
+def bound_account(request: Request, user_id: str) -> Any:
+    """The account :func:`account_for_session_subject` binds *user_id* to, or None."""
     account_store = getattr(request.app.state, "account_store", None)
     if account_store is None:
-        return []
-    account = account_store.get(user_id)
-    return list(account.groups) if account is not None else []
+        return None
+    return account_for_session_subject(account_store, user_id)
 
 
 def get_role_config(request: Request) -> RoleConfig:
@@ -431,92 +428,40 @@ def get_role_config(request: Request) -> RoleConfig:
     return RoleConfig.load_builtin()
 
 
-def _groups_from_stores(request: Request, user_id: str) -> list[str]:
-    """Group names from GroupStore membership and AccountStore (never JWT)."""
+def _groups_of_account(group_store: GroupStore, account: Any) -> list[str]:
+    """Group names from GroupStore membership of *account*, else its own list (never JWT).
+
+    An IdP-owned account takes both: its own list is what its IdP asserts, so a group
+    an operator adds it to by hand is held beside those, not in place of them.
+    """
+    from_membership = sorted(g.name for g in group_store.list() if account.username in g.members)
+    if account.source_provider:
+        return sorted(set(from_membership) | set(account.groups))
+    return from_membership or list(account.groups)
+
+
+def resolve_live_grants_for_user(request: Request, user_id: str) -> GroupResolution:
+    """Resolve roles/org_ids/grants from the bound account's groups, never a token claim.
+
+    The account is the one :func:`account_for_session_subject` binds, so a subject that
+    binds none, an API-key subject among them, resolves to nothing.
+    """
     group_store: GroupStore | None = getattr(request.app.state, "group_store", None)
-    if group_store is not None:
-        from_membership = sorted(g.name for g in group_store.list() if user_id in g.members)
-        if from_membership:
-            return from_membership
-
-    account_store = getattr(request.app.state, "account_store", None)
-    if account_store is not None:
-        account = account_store.get(user_id)
-        if account is not None:
-            return list(account.groups)
-    return []
+    account = bound_account(request, user_id)
+    if group_store is None or account is None:
+        return GroupResolution([], [], [])
+    return _resolve_group_grants(_groups_of_account(group_store, account), group_store)
 
 
-def _has_local_account(request: Request, user_id: str) -> bool:
-    if user_id.startswith(API_KEY_SUBJECT_PREFIX):
-        return False
-    account_store = getattr(request.app.state, "account_store", None)
-    return account_store is not None and account_store.get(user_id) is not None
-
-
-def resolve_live_grants_for_user(
-    request: Request,
-    user_id: str,
-    *,
-    fallback_groups: list[str] | None = None,
-) -> GroupResolution:
-    """Resolve roles/org_ids/grants from group membership (ignores JWT role claims)."""
+def resolve_live_groups_for_user(request: Request, user_id: str) -> list[str]:
+    """Return the bound account's group names from the stores, or none when it binds none."""
+    account = bound_account(request, user_id)
+    if account is None:
+        return []
     group_store: GroupStore | None = getattr(request.app.state, "group_store", None)
     if group_store is None:
-        return GroupResolution([], [], [])
-
-    if user_id.startswith(API_KEY_SUBJECT_PREFIX):
-        key_name = user_id.removeprefix(API_KEY_SUBJECT_PREFIX)
-        api_key_store: APIKeyStore | None = getattr(request.app.state, "api_key_store", None)
-        groups: list[str] = []
-        if api_key_store is not None:
-            key = api_key_store.get(key_name)
-            if key is not None:
-                groups = list(key.groups)
-        if not groups:
-            groups = list(fallback_groups or [])
-        return _resolve_group_grants(groups, group_store)
-
-    groups = sorted(g.name for g in group_store.list() if user_id in g.members)
-    if not groups:
-        groups = _groups_from_stores(request, user_id)
-    if not groups and not _has_local_account(request, user_id):
-        groups = list(fallback_groups or [])
-    return _resolve_group_grants(groups, group_store)
-
-
-def resolve_live_roles_for_user(
-    request: Request,
-    user_id: str,
-    *,
-    fallback_groups: list[str] | None = None,
-) -> list[str]:
-    """Resolve roles from group membership and role mappings (ignores JWT role claims)."""
-    return resolve_live_grants_for_user(request, user_id, fallback_groups=fallback_groups).roles
-
-
-def resolve_live_groups_for_user(
-    request: Request,
-    user_id: str,
-    *,
-    fallback_groups: list[str] | None = None,
-) -> list[str]:
-    """Return current group names for a user from stores."""
-    if user_id.startswith(API_KEY_SUBJECT_PREFIX):
-        key_name = user_id.removeprefix(API_KEY_SUBJECT_PREFIX)
-        api_key_store: APIKeyStore | None = getattr(request.app.state, "api_key_store", None)
-        if api_key_store is not None:
-            key = api_key_store.get(key_name)
-            if key is not None:
-                return list(key.groups)
-        return list(fallback_groups or [])
-
-    groups = _groups_from_stores(request, user_id)
-    if groups:
-        return groups
-    if _has_local_account(request, user_id):
-        return []
-    return list(fallback_groups or [])
+        return list(account.groups)
+    return _groups_of_account(group_store, account)
 
 
 def account_for_session_subject(store: Any, user_id: str):
@@ -565,7 +510,7 @@ def require_local_account_enabled(request: Request, user_id: str) -> Any:
         return None
 
     bound = account_for_session_subject(account_store, user_id)
-    # Role resolution reads the account stored under the raw subject, bound or not.
+    # A disabled or blocked account refuses every token that names it, bound or not.
     account = bound or account_store.get(user_id)
     if account is None:
         return None
@@ -731,11 +676,6 @@ async def get_current_user(request: Request) -> AuthContext:
 
         jwt_user_id = payload.get("sub", "")
         jwt_email = payload.get("email") or None
-        jwt_groups = payload.get("groups")
-        if jwt_groups is None:
-            jwt_groups = _groups_for_local_account(request, jwt_user_id)
-        elif not isinstance(jwt_groups, list):
-            jwt_groups = []
         account = require_local_account_enabled(request, jwt_user_id)
         refuse_until_password_changed(request, account)
         if account is not None and account.password_change_required:
@@ -748,17 +688,16 @@ async def get_current_user(request: Request) -> AuthContext:
                 client_ip=client_ip,
                 user_agent=user_agent,
             )
-        live = resolve_live_grants_for_user(request, jwt_user_id, fallback_groups=jwt_groups)
-        live_groups = resolve_live_groups_for_user(request, jwt_user_id, fallback_groups=jwt_groups)
-        claim_org_ids = payload.get("org_ids", [])
-        org_ids = sorted(set(claim_org_ids) | set(live.org_ids)) if claim_org_ids else live.org_ids
+        # The token's roles, groups and org_ids claims grant nothing; the bound account decides.
+        live = resolve_live_grants_for_user(request, jwt_user_id)
+        live_groups = resolve_live_groups_for_user(request, jwt_user_id)
         return AuthContext(
             org_id=payload.get("org_id", "default"),
             user_id=jwt_user_id,
             email=jwt_email,
             roles=live.roles,
             grants=live.grants,
-            org_ids=org_ids,
+            org_ids=live.org_ids,
             groups=live_groups,
             request_id=request_id,
             client_ip=client_ip,

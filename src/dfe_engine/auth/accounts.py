@@ -24,8 +24,9 @@ Usage::
     store.delete("alice")
 """
 
-from __future__ import annotations
-
+import builtins
+import os
+import tempfile
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
@@ -54,6 +55,21 @@ def _dummy_hash() -> bytes:
     than at import, because a hash at that cost takes a noticeable fraction of a second.
     """
     return bcrypt.hashpw(b"dummy-timing-protection", bcrypt.gensalt(rounds=BCRYPT_ROUNDS))
+
+
+def _ignores_case(directory: Path) -> bool:
+    """Whether *directory* sits on a filesystem that takes ``Bob`` and ``bob`` as one name.
+
+    Probed with a file of its own inside *directory*, since the directory's own name
+    may have no letters to flip. Where no probe can be made the answer is True, so
+    every lookup checks its entry's name, which is right on either kind.
+    """
+    try:
+        with tempfile.NamedTemporaryFile(dir=directory, prefix="case-probe-", suffix=".tmp") as f:
+            probe = Path(f.name)
+            return probe.with_name(probe.name.swapcase()).exists()
+    except OSError:
+        return True
 
 
 # Stored for accounts with NO usable local password (external / IdP-owned /
@@ -132,6 +148,7 @@ class AccountStore:
         self._dir = Path(accounts_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
         self.protected = resolve_floor(admin_name)
+        self._ignores_case = _ignores_case(self._dir)
 
     # ------------------------------------------------------------------
     # Public API
@@ -142,7 +159,7 @@ class AccountStore:
         username: str,
         password: str,
         *,
-        groups: list[str] | None = None,
+        groups: builtins.list[str] | None = None,
         email: str = "",
         phone: str = "",
         name: str = "",
@@ -227,14 +244,14 @@ class AccountStore:
             Account if found, None otherwise.
         """
         try:
-            path = self._path(username)
+            path = self._stored(username)
         except KeyError:
             return None
-        if not path.exists():
+        if path is None:
             return None
         return self._read(path)
 
-    def list(self) -> list[Account]:
+    def list(self) -> builtins.list[Account]:
         """Return all accounts in the store.
 
         Returns:
@@ -266,8 +283,8 @@ class AccountStore:
             ProtectedAccountError: The update would disable a recovery
                 credential or drop it from the admin-role group.
         """
-        path = self._path(username)
-        if not path.exists():
+        path = self._stored(username)
+        if path is None:
             raise KeyError(username)
 
         account = self._read(path)
@@ -292,8 +309,8 @@ class AccountStore:
         Raises:
             KeyError: If no account with *username* exists.
         """
-        path = self._path(username)
-        if not path.exists():
+        path = self._stored(username)
+        if path is None:
             raise KeyError(username)
 
         account = self._read(path)
@@ -313,8 +330,8 @@ class AccountStore:
         Raises:
             KeyError: If no account with *username* exists.
         """
-        path = self._path(username)
-        if not path.exists():
+        path = self._stored(username)
+        if path is None:
             raise KeyError(username)
 
         account = self._read(path)
@@ -334,8 +351,8 @@ class AccountStore:
             KeyError: If no account with *username* exists.
             ProtectedAccountError: *username* is a recovery credential.
         """
-        path = self._path(username)
-        if not path.exists():
+        path = self._stored(username)
+        if path is None:
             raise KeyError(username)
         if not allow_protected:
             self.protected.check_account_delete(username)
@@ -383,6 +400,20 @@ class AccountStore:
             KeyError: No account can hold *username*, so it is looked up nowhere.
         """
         return self._dir / f"{store_key(username)}.yaml"
+
+    def _stored(self, username: str) -> Path | None:
+        """The file holding the account stored under exactly *username*, or None.
+
+        Raises:
+            KeyError: No account can hold *username*, so it is looked up nowhere.
+        """
+        path = self._path(username)
+        if not path.exists():
+            return None
+        # A case-blind filesystem opens bob.yaml for Bob, so the entry's own name must match.
+        if self._ignores_case and path.name not in os.listdir(self._dir):
+            return None
+        return path
 
     def _read(self, path: Path) -> Account:
         """Load an Account from a YAML file.
@@ -447,7 +478,7 @@ class DocuStoreAccountStore:
         username: str,
         password: str,
         *,
-        groups: list[str] | None = None,
+        groups: builtins.list[str] | None = None,
         email: str = "",
         phone: str = "",
         name: str = "",
@@ -502,7 +533,7 @@ class DocuStoreAccountStore:
             raise KeyError(username)
         return account
 
-    def list(self) -> list[Account]:
+    def list(self) -> builtins.list[Account]:
         """Return all accounts, sorted by username."""
         return self._c.list()
 

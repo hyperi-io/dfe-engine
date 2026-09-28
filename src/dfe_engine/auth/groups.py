@@ -6,14 +6,18 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
+import builtins
+import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
+from scalo.logger import logger
 
 from dfe_engine.auth.protected_accounts import resolve_floor
 from dfe_engine.auth.store_names import VALID_NAME, store_key
-from dfe_engine.yaml_utils import yaml_dump, yaml_load
+from dfe_engine.orgs.models import ORG_NAME_PATTERN
+from dfe_engine.yaml_utils import YAMLError, yaml_dump, yaml_load
 
 if TYPE_CHECKING:
     from dfe_engine.store.documents import DocuStore
@@ -21,15 +25,80 @@ if TYPE_CHECKING:
 GROUP_SCOPE_SYSTEM = "system"
 _ORG_SCOPE_PREFIX = "org:"
 
+GROUPS_SKIPPED = "auth_groups_skipped_total"
+
+SkipReason = Literal["unreadable", "not_a_mapping", "invalid"]
+"""Why a stored group was skipped.
+
+- ``unreadable``: the file cannot be read as YAML.
+- ``not_a_mapping``: the file holds a list or a scalar, not a group's fields.
+- ``invalid``: no Group can be made from the fields, a bad scope for one.
+"""
+
+
+class GroupExistsError(ValueError):
+    """A group is already stored under the name, whether or not it loads."""
+
+
+class GroupMetrics:
+    """The group stores' instruments, or a no-op set when no backend is wired.
+
+    Args:
+        manager: a scalo ``MetricsManager`` (anything exposing ``counter``). ``None``
+            means no backend, and every record method returns without doing anything.
+    """
+
+    def __init__(self, manager: Any | None = None) -> None:
+        self._manager = manager
+        if manager is None:
+            return
+        self._skipped = manager.counter(
+            GROUPS_SKIPPED,
+            "Stored groups skipped as not a valid group, counted each time one starts failing",
+            ["reason"],
+        )
+
+    def skipped(self, reason: SkipReason) -> None:
+        """Record a stored group that has started failing to load."""
+        if self._manager is None:
+            return
+        self._skipped.labels(reason=reason).inc()
+
+
+class _Skips:
+    """The stored groups skipped as not valid, each reported once until it loads again."""
+
+    def __init__(self, metrics: GroupMetrics | None) -> None:
+        self._names: set[str] = set()
+        self._metrics = metrics if metrics is not None else GroupMetrics()
+
+    def skip(self, name: str, reason: SkipReason, error: str, **where: str) -> None:
+        """Warn about and count the group stored as *name*, unless it is already skipped."""
+        # Role resolution lists every group per request, so one failure is reported once.
+        if name in self._names:
+            return
+        self._names.add(name)
+        self._metrics.skipped(reason)
+        logger.warning(
+            "stored group skipped: not a valid group", reason=reason, error=error, **where
+        )
+
+    def loaded(self, name: str) -> None:
+        """Forget *name* as skipped, so a later failure is reported again."""
+        self._names.discard(name)
+
 
 def validate_group_scope(scope: str) -> str:
     """Validate a group scope string: ``system`` or ``org:<name>``.
+
+    ``<name>`` follows the org name rule, since it is looked up in the org registry.
 
     Returns the scope unchanged; raises ValueError otherwise.
     """
     if scope == GROUP_SCOPE_SYSTEM:
         return scope
-    if scope.startswith(_ORG_SCOPE_PREFIX) and scope[len(_ORG_SCOPE_PREFIX) :].strip():
+    org = scope.removeprefix(_ORG_SCOPE_PREFIX)
+    if org != scope and re.fullmatch(ORG_NAME_PATTERN, org):
         return scope
     raise ValueError(f"Group scope must be 'system' or 'org:<name>', got '{scope}'")
 
@@ -89,10 +158,17 @@ class GroupStore:
             so a caller can refuse a batch removal before applying any of it.
     """
 
-    def __init__(self, groups_dir: Path, *, admin_name: str = "") -> None:
+    def __init__(
+        self,
+        groups_dir: Path,
+        *,
+        admin_name: str = "",
+        metrics: GroupMetrics | None = None,
+    ) -> None:
         self._dir = Path(groups_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
         self.protected = resolve_floor(admin_name)
+        self._skips = _Skips(metrics)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -114,14 +190,34 @@ class GroupStore:
         return self._load(path)
 
     def _load(self, path: Path) -> Group | None:
-        if not path.exists():
+        """The group in *path*, or None when there is none or it is not a valid group.
+
+        An invalid file is skipped, not raised, so it cannot take down role resolution
+        for every session. Its members lose that group's roles until it is fixed.
+        """
+        try:
+            data = yaml_load(path)
+        except FileNotFoundError:
             return None
-        data = yaml_load(path)
+        # A file nested past the parser's recursion limit raises RecursionError, not YAMLError.
+        except (OSError, UnicodeDecodeError, YAMLError, RecursionError) as exc:
+            self._skips.skip(path.name, "unreadable", str(exc), path=str(path))
+            return None
         if data is None:
             data = {}
+        if not isinstance(data, dict):
+            error = f"holds a {type(data).__name__}, not a mapping"
+            self._skips.skip(path.name, "not_a_mapping", error, path=str(path))
+            return None
         # Name is derived from filename, not stored in the file
         data["name"] = path.stem
-        return Group.model_validate(data)
+        try:
+            group = Group.model_validate(data)
+        except ValidationError as exc:
+            self._skips.skip(path.name, "invalid", str(exc), path=str(path))
+            return None
+        self._skips.loaded(path.name)
+        return group
 
     def _write(self, group: Group) -> None:
         # Exclude the name field -- it lives in the filename, not the YAML
@@ -135,22 +231,23 @@ class GroupStore:
     def create(
         self,
         name: str,
-        roles: list[str],
+        roles: builtins.list[str],
         description: str = "",
         *,
-        members: list[str] | None = None,
+        members: builtins.list[str] | None = None,
         scope: str = GROUP_SCOPE_SYSTEM,
     ) -> Group:
         """Create a new group and persist it to YAML.
 
         Raises:
-            ValueError: If a group with this name already exists, or the
-                scope is not ``system`` / ``org:<name>``.
+            GroupExistsError: A group file already holds this name, loadable or not.
+            ValueError: The name is not one a group can have, or the scope is not
+                ``system`` / ``org:<name>``.
         """
         if not VALID_NAME.match(name):
             raise ValueError(f"Invalid group name: {name!r}")
         if self._path(name).exists():
-            raise ValueError(f"Group '{name}' already exists")
+            raise GroupExistsError(f"Group '{name}' already exists")
         member_list: list[str] = []
         if members:
             seen: set[str] = set()
@@ -172,7 +269,7 @@ class GroupStore:
         """Return the named group, or None if it does not exist."""
         return self._read(name)
 
-    def list(self) -> list[Group]:
+    def list(self) -> builtins.list[Group]:
         """Return all groups sorted by name."""
         groups = []
         for path in sorted(self._dir.glob("*.yaml")):
@@ -309,7 +406,7 @@ class GroupStore:
             updated = group.model_copy(update={"members": updated_members})
             self._write(updated)
 
-    def resolve_roles_for_member(self, username: str) -> list[str]:
+    def resolve_roles_for_member(self, username: str) -> builtins.list[str]:
         """Return the sorted unique list of roles held by a member across all groups.
 
         Scans every group file; a user accumulates roles from all groups they
@@ -354,24 +451,37 @@ class DocuStoreGroupStore:
         *,
         collection: str = "groups",
         admin_name: str = "",
+        metrics: GroupMetrics | None = None,
     ) -> None:
-        self._c = store.typed(collection, Group, key="name")
+        self._collection = collection
+        self._skips = _Skips(metrics)
+        self._c = store.typed(collection, Group, key="name", on_invalid=self._skip_invalid)
         self.protected = resolve_floor(admin_name)
+
+    def _skip_invalid(self, document: dict, exc: ValidationError) -> None:
+        """Leave out a stored document no Group can be made from, as the YAML store does."""
+        name = str(document.get("name", ""))
+        self._skips.skip(name, "invalid", str(exc), collection=self._collection)
 
     def create(
         self,
         name: str,
-        roles: list[str],
+        roles: builtins.list[str],
         description: str = "",
         *,
-        members: list[str] | None = None,
+        members: builtins.list[str] | None = None,
         scope: str = GROUP_SCOPE_SYSTEM,
     ) -> Group:
-        """Create a new group. Raises ValueError if the name is invalid/taken or scope is bad."""
+        """Create a new group.
+
+        Raises:
+            GroupExistsError: A document already holds this name, loadable or not.
+            ValueError: The name is not one a group can have, or the scope is bad.
+        """
         if not VALID_NAME.match(name):
             raise ValueError(f"Invalid group name: {name!r}")
         if self._c.exists(name):
-            raise ValueError(f"Group '{name}' already exists")
+            raise GroupExistsError(f"Group '{name}' already exists")
         member_list: list[str] = []
         if members:
             seen: set[str] = set()
@@ -392,13 +502,19 @@ class DocuStoreGroupStore:
     def get(self, name: str) -> Group | None:
         """Return the named group, or None if it does not exist."""
         try:
-            return self._c.get(store_key(name))
+            group = self._c.get(store_key(name))
         except KeyError:
             return None
+        if group is not None:
+            self._skips.loaded(group.name)
+        return group
 
-    def list(self) -> list[Group]:
-        """Return all groups sorted by name."""
-        return self._c.list()
+    def list(self) -> builtins.list[Group]:
+        """Return all groups sorted by name, leaving out any that is not a valid group."""
+        groups = self._c.list()
+        for group in groups:
+            self._skips.loaded(group.name)
+        return groups
 
     def by_source_id(self) -> dict[str, Group]:
         """Return groups keyed by their provider ``source_id`` (only non-empty ones).
@@ -482,7 +598,7 @@ class DocuStoreGroupStore:
             updated = group.model_copy(update={"members": updated_members})
             self._c.put(group_name, updated)
 
-    def resolve_roles_for_member(self, username: str) -> list[str]:
+    def resolve_roles_for_member(self, username: str) -> builtins.list[str]:
         """Return the sorted unique list of roles held by a member across all groups."""
         roles: set[str] = set()
         for group in self.list():

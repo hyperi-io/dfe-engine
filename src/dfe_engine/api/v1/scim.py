@@ -64,6 +64,7 @@ from scim2_models import (
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.password_floor import FLOOR_MESSAGE, below_floor, count_floor_refusal
+from dfe_engine.auth.groups import GroupExistsError
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.scim_mapping import (
     account_to_scim_user,
@@ -435,13 +436,14 @@ async def create_group(user: CurrentUser, request: Request) -> Response:
 
     store = request.app.state.group_store
     account_store = request.app.state.account_store
-    if store.get(inbound.display_name) is not None:
-        return scim_error(409, f"Group '{inbound.display_name}' already exists", "uniqueness")
-
     fields = scim_group_to_group_fields(inbound)
     name = str(fields["name"])
     members = list(fields["members"])  # type: ignore[arg-type]
-    group = store.create(name, roles=[], description="", members=members)
+    # create() decides, not get(): get() reports a stored group that does not load as absent.
+    try:
+        group = store.create(name, roles=[], description="", members=members)
+    except GroupExistsError:
+        return scim_error(409, f"Group '{name}' already exists", "uniqueness")
     store.update(name, source_id=fields["source_id"], source_provider=fields["source_provider"])
     request_ch_rbac_reconcile(request.app.state)
     sync_account_groups_for_membership_change(account_store, name, added=group.members)

@@ -44,7 +44,7 @@ from scalo.logger import logger
 
 from dfe_engine.auth.accounts import Account, AccountStore, DocuStoreAccountStore, matches_digest
 from dfe_engine.auth.api_keys import APIKeyStore
-from dfe_engine.auth.groups import DocuStoreGroupStore, GroupStore
+from dfe_engine.auth.groups import DocuStoreGroupStore, GroupMetrics, GroupStore
 from dfe_engine.auth.role_store import RoleStore
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.git_identity import DEFAULT_FALLBACK_DOMAIN
@@ -193,6 +193,7 @@ def bootstrap_auth(
     default_admin_name: str = "",
     account_store: AccountStore | DocuStoreAccountStore | None = None,
     group_store: GroupStore | DocuStoreGroupStore | None = None,
+    group_metrics: GroupMetrics | None = None,
     gitcrud: GitCrud | None = None,
     seed_accounts: list[SeedAccount] | None = None,
     breakglass_password: str = "",
@@ -215,6 +216,8 @@ def bootstrap_auth(
             to ``changeme``.
         default_admin_name: Username for the local admin. Empty falls through
             to ``admin``.
+        group_metrics: Where the default group store counts the group files it
+            skips. Unused when ``group_store`` is given.
         gitcrud: When gitops is enabled, the deploy-repo engine. The live store is
             hydrated from it before the reconcile, an admin the reconcile created or
             re-hashed is persisted back into it, and the break-glass hash and the
@@ -255,7 +258,7 @@ def bootstrap_auth(
     if account_store is None:
         account_store = AccountStore(accounts_dir, admin_name=default_admin_name)
     if group_store is None:
-        group_store = GroupStore(groups_dir, admin_name=default_admin_name)
+        group_store = GroupStore(groups_dir, admin_name=default_admin_name, metrics=group_metrics)
     api_key_store = APIKeyStore(api_keys_dir)
 
     # Seed default groups if the store has none (backend-agnostic)

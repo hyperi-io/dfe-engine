@@ -3,9 +3,15 @@
 import secrets
 
 import jwt as pyjwt
+import pytest
 from fastapi.testclient import TestClient
+from prometheus_client.parser import text_string_to_metric_families
+from scalo.metrics import create_metrics
 
+from dfe_engine.api.app import create_app
+from dfe_engine.api.deps import _registries, create_access_token
 from dfe_engine.auth import hyperdx_role
+from dfe_engine.auth.groups import GROUPS_SKIPPED
 
 
 def _claims(token: str) -> dict:
@@ -375,3 +381,391 @@ class TestTheHyperdxRoleClaim:
         assert refreshed.status_code == 200, refreshed.text
         claim = _claims(refreshed.json()["access_token"])[hyperdx_role.CLAIM]
         assert claim == hyperdx_role.MEMBER
+
+
+def _bearer(api_settings, sub: str, **claims) -> dict[str, str]:
+    """Headers for an engine token with *sub* and whatever claims the test names."""
+    token = create_access_token(
+        data={"sub": sub, "org_id": "test-org", **claims}, settings=api_settings
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+class TestRolesFollowTheBoundAccount:
+    """A session's store roles are those of the account it binds to, and no other's."""
+
+    @pytest.mark.parametrize("held_by", ["account", "membership"])
+    def test_a_token_whose_subject_is_anothers_stem_gets_none_of_their_roles(
+        self, client: TestClient, app, api_settings, held_by
+    ):
+        """alice-smith-corp records Alice.Smith@corp, so a token for the bare stem binds nothing."""
+        signed_in = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "Alice.Smith@corp", "X-Oidc-Groups": "dfe-admins"},
+        )
+        assert signed_in.status_code == 200, signed_in.text
+        if held_by == "membership":
+            app.state.account_store.update("alice-smith-corp", groups=[])
+            app.state.group_store.add_member("dfe-admins", "alice-smith-corp")
+
+        resp = client.get("/api/v1/auth/me", headers=_bearer(api_settings, "alice-smith-corp"))
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["roles"] == []
+        assert resp.json()["groups"] == []
+
+    def test_a_token_whose_subject_is_anothers_stem_sees_none_of_their_groups(
+        self, client: TestClient, app, api_settings
+    ):
+        """Members see their own groups, and the bare stem is not a member of Alice's."""
+        client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "Alice.Smith@corp", "X-Oidc-Groups": "dfe-analysts"},
+        )
+        app.state.group_store.add_member("dfe-analysts", "alice-smith-corp")
+
+        resp = client.get("/api/v1/auth/groups", headers=_bearer(api_settings, "alice-smith-corp"))
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["items"] == []
+
+    def test_a_proxied_user_with_no_local_account_gets_its_claim_groups(self, client: TestClient):
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "nia@example.com", "X-Oidc-Groups": "dfe-analysts"},
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["roles"] == ["data_analyst"]
+
+    def test_a_token_with_no_account_behind_it_gets_no_roles_from_its_claim(
+        self, client: TestClient, app, api_settings
+    ):
+        """Every real login binds an account, so a claim alone is a token nothing vouches for."""
+        headers = _bearer(api_settings, "omar@example.com", groups=["dfe-analysts"])
+
+        resp = client.get("/api/v1/auth/me", headers=headers)
+
+        assert app.state.account_store.get("omar-example-com") is None
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["roles"] == []
+        assert resp.json()["groups"] == []
+
+    def test_a_deleted_accounts_live_token_gets_no_roles(self, client: TestClient, app):
+        password = secrets.token_urlsafe(16)
+        app.state.account_store.create("leaver", password, groups=["dfe-admins"])
+        app.state.group_store.add_member("dfe-admins", "leaver")
+        login = client.post("/api/v1/auth/login", json={"username": "leaver", "password": password})
+        assert "admin" in login.json()["roles"]
+        app.state.group_store.remove_member("dfe-admins", "leaver")
+        app.state.account_store.delete("leaver")
+
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {login.json()['access_token']}"},
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["roles"] == []
+        assert resp.json()["groups"] == []
+
+    def test_a_bound_idp_user_gets_its_accounts_roles(self, client: TestClient, api_settings):
+        """Alice.Smith@corp binds alice-smith-corp through the stem; the claim is not consulted."""
+        client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "Alice.Smith@corp", "X-Oidc-Groups": "dfe-analysts"},
+        )
+
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers=_bearer(api_settings, "Alice.Smith@corp", groups=["dfe-admins"]),
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["roles"] == ["data_analyst"]
+
+    def test_a_scim_adopted_local_login_whose_subject_differs_is_unbound(
+        self, client: TestClient, app
+    ):
+        """Pins today's behaviour: login answers with roles, the session holds none and cannot refresh."""
+        password = secrets.token_urlsafe(16)
+        store = app.state.account_store
+        store.create("bob", password, groups=["dfe-analysts"])
+        store.update("bob", source_provider="scim", subject="bob@corp")
+        app.state.group_store.add_member("dfe-analysts", "bob")
+
+        login = client.post("/api/v1/auth/login", json={"username": "bob", "password": password})
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        me = client.get("/api/v1/auth/me", headers=headers)
+        refreshed = client.post("/api/v1/auth/refresh", headers=headers)
+
+        assert login.status_code == 200, login.text
+        assert login.json()["roles"] == ["data_analyst"]
+        assert me.status_code == 200, me.text
+        assert me.json()["roles"] == []
+        assert refreshed.status_code == 401, refreshed.text
+
+    def test_a_local_login_gets_its_accounts_roles(self, client: TestClient):
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "operator", "password": "test-operator-pw"},
+        )
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+        resp = client.get("/api/v1/auth/me", headers=headers)
+
+        assert resp.status_code == 200, resp.text
+        assert sorted(resp.json()["roles"]) == ["data_analyst", "infra_admin"]
+
+    def test_a_scim_account_bound_by_stem_gets_its_roles(
+        self, client: TestClient, app, api_settings
+    ):
+        """jane.doe stems onto the SCIM record jane-doe, which records her as its subject."""
+        store = app.state.account_store
+        store.create("jane-doe", secrets.token_urlsafe(16), groups=["dfe-analysts"])
+        store.update("jane-doe", source_provider="scim", subject="jane.doe")
+
+        resp = client.get("/api/v1/auth/me", headers=_bearer(api_settings, "jane.doe"))
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["roles"] == ["data_analyst"]
+
+    def test_an_api_key_keeps_its_own_groups(self, client: TestClient, app):
+        _, key = app.state.api_key_store.create("ci-analyst", groups=["dfe-analysts"])
+
+        resp = client.get("/api/v1/auth/me", headers={"X-API-Key": key})
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["roles"] == ["data_analyst"]
+
+    def test_a_token_minted_for_an_api_key_gets_no_roles(
+        self, client: TestClient, app, api_settings
+    ):
+        """An API-key subject binds no account; the key's groups belong to the key's own session."""
+        app.state.api_key_store.create("ci-analyst", groups=["dfe-analysts"])
+        headers = _bearer(api_settings, "apikey:ci-analyst", groups=["dfe-analysts"])
+
+        resp = client.get("/api/v1/auth/me", headers=headers)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["roles"] == []
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            pytest.param(
+                "roles: [admin]\nmembers: [viewer]\nscope: org:../elsewhere/outside\n",
+                id="bad-scope",
+            ),
+            pytest.param("roles: [admin\nmembers: [viewer]\n", id="malformed-yaml"),
+            pytest.param("- admin\n- viewer\n", id="not-a-mapping"),
+        ],
+    )
+    def test_an_unloadable_group_file_leaves_other_sessions_their_roles(
+        self, client: TestClient, app, viewer_headers: dict, content
+    ):
+        """Every session lists the groups, so one unloadable file must not fail them all."""
+        (app.state.group_store._dir / "climber.yaml").write_text(content, encoding="utf-8")
+
+        resp = client.get("/api/v1/auth/me", headers=viewer_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert "admin" not in resp.json()["roles"]
+        assert "data_viewer" in resp.json()["roles"]
+
+    def test_a_group_file_nested_past_the_parser_limit_leaves_sessions_and_logins_working(
+        self, client: TestClient, app, viewer_headers: dict
+    ):
+        """The parser recurses per nesting level, so ~3000 levels raise RecursionError."""
+        depth = 3000
+        (app.state.group_store._dir / "climber.yaml").write_text(
+            "roles: " + "[" * depth + "]" * depth + "\n", encoding="utf-8"
+        )
+
+        first = client.get("/api/v1/auth/me", headers=viewer_headers)
+        second = client.get("/api/v1/auth/me", headers=viewer_headers)
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "operator", "password": "test-operator-pw"},
+        )
+
+        assert first.status_code == 200, first.text
+        assert "data_viewer" in first.json()["roles"]
+        assert second.status_code == 200, second.text
+        assert login.status_code == 200, login.text
+        assert sorted(login.json()["roles"]) == ["data_analyst", "infra_admin"]
+
+    def test_creating_a_group_over_an_unloadable_file_is_a_conflict(
+        self, client: TestClient, app, admin_headers: dict
+    ):
+        """The name is taken by a file that does not load, so the create must not replace it."""
+        stored = app.state.group_store._dir / "climber.yaml"
+        stored.write_text("roles: [admin]\nscope: org:../elsewhere/outside\n", encoding="utf-8")
+
+        resp = client.post(
+            "/api/v1/auth/groups", json={"name": "climber", "roles": []}, headers=admin_headers
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "conflict"
+        assert "org:../elsewhere/outside" in stored.read_text(encoding="utf-8")
+
+    def test_an_idp_user_added_to_a_group_by_hand_keeps_its_idp_groups(
+        self, client: TestClient, app, admin_headers: dict, api_settings
+    ):
+        """jane's IdP asserts dfe-admins; an operator adding her to dfe-viewers adds, not replaces."""
+        signed_in = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "jane@example.com", "X-Oidc-Groups": "dfe-admins"},
+        )
+        assert signed_in.status_code == 200, signed_in.text
+        added = client.post(
+            "/api/v1/auth/groups/dfe-viewers/members",
+            json={"username": "jane-example-com"},
+            headers=admin_headers,
+        )
+        assert added.status_code == 200, added.text
+
+        resp = client.get("/api/v1/auth/me", headers=_bearer(api_settings, "jane@example.com"))
+
+        assert resp.status_code == 200, resp.text
+        assert "admin" in resp.json()["roles"]
+        assert "data_viewer" in resp.json()["roles"]
+        assert sorted(resp.json()["groups"]) == ["dfe-admins", "dfe-viewers"]
+
+
+class TestATokenWhoseSubjectNamesAnAccountItDoesNotBind:
+    """alice-smith-corp records Alice.Smith@corp, so a token for the bare name is not hers."""
+
+    @pytest.fixture
+    def laundered(self, client: TestClient, api_settings) -> dict[str, str]:
+        """A token for the bare name whose claim carries Alice's groups, as a refresh once wrote."""
+        signed_in = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "Alice.Smith@corp", "X-Oidc-Groups": "dfe-admins"},
+        )
+        assert signed_in.status_code == 200, signed_in.text
+        return _bearer(api_settings, "alice-smith-corp", groups=["dfe-admins"])
+
+    def test_its_claim_groups_give_it_no_roles(self, client: TestClient, laundered):
+        resp = client.get("/api/v1/auth/me", headers=laundered)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["roles"] == []
+        assert resp.json()["groups"] == []
+
+    def test_it_cannot_refresh(self, client: TestClient, laundered):
+        """Each refresh issues a new expiry, so a refreshable token here never expires."""
+        resp = client.post("/api/v1/auth/refresh", headers=laundered)
+
+        assert resp.status_code == 401, resp.text
+
+
+class TestOnlyASessionBoundToAnAccountRefreshes:
+    """A refresh issues a new expiry, so what it refreshes must still be an account."""
+
+    @pytest.mark.parametrize("revoked", [False, True], ids=["live-key", "revoked-key"])
+    def test_a_token_minted_for_an_api_key_cannot_refresh(
+        self, client: TestClient, app, api_settings, revoked
+    ):
+        meta, _ = app.state.api_key_store.create("ci-admin", groups=["dfe-admins"])
+        if revoked:
+            app.state.api_key_store.revoke(meta.short_token)
+        headers = _bearer(api_settings, "apikey:ci-admin", groups=["dfe-admins"])
+
+        resp = client.post("/api/v1/auth/refresh", headers=headers)
+
+        assert resp.status_code == 401, resp.text
+
+    def test_an_api_key_cannot_mint_a_token_by_refreshing(self, client: TestClient, app):
+        _, key = app.state.api_key_store.create("ci-admin", groups=["dfe-admins"])
+
+        resp = client.post("/api/v1/auth/refresh", headers={"X-API-Key": key})
+
+        assert resp.status_code == 401, resp.text
+
+    def test_a_deleted_accounts_token_cannot_refresh(self, client: TestClient, app):
+        password = secrets.token_urlsafe(16)
+        app.state.account_store.create("leaver", password, groups=["dfe-analysts"])
+        login = client.post("/api/v1/auth/login", json={"username": "leaver", "password": password})
+        assert login.status_code == 200, login.text
+        app.state.account_store.delete("leaver")
+
+        resp = client.post(
+            "/api/v1/auth/refresh",
+            headers={"Authorization": f"Bearer {login.json()['access_token']}"},
+        )
+
+        assert resp.status_code == 401, resp.text
+
+    def test_a_local_login_still_refreshes(self, client: TestClient):
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "operator", "password": "test-operator-pw"},
+        )
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+        resp = client.post("/api/v1/auth/refresh", headers=headers)
+
+        assert resp.status_code == 200, resp.text
+        assert sorted(resp.json()["roles"]) == ["data_analyst", "infra_admin"]
+
+    def test_a_bound_idp_user_still_refreshes(self, client: TestClient, api_settings):
+        """Alice.Smith@corp binds alice-smith-corp through the stem, which records her."""
+        client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "Alice.Smith@corp", "X-Oidc-Groups": "dfe-analysts"},
+        )
+
+        resp = client.post(
+            "/api/v1/auth/refresh",
+            headers=_bearer(api_settings, "Alice.Smith@corp", groups=["dfe-analysts"]),
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["roles"] == ["data_analyst"]
+
+    def test_with_auth_disabled_a_refresh_is_not_refused(self, api_settings):
+        """The dev posture's anonymous session has no account, and still refreshes."""
+        settings = api_settings.model_copy(
+            update={"env": "dev", "auth": api_settings.auth.model_copy(update={"enabled": False})}
+        )
+        app = create_app(settings=settings)
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.post("/api/v1/auth/refresh")
+        finally:
+            _registries.clear()
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["user_id"] == "dev"
+
+
+def _sample(exposition: str, name: str, labels: dict[str, str]) -> float | None:
+    for family in text_string_to_metric_families(exposition):
+        for sample in family.samples:
+            if sample.name == name and sample.labels == labels:
+                return sample.value
+    return None
+
+
+def test_an_unloadable_group_file_is_counted_on_the_engines_metrics(api_settings):
+    manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+    app = create_app(settings=api_settings, metrics_manager=manager)
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            app.state.account_store.create(
+                "counted", secrets.token_urlsafe(16), groups=["dfe-analysts"]
+            )
+            (app.state.group_store._dir / "climber.yaml").write_text(
+                "roles: [admin\n", encoding="utf-8"
+            )
+            headers = _bearer(api_settings, "counted")
+            first = client.get("/api/v1/auth/me", headers=headers)
+            client.get("/api/v1/auth/me", headers=headers)
+    finally:
+        _registries.clear()
+
+    assert first.status_code == 200, first.text
+    assert first.json()["roles"] == ["data_analyst"]
+    assert _sample(manager.metrics_text, GROUPS_SKIPPED, {"reason": "unreadable"}) == 1

@@ -275,7 +275,7 @@ async def oidc_callback(
     require_local_account_enabled(request, identity.subject)
 
     # From the group files rather than the IdP token, for the claim and the audit.
-    live = resolve_live_grants_for_user(request, identity.subject, fallback_groups=identity.groups)
+    live = resolve_live_grants_for_user(request, identity.subject)
     roles = live.roles
 
     # RE-MINT: the engine's own ES384 identity token is the ONLY token downstream
