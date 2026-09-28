@@ -65,7 +65,7 @@ from scim2_models import (
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.password_floor import FLOOR_MESSAGE, below_floor, count_floor_refusal
 from dfe_engine.auth.groups import GroupExistsError
-from dfe_engine.auth.membership import groups_held
+from dfe_engine.auth.membership import forget_member, groups_held
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.scim_mapping import (
     account_to_scim_user,
@@ -364,6 +364,7 @@ async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Resp
     if store.get(user_id) is None:
         return scim_error(404, f"User '{user_id}' not found")
     store.delete(user_id)
+    forget_member(request.app.state.group_store, user_id)
     logger.info("SCIM user deleted", username=user_id)
     return Response(status_code=204)
 

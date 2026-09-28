@@ -34,6 +34,8 @@ from dfe_engine.api.pagination import (
     apply_search,
     apply_sort,
 )
+from dfe_engine.api.v1.account_groups import _check_role_assignment, _scope_of
+from dfe_engine.auth.membership import groups_named
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
 if TYPE_CHECKING:
@@ -114,6 +116,9 @@ async def create_api_key(
             status_code=409,
             detail={"code": "conflict", "message": f"API key '{body.name}' already exists"},
         )
+    # The key's session takes every role its groups carry, so minting it hands them out.
+    for group in groups_named(body.groups, request.app.state.group_store.list()):
+        _check_role_assignment(request, user, group.roles, _scope_of(group))
     try:
         key_meta, full_key = store.create(
             body.name,
