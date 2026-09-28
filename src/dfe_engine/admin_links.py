@@ -25,11 +25,11 @@ import asyncio
 import json
 import time
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import AfterValidator, BaseModel, Field, ValidationError
 from scalo.http import AsyncHttpClient
 from scalo.logger import logger
 
@@ -73,7 +73,10 @@ def _link_url(value: str) -> str:
     return value
 
 
-class AdminLink(BaseModel):
+type LinkUrl = Annotated[str, AfterValidator(_link_url)]
+
+
+class AdminLink(BaseModel, extra="forbid", frozen=True, str_strip_whitespace=True):
     """One admin UI, as the deployer listed it.
 
     Attributes:
@@ -83,28 +86,22 @@ class AdminLink(BaseModel):
         probe_url: The in-network address the engine GETs to report it up or down.
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
-
     name: str = Field(min_length=1)
     purpose: str = Field(min_length=1)
-    url: str = Field(min_length=1)
-    probe_url: str | None = None
-
-    @field_validator("url", "probe_url")
-    @classmethod
-    def _http_url(cls, value: str | None) -> str | None:
-        return None if value is None else _link_url(value)
+    url: LinkUrl = Field(min_length=1)
+    probe_url: LinkUrl | None = None
 
 
 class AdminLinkMetrics:
-    """The link list's instruments, or a no-op set when no backend is wired.
-
-    Args:
-        manager: a scalo ``MetricsManager`` (anything exposing ``counter``). ``None``
-            means no backend, and every record method returns without doing anything.
-    """
+    """The link list's instruments, or a no-op set when no backend is wired."""
 
     def __init__(self, manager: Any | None = None) -> None:
+        """Register the counter on *manager*.
+
+        Args:
+            manager: a scalo ``MetricsManager`` (anything exposing ``counter``). ``None``
+                means no backend, and every record method returns without doing anything.
+        """
         self._manager = manager
         if manager is None:
             return
@@ -168,13 +165,7 @@ def parse_links(raw: str | list[Any], metrics: AdminLinkMetrics) -> list[AdminLi
 
 
 class AdminLinks:
-    """The deployer's admin UIs, each with a status that one round of probes answers for a while.
-
-    Args:
-        links: the validated entries, in the order the deployer listed them.
-        timeout: seconds one probe may take before the UI is reported down.
-        ttl: seconds one round of probes answers for.
-    """
+    """The deployer's admin UIs, each with a status that one round of probes answers for a while."""
 
     def __init__(
         self,
@@ -183,6 +174,13 @@ class AdminLinks:
         timeout: float = PROBE_TIMEOUT_SECONDS,
         ttl: float = CACHE_TTL_SECONDS,
     ) -> None:
+        """Hold *links*; nothing is probed until the first status is asked for.
+
+        Args:
+            links: the validated entries, in the order the deployer listed them.
+            timeout: seconds one probe may take before the UI is reported down.
+            ttl: seconds one round of probes answers for.
+        """
         self._links = tuple(links)
         self._timeout = timeout
         self._ttl = ttl
