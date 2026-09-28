@@ -221,6 +221,12 @@ class SyncResponse(BaseModel):
     created: int
     updated: int
     total: int
+    groups_skipped: int = Field(
+        default=0,
+        description="Provider groups left unsynced: an identifier that makes no valid group "
+        "name, or a name held by a stored group that does not load. Each is counted on "
+        "auth_oidc_sync_groups_skipped_total{reason}.",
+    )
     error: str | None
 
 
@@ -632,7 +638,11 @@ async def sync_provider_groups(
 
     group_store = request.app.state.group_store
     result = await sync_provider(
-        name, registry, group_store, secrets=getattr(request.app.state, "dfe_secrets", None)
+        name,
+        registry,
+        group_store,
+        secrets=getattr(request.app.state, "dfe_secrets", None),
+        metrics=getattr(request.app.state, "oidc_sync_metrics", None),
     )
     # A group the sync created is a new ClickHouse user to provision.
     if result["created"]:
@@ -643,6 +653,7 @@ async def sync_provider_groups(
         created=result["created"],
         updated=result["updated"],
         total=result["total"],
+        groups_skipped=result["groups_skipped"],
         error=result.get("error"),
     )
 

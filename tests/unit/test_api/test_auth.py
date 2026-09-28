@@ -12,6 +12,7 @@ from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries, create_access_token
 from dfe_engine.auth import hyperdx_role
 from dfe_engine.auth.groups import GROUPS_SKIPPED
+from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 
 def _claims(token: str) -> dict:
@@ -550,6 +551,35 @@ class TestRolesFollowTheBoundAccount:
         assert resp.status_code == 200, resp.text
         assert resp.json()["roles"] == []
 
+    @pytest.mark.parametrize("state", ["live", "revoked", "disabled", "expired"])
+    def test_a_token_minted_for_an_api_key_holds_nothing_whatever_the_key(
+        self, client: TestClient, app, api_settings, state
+    ):
+        """The key's own state never reaches the token: it binds no account, live or not."""
+        store = app.state.api_key_store
+        meta, _ = store.create("ci-admin", groups=["dfe-admins"])
+        key_file = store._keys_dir / "ci-admin.yaml"
+        if state == "revoked":
+            store.revoke(meta.short_token)
+        elif state == "disabled":
+            yaml_dump({**yaml_load(key_file), "enabled": False}, key_file)
+        elif state == "expired":
+            yaml_dump({**yaml_load(key_file), "expires_at": "2020-01-01T00:00:00+00:00"}, key_file)
+        headers = _bearer(
+            api_settings,
+            "apikey:ci-admin",
+            roles=["admin"],
+            groups=["dfe-admins"],
+            org_ids=["acme"],
+        )
+
+        me = client.get("/api/v1/auth/me", headers=headers)
+        keys = client.get("/api/v1/auth/api-keys", headers=headers)
+
+        assert me.status_code == 200, me.text
+        assert (me.json()["roles"], me.json()["groups"], me.json()["org_ids"]) == ([], [], [])
+        assert keys.status_code == 403, keys.text
+
     @pytest.mark.parametrize(
         "content",
         [
@@ -661,6 +691,50 @@ class TestATokenWhoseSubjectNamesAnAccountItDoesNotBind:
         assert resp.status_code == 401, resp.text
 
 
+def _listed(client: TestClient, headers: dict[str, str]) -> list[str]:
+    resp = client.get("/api/v1/auth/groups", headers=headers)
+    assert resp.status_code == 200, resp.text
+    return [g["name"] for g in resp.json()["items"]]
+
+
+class TestAMemberSeesTheGroupsItHolds:
+    """No group:read, so only the groups the session's own roles come from are listed."""
+
+    def test_a_proxied_idp_user_sees_its_idp_group(self, client: TestClient):
+        headers = {"X-Oidc-Subject": "nia@example.com", "X-Oidc-Groups": "dfe-analysts"}
+
+        assert _listed(client, headers) == ["dfe-analysts"]
+
+    def test_a_bound_idp_token_sees_its_idp_group(self, client: TestClient, api_settings):
+        client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "nia@example.com", "X-Oidc-Groups": "dfe-analysts"},
+        )
+
+        assert _listed(client, _bearer(api_settings, "nia@example.com")) == ["dfe-analysts"]
+
+    def test_a_group_the_idp_names_by_its_provider_id_is_listed(self, client: TestClient, app):
+        """Entra asserts object GUIDs, which the sync records as the group's source_id."""
+        guid = "7b1d0f3e-0000-4000-8000-000000000001"
+        app.state.group_store.create("entra-analysts", ["data_analyst"])
+        app.state.group_store.update("entra-analysts", source_id=guid)
+        headers = {"X-Oidc-Subject": "nia@example.com", "X-Oidc-Groups": guid}
+
+        assert _listed(client, headers) == ["entra-analysts"]
+
+    def test_an_api_key_sees_its_own_group(self, client: TestClient, app):
+        _, key = app.state.api_key_store.create("ci-analyst", groups=["dfe-analysts"])
+
+        assert _listed(client, {"X-API-Key": key}) == ["dfe-analysts"]
+
+    def test_a_group_it_does_not_hold_stays_hidden(self, client: TestClient):
+        headers = {"X-Oidc-Subject": "nia@example.com", "X-Oidc-Groups": "dfe-analysts"}
+
+        resp = client.get("/api/v1/auth/groups/dfe-admins", headers=headers)
+
+        assert resp.status_code == 404, resp.text
+
+
 class TestOnlyASessionBoundToAnAccountRefreshes:
     """A refresh issues a new expiry, so what it refreshes must still be an account."""
 
@@ -741,6 +815,57 @@ class TestOnlyASessionBoundToAnAccountRefreshes:
         assert resp.json()["user_id"] == "dev"
 
 
+class TestAMembershipTakenAwayIsGoneFromTheNextRequest:
+    """An org's ClickHouse credential is handed out on org_ids, so a removed member loses it."""
+
+    @pytest.fixture
+    def orla(self, client: TestClient, app) -> dict[str, str]:
+        """A local account in one org's group, and a token its refresh minted with that org."""
+        password = secrets.token_urlsafe(16)
+        app.state.account_store.create("orla", password, groups=["acme-analysts"])
+        app.state.group_store.create(
+            "acme-analysts", ["data_analyst"], members=["orla"], scope="org:acme"
+        )
+        login = client.post("/api/v1/auth/login", json={"username": "orla", "password": password})
+        assert login.status_code == 200, login.text
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        refreshed = client.post("/api/v1/auth/refresh", headers=headers)
+        assert refreshed.status_code == 200, refreshed.text
+        assert _claims(refreshed.json()["access_token"])["org_ids"] == ["acme"]
+        return {"Authorization": f"Bearer {refreshed.json()['access_token']}"}
+
+    def test_a_refresh_after_removal_mints_no_org(
+        self, client: TestClient, admin_headers: dict, orla
+    ):
+        removed = client.delete(
+            "/api/v1/auth/groups/acme-analysts/members/orla", headers=admin_headers
+        )
+        assert removed.status_code == 200, removed.text
+
+        refreshed = client.post("/api/v1/auth/refresh", headers=orla)
+        assert refreshed.status_code == 200, refreshed.text
+        fresh = {"Authorization": f"Bearer {refreshed.json()['access_token']}"}
+
+        assert _claims(refreshed.json()["access_token"])["org_ids"] == []
+        assert refreshed.json()["roles"] == []
+        assert client.get("/api/v1/auth/me", headers=fresh).json()["org_ids"] == []
+        assert client.get("/api/v1/auth/me", headers=orla).json()["org_ids"] == []
+
+    def test_a_hand_edit_of_the_group_file_takes_the_org_away(self, client: TestClient, app, orla):
+        """The account record still names the group; the group file decides."""
+        group_file = app.state.group_store._dir / "acme-analysts.yaml"
+        yaml_dump({**yaml_load(group_file), "members": []}, group_file)
+
+        me = client.get("/api/v1/auth/me", headers=orla)
+        refreshed = client.post("/api/v1/auth/refresh", headers=orla)
+
+        assert app.state.account_store.get("orla").groups == ["acme-analysts"]
+        assert me.status_code == 200, me.text
+        assert (me.json()["roles"], me.json()["groups"], me.json()["org_ids"]) == ([], [], [])
+        assert refreshed.status_code == 200, refreshed.text
+        assert _claims(refreshed.json()["access_token"])["org_ids"] == []
+
+
 def _sample(exposition: str, name: str, labels: dict[str, str]) -> float | None:
     for family in text_string_to_metric_families(exposition):
         for sample in family.samples:
@@ -757,6 +882,7 @@ def test_an_unloadable_group_file_is_counted_on_the_engines_metrics(api_settings
             app.state.account_store.create(
                 "counted", secrets.token_urlsafe(16), groups=["dfe-analysts"]
             )
+            app.state.group_store.add_member("dfe-analysts", "counted")
             (app.state.group_store._dir / "climber.yaml").write_text(
                 "roles: [admin\n", encoding="utf-8"
             )

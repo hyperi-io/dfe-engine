@@ -1543,8 +1543,9 @@ class APISettings(BaseModel):
     jwt_secret: str = Field(
         default=_DEV_JWT_SECRET,
         description=(
-            "Legacy HS256 secret - UNUSED. The JWT authority signs ES384 with an "
-            "asymmetric key held in scalo.secrets; retained only for config compat."
+            "Keys the OIDC login session cookie when api.session_secret is empty. It "
+            "signs no JWT: the JWT authority signs ES384 with the asymmetric key at "
+            "api.jwt_key_path in scalo.secrets."
         ),
     )
     jwt_algorithm: str = Field(

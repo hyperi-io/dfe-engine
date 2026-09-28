@@ -23,6 +23,7 @@ Usage::
     registry.delete("acme")
 """
 
+import builtins
 import re
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -71,7 +72,7 @@ class OrgRegistry:
     def create(
         self,
         name: str,
-        org_ids: list[str] | None = None,
+        org_ids: builtins.list[str] | None = None,
         display_name: str = "",
     ) -> Org:
         """Create a new organisation.
@@ -124,7 +125,7 @@ class OrgRegistry:
             return None
         return self._read(path)
 
-    def list(self) -> list[Org]:
+    def list(self) -> builtins.list[Org]:
         """Return all orgs in the store.
 
         Returns:
