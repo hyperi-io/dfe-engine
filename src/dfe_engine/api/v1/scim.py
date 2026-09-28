@@ -64,7 +64,7 @@ from scim2_models import (
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.password_floor import FLOOR_MESSAGE, below_floor, count_floor_refusal
-from dfe_engine.api.v1.account_groups import check_role_assignment, scope_of
+from dfe_engine.api.v1.account_groups import check_group_changes, check_role_assignment, scope_of
 from dfe_engine.auth.groups import GroupExistsError
 from dfe_engine.auth.membership import forget_member, groups_held
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -377,10 +377,15 @@ async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Respo
 async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Response:
     """Delete a user (SCIM 204)."""
     store = request.app.state.account_store
-    if store.get(user_id) is None:
+    group_store = request.app.state.group_store
+    existing = store.get(user_id)
+    if existing is None:
         return scim_error(404, f"User '{user_id}' not found")
+    # Deleting a user takes it out of every group it holds, so it needs their roles.
+    groups = group_store.list()
+    check_group_changes(request, user, groups, groups_held(existing, groups), ())
     store.delete(user_id)
-    forget_member(request.app.state.group_store, user_id)
+    forget_member(group_store, user_id)
     logger.info("SCIM user deleted", username=user_id)
     return Response(status_code=204)
 

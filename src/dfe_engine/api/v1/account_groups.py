@@ -46,6 +46,7 @@ from dfe_engine.api.pagination import (
 from dfe_engine.auth import AuthorizationError, Scope, ScopedGrant
 from dfe_engine.auth.audit import audit_permission_denied
 from dfe_engine.auth.groups import Group, GroupExistsError, validate_group_scope
+from dfe_engine.auth.membership import groups_named
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
 
@@ -180,6 +181,37 @@ def check_role_assignment(request: Request, user, roles: Iterable[str], scope: S
         reason = f"cannot grant or remove role(s) you do not hold: {missing}; requires role:write"
         audit_permission_denied(user.user_id, scopes_dict["role_write"], user.roles, reason)
         raise AuthorizationError(reason)
+
+
+def check_group_changes(
+    request: Request,
+    user,
+    groups: list[Group],
+    before: Iterable[str],
+    after: Iterable[str],
+) -> None:
+    """Refuse an account joining or leaving a group whose roles the caller could not grant.
+
+    An account takes every role its groups carry, so writing its group list, or
+    deleting it, hands those roles out or takes them away, as a group route would.
+    Both lists resolve to groups first, so naming a group by its provider id instead
+    of its name is no change.
+
+    Args:
+        request: The request.
+        user: The caller.
+        groups: Every stored group, listed once per request.
+        before: The group identifiers the account holds now.
+        after: The group identifiers it would hold.
+
+    Raises:
+        AuthorizationError: 403 from :func:`check_role_assignment`.
+    """
+    held = {group.name: group for group in groups_named(before, groups)}
+    wanted = {group.name: group for group in groups_named(after, groups)}
+    for name in sorted(held.keys() ^ wanted.keys()):
+        group = held.get(name) or wanted[name]
+        check_role_assignment(request, user, group.roles, scope_of(group))
 
 
 # -- Endpoints ------------------------------------------------

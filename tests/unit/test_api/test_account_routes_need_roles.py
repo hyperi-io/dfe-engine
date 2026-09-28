@@ -22,6 +22,7 @@ from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
 
 ACCOUNTS = "/api/v1/auth/accounts"
 KEYS = "/api/v1/auth/api-keys"
+SCIM_USERS = "/api/v1/scim/v2/Users"
 _PASSWORD = secrets.token_urlsafe(16)
 
 
@@ -148,34 +149,52 @@ class TestAKeysGroupsNeedTheirRoles:
         assert resp.status_code == 201, resp.text
 
 
+_DELETE_ROUTES = pytest.mark.parametrize("route", [ACCOUNTS, SCIM_USERS], ids=["native", "scim"])
+
+
 class TestDeletingAnAccountNeedsItsGroupsRoles:
     """Deleting an account takes it out of every group it holds, as removing it would."""
 
-    def test_deleting_an_admin_is_refused(self, client, app, mgr):
+    @_DELETE_ROUTES
+    def test_deleting_an_admin_is_refused(self, client, app, mgr, route):
         app.state.account_store.create("ops", _PASSWORD, groups=["dfe-admins"])
         app.state.group_store.add_member("dfe-admins", "ops")
 
-        resp = client.delete(f"{ACCOUNTS}/ops", headers=mgr)
+        resp = client.delete(f"{route}/ops", headers=mgr)
 
         assert resp.status_code == 403, resp.text
         assert app.state.account_store.get("ops") is not None
         assert "ops" in app.state.group_store.get("dfe-admins").members
 
-    def test_deleting_an_idp_admin_is_refused(self, client, app, mgr):
+    @_DELETE_ROUTES
+    def test_deleting_an_idp_admin_is_refused(self, client, app, mgr, route):
         """An IdP-owned account holds the groups its own list names."""
         app.state.account_store.create("jane-corp-com", "", groups=["dfe-admins"])
         app.state.account_store.update("jane-corp-com", external=True, source_provider="entra")
 
-        resp = client.delete(f"{ACCOUNTS}/jane-corp-com", headers=mgr)
+        resp = client.delete(f"{route}/jane-corp-com", headers=mgr)
 
         assert resp.status_code == 403, resp.text
         assert app.state.account_store.get("jane-corp-com") is not None
 
-    def test_an_account_in_groups_whose_roles_the_caller_holds_is_deleted(self, client, app, mgr):
+    def test_a_scim_refusal_is_a_scim_error(self, client, app, mgr):
+        app.state.account_store.create("ops", _PASSWORD, groups=["dfe-admins"])
+        app.state.group_store.add_member("dfe-admins", "ops")
+
+        resp = client.delete(f"{SCIM_USERS}/ops", headers=mgr)
+
+        assert resp.status_code == 403, resp.text
+        assert resp.headers["content-type"].startswith("application/scim+json")
+        assert resp.json()["schemas"] == ["urn:ietf:params:scim:api:messages:2.0:Error"]
+
+    @_DELETE_ROUTES
+    def test_an_account_in_groups_whose_roles_the_caller_holds_is_deleted(
+        self, client, app, mgr, route
+    ):
         app.state.account_store.create("helper", _PASSWORD, groups=["account-managers"])
         app.state.group_store.add_member("account-managers", "helper")
 
-        resp = client.delete(f"{ACCOUNTS}/helper", headers=mgr)
+        resp = client.delete(f"{route}/helper", headers=mgr)
 
         assert resp.status_code == 204, resp.text
         assert "helper" not in app.state.group_store.get("account-managers").members
@@ -203,7 +222,7 @@ class TestADeletedAccountLeavesItsGroups:
 
     @pytest.mark.parametrize(
         "path",
-        [f"{ACCOUNTS}/ghost", "/api/v1/scim/v2/Users/ghost"],
+        [f"{ACCOUNTS}/ghost", f"{SCIM_USERS}/ghost"],
         ids=["account-route", "scim"],
     )
     def test_a_recreated_account_inherits_nothing(
