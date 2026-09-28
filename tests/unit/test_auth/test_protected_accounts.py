@@ -8,8 +8,9 @@
 
 """The floor under the local admin and break-glass, enforced at the stores.
 
-Covers the four writes that would remove an operator's way back in -- disable,
-delete, rename, drop from the admin group -- plus the reconcile paths that must
+Covers the five writes that would remove an operator's way back in -- disable,
+delete, rename, drop from the admin group, take the admin role off that group --
+plus the reconcile paths that must
 keep working: password reset, contact edits, adding a group, and the
 ``allow_protected`` writes admin retirement and the deploy-repo hydration make.
 """
@@ -53,6 +54,9 @@ class TestFloorResolution:
 
     def test_group_is_the_admin_role_group(self):
         assert resolve_floor().group == RECOVERY_GROUP
+
+    def test_role_is_the_admin_role(self):
+        assert resolve_floor().role == "admin"
 
 
 class TestAccountStoreRefuses:
@@ -203,6 +207,22 @@ class TestGroupStoreRefuses:
         with pytest.raises(ValueError):
             groups.delete(RECOVERY_GROUP)
 
+    @pytest.mark.parametrize(
+        "change",
+        [
+            pytest.param({"roles": ["infra_admin"]}, id="admin-role-dropped"),
+            pytest.param({"roles": []}, id="roles-emptied"),
+            pytest.param({"roles": "admin"}, id="roles-as-a-string"),
+            pytest.param({"scope": "org:acme"}, id="moved-to-an-org"),
+        ],
+    )
+    def test_taking_the_admin_role_off_the_admin_group(self, groups, change):
+        """Every recovery credential in it would authenticate with no role."""
+        with pytest.raises(ProtectedAccountError):
+            groups.update(RECOVERY_GROUP, **change)
+        stored = groups.get(RECOVERY_GROUP)
+        assert (stored.roles, stored.scope) == (["admin"], "system")
+
 
 class TestGroupStoreStillAllows:
     def test_removing_an_unprotected_member(self, groups):
@@ -225,6 +245,18 @@ class TestGroupStoreStillAllows:
         groups.add_member(RECOVERY_GROUP, BREAKGLASS)
         group = groups.update(RECOVERY_GROUP, description="Full admin", roles=["admin"])
         assert group.description == "Full admin"
+
+    def test_a_role_added_beside_admin(self, groups):
+        group = groups.update(RECOVERY_GROUP, roles=["admin", "data_viewer"], scope="system")
+        assert group.roles == ["admin", "data_viewer"]
+
+    def test_another_groups_roles_and_scope(self, groups):
+        group = groups.update("dfe-viewers", roles=[], scope="org:acme")
+        assert (group.roles, group.scope) == ([], "org:acme")
+
+    def test_allow_protected_changes_the_admin_groups_roles(self, groups):
+        group = groups.update(RECOVERY_GROUP, roles=["infra_admin"], allow_protected=True)
+        assert group.roles == ["infra_admin"]
 
     def test_allow_protected_removes_for_the_reconcile(self, groups):
         groups.add_member(RECOVERY_GROUP, BREAKGLASS)
