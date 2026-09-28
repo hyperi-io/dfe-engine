@@ -6,15 +6,13 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
-
 import time
 
 import bcrypt
 import pytest
 
 from dfe_engine.auth import accounts as accounts_module
-from dfe_engine.auth.accounts import Account, AccountStore
+from dfe_engine.auth.accounts import Account, AccountStore, DocuStoreAccountStore
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -204,6 +202,46 @@ class TestANameThatIsAPath:
 
     def test_a_password_checked_against_it_never_matches(self, store, outside):
         assert store.verify_password(self.OUTSIDE, "password123") is False
+
+
+class TestANameThatDiffersOnlyInCase:
+    """A case-blind filesystem opens bob.yaml for Bob, which would make Bob's session bob's."""
+
+    def test_it_finds_nothing(self, store, tmp_path):
+        store.create("bob", "password123", phone="+61 2 5550 0001")
+        if not (tmp_path / "accounts" / "BOB.yaml").exists():
+            pytest.skip("this filesystem tells names apart by case")
+
+        assert store.get("Bob") is None
+        with pytest.raises(KeyError):
+            store.update("Bob", phone="+61 2 5550 9999")
+        assert store.get("bob").phone == "+61 2 5550 0001"
+
+    def test_the_probe_answers_for_a_directory_whose_name_has_no_letters(self, tmp_path):
+        """2024 swapcases to itself, so the directory's own name cannot be the probe."""
+        directory = tmp_path / "2024"
+        directory.mkdir()
+        (directory / "Case.yaml").write_text("", encoding="utf-8")
+        folds_case = (directory / "CASE.yaml").exists()
+        (directory / "Case.yaml").unlink()
+
+        assert accounts_module._ignores_case(directory) is folds_case
+        assert list(directory.iterdir()) == []
+
+    def test_a_store_in_such_a_directory_finds_nothing_under_another_case(self, tmp_path):
+        store = AccountStore(tmp_path / "2024")
+        store.create("bob", "password123")
+        if not (tmp_path / "2024" / "BOB.yaml").exists():
+            pytest.skip("this filesystem tells names apart by case")
+
+        assert store.get("Bob") is None
+
+
+def test_the_stores_annotations_can_be_read():
+    """Both stores define list(), which a bare list[...] in their signatures would name."""
+    assert AccountStore.list.__annotations__["return"] == list[Account]
+    assert AccountStore.create.__annotations__["groups"] == list[str] | None
+    assert DocuStoreAccountStore.list.__annotations__["return"] == list[Account]
 
 
 # ---------------------------------------------------------------------------

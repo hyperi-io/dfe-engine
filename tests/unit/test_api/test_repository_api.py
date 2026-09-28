@@ -13,12 +13,14 @@ merge-patch fast path with etags, and the scoped-object RBAC matrix
 (membership reads, owner writes, org-wildcard admins, 404-not-403 hiding).
 """
 
+import jwt as pyjwt
 import pytest
 from common.fake_repository_ch import FakeRepositoryCH
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.deps import create_access_token, get_clickhouse_client
 from dfe_engine.repository.store import RepositoryStore
+from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import DFESettings
 
 PREFS = "/api/v1/repository/preferences"
@@ -321,6 +323,107 @@ class TestObjectsRbac:
             headers={**user1, "If-Match": etag},
         )
         assert resp.status_code == 200
+
+
+# -- Org access follows the bound account --------------------
+
+
+def _session(resp) -> dict[str, str]:
+    """Headers carrying the token a login or refresh answered with."""
+    assert resp.status_code == 200, resp.text
+    return {"Authorization": f"Bearer {resp.json()['access_token']}"}
+
+
+def _org_ids_claim(resp) -> list[str]:
+    claims = pyjwt.decode(resp.json()["access_token"], options={"verify_signature": False})
+    return claims["org_ids"]
+
+
+class TestOrgAccessComesOnlyFromTheBoundAccount:
+    """A token's org_ids claim grants nothing: the orgs are the bound account's groups'."""
+
+    @pytest.mark.parametrize(
+        ("sub", "own_orgs"),
+        [
+            pytest.param("nobody-at-all", [], id="no-account"),
+            pytest.param("globexuser", ["globex"], id="account-in-another-org"),
+        ],
+    )
+    def test_an_org_ids_claim_reads_no_object_of_that_org(
+        self, repo_setup, admin_headers, api_settings, sub, own_orgs
+    ):
+        client = repo_setup
+        put = client.put(
+            f"{OBJECTS}/org/acme/ui/welcome", content=b"acme only", headers=admin_headers
+        )
+        assert put.status_code == 200, put.text
+        token = create_access_token(
+            data={"sub": sub, "org_id": "default", "org_ids": ["acme"]}, settings=api_settings
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+
+        obj = client.get(f"{OBJECTS}/org/acme/ui/welcome", headers=headers)
+        listing = client.get(f"{OBJECTS}/org/acme/ui", headers=headers)
+        me = client.get("/api/v1/auth/me", headers=headers)
+
+        assert obj.status_code == 404, obj.text
+        assert listing.status_code == 404, listing.text
+        assert me.json()["org_ids"] == own_orgs
+
+    def test_a_member_removed_from_the_orgs_group_loses_it_at_the_next_refresh(
+        self, repo_setup, admin_headers, api_settings
+    ):
+        client = repo_setup
+        build_secrets(api_settings.secrets).put("ch/orgs/acme", "acme-pw")
+        client.put(f"{OBJECTS}/org/acme/ui/welcome", content=b"acme only", headers=admin_headers)
+        login = client.post(
+            "/api/v1/auth/login", json={"username": "orguser", "password": "pw-orguser"}
+        )
+        first = client.post("/api/v1/auth/refresh", headers=_session(login))
+        assert _org_ids_claim(first) == ["acme"]
+        removed = client.delete(f"{GROUPS}/acme-analysts/members/orguser", headers=admin_headers)
+        assert removed.status_code == 200, removed.text
+
+        second = client.post("/api/v1/auth/refresh", headers=_session(first))
+        obj = client.get(f"{OBJECTS}/org/acme/ui/welcome", headers=_session(second))
+        conn = client.get("/api/v1/hyperdx/connection", headers=_session(second))
+
+        assert _org_ids_claim(second) == []
+        assert obj.status_code == 404, obj.text
+        assert conn.status_code == 403, conn.text
+        assert "acme-pw" not in conn.text
+
+    def test_a_member_moved_to_another_org_gets_that_orgs_connection(
+        self, repo_setup, admin_headers, api_settings
+    ):
+        client = repo_setup
+        secrets = build_secrets(api_settings.secrets)
+        secrets.put("ch/orgs/acme", "acme-pw")
+        secrets.put("ch/orgs/globex", "globex-pw")
+        login = client.post(
+            "/api/v1/auth/login", json={"username": "orguser", "password": "pw-orguser"}
+        )
+        first = client.post("/api/v1/auth/refresh", headers=_session(login))
+        before = client.get("/api/v1/hyperdx/connection", headers=_session(first))
+        assert before.status_code == 200, before.text
+        assert before.json()["username"] == "dfe_org_acme"
+        removed = client.delete(f"{GROUPS}/acme-analysts/members/orguser", headers=admin_headers)
+        added = client.post(
+            f"{GROUPS}/globex-analysts/members", json={"username": "orguser"}, headers=admin_headers
+        )
+        assert (removed.status_code, added.status_code) == (200, 200), added.text
+
+        second = client.post("/api/v1/auth/refresh", headers=_session(first))
+        after = client.get("/api/v1/hyperdx/connection", headers=_session(second))
+
+        assert _org_ids_claim(second) == ["globex"]
+        assert after.status_code == 200, after.text
+        body = after.json()
+        assert (body["name"], body["username"], body["password"]) == (
+            "globex",
+            "dfe_org_globex",
+            "globex-pw",
+        )
 
 
 # ── Validation + size caps ───────────────────────────────────

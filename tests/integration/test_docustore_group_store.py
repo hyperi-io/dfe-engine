@@ -12,10 +12,20 @@ import os
 import uuid
 
 import pytest
+from prometheus_client.parser import text_string_to_metric_families
+from pydantic import ValidationError
+from scalo.logger import logger
+from scalo.metrics import create_metrics
 
 from dfe_engine.auth.breakglass import GROUP as RECOVERY_GROUP
 from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS
-from dfe_engine.auth.groups import DocuStoreGroupStore, Group
+from dfe_engine.auth.groups import (
+    GROUPS_SKIPPED,
+    DocuStoreGroupStore,
+    Group,
+    GroupExistsError,
+    GroupMetrics,
+)
 from dfe_engine.auth.protected_accounts import ProtectedAccountError
 from dfe_engine.store.documents import DocuStore
 
@@ -75,6 +85,69 @@ class TestANameNoGroupCanHave:
 
         after = docu.collection("groups").find_one({"name": self.NAME}, {"_id": 0})
         assert after == before
+
+
+class TestAStoredDocumentThatIsNotAValidGroup:
+    """One document no Group can be made from must not take every other group down with it."""
+
+    BAD_SCOPE = "org:../elsewhere/outside"
+
+    @pytest.fixture
+    def manager(self):
+        return create_metrics("test", backend="prometheus", enable_auto_update=False)
+
+    @pytest.fixture
+    def planted(self, docu, manager):
+        """A record no create() could make, as a hand edit or an older engine leaves it."""
+        store = DocuStoreGroupStore(docu, collection="groups", metrics=GroupMetrics(manager))
+        store.create("analysts", ["data_analyst"], members=["bob"])
+        docu.collection("groups").insert_one(
+            {"name": "climber", "roles": ["admin"], "members": ["bob"], "scope": self.BAD_SCOPE}
+        )
+        return store
+
+    def _skips(self, manager) -> float | None:
+        for family in text_string_to_metric_families(manager.metrics_text):
+            for sample in family.samples:
+                if sample.name == GROUPS_SKIPPED and sample.labels == {"reason": "invalid"}:
+                    return sample.value
+        return None
+
+    def test_every_other_group_still_loads_and_the_bad_one_is_absent(self, planted):
+        assert [g.name for g in planted.list()] == ["analysts"]
+        assert planted.get("climber") is None
+        assert planted.resolve_roles_for_member("bob") == ["data_analyst"]
+
+    def test_creating_one_over_it_is_refused_as_existing(self, planted, docu):
+        with pytest.raises(GroupExistsError):
+            planted.create("climber", [])
+
+        stored = docu.collection("groups").find_one({"name": "climber"}, {"_id": 0})
+        assert stored["scope"] == self.BAD_SCOPE
+
+    def test_the_skip_is_logged_and_counted_once_until_it_loads_again(self, planted, docu, manager):
+        seen: list[str] = []
+        handler = logger.add(lambda m: seen.append(m.record["message"]), level="WARNING")
+        try:
+            planted.list()
+            planted.list()
+            planted.get("climber")
+            docu.collection("groups").update_one({"name": "climber"}, {"$set": {"scope": "system"}})
+            assert [g.name for g in planted.list()] == ["analysts", "climber"]
+            docu.collection("groups").update_one(
+                {"name": "climber"}, {"$set": {"scope": self.BAD_SCOPE}}
+            )
+            planted.list()
+        finally:
+            logger.remove(handler)
+
+        assert seen.count("stored group skipped: not a valid group") == 2
+        assert self._skips(manager) == 2
+
+    def test_a_collection_that_does_not_opt_in_still_raises(self, planted, docu):
+        """Accounts read through the same layer and keep raising on a document their model rejects."""
+        with pytest.raises(ValidationError):
+            docu.typed("groups", Group, key="name").list()
 
 
 class TestDocuStoreGroupStore:

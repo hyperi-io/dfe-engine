@@ -178,6 +178,20 @@ class TestScopeValidation:
         )
         assert resp.status_code == 422
 
+    def test_an_org_scope_is_refused_with_no_org_registry(self, client, app, admin_headers):
+        """With nothing to check the org against, it is not known to exist."""
+        app.state.org_registry = None
+
+        resp = client.post(
+            GROUPS,
+            json={"name": "unchecked", "roles": [], "scope": "org:acme"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["code"] == "invalid_scope"
+        assert app.state.group_store.get("unchecked") is None
+
     def test_an_org_name_that_is_a_path_finds_no_org(self, scoped_setup, app, admin_headers):
         """The org is looked up by joining its name onto the orgs directory."""
         OrgRegistry(app.state.org_registry._dir.parent / "elsewhere").create("outside")
