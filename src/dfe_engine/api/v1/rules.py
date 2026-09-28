@@ -42,7 +42,12 @@ class _RuleWriteFields(BaseModel):
         description="Human-readable label (defaults from ``name`` when omitted on create)",
     )
     severity: str = Field(default="medium", description="low|medium|high|critical")
-    user_sql: str = Field(description="User-authored SQL WHERE fragment")
+    user_sql: str = Field(
+        description=(
+            "Full detection query: SELECT ... FROM <db>.<table> WHERE ... "
+            "(the FROM names the source table)"
+        )
+    )
     cel_filter: str | None = Field(default=None, description="CEL expression filter")
     hunt_name: str | None = Field(default=None, description="Parent hunt name")
     source: str | None = Field(default=None, description="Source label (e.g. windows_audit)")
@@ -77,7 +82,7 @@ class RuleUpdateRequest(_RuleWriteFields):
 
 
 class SqlValidationRequest(BaseModel):
-    sql: str = Field(description="SQL WHERE fragment to validate")
+    sql: str = Field(description="Full SELECT ... FROM ... query to validate")
 
 
 class SqlValidationError(BaseModel):
@@ -379,7 +384,7 @@ def validate_rule_sql(
     user: CurrentUser,
     settings: Settings,
 ):
-    """Validate a SQL WHERE fragment without creating a rule.
+    """Validate a detection query (SELECT ... FROM ...) without creating a rule.
 
     Returns any syntax errors or validation issues found.
     """
