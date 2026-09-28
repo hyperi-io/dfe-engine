@@ -5732,6 +5732,37 @@
         ]
       }
     },
+    "/api/v1/deployment/admin-links": {
+      "get": {
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "List Admin Links",
+        "description": "Each admin UI this deployment runs, in the order its deployer listed them.\n\nThe deployer supplies the list, so an empty one means it listed none. Gated to\nthe admin-class roles, which hold ``deployment:*`` or ``*``: the list maps the\ndeployment's consoles. Links only; nothing here carries a credential.",
+        "operationId": "list_admin_links_api_v1_deployment_admin_links_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AdminLinkResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Admin Links Api V1 Deployment Admin Links Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/field-maps": {
       "get": {
         "tags": [
@@ -17903,6 +17934,48 @@
           "username"
         ],
         "title": "AddMemberRequest"
+      },
+      "AdminLinkResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "What the UI is, as the deployer named it, e.g. Argo CD."
+          },
+          "purpose": {
+            "type": "string",
+            "title": "Purpose",
+            "description": "What an admin opens it for, in one line."
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "Where a browser reaches it."
+          },
+          "status": {
+            "$ref": "#/components/schemas/AdminLinkStatus",
+            "description": "up when its probe got an HTTP answer below 500, a login redirect included; down on a 5xx, a timeout or no connection; unknown when the deployer gave no address to probe."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "purpose",
+          "url",
+          "status"
+        ],
+        "title": "AdminLinkResponse",
+        "description": "One admin UI a browser can open, and whether it answered its probe."
+      },
+      "AdminLinkStatus": {
+        "type": "string",
+        "enum": [
+          "up",
+          "down",
+          "unknown"
+        ],
+        "title": "AdminLinkStatus",
+        "description": "Whether an admin UI answered its probe."
       },
       "AlertDestination": {
         "properties": {

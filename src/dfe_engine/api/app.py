@@ -569,6 +569,13 @@ def create_app(
     # Every store writes YAML without the app in reach, so its refusals count process-wide.
     write_health().bind(YamlWriteMetrics(metrics_manager))
 
+    # Parsed once here, so a bad entry is logged and counted once rather than per request.
+    from dfe_engine.admin_links import AdminLinkMetrics, AdminLinks, parse_links
+
+    app.state.admin_links = AdminLinks(
+        parse_links(settings.deployment.admin_links, AdminLinkMetrics(metrics_manager))
+    )
+
     # Core-resource write guard (register before CORS so 409 responses still get CORS headers)
     from dfe_engine.api.middleware.core_resource_guard import install_core_resource_guard
 

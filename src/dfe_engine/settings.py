@@ -111,6 +111,7 @@ Stack identity (what the deploy says this pod came from):
 - DFE_STACK_VERSION -> stack_version
 - DFE_UI_VERSION -> ui_version (the dfe-ui pin the deploy rendered)
 - DFE_PROFILE -> deployment.profile (the tier the deploy chose; empty = unknown)
+- DFE_ADMIN_LINKS -> deployment.admin_links (JSON array of the admin UIs the deploy runs)
 
 Repository (scope-aligned small-object store; lives in the DFE database):
 - DFE_REPOSITORY_MAX_PREFS_BYTES -> repository.max_prefs_bytes
@@ -923,6 +924,7 @@ class DeploymentSettings(BaseModel):
     - DFE_DEPLOYMENT_TARGET -> deployment.target
     - DFE_DEPLOYMENT_NAMESPACE -> deployment.namespace
     - DFE_PROFILE -> deployment.profile
+    - DFE_ADMIN_LINKS -> deployment.admin_links
     - DFE_DEPLOYMENT_APP_CONFIG_DIR -> deployment.app_config_dir
     - DFE_DEPLOYMENT_APP_CONFIG_BASE_DIR -> deployment.app_config_base_dir
     - DFE_DEPLOYMENT_APP_CONFIG_MOUNT -> deployment.app_config_mount
@@ -940,6 +942,19 @@ class DeploymentSettings(BaseModel):
             "but never changes what it deploys. Empty means unknown, which a "
             "hand-run engine is; every deployer names one, dfe-docker included. "
             "DFE_PROFILE."
+        ),
+    )
+    admin_links: str | list[Any] = Field(
+        default_factory=list,
+        description=(
+            "The admin UIs this deployment runs, as a JSON array of objects with "
+            "name, purpose, url and an optional probe_url. Injected by the deployer, "
+            "which knows what it stood up and where a browser reaches each one, "
+            "never discovered. url is what a browser opens; probe_url is the "
+            "in-network address the engine GETs to report the UI up or down. Held "
+            "as given and read at startup, where an entry that does not validate is "
+            "dropped and counted rather than stopping the engine. Empty means none "
+            "listed. DFE_ADMIN_LINKS."
         ),
     )
     namespace: str = Field(
@@ -2116,6 +2131,9 @@ def _get_env_overrides() -> dict:
         overrides["deployment"]["namespace"] = val
     if val := _get_env("DFE_PROFILE"):
         overrides["deployment"]["profile"] = val.strip()
+    if val := _get_env("DFE_ADMIN_LINKS"):
+        # Parsed by dfe_engine.admin_links, which drops a bad entry instead of failing the load.
+        overrides["deployment"]["admin_links"] = val.strip()
     if val := _get_env("DFE_DEPLOYMENT_APP_CONFIG_DIR"):
         overrides["deployment"]["app_config_dir"] = val.strip()
     if val := _get_env("DFE_DEPLOYMENT_APP_CONFIG_BASE_DIR"):
