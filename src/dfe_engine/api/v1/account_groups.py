@@ -27,7 +27,7 @@ org-local groups are never listed outside their org.
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from dfe_engine.api.deps import (
     CurrentUser,
@@ -90,6 +90,13 @@ class AttributesRequest(BaseModel):
     """Full-replace body for a group's attribute blob (non-sensitive or sensitive)."""
 
     attributes: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("attributes")
+    @classmethod
+    def _bounded_depth(cls, value: dict[str, Any]) -> dict[str, Any]:
+        from dfe_engine.auth.attributes import check_attribute_depth
+
+        return check_attribute_depth(value)
 
 
 # -- Helpers --------------------------------------------------

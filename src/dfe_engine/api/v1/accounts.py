@@ -23,8 +23,6 @@ Admin endpoints require account write/reset scopes. ``GET/PUT /me`` and
 a logged-in user. Password hashes are NEVER returned in any response.
 """
 
-from __future__ import annotations
-
 import functools
 from typing import Any
 
@@ -47,6 +45,7 @@ from dfe_engine.api.pagination import (
 from dfe_engine.auth import account_durability
 from dfe_engine.auth.account_durability import AccountGitState
 from dfe_engine.auth.accounts import Account, matches_digest
+from dfe_engine.auth.attributes import check_attribute_depth
 from dfe_engine.auth.audit import audit_account_change
 from dfe_engine.auth.bootstrap import (
     MIN_ADMIN_PASSWORD_LENGTH,
@@ -235,6 +234,11 @@ class AttributesRequest(BaseModel):
     """Full-replace body for an account's attribute blob (non-sensitive or sensitive)."""
 
     attributes: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("attributes")
+    @classmethod
+    def _bounded_depth(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return check_attribute_depth(value)
 
 
 def _account_response(account: Account) -> AccountResponse:
