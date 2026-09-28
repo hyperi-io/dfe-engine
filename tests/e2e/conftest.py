@@ -46,7 +46,7 @@ import json
 import os
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
@@ -54,26 +54,27 @@ import pytest
 
 @dataclass(frozen=True)
 class E2EConfig:
+    # Every secret is repr=False: pytest prints this object in a failure trace.
     receiver_url: str | None
-    receiver_token: str | None
+    receiver_token: str | None = field(repr=False)
     ch_host: str | None
     ch_port: int
     ch_user: str
-    ch_password: str | None
+    ch_password: str | None = field(repr=False)
     ch_db: str
     hyperdx_url: str | None
-    hyperdx_api_key: str | None
+    hyperdx_api_key: str | None = field(repr=False)
     engine_url: str | None
-    engine_token: str | None
+    engine_token: str | None = field(repr=False)
     engine_user: str
-    engine_password: str | None
+    engine_password: str | None = field(repr=False)
     # What a fresh deployment's admin is changed to at its forced first-login change.
-    engine_new_password: str | None
+    engine_new_password: str | None = field(repr=False)
     # The data path the flow suite must prove, in the deployment's own words
     # (kafka | grpc | both). Empty means nothing asked, so the flow suite gates.
     transport: str
     deploy_repo_url: str | None
-    deploy_repo_token: str | None
+    deploy_repo_token: str | None = field(repr=False)
     deploy_repo_user: str
     # Which transform app is deployed for the source under test. Declared, not
     # observed: both transforms consume the source topic under their own consumer
@@ -146,7 +147,7 @@ OIDC_FIXTURE_DEFAULT_USER = "dfe-test@dfe-oidc.test"
 @dataclass(frozen=True)
 class OIDCFixtureLogin:
     user: str
-    password: str
+    password: str = field(repr=False)
 
 
 def oidc_fixture_user(provider: str) -> str:

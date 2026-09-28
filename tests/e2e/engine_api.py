@@ -14,7 +14,7 @@ the TLS posture to drift.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -35,10 +35,11 @@ class EngineAPI:
 
     base: str
     user: str
-    password: str
+    # Secrets are repr=False: pytest prints this object in a failure trace.
+    password: str = field(repr=False)
     verify: bool
-    token: str | None = None
-    new_password: str | None = None
+    token: str | None = field(default=None, repr=False)
+    new_password: str | None = field(default=None, repr=False)
 
     def _client(self) -> httpx.Client:
         return httpx.Client(verify=self.verify, timeout=120.0)
