@@ -64,9 +64,9 @@ from scim2_models import (
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.password_floor import FLOOR_MESSAGE, below_floor, count_floor_refusal
-from dfe_engine.api.v1.account_groups import check_role_assignment, scope_of
+from dfe_engine.api.v1.account_groups import check_group_changes, check_role_assignment, scope_of
 from dfe_engine.auth.groups import GroupExistsError
-from dfe_engine.auth.membership import groups_held
+from dfe_engine.auth.membership import forget_member, groups_held
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.scim_mapping import (
     account_to_scim_user,
@@ -178,6 +178,21 @@ def _page_params(request: Request) -> tuple[int, int]:
     except ValueError:
         count = 100
     return start_index, max(0, count)
+
+
+def _refuse_taken_provider_id(store, source_id: str, name: str) -> JSONResponse | None:
+    """Refuse an externalId another group already carries as its provider id.
+
+    Login resolves a provider id to one group, and a second group sharing it would
+    decide by name order whose roles every IdP user asserting it gets.
+    """
+    if not source_id:
+        return None
+    if any(group.source_id == source_id and group.name != name for group in store.list()):
+        return scim_error(
+            409, f"externalId '{source_id}' is already another group's provider id", "uniqueness"
+        )
+    return None
 
 
 # -- /Users ---------------------------------------------------
@@ -362,9 +377,15 @@ async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Respo
 async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Response:
     """Delete a user (SCIM 204)."""
     store = request.app.state.account_store
-    if store.get(user_id) is None:
+    group_store = request.app.state.group_store
+    existing = store.get(user_id)
+    if existing is None:
         return scim_error(404, f"User '{user_id}' not found")
+    # Deleting a user takes it out of every group it holds, so it needs their roles.
+    groups = group_store.list()
+    check_group_changes(request, user, groups, groups_held(existing, groups), ())
     store.delete(user_id)
+    forget_member(group_store, user_id)
     logger.info("SCIM user deleted", username=user_id)
     return Response(status_code=204)
 
@@ -442,6 +463,9 @@ async def create_group(user: CurrentUser, request: Request) -> Response:
     fields = scim_group_to_group_fields(inbound)
     name = str(fields["name"])
     members = list(fields["members"])  # type: ignore[arg-type]
+    taken = _refuse_taken_provider_id(store, str(fields["source_id"]), name)
+    if taken is not None:
+        return taken
     # create() decides, not get(): get() reports a stored group that does not load as absent.
     try:
         group = store.create(name, roles=[], description="", members=members)
@@ -485,6 +509,10 @@ async def replace_group(group_id: str, user: CurrentUser, request: Request) -> R
     # An IdP login resolves a group by its provider id, so moving the id moves the roles.
     if old != new or fields["source_id"] != existing.source_id:
         check_role_assignment(request, user, existing.roles, scope_of(existing))
+    if fields["source_id"] != existing.source_id:
+        taken = _refuse_taken_provider_id(store, str(fields["source_id"]), group_id)
+        if taken is not None:
+            return taken
     store.update(
         group_id,
         members=new_members,
