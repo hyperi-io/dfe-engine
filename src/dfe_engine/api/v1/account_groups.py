@@ -42,7 +42,7 @@ from dfe_engine.api.pagination import (
     apply_search,
     apply_sort,
 )
-from dfe_engine.auth import Scope
+from dfe_engine.auth import Scope, ScopedGrant
 from dfe_engine.auth.groups import Group, GroupExistsError, validate_group_scope
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
@@ -102,7 +102,8 @@ class AttributesRequest(BaseModel):
 # -- Helpers --------------------------------------------------
 
 
-def _scope_of(group: Group) -> Scope:
+def scope_of(group: Group) -> Scope:
+    """The scope *group*'s roles bind at: its owning org's, else system-wide."""
     org = group.scope_org
     return Scope(type="org", id=org) if org else Scope()
 
@@ -118,7 +119,7 @@ def _visible(request: Request, user, group: Group, member: str | None) -> bool:
     group's scope decides (org-local groups stay invisible outside their org)."""
     if member is not None and member in group.members:
         return True
-    return is_action_allowed(request, user, scopes_dict["group_read"], scope=_scope_of(group))
+    return is_action_allowed(request, user, scopes_dict["group_read"], scope=scope_of(group))
 
 
 def _response(group: Group) -> GroupResponse:
@@ -131,19 +132,26 @@ def _response(group: Group) -> GroupResponse:
     )
 
 
-def _check_role_assignment(request: Request, user, roles: list[str], scope: Scope) -> None:
+def check_role_assignment(request: Request, user, roles: list[str], scope: Scope) -> None:
     """Guard against privilege escalation via group roles.
 
-    A caller may put a role on a group only if they hold role-management
-    permission (role:write) at the group's scope, or already hold that role
-    themselves. Without this, a group:write holder could grant a group -- and
-    thereby themselves, by joining it -- a role they do not have (e.g. admin).
+    A caller may put a role on a group, or put a new member into a group that
+    carries it, only if they hold role-management permission (role:write) at the
+    group's scope, or already hold that role at a scope covering the group's. A
+    member takes every role its group carries, so without this a group:write holder
+    could make itself admin by granting a group the role, or by joining a group
+    that has it, and an admin of one org could make itself admin of another.
+
+    Raises:
+        HTTPException: 403 naming the roles the caller may not hand out.
     """
     if not roles:
         return
     if is_action_allowed(request, user, scopes_dict["role_write"], scope=scope):
         return
-    held = set(user.roles)
+    # Bare role names, with no scoped grants, mean system-wide, as authorize() reads them.
+    grants = user.grants or [ScopedGrant(role=name) for name in user.roles]
+    held = {grant.role for grant in grants if grant.scope.covers(scope)}
     escalated = sorted(r for r in roles if r not in held)
     if escalated:
         raise HTTPException(
@@ -180,8 +188,8 @@ async def create_group(
         ) from exc
 
     target = Group(name=body.name, scope=body.scope)
-    check_action(request, user, scopes_dict["group_write"], scope=_scope_of(target))
-    _check_role_assignment(request, user, body.roles, _scope_of(target))
+    check_action(request, user, scopes_dict["group_write"], scope=scope_of(target))
+    check_role_assignment(request, user, body.roles, scope_of(target))
 
     org = target.scope_org
     org_registry = getattr(request.app.state, "org_registry", None)
@@ -278,9 +286,12 @@ async def update_group(
             status_code=404,
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
         )
-    check_action(request, user, scopes_dict["group_write"], scope=_scope_of(existing))
-    if body.roles is not None:
-        _check_role_assignment(request, user, body.roles, _scope_of(existing))
+    check_action(request, user, scopes_dict["group_write"], scope=scope_of(existing))
+    adds_members = body.members is not None and not set(body.members) <= set(existing.members)
+    if body.roles is not None or adds_members:
+        # A new member takes the roles the group carries after this update.
+        roles = body.roles if body.roles is not None else existing.roles
+        check_role_assignment(request, user, roles, scope_of(existing))
     update_fields: dict[str, object] = {}
     if body.roles is not None:
         update_fields["roles"] = body.roles
@@ -329,7 +340,10 @@ async def add_member(
             status_code=404,
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
         )
-    check_action(request, user, scopes_dict["group_add_member"], scope=_scope_of(existing))
+    check_action(request, user, scopes_dict["group_add_member"], scope=scope_of(existing))
+    if body.username not in existing.members:
+        # The new member takes every role the group carries.
+        check_role_assignment(request, user, existing.roles, scope_of(existing))
     store.add_member(name, body.username)
     sync_account_groups_for_membership_change(
         account_store,
@@ -365,7 +379,7 @@ async def remove_member(
             status_code=404,
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
         )
-    check_action(request, user, scopes_dict["group_remove_member"], scope=_scope_of(existing))
+    check_action(request, user, scopes_dict["group_remove_member"], scope=scope_of(existing))
     store.remove_member(name, username)
     sync_account_groups_for_membership_change(
         account_store,
@@ -397,7 +411,7 @@ async def delete_group(
             status_code=404,
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
         )
-    check_action(request, user, scopes_dict["group_delete"], scope=_scope_of(existing))
+    check_action(request, user, scopes_dict["group_delete"], scope=scope_of(existing))
     try:
         store.delete(name)
     except ValueError as exc:

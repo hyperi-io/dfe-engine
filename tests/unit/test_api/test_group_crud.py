@@ -14,6 +14,8 @@ import secrets
 
 import pytest
 
+from dfe_engine.api.deps import create_access_token
+
 
 class TestCreateGroup:
     """POST /api/v1/auth/groups"""
@@ -124,6 +126,206 @@ class TestGroupRoleEscalation:
         )
         assert resp.status_code == 403
         assert resp.json()["code"] == "forbidden"
+
+
+def _roles(client, headers) -> list[str]:
+    resp = client.get("/api/v1/auth/me", headers=headers)
+    assert resp.status_code == 200, resp.text
+    return resp.json()["roles"]
+
+
+class TestJoiningAGroupNeedsItsRoles:
+    """A new member takes every role its group carries, so adding one is assigning them.
+
+    operator holds group:* through infra_admin, and neither admin nor role:write.
+    """
+
+    @pytest.mark.parametrize("username", ["operator", "viewer"])
+    def test_a_member_cannot_be_added_to_the_admin_group(
+        self, client, app, operator_headers, username
+    ):
+        resp = client.post(
+            "/api/v1/auth/groups/dfe-admins/members",
+            json={"username": username},
+            headers=operator_headers,
+        )
+
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["code"] == "forbidden"
+        assert username not in app.state.group_store.get("dfe-admins").members
+        assert "admin" not in _roles(client, operator_headers)
+
+    def test_a_member_cannot_be_put_into_the_admin_group(self, client, app, operator_headers):
+        members = [*app.state.group_store.get("dfe-admins").members, "operator"]
+
+        resp = client.put(
+            "/api/v1/auth/groups/dfe-admins", json={"members": members}, headers=operator_headers
+        )
+
+        assert resp.status_code == 403, resp.text
+        assert "operator" not in app.state.group_store.get("dfe-admins").members
+        assert "admin" not in _roles(client, operator_headers)
+
+    def test_admin_still_adds_a_member(self, client, app, admin_headers):
+        resp = client.post(
+            "/api/v1/auth/groups/dfe-admins/members",
+            json={"username": "operator"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert "operator" in app.state.group_store.get("dfe-admins").members
+
+    def test_a_group_whose_roles_the_caller_holds_takes_a_new_member(
+        self, client, app, operator_headers
+    ):
+        """dfe-infra carries infra_admin, which operator holds."""
+        by_post = client.post(
+            "/api/v1/auth/groups/dfe-infra/members",
+            json={"username": "viewer"},
+            headers=operator_headers,
+        )
+        members = [*app.state.group_store.get("dfe-infra").members, "admin"]
+        by_put = client.put(
+            "/api/v1/auth/groups/dfe-infra", json={"members": members}, headers=operator_headers
+        )
+
+        assert by_post.status_code == 200, by_post.text
+        assert by_put.status_code == 200, by_put.text
+        assert {"viewer", "admin"} <= set(app.state.group_store.get("dfe-infra").members)
+
+    def test_removing_a_member_needs_no_role(self, client, app, operator_headers):
+        app.state.group_store.add_member("dfe-admins", "viewer")
+
+        resp = client.delete(
+            "/api/v1/auth/groups/dfe-admins/members/viewer", headers=operator_headers
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert "viewer" not in app.state.group_store.get("dfe-admins").members
+
+
+class TestJoiningAnOrgGroupNeedsItsRolesInThatOrg:
+    """The same rule at org scope: group:* in acme does not make its holder acme's admin."""
+
+    @pytest.fixture
+    def acme(self, client, app, admin_headers, api_settings) -> dict[str, dict[str, str]]:
+        """acme-admins (admin) and acme-infra (infra_admin), each with one member."""
+        resp = client.post("/api/v1/orgs", json={"name": "acme"}, headers=admin_headers)
+        assert resp.status_code == 201, resp.text
+        for username, group, role in (
+            ("orgadmin", "acme-admins", "admin"),
+            ("orgop", "acme-infra", "infra_admin"),
+        ):
+            app.state.account_store.create(username, secrets.token_urlsafe(16))
+            app.state.group_store.create(group, [role], members=[username], scope="org:acme")
+        return {
+            username: {
+                "Authorization": "Bearer "
+                + create_access_token(data={"sub": username}, settings=api_settings)
+            }
+            for username in ("orgadmin", "orgop")
+        }
+
+    def test_an_org_infra_admin_cannot_join_the_org_admins(self, client, app, acme):
+        by_post = client.post(
+            "/api/v1/auth/groups/acme-admins/members",
+            json={"username": "orgop"},
+            headers=acme["orgop"],
+        )
+        by_put = client.put(
+            "/api/v1/auth/groups/acme-admins",
+            json={"members": ["orgadmin", "orgop"]},
+            headers=acme["orgop"],
+        )
+
+        assert by_post.status_code == 403, by_post.text
+        assert by_put.status_code == 403, by_put.text
+        assert app.state.group_store.get("acme-admins").members == ["orgadmin"]
+
+    def test_an_admin_of_another_org_cannot_join_the_org_admins(
+        self, client, app, admin_headers, api_settings, acme
+    ):
+        """crosser is globex's admin and acme's infra_admin: admin in globex is not admin in acme."""
+        resp = client.post("/api/v1/orgs", json={"name": "globex"}, headers=admin_headers)
+        assert resp.status_code == 201, resp.text
+        app.state.account_store.create("crosser", secrets.token_urlsafe(16))
+        app.state.group_store.create(
+            "globex-admins", ["admin"], members=["crosser"], scope="org:globex"
+        )
+        app.state.group_store.add_member("acme-infra", "crosser")
+        headers = {
+            "Authorization": "Bearer "
+            + create_access_token(data={"sub": "crosser"}, settings=api_settings)
+        }
+
+        resp = client.post(
+            "/api/v1/auth/groups/acme-admins/members",
+            json={"username": "crosser"},
+            headers=headers,
+        )
+
+        assert resp.status_code == 403, resp.text
+        assert "crosser" not in app.state.group_store.get("acme-admins").members
+        created = client.post(
+            "/api/v1/auth/groups",
+            json={"name": "acme-own", "roles": ["admin"], "scope": "org:acme"},
+            headers=headers,
+        )
+        assert created.status_code == 403, created.text
+
+    def test_the_org_admin_still_adds_a_member(self, client, app, acme):
+        resp = client.post(
+            "/api/v1/auth/groups/acme-admins/members",
+            json={"username": "orgop"},
+            headers=acme["orgadmin"],
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert "orgop" in app.state.group_store.get("acme-admins").members
+
+
+class TestScimJoinsNeedTheGroupsRoles:
+    """SCIM group writes need group:write, which operator holds, so the same rule applies."""
+
+    SCIM = "/api/v1/scim/v2/Groups"
+    PATCH_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+    GROUP_SCHEMA = "urn:ietf:params:scim:schemas:core:2.0:Group"
+
+    def _patch_add(self, username: str) -> dict:
+        return {
+            "schemas": [self.PATCH_SCHEMA],
+            "Operations": [{"op": "add", "path": "members", "value": [{"value": username}]}],
+        }
+
+    def test_a_patch_cannot_add_a_member_to_the_admin_group(self, client, app, operator_headers):
+        resp = client.patch(
+            f"{self.SCIM}/dfe-admins", json=self._patch_add("operator"), headers=operator_headers
+        )
+
+        assert resp.status_code == 403, resp.text
+        assert "operator" not in app.state.group_store.get("dfe-admins").members
+
+    def test_a_put_cannot_add_a_member_to_the_admin_group(self, client, app, operator_headers):
+        members = [*app.state.group_store.get("dfe-admins").members, "operator"]
+        body = {
+            "schemas": [self.GROUP_SCHEMA],
+            "displayName": "dfe-admins",
+            "members": [{"value": username} for username in members],
+        }
+
+        resp = client.put(f"{self.SCIM}/dfe-admins", json=body, headers=operator_headers)
+
+        assert resp.status_code == 403, resp.text
+        assert "operator" not in app.state.group_store.get("dfe-admins").members
+
+    def test_admin_still_adds_a_member_through_scim(self, client, app, admin_headers):
+        resp = client.patch(
+            f"{self.SCIM}/dfe-admins", json=self._patch_add("operator"), headers=admin_headers
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert "operator" in app.state.group_store.get("dfe-admins").members
 
 
 class TestListGroups:
