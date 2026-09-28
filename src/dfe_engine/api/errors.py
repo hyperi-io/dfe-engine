@@ -194,6 +194,7 @@ def install_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(status_code=422, content=_error_response_json(body))
 
     # Import engine exceptions here to avoid circular imports at module level
+    from dfe_engine.api.v1.scim import SCIM_ROOT, scim_error
     from dfe_engine.auth.models import AuthenticationError, AuthorizationError
 
     @app.exception_handler(AuthenticationError)
@@ -202,14 +203,16 @@ def install_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(status_code=401, content=_error_response_json(body))
 
     @app.exception_handler(AuthorizationError)
-    async def authz_error_handler(_request: Request, exc: AuthorizationError):
+    async def authz_error_handler(request: Request, exc: AuthorizationError):
+        # A SCIM client reads the RFC 7644 error envelope, not the native one.
+        if request.url.path.startswith(SCIM_ROOT):
+            return scim_error(403, str(exc))
         body = ErrorResponse(code=ErrorCode.FORBIDDEN, message=str(exc))
         return JSONResponse(status_code=403, content=_error_response_json(body))
 
     # Registered once rather than caught per route, so a route nobody has written
     # yet answers a protected-name refusal the same way.
     # Starlette matches the most derived handler, so this wins over AuthorizationError.
-    from dfe_engine.api.v1.scim import SCIM_ROOT, scim_error
     from dfe_engine.auth.protected_accounts import ProtectedAccountError
 
     @app.exception_handler(ProtectedAccountError)

@@ -10,10 +10,10 @@
 
 Two accounts are how an operator gets into a deployment whose federation is
 broken or hostile: the local admin seeded from config, and ``breakglass``, whose
-hash lives in the deploy repo. Four writes take that away -- disabling the
-account, deleting it, renaming it, and dropping it from the group that carries
-the admin role -- and any of them leaves the deployment reachable only by whoever
-broke it.
+hash lives in the deploy repo. Five writes take that away -- disabling the
+account, deleting it, renaming it, dropping it from the group that carries the
+admin role, and taking that role off the group -- and any of them leaves the
+deployment reachable only by whoever broke it.
 
 The floor is enforced in the STORES (:mod:`dfe_engine.auth.accounts`,
 :mod:`dfe_engine.auth.groups`), not in each route, so a caller nobody has written
@@ -53,10 +53,13 @@ class ProtectedFloor:
         usernames: The local admin and ``breakglass``.
         group: The group whose roles make those accounts able to run the
             deployment; removing a protected member from it is refused.
+        role: The role :attr:`group` must keep, system-wide, for those accounts to
+            run the deployment.
     """
 
     usernames: frozenset[str]
     group: str
+    role: str
 
     def is_protected(self, username: str) -> bool:
         """Whether *username* is a recovery credential."""
@@ -173,6 +176,30 @@ class ProtectedFloor:
         keeping = _as_names(wanted)
         self.check_member_removal(group_name, [m for m in current if m not in keeping])
 
+    def check_group_update(self, group_name: str, fields: Mapping[str, object]) -> None:
+        """Refuse a roles or scope change that leaves :attr:`group` without :attr:`role`.
+
+        Taking the role away, or binding the group to one org, strips the
+        recovery credentials of the system-wide role as surely as removing them.
+
+        Args:
+            group_name: The group being updated.
+            fields: The update as the caller passed it.
+
+        Raises:
+            ProtectedAccountError: *group_name* is :attr:`group` and the update
+                drops :attr:`role` or moves the group off system scope.
+        """
+        if group_name != self.group:
+            return
+        # Deferred: the group store imports this module.
+        from dfe_engine.auth.groups import GROUP_SCOPE_SYSTEM
+
+        if "roles" in fields and self.role not in _as_names(fields["roles"]):
+            raise ProtectedAccountError(_unrole_message(group_name, self.role))
+        if "scope" in fields and fields["scope"] != GROUP_SCOPE_SYSTEM:
+            raise ProtectedAccountError(_unrole_message(group_name, self.role))
+
 
 def resolve_floor(admin_name: str = "") -> ProtectedFloor:
     """Build the floor for a deployment whose admin is named *admin_name*.
@@ -186,12 +213,14 @@ def resolve_floor(admin_name: str = "") -> ProtectedFloor:
     """
     # Deferred: bootstrap and breakglass both import the account store, which
     # imports this module.
+    from dfe_engine.auth.admin_retirement import ADMIN_ROLE
     from dfe_engine.auth.bootstrap import admin_account_name
     from dfe_engine.auth.breakglass import GROUP, USERNAME
 
     return ProtectedFloor(
         usernames=frozenset({admin_account_name(admin_name), USERNAME}),
         group=GROUP,
+        role=ADMIN_ROLE,
     )
 
 
@@ -213,6 +242,14 @@ def _disable_message(username: str) -> str:
         f"'{username}' is a recovery credential and cannot be disabled here; "
         "retire the bootstrap admin through the setup API, or turn break-glass "
         "off with the breakglass.enabled governance flag"
+    )
+
+
+def _unrole_message(group_name: str, role: str) -> str:
+    """Refusal text for a group write that would take the recovery role away system-wide."""
+    return (
+        f"'{group_name}' carries the recovery credentials' role and must keep '{role}' "
+        "at system scope; they would authenticate with no role"
     )
 
 

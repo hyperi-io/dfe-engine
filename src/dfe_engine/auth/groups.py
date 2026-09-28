@@ -306,7 +306,8 @@ class GroupStore:
         Args:
             name: Group to update.
             allow_protected: Replace the admin-role group's members with a list
-                that drops a recovery credential. Reserved for the reconcile paths.
+                that drops a recovery credential, or change its roles or scope.
+                Reserved for the reconcile paths.
             **fields: Fields to update.
 
         Returns:
@@ -315,8 +316,8 @@ class GroupStore:
         Raises:
             KeyError: If the group does not exist.
             ValueError: If ``scope`` is not ``system`` / ``org:<name>``.
-            ProtectedAccountError: The replacement drops a recovery credential
-                from the admin-role group.
+            ProtectedAccountError: The update drops a recovery credential from the
+                admin-role group, or takes the admin role off it system-wide.
         """
         group = self._read(name)
         if group is None:
@@ -324,8 +325,10 @@ class GroupStore:
         if "scope" in fields:
             # model_copy(update=...) skips validators - check explicitly.
             validate_group_scope(str(fields["scope"]))
-        if not allow_protected and "members" in fields:
-            self.protected.check_members_replaced(name, group.members, fields["members"])
+        if not allow_protected:
+            self.protected.check_group_update(name, fields)
+            if "members" in fields:
+                self.protected.check_members_replaced(name, group.members, fields["members"])
         updated = group.model_copy(update=fields)
         self._write(updated)
         return updated
@@ -536,8 +539,8 @@ class DocuStoreGroupStore:
         Accepted keyword arguments: ``roles``, ``description``, ``members``,
         ``org_ids``, ``scope``, ``source_provider``, ``source_id``. Any other is
         ignored. ``allow_protected`` replaces the admin-role group's members with a
-        list that drops a recovery credential; reserved for the reconcile paths.
-        Raises ProtectedAccountError otherwise.
+        list that drops a recovery credential, or changes its roles or scope;
+        reserved for the reconcile paths. Raises ProtectedAccountError otherwise.
         """
         group = self.get(name)
         if group is None:
@@ -545,8 +548,10 @@ class DocuStoreGroupStore:
         if "scope" in fields:
             # model_copy(update=...) skips validators - check explicitly.
             validate_group_scope(str(fields["scope"]))
-        if not allow_protected and "members" in fields:
-            self.protected.check_members_replaced(name, group.members, fields["members"])
+        if not allow_protected:
+            self.protected.check_group_update(name, fields)
+            if "members" in fields:
+                self.protected.check_members_replaced(name, group.members, fields["members"])
         updates = {k: fields[k] for k in _UPDATABLE_GROUP_FIELDS if k in fields}
         updated = group.model_copy(update=updates)
         self._c.put(name, updated)
