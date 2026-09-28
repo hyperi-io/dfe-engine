@@ -16,11 +16,20 @@ release:
   # Private service: ship only the GHCR container image, never a wheel to PyPI.
   destinations:
     python: false
+  # The committed spec carries the version, so a release regenerates it or main fails test_openapi_spec_committed.
+  stamp_cmd: uv run python openapi-spec/generate.py
+  stamp_paths:
+    - openapi-spec/openapi.json
+    - openapi-spec/openapi.e2e.json
 
 test:
   min_coverage: 70  # Current: 75%. Target: 80%. Ratchet up as coverage improves.
   python:
     parallel: auto
+  full:
+    python:
+      # Live tests need a deployed DFE; the full tier runs everything else.
+      markers: "not live"
 
 quality:
   python:
