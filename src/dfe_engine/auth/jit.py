@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 
 from scalo.logger import logger
 
-from dfe_engine.auth.accounts import Account, AccountStore
+from dfe_engine.auth.accounts import Account, AccountStore, discard_created
 from dfe_engine.auth.audit import (
     audit_jit_account_created,
     audit_jit_groups_updated,
@@ -168,7 +168,7 @@ class JitProvisioner:
 
         # First login -- create shadow account
         try:
-            self._accounts.create(
+            created = self._accounts.create(
                 email=wanted_email,
                 groups=oidc_groups,
                 name=wanted_name,
@@ -206,7 +206,7 @@ class JitProvisioner:
             )
         except Exception:
             # Unstamped, the account reads as a local one and refuses this identity at every login.
-            self._discard(safe_name)
+            discard_created(self._accounts, created)
             raise
 
         _, org_ids = self._resolve_grants(oidc_groups)
@@ -240,23 +240,6 @@ class JitProvisioner:
                     task.add_done_callback(self._invite_tasks.discard)
 
         return self._accounts.get(safe_name)
-
-    def _discard(self, safe_name: str) -> None:
-        """Remove the account a first login created and could not stamp.
-
-        A failure to remove it is logged, never raised: the caller re-raises the
-        error that stopped the stamp.
-        """
-        try:
-            self._accounts.delete(safe_name)
-        except KeyError:
-            return
-        except Exception as exc:
-            logger.error(
-                "JIT could not remove an account it failed to stamp",
-                username=safe_name,
-                error=type(exc).__name__,
-            )
 
     def _refuse_protected(self, safe_name: str, user_id: str, source_provider: str) -> None:
         """Refuse any assertion resolving onto a recovery credential.

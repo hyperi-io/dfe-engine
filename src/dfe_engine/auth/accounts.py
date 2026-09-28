@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any
 
 import bcrypt
 from pydantic import BaseModel, Field
+from scalo.logger import logger
 
 from dfe_engine.auth.protected_accounts import resolve_floor
 from dfe_engine.auth.store_names import VALID_NAME, store_key
@@ -630,6 +631,32 @@ class DocuStoreAccountStore:
 # ------------------------------------------------------------------
 # Module-level helpers
 # ------------------------------------------------------------------
+
+
+def discard_created(store: AccountStore | DocuStoreAccountStore, created: Account) -> None:
+    """Remove *created*, an account the caller's own create stored and could not finish.
+
+    Only that record goes: an account stored under the name since, with another
+    creation time, is left alone. A failure to remove it is logged, never raised,
+    because the caller re-raises the error that stopped it.
+
+    Args:
+        store: The store the create wrote to.
+        created: The account that create returned.
+    """
+    try:
+        stored = store.get(created.username)
+        if stored is None or stored.created_at != created.created_at:
+            return
+        store.delete(created.username)
+    except KeyError:
+        return
+    except Exception as exc:
+        logger.error(
+            "Could not remove an account whose create did not finish",
+            username=created.username,
+            error=type(exc).__name__,
+        )
 
 
 def _apply_access_stamps(updates: dict[str, object]) -> dict[str, object]:

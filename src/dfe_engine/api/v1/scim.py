@@ -65,7 +65,7 @@ from scim2_models import (
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.password_floor import FLOOR_MESSAGE, below_floor, count_floor_refusal
 from dfe_engine.api.v1.account_groups import check_group_changes, check_role_assignment, scope_of
-from dfe_engine.auth.accounts import AccountExistsError
+from dfe_engine.auth.accounts import AccountExistsError, discard_created
 from dfe_engine.auth.groups import GroupExistsError
 from dfe_engine.auth.membership import forget_member, groups_held
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -293,19 +293,24 @@ async def create_user(user: CurrentUser, request: Request) -> Response:
         return scim_error(400, FLOOR_MESSAGE, "invalidValue")
     # The create decides: another replica can take the name after the lookup above.
     try:
-        store.create(username, password, groups=[])
+        created = store.create(username, password, groups=[])
     except AccountExistsError:
         return _user_exists(username)
     except ValueError as exc:
         # A userName no account can have, or a password the hash refuses.
         return scim_error(400, str(exc), "invalidValue")
     # Apply the remaining writable attributes (enabled, external_id, provider).
-    store.update(
-        username,
-        enabled=fields["enabled"],
-        external_id=fields["external_id"],
-        source_provider=fields["source_provider"],
-    )
+    try:
+        store.update(
+            username,
+            enabled=fields["enabled"],
+            external_id=fields["external_id"],
+            source_provider=fields["source_provider"],
+        )
+    except Exception:
+        # Left unstamped, the account reads as a local one and the IdP's retry meets a 409.
+        discard_created(store, created)
+        raise
     logger.info("SCIM user provisioned", username=username)
     account = store.get(username)
     scim_user = account_to_scim_user(
