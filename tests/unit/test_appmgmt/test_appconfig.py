@@ -513,6 +513,29 @@ class TestCustomEnvironment:
         assert not _env_file(settings, f"{VRL}-crowdstrike-us").exists()
         assert _env_file(settings, f"{VRL}-crowdstrike-eu").read_text() == "DFE_VRL_REGION=eu\n"
 
+    def test_an_env_file_that_cannot_be_removed_is_named_and_the_render_goes_on(
+        self, crud, tmp_path, captured_logs
+    ):
+        if os.geteuid() == 0:
+            pytest.skip("root removes a file from a read-only directory")
+        settings = _settings(tmp_path)
+        _deploy(crud, VRL, "crowdstrike-eu", extraEnv__DFE_VRL_REGION="eu")
+        gone = _deploy(crud, VRL, "crowdstrike-us", extraEnv__DFE_VRL_REGION="us")
+        appconfig.render(crud, settings)
+        crud.delete(instances.HELMVARS_CLASS, gone.overlay_name, ACTOR, message="test: rm")
+        env_dir = Path(settings.deployment.app_env_dir)
+        env_dir.chmod(0o500)
+
+        try:
+            appconfig.render(crud, settings)
+        finally:
+            env_dir.chmod(0o700)
+
+        leftover = f"{VRL}-crowdstrike-us{appconfig.CUSTOM_ENV_SUFFIX}"
+        assert _env_file(settings, f"{VRL}-crowdstrike-us").is_file()
+        assert any(line.startswith("WARNING ") and leftover in line for line in captured_logs)
+        assert not _app_dir(settings, VRL, "crowdstrike-us").exists()
+
     def test_an_index_line_that_is_no_instance_name_removes_nothing(self, crud, tmp_path):
         settings = _settings(tmp_path)
         bystander = _env_file(settings, f"{VRL}-Not-An-Instance")
