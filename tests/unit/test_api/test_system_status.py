@@ -11,25 +11,16 @@ The trigger is real: a NEL character reads back from YAML as a line break, so a 
 description holding one is refused rather than stored changed.
 """
 
-import pytest
 from fastapi.testclient import TestClient
 from prometheus_client.parser import text_string_to_metric_families
 from scalo.metrics import create_metrics
 
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
-from dfe_engine.yaml_health import WRITE_FAILURES, YamlWriteMetrics, write_health
+from dfe_engine.yaml_health import WRITE_FAILURES
 
 STATUS = "/api/v1/system/status"
 GROUPS = "/api/v1/auth/groups"
-
-
-@pytest.fixture(autouse=True)
-def _clear_write_health():
-    yield
-    write_health().bind(YamlWriteMetrics())
-    for entry in write_health().degraded():
-        write_health().written(entry.target)
 
 
 def _failures(manager, reason: str) -> float:

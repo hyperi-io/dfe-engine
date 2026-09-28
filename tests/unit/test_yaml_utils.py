@@ -169,15 +169,10 @@ _UNREADABLE = [
 
 @pytest.fixture
 def reported():
-    """A real metrics backend bound to the writer, and every degraded target cleared after."""
+    """A real metrics backend bound to the writer; tests/unit/conftest.py unbinds it after."""
     manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
     write_health().bind(YamlWriteMetrics(manager))
-    try:
-        yield manager
-    finally:
-        write_health().bind(YamlWriteMetrics())
-        for entry in write_health().degraded():
-            write_health().written(entry.target)
+    return manager
 
 
 def _failures(manager, reason: str) -> float:

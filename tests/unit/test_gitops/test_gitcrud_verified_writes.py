@@ -17,7 +17,7 @@ from dulwich.repo import Repo
 
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitops.repo import GitopsRepo
-from dfe_engine.yaml_health import YamlWriteMetrics, write_health
+from dfe_engine.yaml_health import write_health
 from dfe_engine.yaml_utils import YamlWriteError, yaml_dump_string
 
 
@@ -56,15 +56,10 @@ def _remote_file(remote: str, branch: str, rel: str) -> str | None:
 
 @pytest.fixture
 def crud(tmp_path: Path):
-    """A GitCrud over a pushing clone; every degraded target is cleared after."""
+    """A GitCrud over a pushing clone, with the bare remote it pushes to and its branch."""
     remote, branch = _remote(tmp_path)
     repo = GitopsRepo(local_path=str(tmp_path / "clone"), repo_url=remote, branch=branch, push=True)
-    try:
-        yield GitCrud(repo), remote, branch
-    finally:
-        write_health().bind(YamlWriteMetrics())
-        for entry in write_health().degraded():
-            write_health().written(entry.target)
+    return GitCrud(repo), remote, branch
 
 
 def _rel(crud: GitCrud, name: str) -> str:

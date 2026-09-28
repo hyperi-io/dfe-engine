@@ -6,6 +6,8 @@ Test-session guard: every bcrypt hash in this tree runs at the minimum cost.
 import bcrypt
 import pytest
 
+from dfe_engine.yaml_health import YamlWriteMetrics, write_health
+
 # bcrypt's own floor -- gensalt() accepts 4-31, so this is not an arbitrary
 # choice, it is the cheapest hash bcrypt can produce.
 _TEST_BCRYPT_ROUNDS = 4
@@ -31,3 +33,22 @@ def _fast_bcrypt(monkeypatch):
         "gensalt",
         lambda rounds=12, prefix=b"2b": _real_gensalt(_TEST_BCRYPT_ROUNDS, prefix),
     )
+
+
+def _forget_refused_writes() -> None:
+    health = write_health()
+    health.bind(YamlWriteMetrics())
+    for entry in health.degraded():
+        health.written(entry.target)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_write_health():
+    """Start and end every test with no refused YAML write recorded and no counter bound.
+
+    The writer's health is per process, so a refusal one test provokes would otherwise
+    show in a later test's status report.
+    """
+    _forget_refused_writes()
+    yield
+    _forget_refused_writes()
