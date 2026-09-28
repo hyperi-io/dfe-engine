@@ -429,15 +429,17 @@ def get_role_config(request: Request) -> RoleConfig:
 
 
 def _groups_of_account(group_store: GroupStore, account: Any) -> list[str]:
-    """Group names from GroupStore membership of *account*, else its own list (never JWT).
+    """Group names whose group file lists *account* as a member (never JWT).
 
-    An IdP-owned account takes both: its own list is what its IdP asserts, so a group
-    an operator adds it to by hand is held beside those, not in place of them.
+    The group files are the authority, so a member removed there loses the group even
+    while the account's own list still names it. An IdP-owned account also takes its
+    own list: that is what its IdP asserts, so a group an operator adds it to by hand
+    is held beside those, not in place of them.
     """
     from_membership = sorted(g.name for g in group_store.list() if account.username in g.members)
     if account.source_provider:
         return sorted(set(from_membership) | set(account.groups))
-    return from_membership or list(account.groups)
+    return from_membership
 
 
 def resolve_live_grants_for_user(request: Request, user_id: str) -> GroupResolution:

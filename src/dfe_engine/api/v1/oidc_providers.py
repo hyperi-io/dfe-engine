@@ -632,7 +632,11 @@ async def sync_provider_groups(
 
     group_store = request.app.state.group_store
     result = await sync_provider(
-        name, registry, group_store, secrets=getattr(request.app.state, "dfe_secrets", None)
+        name,
+        registry,
+        group_store,
+        secrets=getattr(request.app.state, "dfe_secrets", None),
+        metrics=getattr(request.app.state, "oidc_sync_metrics", None),
     )
     # A group the sync created is a new ClickHouse user to provision.
     if result["created"]:

@@ -27,13 +27,15 @@ flowchart TD
     RESOLVE_OIDC --> CTX[Build AuthContext]
 
     OIDC -->|No| APIKEY{X-API-Key<br/>header?}
-    APIKEY -->|Yes| VERIFY_KEY[APIKeyStore.verify<br/>Parse short+long token<br/>SHA-256 compare]
+    APIKEY -->|Yes| VERIFY_KEY[APIKeyStore.verify<br/>Parse short+long token<br/>SHA-384 compare]
     VERIFY_KEY --> RESOLVE_KEY[GroupStore resolves<br/>key groups → roles]
     RESOLVE_KEY --> CTX
 
     APIKEY -->|No| JWT{Authorization:<br/>Bearer?}
-    JWT -->|Yes| DECODE[Decode JWT<br/>Extract sub, roles,<br/>org_id, org_ids]
-    DECODE --> CTX
+    JWT -->|Yes| DECODE["Verify signature ES384 by default,<br/>issuer and expiry<br/>Take sub and org_id"]
+    DECODE --> BIND["Bind sub to its account<br/>disabled or blocked -> 401"]
+    BIND --> RESOLVE_JWT["GroupStore resolves the account's<br/>groups -> roles + org_ids<br/>token claims ignored"]
+    RESOLVE_JWT --> CTX
 
     JWT -->|No| DISABLED{auth.enabled<br/>= false?}
     DISABLED -->|Yes| ROOT[Root context<br/>roles=admin<br/>user_id=dev]
@@ -51,9 +53,11 @@ flowchart TD
 | Path | Use case | Credential storage | Token lifetime |
 |------|----------|-------------------|----------------|
 | OIDC headers | Production (Envoy Gateway fronted) | IdP (Entra, Google, etc.) | Session cookie (Envoy managed) |
-| API key | CI/CD, Terraform, scripts | `config/auth/api-keys/*.yaml` (SHA-256 hash) | `expires_at` if set, else long-lived (revoke by deleting file) |
-| JWT Bearer | Standalone UI, dev | Issued by `/api/v1/auth/login` | `jwt_expire_minutes` (default 30) |
+| API key | CI/CD, Terraform, scripts | `config/auth/api-keys/*.yaml` (SHA-384 hash) | `expires_at` if set, else long-lived (revoke by deleting file) |
+| JWT Bearer | Console sessions, standalone, dev | Issued by `POST /api/v1/auth/login`, the OIDC login callback and `POST /api/v1/auth/refresh` | `api.jwt_expire_minutes` (`DFE_API_JWT_EXPIRE_MINUTES`, default 60) |
 | Disabled | Dev/test | N/A | N/A |
+
+A JWT carries identity, not authority. Its `roles`, `groups` and `org_ids` claims grant nothing: every request re-resolves them from the account the `sub` binds to, so a role or org taken away is gone from the next request. A `sub` that binds no account holds nothing -- an API-key subject, a deleted account -- and with auth enabled `POST /api/v1/auth/refresh` answers 401 for it, since each refresh issues a new expiry.
 
 OIDC headers injected by Envoy Gateway SecurityPolicy:
 
@@ -88,7 +92,7 @@ flowchart LR
     subgraph "YAML Config (safe to commit)"
         ACC["accounts/*.yaml<br/>username, bcrypt hash,<br/>group memberships"]
         GRP["groups/*.yaml<br/>group name, roles,<br/>member list"]
-        KEY["api-keys/*.yaml<br/>short token, SHA-256 hash,<br/>group memberships"]
+        KEY["api-keys/*.yaml<br/>short token, SHA-384 hash,<br/>group memberships"]
         ROLES["roles.yaml<br/>role definitions,<br/>permission patterns"]
     end
 
@@ -102,9 +106,9 @@ flowchart LR
 
     ACC -->|bcrypt verify| API
     GRP -->|role lookup| API
-    KEY -->|SHA-256 verify| API
+    KEY -->|SHA-384 verify| API
     ROLES -->|permission check| API
-    ENV -->|JWT secret,<br/>CH passwords| API
+    ENV -->|JWT signing key,<br/>CH passwords| API
 ```
 
 #### What Goes Where
@@ -114,9 +118,10 @@ flowchart LR
 | Account names | `accounts/{name}.yaml` | Filename stem | Yes |
 | Password hashes | `accounts/{name}.yaml` | `$2b$12$...` (bcrypt) | Yes (one-way) |
 | API key short token | `api-keys/{name}.yaml` | Plaintext (8 hex chars) | Yes (lookup index) |
-| API key long hash | `api-keys/{name}.yaml` | `sha256:{hex}` | Yes (one-way) |
+| API key long hash | `api-keys/{name}.yaml` | `sha384:{hex}` (legacy `sha256:` keys still verify) | Yes (one-way) |
 | Full API key | Shown once at creation | `dfe_ak_{short}_{long}` | **NO** (never stored) |
-| JWT signing secret | Env var (`DFE_API_JWT_SECRET`) | Random 256-bit | **NO** |
+| JWT signing key | Secrets backend at `api.jwt_key_path` (default `jwt/signing-key`), minted on first boot when absent | ECDSA private key, PEM (P-384 for the default ES384) | **NO** |
+| OIDC login session cookie key | `DFE_API_SESSION_SECRET`, else `DFE_API_JWT_SECRET` | Random, `DFE_API_JWT_SECRET` at least 32 bytes | **NO** |
 | CH connection passwords | Env var / K8s Secret | Plaintext | **NO** |
 | Role definitions | `auth/resources/roles.yaml` | Permission patterns | Yes |
 | Group→role mapping | `groups/{name}.yaml` | Role list | Yes |
@@ -158,14 +163,14 @@ Constant-time rejection for unknown usernames prevents enumeration attacks.
 ```
 dfe_ak_8a3f2c91_7f3b2c4d8e9a1b5f6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f
 |      |         |
-prefix short     long token (shown once, stored as SHA-256 hash)
+prefix short     long token (shown once, stored as SHA-384 hash)
        token
        (lookup index, shown in UI)
 ```
 
 - **Prefix** (`dfe_ak_`): enables secret scanning by GitHub, GitGuardian
 - **Short token** (8 hex chars): plaintext in YAML, used for lookup and display
-- **Long token** (32 hex chars): SHA-256 hashed. Not bcrypt — keys are
+- **Long token** (32 hex chars): SHA-384 hashed. Not bcrypt -- keys are
   high-entropy random, bcrypt's slowness adds no security value
 - Full key shown **once** at creation, never retrievable again
 - **Expiry** (`expires_at`, optional ISO-8601 stored as UTC): enforced on every
@@ -207,18 +212,18 @@ flowchart TD
     subgraph "Authentication (who are you?)"
         OIDC_AUTH["OIDC: X-Oidc-Subject → user_id"]
         KEY_AUTH["API Key: X-API-Key → APIKeyStore.verify() → key name"]
-        JWT_AUTH["JWT: Bearer → decode → sub claim"]
+        JWT_AUTH["JWT: Bearer -> verify -> sub binds an account"]
         LOCAL_AUTH["Login: POST /auth/login → AccountStore.verify_password()"]
     end
 
     subgraph "Group Resolution (what groups?)"
         OIDC_GRP["OIDC: X-Oidc-Groups header"]
-        LOCAL_GRP["Local: account.groups field"]
+        ACCT_GRP["Account: the group files listing it as a member,<br/>plus its IdP-asserted groups when an IdP owns it"]
         KEY_GRP["API Key: key.groups field"]
     end
 
     subgraph "Role Resolution (what roles?)"
-        ROLE_RES["GroupStore.resolve_roles_for_member()<br/>Union of all roles from all groups"]
+        ROLE_RES["Each group by name, else by provider source_id<br/>Union of roles, scoped grants and org_ids"]
     end
 
     subgraph "Permission Check (can you do this?)"
@@ -227,11 +232,11 @@ flowchart TD
 
     OIDC_AUTH --> OIDC_GRP
     KEY_AUTH --> KEY_GRP
-    JWT_AUTH -.->|roles in claims| PERM
-    LOCAL_AUTH --> LOCAL_GRP
+    JWT_AUTH --> ACCT_GRP
+    LOCAL_AUTH --> ACCT_GRP
 
     OIDC_GRP --> ROLE_RES
-    LOCAL_GRP --> ROLE_RES
+    ACCT_GRP --> ROLE_RES
     KEY_GRP --> ROLE_RES
 
     ROLE_RES --> PERM
@@ -245,6 +250,8 @@ flowchart TD
 
 OIDC groups and local groups are unified — an OIDC group name that matches a
 group file in `config/auth/groups/` inherits that group's roles.
+
+For a local account the group files are the authority. The account's own `groups` list is kept in step by the API routes, but it grants nothing: a member removed from a group file, by the API or by a hand edit in gitops, loses that group's roles and orgs on the next request. An account an IdP owns (JIT or SCIM) also holds the groups its record says the IdP asserts, so a group an operator adds it to by hand sits beside those.
 
 ### 2.2 Role Definitions
 
@@ -414,7 +421,7 @@ source_id: ""                    # Provider-specific group ID
 # config/auth/api-keys/ci-deploy.yaml
 enabled: true
 short_token: "8a3f2c91"
-key_hash: "sha256:e3b0c442..."
+key_hash: "sha384:38b060a7..."
 groups: ["infra-ops"]
 description: "CI/CD pipeline deployer"
 created_at: "2026-03-31T02:00:00Z"
@@ -599,6 +606,8 @@ sequenceDiagram
 Key behaviour: existing groups keep their roles. Sync only updates
 description and source metadata. Admins assign roles to synced groups
 manually.
+
+One bad group never aborts the sync. A provider group whose email, name or id makes no valid group name, or whose name is held by a stored group that does not load, is skipped and counted on `auth_oidc_sync_groups_skipped_total{reason}` (`invalid_name`, `stored_unloadable`), and the provider's `last_sync_status` reads `partial` with each reason.
 
 ---
 
