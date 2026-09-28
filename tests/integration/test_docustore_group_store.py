@@ -26,6 +26,10 @@ from dfe_engine.auth.groups import (
     GroupExistsError,
     GroupMetrics,
 )
+from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
+from dfe_engine.auth.oidc.models import GroupInfo, GroupResolutionConfig, OIDCProvider
+from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+from dfe_engine.auth.oidc.sync import sync_provider
 from dfe_engine.auth.protected_accounts import ProtectedAccountError
 from dfe_engine.store.documents import DocuStore
 
@@ -264,14 +268,72 @@ class TestDocuStoreGroupStore:
     def test_by_source_id(self, store):
         store.create("with-src", ["r1"])
         store.create("plain", ["r1"])
-        # source_id is sync-owned (no public setter), so set it via a direct put
-        # on the underlying typed collection to exercise the index.
-        grp = store.get("with-src").model_copy(update={"source_id": "prov-123"})
-        store._c.put("with-src", grp)
+        store.update("with-src", source_id="prov-123")
         index = store.by_source_id()
         assert "prov-123" in index
         assert index["prov-123"].name == "with-src"
         assert all(g.source_id for g in index.values())
+
+
+class TestTheProviderIdsAGroupCarries:
+    """The OIDC group sync and SCIM write a group's provider ids through update().
+
+    Role resolution finds a group by its source_id when the IdP asserts an id
+    rather than a name, as Entra's object GUIDs are.
+    """
+
+    GUID = "7b1d0f3e-0000-4000-8000-000000000001"
+
+    def test_update_keeps_them(self, store):
+        store.create("entra-analysts", ["data_analyst"])
+
+        store.update("entra-analysts", source_provider="entra", source_id=self.GUID)
+
+        got = store.get("entra-analysts")
+        assert (got.source_provider, got.source_id) == ("entra", self.GUID)
+        assert store.by_source_id()[self.GUID].name == "entra-analysts"
+
+    def test_a_field_outside_the_list_is_still_ignored(self, store):
+        """Attributes have their own setter; update() leaves them alone."""
+        store.create("entra-analysts", ["data_analyst"])
+
+        store.update("entra-analysts", attributes={"k": "v"})
+
+        assert store.get("entra-analysts").attributes == {}
+
+    async def test_the_oidc_sync_records_them(self, store, tmp_path):
+        provider = OIDCProvider(
+            type="generic",
+            enabled=True,
+            issuer="https://sso.example.com",
+            groups=GroupResolutionConfig(mode="api"),
+        )
+        registry = OIDCProviderRegistry(tmp_path / "oidc")
+        registry.create("entra", provider)
+        adapter = _Directory(provider, [GroupInfo(id=self.GUID, name="Analysts")])
+
+        result = await sync_provider("entra", registry, store, adapter=adapter)
+
+        assert result["created"] == 1
+        got = store.get("analysts")
+        assert (got.source_provider, got.source_id) == ("entra", self.GUID)
+
+
+class _Directory(OIDCGroupAdapter):
+    """A provider directory holding a fixed list of groups."""
+
+    def __init__(self, provider: OIDCProvider, groups: list[GroupInfo]) -> None:
+        super().__init__(provider)
+        self._groups = groups
+
+    async def resolve_groups(self, subject: str) -> list[GroupInfo]:
+        return []
+
+    async def list_all_groups(self) -> list[GroupInfo]:
+        return self._groups
+
+    async def test_connection(self) -> tuple[bool, str]:
+        return (True, "fixed directory")
 
 
 class TestProtectedNameFloor:
