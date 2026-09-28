@@ -19,8 +19,6 @@ engine parses; ``put_bundle`` writes the manifest and its files in one commit, a
 every doc-level operation keeps working against the manifest unchanged.
 """
 
-from __future__ import annotations
-
 import builtins
 from contextlib import AbstractContextManager
 from pathlib import Path
@@ -205,6 +203,18 @@ class GitCrud:
     def _file(self, cls: ResourceClass, name: str) -> Path:
         return self._repo.path / self._rel(cls, name)
 
+    @staticmethod
+    def _yaml(rel: str, doc: dict) -> str:
+        """*doc* as YAML that reads back as *doc*, the one way a resource reaches a commit.
+
+        A refusal raises before anything is staged, so the deploy repo keeps the old
+        file and the file is reported degraded until it next writes.
+
+        Raises:
+            YamlWriteError: The doc did not dump, or its YAML does not read back as it.
+        """
+        return yaml_dump_string(doc, target=f"deploy-repo:{rel}")
+
     def reading(self) -> AbstractContextManager[None]:
         """Take any write another replica pushed, and hold the tree for the read.
 
@@ -324,9 +334,8 @@ class GitCrud:
         self._guard_revision(cls_name, name, base_revision)
         cls = self._cls(cls_name)
         msg = message or f"{cls.name}({name}): update by {actor}"
-        return self._repo.publish(
-            {self._rel(cls, name): yaml_dump_string(doc)}, msg, branch=branch or None
-        )
+        rel = self._rel(cls, name)
+        return self._repo.publish({rel: self._yaml(rel, doc)}, msg, branch=branch or None)
 
     def put_many(
         self,
@@ -343,8 +352,8 @@ class GitCrud:
         """
         artifacts: dict[str, str] = {}
         for cls_name, name, doc in items:
-            cls = self._cls(cls_name)
-            artifacts[self._rel(cls, name)] = yaml_dump_string(doc)
+            rel = self._rel(self._cls(cls_name), name)
+            artifacts[rel] = self._yaml(rel, doc)
         return self._repo.publish(artifacts, message, branch=branch or None)
 
     def payloads(self, cls_name: str, name: str) -> builtins.list[str]:
@@ -398,7 +407,8 @@ class GitCrud:
         """
         cls = self._require_bundle(cls_name)
         self._guard_revision(cls_name, name, base_revision)
-        artifacts: dict[str, str | bytes] = {self._rel(cls, name): yaml_dump_string(doc)}
+        rel = self._rel(cls, name)
+        artifacts: dict[str, str | bytes] = {rel: self._yaml(rel, doc)}
         for relpath, content in (writes or {}).items():
             artifacts[self._rel_payload(cls, name, relpath)] = content
         deletions = [self._rel_payload(cls, name, r) for r in (removals or [])]

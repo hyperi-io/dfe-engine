@@ -19,18 +19,20 @@ Usage:
     deep_merge(base, overrides)  # mutates base in-place
 """
 
+import math
 import os
 import tempfile
 import threading
+from collections.abc import Mapping
 from io import StringIO
 from pathlib import Path
 from typing import Any
 
-from ruamel.yaml import (
-    YAML,
-    YAMLError,  # noqa: F401 - re-exported
-)
+from ruamel.yaml import YAML, YAMLError
 from ruamel.yaml.scalarstring import LiteralScalarString
+from scalo.logger import logger
+
+from dfe_engine.yaml_health import FailureReason, write_health
 
 # ruamel YAML instances carry mutable parser/emitter state and are NOT
 # thread-safe: a single shared instance dumped/loaded from two threads at once
@@ -86,7 +88,7 @@ def yaml_load(source: str | Path) -> Any:
         FileNotFoundError: If the file doesn't exist
     """
     path = Path(source)
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return _safe().load(f)
 
 
@@ -106,24 +108,106 @@ def yaml_load_string(content: str) -> Any:
     return _safe().load(StringIO(content))
 
 
+class YamlWriteError(YAMLError):
+    """A write refused because its data did not dump, or its YAML does not read back as it.
+
+    Attributes:
+        reason: ``dump`` or ``verify`` (see :data:`dfe_engine.yaml_health.FailureReason`).
+        target: The file or deploy-repo path that kept its old content, or None for a string.
+    """
+
+    def __init__(self, reason: FailureReason, target: str | None, error: str) -> None:
+        super().__init__(f"refused to write {target or 'a YAML string'}: {reason} failed ({error})")
+        self.reason = reason
+        self.target = target
+
+
+def same_data(written: Any, read: Any) -> bool:
+    """Whether YAML that read back as *read* holds the data *written*.
+
+    A tuple reads back as a list and NaN never equals itself, so both compare by content.
+    The walk is iterative: the data may nest as deep as the writer itself managed.
+    """
+    pending = [(written, read)]
+    while pending:
+        left, right = pending.pop()
+        if isinstance(left, Mapping):
+            if not isinstance(right, Mapping) or left.keys() != right.keys():
+                return False
+            pending.extend((left[key], right[key]) for key in left)
+        elif isinstance(left, list | tuple):
+            if not isinstance(right, list) or len(left) != len(right):
+                return False
+            pending.extend(zip(left, right, strict=True))
+        elif isinstance(left, float) and math.isnan(left):
+            if not (isinstance(right, float) and math.isnan(right)):
+                return False
+        elif left != right:
+            return False
+    return True
+
+
+def _refusal(reason: FailureReason, target: str | None, error: str) -> YamlWriteError:
+    """Log, count and record a refused write, and return the error to raise."""
+    logger.error(
+        "YAML write refused; the old content is kept", target=target, reason=reason, error=error
+    )
+    write_health().refused(target, reason, error)
+    return YamlWriteError(reason, target, error)
+
+
+def _verified_text(data: Any, target: str | None) -> str:
+    """*data* as YAML text that reads back as *data* and encodes as UTF-8.
+
+    Raises:
+        YamlWriteError: The dump raised, or its text does not read back as *data*.
+    """
+    stream = StringIO()
+    try:
+        _rt().dump(data, stream)
+    except BaseException as exc:
+        # A failed dump leaves ruamel's document open; every later dump on the thread writes nothing.
+        _local.rt = None
+        if not isinstance(exc, Exception):
+            raise
+        # The type only: an exception message can quote the data, and some of it is secret.
+        raise _refusal("dump", target, type(exc).__name__) from exc
+    text = stream.getvalue()
+    try:
+        text.encode("utf-8")
+        read = yaml_load_string(text)
+    except (YAMLError, UnicodeEncodeError, RecursionError) as exc:
+        raise _refusal("verify", target, type(exc).__name__) from exc
+    if not same_data(data, read):
+        raise _refusal("verify", target, "does not read back as the data")
+    return text
+
+
 def yaml_dump(data: Any, dest: str | Path) -> None:
     """
-    Dump data to a YAML file, ATOMICALLY.
+    Dump data to a YAML file, ATOMICALLY, refusing YAML that does not read back.
 
-    Writes to a temp file in the destination directory and os.replace()s it
-    over the target, so a concurrent reader always sees either the complete
+    The text is read back and compared with *data* before anything touches the
+    destination. It then goes to a temp file in the destination directory that
+    os.replace()s the target, so a concurrent reader always sees either the complete
     old file or the complete new one - never a partial or doubled write.
 
     Args:
         data: Data to serialize
         dest: Path to the output file
+
+    Raises:
+        YamlWriteError: The data did not dump, or its YAML does not read back as it.
+            The destination keeps its old content.
     """
     path = Path(dest)
+    target = str(path)
+    text = _verified_text(data, target)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
-        with os.fdopen(fd, "w") as f:
-            _rt().dump(data, f)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_name, path)
@@ -134,21 +218,28 @@ def yaml_dump(data: Any, dest: str | Path) -> None:
         except OSError:
             pass
         raise
+    write_health().written(target)
 
 
-def yaml_dump_string(data: Any) -> str:
+def yaml_dump_string(data: Any, *, target: str | None = None) -> str:
     """
-    Dump data to a YAML string.
+    Dump data to a YAML string that reads back as the data.
 
     Args:
         data: Data to serialize
+        target: Where the caller will store the text. A refusal leaves it degraded,
+            and a clean dump clears it; None when the text is not stored.
 
     Returns:
         YAML string representation
+
+    Raises:
+        YamlWriteError: The data did not dump, or its YAML does not read back as it.
     """
-    stream = StringIO()
-    _rt().dump(data, stream)
-    return stream.getvalue()
+    text = _verified_text(data, target)
+    if target is not None:
+        write_health().written(target)
+    return text
 
 
 def block_scalar_safe(text: str) -> bool:

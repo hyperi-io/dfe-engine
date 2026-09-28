@@ -13,9 +13,11 @@ the yaml :class:`AttributeStore`. ``app.state.account_sensitive_attributes`` and
 ``app.state.group_sensitive_attributes`` are built by the real lifespan.
 """
 
-from __future__ import annotations
-
 import secrets
+
+import pytest
+
+from dfe_engine.auth.attributes import MAX_ATTRIBUTE_DEPTH
 
 NESTED = {"team": "blue", "profile": {"tz": "Australia/Canberra", "tags": ["a", "b"]}}
 SENSITIVE = {"otp_seed": "abc123", "recovery": {"codes": ["one", "two"]}}
@@ -197,3 +199,62 @@ class TestGroupAttributes:
             headers=viewer_headers,
         )
         assert resp.status_code == 403
+
+
+def _nested(depth: int) -> dict:
+    """An attributes blob nested *depth* levels deep, the top-level mapping being one."""
+    blob: dict = {"leaf": "x"}
+    for _ in range(depth - 1):
+        blob = {"k": blob}
+    return blob
+
+
+class TestAttributeNestingIsCapped:
+    """The YAML writer recurses once per level, so a blob nested past the cap is a 422."""
+
+    @pytest.fixture
+    def targets(self, client, admin_headers) -> list[str]:
+        client.post(
+            "/api/v1/auth/groups",
+            json={"name": "deepgroup", "roles": [], "description": "", "members": []},
+            headers=admin_headers,
+        )
+        client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "deepuser",
+                "password": secrets.token_urlsafe(16),
+                "email": "deepuser@example.com",
+            },
+            headers=admin_headers,
+        )
+        return [
+            f"/api/v1/auth/{owner}/{route}"
+            for owner in ("groups/deepgroup", "accounts/deepuser")
+            for route in ("attributes", "sensitive-attributes")
+        ]
+
+    def test_a_blob_at_the_cap_writes(self, client, admin_headers, targets):
+        for url in targets:
+            resp = client.put(
+                url, json={"attributes": _nested(MAX_ATTRIBUTE_DEPTH)}, headers=admin_headers
+            )
+            assert resp.status_code == 200, f"{url}: {resp.text}"
+
+    @pytest.mark.parametrize("depth", [MAX_ATTRIBUTE_DEPTH + 1, 400])
+    def test_a_blob_past_the_cap_is_refused_and_later_writes_go_through(
+        self, client, admin_headers, targets, depth
+    ):
+        for url in targets:
+            resp = client.put(url, json={"attributes": _nested(depth)}, headers=admin_headers)
+            assert resp.status_code == 422, f"{url}: {resp.text}"
+
+        later = client.post(
+            "/api/v1/auth/groups",
+            json={"name": "aftergroup", "roles": [], "description": "", "members": []},
+            headers=admin_headers,
+        )
+        small = client.put(targets[0], json={"attributes": NESTED}, headers=admin_headers)
+
+        assert later.status_code == 201, later.text
+        assert small.status_code == 200, small.text

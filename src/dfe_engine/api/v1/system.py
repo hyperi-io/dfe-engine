@@ -3,11 +3,10 @@
 GET /api/v1/system/deployment  -> What this deployment IS: profile, transports, mesh, routing, versions
 GET /api/v1/system/version     -> What this deployment runs: stack, engine, schemas, ui
 GET /api/v1/system/schema      -> What the last schema bootstrap pass did, object by object
+GET /api/v1/system/status      -> Conditions that leave the engine degraded while it serves
 GET /api/v1/system/settings    -> Redacted settings summary
 GET /api/v1/system/retention   -> The deployment default TTL
 """
-
-from __future__ import annotations
 
 import sys
 from typing import Any, Literal
@@ -27,6 +26,7 @@ from dfe_engine.appmgmt import DeployTarget, appconfig, routing
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitops.pins import UI_COMPONENT, component_overrides, load_pins, stack_version
+from dfe_engine.yaml_health import write_health
 
 router = APIRouter(prefix="/system", tags=["System"])
 
@@ -204,6 +204,39 @@ class DeploymentResponse(BaseModel):
     )
 
 
+class DegradedCondition(BaseModel):
+    """One condition the engine keeps serving through, with the old content in place."""
+
+    kind: Literal["yaml_write"] = Field(
+        description="yaml_write: a write was refused and its target kept the content it had."
+    )
+    target: str = Field(
+        description="The file path, or deploy-repo:<path> for a file in the deploy repo."
+    )
+    reason: Literal["dump", "verify"] = Field(
+        description=(
+            "dump: turning the data into YAML failed. verify: the YAML produced does "
+            "not read back as the data."
+        )
+    )
+    error: str = Field(description="The exception type behind the refusal.")
+    since: str = Field(
+        description="RFC 3339 time of the first refusal since the target last wrote cleanly."
+    )
+
+
+class SystemStatusResponse(BaseModel):
+    """Whether the engine is serving degraded, and why."""
+
+    status: Literal["ok", "degraded"] = Field(
+        description="degraded while any condition is listed. Readiness does not follow it."
+    )
+    degraded: list[DegradedCondition] = Field(
+        default_factory=list,
+        description="Each condition, cleared when its target next writes cleanly.",
+    )
+
+
 class SettingsSummary(BaseModel):
     """Redacted settings -- no secrets."""
 
@@ -317,6 +350,30 @@ async def get_schema_status(user: CurrentUser, settings: Settings) -> SchemaStat
     from dfe_engine.schema.phase import current_state
 
     return SchemaStatusResponse.model_validate(current_state().as_dict())
+
+
+@router.get(
+    "/status",
+    response_model=SystemStatusResponse,
+    dependencies=[Depends(require_action(scopes_dict["system_read"]))],
+)
+async def get_system_status(user: CurrentUser) -> SystemStatusResponse:
+    """Conditions that leave the engine degraded while it keeps serving.
+
+    A refused YAML write keeps the old file or the old deploy-repo content, so reads
+    stay correct and readiness is not failed; this is where the refusal shows.
+    """
+    degraded = [
+        DegradedCondition(
+            kind="yaml_write",
+            target=entry.target,
+            reason=entry.reason,
+            error=entry.error,
+            since=entry.since,
+        )
+        for entry in write_health().degraded()
+    ]
+    return SystemStatusResponse(status="degraded" if degraded else "ok", degraded=degraded)
 
 
 @router.get(
