@@ -17,6 +17,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.deps import create_access_token
+from dfe_engine.auth.breakglass import GROUP as BREAKGLASS_GROUP
+from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
 
 ACCOUNTS = "/api/v1/auth/accounts"
 KEYS = "/api/v1/auth/api-keys"
@@ -144,6 +146,51 @@ class TestAKeysGroupsNeedTheirRoles:
         )
 
         assert resp.status_code == 201, resp.text
+
+
+class TestDeletingAnAccountNeedsItsGroupsRoles:
+    """Deleting an account takes it out of every group it holds, as removing it would."""
+
+    def test_deleting_an_admin_is_refused(self, client, app, mgr):
+        app.state.account_store.create("ops", _PASSWORD, groups=["dfe-admins"])
+        app.state.group_store.add_member("dfe-admins", "ops")
+
+        resp = client.delete(f"{ACCOUNTS}/ops", headers=mgr)
+
+        assert resp.status_code == 403, resp.text
+        assert app.state.account_store.get("ops") is not None
+        assert "ops" in app.state.group_store.get("dfe-admins").members
+
+    def test_deleting_an_idp_admin_is_refused(self, client, app, mgr):
+        """An IdP-owned account holds the groups its own list names."""
+        app.state.account_store.create("jane-corp-com", "", groups=["dfe-admins"])
+        app.state.account_store.update("jane-corp-com", external=True, source_provider="entra")
+
+        resp = client.delete(f"{ACCOUNTS}/jane-corp-com", headers=mgr)
+
+        assert resp.status_code == 403, resp.text
+        assert app.state.account_store.get("jane-corp-com") is not None
+
+    def test_an_account_in_groups_whose_roles_the_caller_holds_is_deleted(self, client, app, mgr):
+        app.state.account_store.create("helper", _PASSWORD, groups=["account-managers"])
+        app.state.group_store.add_member("account-managers", "helper")
+
+        resp = client.delete(f"{ACCOUNTS}/helper", headers=mgr)
+
+        assert resp.status_code == 204, resp.text
+        assert "helper" not in app.state.group_store.get("account-managers").members
+
+    def test_the_break_glass_floor_still_refuses_admin(
+        self, recovery_accounts, client, admin_headers
+    ):
+        resp = client.delete(f"{ACCOUNTS}/{BREAKGLASS_USERNAME}", headers=admin_headers)
+
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["code"] == "protected_account"
+        assert recovery_accounts.state.account_store.get(BREAKGLASS_USERNAME) is not None
+        assert (
+            BREAKGLASS_USERNAME in recovery_accounts.state.group_store.get(BREAKGLASS_GROUP).members
+        )
 
 
 class TestADeletedAccountLeavesItsGroups:

@@ -180,6 +180,21 @@ def _page_params(request: Request) -> tuple[int, int]:
     return start_index, max(0, count)
 
 
+def _refuse_taken_provider_id(store, source_id: str, name: str) -> JSONResponse | None:
+    """Refuse an externalId another group already carries as its provider id.
+
+    Login resolves a provider id to one group, and a second group sharing it would
+    decide by name order whose roles every IdP user asserting it gets.
+    """
+    if not source_id:
+        return None
+    if any(group.source_id == source_id and group.name != name for group in store.list()):
+        return scim_error(
+            409, f"externalId '{source_id}' is already another group's provider id", "uniqueness"
+        )
+    return None
+
+
 # -- /Users ---------------------------------------------------
 
 
@@ -443,6 +458,9 @@ async def create_group(user: CurrentUser, request: Request) -> Response:
     fields = scim_group_to_group_fields(inbound)
     name = str(fields["name"])
     members = list(fields["members"])  # type: ignore[arg-type]
+    taken = _refuse_taken_provider_id(store, str(fields["source_id"]), name)
+    if taken is not None:
+        return taken
     # create() decides, not get(): get() reports a stored group that does not load as absent.
     try:
         group = store.create(name, roles=[], description="", members=members)
@@ -486,6 +504,10 @@ async def replace_group(group_id: str, user: CurrentUser, request: Request) -> R
     # An IdP login resolves a group by its provider id, so moving the id moves the roles.
     if old != new or fields["source_id"] != existing.source_id:
         check_role_assignment(request, user, existing.roles, scope_of(existing))
+    if fields["source_id"] != existing.source_id:
+        taken = _refuse_taken_provider_id(store, str(fields["source_id"]), group_id)
+        if taken is not None:
+            return taken
     store.update(
         group_id,
         members=new_members,

@@ -43,7 +43,7 @@ from dfe_engine.api.pagination import (
     apply_search,
     apply_sort,
 )
-from dfe_engine.api.v1.account_groups import _check_role_assignment, _scope_of
+from dfe_engine.api.v1.account_groups import check_role_assignment, scope_of
 from dfe_engine.auth import account_durability
 from dfe_engine.auth.account_durability import AccountGitState
 from dfe_engine.auth.accounts import Account, matches_digest
@@ -311,7 +311,7 @@ def _check_group_changes(
     wanted = {group.name: group for group in groups_named(after, groups)}
     for name in sorted(held.keys() ^ wanted.keys()):
         group = held.get(name) or wanted[name]
-        _check_role_assignment(request, user, group.roles, _scope_of(group))
+        check_role_assignment(request, user, group.roles, scope_of(group))
 
 
 def _require_account(store: Any, username: str) -> Account:
@@ -794,14 +794,19 @@ async def delete_account(
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    if store.get(username) is None:
+    group_store = request.app.state.group_store
+    existing = store.get(username)
+    if existing is None:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
         )
+    # Deleting an account takes it out of every group it holds, so it needs their roles.
+    groups = group_store.list()
+    _check_group_changes(request, user, groups, groups_held(existing, groups), ())
     # The store refuses the break-glass admin, the one account the deploy repo carries.
     store.delete(username)
-    forget_member(request.app.state.group_store, username)
+    forget_member(group_store, username)
 
 
 # -- Attributes -----------------------------------------------

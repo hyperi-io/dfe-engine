@@ -588,6 +588,79 @@ class TestScimLeavesAndProviderIdsNeedTheGroupsRoles:
         assert "viewer" not in app.state.group_store.get("dfe-admins").members
 
 
+def _scim_group_body(name: str, external_id: str) -> dict:
+    """A SCIM Group body for a memberless group *name* carrying *external_id*."""
+    return {
+        "schemas": [TestScimJoinsNeedTheGroupsRoles.GROUP_SCHEMA],
+        "displayName": name,
+        "externalId": external_id,
+        "members": [],
+    }
+
+
+class TestAProviderIdNamesOneGroup:
+    """Login resolves a provider id to one group, the last by name, so no second group may take it.
+
+    ``zz-shadow`` sorts after ``dfe-admins``, so on a shared id it is the group login picks.
+    """
+
+    SCIM = TestScimJoinsNeedTheGroupsRoles.SCIM
+    IDP = {"X-Oidc-Subject": "jane@corp", "X-Oidc-Groups": "entra-admins-guid"}
+
+    @pytest.fixture(autouse=True)
+    def admins_carry_a_provider_id(self, app, client) -> None:
+        """Depends on ``client``, whose lifespan builds the stores."""
+        app.state.group_store.update("dfe-admins", source_id="entra-admins-guid")
+
+    @pytest.mark.parametrize("caller", ["operator_headers", "admin_headers"])
+    def test_a_post_cannot_take_another_groups_provider_id(self, client, app, request, caller):
+        resp = client.post(
+            self.SCIM,
+            json=_scim_group_body("zz-shadow", "entra-admins-guid"),
+            headers=request.getfixturevalue(caller),
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["scimType"] == "uniqueness"
+        assert app.state.group_store.get("zz-shadow") is None
+        assert "admin" in _roles(client, self.IDP)
+
+    def test_a_put_cannot_take_another_groups_provider_id(self, client, app, operator_headers):
+        """A group with no roles passes the role check, so the id itself has to be refused."""
+        app.state.group_store.create("zz-shadow", [], members=[])
+
+        resp = client.put(
+            f"{self.SCIM}/zz-shadow",
+            json=_scim_group_body("zz-shadow", "entra-admins-guid"),
+            headers=operator_headers,
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["scimType"] == "uniqueness"
+        assert app.state.group_store.get("zz-shadow").source_id == ""
+        assert "admin" in _roles(client, self.IDP)
+
+    def test_a_new_provider_id_is_still_provisioned(self, client, app, operator_headers):
+        resp = client.post(
+            self.SCIM, json=_scim_group_body("sec-team", "entra-sec-guid"), headers=operator_headers
+        )
+
+        assert resp.status_code == 201, resp.text
+        assert app.state.group_store.get("sec-team").source_id == "entra-sec-guid"
+
+    def test_a_group_resending_its_own_provider_id_is_accepted(self, client, app, operator_headers):
+        app.state.group_store.create("sec-team", [], members=[])
+        app.state.group_store.update("sec-team", source_id="entra-sec-guid")
+
+        resp = client.put(
+            f"{self.SCIM}/sec-team",
+            json=_scim_group_body("sec-team", "entra-sec-guid"),
+            headers=operator_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+
+
 class TestListGroups:
     """GET /api/v1/auth/groups"""
 
