@@ -368,3 +368,22 @@ class TestProtectedNameFloor:
     def test_allow_protected_reaches_past_the_floor(self, seeded):
         seeded.remove_member(RECOVERY_GROUP, BREAKGLASS, allow_protected=True)
         assert BREAKGLASS not in seeded.get(RECOVERY_GROUP).members
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            pytest.param({"roles": ["infra_admin"]}, id="admin-role-dropped"),
+            pytest.param({"scope": "org:acme"}, id="moved-to-an-org"),
+        ],
+    )
+    def test_taking_the_admin_role_off_the_admin_group_is_refused(self, seeded, change):
+        with pytest.raises(ProtectedAccountError):
+            seeded.update(RECOVERY_GROUP, **change)
+        stored = seeded.get(RECOVERY_GROUP)
+        assert (stored.roles, stored.scope) == (["admin"], "system")
+
+    def test_a_role_added_beside_admin_still_works(self, seeded):
+        assert seeded.update(RECOVERY_GROUP, roles=["admin", "data_viewer"]).roles == [
+            "admin",
+            "data_viewer",
+        ]

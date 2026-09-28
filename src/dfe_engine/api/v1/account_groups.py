@@ -24,6 +24,7 @@ the same rule, plus members always see the groups they belong to --
 org-local groups are never listed outside their org.
 """
 
+from collections.abc import Iterable
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -42,7 +43,8 @@ from dfe_engine.api.pagination import (
     apply_search,
     apply_sort,
 )
-from dfe_engine.auth import Scope, ScopedGrant
+from dfe_engine.auth import AuthorizationError, Scope, ScopedGrant
+from dfe_engine.auth.audit import audit_permission_denied
 from dfe_engine.auth.groups import Group, GroupExistsError, validate_group_scope
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
@@ -146,37 +148,38 @@ def _response(group: Group) -> GroupResponse:
     )
 
 
-def check_role_assignment(request: Request, user, roles: list[str], scope: Scope) -> None:
-    """Guard against privilege escalation via group roles.
+def check_role_assignment(request: Request, user, roles: Iterable[str], scope: Scope) -> None:
+    """Refuse a change to who holds a group's roles unless the caller could grant them.
 
-    A caller may put a role on a group, or put a new member into a group that
-    carries it, only if they hold role-management permission (role:write) at the
-    group's scope, or already hold that role at a scope covering the group's. A
-    member takes every role its group carries, so without this a group:write holder
-    could make itself admin by granting a group the role, or by joining a group
-    that has it, and an admin of one org could make itself admin of another.
+    Giving a group a role or taking one away, adding a member or removing one, and
+    changing the provider id an IdP login resolves the group by all change who
+    holds its roles. Each needs role-management permission (role:write) at the
+    group's scope, or holding every one of those roles at a scope covering the
+    group's. Without this a group:write holder could make itself admin, or strip
+    admin from everyone else, and an admin of one org could act as another's.
+
+    Args:
+        request: The request, for the role configuration and auth settings.
+        user: The caller.
+        roles: The roles whose holders the change affects.
+        scope: The scope the group's roles bind at.
 
     Raises:
-        HTTPException: 403 naming the roles the caller may not hand out.
+        AuthorizationError: 403 naming the roles the caller may not hand out or take away.
     """
-    if not roles:
+    wanted = sorted(set(roles))
+    if not wanted:
         return
     if is_action_allowed(request, user, scopes_dict["role_write"], scope=scope):
         return
     # Bare role names, with no scoped grants, mean system-wide, as authorize() reads them.
     grants = user.grants or [ScopedGrant(role=name) for name in user.roles]
     held = {grant.role for grant in grants if grant.scope.covers(scope)}
-    escalated = sorted(r for r in roles if r not in held)
-    if escalated:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "forbidden",
-                "message": (
-                    f"Cannot assign role(s) you do not hold: {escalated}; requires role:write"
-                ),
-            },
-        )
+    missing = [role for role in wanted if role not in held]
+    if missing:
+        reason = f"cannot grant or remove role(s) you do not hold: {missing}; requires role:write"
+        audit_permission_denied(user.user_id, scopes_dict["role_write"], user.roles, reason)
+        raise AuthorizationError(reason)
 
 
 # -- Endpoints ------------------------------------------------
@@ -301,11 +304,11 @@ async def update_group(
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
         )
     check_action(request, user, scopes_dict["group_write"], scope=scope_of(existing))
-    adds_members = body.members is not None and not set(body.members) <= set(existing.members)
-    if body.roles is not None or adds_members:
-        # A new member takes the roles the group carries after this update.
-        roles = body.roles if body.roles is not None else existing.roles
-        check_role_assignment(request, user, roles, scope_of(existing))
+    changes_members = body.members is not None and set(body.members) != set(existing.members)
+    if body.roles is not None or changes_members:
+        # Members keep, gain or lose the roles before and after; a role removed counts too.
+        roles_after = body.roles if body.roles is not None else existing.roles
+        check_role_assignment(request, user, [*existing.roles, *roles_after], scope_of(existing))
     update_fields: dict[str, object] = {}
     if body.roles is not None:
         update_fields["roles"] = body.roles
@@ -394,6 +397,9 @@ async def remove_member(
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
         )
     check_action(request, user, scopes_dict["group_remove_member"], scope=scope_of(existing))
+    if username in existing.members:
+        # The member loses every role the group carries.
+        check_role_assignment(request, user, existing.roles, scope_of(existing))
     store.remove_member(name, username)
     sync_account_groups_for_membership_change(
         account_store,
