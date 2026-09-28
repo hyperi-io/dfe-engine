@@ -42,6 +42,7 @@ from dfe_engine.api.pagination import (
     apply_search,
     apply_sort,
 )
+from dfe_engine.api.v1.account_groups import check_group_changes
 from dfe_engine.auth import account_durability
 from dfe_engine.auth.account_durability import AccountGitState
 from dfe_engine.auth.accounts import Account, matches_digest
@@ -53,7 +54,7 @@ from dfe_engine.auth.bootstrap import (
     default_credentials_in_use,
 )
 from dfe_engine.auth.groups import Group
-from dfe_engine.auth.membership import groups_held
+from dfe_engine.auth.membership import forget_member, groups_held
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/accounts", tags=["Accounts"])
@@ -391,6 +392,7 @@ async def create_account(
             status_code=409,
             detail={"code": "conflict", "message": f"Account '{body.username}' already exists"},
         )
+    check_group_changes(request, user, group_store.list(), (), body.groups)
     account = store.create(
         body.username,
         body.password,
@@ -545,7 +547,10 @@ async def update_account(
 
     store: AccountStore = request.app.state.account_store
     group_store = request.app.state.group_store
-    _require_account(store, username)
+    existing = _require_account(store, username)
+    if body.groups is not None:
+        groups = group_store.list()
+        check_group_changes(request, user, groups, groups_held(existing, groups), body.groups)
     update_fields: dict[str, object] = _contact_updates(body)
     if body.groups is not None:
         update_fields["groups"] = body.groups
@@ -760,13 +765,19 @@ async def delete_account(
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    if store.get(username) is None:
+    group_store = request.app.state.group_store
+    existing = store.get(username)
+    if existing is None:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
         )
+    # Deleting an account takes it out of every group it holds, so it needs their roles.
+    groups = group_store.list()
+    check_group_changes(request, user, groups, groups_held(existing, groups), ())
     # The store refuses the break-glass admin, the one account the deploy repo carries.
     store.delete(username)
+    forget_member(group_store, username)
 
 
 # -- Attributes -----------------------------------------------

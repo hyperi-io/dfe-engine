@@ -37,6 +37,41 @@ def groups_held(account: Account, groups: Iterable[Group]) -> list[str]:
     return sorted(held)
 
 
+def groups_named(identifiers: Iterable[str], groups: Iterable[Group]) -> list[Group]:
+    """The stored groups *identifiers* name, each by group name else by provider source_id.
+
+    The lookup role resolution makes, so these are the groups whose roles those
+    identifiers carry. An identifier that names no group is left out.
+
+    Args:
+        identifiers: Group names or IdP-asserted provider ids.
+        groups: Every stored group, listed once by the caller.
+
+    Returns:
+        The named groups, each once, in the order first named.
+    """
+    listed = list(groups)
+    by_name = {group.name: group for group in listed}
+    by_source_id = {group.source_id: group for group in listed if group.source_id}
+    named: dict[str, Group] = {}
+    for identifier in identifiers:
+        group = by_name.get(identifier) or by_source_id.get(identifier)
+        if group is not None:
+            named.setdefault(group.name, group)
+    return list(named.values())
+
+
+def forget_member(group_store: GroupStore, username: str) -> None:
+    """Remove *username* from every group that lists it.
+
+    Membership is keyed by name, so without this an account recreated under the name
+    would inherit every group the deleted one held.
+    """
+    for group in group_store.list():
+        if username in group.members:
+            group_store.remove_member(group.name, username)
+
+
 def sync_account_groups_for_membership_change(
     account_store: AccountStore,
     group_name: str,
