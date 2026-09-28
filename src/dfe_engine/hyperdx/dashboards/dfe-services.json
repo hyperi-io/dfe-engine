@@ -280,7 +280,7 @@
       "w": 12,
       "h": 4,
       "config": {
-        "name": "Offsets committed and rebalances",
+        "name": "Offsets committed",
         "configType": "sql",
         "displayType": "table",
         "connection": "platform",
