@@ -545,6 +545,30 @@ class TestAnotherAdminExists:
 
         assert admin_retirement.another_admin_exists(store, groups, "admin") is True
 
+    def test_an_idp_account_asserting_the_admin_groups_provider_id_counts(
+        self, tmp_path: Path, crud
+    ):
+        """Entra asserts object GUIDs, which the sync records as the group's source_id."""
+        store, groups = self._stores(tmp_path, crud)
+        guid = "7b1d0f3e-0000-4000-8000-000000000002"
+        groups.update("dfe-admins", source_id=guid)
+        store.create("jane-corp-com", "", groups=[guid])
+        store.update("jane-corp-com", external=True, source_provider="entra")
+
+        assert admin_retirement.another_admin_exists(store, groups, "admin") is True
+
+    def test_a_group_named_as_the_admin_groups_provider_id_does_not_count(
+        self, tmp_path: Path, crud
+    ):
+        """Login resolves the identifier by name first, so the session holds analyst roles only."""
+        store, groups = self._stores(tmp_path, crud)
+        groups.create("entra-analysts", roles=["data_analyst"])
+        groups.update("dfe-admins", source_id="entra-analysts")
+        store.create("jane-corp-com", "", groups=["entra-analysts"])
+        store.update("jane-corp-com", external=True, source_provider="entra")
+
+        assert admin_retirement.another_admin_exists(store, groups, "admin") is False
+
     @pytest.mark.parametrize(
         "state",
         [
