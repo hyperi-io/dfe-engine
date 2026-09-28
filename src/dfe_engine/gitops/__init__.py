@@ -13,18 +13,10 @@ Argo CD applies them. The engine needs only git-write, never kubectl.
 """
 
 from dfe_engine.gitops.artifacts import collect_deploy_artifacts
-from dfe_engine.gitops.oidc import (
-    ENVOY_OIDC_VALUES_PATH,
-    build_oidc_providers,
-    render_envoy_oidc_values,
-)
 from dfe_engine.gitops.repo import GitopsRepo, PublishResult
 
 __all__ = [
-    "ENVOY_OIDC_VALUES_PATH",
     "GitopsRepo",
     "PublishResult",
-    "build_oidc_providers",
     "collect_deploy_artifacts",
-    "render_envoy_oidc_values",
 ]
