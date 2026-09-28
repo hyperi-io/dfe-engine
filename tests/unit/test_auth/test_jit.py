@@ -21,7 +21,9 @@ from dfe_engine.auth.jit import (
     JitProvisioner,
     JitSubjectUnusableError,
 )
+from dfe_engine.auth.models import AuthenticationError
 from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
+from tests.support.failing_stores import StampFailingAccountStore
 
 
 @pytest.fixture
@@ -938,3 +940,46 @@ class TestOrgIdsFromGroupGuids:
             jit.ensure_account("guid-123", ["globex-viewers"], "entra")
 
         assert audit.call_args.args[3] == ["globex"]
+
+
+class VanishedRaceAccountStore(AccountStore):
+    """A real store where the account that took the name is gone by the time it is looked up.
+
+    Another request created it and a third deleted it, so the create is refused
+    for a name nothing holds.
+    """
+
+    def create(self, username, password, **fields):
+        raise ValueError(f"Account already exists: {username}")
+
+
+class TestAStoreFaultIsNotARefusal:
+    """A write the store cannot make is a service fault, never a refusal of the identity."""
+
+    def test_a_failed_stamp_leaves_no_account_to_refuse_the_next_login(self, tmp_path, stores):
+        _, groups = stores
+        failing = StampFailingAccountStore(tmp_path / "accounts")
+
+        with pytest.raises(OSError, match="No space left on device"):
+            JitProvisioner(account_store=failing, group_store=groups).ensure_account(
+                "kim@example.com", ["dfe-admins"], "entra"
+            )
+
+        assert failing.get("kim-example-com") is None
+        healthy = AccountStore(tmp_path / "accounts")
+        account = JitProvisioner(account_store=healthy, group_store=groups).ensure_account(
+            "kim@example.com", ["dfe-admins"], "entra"
+        )
+        assert account.source_provider == "entra"
+        assert account.subject == "kim@example.com"
+
+    def test_a_refused_create_for_a_name_nothing_holds_is_not_a_race(self, tmp_path, stores):
+        _, groups = stores
+        jit = JitProvisioner(
+            account_store=VanishedRaceAccountStore(tmp_path / "accounts"), group_store=groups
+        )
+
+        with pytest.raises(ValueError, match="Account already exists") as raised:
+            jit.ensure_account("kim@example.com", ["dfe-admins"], "entra")
+
+        assert not isinstance(raised.value, AuthenticationError)

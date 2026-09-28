@@ -114,10 +114,24 @@ def _member_name(request: Request, user) -> str | None:
     return account.username if account is not None else None
 
 
+def _held(group: Group, groups: list[str]) -> bool:
+    """Whether the session's groups name *group*, by name or by the provider id the sync recorded.
+
+    The same two-step role resolution uses, so a session sees each group its roles came from.
+    """
+    return group.name in groups or bool(group.source_id and group.source_id in groups)
+
+
 def _visible(request: Request, user, group: Group, member: str | None) -> bool:
     """Members always see their own groups; otherwise group:read at the
-    group's scope decides (org-local groups stay invisible outside their org)."""
+    group's scope decides (org-local groups stay invisible outside their org).
+
+    A member is listed in the group file, or holds the group through its session's
+    groups: an identity provider asserts those, and an API key carries its own.
+    """
     if member is not None and member in group.members:
+        return True
+    if _held(group, user.groups):
         return True
     return is_action_allowed(request, user, scopes_dict["group_read"], scope=scope_of(group))
 

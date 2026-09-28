@@ -18,6 +18,7 @@ Example layout::
         entra-id.yaml
 """
 
+import builtins
 from pathlib import Path
 
 from dfe_engine.auth.oidc.models import OIDCProvider
@@ -96,7 +97,7 @@ class OIDCProviderRegistry:
         """Return the named provider, or None if it does not exist."""
         return self._read(name)
 
-    def list(self) -> list[tuple[str, OIDCProvider]]:
+    def list(self) -> builtins.list[tuple[str, OIDCProvider]]:
         """Return all providers as (name, provider) tuples sorted by name."""
         result: list[tuple[str, OIDCProvider]] = []
         for path in sorted(self._dir.glob("*.yaml")):
