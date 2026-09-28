@@ -232,14 +232,9 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(user: CurrentUser, request: Request, settings: Settings):
-    """Refresh the current JWT token. Requires a valid existing token.
-
-    Only a session bound to an account refreshes. Every refresh issues a new
-    expiry, so a token for an API key, a deleted account or a subject that no
-    longer binds would otherwise outlive what it was minted for. With auth
-    disabled there is no account to bind, and the refresh is not refused.
-    """
+    """Refresh the current JWT token. Requires a valid existing token."""
     account = require_local_account_enabled(request, user.user_id)
+    # Each refresh issues a new expiry, so only a session an account backs may renew.
     if account is None and settings.auth.enabled:
         raise HTTPException(
             status_code=401,
