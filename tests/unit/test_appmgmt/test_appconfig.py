@@ -13,6 +13,7 @@ so proving the overlay changed would prove nothing.
 """
 
 import os
+import shutil
 import uuid
 from pathlib import Path
 
@@ -32,6 +33,7 @@ ACTOR = "test"
 RECEIVER = "dfe-receiver"
 LOADER = "dfe-loader"
 VRL = "dfe-transform-vrl"
+VECTOR = "dfe-transform-vector"
 
 MOUNT = "/etc/dfe/apps"
 
@@ -227,6 +229,49 @@ class TestFileSets:
 
         directory = _app_dir(settings, VRL, "filebeat") / "transforms"
         assert list(directory.iterdir()) == []
+
+    def test_a_source_with_no_program_yet_gets_the_directories_its_config_names(
+        self, crud, tmp_path
+    ):
+        # dfe-transform-vector exits at startup when transforms.dir is not a directory.
+        settings = _settings(tmp_path)
+        _deploy(crud, VECTOR, "accprune")
+
+        appconfig.render(crud, settings)
+
+        config = _rendered(settings, VECTOR, "accprune")
+        assert config["transforms"]["dir"] == f"{MOUNT}/{VECTOR}/accprune/transforms"
+        assert (_app_dir(settings, VECTOR, "accprune") / "transforms").is_dir()
+        # An empty entries set names no table, so no entry points into the directory.
+        assert "enrichment_tables" not in config
+        assert (_app_dir(settings, VECTOR, "accprune") / "enrichment").is_dir()
+
+    def test_an_empty_set_whose_directory_is_missing_gets_it_back_without_a_restart(
+        self, crud, tmp_path
+    ):
+        # The state an engine that never created the directory left behind.
+        settings = _settings(tmp_path)
+        _deploy(crud, VRL, "filebeat")
+        appconfig.render(crud, settings)
+        directory = _app_dir(settings, VRL, "filebeat") / "transforms"
+        shutil.rmtree(directory)
+
+        rendered = {r.container: r for r in appconfig.render(crud, settings)}
+
+        assert directory.is_dir()
+        assert not rendered[f"{VRL}-filebeat"].changed
+        assert rendered[f"{VRL}-filebeat"].restart_hint == ""
+
+    def test_an_app_with_no_source_keeps_the_directories_its_base_config_names(
+        self, crud, tmp_path
+    ):
+        # The resident container reads the app-level render, beside the instance directories.
+        settings = _settings(tmp_path)
+
+        appconfig.render(crud, settings)
+
+        assert _rendered(settings, VRL)["transforms"]["dir"] == f"{MOUNT}/{VRL}/transforms"
+        assert (_app_dir(settings, VRL) / "transforms").is_dir()
 
     def test_a_new_program_rewrites_the_config_the_app_watches(self, crud, tmp_path):
         # The app polls its config file, and a program appearing in a directory
@@ -453,6 +498,31 @@ class TestCustomEnvironment:
         appconfig.render(crud, settings)
 
         assert leftover.read_text() == ""
+
+    def test_a_deleted_instance_takes_its_env_file_with_it(self, crud, tmp_path):
+        # The file can hold the source's credentials, and no container reads it any more.
+        settings = _settings(tmp_path)
+        _deploy(crud, VRL, "crowdstrike-eu", extraEnv__DFE_VRL_REGION="eu")
+        gone = _deploy(crud, VRL, "crowdstrike-us", extraEnv__DFE_VRL_REGION="us")
+        appconfig.render(crud, settings)
+        assert _env_file(settings, f"{VRL}-crowdstrike-us").is_file()
+
+        crud.delete(instances.HELMVARS_CLASS, gone.overlay_name, ACTOR, message="test: rm")
+        appconfig.render(crud, settings)
+
+        assert not _env_file(settings, f"{VRL}-crowdstrike-us").exists()
+        assert _env_file(settings, f"{VRL}-crowdstrike-eu").read_text() == "DFE_VRL_REGION=eu\n"
+
+    def test_an_index_line_that_is_no_instance_name_removes_nothing(self, crud, tmp_path):
+        settings = _settings(tmp_path)
+        bystander = _env_file(settings, f"{VRL}-Not-An-Instance")
+        bystander.parent.mkdir(parents=True)
+        bystander.write_text("KEY=value\n", encoding="utf-8")
+        _index(settings, VRL).write_text("Not-An-Instance\n", encoding="utf-8")
+
+        appconfig.render(crud, settings)
+
+        assert bystander.read_text() == "KEY=value\n"
 
     def test_the_file_is_readable_by_its_group_and_nobody_else(self, crud, tmp_path):
         # Compose reads env_file as the operator who runs it, not as the engine.
