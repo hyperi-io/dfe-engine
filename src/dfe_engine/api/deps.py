@@ -688,18 +688,16 @@ async def get_current_user(request: Request) -> AuthContext:
                 client_ip=client_ip,
                 user_agent=user_agent,
             )
-        # The token's own roles and groups claims grant nothing; the bound account decides.
+        # The token's roles, groups and org_ids claims grant nothing; the bound account decides.
         live = resolve_live_grants_for_user(request, jwt_user_id)
         live_groups = resolve_live_groups_for_user(request, jwt_user_id)
-        claim_org_ids = payload.get("org_ids", [])
-        org_ids = sorted(set(claim_org_ids) | set(live.org_ids)) if claim_org_ids else live.org_ids
         return AuthContext(
             org_id=payload.get("org_id", "default"),
             user_id=jwt_user_id,
             email=jwt_email,
             roles=live.roles,
             grants=live.grants,
-            org_ids=org_ids,
+            org_ids=live.org_ids,
             groups=live_groups,
             request_id=request_id,
             client_ip=client_ip,

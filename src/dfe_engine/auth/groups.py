@@ -199,7 +199,8 @@ class GroupStore:
             data = yaml_load(path)
         except FileNotFoundError:
             return None
-        except (OSError, UnicodeDecodeError, YAMLError) as exc:
+        # A file nested past the parser's recursion limit raises RecursionError, not YAMLError.
+        except (OSError, UnicodeDecodeError, YAMLError, RecursionError) as exc:
             self._skips.skip(path.name, "unreadable", str(exc), path=str(path))
             return None
         if data is None:

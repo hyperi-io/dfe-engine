@@ -17,7 +17,7 @@ Usage::
     from dfe_engine.auth.oidc.sync import sync_provider
 
     result = await sync_provider("my-provider", provider_registry, group_store)
-    # {"created": 3, "updated": 1, "total": 4, "error": None, "skipped": None}
+    # {"created": 3, "updated": 1, "total": 4, "groups_skipped": 0, "error": None, "skipped": None}
 """
 
 from __future__ import annotations
@@ -79,6 +79,8 @@ async def sync_provider(
         - ``created`` (int): number of new groups created.
         - ``updated`` (int): number of existing groups updated.
         - ``total`` (int): total groups processed.
+        - ``groups_skipped`` (int): groups left unsynced because their stored copy
+          does not load. Non-zero makes the provider's ``last_sync_status`` partial.
         - ``error`` (str | None): error message if the sync failed.
         - ``skipped`` (str | None): reason string if the provider was skipped.
     """
@@ -89,6 +91,7 @@ async def sync_provider(
             "created": 0,
             "updated": 0,
             "total": 0,
+            "groups_skipped": 0,
             "error": f"Provider '{provider_name}' not found",
             "skipped": None,
         }
@@ -100,6 +103,7 @@ async def sync_provider(
             "created": 0,
             "updated": 0,
             "total": 0,
+            "groups_skipped": 0,
             "error": None,
             "skipped": "disabled",
         }
@@ -116,6 +120,7 @@ async def sync_provider(
             "created": 0,
             "updated": 0,
             "total": 0,
+            "groups_skipped": 0,
             "error": None,
             "skipped": f"mode is '{mode}'",
         }
@@ -145,12 +150,14 @@ async def sync_provider(
             "created": 0,
             "updated": 0,
             "total": 0,
+            "groups_skipped": 0,
             "error": error_msg,
             "skipped": None,
         }
 
     created = 0
     updated = 0
+    skipped = 0
 
     for group_info in remote_groups:
         # Determine a stable filename-safe group name.
@@ -173,6 +180,7 @@ async def sync_provider(
                     provider=provider_name,
                     group=group_name,
                 )
+                skipped += 1
                 continue
             group_store.update(
                 group_name,
@@ -190,12 +198,18 @@ async def sync_provider(
             updated += 1
 
     total = created + updated
+    status = "ok"
+    if skipped:
+        status = (
+            f"partial: {skipped} of {len(remote_groups)} groups skipped, "
+            "their stored copy does not load"
+        )
 
     # Update provider sync metadata
     provider_registry.update(
         provider_name,
         last_sync_at=datetime.now(UTC).isoformat(),
-        last_sync_status="ok",
+        last_sync_status=status,
         sync_error="",
     )
 
@@ -205,12 +219,14 @@ async def sync_provider(
         created=created,
         updated=updated,
         total=total,
+        groups_skipped=skipped,
     )
 
     return {
         "created": created,
         "updated": updated,
         "total": total,
+        "groups_skipped": skipped,
         "error": None,
         "skipped": None,
     }

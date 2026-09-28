@@ -279,7 +279,10 @@ class TestSyncOverAGroupFileThatDoesNotLoad:
         assert group_store.get("ops-example.com").source_id == "g2"
         assert stored.read_text(encoding="utf-8") == self._BAD_SCOPE
         assert "OIDC group sync skipped a group whose stored copy does not load" in warnings
-        assert provider_registry.get("test-sso").last_sync_status == "ok"
+        assert result["groups_skipped"] == 1
+        assert provider_registry.get("test-sso").last_sync_status == (
+            "partial: 1 of 2 groups skipped, their stored copy does not load"
+        )
         skipped = [
             s.value
             for f in text_string_to_metric_families(manager.metrics_text)

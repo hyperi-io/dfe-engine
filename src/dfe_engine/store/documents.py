@@ -18,8 +18,7 @@ One client, one database (default ``dfe_engine``), typed pydantic collections ke
 on a unique field.
 """
 
-from __future__ import annotations
-
+import builtins
 from collections.abc import Callable
 from typing import Generic, TypeVar
 
@@ -110,7 +109,7 @@ class DocumentCollection(Generic[T]):
         """Return the document with ``key == key_value``, or None."""
         return self._load(self._c.find_one({self._key: key_value}))
 
-    def list(self) -> list[T]:
+    def list(self) -> builtins.list[T]:
         """Return all documents, sorted by the key field."""
         return [m for m in (self._load(d) for d in self._c.find().sort(self._key, ASCENDING)) if m]
 

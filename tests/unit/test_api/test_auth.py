@@ -573,6 +573,28 @@ class TestRolesFollowTheBoundAccount:
         assert "admin" not in resp.json()["roles"]
         assert "data_viewer" in resp.json()["roles"]
 
+    def test_a_group_file_nested_past_the_parser_limit_leaves_sessions_and_logins_working(
+        self, client: TestClient, app, viewer_headers: dict
+    ):
+        """The parser recurses per nesting level, so ~3000 levels raise RecursionError."""
+        depth = 3000
+        (app.state.group_store._dir / "climber.yaml").write_text(
+            "roles: " + "[" * depth + "]" * depth + "\n", encoding="utf-8"
+        )
+
+        first = client.get("/api/v1/auth/me", headers=viewer_headers)
+        second = client.get("/api/v1/auth/me", headers=viewer_headers)
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "operator", "password": "test-operator-pw"},
+        )
+
+        assert first.status_code == 200, first.text
+        assert "data_viewer" in first.json()["roles"]
+        assert second.status_code == 200, second.text
+        assert login.status_code == 200, login.text
+        assert sorted(login.json()["roles"]) == ["data_analyst", "infra_admin"]
+
     def test_creating_a_group_over_an_unloadable_file_is_a_conflict(
         self, client: TestClient, app, admin_headers: dict
     ):

@@ -242,7 +242,7 @@ async def refresh_token(user: CurrentUser, request: Request, settings: Settings)
             headers={"WWW-Authenticate": "Bearer"},
         )
     change_required = _password_change_required(request, user.user_id)
-    # Re-resolved, so a role taken away is gone from the next token too.
+    # Re-resolved, so a role or org taken away is gone from the next token too.
     live = resolve_live_grants_for_user(request, user.user_id)
     data = _token_data(
         user.user_id,
@@ -250,7 +250,7 @@ async def refresh_token(user: CurrentUser, request: Request, settings: Settings)
         live.roles,
         live.grants,
         resolve_live_groups_for_user(request, user.user_id),
-        user.org_ids,
+        live.org_ids,
         change_required=change_required,
     )
     token = create_access_token(data=data, settings=settings)
