@@ -203,11 +203,14 @@ def compile_receiver_destinations(registry: SourceRegistry, settings: Any) -> De
     be handed to a stage by address - its source's transform when it has one,
     else the loader.
 
-    The loader is the exception that carries no address: the receiver resolves
-    its own built-in ``loader`` destination from ``loader.grpc_endpoint``, and
-    only while the destination set has not declared one. Naming it here would
-    take precedence over the endpoint the loader is deployed on, so it is
-    referenced and left for the receiver to resolve.
+    The loader is the exception that carries no address: while the destination
+    set declares no ``loader`` entry, the receiver resolves its built-in one from
+    its own ``loader`` block. That is ``loader.grpc_endpoint`` only once
+    ``loader.transport`` is ``grpc``. Under its ``kafka`` default the name
+    resolves to the bus. The deployment sets ``grpc`` on the direct transport,
+    as the dfe-infra receiver chart does. Naming it here would take precedence
+    over the endpoint the loader is deployed on, so it is referenced and left for
+    the receiver to resolve.
 
     The default destination follows the DEPLOYMENT, not a source, because it is
     what an unmatched record takes. Unless the default flow itself is direct and
