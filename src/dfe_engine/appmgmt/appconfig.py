@@ -363,21 +363,26 @@ def _write_file_set(directory: Path, entries: list[files.AppFile]) -> bool:
     Replaced rather than updated: a program deleted from the overlay has to
     leave the directory too, and dfe-transform-vrl compiles every ``.vrl`` it
     finds into one program, so a leftover file keeps running.
+
+    Created for an empty set too: the config names the directory whatever it
+    holds, and both transform apps refuse a ``transforms.dir`` that is not one.
+
+    Returns whether the files changed. An empty directory appearing where there
+    was none is not a change, because the app finds no file in it either way.
     """
     wanted = {entry.name: entry.content for entry in entries}
-    present: dict[str, str] = {}
-    if directory.is_dir():
+    existed = directory.is_dir()
+    if existed:
         present = {
             p.name: p.read_text(encoding="utf-8") for p in directory.iterdir() if p.is_file()
         }
-    if present == wanted:
-        return False
-    if directory.exists():
+        if present == wanted:
+            return False
         shutil.rmtree(directory)
     directory.mkdir(parents=True, exist_ok=True)
     for name, content in wanted.items():
         (directory / name).write_text(content, encoding="utf-8")
-    return True
+    return existed or bool(wanted)
 
 
 def _apply_file_sets(
@@ -645,6 +650,33 @@ def _prune_instance_dirs(app_root: Path, keep: list[str]) -> None:
             shutil.rmtree(path)
 
 
+def _prune_custom_env(settings: Any, service: str, keep: list[str]) -> None:
+    """Remove the custom env file of each instance the index lists and ``keep`` does not.
+
+    Read before the index is rewritten: it is the engine's own record of the
+    instances it rendered, so a name leaving it is a source deleted here. That
+    source's env file sits in the operator's checkout and can hold credentials,
+    and no container reads it once the index drops the name.
+    """
+    directory = custom_env_dir(settings)
+    if directory is None:
+        return
+    index = directory / f"{service}{INSTANCE_INDEX_SUFFIX}"
+    if not index.is_file():
+        return
+    listed = {line.strip() for line in index.read_text(encoding="utf-8").splitlines()}
+    for name in sorted(listed - set(keep)):
+        try:
+            instances.validate_instance(name)
+        except instances.InvalidInstanceError:
+            continue  # a line this engine never wrote names no file it owns
+        target = directory / f"{container_name(service, name)}{CUSTOM_ENV_SUFFIX}"
+        try:
+            target.unlink(missing_ok=True)
+        except OSError as exc:
+            _report_unwritable(target.name, directory, exc)
+
+
 def render(gc: GitCrud, settings: Any) -> list[RenderedApp]:
     """Render every app's config from the deploy repo. Returns what was written.
 
@@ -666,7 +698,9 @@ def render(gc: GitCrud, settings: Any) -> list[RenderedApp]:
         if app.multiplicity is not Multiplicity.PER_CONFIG:
             continue
         names = [i.instance for i in found if i is not None]
-        _prune_instance_dirs(out_root / app.service, names)
+        # An app-level render's file-set directories share this parent with the instances.
+        _prune_instance_dirs(out_root / app.service, [*names, *(fs.name for fs in app.files)])
+        _prune_custom_env(settings, app.service, names)
         write_instance_index(settings, app.service, names)
         _clear_app_level_custom_env(settings, app)
     return written
