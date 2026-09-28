@@ -285,7 +285,7 @@
         "displayType": "table",
         "connection": "platform",
         "source": "otel_metrics",
-        "sqlTemplate": "SELECT ServiceName AS \"Service\",\n       Attributes['topic'] AS \"Topic\",\n       Attributes['partition'] AS \"Partition\",\n       toUInt64(max(Value)) AS \"Committed offset\",\n       toUInt64(max(Value) - min(Value)) AS \"Advanced by\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName = 'rdkafka_topic_partition_committed_offset' AND $__timeFilter(TimeUnix)\nGROUP BY ServiceName, Attributes['topic'], Attributes['partition']\nORDER BY \"Service\", \"Topic\", \"Partition\""
+        "sqlTemplate": "SELECT ServiceName AS \"Service\",\n       Attributes['topic'] AS \"Topic\",\n       Attributes['partition'] AS \"Partition\",\n       toUInt64(max(Value)) AS \"Committed offset\",\n       toUInt64(max(Value) - min(Value)) AS \"Advanced by\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName = 'rdkafka_topic_partition_committed_offset' AND Value > 0 AND $__timeFilter(TimeUnix)\nGROUP BY ServiceName, Attributes['topic'], Attributes['partition']\nORDER BY \"Service\", \"Topic\", \"Partition\""
       }
     },
     {
