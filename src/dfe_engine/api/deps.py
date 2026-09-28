@@ -10,11 +10,15 @@ per-request via ``Depends()``.  Authentication checks four paths in order:
 4. Auth disabled -- dev/test default, root context
 """
 
+from collections.abc import Iterator, Sequence
 from datetime import timedelta
 from typing import TYPE_CHECKING, Annotated, Any, NamedTuple
 
 from fastapi import Depends, HTTPException, Request, status
+from fastapi.dependencies.models import Dependant
+from fastapi.routing import APIRoute, iter_route_contexts
 from scalo.logger import logger
+from starlette.routing import BaseRoute
 
 from dfe_engine.api.password_change import refuse_until_password_changed
 from dfe_engine.auth import AuthContext, AuthorizationError, Scope, ScopedGrant, authorize
@@ -710,6 +714,50 @@ async def get_current_user(request: Request) -> AuthContext:
 
 
 CurrentUser = Annotated[AuthContext, Depends(get_current_user)]
+
+
+def requires_session(dependant: Dependant) -> bool:
+    """Whether a route's dependency tree reaches :func:`get_current_user`.
+
+    The whole tree is walked, so a route guarded only by ``require_action`` counts
+    as well as one taking ``CurrentUser``.
+    """
+    pending = list(dependant.dependencies)
+    while pending:
+        dependency = pending.pop()
+        if dependency.call is get_current_user:
+            return True
+        pending.extend(dependency.dependencies)
+    return False
+
+
+def guarded_operations(
+    openapi: dict[str, Any], routes: Sequence[BaseRoute]
+) -> Iterator[tuple[str, dict[str, Any]]]:
+    """Yield ``(path, operation)`` for each operation in *openapi* a session guards.
+
+    Each route is read as mounted, with its included routers' prefixes and
+    dependencies, so a guard added at include time counts. A route the spec
+    leaves out yields nothing.
+
+    Args:
+        openapi: The generated OpenAPI document.
+        routes: The application's routes, included routers unexpanded.
+
+    Yields:
+        The operation's path in the spec and the operation object itself.
+    """
+    paths = openapi.get("paths", {})
+    for route in iter_route_contexts(routes):
+        path, methods = route.path_format, route.methods
+        if not isinstance(route.original_route, APIRoute) or path is None or methods is None:
+            continue
+        if not requires_session(route.dependant):
+            continue
+        for method in methods:
+            operation = paths.get(path, {}).get(method.lower())
+            if operation is not None:
+                yield path, operation
 
 
 # -- Authorization ---------------------------------------------
