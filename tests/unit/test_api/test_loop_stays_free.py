@@ -214,7 +214,10 @@ _DEPLOY_REPO_CASES: list[tuple[str, str, dict | None]] = [
     (
         "POST",
         "/api/v1/rules/from-hyperdx",
-        {"raw_sql": "SELECT 1 FROM logs WHERE level = 'error'", "saved_search_name": "Loop probe"},
+        {
+            "raw_sql": "SELECT 1 FROM default.logs WHERE level = 'error'",
+            "saved_search_name": "Loop probe",
+        },
     ),
     # The break-glass admin is the one account mirrored into the deploy repo.
     ("PUT", "/api/v1/auth/accounts/admin", {"name": "Loop Probe"}),

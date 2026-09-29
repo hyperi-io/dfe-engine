@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from scalo.concurrency import run_blocking
 
 from dfe_engine.api.deps import CurrentUser, HuntConfigReg, RuleReg, Settings, require_action
+from dfe_engine.api.errors import ErrorCode, ErrorResponse
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.api.review import apply_review_headers, review_audit_detail
 from dfe_engine.api.write_turn import WRITE_TURN
@@ -32,6 +33,18 @@ _RULE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 router = APIRouter(prefix="/rules", tags=["Rules"], dependencies=[WRITE_TURN])
 
+_REFUSED_RULE_RESPONSES: dict[int | str, dict] = {
+    422: {
+        "model": ErrorResponse,
+        "description": (
+            "Refused, nothing written: the body failed validation (code validation_error), "
+            "or the hunt runner could not compile the rule -- its SQL does not parse as "
+            "one SELECT, names no <db>.<table> source, or has no WHERE to detect with "
+            "(code invalid_sql, the errors in context.sql_errors)"
+        ),
+    },
+}
+
 
 # -- Request/response models -----------------------------------
 
@@ -43,10 +56,11 @@ class _RuleWriteFields(BaseModel):
     )
     severity: str = Field(default="medium", description="low|medium|high|critical")
     user_sql: str = Field(
+        min_length=1,
         description=(
             "Full detection query: SELECT ... FROM <db>.<table> WHERE ... "
             "(the FROM names the source table)"
-        )
+        ),
     )
     cel_filter: str | None = Field(default=None, description="CEL expression filter")
     hunt_name: str | None = Field(default=None, description="Parent hunt name")
@@ -230,6 +244,7 @@ def list_rules(
     "",
     response_model=RuleCreateResponse,
     status_code=201,
+    responses=_REFUSED_RULE_RESPONSES,
     dependencies=[Depends(require_action(scopes_dict["rule_write"]))],
 )
 def create_rule(
@@ -242,7 +257,8 @@ def create_rule(
     """Create a new hunt rule via RuleCreationService.
 
     The service sanitizes the SQL, applies CEL->SQL transpilation,
-    validates column references, and optionally estimates query cost.
+    validates column references, and optionally estimates query cost. A rule
+    whose SQL the hunt runner could not compile is refused with 422.
 
     A production+team write is routed to a review branch instead of the branch the
     runner git-syncs, and the ``X-DFE-Review-Required`` header says so.
@@ -279,6 +295,7 @@ def create_rule(
     )
 
     result = service.create_rule(svc_request, body.name)
+    _refuse_uncompilable(result)
     outcome = registry.save(
         result.rule, created_by=git_author(user), description=f"rule: create {body.name}"
     )
@@ -291,6 +308,7 @@ def create_rule(
     "/from-hyperdx",
     response_model=RuleFromHyperdxResponse,
     status_code=201,
+    responses=_REFUSED_RULE_RESPONSES,
     dependencies=[Depends(require_action(scopes_dict["rule_write"]))],
 )
 async def create_rule_from_hyperdx(
@@ -305,6 +323,7 @@ async def create_rule_from_hyperdx(
 
     Wraps the create pipeline with ``source_type='hyperdx'`` and auto-derives a
     unique rule id from the saved-search name, so the caller need not supply one.
+    A view whose SQL the hunt runner could not compile is refused with 422.
     RBAC: ``rule:write`` (data_analyst) -- ``org_viewer`` has neither this grant nor
     the UI button.
     """
@@ -357,6 +376,7 @@ def _create_rule_from_sql(
     )
 
     result = service.create_rule(svc_request, rule_id)
+    _refuse_uncompilable(result)
     outcome = registry.save(
         result.rule,
         created_by=git_author(user),
@@ -428,6 +448,7 @@ def get_rule(name: str, user: CurrentUser, registry: RuleReg, settings: Settings
 @router.put(
     "/{name}",
     response_model=RuleCreateResponse,
+    responses=_REFUSED_RULE_RESPONSES,
     dependencies=[Depends(require_action(scopes_dict["rule_write"]))],
 )
 def update_rule(
@@ -440,8 +461,10 @@ def update_rule(
 ):
     """Replace a detection rule (re-runs creation pipeline, preserves created_at).
 
-    A production+team write is routed to a review branch instead of the branch the
-    runner git-syncs, and the ``X-DFE-Review-Required`` header says so.
+    A replacement the hunt runner could not compile is refused with 422 and the
+    stored rule is left as it was. A production+team write is routed to a review
+    branch instead of the branch the runner git-syncs, and the
+    ``X-DFE-Review-Required`` header says so.
     """
     try:
         existing = registry.get(name)
@@ -475,6 +498,7 @@ def update_rule(
         cost_window_minutes=body.cost_window_minutes,
     )
     result = service.create_rule(svc_request, name)
+    _refuse_uncompilable(result)
     updated = result.rule.model_copy(
         update={"created_at": existing.created_at, "name": effective_display},
     )
@@ -567,6 +591,31 @@ def _map_sql_errors(errors) -> list[SqlValidationError]:
         )
         for e in errors
     ]
+
+
+def _refuse_uncompilable(result) -> None:
+    """Refuse, before anything is written, a rule the hunt runner cannot compile.
+
+    SQL that does not validate is refused on its SQL errors. SQL that validates
+    can still leave nothing to run, such as a search with no filter, which the
+    rule's own execution check reports.
+
+    Raises:
+        HTTPException: 422 ``invalid_sql``, every error in ``context.sql_errors``.
+    """
+    sql_errors = _map_sql_errors(result.sql_errors or [])
+    if not sql_errors:
+        sql_errors = [SqlValidationError(message=m) for m in result.rule.validate_rule()]
+    if not sql_errors:
+        return
+    raise HTTPException(
+        status_code=422,
+        detail={
+            "code": ErrorCode.INVALID_SQL,
+            "message": "Rule not saved: " + "; ".join(e.message for e in sql_errors),
+            "sql_errors": [e.model_dump(exclude_none=True) for e in sql_errors],
+        },
+    )
 
 
 def _slugify_rule_id(text: str | None) -> str:
