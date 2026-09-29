@@ -3,8 +3,7 @@
 
 kafka:
   consumer:
-    brokers:
-      - kafka-bootstrap.kafka.svc.cluster.local:9092
+    brokers: []  # every deployment names its own brokers
     group: dfe-transform-wasm
     topics: []
     client_id: dfe-transform-wasm
@@ -16,8 +15,7 @@ kafka:
     tls:
       enabled: true
   producer:
-    brokers:
-      - kafka-bootstrap.kafka.svc.cluster.local:9092
+    brokers: []  # every deployment names its own brokers
     client_id: dfe-transform-wasm
     compression: lz4
     batch_size: 8388608

@@ -10,8 +10,7 @@
 #   trigger: kafka consumer lag (threshold: 100000)
 
 kafka:
-  brokers:
-    - kafka-bootstrap.kafka.svc.cluster.local:9092
+  brokers: []  # every deployment names its own brokers
   group_id: dfe-archiver
   topics:
     - events

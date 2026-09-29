@@ -5,8 +5,6 @@ for the fetcher service. Type 2 service (multi-source) -- pulls from
 SaaS APIs and routes events to Kafka like a receiver.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from dfe_engine.services.descriptor import KafkaRole, ServiceDescriptor
@@ -79,9 +77,7 @@ _template_overrides: dict[str, dict[str, Any]] = {
         },
     },
     "k8s": {
-        "kafka": {
-            "brokers": ["kafka-bootstrap.kafka.svc.cluster.local:9092"],
-        },
+        # No brokers: every deployment names its own.
         "metrics": {"address": "0.0.0.0:9090"},
     },
 }
