@@ -15,13 +15,19 @@ convenience store, and keeps the runner working on a non-k8s single deploy
 (dfe-docker) where the only thing guaranteed present is ClickHouse.
 
 CH has no row locks / SELECT ... FOR UPDATE, so the per-hunt claim is optimistic
-(insert-and-resolve): read the current lease, insert a claim, wait a short settle
-window, re-read, and the deterministic latest claim (max claimed, then min owner)
-is the winner. One active lease per hunt -> never-double-run. A single worker (the
-dfe-docker case and most deploys) is exactly-once; with many workers a claim can
-rarely race inside the settle window, giving a rare duplicate run that the
-idempotent windowed INSERT absorbs (the same window re-inserted dedupes on the
-target). The watermark gives crash-safe incremental resume; hunt_state carries the
+(insert-and-resolve): insert a claim, wait a short settle window, re-read, and the
+latest claim (max claimed, then min owner) is the winner. The latest claim is also
+the row a merge keeps, since hunt_lease collapses to one row per hunt, so the answer
+does not change when parts merge. The claim INSERT itself checks the hunt's newest
+lease row and inserts nothing when another owner's is live, so a worker that read
+the hunt as free cannot then steal it from one that claimed it in the meantime.
+
+A single worker (the dfe-docker case and most deploys) is exactly-once. With many
+workers, two claims can still both land if their conditional inserts run at the
+same moment on the server; the settle window gives both the same winner as long as
+both inserts commit inside it. A duplicate run is NOT absorbed: the detection table
+is a plain MergeTree, so the same window inserted twice writes its rows twice. The
+watermark gives crash-safe incremental resume; hunt_state carries the
 too_aggressive / overrun signal for the UI.
 
 Tables (all ReplacingMergeTree; the first three bounded to ~1 row/hunt after merge):
@@ -146,7 +152,8 @@ class ChCoordinator:
         """The current lease = the deterministic latest claim for the hunt.
 
         Ordered by (claimed DESC, owner ASC) so two concurrent readers agree on the
-        single winner by scanning the (few) rows, without relying on merge state.
+        single winner. It is also the row a merge keeps, so the answer holds whatever
+        the table's merge state.
         """
         rows = self._ch.query(
             f"SELECT owner, fire, lease_until FROM `{self._db}`.hunt_lease "
@@ -170,6 +177,28 @@ class ChCoordinator:
             database=self._db,
         )
 
+    def _insert_claim_if_free(self, hunt_id: str, fire: int, now: int) -> None:
+        """Insert this worker's claim unless another owner's newest lease row is live.
+
+        The check and the insert are one statement, so the hunt is re-read at the
+        moment the claim would land rather than when this worker last looked.
+        """
+        self._ch.command(
+            f"INSERT INTO `{self._db}`.hunt_lease (hunt_id, owner, fire, lease_until) "
+            "SELECT {h:String}, {o:String}, {f:Int64}, {u:Int64} "
+            "WHERE (SELECT count() FROM ("
+            f"SELECT owner, lease_until FROM `{self._db}`.hunt_lease "
+            "WHERE hunt_id = {h:String} ORDER BY claimed DESC, owner ASC LIMIT 1"
+            ") WHERE lease_until > {now:Int64} AND owner != {o:String}) = 0",
+            parameters={
+                "h": hunt_id,
+                "o": self._worker_id,
+                "f": fire,
+                "u": now + self._lease_seconds,
+                "now": now,
+            },
+        )
+
     def try_claim(self, hunt_id: str, fire: int, now: int | None = None) -> bool:
         """Claim a hunt for this worker (insert-and-resolve). True if we own it.
 
@@ -180,7 +209,7 @@ class ChCoordinator:
         current = self.current_lease(hunt_id)
         if current is not None and current.lease_until > now and current.owner != self._worker_id:
             return False  # someone else is running this hunt -> never double-run
-        self._insert_lease(hunt_id, fire, now + self._lease_seconds)
+        self._insert_claim_if_free(hunt_id, fire, now)
         self._sleep(self._settle)
         winner = self.current_lease(hunt_id)
         return winner is not None and winner.owner == self._worker_id

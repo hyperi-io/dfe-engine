@@ -16,9 +16,12 @@ leans on: claim exclusivity, lease expiry + reclaim, release, the cap input
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import pytest
 
 from dfe_engine.hunt_runner import ChCoordinator
+from dfe_engine.hunt_runner.ch_coordinator import Lease
 
 
 def _coord(ch_client, db, worker_id, *, now=None, lease_seconds=300):
@@ -120,3 +123,62 @@ def test_record_overrun_flags_too_aggressive(ch_client, dfe_db):
 def test_requires_explicit_database():
     with pytest.raises(ValueError):
         ChCoordinator(object(), database="")
+
+
+class _PeerClaimsAfterThePrecheck(ChCoordinator):
+    """A real coordinator whose peer claims the hunt between this one's lease read and insert.
+
+    That gap is where two workers can both see a hunt free.
+    """
+
+    def __init__(self, *args, peer_claims: Callable[[], None], **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._peer_claims: Callable[[], None] | None = peer_claims
+
+    def current_lease(self, hunt_id: str) -> Lease | None:
+        lease = super().current_lease(hunt_id)
+        hook, self._peer_claims = self._peer_claims, None
+        if hook is not None:
+            hook()
+        return lease
+
+
+def _late_claimant(ch_client, db: str, holder: ChCoordinator, won: list[bool]):
+    """Worker b, which saw the hunt free just before *holder* claimed and won it."""
+    return _PeerClaimsAfterThePrecheck(
+        ch_client,
+        database=db,
+        worker_id="b",
+        settle_seconds=0.0,
+        sleep=lambda _s: None,
+        peer_claims=lambda: won.append(holder.try_claim("h", fire=1000, now=1001)),
+    )
+
+
+def test_a_claim_inserted_after_the_holder_won_does_not_steal_the_hunt(ch_client, dfe_db):
+    """a saw the hunt free and won; b saw it free too, but inserted after a had resolved."""
+    a = _coord(ch_client, dfe_db, "a")
+    a.ensure_schema()
+    a_won: list[bool] = []
+    b = _late_claimant(ch_client, dfe_db, a, a_won)
+
+    assert b.try_claim("h", fire=1000, now=1001) is False
+    assert a_won == [True]
+    assert a.current_lease("h").owner == "a"
+
+
+def test_a_refused_claim_leaves_nothing_that_holds_the_hunt(ch_client, dfe_db):
+    """b's claim never landed, so once a releases the next claimant wins at once."""
+    a = _coord(ch_client, dfe_db, "a")
+    a.ensure_schema()
+    a_won: list[bool] = []
+    b = _late_claimant(ch_client, dfe_db, a, a_won)
+    assert b.try_claim("h", fire=1000, now=1001) is False
+    rows_by_b = ch_client.query(
+        f"SELECT count() FROM `{dfe_db}`.hunt_lease WHERE hunt_id = 'h' AND owner = 'b'"
+    ).result_rows[0][0]
+    assert rows_by_b == 0
+
+    a.release("h", fire=1000)
+    c = _coord(ch_client, dfe_db, "c")
+    assert c.try_claim("h", fire=1000, now=1002) is True
