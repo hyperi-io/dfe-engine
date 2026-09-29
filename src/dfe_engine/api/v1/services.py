@@ -153,6 +153,10 @@ async def save_service_config(
 ):
     """Create or update a service config.
 
+    Each top-level section in the body replaces the stored one, and a section the
+    body leaves out is kept as stored, so a form that sends some sections cannot
+    drop the rest and the secrets in them. A section written as ``null`` is removed.
+
     A read shows every set secret masked, so a masked value written back keeps the
     secret stored there, matched as the app surface matches one. A mask with nothing
     stored behind it, or in a list entry that cannot be told apart, is a 400
@@ -168,12 +172,15 @@ async def save_service_config(
     else:
         stored = stored_form(current)
         shown = _shown(current)
+    sent = {key: value for key, value in body.items() if value is not None}
     try:
-        config = contract.restore_masked(_as_redacted(body), stored, shown=shown)
+        restored = contract.restore_masked(_as_redacted(sent), stored, shown=shown)
     except contract.MaskedValueError as exc:
         raise HTTPException(
             status_code=400, detail={"code": exc.code, "message": str(exc)}
         ) from exc
+    removed = {key for key, value in body.items() if value is None}
+    config = {key: value for key, value in stored.items() if key not in removed} | restored
     registry.save_config(
         service=service,
         config=config,
