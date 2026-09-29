@@ -75,14 +75,11 @@ component is unchanged.
 
 ### The hunt runner pushes rather than being scraped
 
-The runner has no HTTP listener, so nothing scrapes it. It pushes on the OTLP
-endpoint the chart already wires and reports `dfe_hunt_runs_total`
-(`hunt_id`, `outcome`), `dfe_hunt_run_duration_seconds`,
-`dfe_hunt_rows_written_total`, `dfe_hunt_overruns_total`, `dfe_hunt_claims_total`
-(`hunt_id`, `outcome`), `dfe_hunt_backlog` and `dfe_hunt_tick_duration_seconds`.
-The backlog gauge runs the SAME due-count SQL the KEDA shim scales on, so a
-dashboard and the autoscaler cannot disagree about the queue. Each fire also logs
-one INFO line carrying the hunt, the rows it wrote and how long it took.
+The runner has no HTTP listener, so nothing scrapes it. It pushes on the OTLP endpoint the chart already wires and reports `dfe_hunt_runs_total` (`hunt_id`, `outcome`), `dfe_hunt_run_duration_seconds`, `dfe_hunt_rows_written_total`, `dfe_hunt_overruns_total`, `dfe_hunt_claims_total` (`hunt_id`, `outcome`), `dfe_hunt_backlog`, `dfe_hunt_tick_duration_seconds`, `dfe_hunt_detections_capped_total` (`hunt_id`, `rule_id`) and `dfe_hunt_detections_dropped_total` (`hunt_id`, `rule_id`). The backlog gauge runs the SAME due-count SQL the KEDA shim scales on, so a dashboard and the autoscaler cannot disagree about the queue. Each fire also logs one INFO line carrying the hunt, the rows it wrote and how long it took.
+
+A rule compiled into a hunt writes at most `hunts.max_detections_per_run` detection rows per run (default 1000, env `DFE_HUNTS_MAX_DETECTIONS_PER_RUN`), cut to `hunts.max_detections_per_run_ceiling` (default 10000, env `DFE_HUNTS_MAX_DETECTIONS_PER_RUN_CEILING`). A rule that matches more writes the cap plus one summary row: nil `matched_uuid`, `_json` of `{"dfe_capped": true, "matched": N, "written": cap, "rule_id": ...}`, and an `_org_id` only when every match shares one. The run logs one WARN line with the counts, adds 1 to `dfe_hunt_detections_capped_total` and adds the unwritten matches to `dfe_hunt_detections_dropped_total`.
+
+The watermark still advances and the run still records as `completed`, so the same flood is not re-run next fire. A hunt that carries a direct `query` rather than `rules` runs uncapped, and says so in an INFO line each time its specs load.
 
 ## 4. Identity
 

@@ -32,6 +32,8 @@ def test_the_whole_instrument_set_is_registered_up_front(manager):
         ("counter", "hunt_claims_total"),
         ("gauge", "hunt_backlog"),
         ("histogram", "hunt_tick_duration_seconds"),
+        ("counter", "hunt_detections_capped_total"),
+        ("counter", "hunt_detections_dropped_total"),
     ]
 
 
@@ -48,6 +50,7 @@ def test_no_backend_registers_nothing_and_records_nothing():
     metrics.claim("h", won=True)
     metrics.backlog(3)
     metrics.tick_completed(0.2)
+    metrics.detections_capped("h", "r", dropped=4)
 
 
 def test_a_completed_fire_counts_once_and_records_its_duration(manager):
@@ -119,6 +122,18 @@ def test_a_tick_records_its_own_length(manager):
 
     assert manager.observed("hunt_tick_duration_seconds") == [
         Observation("hunt_tick_duration_seconds", {}, "observe", 0.75)
+    ]
+
+
+def test_a_capped_rule_counts_once_and_adds_what_it_dropped(manager):
+    HuntRunnerMetrics(manager).detections_capped("brute-force", "ssh_fail", dropped=250)
+
+    labels = {"hunt_id": "brute-force", "rule_id": "ssh_fail"}
+    assert manager.observed("hunt_detections_capped_total") == [
+        Observation("hunt_detections_capped_total", labels, "inc", 1)
+    ]
+    assert manager.observed("hunt_detections_dropped_total") == [
+        Observation("hunt_detections_dropped_total", labels, "inc", 250)
     ]
 
 
