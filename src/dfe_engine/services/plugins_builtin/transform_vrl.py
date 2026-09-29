@@ -6,8 +6,6 @@ service embeds the VRL crate directly -- no subprocess, no Vector binary.
 Simpler config: flat source/sink Kafka, VRL transforms directory.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from dfe_engine.services.descriptor import KafkaRole, ServiceDescriptor
@@ -83,12 +81,7 @@ _template_overrides: dict[str, dict[str, Any]] = {
         },
     },
     "k8s": {
-        "source": {
-            "brokers": ["kafka-bootstrap.kafka.svc.cluster.local:9092"],
-        },
-        "sink": {
-            "brokers": ["kafka-bootstrap.kafka.svc.cluster.local:9092"],
-        },
+        # No brokers: every deployment names its own.
         "health": {"address": "0.0.0.0:9000"},
         "metrics": {"address": "0.0.0.0:9090"},
     },

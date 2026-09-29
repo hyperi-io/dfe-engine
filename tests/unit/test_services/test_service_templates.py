@@ -8,12 +8,14 @@
 
 """Tests for services/templates.py — pure logic only, no HTTP/external deps."""
 
-from __future__ import annotations
+import json
 
 import pytest
 
 from dfe_engine.services.plugins import reset, valid_services
+from dfe_engine.services.plugins_builtin.receiver import loader_address
 from dfe_engine.services.templates import generate_template
+from tests.support.deployment_address import IN_CLUSTER_NAME
 
 
 @pytest.fixture(autouse=True)
@@ -161,22 +163,28 @@ class TestK8sProfile:
         result = generate_template("receiver", profile="k8s")
         assert isinstance(result, dict)
 
-    def test_receiver_k8s_has_cluster_kafka_brokers(self):
-        result = generate_template("receiver", profile="k8s")
-        # K8s profile uses cluster-internal Kafka address
-        kafka_brokers = result["kafka"]["brokers"]
-        assert len(kafka_brokers) > 0
-        assert any("cluster.local" in b for b in kafka_brokers)
+    @pytest.mark.parametrize("service", ["receiver", "loader", "archiver", "fetcher"])
+    def test_k8s_adds_no_broker(self, service):
+        """The deployment names its brokers, so the profile keeps the app's own default."""
+        k8s = generate_template(service, profile="k8s")["kafka"]["brokers"]
+        assert k8s == generate_template(service, profile="default")["kafka"]["brokers"]
 
-    def test_loader_k8s_has_cluster_kafka_brokers(self):
-        result = generate_template("loader", profile="k8s")
-        kafka_brokers = result["kafka"]["brokers"]
-        assert any("cluster.local" in b for b in kafka_brokers)
+    def test_loader_k8s_adds_no_clickhouse_host(self):
+        k8s = generate_template("loader", profile="k8s")["clickhouse"]["hosts"]
+        assert k8s == generate_template("loader", profile="default")["clickhouse"]["hosts"]
 
-    def test_loader_k8s_has_cluster_clickhouse_hosts(self):
-        result = generate_template("loader", profile="k8s")
-        ch_hosts = result["clickhouse"]["hosts"]
-        assert any("cluster.local" in h for h in ch_hosts)
+    def test_receiver_k8s_dials_the_loader_the_app_manifest_places(self):
+        address = generate_template("receiver", profile="k8s")["loader"]["address"]
+        host, _, port = address.rpartition(":")
+
+        assert address == loader_address()
+        assert port == "6000"
+        assert "." not in host, f"{address} names a namespace"
+
+    @pytest.mark.parametrize("service", sorted(valid_services()))
+    def test_k8s_names_no_in_cluster_address(self, service):
+        emitted = json.dumps(generate_template(service, profile="k8s"))
+        assert not IN_CLUSTER_NAME.search(emitted), f"{service} names a deployment's address"
 
     def test_loader_k8s_has_json_logging(self):
         result = generate_template("loader", profile="k8s")

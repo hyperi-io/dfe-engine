@@ -1,5 +1,5 @@
 # DFE Loader -- Production (K8s)
-# Tuned buffers, SASL+TLS, K8s service DNS, JSON logging
+# Tuned buffers, SASL+TLS, JSON logging
 #
 # K8s resource sizing (medium):
 #   requests: { cpu: 1000m, memory: 1Gi }
@@ -14,8 +14,7 @@
 transport: kafka
 
 kafka:
-  brokers:
-    - kafka-bootstrap.kafka.svc.cluster.local:9092
+  brokers: []  # every deployment names its own brokers
   group: dfe-loader
   topics: []  # empty = auto-discover every *_load / *_land topic
   client_id: dfe-loader
@@ -31,8 +30,7 @@ kafka:
 # http on the 8123 port, never native on 9000: the loader's pinned ClickHouse
 # client has no TCP row fetch, so every message stalls pending schema (#115).
 clickhouse:
-  hosts:
-    - clickhouse.clickhouse.svc.cluster.local:8123
+  hosts: []  # every deployment names its own HTTP endpoints
   database: default
   username: default
   password: ""

@@ -11,12 +11,11 @@ Proves the runtime on CH only: the worker runs a windowed INSERT and advances th
 watermark so the next window resumes incrementally (no duplicate rows), and a
 runner tick claims + runs a due hunt while NEVER double-running one that is already
 leased (records the too-aggressive overrun instead). Uses the ClickHouse the .env
-configures, else a docker ClickHouse; drops its isolated database after.
+configures, else a docker ClickHouse, in the ``dfe_db`` database that carries the
+coordination tables the schema phase applies.
 """
 
 from __future__ import annotations
-
-import uuid
 
 import pytest
 
@@ -25,22 +24,14 @@ from dfe_engine.hunt_runner.spread import current_fire
 
 
 @pytest.fixture
-def ch_db(ch_client):
-    """An isolated CH database with src/tgt tables; dropped after."""
-    db = f"dfe_e2e_{uuid.uuid4().hex[:8]}"
-    ch_client.command(f"CREATE DATABASE `{db}`")
+def ch_db(ch_client, dfe_db):
+    """``dfe_db`` plus the scratch src/tgt tables the direct queries here read and write."""
     ch_client.command(
-        f"CREATE TABLE `{db}`.src (timestamp_load Int64, ev String) "
+        f"CREATE TABLE `{dfe_db}`.src (timestamp_load Int64, ev String) "
         "ENGINE = MergeTree ORDER BY timestamp_load"
     )
-    ch_client.command(f"CREATE TABLE `{db}`.tgt (ev String) ENGINE = MergeTree ORDER BY ev")
-    try:
-        yield db
-    finally:
-        try:
-            ch_client.command(f"DROP DATABASE IF EXISTS `{db}`")
-        except Exception:
-            pass
+    ch_client.command(f"CREATE TABLE `{dfe_db}`.tgt (ev String) ENGINE = MergeTree ORDER BY ev")
+    return dfe_db
 
 
 def _count(ch, table: str) -> int:

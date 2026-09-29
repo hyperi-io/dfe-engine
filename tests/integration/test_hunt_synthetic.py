@@ -12,9 +12,10 @@
     hunts and each runs EXACTLY once, with work genuinely shared,
   - the global concurrency cap protecting ClickHouse.
 
-Uses the tiered CH harness (cluster / remote docker / local); isolated db, dropped
-after. Time is deterministic via the coordinator's injected clock - no wall-clock
-races (the no-timing-flake rule).
+Uses the tiered CH harness (cluster / remote docker / local) and the ``dfe_db``
+database, which carries the coordination tables the schema phase applies. Time is
+deterministic via the coordinator's injected clock - no wall-clock races (the
+no-timing-flake rule).
 """
 
 from __future__ import annotations
@@ -27,19 +28,6 @@ import pytest
 
 from dfe_engine.hunt_runner import ChCoordinator, HuntRunner, HuntSpec, HuntWorker
 from dfe_engine.hunt_runner.spread import current_fire
-
-
-@pytest.fixture
-def synth_db(ch_client):
-    db = f"dfe_synth_{uuid.uuid4().hex[:8]}"
-    ch_client.command(f"CREATE DATABASE `{db}`")
-    try:
-        yield db
-    finally:
-        try:
-            ch_client.command(f"DROP DATABASE IF EXISTS `{db}`")
-        except Exception:
-            pass
 
 
 def _count(ch, table: str) -> int:
@@ -89,9 +77,9 @@ def _shares_db_across_concurrent_connections(ch_client, ch_params) -> bool:
             pass
 
 
-def test_scheduling_cadence_and_incremental_resume(ch_client, synth_db):
+def test_scheduling_cadence_and_incremental_resume(ch_client, dfe_db):
     """A hunt fires exactly once per interval and resumes across 3 windows, no dup."""
-    db = synth_db
+    db = dfe_db
     ch_client.command(
         f"CREATE TABLE `{db}`.src (timestamp_load Int64, ev String) "
         "ENGINE = MergeTree ORDER BY timestamp_load"
@@ -128,7 +116,7 @@ def test_scheduling_cadence_and_incremental_resume(ch_client, synth_db):
     assert _count(ch_client, f"`{db}`.tgt") == 3
 
 
-def test_multi_pod_exactly_once_and_distributed(ch_params, ch_client, synth_db):
+def test_multi_pod_exactly_once_and_distributed(ch_params, ch_client, dfe_db):
     """N competing pods claim M hunts: each runs exactly once and work is shared."""
     import clickhouse_connect
 
@@ -144,7 +132,7 @@ def test_multi_pod_exactly_once_and_distributed(ch_params, ch_client, synth_db):
             "(see docs/data-plane/hunt-runner-scaling.md)."
         )
 
-    db = synth_db
+    db = dfe_db
     ch_client.command(
         f"CREATE TABLE `{db}`.runs (hunt_id String, run_at DateTime64(3) DEFAULT now64(3)) "
         "ENGINE = MergeTree ORDER BY hunt_id"
@@ -228,9 +216,9 @@ def test_multi_pod_exactly_once_and_distributed(ch_params, ch_client, synth_db):
     assert len(workers_used) == n, f"round-1 distribution broken: {workers_used}"
 
 
-def test_global_cap_is_never_exceeded(ch_client, synth_db):
+def test_global_cap_is_never_exceeded(ch_client, dfe_db):
     """The runner runs nothing when the global cap is already saturated."""
-    db = synth_db
+    db = dfe_db
     coord = ChCoordinator(
         ch_client, database=db, worker_id="w", settle_seconds=0.0, sleep=lambda _s: None
     )

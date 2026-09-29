@@ -1,40 +1,33 @@
 service: dfe-archiver
 description: "Kafka-to-object-storage archiver with compression"
 config_surface:
-  config.kafka.bootstrap_servers:
-    type: string
-    description: "Kafka bootstrap servers"
+  config.kafka.brokers:
+    type: array
+    description: "Kafka broker addresses, as host:port"
+    default: ["localhost:9092"]
   config.kafka.group_id:
     type: string
     description: "Kafka consumer group ID"
     default: "dfe-archiver"
-  config.storage.backend:
+  config.archive.destination:
     type: string
-    description: "Storage backend (s3, minio, gcs, azure, file)"
-    default: "s3"
-  config.storage.bucket:
-    type: string
-    description: "Target bucket or directory"
-  config.storage.prefix:
-    type: string
-    description: "Object key prefix"
+    description: "Where archives are written, as a file, s3, gs, az or minio URL naming the bucket and prefix. Empty leaves the archiver idle"
     default: ""
   config.compression.codec:
     type: string
-    description: "Compression codec (zstd, lz4, snappy, none)"
+    description: "Compression codec (zstd, lz4, snappy, gzip, none)"
     default: "zstd"
   config.compression.level:
     type: integer
     description: "Compression level"
     default: 3
-  config.archive.max_file_bytes:
+  config.archive.roll_size_bytes:
     type: integer
-    description: "Maximum archive file size before roll"
-    default: 268435456
-  config.archive.max_age_seconds:
+    description: "Compressed file size that rolls an archive file, in bytes"
+    default: 1073741824
+  config.archive.roll_interval_secs:
     type: integer
-    description: "Maximum archive file age before roll"
-    default: 300
+    description: "Seconds before an archive file rolls. Unset is 300 while Kafka offsets are held, 3600 otherwise"
 metrics_surface:
   - name: files_created_total
     type: counter
