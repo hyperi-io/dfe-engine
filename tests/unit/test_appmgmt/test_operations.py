@@ -183,3 +183,17 @@ def test_an_instance_with_telemetry_is_reporting():
 
     assert status.reporting is True
     assert status.last_seen_epoch == 1757000000.0
+
+
+def test_uptime_reads_the_start_time_every_dfe_app_emits():
+    # A scalo-py service reports start_time_seconds and no process_start_time_seconds.
+    ch = PerQueryClickHouse(
+        {
+            "AS last_seen": [(1757000600.0, 3)],
+            "SELECT metric, max(value)": [("start_time_seconds", 1757000000.0)],
+        }
+    )
+
+    status = OperationalReader(ch, "dfe").status("dfe-engine")
+
+    assert status.started_epoch == 1757000000.0
