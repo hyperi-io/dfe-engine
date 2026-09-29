@@ -28,7 +28,6 @@ from dfe_engine.source.expression import (
     ExpressionBuilder,
     ExpressionValidator,
     ExprValidationResult,
-    list_directive_types,
 )
 from dfe_engine.source.models import (
     SchemaColumn,
@@ -62,7 +61,6 @@ __all__ = [
     "ExpressionBuilder",
     "ExpressionValidator",
     "ExprValidationResult",
-    "list_directive_types",
     # Type Registry
     "InvalidAttributeError",
     "InvalidChOverrideError",

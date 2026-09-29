@@ -6,7 +6,6 @@ from dfe_engine.source.expression import (
     DIRECTIVES,
     ExpressionBuilder,
     ExpressionValidator,
-    list_directive_types,
 )
 
 # ── Validator: basic parsing ────────────────────────────────────
@@ -129,30 +128,6 @@ class TestValidatorGenerated:
         assert not result.valid
 
 
-# ── Validator: @captured ────────────────────────────────────────
-
-
-class TestValidatorCaptured:
-    """Test @captured directive validation."""
-
-    def test_simple_capture(self):
-        result = ExpressionValidator.validate("@captured: raw_payload")
-        assert result.valid
-        assert result.directive == "captured"
-        assert result.captured_what == "raw_payload"
-        assert result.cast_type is None
-
-    def test_capture_with_cast(self):
-        result = ExpressionValidator.validate("@captured: raw_payload as JSON")
-        assert result.valid
-        assert result.captured_what == "raw_payload"
-        assert result.cast_type == "JSON"
-
-    def test_empty_captured(self):
-        result = ExpressionValidator.validate("@captured: ")
-        assert not result.valid
-
-
 # ── Validator: @computed ────────────────────────────────────────
 
 
@@ -196,26 +171,14 @@ class TestRetiredCopyDirective:
         assert "Unknown directive '@copy'" in result.errors[0]
 
 
-# ── Validator: validate_column_expr ─────────────────────────────
+class TestRetiredCapturedDirective:
+    """@captured is retired -- dfe-loader does not parse it; its capture mode fills _raw and _json."""
 
-
-class TestValidateColumnExpr:
-    """Test convenience column-level validation."""
-
-    def test_none_expr(self):
-        errors = ExpressionValidator.validate_column_expr("_timestamp", None)
-        assert errors == []
-
-    def test_valid_expr(self):
-        errors = ExpressionValidator.validate_column_expr(
-            "_timestamp", "@source: timestamp | now()"
-        )
-        assert errors == []
-
-    def test_invalid_expr(self):
-        errors = ExpressionValidator.validate_column_expr("_bad", "not a directive")
-        assert len(errors) == 1
-        assert "_bad" in errors[0]
+    @pytest.mark.parametrize("expr", ["@captured: raw_payload", "@captured: raw_payload as JSON"])
+    def test_captured_is_rejected_as_an_unknown_directive(self, expr):
+        result = ExpressionValidator.validate(expr)
+        assert not result.valid
+        assert "Unknown directive '@captured'" in result.errors[0]
 
 
 # ── Validator: real-world expressions from dfe-schemas ──────────
@@ -233,8 +196,6 @@ class TestRealWorldExpressions:
             "@generated: generateUUIDv7()",
             "@source: org_id",
             "@source: first(_source)",
-            "@captured: raw_payload",
-            "@captured: raw_payload as JSON",
             "@source: first(tags/_tags/meta/metadata.tags)",
         ],
     )
@@ -257,33 +218,6 @@ class TestBuilder:
             ExpressionBuilder.source("timestamp", fallback="now()") == "@source: timestamp | now()"
         )
 
-    def test_source_first(self):
-        assert (
-            ExpressionBuilder.source_first(["tags", "_tags", "meta"])
-            == "@source: first(tags/_tags/meta)"
-        )
-
-    def test_generated(self):
-        assert ExpressionBuilder.generated("now64(3)") == "@generated: now64(3)"
-
-    def test_captured_simple(self):
-        assert ExpressionBuilder.captured("raw_payload") == "@captured: raw_payload"
-
-    def test_captured_with_cast(self):
-        assert (
-            ExpressionBuilder.captured("raw_payload", cast_type="JSON")
-            == "@captured: raw_payload as JSON"
-        )
-
-    def test_computed(self):
-        assert (
-            ExpressionBuilder.computed("geoip(client_ip).country")
-            == "@computed: geoip(client_ip).country"
-        )
-
-    def test_config(self):
-        assert ExpressionBuilder.config("routing.org_id_field") == "@config: routing.org_id_field"
-
 
 class TestBuilderRoundTrip:
     """Test that built expressions validate correctly."""
@@ -295,44 +229,9 @@ class TestBuilderRoundTrip:
         assert result.field == "timestamp"
         assert result.fallback == "now()"
 
-    def test_source_first_roundtrip(self):
-        expr = ExpressionBuilder.source_first(["a", "b", "c"])
-        result = ExpressionValidator.validate(expr)
-        assert result.valid
-        assert result.candidate_fields == ["a", "b", "c"]
-
-    def test_generated_roundtrip(self):
-        expr = ExpressionBuilder.generated("generateUUIDv7()")
-        result = ExpressionValidator.validate(expr)
-        assert result.valid
-        assert result.expression == "generateUUIDv7()"
-
-    def test_captured_roundtrip(self):
-        expr = ExpressionBuilder.captured("raw_payload", cast_type="JSON")
-        result = ExpressionValidator.validate(expr)
-        assert result.valid
-        assert result.captured_what == "raw_payload"
-        assert result.cast_type == "JSON"
-
     def test_promoted_column_roundtrip(self):
         # A promoted column is an ordinary @source column on the record path.
         expr = ExpressionBuilder.source("user.email")
         result = ExpressionValidator.validate(expr)
         assert result.valid
         assert result.field == "user.email"
-
-
-# ── Autocomplete ────────────────────────────────────────────────
-
-
-class TestAutocomplete:
-    """Test autocomplete data helpers."""
-
-    def test_list_directive_types(self):
-        types = list_directive_types()
-        assert len(types) == 5
-        names = {t["name"] for t in types}
-        assert names == DIRECTIVES
-        for t in types:
-            assert "description" in t
-            assert "syntax" in t
