@@ -822,18 +822,63 @@ class TestOwnAccount:
 
 
 class TestResetOwnPassword:
-    """POST /api/v1/auth/accounts/reset-password uses the current session."""
+    """POST /api/v1/auth/accounts/reset-password uses the current session and password."""
 
     def test_authenticated_user_resets_own_password(self, client, app, viewer_headers):
         resp = client.post(
             "/api/v1/auth/accounts/reset-password",
-            json={"new_password": "viewer-new-pw"},
+            json={"current_password": "test-viewer-pw", "new_password": "viewer-new-pw"},
             headers=viewer_headers,
         )
         assert resp.status_code == 200
         store = app.state.account_store
         assert store.verify_password("viewer", "viewer-new-pw")
         assert not store.verify_password("viewer", "test-viewer-pw")
+
+    def test_a_session_without_the_current_password_cannot_change_it(
+        self, client, app, viewer_headers
+    ):
+        store = app.state.account_store
+        before = store.get("viewer").password_hash
+        takeover = secrets.token_urlsafe(16)
+
+        missing = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"new_password": takeover},
+            headers=viewer_headers,
+        )
+        wrong = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"current_password": "not-the-password", "new_password": takeover},
+            headers=viewer_headers,
+        )
+
+        assert missing.status_code == 422, missing.text
+        assert wrong.status_code == 403, wrong.text
+        assert wrong.json()["code"] == "invalid_current_password"
+        assert "not-the-password" not in wrong.text
+        assert store.get("viewer").password_hash == before
+
+    def test_wrong_current_passwords_back_off(self, client, app, viewer_headers):
+        store = app.state.account_store
+        body = {"current_password": "not-the-password", "new_password": secrets.token_urlsafe(16)}
+        statuses = [
+            client.post(
+                "/api/v1/auth/accounts/reset-password", json=body, headers=viewer_headers
+            ).status_code
+            for _ in range(5)
+        ]
+
+        right = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"current_password": "test-viewer-pw", "new_password": secrets.token_urlsafe(16)},
+            headers=viewer_headers,
+        )
+
+        assert statuses == [403] * 5
+        assert right.status_code == 429, right.text
+        assert int(right.headers["Retry-After"]) >= 1
+        assert store.verify_password("viewer", "test-viewer-pw")
 
     def test_query_username_cannot_reset_another_account(self, client, app, viewer_headers):
         from tests.unit.test_api.conftest import ADMIN_PASSWORD
@@ -842,7 +887,7 @@ class TestResetOwnPassword:
         resp = client.post(
             "/api/v1/auth/accounts/reset-password",
             params={"username": "admin"},
-            json={"new_password": hijack},
+            json={"current_password": "test-viewer-pw", "new_password": hijack},
             headers=viewer_headers,
         )
         assert resp.status_code == 200
@@ -874,7 +919,7 @@ class TestResetOwnPassword:
     def test_reset_to_current_password_rejected(self, client, viewer_headers):
         resp = client.post(
             "/api/v1/auth/accounts/reset-password",
-            json={"new_password": "test-viewer-pw"},
+            json={"current_password": "test-viewer-pw", "new_password": "test-viewer-pw"},
             headers=viewer_headers,
         )
         assert resp.status_code == 400
@@ -896,7 +941,7 @@ class TestResetOwnPassword:
         )
         resp = client.post(
             "/api/v1/auth/accounts/reset-password",
-            json={"new_password": "should-not-apply"},
+            json={"current_password": "anything-at-all", "new_password": "should-not-apply"},
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 409
@@ -905,7 +950,7 @@ class TestResetOwnPassword:
 
 
 class TestTheSessionOwnsOnlyItsOwnAccount:
-    """GET/PUT /me and the own-password reset need no current password, so they bind strictly."""
+    """GET/PUT /me need no current password, so they and the own-password change bind strictly."""
 
     def test_an_api_key_owns_no_account(self, client, app):
         store = app.state.account_store
@@ -917,7 +962,7 @@ class TestTheSessionOwnsOnlyItsOwnAccount:
         me = client.get("/api/v1/auth/accounts/me", headers=headers)
         reset = client.post(
             "/api/v1/auth/accounts/reset-password",
-            json={"new_password": new_password},
+            json={"current_password": _PASSWORD, "new_password": new_password},
             headers=headers,
         )
 
@@ -944,7 +989,7 @@ class TestTheSessionOwnsOnlyItsOwnAccount:
         )
         reset = client.post(
             "/api/v1/auth/accounts/reset-password",
-            json={"new_password": new_password},
+            json={"current_password": _PASSWORD, "new_password": new_password},
             headers=headers,
         )
 

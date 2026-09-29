@@ -115,7 +115,7 @@ def _change_admin_password(client: TestClient, new_password: str) -> None:
     assert issued.json()["password_change_required"] is True
     changed = client.post(
         "/api/v1/auth/accounts/reset-password",
-        json={"new_password": new_password},
+        json={"current_password": SHIPPED_DEFAULT, "new_password": new_password},
         headers={"Authorization": f"Bearer {issued.json()['access_token']}"},
     )
     assert changed.status_code == 200, changed.text

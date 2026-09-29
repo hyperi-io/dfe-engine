@@ -1443,6 +1443,44 @@ class AccountStoreSettings(BaseModel):
     collection: str = Field(default="accounts", description="Accounts collection name")
 
 
+class LoginThrottleSettings(BaseModel):
+    """Backoff after failed sign-ins, per username and per client address.
+
+    Counted in each engine process, so N replicas allow up to N times the attempts.
+    Past the threshold each further failure doubles the wait, from two seconds up to
+    ``max_delay_seconds``; a key forgets its failures after the same span with none.
+
+    Environment variables:
+    - DFE_AUTH_LOGIN_THROTTLE_ENABLED -> auth.login_throttle.enabled
+    - DFE_AUTH_LOGIN_THROTTLE_USERNAME_FAILURES -> auth.login_throttle.username_failures
+    - DFE_AUTH_LOGIN_THROTTLE_CLIENT_FAILURES -> auth.login_throttle.client_failures
+    - DFE_AUTH_LOGIN_THROTTLE_MAX_DELAY_SECONDS -> auth.login_throttle.max_delay_seconds
+    """
+
+    enabled: bool = Field(default=True, description="Throttle failed sign-ins")
+    username_failures: int = Field(
+        default=5,
+        ge=1,
+        description=(
+            "Failed sign-ins for one username before it must wait. Counted whatever "
+            "address they come from, so an attacker can hold one account's sign-in "
+            "back for up to max_delay_seconds at a time."
+        ),
+    )
+    client_failures: int = Field(
+        default=20,
+        ge=1,
+        description=(
+            "Failed sign-ins from one client address before it must wait. The address "
+            "is the proxy's unless api.forwarded_allow_ips trusts it, and then every "
+            "caller shares one count."
+        ),
+    )
+    max_delay_seconds: int = Field(
+        default=900, ge=1, description="Longest wait one failure can impose, in seconds"
+    )
+
+
 class AuthSettings(BaseModel):
     """Authorization settings.
 
@@ -1509,6 +1547,7 @@ class AuthSettings(BaseModel):
     )
     oidc: OIDCSettings = Field(default_factory=OIDCSettings)
     local: LocalAuthSettings = Field(default_factory=LocalAuthSettings)
+    login_throttle: LoginThrottleSettings = Field(default_factory=LoginThrottleSettings)
     store_backend: str = Field(
         default="auto",
         description=(
@@ -1691,6 +1730,7 @@ class APISettings(BaseModel):
     - DFE_API_CORS_ORIGINS -> api.cors_origins (comma-separated)
     - DFE_API_FORWARDED_ALLOW_IPS -> api.forwarded_allow_ips (comma-separated)
     - DFE_API_JWT_EXPIRE_MINUTES -> api.jwt_expire_minutes
+    - DFE_API_MAX_SESSION_MINUTES -> api.max_session_minutes
     - DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES -> api.elastic_converter_max_upload_bytes
     - DFE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE -> api.elastic_converter_read_chunk_size
     - DFE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES ->
@@ -1732,6 +1772,15 @@ class APISettings(BaseModel):
         description="JWT signing algorithm - ES384 (ECDSA P-384 + SHA-384, CNSA-aligned). Crypto-agile.",
     )
     jwt_expire_minutes: int = Field(default=60, description="JWT token expiry in minutes")
+    max_session_minutes: int = Field(
+        default=720,
+        ge=1,
+        description=(
+            "Longest a session runs from its sign-in, in minutes. POST /auth/refresh "
+            "is refused past it and never mints a token that outlives it, so the "
+            "owner signs in again. DFE_API_MAX_SESSION_MINUTES."
+        ),
+    )
     jwt_issuer: str = Field(
         default="https://dfe.local/api",
         description="JWT issuer (iss) claim + JWKS issuer; set to the deployment engine origin.",
@@ -2428,6 +2477,20 @@ def _get_env_overrides() -> dict:
             raise ValueError(f"DFE_ORGS_SEED_ORGS is not valid JSON: {exc}") from exc
         overrides["orgs"]["seed_orgs"] = seed
 
+    # Failed sign-in backoff (nested under auth.login_throttle)
+    if val := _get_env("DFE_AUTH_LOGIN_THROTTLE_ENABLED"):
+        overrides["auth"].setdefault("login_throttle", {})["enabled"] = val.lower() in (
+            "true",
+            "1",
+            "yes",
+        )
+    if val := _get_env("DFE_AUTH_LOGIN_THROTTLE_USERNAME_FAILURES"):
+        overrides["auth"].setdefault("login_throttle", {})["username_failures"] = int(val)
+    if val := _get_env("DFE_AUTH_LOGIN_THROTTLE_CLIENT_FAILURES"):
+        overrides["auth"].setdefault("login_throttle", {})["client_failures"] = int(val)
+    if val := _get_env("DFE_AUTH_LOGIN_THROTTLE_MAX_DELAY_SECONDS"):
+        overrides["auth"].setdefault("login_throttle", {})["max_delay_seconds"] = int(val)
+
     # OIDC settings (nested under auth.oidc)
     if val := _get_env("DFE_AUTH_OIDC_PROVIDERS_DIR"):
         overrides["auth"].setdefault("oidc", {})["providers_dir"] = val
@@ -2511,6 +2574,8 @@ def _get_env_overrides() -> dict:
         overrides["api"]["forwarded_allow_ips"] = val.strip()
     if val := _get_env("DFE_API_JWT_EXPIRE_MINUTES"):
         overrides["api"]["jwt_expire_minutes"] = int(val)
+    if val := _get_env("DFE_API_MAX_SESSION_MINUTES"):
+        overrides["api"]["max_session_minutes"] = int(val)
     if val := _get_env("DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES"):
         overrides["api"]["elastic_converter_max_upload_bytes"] = int(val)
     if val := _get_env("DFE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE"):

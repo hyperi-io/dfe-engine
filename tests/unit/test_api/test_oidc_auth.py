@@ -165,7 +165,7 @@ class TestOidcAuthentication:
         resp = client.post(
             "/api/v1/auth/accounts/reset-password",
             headers={"X-Oidc-Subject": "olga@example.com", "X-Oidc-Groups": "dfe-viewers"},
-            json={"new_password": "a-long-enough-password-1"},
+            json={"current_password": "anything", "new_password": "a-long-enough-password-1"},
         )
 
         assert resp.status_code == 409

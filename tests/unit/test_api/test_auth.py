@@ -452,7 +452,7 @@ class TestRolesFollowTheBoundAccount:
         assert resp.json()["roles"] == []
         assert resp.json()["groups"] == []
 
-    def test_a_deleted_accounts_live_token_gets_no_roles(self, client: TestClient, app):
+    def test_a_deleted_accounts_live_token_is_refused(self, client: TestClient, app):
         password = secrets.token_urlsafe(16)
         app.state.account_store.create("leaver", password, groups=["dfe-admins"])
         app.state.group_store.add_member("dfe-admins", "leaver")
@@ -466,9 +466,8 @@ class TestRolesFollowTheBoundAccount:
             headers={"Authorization": f"Bearer {login.json()['access_token']}"},
         )
 
-        assert resp.status_code == 200, resp.text
-        assert resp.json()["roles"] == []
-        assert resp.json()["groups"] == []
+        assert resp.status_code == 401, resp.text
+        assert resp.json()["code"] == "session_ended"
 
     def test_a_bound_idp_user_gets_its_accounts_roles(self, client: TestClient, api_settings):
         """Alice.Smith@corp binds alice-smith-corp through the stem; the claim is not consulted."""
@@ -488,7 +487,7 @@ class TestRolesFollowTheBoundAccount:
     def test_a_scim_adopted_local_login_whose_subject_differs_is_unbound(
         self, client: TestClient, app
     ):
-        """Pins today's behaviour: login answers with roles, the session holds none and cannot refresh."""
+        """Login answers with roles, but no account backs the session, so its token is refused."""
         password = secrets.token_urlsafe(16)
         store = app.state.account_store
         store.create("bob", password, groups=["dfe-analysts"])
@@ -502,8 +501,8 @@ class TestRolesFollowTheBoundAccount:
 
         assert login.status_code == 200, login.text
         assert login.json()["roles"] == ["data_analyst"]
-        assert me.status_code == 200, me.text
-        assert me.json()["roles"] == []
+        assert me.status_code == 401, me.text
+        assert me.json()["code"] == "session_ended"
         assert refreshed.status_code == 401, refreshed.text
 
     def test_a_local_login_gets_its_accounts_roles(self, client: TestClient):
