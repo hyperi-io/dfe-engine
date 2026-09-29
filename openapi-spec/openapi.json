@@ -40856,7 +40856,7 @@
           "groups_skipped": {
             "type": "integer",
             "title": "Groups Skipped",
-            "description": "Provider groups left unsynced: an identifier that makes no valid group name, or a name held by a stored group that does not load. Each is counted on auth_oidc_sync_groups_skipped_total{reason}.",
+            "description": "Provider groups left unsynced: an identifier that makes no valid group name, a name held by a stored group that does not load, or a name held by a stored group not linked to that provider group. Each is counted on auth_oidc_sync_groups_skipped_total{reason}.",
             "default": 0
           },
           "error": {

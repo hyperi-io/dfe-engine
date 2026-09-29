@@ -10,7 +10,9 @@
 
 Fetches all groups from a provider's API and upserts them into the local
 GroupStore.  Only providers with ``groups.mode == "api"`` and
-``enabled == True`` are processed.
+``enabled == True`` are processed.  A stored group is updated only when it is
+already linked to the provider group.  A name match alone links nothing, because
+a directory's display names are not unique and its users may choose them.
 
 Usage::
 
@@ -37,18 +39,21 @@ if TYPE_CHECKING:
 
 SYNC_GROUPS_SKIPPED = "auth_oidc_sync_groups_skipped_total"
 
-SyncSkipReason = Literal["invalid_name", "stored_unloadable"]
+SyncSkipReason = Literal["invalid_name", "stored_unloadable", "name_taken"]
 """Why the sync left a provider group unsynced.
 
 - ``invalid_name``: its email, name or id makes no valid group name: empty, over 128
   characters, or not starting with a letter or digit.
 - ``stored_unloadable``: a stored group that does not load already holds its name.
+- ``name_taken``: a stored group holds its name and is not linked to it: the stored
+  group names no provider, or carries another provider group's id.
 """
 
 # The provider's last_sync_status names each reason that skipped a group.
 _SKIP_STATUS: dict[SyncSkipReason, str] = {
     "stored_unloadable": "their stored copy does not load",
     "invalid_name": "their identifier makes no valid group name",
+    "name_taken": "their name is held by a group not linked to them",
 }
 
 
@@ -101,9 +106,12 @@ async def sync_provider(
     """Run group sync for a single OIDC provider.
 
     Fetches all groups from the provider's API and upserts them into
-    *group_store*.  Existing groups have their description and source
-    metadata updated; their roles are preserved.  New groups are created
-    with empty roles.
+    *group_store*.  A stored group linked to the provider group (it names a
+    provider and carries the group's id) has its description and source
+    metadata updated, and keeps its roles.  A stored group of the same name
+    with no such link is left untouched and counted as ``name_taken``:
+    linking one is an admin's act.  New groups are created with empty roles,
+    linked to the provider group.
 
     Args:
         provider_name: Name of the provider in *provider_registry*.
@@ -224,6 +232,8 @@ async def sync_provider(
                     name=group_name,
                     roles=[],
                     description=group_info.description,
+                    source_provider=provider_name,
+                    source_id=group_info.id,
                 )
             except GroupExistsError:
                 # A stored group that does not load holds the name; the store counts the file.
@@ -235,20 +245,27 @@ async def sync_provider(
                 metrics.skipped("stored_unloadable")
                 skips["stored_unloadable"] += 1
                 continue
-            group_store.update(
-                group_name,
-                source_provider=provider_name,
-                source_id=group_info.id,
-            )
             created += 1
-        else:
-            group_store.update(
-                group_name,
-                description=group_info.description,
-                source_provider=provider_name,
-                source_id=group_info.id,
+            continue
+
+        # A name match is no link: only an admin, or this sync creating it, links a group.
+        if not existing.source_provider or existing.source_id != group_info.id:
+            logger.warning(
+                "OIDC group sync skipped a group whose name is held by a group not linked to it",
+                provider=provider_name,
+                group=group_name,
+                group_id=group_info.id,
             )
-            updated += 1
+            metrics.skipped("name_taken")
+            skips["name_taken"] += 1
+            continue
+        group_store.update(
+            group_name,
+            description=group_info.description,
+            source_provider=provider_name,
+            source_id=group_info.id,
+        )
+        updated += 1
 
     total = created + updated
     skipped = sum(skips.values())

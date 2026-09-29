@@ -318,6 +318,25 @@ class TestTheProviderIdsAGroupCarries:
         got = store.get("analysts")
         assert (got.source_provider, got.source_id) == ("entra", self.GUID)
 
+    async def test_the_oidc_sync_leaves_a_group_no_admin_linked(self, store, tmp_path):
+        store.create(RECOVERY_GROUP, ["admin"])
+        provider = OIDCProvider(
+            type="entra_id",
+            enabled=True,
+            issuer="https://sso.example.com",
+            groups=GroupResolutionConfig(mode="api"),
+        )
+        registry = OIDCProviderRegistry(tmp_path / "oidc")
+        registry.create("entra", provider)
+        adapter = _Directory(provider, [GroupInfo(id=self.GUID, name="DFE Admins")])
+
+        result = await sync_provider("entra", registry, store, adapter=adapter)
+
+        assert (result["updated"], result["groups_skipped"]) == (0, 1)
+        got = store.get(RECOVERY_GROUP)
+        assert (got.source_provider, got.source_id) == ("", "")
+        assert self.GUID not in store.by_source_id()
+
 
 class _Directory(OIDCGroupAdapter):
     """A provider directory holding a fixed list of groups."""
