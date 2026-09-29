@@ -282,14 +282,6 @@ class TestEnvOverrides:
     def test_api_forwarded_allow_ips_defaults_to_loopback(self):
         assert APISettings().forwarded_allow_ips == "127.0.0.1"
 
-    @pytest.mark.parametrize(("value", "expected"), [("true", True), ("false", False)])
-    def test_api_docs_enabled_override(self, monkeypatch, value, expected):
-        monkeypatch.setenv("DFE_API_DOCS_ENABLED", value)
-        assert load_settings().api.docs_enabled is expected
-
-    def test_api_docs_enabled_is_unset_by_default(self):
-        assert load_settings().api.docs_enabled is None
-
     def test_api_elastic_converter_max_upload_override(self, monkeypatch):
         monkeypatch.setenv("DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES", "1048576")
         settings = load_settings()
@@ -304,6 +296,14 @@ class TestEnvOverrides:
         monkeypatch.setenv("DFE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES", "65536")
         settings = load_settings()
         assert settings.api.elastic_converter_content_length_slack_bytes == 65_536
+
+    @pytest.mark.parametrize(("value", "expected"), [("true", True), ("false", False)])
+    def test_api_docs_enabled_override(self, monkeypatch, value, expected):
+        monkeypatch.setenv("DFE_API_DOCS_ENABLED", value)
+        assert load_settings().api.docs_enabled is expected
+
+    def test_api_docs_enabled_is_unset_by_default(self):
+        assert load_settings().api.docs_enabled is None
 
     def test_auth_enabled_override(self, monkeypatch):
         monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
