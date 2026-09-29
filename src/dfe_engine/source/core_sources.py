@@ -14,8 +14,6 @@ ClickHouse bootstrap creates, so a deployment that renames its landing table
 cannot end up with a source pointing at the old one.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -114,6 +112,7 @@ def _record_built_and_deployed(source: Source, settings: Any, *, tables_bootstra
         refresh=True,
         schemas_base_dir=settings.schemas.schemas_dir,
         version_id=source.current,
+        settings=settings,
     )
     if not (tables_bootstrapped):
         logger.info(

@@ -18,6 +18,9 @@ from dfe_engine.auth.bootstrap import admin_account_password
 from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
 from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+from dfe_engine.gitcrud import GitCrud, default_registry
+from dfe_engine.gitcrud.retention import set_stored
+from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.orgs.registry import OrgRegistry
 from dfe_engine.state_machines.setup import (
     SETUP_MACHINE,
@@ -285,6 +288,24 @@ def test_context_reads_the_default_ttl_from_settings(tmp_path):
     ctx = SetupContext.from_app_state(SimpleNamespace(account_store=None, settings=settings))
 
     assert ctx.default_ttl_days == 45
+
+
+def test_context_reads_the_admins_default_ttl_over_the_deployed_one(tmp_path):
+    settings = SimpleNamespace(
+        auth=SimpleNamespace(local=SimpleNamespace(admin_name="", admin_password="")),
+        env="dev",
+        gitops=SimpleNamespace(mode="team"),
+        deployment=SimpleNamespace(target="docker", namespace=""),
+        clickhouse=SimpleNamespace(default_ttl_days=45),
+    )
+    crud = GitCrud(GitopsRepo(local_path=str(tmp_path / "deploy"), push=False), default_registry())
+    set_stored(crud, 7, "admin")
+
+    ctx = SetupContext.from_app_state(
+        SimpleNamespace(account_store=None, settings=settings, gitcrud=crud)
+    )
+
+    assert ctx.default_ttl_days == 7
 
 
 def test_status_carries_the_default_ttl_from_the_context(ctx):

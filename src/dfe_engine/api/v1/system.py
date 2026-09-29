@@ -5,7 +5,8 @@ GET /api/v1/system/version     -> What this deployment runs: stack, engine, sche
 GET /api/v1/system/schema      -> What the last schema bootstrap pass did, object by object
 GET /api/v1/system/status      -> Conditions that leave the engine degraded while it serves
 GET /api/v1/system/settings    -> Redacted settings summary
-GET /api/v1/system/retention   -> The deployment default TTL
+GET /api/v1/system/retention   -> The effective default TTL and where it comes from
+PUT /api/v1/system/retention   -> Set or clear the admin's override, then apply it
 """
 
 import sys
@@ -20,12 +21,24 @@ from dfe_engine import __version__
 from dfe_engine.api.deps import (
     CurrentUser,
     Settings,
+    SourceReg,
+    get_clickhouse_client,
     require_action,
 )
+from dfe_engine.api.errors import ErrorResponse
+from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import DeployTarget, appconfig, routing
+from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.gitcrud import GitCrud
+from dfe_engine.gitcrud.retention import (
+    MAX_DEFAULT_TTL_DAYS,
+    effective_settings,
+    resolve_state,
+    set_stored,
+)
 from dfe_engine.gitops.pins import UI_COMPONENT, component_overrides, load_pins, stack_version
+from dfe_engine.schema.retention import reconcile_default_ttl
 from dfe_engine.yaml_health import write_health
 
 router = APIRouter(prefix="/system", tags=["System"])
@@ -37,6 +50,17 @@ router = APIRouter(prefix="/system", tags=["System"])
 def _optional_gitcrud(request: Request) -> GitCrud | None:
     """The deploy repo, or None when gitops is disabled. For readers with a default."""
     return getattr(request.app.state, "gitcrud", None)
+
+
+def _gitcrud(request: Request) -> GitCrud:
+    """The deploy repo, or 503. For writers, which have nowhere else to commit."""
+    gc = _optional_gitcrud(request)
+    if gc is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "not_configured", "message": "gitops is not enabled"},
+        )
+    return gc
 
 
 # -- Response models ------------------------------------------
@@ -244,7 +268,10 @@ class SettingsSummary(BaseModel):
     clickhouse_database: str
     clickhouse_data_database: str
     clickhouse_default_ttl_days: int = Field(
-        description="Retention in days a time-series table gets when it declares none; 0 = none."
+        description=(
+            "Retention in days a time-series table gets when it declares none; 0 = none. "
+            "The admin's override when one is set, else DFE_CLICKHOUSE_DEFAULT_TTL_DAYS."
+        )
     )
     sources_dir: str
     services_config_dir: str
@@ -381,13 +408,13 @@ async def get_system_status(user: CurrentUser) -> SystemStatusResponse:
     response_model=SettingsSummary,
     dependencies=[Depends(require_action(scopes_dict["system_read"]))],
 )
-async def get_settings(user: CurrentUser, settings: Settings):
+def get_settings(user: CurrentUser, request: Request, settings: Settings):
     """Get a redacted summary of current settings. No secrets exposed."""
     return SettingsSummary(
         clickhouse_host=settings.clickhouse.host,
         clickhouse_database=settings.clickhouse.database,
         clickhouse_data_database=settings.clickhouse.effective_data_database,
-        clickhouse_default_ttl_days=settings.clickhouse.default_ttl_days,
+        clickhouse_default_ttl_days=resolve_state(_optional_gitcrud(request), settings).effective,
         sources_dir=settings.source.sources_dir,
         services_config_dir=settings.services.config_yaml_dir,
         hunt_dir=settings.hunts.hunt_dir,
@@ -403,13 +430,78 @@ async def get_settings(user: CurrentUser, settings: Settings):
 
 
 class RetentionStatus(BaseModel):
-    """The deployment default TTL, as the environment sets it."""
+    """The default TTL a time-series table gets when it declares none, and where it comes from."""
 
     default_ttl_days: int = Field(
         description=(
-            "Retention in days a time-series table gets when it declares none; 0 = no TTL. "
-            "Set by DFE_CLICKHOUSE_DEFAULT_TTL_DAYS and applied to every table on engine start."
+            "Effective retention in days for every table that follows the default; "
+            "0 = no TTL. The override when one is stored, else deployment_default."
         )
+    )
+    stored: int | None = Field(
+        description="The admin's override, committed in the deploy repo; null when none is set."
+    )
+    origin: Literal["override", "deployment"] = Field(
+        description="override when the stored value wins, deployment when deployment_default does."
+    )
+    deployment_default: int = Field(
+        description="DFE_CLICKHOUSE_DEFAULT_TTL_DAYS as deployed; applies whenever no override is set."
+    )
+    editable: bool = Field(
+        description=(
+            "Whether this deployment can store an override. False without gitops, "
+            "where a PUT answers 503."
+        )
+    )
+
+
+class RetentionUpdate(BaseModel):
+    """An admin's change to the default TTL."""
+
+    default_ttl_days: int | None = Field(
+        strict=True,
+        ge=0,
+        le=MAX_DEFAULT_TTL_DAYS,
+        description=(
+            "Retention in days for every table that follows the default; 0 keeps rows "
+            "forever. null clears the override, so deployment_default applies again."
+        ),
+    )
+
+
+class RetentionReconcileSummary(BaseModel):
+    """What applying the new default did to the live tables."""
+
+    core_tables_altered: list[str] = Field(
+        description="database.table: <old> -> <new> days, for each engine table whose TTL moved."
+    )
+    source_tables_altered: list[str] = Field(
+        description="database.table for each deployed source's table the apply altered."
+    )
+    sources_reconciled: int = Field(description="Deployed sources whose table was brought current.")
+    sources_skipped: int = Field(
+        description=(
+            "Deployed sources left to their next deploy: table absent, build failed "
+            "or ClickHouse refused."
+        )
+    )
+
+
+class RetentionUpdateResponse(RetentionStatus):
+    """The default TTL after the change, and what applying it did."""
+
+    reconcile: RetentionReconcileSummary
+
+
+def _retention_status(request: Request, settings: Any) -> RetentionStatus:
+    gc = _optional_gitcrud(request)
+    state = resolve_state(gc, settings)
+    return RetentionStatus(
+        default_ttl_days=state.effective,
+        stored=state.stored,
+        origin=state.origin,
+        deployment_default=state.deployment_default,
+        editable=gc is not None,
     )
 
 
@@ -418,9 +510,86 @@ class RetentionStatus(BaseModel):
     response_model=RetentionStatus,
     dependencies=[Depends(require_action(scopes_dict["system_read"]))],
 )
-async def get_retention(user: CurrentUser, settings: Settings) -> RetentionStatus:
-    """The deployment default TTL."""
-    return RetentionStatus(default_ttl_days=settings.clickhouse.default_ttl_days)
+def get_retention(user: CurrentUser, request: Request, settings: Settings) -> RetentionStatus:
+    """The effective default TTL, the admin's override and the deployment's own value."""
+    return _retention_status(request, settings)
+
+
+@router.put(
+    "/retention",
+    response_model=RetentionUpdateResponse,
+    dependencies=[Depends(require_action(scopes_dict["system_write"])), WRITE_TURN],
+    responses={
+        502: {
+            "model": ErrorResponse,
+            "description": (
+                "reconcile_failed: the value is stored, and applying it to ClickHouse "
+                "failed; sending the same value again applies it"
+            ),
+        },
+        503: {
+            "model": ErrorResponse,
+            "description": "not_configured: gitops is off, so there is nowhere to store the value",
+        },
+    },
+)
+def put_retention(
+    body: RetentionUpdate,
+    user: CurrentUser,
+    request: Request,
+    settings: Settings,
+    sources: SourceReg,
+) -> RetentionUpdateResponse:
+    """Store the override in the deploy repo, then apply it to every table that follows it.
+
+    The engine's own tables and every deployed source's table are brought to the new
+    effective default in this request, with ``ALTER TABLE ... MODIFY TTL`` (or
+    ``REMOVE TTL`` for 0). A table that declares its own TTL is left alone. A
+    ClickHouse failure answers 502 with the override ALREADY committed; sending the
+    same value again applies it.
+    """
+    gc = _gitcrud(request)
+    set_stored(gc, body.default_ttl_days, user.user_id)
+    audit_resource_change(
+        user.user_id, "system", "retention", "updated", {"default_ttl_days": body.default_ttl_days}
+    )
+    status = _retention_status(request, settings)
+    logger.info(
+        "default TTL set via API",
+        actor=user.user_id,
+        days=status.default_ttl_days,
+        origin=status.origin,
+    )
+    try:
+        outcome = reconcile_default_ttl(
+            get_clickhouse_client(settings),
+            settings=effective_settings(settings, gc),
+            sources=sources.get_all_sources(),
+        )
+    # The override is committed by now, so any ClickHouse failure has to say so rather than 500.
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "reconcile_failed",
+                "message": f"override stored; applying it to ClickHouse failed: {exc}",
+            },
+        ) from exc
+    if outcome.sources_skipped:
+        logger.warning(
+            "default TTL: sources left to their next deploy", count=outcome.sources_skipped
+        )
+    return RetentionUpdateResponse(
+        **status.model_dump(),
+        reconcile=RetentionReconcileSummary(
+            core_tables_altered=outcome.core_altered,
+            source_tables_altered=[
+                f"{t.database}.{t.table}" for t in outcome.report.tables if t.action == "altered"
+            ],
+            sources_reconciled=outcome.sources_reconciled,
+            sources_skipped=outcome.sources_skipped,
+        ),
+    )
 
 
 # -- ClickHouse Cloud lifecycle (control plane) ---------------

@@ -37,6 +37,7 @@ from dfe_engine.auth.jit import (
 )
 from dfe_engine.auth.membership import groups_held
 from dfe_engine.auth.roles import RoleConfig
+from dfe_engine.gitcrud.retention import effective_settings
 from dfe_engine.settings import DFESettings, is_dev_posture
 
 if TYPE_CHECKING:
@@ -51,6 +52,14 @@ def get_app_settings(request: Request) -> DFESettings:
 
 
 Settings = Annotated[DFESettings, Depends(get_app_settings)]
+
+
+def ttl_settings(request: Request, settings: DFESettings) -> DFESettings:
+    """*settings* carrying the admin's default TTL, for a path that builds table DDL.
+
+    Blocking: it reads the deploy repo, so call it off the event loop.
+    """
+    return effective_settings(settings, getattr(request.app.state, "gitcrud", None))
 
 
 # -- Registry lifecycle ----------------------------------------

@@ -9522,7 +9522,7 @@
           "System"
         ],
         "summary": "Get Retention",
-        "description": "The deployment default TTL.",
+        "description": "The effective default TTL, the admin's override and the deployment's own value.",
         "operationId": "get_retention_api_v1_system_retention_get",
         "responses": {
           "200": {
@@ -9547,6 +9547,91 @@
           },
           "403": {
             "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Put Retention",
+        "description": "Store the override in the deploy repo, then apply it to every table that follows it.\n\nThe engine's own tables and every deployed source's table are brought to the new\neffective default in this request, with ``ALTER TABLE ... MODIFY TTL`` (or\n``REMOVE TTL`` for 0). A table that declares its own TTL is left alone. A\nClickHouse failure answers 502 with the override ALREADY committed; sending the\nsame value again applies it.",
+        "operationId": "put_retention_api_v1_system_retention_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetentionUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetentionUpdateResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "reconcile_failed: the value is stored, and applying it to ClickHouse failed; sending the same value again applies it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not_configured: gitops is off, so there is nowhere to store the value",
             "content": {
               "application/json": {
                 "schema": {
@@ -33726,20 +33811,172 @@
         ],
         "title": "ResourceSeriesResponse"
       },
+      "RetentionReconcileSummary": {
+        "properties": {
+          "core_tables_altered": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Core Tables Altered",
+            "description": "database.table: <old> -> <new> days, for each engine table whose TTL moved."
+          },
+          "source_tables_altered": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Source Tables Altered",
+            "description": "database.table for each deployed source's table the apply altered."
+          },
+          "sources_reconciled": {
+            "type": "integer",
+            "title": "Sources Reconciled",
+            "description": "Deployed sources whose table was brought current."
+          },
+          "sources_skipped": {
+            "type": "integer",
+            "title": "Sources Skipped",
+            "description": "Deployed sources left to their next deploy: table absent, build failed or ClickHouse refused."
+          }
+        },
+        "type": "object",
+        "required": [
+          "core_tables_altered",
+          "source_tables_altered",
+          "sources_reconciled",
+          "sources_skipped"
+        ],
+        "title": "RetentionReconcileSummary",
+        "description": "What applying the new default did to the live tables."
+      },
       "RetentionStatus": {
         "properties": {
           "default_ttl_days": {
             "type": "integer",
             "title": "Default Ttl Days",
-            "description": "Retention in days a time-series table gets when it declares none; 0 = no TTL. Set by DFE_CLICKHOUSE_DEFAULT_TTL_DAYS and applied to every table on engine start."
+            "description": "Effective retention in days for every table that follows the default; 0 = no TTL. The override when one is stored, else deployment_default."
+          },
+          "stored": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stored",
+            "description": "The admin's override, committed in the deploy repo; null when none is set."
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "override",
+              "deployment"
+            ],
+            "title": "Origin",
+            "description": "override when the stored value wins, deployment when deployment_default does."
+          },
+          "deployment_default": {
+            "type": "integer",
+            "title": "Deployment Default",
+            "description": "DFE_CLICKHOUSE_DEFAULT_TTL_DAYS as deployed; applies whenever no override is set."
+          },
+          "editable": {
+            "type": "boolean",
+            "title": "Editable",
+            "description": "Whether this deployment can store an override. False without gitops, where a PUT answers 503."
+          }
+        },
+        "type": "object",
+        "required": [
+          "default_ttl_days",
+          "stored",
+          "origin",
+          "deployment_default",
+          "editable"
+        ],
+        "title": "RetentionStatus",
+        "description": "The default TTL a time-series table gets when it declares none, and where it comes from."
+      },
+      "RetentionUpdate": {
+        "properties": {
+          "default_ttl_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 36500.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Ttl Days",
+            "description": "Retention in days for every table that follows the default; 0 keeps rows forever. null clears the override, so deployment_default applies again."
           }
         },
         "type": "object",
         "required": [
           "default_ttl_days"
         ],
-        "title": "RetentionStatus",
-        "description": "The deployment default TTL, as the environment sets it."
+        "title": "RetentionUpdate",
+        "description": "An admin's change to the default TTL."
+      },
+      "RetentionUpdateResponse": {
+        "properties": {
+          "default_ttl_days": {
+            "type": "integer",
+            "title": "Default Ttl Days",
+            "description": "Effective retention in days for every table that follows the default; 0 = no TTL. The override when one is stored, else deployment_default."
+          },
+          "stored": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stored",
+            "description": "The admin's override, committed in the deploy repo; null when none is set."
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "override",
+              "deployment"
+            ],
+            "title": "Origin",
+            "description": "override when the stored value wins, deployment when deployment_default does."
+          },
+          "deployment_default": {
+            "type": "integer",
+            "title": "Deployment Default",
+            "description": "DFE_CLICKHOUSE_DEFAULT_TTL_DAYS as deployed; applies whenever no override is set."
+          },
+          "editable": {
+            "type": "boolean",
+            "title": "Editable",
+            "description": "Whether this deployment can store an override. False without gitops, where a PUT answers 503."
+          },
+          "reconcile": {
+            "$ref": "#/components/schemas/RetentionReconcileSummary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "default_ttl_days",
+          "stored",
+          "origin",
+          "deployment_default",
+          "editable",
+          "reconcile"
+        ],
+        "title": "RetentionUpdateResponse",
+        "description": "The default TTL after the change, and what applying it did."
       },
       "ReviewRequest": {
         "properties": {
@@ -36130,7 +36367,7 @@
           "clickhouse_default_ttl_days": {
             "type": "integer",
             "title": "Clickhouse Default Ttl Days",
-            "description": "Retention in days a time-series table gets when it declares none; 0 = none."
+            "description": "Retention in days a time-series table gets when it declares none; 0 = none. The admin's override when one is set, else DFE_CLICKHOUSE_DEFAULT_TTL_DAYS."
           },
           "sources_dir": {
             "type": "string",

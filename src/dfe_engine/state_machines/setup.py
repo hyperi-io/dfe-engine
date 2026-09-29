@@ -66,6 +66,7 @@ from dfe_engine.auth.deployment_hints import (
     detect_deploy_kind,
 )
 from dfe_engine.auth.oidc.models import OIDCProvider
+from dfe_engine.gitcrud import retention
 from dfe_engine.orgs.models import Org
 
 if TYPE_CHECKING:
@@ -150,7 +151,9 @@ class SetupContext:
         # The schema builder treats a blank default as MergeTree, so report the same.
         default_engine = getattr(clickhouse, "default_engine", "") or "MergeTree"
         if clickhouse is not None:
-            default_ttl_days = int(getattr(clickhouse, "default_ttl_days", 0) or 0)
+            default_ttl_days = retention.resolve_state(
+                getattr(state, "gitcrud", None), state.settings
+            ).effective
         return cls(
             account_store=account_store,
             group_store=getattr(state, "group_store", None),

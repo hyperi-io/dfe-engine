@@ -32,6 +32,7 @@ def _settings(*, root: Path, seeded: bool = True, table: str = "main") -> Simple
         write_landing_definition(schemas_dir=schemas_dir)
     return SimpleNamespace(
         clickhouse=SimpleNamespace(
+            default_engine="MergeTree",
             default_table_profile="timeseries",
             default_ttl_days=0,
             effective_data_database="dfe",

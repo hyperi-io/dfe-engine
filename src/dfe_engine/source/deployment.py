@@ -1,7 +1,5 @@
 """Source ClickHouse plan/deploy -- build artifacts, dry-run plans, and deploy execution."""
 
-from __future__ import annotations
-
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypeVar
@@ -647,11 +645,17 @@ def run_source_build(
     version_id: str,
     schemas_base_dir: str | Path | None,
     resolver: EngineResolver | None = None,
+    settings: Any | None = None,
 ) -> SchemaBuildResult:
+    """Build *source* at *version_id* under *settings*, or the process settings when None.
+
+    A caller that has resolved the effective default TTL passes its settings, so the
+    build carries the retention the deploy will apply.
+    """
     from dfe_engine.schema.derived_registry import derived_reference_root
     from dfe_engine.settings import get_settings
 
-    settings = get_settings()
+    settings = get_settings() if settings is None else settings
     ch = settings.clickhouse
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
@@ -672,11 +676,13 @@ def ensure_build_artifact(
     schemas_base_dir: str | Path | None,
     refresh: bool = False,
     resolver: EngineResolver | None = None,
+    settings: Any | None = None,
 ) -> tuple[SchemaBuildResult, SourceBuildArtifact]:
     """Load build from source-builds or run build and persist.
 
     ``resolver`` is the live server's engine resolver when the build is bound for
     that server; the persisted artefact then carries the cluster form of the DDL.
+    ``settings`` is what a fresh build runs under; see :func:`run_source_build`.
     """
     if not refresh:
         existing = store.load_build(source.source, version_id)
@@ -684,7 +690,11 @@ def ensure_build_artifact(
             return build_from_artifact(existing), existing
 
     result = run_source_build(
-        source, version_id=version_id, schemas_base_dir=schemas_base_dir, resolver=resolver
+        source,
+        version_id=version_id,
+        schemas_base_dir=schemas_base_dir,
+        resolver=resolver,
+        settings=settings,
     )
     artifact = artifact_from_build(result, version=version_id)
     store.save_build(artifact, source)

@@ -30,8 +30,6 @@ A deploy also points HyperDX at the table it just made, and a delete takes that
 source away again. Like the reconcile, neither ever fails the source write.
 """
 
-from __future__ import annotations
-
 import asyncio
 import functools
 from dataclasses import dataclass, field
@@ -50,6 +48,7 @@ from dfe_engine.api.deps import (
     Settings,
     SourceReg,
     require_action,
+    ttl_settings,
 )
 from dfe_engine.api.errors import (
     CoreResourceConflictErrorResponse,
@@ -1079,6 +1078,7 @@ def build_source_schema(
     name: str,
     user: CurrentUser,
     registry: SourceReg,
+    request: Request,
     version: str | None = Query(
         None,
         description="Source version id (defaults to deployed_version)",
@@ -1120,7 +1120,7 @@ def build_source_schema(
             },
         )
 
-    settings = get_settings()
+    settings = ttl_settings(request, get_settings())
     store = SourceDeploymentStore.from_settings(settings)
     try:
         result, _build_artifact = ensure_build_artifact(
@@ -1129,6 +1129,7 @@ def build_source_schema(
             version_id=version_id,
             schemas_base_dir=settings.schemas.schemas_dir or None,
             refresh=True,
+            settings=settings,
         )
     except (SchemaBuildError, SchemaLoadError) as exc:
         raise HTTPException(
@@ -1166,6 +1167,7 @@ def plan_source_deploy(
     user: CurrentUser,
     registry: SourceReg,
     ch_client: ClickHouseClient,
+    request: Request,
     version: str | None = Query(
         None,
         description="Source version id (defaults to current working version)",
@@ -1188,7 +1190,7 @@ def plan_source_deploy(
             },
         )
 
-    settings = get_settings()
+    settings = ttl_settings(request, get_settings())
     store = SourceDeploymentStore.from_settings(settings)
     # The plan shows the DDL the deploy would apply, so it senses the engine and
     # ON CLUSTER from the same server.
@@ -1201,6 +1203,7 @@ def plan_source_deploy(
             schemas_base_dir=settings.schemas.schemas_dir or None,
             refresh=True,
             resolver=resolver,
+            settings=settings,
         )
     except (SchemaBuildError, SchemaLoadError) as exc:
         raise HTTPException(
@@ -1345,8 +1348,9 @@ async def deploy_source_schema(
     NOT EXISTS) so a re-deploy is a no-op. A schema that failed validation is never
     deployed.
     """
+    ddl_settings = await run_blocking(functools.partial(ttl_settings, request, settings))
     applied = await run_blocking(
-        functools.partial(_apply_source_schema, name, registry, settings, version, dry_run)
+        functools.partial(_apply_source_schema, name, registry, ddl_settings, version, dry_run)
     )
     if isinstance(applied, SchemaDeployResult):
         return applied
