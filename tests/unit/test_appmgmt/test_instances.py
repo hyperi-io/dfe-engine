@@ -34,6 +34,14 @@ def test_telemetry_name_distinguishes_instances_of_one_app():
     assert first.telemetry_name != second.telemetry_name
 
 
+def test_a_stack_wide_app_reports_its_bare_name():
+    # Its chart hard-codes OTEL_SERVICE_NAME to the service and ignores
+    # otelServiceName, so a "-default" suffix names something nothing reports.
+    app = instances.instance_of("dfe-loader", "default")
+
+    assert app.telemetry_name == "dfe-loader"
+
+
 @pytest.mark.parametrize(
     "bad",
     ["", "Edge", "-edge", "edge-", "edge_1", "edge/other", "e" * 41, "..", "a.b"],
@@ -128,7 +136,7 @@ def test_instances_are_found_by_the_compiler_that_routes_them(crud):
 
     found = instances.instances_routed_by(crud, LOADER_COMPILER)
 
-    assert [i.telemetry_name for i in found] == ["dfe-loader-default"]
+    assert [i.telemetry_name for i in found] == ["dfe-loader"]
 
 
 def test_unmanaged_values_file_is_not_listed_as_an_instance(crud):

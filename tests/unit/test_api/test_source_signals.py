@@ -108,7 +108,9 @@ class TestSourceSignals:
         assert "otel_metrics_sum" in sql
         assert "loader_messages_by_table_total" in sql
         assert params["table"] == "test-source"
-        assert params["services"] == [f"{LOADER}-main"]
+        # A stack-wide app's chart hard-codes OTEL_SERVICE_NAME to the service, so
+        # the instance name never reaches the query.
+        assert params["services"] == [LOADER]
         # Bounded, so the console asking on every list render cannot scan the table.
         assert params["window_seconds"] == 300
 
