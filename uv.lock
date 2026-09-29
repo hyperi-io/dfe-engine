@@ -622,7 +622,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },
-    { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.30.5" },
+    { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.30.6" },
     { name = "scim2-models", specifier = ">=0.6.12" },
     { name = "sqlglot", specifier = ">=30.17.0" },
     { name = "sse-starlette", specifier = ">=3.4.5" },
@@ -1981,7 +1981,7 @@ wheels = [
 
 [[package]]
 name = "scalo"
-version = "2.30.5"
+version = "2.30.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -1999,9 +1999,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4c/bc/8454e5fae055d344d9a90a51822f11c828f17a40e9163638b89bb9b9cad5/scalo-2.30.5.tar.gz", hash = "sha256:6e9998527c183a2630804dc244ef0e96105de0efe74b051aa41ef9ef5f4aeb43", size = 340267, upload-time = "2026-09-27T00:03:01.969Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fd/3c/3775247e1c74f22fa18047947a317ff7b99f28fa9635883bcb1e34d1f8f5/scalo-2.30.6.tar.gz", hash = "sha256:757e4832668952848cf9e1e04d5d4b79ce6cbaa562422b1687ca6c464e5c2543", size = 340352, upload-time = "2026-09-29T13:35:43.059Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fe/4d/dacdd75b70cb126bc4c9d13d41a6d8cb5b3862c1036319d18f5cdd05b0a0/scalo-2.30.5-py3-none-any.whl", hash = "sha256:c1485fcc07a31d723fa0ed7806e42f2319334ac87ca2f5c54fd56526a6ab5f35", size = 413186, upload-time = "2026-09-27T00:03:00.139Z" },
+    { url = "https://files.pythonhosted.org/packages/29/d4/c74a689c5abebc5550ba1b36656f61681d06eff4706f46d94794779b678b/scalo-2.30.6-py3-none-any.whl", hash = "sha256:244782be77b2c231a0e730f78df973953aa1164dcd7d7f9dac4ed185202857fe", size = 413249, upload-time = "2026-09-29T13:35:40.944Z" },
 ]
 
 [package.optional-dependencies]
