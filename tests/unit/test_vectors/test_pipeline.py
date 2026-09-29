@@ -437,28 +437,25 @@ def test_pipeline_renders_with_missing_secret_env_vars(sample_dfe_config, sample
 
     for secret in secrets_to_remove:
         sample_dfe_config["default_env_vars"].pop(secret, None)
+    output_dir = os.path.join(temp_dir, "output")
 
     pipeline = Pipeline(
         name="test-pipeline",
         dfe_config=sample_dfe_config,
         pipeline_config=sample_dfe_config["ingestion_pipelines"]["test-pipeline"],
-        output_dir=os.path.join(temp_dir, "output"),
+        output_dir=output_dir,
     )
 
-    # Pipeline should build successfully even without secret vars
-    # because they are handled by Kubernetes secrets at runtime
-    try:
-        pipeline.build()
-        # If we reach here, the pipeline rendered successfully
-        assert True
-    except PipelineSchemaError as e:
-        # Should not fail due to missing secret vars
-        assert "CLICKHOUSE_AUTH_USER" not in str(e)
-        assert "CLICKHOUSE_AUTH_PASSWORD" not in str(e)
-        assert "CLICKHOUSE_ENDPOINT" not in str(e)
-        assert "KAFKA_BROKERS_SASL_SCRAM" not in str(e)
-        assert "KAFKA_SASL_USERNAME" not in str(e)
-        assert "KAFKA_SASL_PASSWORD" not in str(e)
+    # The step templates require all six, and Kubernetes secrets supply them at runtime.
+    pipeline.build()
+
+    with open(os.path.join(output_dir, "test-pipeline.yaml")) as f:
+        manifest = yaml.safe_load(f)
+    plain_env = {item["name"] for item in manifest["env"] if "valueFrom" not in item}
+    config_map = set(manifest["extraObjects"][0]["data"])
+    assert sorted((plain_env | config_map) & set(secrets_to_remove)) == []
+    brokers = next(e for e in manifest["env"] if e["name"] == "KAFKA_BROKERS_SASL_SCRAM")
+    assert brokers["valueFrom"]["secretKeyRef"]["name"] == "kafka-sasl-secret"
 
 
 def test_pipeline_fails_with_missing_non_secret_env_vars(sample_dfe_config, sample_steps, temp_dir):

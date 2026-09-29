@@ -52,7 +52,7 @@ link-local), and - when `DFE_SIGMA_ALLOWED_HOSTS` is set - must be allow-listed.
 `sync_provider` fetches a provider and UPSERTs its docs by `id` into the id-keyed
 gitcrud catalogue (`catalog.py`). The upsert is idempotent and local-edit
 preserving: an operator can edit a catalogued rule and a later re-sync keeps that
-edit (via `deep_merge(replace_lists=True)`), reporting drift when the upstream
+edit (via `deep_merge`, where the operator's lists replace upstream's), reporting drift when the upstream
 changed. The operator then SELECTS the rules to activate; selection is its own
 gitcrud object.
 

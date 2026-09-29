@@ -2,7 +2,9 @@
 # /keda/pressure + /keda/hunt-backlog aliases); the shim runs the SQL named here
 # and returns {"value": <int>}. OVERRIDE or EXTEND these via a YAML file at
 # DFE_KEDA_SHIM_QUERY_CONFIG (deep-merged over these defaults) - change a query, or
-# add a new scaling signal, with a config edit and NO rebuild.
+# add a new scaling signal, with a config edit and NO rebuild. A new query name adds
+# a query and a key under an existing one overrides it, but a list in the override
+# (`params`) REPLACES the built-in list rather than extending it.
 #
 # Per-query keys:
 #   database         otel | data | <literal db>. Both otel and data resolve to the

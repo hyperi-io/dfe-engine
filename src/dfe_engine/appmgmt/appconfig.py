@@ -544,7 +544,7 @@ def _render_one(
     per_instance = app.multiplicity is Multiplicity.PER_CONFIG and instance is not None
     leaf = f"{app.service}/{instance.instance}" if per_instance else app.service
 
-    config = deep_merge(_base_config(settings, app.service), _config_block(doc), replace_lists=True)
+    config = deep_merge(_base_config(settings, app.service), _config_block(doc))
     reloads = _enable_reload(app, config)
     app_dir = out_root / leaf
     # A directory this render creates has no container reading it yet, so the

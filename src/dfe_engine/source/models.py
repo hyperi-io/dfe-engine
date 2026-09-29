@@ -452,7 +452,7 @@ class SourceTransform(BaseModel):
         # The catalogue (dfe-infra apps.yaml) is the only list of transform apps
         # that exist, so the accepted engines are read from it, never written here.
         # Imported at call time: appmgmt's package init reaches this module through
-        # helm.compiler -> source.registry, so a top-level import is a cycle.
+        # appmgmt.routing -> dfe_engine.source, so a top-level import is a cycle.
         from dfe_engine.appmgmt.catalogue import transform_engines
 
         valid = transform_engines()
@@ -650,7 +650,7 @@ class SourceFetcher(BaseModel):
     def _validate_source_type(cls, v: str) -> str:
         # The manifest (dfe-infra apps.yaml) lists the fetcher's source families;
         # a manifest that declares none leaves the value unchecked. Imported at call
-        # time: appmgmt reaches this module through helm.compiler -> source.registry.
+        # time: appmgmt reaches this module through appmgmt.routing -> dfe_engine.source.
         from dfe_engine.appmgmt.catalogue import source_types
 
         valid = source_types()

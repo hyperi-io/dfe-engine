@@ -312,10 +312,20 @@ class TestDeepMerge:
         deep_merge(base, {"a": {"y": 2}})
         assert base == {"a": {"x": 1, "y": 2}}
 
-    def test_list_append(self):
+    def test_an_override_list_replaces_the_base_list(self):
         base = {"items": [1, 2]}
         deep_merge(base, {"items": [3, 4]})
-        assert base["items"] == [1, 2, 3, 4]
+        assert base["items"] == [3, 4]
+
+    def test_a_nested_override_list_replaces_the_base_list(self):
+        base = {"kafka": {"brokers": ["localhost:9092"], "acks": "all"}}
+        deep_merge(base, {"kafka": {"brokers": ["kafka.dfe:9092"]}})
+        assert base == {"kafka": {"brokers": ["kafka.dfe:9092"], "acks": "all"}}
+
+    def test_an_empty_override_list_empties_the_base_list(self):
+        base = {"items": [1, 2]}
+        deep_merge(base, {"items": []})
+        assert base["items"] == []
 
     def test_set_union(self):
         base = {"tags": {1, 2}}

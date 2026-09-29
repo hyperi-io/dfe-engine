@@ -65,8 +65,8 @@ API_ENFORCED_ACTIONS: frozenset[str] = frozenset(
 # Format: argo:<resource>:<action>  (e.g. argo:applications:sync)
 # These are NOT hardcoded -- any argo:*:* action is valid.
 # The RBAC YAML config is the source of truth for which argo actions
-# each role can perform. The prefix is used to generate Argo CD
-# argocd-rbac-cm policies from engine role definitions.
+# each role can perform. The prefix is published with the scope catalogue
+# (auth/rbac_scopes); the engine writes no Argo CD RBAC policy of its own.
 ARGO_ACTION_PREFIX = "argo:"
 
 

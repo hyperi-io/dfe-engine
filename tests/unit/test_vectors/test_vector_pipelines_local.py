@@ -191,16 +191,13 @@ def test_gather_env_variables_for_pipeline(sample_dfe_config):
     assert "PROMETHEUS_EXPORTER" in env_vars
     assert env_vars["PROMETHEUS_EXPORTER"] == "0.0.0.0:9090"
 
-    # Check that pipeline env vars are included - for now just verify it exists
-    # TODO: Check why pipeline env vars are not overriding default env vars
-    assert "KAFKA_SOURCE_TOPIC_LIST" in env_vars
+    # The pipeline's own value wins over the package default, though a step requires it.
+    assert env_vars["KAFKA_SOURCE_TOPIC_LIST"] == ["logs_test_load"]
+    assert vector_env_vars["KAFKA_SOURCE_TOPIC_LIST"] == ["logs_test_load"]
 
     # Check that meta vars are included
     assert "EXPECTED_EPS" in env_vars
     assert env_vars["EXPECTED_EPS"] == 1000
-
-    # Check that vector_env_vars contains step-specific variables
-    assert isinstance(vector_env_vars, dict)
 
 
 def test_read_vector_step_config(sample_dfe_config):
