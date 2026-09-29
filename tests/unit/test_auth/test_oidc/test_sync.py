@@ -353,6 +353,38 @@ class TestSyncNeverTakesAGroupNoAdminLinked:
         assert _resolve_roles_from_groups([self.ATTACKER], group_store) == ([], [])
         assert _resolve_roles_from_groups(["g-soc"], group_store) == (["data_analyst"], [])
 
+    async def test_a_group_linked_by_id_alone_syncs_and_gains_its_provider(
+        self, registries, api_provider
+    ):
+        """SCIM and a hand-edited group file set only source_id, and that id is the link."""
+        provider_registry, group_store = registries
+        provider_registry.create("test-sso", api_provider)
+        group_store.create("soc-team", roles=["data_analyst"], description="Old")
+        group_store.update("soc-team", source_id="g-soc")
+        groups = [GroupInfo(id="g-soc", name="SOC Team", email="", description="New")]
+
+        result = await sync_provider(
+            "test-sso", provider_registry, group_store, adapter=FakeAdapter(api_provider, groups)
+        )
+
+        assert (result["updated"], result["groups_skipped"]) == (1, 0)
+        stored = group_store.get("soc-team")
+        assert (stored.source_provider, stored.source_id) == ("test-sso", "g-soc")
+        assert (stored.roles, stored.description) == (["data_analyst"], "New")
+
+    async def test_an_idp_group_with_no_id_links_nothing(self, seeded, api_provider):
+        """An empty id would otherwise match every group that carries no source_id."""
+        provider_registry, group_store = seeded
+        before = group_store.get("dfe-admins")
+        groups = [GroupInfo(id="", name="DFE Admins", email="")]
+
+        result = await sync_provider(
+            "test-sso", provider_registry, group_store, adapter=FakeAdapter(api_provider, groups)
+        )
+
+        assert (result["updated"], result["groups_skipped"]) == (0, 1)
+        assert group_store.get("dfe-admins") == before
+
     async def test_a_skipped_group_does_not_stop_the_rest(self, seeded, api_provider):
         provider_registry, group_store = seeded
         groups = [

@@ -147,7 +147,7 @@ if group resolution degrades.
 
 ### Sync and control-plane independence
 
-`auth/oidc/sync.py` enumerates a provider's groups (api mode). It creates a group file for each new one, linked by `source_provider` and `source_id`, and updates only files already linked to that IdP group, preserving their roles. A file of the same name with no link is skipped as `name_taken`: a display name is no identity, so linking one is an admin's act (rbac.md section 4.4). Detaching a provider does NOT delete its groups - they orphan with `source_provider` set, reported on delete.
+`auth/oidc/sync.py` enumerates a provider's groups (api mode). It creates a group file for each new one, linked by `source_provider` and `source_id`, and updates only files already linked to that IdP group (their `source_id` is its id), preserving their roles. A file of the same name with no link is skipped as `name_taken`: a display name is no identity, so linking one is an admin's act (rbac.md section 4.4). Detaching a provider does NOT delete its groups - they orphan with `source_provider` set, reported on delete.
 
 **The OIDC auth flow does not depend on dfe-engine running.** Envoy (fallback
 path) keeps doing OIDC from a static CRD; group files on disk keep resolving

@@ -46,7 +46,7 @@ SyncSkipReason = Literal["invalid_name", "stored_unloadable", "name_taken"]
   characters, or not starting with a letter or digit.
 - ``stored_unloadable``: a stored group that does not load already holds its name.
 - ``name_taken``: a stored group holds its name and is not linked to it: the stored
-  group names no provider, or carries another provider group's id.
+  group carries no ``source_id``, or another provider group's id.
 """
 
 # The provider's last_sync_status names each reason that skipped a group.
@@ -106,8 +106,8 @@ async def sync_provider(
     """Run group sync for a single OIDC provider.
 
     Fetches all groups from the provider's API and upserts them into
-    *group_store*.  A stored group linked to the provider group (it names a
-    provider and carries the group's id) has its description and source
+    *group_store*.  A stored group linked to the provider group (its
+    ``source_id`` is the group's id) has its description and source
     metadata updated, and keeps its roles.  A stored group of the same name
     with no such link is left untouched and counted as ``name_taken``:
     linking one is an admin's act.  New groups are created with empty roles,
@@ -248,8 +248,8 @@ async def sync_provider(
             created += 1
             continue
 
-        # A name match is no link: only an admin, or this sync creating it, links a group.
-        if not existing.source_provider or existing.source_id != group_info.id:
+        # A name match is no link: only the IdP group's own id links a group, and a user cannot choose that.
+        if not group_info.id or existing.source_id != group_info.id:
             logger.warning(
                 "OIDC group sync skipped a group whose name is held by a group not linked to it",
                 provider=provider_name,
