@@ -12,8 +12,6 @@ unit suite. The fail-safe tests are the important ones - a metric outage must ho
 last-good / cold value, never scale up.
 """
 
-from __future__ import annotations
-
 import pytest
 
 from dfe_engine.keda_shim.shim import QueryShim
@@ -118,3 +116,36 @@ def test_unknown_query_raises_keyerror():
 def test_query_names_lists_builtins():
     shim = _shim(_FakeClient())
     assert shim.query_names == ["backlog", "pressure"]
+
+
+def _overridden_shim(client: _FakeClient, tmp_path, override: str) -> QueryShim:
+    path = tmp_path / "queries.yaml"
+    path.write_text(override, encoding="utf-8")
+    settings = DFESettings(env="test", keda_shim={"query_config": str(path)})
+    return QueryShim(settings, client_factory=lambda: client)
+
+
+def test_an_override_params_list_replaces_the_builtin_one(tmp_path):
+    """A rewritten query binds exactly the params its override names."""
+    client = _FakeClient(rows=[[42]])
+    shim = _overridden_shim(
+        client,
+        tmp_path,
+        "queries:\n"
+        "  pressure:\n"
+        "    sql: SELECT count() FROM __DB__.t WHERE app = {app:String}\n"
+        "    params: [app]\n",
+    )
+
+    assert shim.run("pressure", {"app": "dfe-receiver"}) == 42
+    assert client.calls[0][1] == {"window_seconds": 60, "app": "dfe-receiver"}
+
+
+def test_an_override_adds_a_query_beside_the_builtins(tmp_path):
+    shim = _overridden_shim(
+        _FakeClient(),
+        tmp_path,
+        "queries:\n  spool:\n    database: data\n    sql: SELECT 1\n",
+    )
+
+    assert shim.query_names == ["backlog", "pressure", "spool"]
