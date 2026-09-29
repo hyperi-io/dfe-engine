@@ -32,7 +32,8 @@ What is REFUSED and named:
   actioned
 
 A refusal is not a failure of the pass. The object is named, the rest of the
-manifest still converges, and an operator applies the change deliberately with
+manifest still converges, a column the same table gains is still added, and an
+operator applies the refused change deliberately with
 ``dfe schema apply --allow-drift``. A table whose TTL is the deployment default
 also takes an admin's change of that default through :meth:`ManifestApplier.reconcile_ttl`.
 """
@@ -92,7 +93,11 @@ class ObjectOutcome:
             added = ", ".join(self.columns_added)
             return f"altered {self.qualified}: added {len(self.columns_added)} column(s) [{added}]"
         if self.action == "refused":
-            return f"refused {self.qualified}: {'; '.join(self.drift) or self.reason}"
+            refused = f"refused {self.qualified}: {'; '.join(self.drift) or self.reason}"
+            if self.columns_added:
+                added = ", ".join(self.columns_added)
+                refused += f"; added {len(self.columns_added)} column(s) [{added}]"
+            return refused
         if self.action == "skipped":
             return f"skipped {self.qualified}: {self.reason}"
         return f"unchanged {self.qualified}"
@@ -391,22 +396,30 @@ class ManifestApplier:
         extra = [name for name in live if name not in declared]
         drift = self._table_drift(rendered, declared, live)
 
-        if drift and not self._allow_drift:
-            return self._record(rendered, "refused", drift=tuple(drift), extra_columns=tuple(extra))
-
         added: list[str] = []
         for name in missing:
             if not rendered.additive:
                 return self._record(
                     rendered,
                     "refused",
-                    drift=(f"{name} is a new column on an object declared non-additive",),
+                    drift=(f"{name} is a new column on an object declared non-additive", *drift),
                 )
             self._run(
                 f"ALTER TABLE {self._target(database, rendered.name)}{self._on_cluster(statement)} "
                 f"ADD COLUMN IF NOT EXISTS `{name}` {clauses[name]}"
             )
             added.append(name)
+
+        # A new column is additive whatever else drifted, so a refusal never holds one back.
+        if drift and not self._allow_drift:
+            return self._record(
+                rendered,
+                "refused",
+                columns_added=tuple(added),
+                drift=tuple(drift),
+                extra_columns=tuple(extra),
+            )
+
         for message in drift:
             self._apply_drift(rendered, message, clauses)
 
