@@ -8,14 +8,12 @@ DELETE /api/v1/rules/{name}    -> Delete rule
 POST   /api/v1/rules/validate     -> Validate SQL/CEL without creating
 """
 
-from __future__ import annotations
-
 import functools
 import re
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel, Field, field_validator, model_validator
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel, Field, field_validator
 from scalo.concurrency import run_blocking
 
 from dfe_engine.api.deps import CurrentUser, HuntConfigReg, RuleReg, Settings, require_action
@@ -27,6 +25,8 @@ from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.git_identity import git_author
 from dfe_engine.hunts.hunt_config_registry import default_display_name
+from dfe_engine.hunts.rule_creation_service import CostEstimate
+from dfe_engine.hunts.rule_guard import source_label
 from dfe_engine.hunts.rule_registry import RuleNotFoundError
 
 _RULE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -37,10 +37,12 @@ _REFUSED_RULE_RESPONSES: dict[int | str, dict] = {
     422: {
         "model": ErrorResponse,
         "description": (
-            "Refused, nothing written: the body failed validation (code validation_error), "
-            "or the hunt runner could not compile the rule -- its SQL does not parse as "
+            "Refused, nothing written. The body failed validation (code validation_error). "
+            "Or the hunt runner could not compile the rule -- its SQL does not parse as "
             "one SELECT, names no <db>.<table> source, or has no WHERE to detect with "
-            "(code invalid_sql, the errors in context.sql_errors)"
+            "(code invalid_sql, the errors in context.sql_errors). Or the rule matches "
+            "every event in its source (code rule_matches_everything, the source and "
+            "detection WHERE in context)."
         ),
     },
 }
@@ -65,8 +67,20 @@ class _RuleWriteFields(BaseModel):
     cel_filter: str | None = Field(default=None, description="CEL expression filter")
     hunt_name: str | None = Field(default=None, description="Parent hunt name")
     source: str | None = Field(default=None, description="Source label (e.g. windows_audit)")
-    estimate_cost: bool = Field(default=False, description="Run EXPLAIN and estimate query cost")
-    cost_window_minutes: int = Field(default=60, description="Window in minutes for cost estimate")
+    estimate_cost: bool = Field(
+        default=True,
+        description=(
+            "Return the alert-volume preview's measurement as cost_estimate. The preview "
+            "and its warnings on the rule follow the deployment's detection guard either way."
+        ),
+    )
+    cost_window_minutes: int | None = Field(
+        default=None,
+        description=(
+            "Lookback window in minutes the preview counts over. Absent or 0 uses the "
+            "deployment's preview window."
+        ),
+    )
 
 
 class RuleCreateRequest(_RuleWriteFields):
@@ -110,14 +124,6 @@ class SqlValidationResponse(BaseModel):
     errors: list[SqlValidationError] = Field(default_factory=list)
 
 
-class CostEstimate(BaseModel):
-    estimated_rows: int | None = None
-    explain_plan: str | None = None
-    explain_duration_ms: float | None = None
-    window_minutes: int = 60
-    warnings: list[str] = Field(default_factory=list)
-
-
 class RuleResponse(BaseModel):
     name: str = Field(description="Rule file name (YAML stem)")
     display_name: str = Field(description="Human-readable rule label")
@@ -153,26 +159,20 @@ class RuleCreateResponse(BaseModel):
 
 
 class RuleFromHyperdxRequest(BaseModel):
-    """Create a hunt rule from a live HyperDX view.
+    """Create a hunt rule from the SQL a HyperDX view runs.
 
-    Supply ``saved_search_id`` and the engine asks HyperDX what SQL that view
-    actually runs. Supply ``raw_sql`` and the caller's string is taken on trust,
-    which on a SQL-mode search is whatever sits in the editor rather than the
-    query the view executes.
-
-    Either way the create pipeline strips the UI meta (time bounds, LIMIT,
-    ``__hdx_time_bucket``, SETTINGS) via the HyperDX sanitizer, and the engine
-    derives a unique rule id from the saved-search name. The caller gets that id
-    back and opens ``/rules/{id}`` -- no id to invent, no IndexedDB round-trip.
+    HyperDX renders the view to ``raw_sql`` and sends it here. The create
+    pipeline strips the UI meta (time bounds, LIMIT, ``__hdx_time_bucket``,
+    SETTINGS) via the HyperDX sanitizer, and the engine derives a unique rule id
+    from the saved-search name. The caller gets that id back and opens
+    ``/rules/{id}`` -- no id to invent, no IndexedDB round-trip.
     """
 
-    saved_search_id: str | None = Field(
-        default=None,
-        description="HyperDX saved-search id; the engine resolves the SQL that view runs",
-    )
-    raw_sql: str | None = Field(
-        default=None,
-        description="Pre-rendered ClickHouse SELECT, trusted as given",
+    model_config = {"extra": "forbid"}
+
+    raw_sql: str = Field(
+        min_length=1,
+        description="The ClickHouse SELECT the HyperDX view renders to",
     )
     saved_search_name: str | None = Field(
         default=None, description="HyperDX saved-search name; seeds the rule id and label"
@@ -181,20 +181,10 @@ class RuleFromHyperdxRequest(BaseModel):
     hunt_name: str | None = Field(default=None, description="Parent hunt name")
     source: str | None = Field(default=None, description="Source label (e.g. windows_audit)")
 
-    @model_validator(mode="after")
-    def _one_sql_source(self):
-        """Require exactly one SQL source, so neither silently wins over the other."""
-        if bool(self.saved_search_id) == bool(self.raw_sql):
-            raise ValueError("supply exactly one of saved_search_id or raw_sql")
-        return self
-
 
 class RuleFromHyperdxResponse(BaseModel):
     id: str = Field(description="Created rule id (YAML stem); open at /rules/{id}")
     display_name: str
-    resolved_from: Literal["saved_search", "raw_sql"] = Field(
-        default="raw_sql", description="Which SQL source the rule was built from"
-    )
     sanitize_summary: dict = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     sql_errors: list[SqlValidationError] = Field(default_factory=list)
@@ -277,7 +267,7 @@ def create_rule(
             detail={"code": "conflict", "message": f"Rule '{body.name}' already exists"},
         )
 
-    service = RuleCreationService(ch_config=get_clickhouse_config(settings))
+    service = RuleCreationService(ch_config=get_clickhouse_config(settings), hunts=settings.hunts)
     display = (
         body.display_name if body.display_name is not None else default_display_name(body.name)
     )
@@ -296,12 +286,13 @@ def create_rule(
 
     result = service.create_rule(svc_request, body.name)
     _refuse_uncompilable(result)
+    _refuse_matches_everything(result)
     outcome = registry.save(
         result.rule, created_by=git_author(user), description=f"rule: create {body.name}"
     )
     apply_review_headers(response, outcome)
     audit_resource_change(user.user_id, "rule", body.name, "created", review_audit_detail(outcome))
-    return _build_create_response(result, body.cost_window_minutes)
+    return _build_create_response(result)
 
 
 @router.post(
@@ -313,39 +304,26 @@ def create_rule(
 )
 async def create_rule_from_hyperdx(
     body: RuleFromHyperdxRequest,
-    request: Request,
     user: CurrentUser,
     settings: Settings,
     registry: RuleReg,
     response: Response,
 ):
-    """Create a hunt rule from a HyperDX view's expanded query.
+    """Create a hunt rule from the SQL a HyperDX view renders to.
 
     Wraps the create pipeline with ``source_type='hyperdx'`` and auto-derives a
     unique rule id from the saved-search name, so the caller need not supply one.
-    A view whose SQL the hunt runner could not compile is refused with 422.
-    RBAC: ``rule:write`` (data_analyst) -- ``org_viewer`` has neither this grant nor
-    the UI button.
+    A view whose SQL the hunt runner could not compile, or that matches every
+    event, is refused with 422. RBAC: ``rule:write`` (data_analyst) --
+    ``org_viewer`` has neither this grant nor the UI button.
     """
-    raw_sql, search_name = await _resolve_hyperdx_sql(request, body)
     return await run_blocking(
-        functools.partial(
-            _create_rule_from_sql,
-            body,
-            raw_sql,
-            search_name,
-            user,
-            settings,
-            registry,
-            response,
-        )
+        functools.partial(_create_rule_from_sql, body, user, settings, registry, response)
     )
 
 
 def _create_rule_from_sql(
     body: RuleFromHyperdxRequest,
-    raw_sql: str,
-    search_name: str | None,
     user: CurrentUser,
     settings: Settings,
     registry: RuleReg,
@@ -360,23 +338,22 @@ def _create_rule_from_sql(
     )
     from dfe_engine.settings import get_clickhouse_config
 
-    resolved_from = "raw_sql" if body.raw_sql else "saved_search"
+    rule_id = _unique_rule_id(registry, body.saved_search_name)
+    display = body.saved_search_name or default_display_name(rule_id)
 
-    rule_id = _unique_rule_id(registry, search_name)
-    display = search_name or default_display_name(rule_id)
-
-    service = RuleCreationService(ch_config=get_clickhouse_config(settings))
+    service = RuleCreationService(ch_config=get_clickhouse_config(settings), hunts=settings.hunts)
     svc_request = SvcRequest(
         name=display,
         severity=body.severity,
         source_type="hyperdx",
-        user_sql=raw_sql,
+        user_sql=body.raw_sql,
         hunt_name=body.hunt_name,
         source=body.source,
     )
 
     result = service.create_rule(svc_request, rule_id)
     _refuse_uncompilable(result)
+    _refuse_matches_everything(result)
     outcome = registry.save(
         result.rule,
         created_by=git_author(user),
@@ -387,9 +364,8 @@ def _create_rule_from_sql(
     return RuleFromHyperdxResponse(
         id=rule_id,
         display_name=result.rule.name,
-        resolved_from=resolved_from,
         sanitize_summary=result.sanitize_summary or {},
-        warnings=list(getattr(result.rule, "warnings", []) or []),
+        warnings=list(result.rule.warnings),
         sql_errors=_map_sql_errors(result.sql_errors or []),
     )
 
@@ -482,7 +458,7 @@ def update_rule(
     )
     from dfe_engine.settings import get_clickhouse_config
 
-    service = RuleCreationService(ch_config=get_clickhouse_config(settings))
+    service = RuleCreationService(ch_config=get_clickhouse_config(settings), hunts=settings.hunts)
     effective_display = body.display_name if body.display_name is not None else existing.name
     effective_source = body.source if body.source is not None else existing.source
     effective_hunt = body.hunt_name if body.hunt_name is not None else existing.hunt_name
@@ -499,6 +475,7 @@ def update_rule(
     )
     result = service.create_rule(svc_request, name)
     _refuse_uncompilable(result)
+    _refuse_matches_everything(result)
     updated = result.rule.model_copy(
         update={"created_at": existing.created_at, "name": effective_display},
     )
@@ -507,10 +484,7 @@ def update_rule(
     )
     apply_review_headers(response, outcome)
     audit_resource_change(user.user_id, "rule", name, "updated", review_audit_detail(outcome))
-    return _build_create_response(
-        result.model_copy(update={"rule": updated}),
-        body.cost_window_minutes,
-    )
+    return _build_create_response(result.model_copy(update={"rule": updated}))
 
 
 @router.delete(
@@ -618,6 +592,26 @@ def _refuse_uncompilable(result) -> None:
     )
 
 
+def _refuse_matches_everything(result) -> None:
+    """Refuse, before anything is written, a rule whose condition matches every event.
+
+    Raises:
+        HTTPException: 422 ``rule_matches_everything``, with the source and the
+            detection WHERE in context.
+    """
+    if not result.matches_everything:
+        return
+    raise HTTPException(
+        status_code=422,
+        detail={
+            "code": ErrorCode.RULE_MATCHES_EVERYTHING,
+            "message": result.matches_everything,
+            "source": source_label(result.rule),
+            "where_clause": result.rule.where_clause,
+        },
+    )
+
+
 def _slugify_rule_id(text: str | None) -> str:
     """Slug free text into the rule-id charset /^[a-zA-Z0-9_-]+$/, falling back to a default."""
     base = re.sub(r"[^a-zA-Z0-9_-]+", "-", (text or "").strip()).strip("-").lower()
@@ -635,58 +629,11 @@ def _unique_rule_id(registry, saved_search_name: str | None) -> str:
     return candidate
 
 
-async def _resolve_hyperdx_sql(
-    request: Request, body: RuleFromHyperdxRequest
-) -> tuple[str, str | None]:
-    """Return the SQL to build the rule from, plus the saved-search name to label it.
-
-    A saved-search id is resolved by ASKING HyperDX what that view runs, rather
-    than re-rendering it here: the fork owns the chart-config renderer, and a
-    second renderer would be a second definition of what the view means.
-    """
-    if body.raw_sql:
-        return body.raw_sql, body.saved_search_name
-
-    client = getattr(request.app.state, "hyperdx_client", None)
-    if client is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "hyperdx_unconfigured",
-                "message": "saved_search_id needs a configured HyperDX; send raw_sql instead",
-            },
-        )
-
-    rendered = await client.saved_search_sql(body.saved_search_id or "")
-    sql = (rendered or {}).get("rawSql") or ""
-    if not (sql):
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "code": "hyperdx_render_failed",
-                "message": (f"HyperDX returned no SQL for saved search {body.saved_search_id!r}"),
-            },
-        )
-    return sql, body.saved_search_name or (rendered or {}).get("savedSearchName")
-
-
-def _build_create_response(result, cost_window_minutes: int) -> RuleCreateResponse:
-    rule_data = result.rule
-    cost = None
-    if result.cost_estimate:
-        ce = result.cost_estimate
-        cost = CostEstimate(
-            estimated_rows=getattr(ce, "estimated_rows", None),
-            explain_plan=getattr(ce, "explain_plan", None),
-            explain_duration_ms=getattr(ce, "explain_duration_ms", None),
-            window_minutes=getattr(ce, "window_minutes", cost_window_minutes),
-            warnings=getattr(ce, "warnings", []),
-        )
-
+def _build_create_response(result) -> RuleCreateResponse:
     sql_errors = _map_sql_errors(result.sql_errors or [])
     return RuleCreateResponse(
-        rule=_rule_to_response(rule_data, sql_errors=sql_errors),
+        rule=_rule_to_response(result.rule, sql_errors=sql_errors),
         sanitize_summary=result.sanitize_summary or {},
         sql_errors=sql_errors,
-        cost_estimate=cost,
+        cost_estimate=result.cost_estimate,
     )

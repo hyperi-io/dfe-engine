@@ -4,8 +4,10 @@ Orchestrates the full rule creation workflow:
 1. HyperDX SQL sanitization (if source_type="hyperdx")
 2. SQL syntax validation with helpful error messages
 3. Rule creation via Rule.from_create()
-4. Optional EXPLAIN cost estimation against ClickHouse
-5. AI analysis stub for async TS runner consumption
+4. The match-everything check, which the API refuses on
+5. The alert-volume preview: a count over a lookback window on the rule's
+   source table, banded into warnings on the rule
+6. AI analysis stub for async TS runner consumption
 
 dfe-engine is a library -- no HTTP endpoints here. The control-plane
 wraps this service in API routes.
@@ -31,18 +33,30 @@ Usage::
     # result.sanitize_summary -- what was stripped
 """
 
-from __future__ import annotations
-
 import re
-from datetime import UTC, datetime
-from typing import Any, Literal
+import time
+from typing import Any, Literal, Protocol
 
 import sqlglot
+from clickhouse_connect.driver.exceptions import ClickHouseError
 from pydantic import BaseModel, Field, model_validator
 from scalo.logger import logger
+from scalo.resilience import ServiceUnavailable
 from sqlglot.errors import ParseError
 
+from ..clickhouse.errors import ErrorCategory, wrap_ch_error
+from ..settings import DetectionGuardSettings, HuntsSettings
 from .hdx_sanitizer import HdxSanitizeError, HdxSanitizer, HdxSanitizeResult
+from .rule_guard import (
+    VolumeBand,
+    VolumeMeasure,
+    match_everything,
+    preview_settings,
+    preview_sql,
+    source_label,
+    unmeasured_warning,
+    volume_verdict,
+)
 from .rule_model import Rule, RuleCreate
 from .rule_rewriter import RuleRewriter
 
@@ -68,9 +82,16 @@ class RuleCreateRequest(BaseModel):
     source: str | None = Field(
         default=None, description="Source name for SourceRegistry resolution"
     )
-    estimate_cost: bool = Field(default=False, description="Run EXPLAIN to estimate query cost")
-    cost_window_minutes: int = Field(
-        default=10, description="Time window (minutes) for cost estimation"
+    estimate_cost: bool = Field(
+        default=True,
+        description="Return the measured alert-volume preview in the result's cost_estimate",
+    )
+    cost_window_minutes: int | None = Field(
+        default=None,
+        description=(
+            "Lookback window (minutes) the preview counts over. Absent or 0 uses the "
+            "deployment's hunts.detection_guard.preview_window_minutes."
+        ),
     )
 
     @model_validator(mode="after")
@@ -89,13 +110,35 @@ class SqlValidationError(BaseModel):
 
 
 class CostEstimate(BaseModel):
-    """EXPLAIN-based query cost estimate."""
+    """What the alert-volume preview measured over its lookback window."""
 
-    estimated_rows: int | None = None
-    explain_plan: str | None = None
-    explain_duration_ms: float | None = None
-    window_minutes: int = 10
+    estimated_rows: int | None = Field(
+        default=None, description="Events the rule matched in the window"
+    )
+    rows_in_window: int | None = Field(
+        default=None, description="Events in the source table in the window"
+    )
+    projected_per_day: int | None = Field(
+        default=None, description="Matches projected to a day at the window's rate"
+    )
+    match_ratio: float | None = Field(
+        default=None, description="Share of the window's events the rule matched"
+    )
+    band: VolumeBand = Field(
+        default=VolumeBand.UNMEASURED,
+        description="ok, guidance, warn, plainly_bad, or unmeasured when the preview did not finish",
+    )
+    window_minutes: int
+    duration_ms: float | None = Field(default=None, description="How long the preview took")
     warnings: list[str] = Field(default_factory=list)
+
+
+class ChQueryClient(Protocol):
+    """A ClickHouse client the preview can run its count through."""
+
+    def query(self, query: str, *args: Any, **kwargs: Any) -> Any:
+        """Run a SELECT and return a result carrying ``result_rows``."""
+        ...
 
 
 class AIAnalysisStub(BaseModel):
@@ -116,6 +159,9 @@ class RuleCreateResult(BaseModel):
     rule: Rule
     sanitize_summary: dict[str, Any] = Field(default_factory=dict)
     sql_errors: list[SqlValidationError] = Field(default_factory=list)
+    matches_everything: str | None = Field(
+        default=None, description="Why the rule matches every event, when it does"
+    )
     cost_estimate: CostEstimate | None = None
     ai_context: AIAnalysisStub | None = None
 
@@ -141,6 +187,31 @@ def _mask_quoted(sql: str) -> str:
     return _QUOTED_RE.sub(_blank_inside, sql)
 
 
+# ClickHouse error codes the preview names in its own words.
+_TOO_MANY_ROWS = 158
+_MEMORY_LIMIT_EXCEEDED = 241
+
+
+def _failure_reason(
+    exc: ClickHouseError, guard: DetectionGuardSettings, window: int, source: str
+) -> str:
+    """Why the preview query failed, in words a rule author can act on."""
+    error = wrap_ch_error(exc)
+    if error.category is ErrorCategory.TIMEOUT:
+        return f"it ran past its {guard.preview_timeout_seconds:g} second limit on {source}"
+    if error.code == _TOO_MANY_ROWS:
+        return (
+            f"the last {window} minutes of {source} are more than its "
+            f"{guard.preview_max_rows:,} row limit"
+        )
+    if error.code == _MEMORY_LIMIT_EXCEEDED:
+        return "it needed more memory than ClickHouse allows it"
+    if error.category is ErrorCategory.CONNECTION:
+        return "ClickHouse could not be reached"
+    detail = str(exc).strip().splitlines()[0] if error.user_safe and str(exc).strip() else ""
+    return f"ClickHouse refused it ({detail})" if detail else "ClickHouse refused it"
+
+
 # -- Service ------------------------------------------------
 
 
@@ -150,8 +221,12 @@ class RuleCreationService:
     Args:
         rewriter: Custom RuleRewriter instance (optional).
         hdx_sanitizer: Custom HdxSanitizer instance (optional).
-        ch_config: ClickHouse config for cost estimation (optional).
-            When None, cost estimation is skipped gracefully.
+        ch_config: ClickHouse config. With it, the parse check and the volume
+            preview use the engine's pooled ClickHouse client.
+        hunts: Hunt settings: the detection guard's thresholds and the load-time
+            column the runner windows on. Defaults when omitted.
+        ch_client: ClickHouse client for the volume preview, in place of the
+            pooled one.
     """
 
     def __init__(
@@ -160,10 +235,14 @@ class RuleCreationService:
         rewriter: RuleRewriter | None = None,
         hdx_sanitizer: HdxSanitizer | None = None,
         ch_config: dict[str, Any] | None = None,
+        hunts: HuntsSettings | None = None,
+        ch_client: ChQueryClient | None = None,
     ) -> None:
         self._rewriter = rewriter or RuleRewriter()
         self._hdx_sanitizer = hdx_sanitizer or HdxSanitizer()
         self._ch_config = ch_config
+        self._hunts = hunts or HuntsSettings()
+        self._ch_client = ch_client
 
     # -- Public API ----------------------------------------
 
@@ -172,14 +251,20 @@ class RuleCreationService:
         request: RuleCreateRequest,
         rule_id: str,
     ) -> RuleCreateResult:
-        """Full pipeline: sanitize -> validate -> Rule.from_create -> EXPLAIN -> AI stub.
+        """Full pipeline: sanitize -> validate -> Rule.from_create -> guards -> AI stub.
+
+        The volume preview runs only on a rule that would be saved. With the
+        detection guard enabled its warnings join the rule's own, and
+        ``estimate_cost`` decides whether the measurement comes back as
+        ``cost_estimate``.
 
         Args:
             request: Rule creation request with SQL and/or CEL filter.
             rule_id: Unique rule identifier.
 
         Returns:
-            RuleCreateResult with rule, validation errors, cost estimate, and AI context.
+            RuleCreateResult with rule, validation errors, the match-everything
+            verdict, cost estimate, and AI context.
         """
         sanitize_summary: dict[str, Any] = {}
         clean_sql = request.user_sql
@@ -218,12 +303,25 @@ class RuleCreationService:
         )
         rule = Rule.from_create(rule_create, rule_id=rule_id, rewriter=self._rewriter)
 
-        # Phase 4: Cost estimation (optional, best-effort)
-        cost_estimate: CostEstimate | None = None
-        if request.estimate_cost and rule.source_table:
-            cost_estimate = self._estimate_cost(rule, request.cost_window_minutes)
+        # Phase 4: a rule the API will refuse is neither judged nor measured further.
+        refused = bool(sql_errors or rule.validate_rule())
+        matches_everything = (
+            None if refused else match_everything(rule.where_clause, source_label(rule))
+        )
 
-        # Phase 5: AI analysis stub
+        # Phase 5: alert-volume preview
+        guard = self._hunts.detection_guard
+        cost_estimate: CostEstimate | None = None
+        measurable = not refused and matches_everything is None
+        if measurable and rule.source_db and rule.source_table:
+            if guard.enabled or request.estimate_cost:
+                cost_estimate = self._preview_volume(rule, request.cost_window_minutes)
+            if guard.enabled and cost_estimate is not None:
+                rule.warnings.extend(cost_estimate.warnings)
+            if not request.estimate_cost:
+                cost_estimate = None
+
+        # Phase 6: AI analysis stub
         ai_context = AIAnalysisStub(
             rule_id=rule_id,
             original_sql=request.user_sql or "",
@@ -238,6 +336,7 @@ class RuleCreationService:
             rule=rule,
             sanitize_summary=sanitize_summary,
             sql_errors=sql_errors,
+            matches_everything=matches_everything,
             cost_estimate=cost_estimate,
             ai_context=ai_context,
         )
@@ -348,6 +447,8 @@ class RuleCreationService:
                 from ..clickhouse.clickhouse_manager import ClickHouseManager
 
                 client = ClickHouseManager.get_instance().get_clickhouse_client()
+                # Risk accepted: EXPLAIN AST only asks ClickHouse to parse the SQL, never to run it, and the SQL has already passed the sanitiser.
+                # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
                 client.execute(f"EXPLAIN AST {sql}")
                 return None
             except Exception as exc:
@@ -380,68 +481,79 @@ class RuleCreationService:
             )
         return None
 
-    def _estimate_cost(self, rule: Rule, window_minutes: int) -> CostEstimate:
-        """Run EXPLAIN PLAN against ClickHouse. Best-effort, never blocks.
-
-        Follows the same EXPLAIN pattern as Hunt._execute_single_rule().
-        """
-        warnings: list[str] = []
-
+    def _preview_client(self) -> ChQueryClient | None:
+        """The client the preview counts through, or None when no ClickHouse is configured."""
+        if self._ch_client is not None:
+            return self._ch_client
         if not self._ch_config:
-            warnings.append("ClickHouse not configured -- cost estimation skipped.")
-            return CostEstimate(window_minutes=window_minutes, warnings=warnings)
+            return None
+        from ..clickhouse.clickhouse_manager import ClickHouseManager
 
+        return ClickHouseManager.get_instance().get_clickhouse_client()
+
+    def _preview_volume(self, rule: Rule, window_minutes: int | None) -> CostEstimate:
+        """Count what the rule matches over the lookback window and band the result.
+
+        A preview that cannot finish -- timed out, over its row budget, ClickHouse
+        unreachable or refusing -- comes back UNMEASURED with a warning saying so,
+        never as a rule that matches nothing.
+        """
+        guard = self._hunts.detection_guard
+        window = guard.preview_window_minutes
+        if window_minutes is not None and window_minutes > 0:
+            window = window_minutes
+        source = source_label(rule)
+
+        def unmeasured(reason: str) -> CostEstimate:
+            logger.warning(
+                "Rule volume preview did not finish", rule_id=rule.rule_id, reason=reason
+            )
+            return CostEstimate(window_minutes=window, warnings=[unmeasured_warning(reason)])
+
+        client = self._preview_client()
+        if client is None:
+            return unmeasured("no ClickHouse is configured")
+
+        sql = preview_sql(
+            rule.source_db or "",
+            rule.source_table or "",
+            self._hunts.checkpoint_timestamp_field,
+            rule.where_clause,
+            window,
+        )
+        started = time.monotonic()
         try:
-            from ..clickhouse.clickhouse_manager import ClickHouseManager
+            rows = client.query(sql, settings=preview_settings(guard)).result_rows
+        except ServiceUnavailable:
+            return unmeasured("ClickHouse could not be reached")
+        except ClickHouseError as exc:
+            return unmeasured(_failure_reason(exc, guard, window, source))
+        duration_ms = (time.monotonic() - started) * 1000
+        if not rows:
+            return unmeasured("ClickHouse returned no count")
 
-            ch = ClickHouseManager.get_instance()
-            client = ch.get_clickhouse_client()
-
-            # Build a minimal SELECT to estimate cost
-            db_table = (
-                f"{rule.source_db}.{rule.source_table}" if rule.source_db else rule.source_table
-            )
-            where = rule.where_clause.strip()
-            if where:
-                explain_sql = f"EXPLAIN ESTIMATE SELECT count() FROM {db_table} WHERE {where}"
-            else:
-                explain_sql = f"EXPLAIN ESTIMATE SELECT count() FROM {db_table}"
-
-            explain_start = datetime.now(UTC)
-            explain_result = client.execute(explain_sql)
-            explain_duration_ms = (datetime.now(UTC) - explain_start).total_seconds() * 1000
-
-            explain_plan = "\n".join(
-                str(row[0]) if isinstance(row, (list, tuple)) else str(row)
-                for row in explain_result
-            )
-
-            # Try to extract estimated rows from EXPLAIN output
-            estimated_rows = None
-            for row in explain_result:
-                row_str = str(row[0]) if isinstance(row, (list, tuple)) else str(row)
-                row_match = re.search(r"estimated_rows[=:]\s*(\d+)", row_str)
-                if row_match:
-                    estimated_rows = int(row_match.group(1))
-                    break
-
-            logger.info(
-                f"EXPLAIN ESTIMATE [{rule.rule_id}]: "
-                f"rows={estimated_rows}, {explain_duration_ms:.0f}ms"
-            )
-
-            return CostEstimate(
-                estimated_rows=estimated_rows,
-                explain_plan=explain_plan,
-                explain_duration_ms=explain_duration_ms,
-                window_minutes=window_minutes,
-                warnings=warnings,
-            )
-
-        except Exception as e:
-            logger.warning(f"Cost estimation failed for {rule.rule_id}: {e}")
-            warnings.append(f"EXPLAIN failed: {e}")
-            return CostEstimate(window_minutes=window_minutes, warnings=warnings)
+        total, matched = (int(value) for value in rows[0])
+        measure = VolumeMeasure(window_minutes=window, total=total, matched=matched)
+        band, warnings = volume_verdict(measure, guard, source)
+        logger.info(
+            "Rule volume preview",
+            rule_id=rule.rule_id,
+            window_minutes=window,
+            total=total,
+            matched=matched,
+            per_day=measure.per_day,
+            band=str(band),
+        )
+        return CostEstimate(
+            estimated_rows=matched,
+            rows_in_window=total,
+            projected_per_day=measure.per_day if total else None,
+            match_ratio=measure.ratio,
+            band=band,
+            window_minutes=window,
+            duration_ms=duration_ms,
+            warnings=warnings,
+        )
 
     @staticmethod
     def _build_sanitize_summary(hdx_result: HdxSanitizeResult) -> dict[str, Any]:
