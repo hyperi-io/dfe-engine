@@ -65,7 +65,7 @@ def manager(ch_params):
     try:
         yield mgr
     finally:
-        mgr._cleanup()
+        mgr.close()
 
 
 def _service(manager, **guard) -> RuleCreationService:
