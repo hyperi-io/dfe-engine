@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from dfe_engine.clickhouse import ClickHouseManager
 from dfe_engine.query.datasources import (
     DatasourceAdapter,
     get_adapter,
@@ -155,12 +156,18 @@ class TestClickHouseAdapter:
         adapter._manager = mock_manager
         assert adapter.healthcheck() is False
 
-    def test_close(self, mock_manager):
+    def test_close_releases_only_what_the_adapter_opened(self):
+        # spec= refuses any method ClickHouseManager does not have.
+        shared = MagicMock(spec=ClickHouseManager)
+        restricted = MagicMock()
         adapter = ClickHouseAdapter("default")
-        adapter._manager = mock_manager
+        adapter._manager = shared
+        adapter._restricted_client = restricted
         adapter.close()
-        mock_manager.close.assert_called_once()
+        restricted.close.assert_called_once()
+        shared._cleanup.assert_not_called()
         assert adapter._manager is None
+        assert adapter._restricted_client is None
 
 
 class TestClickHouseAdapterExplainParsing:

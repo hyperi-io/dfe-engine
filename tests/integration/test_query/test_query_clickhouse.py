@@ -73,9 +73,9 @@ def people(ch_client, clickhouse_test_database):
 class TestExecute:
     def test_rows_are_dicts_keyed_by_the_returned_columns(self, adapter, people):
         rows, columns = adapter.execute(f"SELECT * FROM {people} ORDER BY id")
-        assert list(columns) == ["id", "name", "value", "timestamp", "tags", "metadata"]
+        assert columns == ["id", "name", "value", "timestamp", "tags", "metadata"]
         assert [row["name"] for row in rows] == NAMES
-        assert all(list(row) == list(columns) for row in rows)
+        assert all(list(row) == columns for row in rows)
 
     def test_a_filter_narrows_the_rows(self, adapter, people):
         rows, _ = adapter.execute(f"SELECT name FROM {people} WHERE value > 150 ORDER BY id")
@@ -118,11 +118,32 @@ class TestExecute:
         assert rows[0]["limit"] == 7
 
 
-class TestShapes:
-    def test_an_empty_result_is_no_rows(self, adapter, people):
-        rows, _ = adapter.execute(f"SELECT id FROM {people} WHERE id = 999")
-        assert rows == []
+class TestAnEmptyResult:
+    """ClickHouse sends no Native block for zero rows, so the names come from DESCRIBE."""
 
+    def test_still_names_its_columns(self, adapter, people):
+        assert adapter.execute(f"SELECT id, name FROM {people} WHERE id = 999") == (
+            [],
+            ["id", "name"],
+        )
+
+    def test_binds_its_parameters_to_name_the_columns(self, adapter, people):
+        rows, columns = adapter.execute(
+            f"SELECT name FROM {people} WHERE name = {{name:String}}", params={"name": "nobody"}
+        )
+        assert (rows, columns) == ([], ["name"])
+
+    def test_names_its_columns_through_a_trailing_semicolon_and_comment(self, adapter, people):
+        rows, columns = adapter.execute(f"SELECT id FROM {people} WHERE id = 999 -- none\n;")
+        assert (rows, columns) == ([], ["id"])
+
+    def test_a_statement_describe_cannot_wrap_has_no_columns(
+        self, adapter, clickhouse_test_database
+    ):
+        assert adapter.execute(f"SHOW TABLES FROM `{clickhouse_test_database}`") == ([], [])
+
+
+class TestShapes:
     def test_a_larger_result_arrives_whole(self, adapter):
         rows, _ = adapter.execute("SELECT number AS id FROM numbers(10000)")
         assert len(rows) == 10000
@@ -159,12 +180,30 @@ class TestExplain:
             f"SELECT id, name FROM {people}", parallel=parallel
         )
         assert len(rows) == 5
-        assert list(columns) == ["id", "name"]
+        assert columns == ["id", "name"]
         assert plan.steps
+
+    def test_the_estimate_counts_rows_not_parts(self, adapter, ch_client, people):
+        # A second insert makes a second part: 8 rows across 2 parts.
+        ch_client.command(
+            f"INSERT INTO {people} (id, name, value) VALUES (6, 'F', 1), (7, 'G', 2), (8, 'H', 3)"
+        )
+        assert adapter.explain(f"SELECT * FROM {people}").total_estimated_rows == 8
+
+    def test_a_query_that_reads_no_mergetree_table_has_no_estimate(self, adapter):
+        assert adapter.explain("SELECT 1").total_estimated_rows is None
 
 
 def test_healthcheck(adapter):
     assert adapter.healthcheck() is True
+
+
+def test_closing_the_adapter_leaves_the_shared_client_open(adapter):
+    adapter.execute("SELECT 1")
+    adapter.close()
+    shared = ClickHouseManager.get_instance().get_clickhouse_client()
+    assert shared.query("SELECT 1").result_rows == [(1,)]
+    assert adapter.execute("SELECT 2 AS n") == ([{"n": 2}], ["n"])
 
 
 class TestExportsOfRealRows:
@@ -187,4 +226,4 @@ class TestExportsOfRealRows:
     def test_csv(self, result):
         rows = list(csv.DictReader(io.StringIO(result.to_csv())))
         assert [row["name"] for row in rows] == NAMES
-        assert list(rows[0]) == list(result.columns)
+        assert list(rows[0]) == result.columns
