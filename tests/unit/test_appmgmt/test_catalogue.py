@@ -100,6 +100,18 @@ class TestShippedManifest:
         assert "config.destinations" in receiver.restart_paths
         assert "config.routing" not in receiver.restart_paths
 
+    def test_every_block_the_engine_writes_into_a_fetcher_reports_a_restart(self):
+        # A fetcher reload re-reads a source's filter and interval but adds no
+        # source and rebuilds no output, so a Compose operator told nothing would
+        # keep running the old source.
+        fetcher = catalogue.descriptor("dfe-fetcher")
+
+        written = set(fetcher.routing_paths.values())
+
+        assert fetcher.hot_reload is True
+        assert written
+        assert written <= set(fetcher.restart_paths)
+
     def test_vector_reloads_its_transform_files_in_place(self):
         # It SIGHUPs Vector when only the transform files changed; the enrichment
         # tables are not watched, so they still roll.
