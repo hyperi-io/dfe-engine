@@ -29,9 +29,27 @@ Usage:
     # result.stripped_time_bounds == ["timestamp > '2026-01-01'"]
 """
 
+import re
 from dataclasses import dataclass, field
 
 from .hdx_sanitizer import HdxSanitizeError, split_time_window
+
+TIME_PLACEHOLDER = "{timestamp_condition}"
+"""The time-bound placeholder Sigma's full-alert output writes; the hunt window replaces it."""
+
+_TIME_PLACEHOLDER_CONJUNCT = re.compile(
+    r"\{timestamp_condition\}\s+AND\s+|\s+AND\s+\{timestamp_condition\}", re.IGNORECASE
+)
+
+
+def strip_time_placeholder(where: str) -> str:
+    """``where`` without :data:`TIME_PLACEHOLDER`, which the worker never fills in.
+
+    Left in, ClickHouse reads it as a query parameter with no type and refuses the
+    statement. As a conjunct it is dropped; anywhere else it becomes ``1``, since the
+    hunt window already bounds the scan in time.
+    """
+    return _TIME_PLACEHOLDER_CONJUNCT.sub("", where).replace(TIME_PLACEHOLDER, "1").strip()
 
 # Common timestamp column patterns in DFE tables.
 _TIMESTAMP_COLUMNS = frozenset(
@@ -54,6 +72,7 @@ class ParsedRule:
     where_clause: str = ""
     had_select_star: bool = False
     stripped_time_bounds: list[str] = field(default_factory=list)
+    ignored_clauses: list[str] = field(default_factory=list)
     original_sql: str = ""
     warnings: list[str] = field(default_factory=list)
 
@@ -102,8 +121,9 @@ class RuleRewriter:
         result.source_db = split.source_db
         result.source_table = split.source_table
         result.had_select_star = split.select_star
-        result.where_clause = split.filter or ""
+        result.where_clause = strip_time_placeholder(split.filter or "")
         result.stripped_time_bounds = list(split.removed)
+        result.ignored_clauses = list(split.ignored_clauses)
 
         if result.had_select_star:
             result.warnings.append(

@@ -74,7 +74,7 @@ _CLAUSE_RANK = {
     "INTO OUTFILE": 8,
     "FORMAT": 8,
 }
-_REFUSED_CLAUSES = {
+REFUSED_CLAUSES = {
     "HAVING": (
         "HAVING filters aggregated groups, and a rule matches single rows, so the "
         "rule would match more than the view shows. Remove the HAVING condition "
@@ -878,8 +878,8 @@ def _clauses(toks: list[_Tok], *, strict: bool = True) -> list[_Clause]:
     rank = -1
     seen: set[str] = set()
     for clause in clauses:
-        if clause.name in _REFUSED_CLAUSES:
-            raise HdxSanitizeError(_REFUSED_CLAUSES[clause.name])
+        if clause.name in REFUSED_CLAUSES:
+            raise HdxSanitizeError(REFUSED_CLAUSES[clause.name])
         if clause.name in seen and clause.name != "LIMIT":
             raise HdxSanitizeError(f"The SQL has two top-level {clause.name} clauses.")
         if _CLAUSE_RANK[clause.name] < rank:
@@ -995,7 +995,7 @@ def _split_window(
             filters.append(clause)
         else:
             after.append(clause)
-        if clause.name in _REFUSED_CLAUSES and clause.name not in names:
+        if clause.name in REFUSED_CLAUSES and clause.name not in names:
             names.append(clause.name)
     ignored[:0] = names
 
