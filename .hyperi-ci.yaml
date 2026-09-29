@@ -44,6 +44,8 @@ test:
         - "^Requires running HyperDX instance$"
         # The replica fan-out check needs an ON CLUSTER target; the harness is one node.
         - "^not an ON CLUSTER deployment"
+        # The overlay-to-chart render needs helm, which hyperi-ci's test runner does not install.
+        - "^the helm binary is not on PATH$"
 
 quality:
   python:
