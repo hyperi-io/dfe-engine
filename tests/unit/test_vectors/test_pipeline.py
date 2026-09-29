@@ -1,3 +1,4 @@
+import importlib.resources
 import os
 import tempfile
 
@@ -478,3 +479,37 @@ def test_pipeline_fails_with_missing_non_secret_env_vars(sample_dfe_config, samp
 
     # Verify the error mentions the missing non-secret variable
     assert "VECTOR_DATA_DIR" in str(exc_info.value)
+
+
+SHIPPED_TEMPLATE = importlib.resources.files("dfe_engine.pipeline") / "pipeline_template.yaml"
+
+
+def _shipped_template_pipeline(output_dir: str, **global_settings: str) -> Pipeline:
+    """A one-step pipeline rendered through the template the engine ships."""
+    with importlib.resources.as_file(SHIPPED_TEMPLATE) as template:
+        return Pipeline(
+            name="test-pipeline",
+            dfe_config={"global_settings": {"helm_template": str(template), **global_settings}},
+            pipeline_config={"steps": [{"id": "hs-xdr-vector-ct-all-main.yml"}]},
+            output_dir=output_dir,
+        )
+
+
+def test_the_shipped_template_names_no_prometheus_of_its_own(temp_dir, monkeypatch):
+    monkeypatch.delenv("PROMETHEUS_SERVER_ADDRESS", raising=False)
+    pipeline = _shipped_template_pipeline(temp_dir)
+
+    with pytest.raises(PipelineSchemaError, match="PROMETHEUS_SERVER_ADDRESS"):
+        pipeline.render_template_for_pipeline({}, {})
+
+
+def test_every_keda_prometheus_trigger_queries_the_deployment_s_prometheus(temp_dir):
+    address = "http://prometheus.example.test:9090"
+    pipeline = _shipped_template_pipeline(temp_dir, PROMETHEUS_SERVER_ADDRESS=address)
+
+    # SINK_NAME and PEAK_TIME render the two optional prometheus triggers as well.
+    rendered = pipeline.render_template_for_pipeline({"SINK_NAME": "sink", "PEAK_TIME": 43200}, {})
+    triggers = yaml.safe_load(rendered)["extraObjects"][0]["spec"]["triggers"]
+    queried = [t["metadata"]["serverAddress"] for t in triggers if t["type"] == "prometheus"]
+
+    assert queried == [address, address, address]

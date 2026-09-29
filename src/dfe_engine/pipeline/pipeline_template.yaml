@@ -115,10 +115,11 @@ extraObjects:
           offsetResetPolicy: latest
         authenticationRef:
           name: keda-trigger-auth-kafka-credential
+      # PROMETHEUS_SERVER_ADDRESS is the deployment's own Prometheus. Rendering stops without it.
       - type: prometheus
         name: pod_count
         metadata:
-          serverAddress: http://prometheus-kube-prometheus-prometheus.prometheus.svc:9090
+          serverAddress: {{PROMETHEUS_SERVER_ADDRESS}}
           query: count(kube_pod_info{created_by_kind = "StatefulSet",namespace = "{{NAME}}"})
           threshold: "1"
           activationThreshold: "0"
@@ -126,7 +127,7 @@ extraObjects:
       - type: prometheus
         name: avg_eps
         metadata:
-          serverAddress: http://prometheus-kube-prometheus-prometheus.prometheus.svc:9090
+          serverAddress: {{PROMETHEUS_SERVER_ADDRESS}}
           query: avg(rate(vector_component_sent_events_total{namespace="{{NAME}}",component_id=~".*{{SINK_NAME}}.*",component_kind="sink"}[5m]))
           threshold: "{{EXPECTED_EPS | default(1000, true)}}"
           activationThreshold: "0"
@@ -135,7 +136,7 @@ extraObjects:
       - type: prometheus
         name: peak_time
         metadata:
-          serverAddress: http://prometheus-kube-prometheus-prometheus.prometheus.svc:9090
+          serverAddress: {{PROMETHEUS_SERVER_ADDRESS}}
           query: (vector(time() % 86400 >= bool {{PEAK_TIME - 1800}}) *vector (time() % 86400 < bool {{PEAK_TIME + 1800}}))
           threshold: "1"
           activationThreshold: "0"

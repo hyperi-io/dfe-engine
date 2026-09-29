@@ -4,8 +4,6 @@ Generates deployment-ready configuration templates for different profiles.
 Template overrides are sourced from the plugin system.
 """
 
-from __future__ import annotations
-
 import copy
 from typing import Any
 
@@ -21,7 +19,8 @@ def generate_template(service: str, profile: str = "default") -> dict[str, Any]:
         profile: Configuration profile
             - 'default': Rust defaults (dev-friendly, localhost)
             - 'production': Production-hardened (TLS, SASL, tuned buffers)
-            - 'k8s': Kubernetes-optimized (service DNS, ConfigMap-friendly)
+            - 'k8s': listeners bound for a pod, and empty broker and host lists
+              for the deployment to fill with its own
 
     Returns:
         Configuration dictionary ready for YAML serialization
@@ -46,11 +45,11 @@ def generate_template(service: str, profile: str = "default") -> dict[str, Any]:
         msg = f"Unknown profile: {profile}. Valid: {', '.join(sorted(valid_profiles))}"
         raise ValueError(msg)
 
-    # Apply plugin-provided overrides for this profile
+    # A profile's list replaces the app's default list rather than extending it.
     overrides = plugin.config_template_overrides.get(profile, {})
     if overrides:
         merged = copy.deepcopy(base)
-        deep_merge(merged, overrides)
+        deep_merge(merged, overrides, replace_lists=True)
         return merged
 
     return base

@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from dfe_engine.appmgmt import catalogue
 from dfe_engine.services.models.archiver import ArchiverConfig
 from dfe_engine.services.models.loader import LoaderConfig
 from dfe_engine.services.models.receiver import ReceiverConfig
@@ -186,3 +187,9 @@ class TestReceiverNextHopDeadline:
     def test_it_sits_inside_the_listener_s_hold(self):
         """A 25 s hold answered before a 20 s send settles would retry a delivered batch."""
         assert ReceiverConfig().loader.timeout_ms < 25_000
+
+    def test_the_loader_address_is_the_app_s_and_the_app_manifest_s(self):
+        """dfe-receiver cc07306's own default, and where apps.yaml puts the loader's listener."""
+        app = _schema_default("contract-main", "dfe-receiver", "loader")["address"]
+        manifest = catalogue.push_address(catalogue.descriptor("dfe-loader"))
+        assert ReceiverConfig().loader.address == app == manifest
