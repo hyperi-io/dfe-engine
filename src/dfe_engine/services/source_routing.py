@@ -42,6 +42,7 @@ from dfe_engine.services.models.receiver import (
 from dfe_engine.source.flow import (
     ARCHIVER_SERVICE,
     FlowError,
+    archive_gap,
     archiver_endpoint,
     resolve_flow,
 )
@@ -220,13 +221,16 @@ def compile_receiver_destinations(registry: SourceRegistry, settings: Any) -> De
 
     An archived source names TWO: there is no landing topic for the archiver to
     read on direct, so the sender fans the record out to it beside the stage that
-    handles it, and the raw copy is kept before any transform sees it.
+    handles it, and the raw copy is kept before any transform sees it. The
+    archiver's leg is declared as one that does not confirm delivery, because its
+    listener answers a push once the record is queued rather than written, and the
+    receiver reports its delivery guarantee from that.
     """
     default: DestinationRef = (
         LOADER_DESTINATION if settings.transport.default == "direct" else BUS_DESTINATION
     )
     rules: list[DestinationRule] = []
-    endpoints: dict[str, str] = {}
+    named: dict[str, dict[str, Any]] = {}
 
     for source in registry.get_all_sources(states=("active",)):
         try:
@@ -242,7 +246,7 @@ def compile_receiver_destinations(registry: SourceRegistry, settings: Any) -> De
 
         if flow.transform is not None and flow.transform.endpoint:
             name = flow.transform.instance
-            endpoints[name] = flow.transform.endpoint
+            named[name] = {"endpoint": flow.transform.endpoint}
         else:
             # Referenced by name and given no endpoint: an entry here would win
             # over the receiver's own loader.grpc_endpoint, which is the address
@@ -251,7 +255,16 @@ def compile_receiver_destinations(registry: SourceRegistry, settings: Any) -> De
 
         destination: DestinationRef = name
         if flow.outputs.archive:
-            endpoints[ARCHIVER_SERVICE] = archiver_endpoint(settings)
+            gap = archive_gap(flow)
+            if gap is not None:
+                logger.warning(
+                    f"{gap}. It is compiled as stored and archives nothing until it moves to "
+                    "the bus or stops asking"
+                )
+            named[ARCHIVER_SERVICE] = {
+                "endpoint": archiver_endpoint(settings),
+                "confirms_delivery": False,
+            }
             destination = [name, ARCHIVER_SERVICE]
 
         match = receiver_match(source)
@@ -278,7 +291,7 @@ def compile_receiver_destinations(registry: SourceRegistry, settings: Any) -> De
     return DestinationsConfig(
         default=default,
         rules=rules,
-        **{name: {"grpc": {"endpoint": endpoint}} for name, endpoint in sorted(endpoints.items())},
+        **{name: {"grpc": grpc} for name, grpc in sorted(named.items())},
     )
 
 
@@ -292,8 +305,10 @@ def compile_archiver_topics(registry: SourceRegistry, settings: Any) -> list[str
 
     Direct sources are absent by construction: nothing holds their records, so
     the receiver fans them out to the archiver's listener instead
-    (``compile_receiver_destinations``). The bucket and the path an object lands
-    under stay the deployment's, so only the topics are derived here.
+    (``compile_receiver_destinations``). A fetched source never passes the
+    receiver, which is why the save path refuses archiving one on direct. The
+    bucket and the path an object lands under stay the deployment's, so only the
+    topics are derived here.
     """
     # A set because several sources can land on the shared topic, and subscribing
     # to it once per source would consume every record that many times.
