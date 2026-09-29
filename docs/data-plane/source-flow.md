@@ -62,7 +62,7 @@ flowchart LR
   L --> CH[(ClickHouse<br/>source table, else main)]
 ```
 
-The archiver keeps the RAW record as it arrived, before any transform. On the bus it reads the landing topic; on direct the receiver fans the record out to it beside the stage that loads it.
+The archiver keeps the RAW record as it arrived, before any transform. On the bus it reads the landing topic; on direct the receiver fans the record out to it beside the stage that loads it. A fetched record never passes the receiver, so on direct the save refuses a fetched source that asks to be archived, and a fetcher route into an archived source, because the archiver would see neither.
 
 The second diagram is the shape a transform takes once it declares `direct` - which transforms do, and how one gains it, is under [Adding a transform](#adding-a-transform).
 
