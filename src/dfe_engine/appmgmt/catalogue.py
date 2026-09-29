@@ -314,6 +314,13 @@ class AppDescriptor:
     that name; off it, the Compose writer renders the same content there.
     """
 
+    display_name: str = ""
+    """The label a console shows for this app; empty where the service id is the label.
+
+    A label only: the service id still names the chart, the routes and the
+    telemetry, so nothing the engine derives reads this.
+    """
+
     def carries(self, transport: str) -> bool:
         """Whether this app can carry a source on *transport*."""
         return transport in self.transports
@@ -514,6 +521,7 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
         variant_path=str(raw.get("variant_path", "")),
         catalogue=_catalogue_from(service, raw.get("catalogue")),
         config_file=_config_file_from(service, raw.get("consumes")),
+        display_name=_display_name_from(service, raw.get("display_name")),
     )
     # The variant is written into one of the derived blocks, so a path outside
     # them would be compiled and then dropped on the next sync.
@@ -542,6 +550,22 @@ def _config_file_from(service: str, raw: object) -> str:
             "because the directory belongs to whoever mounts it"
         )
     return name
+
+
+def _display_name_from(service: str, raw: object) -> str:
+    """The label a console shows for this app, empty when the manifest names none.
+
+    Refused unless it is a non-blank string: an unquoted ``true`` or ``2024``
+    parses as a boolean or a number, and would otherwise reach a console as one.
+    """
+    if raw is None:
+        return ""
+    if not isinstance(raw, str) or not raw.strip():
+        raise CatalogueError(
+            f"{service}: display_name must be a non-empty string, got {raw!r}; "
+            "omit the key to show the service id"
+        )
+    return raw.strip()
 
 
 def _reload_setting_from(service: str, raw: object, *, hot_reload: bool) -> str:
