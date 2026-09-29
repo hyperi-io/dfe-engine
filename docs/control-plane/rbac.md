@@ -817,10 +817,6 @@ graph TD
         HDX["client.py<br/>HyperDXClient"]
     end
 
-    subgraph "helm/"
-        ARGO["argo_rbac.py<br/>RBAC CSV + AppProject"]
-    end
-
     DEPS --> ENGINE
     DEPS --> ACCOUNTS
     DEPS --> GROUPS
@@ -836,8 +832,6 @@ graph TD
     OIDC_SYNC --> GROUPS
     CH_RBAC --> ORG_REG
     CH_RBAC --> GROUPS
-    ARGO --> ROLES_MOD
-    ARGO --> GROUPS
 ```
 
 ---

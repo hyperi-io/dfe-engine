@@ -16,7 +16,6 @@ Modules:
     hunts       -- Hunt scheduling and execution
     sigma       -- Sigma rule conversion and field mapping
     services    -- Service config registry and source routing
-    helm        -- Helm values compiler and Argo CD generators
     deployment  -- K8s deployment config models
     auth        -- Engine RBAC
     query       -- Query registry and execution
