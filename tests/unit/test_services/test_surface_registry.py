@@ -1,7 +1,9 @@
 """Tests for the SurfaceRegistry — YAML-backed service surface CRUD."""
 
-from __future__ import annotations
-
+import json
+import threading
+from collections.abc import Iterator
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -12,7 +14,9 @@ from dfe_engine.services.surfaces.models import (
     ServiceSurface,
 )
 from dfe_engine.services.surfaces.registry import SurfaceNotFoundError, SurfaceRegistry
-from dfe_engine.yaml_utils import yaml_dump
+from dfe_engine.yaml_utils import yaml_dump, yaml_load
+
+MANIFESTS = Path(__file__).parents[2] / "fixtures" / "contract"
 
 
 def _make_surface(
@@ -206,7 +210,6 @@ class TestSurfaceRegistryBuiltIns:
         assert receiver is not None
         assert len(receiver.config_surface) > 0
         assert len(receiver.metrics_surface) > 0
-        assert receiver.manifest_url != ""
 
     def test_builtin_loader_has_config_and_metrics(self, tmp_path: Path):
         surfaces_dir = tmp_path / "surfaces"
@@ -223,3 +226,144 @@ class TestSurfaceRegistryBuiltIns:
         assert archiver is not None
         assert len(archiver.config_surface) > 0
         assert len(archiver.metrics_surface) > 0
+
+
+def _at(base: str):
+    """A resolver naming each service's manifest under *base*."""
+    return lambda service: f"{base}/{service}/metrics/manifest"
+
+
+def _got(registry: SurfaceRegistry, service: str) -> ServiceSurface:
+    surface = registry.get(service)
+    assert surface is not None, f"no surface for {service}"
+    return surface
+
+
+class TestManifestAddress:
+    def test_no_resolver_names_no_address(self, tmp_path: Path):
+        registry = SurfaceRegistry(tmp_path / "surfaces")
+
+        assert {s.manifest_url for s in registry.list()} == {""}
+
+    def test_each_service_gets_the_resolver_s_address(self, tmp_path: Path):
+        registry = SurfaceRegistry(tmp_path / "surfaces", manifest_url_for=_at("http://m"))
+
+        assert _got(registry, "dfe-loader").manifest_url == "http://m/dfe-loader/metrics/manifest"
+
+    def test_an_address_in_the_file_is_replaced_by_the_resolver_s(self, tmp_path: Path):
+        surfaces_dir = tmp_path / "surfaces"
+        surfaces_dir.mkdir()
+        yaml_dump(
+            {"service": "dfe-x", "manifest_url": "http://dfe-x.dfe-prod.svc.cluster.local:9090/m"},
+            surfaces_dir / "dfe-x.yaml",
+        )
+
+        assert _got(SurfaceRegistry(surfaces_dir), "dfe-x").manifest_url == ""
+        resolved = SurfaceRegistry(surfaces_dir, manifest_url_for=_at("http://m"))
+        assert _got(resolved, "dfe-x").manifest_url == "http://m/dfe-x/metrics/manifest"
+
+    def test_a_written_surface_stores_no_address(self, tmp_path: Path):
+        surfaces_dir = tmp_path / "surfaces"
+        surfaces_dir.mkdir()
+        yaml_dump({"service": "existing"}, surfaces_dir / "existing.yaml")
+        registry = SurfaceRegistry(surfaces_dir, manifest_url_for=_at("http://m"))
+
+        surface = _make_surface("dfe-new")
+        surface.manifest_url = "http://somewhere/else"
+        registry.create(surface)
+
+        assert "manifest_url" not in yaml_load(surfaces_dir / "dfe-new.yaml")
+        assert _got(registry, "dfe-new").manifest_url == "http://m/dfe-new/metrics/manifest"
+
+
+class _ManifestServer:
+    """A local HTTP server answering each path with a fixed status and body."""
+
+    def __init__(self, routes: dict[str, tuple[int, bytes]]) -> None:
+        self.hits: list[str] = []
+        server = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+            def do_GET(self) -> None:
+                server.hits.append(self.path)
+                status, body = routes.get(self.path, (404, b""))
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.base = f"http://127.0.0.1:{self.httpd.server_port}"
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self) -> None:
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+@pytest.fixture
+def loader_app() -> Iterator[_ManifestServer]:
+    """dfe-loader's real manifest, served where the resolver below points."""
+    manifest = (MANIFESTS / "dfe-loader" / "metrics-manifest.json").read_bytes()
+    server = _ManifestServer(
+        {
+            "/dfe-loader/metrics/manifest": (200, manifest),
+            "/dfe-receiver/metrics/manifest": (200, b'{"metrics": [{"name": "no_type"}]}'),
+            "/dfe-archiver/metrics/manifest": (200, b'{"app": "dfe-archiver"}'),
+        }
+    )
+    yield server
+    server.close()
+
+
+class TestRefreshManifest:
+    async def test_no_address_fetches_nothing_and_keeps_the_file(self, tmp_path: Path):
+        registry = SurfaceRegistry(tmp_path / "surfaces")
+        before = (tmp_path / "surfaces" / "dfe-loader.yaml").read_text()
+
+        assert await registry.refresh_manifest("dfe-loader") is None
+        assert (tmp_path / "surfaces" / "dfe-loader.yaml").read_text() == before
+
+    async def test_an_unknown_service_is_not_refreshed(self, tmp_path: Path, loader_app):
+        registry = SurfaceRegistry(tmp_path / "surfaces", manifest_url_for=_at(loader_app.base))
+
+        assert await registry.refresh_manifest("dfe-nothing") is None
+        assert loader_app.hits == []
+
+    async def test_the_app_s_manifest_replaces_the_metrics(self, tmp_path: Path, loader_app):
+        registry = SurfaceRegistry(tmp_path / "surfaces", manifest_url_for=_at(loader_app.base))
+        manifest = json.loads((MANIFESTS / "dfe-loader" / "metrics-manifest.json").read_text())
+        published = manifest["metrics"]
+
+        refreshed = await registry.refresh_manifest("dfe-loader")
+
+        assert loader_app.hits == ["/dfe-loader/metrics/manifest"]
+        assert refreshed is not None
+        assert refreshed.discovered_at
+        assert [m.name for m in refreshed.metrics_surface] == [m["name"] for m in published]
+        stored = _got(registry, "dfe-loader")
+        assert [m.name for m in stored.metrics_surface] == [m["name"] for m in published]
+        assert "manifest_url" not in yaml_load(tmp_path / "surfaces" / "dfe-loader.yaml")
+
+    async def test_a_non_success_answer_is_not_a_refresh(self, tmp_path: Path, loader_app):
+        registry = SurfaceRegistry(
+            tmp_path / "surfaces", manifest_url_for=lambda s: f"{loader_app.base}/gone/{s}"
+        )
+        before = (tmp_path / "surfaces" / "dfe-loader.yaml").read_text()
+
+        assert await registry.refresh_manifest("dfe-loader") is None
+        assert (tmp_path / "surfaces" / "dfe-loader.yaml").read_text() == before
+
+    @pytest.mark.parametrize("service", ["dfe-receiver", "dfe-archiver"])
+    async def test_a_body_that_is_not_a_manifest_is_not_a_refresh(
+        self, tmp_path: Path, loader_app, service
+    ):
+        registry = SurfaceRegistry(tmp_path / "surfaces", manifest_url_for=_at(loader_app.base))
+        before = (tmp_path / "surfaces" / f"{service}.yaml").read_text()
+
+        assert await registry.refresh_manifest(service) is None
+        assert (tmp_path / "surfaces" / f"{service}.yaml").read_text() == before
