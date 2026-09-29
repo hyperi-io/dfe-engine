@@ -8326,7 +8326,7 @@
             }
           },
           "422": {
-            "description": "Refused, nothing written: the body failed validation (code validation_error), or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, or has no WHERE to detect with (code invalid_sql, the errors in context.sql_errors)",
+            "description": "Refused, nothing written. The body failed validation (code validation_error). Or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, or has no WHERE to detect with (code invalid_sql, the errors in context.sql_errors). Or the rule matches every event in its source (code rule_matches_everything, the source and detection WHERE in context).",
             "content": {
               "application/json": {
                 "schema": {
@@ -8349,7 +8349,7 @@
           "Rules"
         ],
         "summary": "Create Rule From Hyperdx",
-        "description": "Create a hunt rule from a HyperDX view's expanded query.\n\nWraps the create pipeline with ``source_type='hyperdx'`` and auto-derives a\nunique rule id from the saved-search name, so the caller need not supply one.\nA view whose SQL the hunt runner could not compile is refused with 422.\nRBAC: ``rule:write`` (data_analyst) -- ``org_viewer`` has neither this grant nor\nthe UI button.",
+        "description": "Create a hunt rule from the SQL a HyperDX view renders to.\n\nWraps the create pipeline with ``source_type='hyperdx'`` and auto-derives a\nunique rule id from the saved-search name, so the caller need not supply one.\nA view whose SQL the hunt runner could not compile, or that matches every\nevent, is refused with 422. RBAC: ``rule:write`` (data_analyst) --\n``org_viewer`` has neither this grant nor the UI button.",
         "operationId": "create_rule_from_hyperdx_api_v1_rules_from_hyperdx_post",
         "requestBody": {
           "content": {
@@ -8393,7 +8393,7 @@
             }
           },
           "422": {
-            "description": "Refused, nothing written: the body failed validation (code validation_error), or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, or has no WHERE to detect with (code invalid_sql, the errors in context.sql_errors)",
+            "description": "Refused, nothing written. The body failed validation (code validation_error). Or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, or has no WHERE to detect with (code invalid_sql, the errors in context.sql_errors). Or the rule matches every event in its source (code rule_matches_everything, the source and detection WHERE in context).",
             "content": {
               "application/json": {
                 "schema": {
@@ -8604,7 +8604,7 @@
             }
           },
           "422": {
-            "description": "Refused, nothing written: the body failed validation (code validation_error), or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, or has no WHERE to detect with (code invalid_sql, the errors in context.sql_errors)",
+            "description": "Refused, nothing written. The body failed validation (code validation_error). Or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, or has no WHERE to detect with (code invalid_sql, the errors in context.sql_errors). Or the rule matches every event in its source (code rule_matches_everything, the source and detection WHERE in context).",
             "content": {
               "application/json": {
                 "schema": {
@@ -26039,20 +26039,34 @@
                 "type": "null"
               }
             ],
-            "title": "Estimated Rows"
+            "title": "Estimated Rows",
+            "description": "Events the rule matched in the window"
           },
-          "explain_plan": {
+          "rows_in_window": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "integer"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Explain Plan"
+            "title": "Rows In Window",
+            "description": "Events in the source table in the window"
           },
-          "explain_duration_ms": {
+          "projected_per_day": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projected Per Day",
+            "description": "Matches projected to a day at the window's rate"
+          },
+          "match_ratio": {
             "anyOf": [
               {
                 "type": "number"
@@ -26061,12 +26075,29 @@
                 "type": "null"
               }
             ],
-            "title": "Explain Duration Ms"
+            "title": "Match Ratio",
+            "description": "Share of the window's events the rule matched"
+          },
+          "band": {
+            "$ref": "#/components/schemas/VolumeBand",
+            "description": "ok, guidance, warn, plainly_bad, or unmeasured when the preview did not finish",
+            "default": "unmeasured"
           },
           "window_minutes": {
             "type": "integer",
-            "title": "Window Minutes",
-            "default": 60
+            "title": "Window Minutes"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms",
+            "description": "How long the preview took"
           },
           "warnings": {
             "items": {
@@ -26077,7 +26108,11 @@
           }
         },
         "type": "object",
-        "title": "CostEstimate"
+        "required": [
+          "window_minutes"
+        ],
+        "title": "CostEstimate",
+        "description": "What the alert-volume preview measured over its lookback window."
       },
       "CostLeaderboardRow": {
         "properties": {
@@ -33934,14 +33969,20 @@
           "estimate_cost": {
             "type": "boolean",
             "title": "Estimate Cost",
-            "description": "Run EXPLAIN and estimate query cost",
-            "default": false
+            "description": "Return the alert-volume preview's measurement as cost_estimate. The preview and its warnings on the rule follow the deployment's detection guard either way.",
+            "default": true
           },
           "cost_window_minutes": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Cost Window Minutes",
-            "description": "Window in minutes for cost estimate",
-            "default": 60
+            "description": "Lookback window in minutes the preview counts over. Absent or 0 uses the deployment's preview window."
           },
           "name": {
             "type": "string",
@@ -34029,29 +34070,11 @@
       },
       "RuleFromHyperdxRequest": {
         "properties": {
-          "saved_search_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Saved Search Id",
-            "description": "HyperDX saved-search id; the engine resolves the SQL that view runs"
-          },
           "raw_sql": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
+            "minLength": 1,
             "title": "Raw Sql",
-            "description": "Pre-rendered ClickHouse SELECT, trusted as given"
+            "description": "The ClickHouse SELECT the HyperDX view renders to"
           },
           "saved_search_name": {
             "anyOf": [
@@ -34096,9 +34119,13 @@
             "description": "Source label (e.g. windows_audit)"
           }
         },
+        "additionalProperties": false,
         "type": "object",
+        "required": [
+          "raw_sql"
+        ],
         "title": "RuleFromHyperdxRequest",
-        "description": "Create a hunt rule from a live HyperDX view.\n\nSupply ``saved_search_id`` and the engine asks HyperDX what SQL that view\nactually runs. Supply ``raw_sql`` and the caller's string is taken on trust,\nwhich on a SQL-mode search is whatever sits in the editor rather than the\nquery the view executes.\n\nEither way the create pipeline strips the UI meta (time bounds, LIMIT,\n``__hdx_time_bucket``, SETTINGS) via the HyperDX sanitizer, and the engine\nderives a unique rule id from the saved-search name. The caller gets that id\nback and opens ``/rules/{id}`` -- no id to invent, no IndexedDB round-trip."
+        "description": "Create a hunt rule from the SQL a HyperDX view runs.\n\nHyperDX renders the view to ``raw_sql`` and sends it here. The create\npipeline strips the UI meta (time bounds, LIMIT, ``__hdx_time_bucket``,\nSETTINGS) via the HyperDX sanitizer, and the engine derives a unique rule id\nfrom the saved-search name. The caller gets that id back and opens\n``/rules/{id}`` -- no id to invent, no IndexedDB round-trip."
       },
       "RuleFromHyperdxResponse": {
         "properties": {
@@ -34110,16 +34137,6 @@
           "display_name": {
             "type": "string",
             "title": "Display Name"
-          },
-          "resolved_from": {
-            "type": "string",
-            "enum": [
-              "saved_search",
-              "raw_sql"
-            ],
-            "title": "Resolved From",
-            "description": "Which SQL source the rule was built from",
-            "default": "raw_sql"
           },
           "sanitize_summary": {
             "additionalProperties": true,
@@ -34395,14 +34412,20 @@
           "estimate_cost": {
             "type": "boolean",
             "title": "Estimate Cost",
-            "description": "Run EXPLAIN and estimate query cost",
-            "default": false
+            "description": "Return the alert-volume preview's measurement as cost_estimate. The preview and its warnings on the rule follow the deployment's detection guard either way.",
+            "default": true
           },
           "cost_window_minutes": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Cost Window Minutes",
-            "description": "Window in minutes for cost estimate",
-            "default": 60
+            "description": "Lookback window in minutes the preview counts over. Absent or 0 uses the deployment's preview window."
           }
         },
         "type": "object",
@@ -40415,6 +40438,18 @@
         ],
         "title": "ViewParameter",
         "description": "Parameter discovered from a ClickHouse parameterized view.\n\nExtracted from the view's CREATE SQL by parsing {param:Type} patterns.\nProvides type metadata across the full stack (ClickHouse -> Python -> TypeScript -> HTML)."
+      },
+      "VolumeBand": {
+        "type": "string",
+        "enum": [
+          "ok",
+          "guidance",
+          "warn",
+          "plainly_bad",
+          "unmeasured"
+        ],
+        "title": "VolumeBand",
+        "description": "How much a rule's projected alert volume asks of the people reviewing it."
       },
       "VrlRequest": {
         "properties": {

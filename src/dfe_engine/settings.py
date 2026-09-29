@@ -61,6 +61,16 @@ Hunts:
 - DFE_HUNTS_ALERT_DESTINATIONS_DIR -> hunts.alert_destinations_dir
 - DFE_HUNTS_MAX_DETECTIONS_PER_RUN -> hunts.max_detections_per_run
 - DFE_HUNTS_MAX_DETECTIONS_PER_RUN_CEILING -> hunts.max_detections_per_run_ceiling
+- DFE_DETECTION_GUARD_ENABLED -> hunts.detection_guard.enabled (true/false)
+- DFE_DETECTION_GUARD_PREVIEW_WINDOW_MINUTES -> hunts.detection_guard.preview_window_minutes
+- DFE_DETECTION_GUARD_PREVIEW_TIMEOUT_SECONDS -> hunts.detection_guard.preview_timeout_seconds
+- DFE_DETECTION_GUARD_PREVIEW_MAX_ROWS -> hunts.detection_guard.preview_max_rows
+- DFE_DETECTION_GUARD_WARN_PER_DAY -> hunts.detection_guard.warn_per_day
+- DFE_DETECTION_GUARD_ACK_PER_DAY -> hunts.detection_guard.ack_per_day
+- DFE_DETECTION_GUARD_BLOCK_PER_DAY -> hunts.detection_guard.block_per_day
+- DFE_DETECTION_GUARD_WARN_MATCH_RATIO -> hunts.detection_guard.warn_match_ratio
+- DFE_DETECTION_GUARD_BLOCK_MATCH_RATIO -> hunts.detection_guard.block_match_ratio
+- DFE_DETECTION_GUARD_MIN_ROWS_FOR_RATIO -> hunts.detection_guard.min_rows_for_ratio
 
 Artifactory:
 - DFE_ARTIFACTORY_URL -> artifactory.url
@@ -326,6 +336,110 @@ MAX_DETECTIONS_PER_RUN = 1000
 MAX_DETECTIONS_PER_RUN_CEILING = 10_000
 
 
+class DetectionGuardSettings(BaseModel):
+    """Alert-volume preview a rule gets when it is created or updated.
+
+    The preview counts what the rule matches over a lookback window on its own
+    source table, projects that to a day, and warns in bands. Every band warns,
+    and none blocks the save. The 150 and 300 a day defaults are ISA-18.2's range
+    for what one operator can handle.
+    """
+
+    enabled: bool = Field(
+        default=True,
+        description="Warn on a rule's measured alert volume. DFE_DETECTION_GUARD_ENABLED.",
+    )
+    preview_window_minutes: int = Field(
+        default=60,
+        gt=0,
+        description=(
+            "Lookback window the preview counts over, unless the request names its own. "
+            "DFE_DETECTION_GUARD_PREVIEW_WINDOW_MINUTES."
+        ),
+    )
+    preview_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        description=(
+            "Longest the preview query may run before it is reported unfinished. "
+            "DFE_DETECTION_GUARD_PREVIEW_TIMEOUT_SECONDS."
+        ),
+    )
+    preview_max_rows: int = Field(
+        default=50_000_000,
+        gt=0,
+        description=(
+            "Most rows the preview may read before it is reported unfinished. "
+            "DFE_DETECTION_GUARD_PREVIEW_MAX_ROWS."
+        ),
+    )
+    warn_per_day: int = Field(
+        default=150,
+        gt=0,
+        description=(
+            "Projected alerts a day above which the rule gets guidance. "
+            "DFE_DETECTION_GUARD_WARN_PER_DAY."
+        ),
+    )
+    ack_per_day: int = Field(
+        default=300,
+        gt=0,
+        description=(
+            "Projected alerts a day above which the rule gets a warning. "
+            "DFE_DETECTION_GUARD_ACK_PER_DAY."
+        ),
+    )
+    block_per_day: int = Field(
+        default=10_000,
+        gt=0,
+        description=(
+            "Projected alerts a day above which the rule is called out as plainly bad. "
+            "DFE_DETECTION_GUARD_BLOCK_PER_DAY."
+        ),
+    )
+    warn_match_ratio: float = Field(
+        default=0.10,
+        gt=0,
+        le=1,
+        description=(
+            "Share of the window's events a rule may match before it gets a note. "
+            "DFE_DETECTION_GUARD_WARN_MATCH_RATIO."
+        ),
+    )
+    block_match_ratio: float = Field(
+        default=0.50,
+        gt=0,
+        le=1,
+        description=(
+            "Share of the window's events that makes a rule over ack_per_day plainly "
+            "bad. DFE_DETECTION_GUARD_BLOCK_MATCH_RATIO."
+        ),
+    )
+    min_rows_for_ratio: int = Field(
+        default=1000,
+        ge=0,
+        description=(
+            "Events the window must hold before the match share is judged at all. "
+            "DFE_DETECTION_GUARD_MIN_ROWS_FOR_RATIO."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _bands_in_order(self) -> DetectionGuardSettings:
+        if not self.warn_per_day < self.ack_per_day < self.block_per_day:
+            raise ValueError(
+                "detection guard bands must rise: warn_per_day "
+                f"({self.warn_per_day}) < ack_per_day ({self.ack_per_day}) < "
+                f"block_per_day ({self.block_per_day})"
+            )
+        if not self.warn_match_ratio < self.block_match_ratio:
+            raise ValueError(
+                "detection guard ratios must rise: warn_match_ratio "
+                f"({self.warn_match_ratio}) < block_match_ratio ({self.block_match_ratio})"
+            )
+        return self
+
+
 class HuntsSettings(BaseModel):
     """Hunt scheduler settings."""
 
@@ -425,6 +539,10 @@ class HuntsSettings(BaseModel):
     default_max_sample_events: int = Field(
         default=10,
         description="Default max _json samples in grouped alert body",
+    )
+    detection_guard: DetectionGuardSettings = Field(
+        default_factory=DetectionGuardSettings,
+        description="Alert-volume preview on rule create and update",
     )
 
 
@@ -1987,6 +2105,30 @@ def _get_env_overrides() -> dict:
         overrides["hunts"]["max_detections_per_run_ceiling"] = int(val)
     if val := _get_env("DFE_HUNTS_DEFAULT_MAX_SAMPLE_EVENTS"):
         overrides["hunts"]["default_max_sample_events"] = int(val)
+
+    guard: dict[str, Any] = {}
+    if val := _get_env("DFE_DETECTION_GUARD_ENABLED"):
+        guard["enabled"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_DETECTION_GUARD_PREVIEW_WINDOW_MINUTES"):
+        guard["preview_window_minutes"] = int(val)
+    if val := _get_env("DFE_DETECTION_GUARD_PREVIEW_TIMEOUT_SECONDS"):
+        guard["preview_timeout_seconds"] = float(val)
+    if val := _get_env("DFE_DETECTION_GUARD_PREVIEW_MAX_ROWS"):
+        guard["preview_max_rows"] = int(val)
+    if val := _get_env("DFE_DETECTION_GUARD_WARN_PER_DAY"):
+        guard["warn_per_day"] = int(val)
+    if val := _get_env("DFE_DETECTION_GUARD_ACK_PER_DAY"):
+        guard["ack_per_day"] = int(val)
+    if val := _get_env("DFE_DETECTION_GUARD_BLOCK_PER_DAY"):
+        guard["block_per_day"] = int(val)
+    if val := _get_env("DFE_DETECTION_GUARD_WARN_MATCH_RATIO"):
+        guard["warn_match_ratio"] = float(val)
+    if val := _get_env("DFE_DETECTION_GUARD_BLOCK_MATCH_RATIO"):
+        guard["block_match_ratio"] = float(val)
+    if val := _get_env("DFE_DETECTION_GUARD_MIN_ROWS_FOR_RATIO"):
+        guard["min_rows_for_ratio"] = int(val)
+    if guard:
+        overrides["hunts"]["detection_guard"] = guard
 
     # Artifactory settings
     if val := _get_env("DFE_ARTIFACTORY_URL", "ARTIFACTORY_VECTOR_TEMPLATES"):

@@ -120,6 +120,7 @@ class ErrorCode:
     PROTECTED_ACCOUNT = "protected_account"
     PASSWORD_CHANGE_REQUIRED = "password_change_required"
     INVALID_SQL = "invalid_sql"
+    RULE_MATCHES_EVERYTHING = "rule_matches_everything"
     INTERNAL_ERROR = "internal_error"
     SERVICE_UNAVAILABLE = "service_unavailable"
     UNRESOLVED_REFERENCE = "unresolved_reference"

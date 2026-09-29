@@ -227,28 +227,6 @@ class HyperDXClient:
         return data if isinstance(data, dict) else None
 
     # ------------------------------------------------------------------
-    # Saved searches
-    # ------------------------------------------------------------------
-
-    async def saved_search_sql(self, saved_search_id: str) -> dict[str, Any] | None:
-        """Render a saved search to the ClickHouse SELECT that view actually runs.
-
-        The fork owns the rendering: the chart-config renderer and the column
-        metadata it resolves against are both TypeScript, and a second renderer
-        here would be a second definition of what a view means.
-
-        Returns:
-            ``{"rawSql", "sql", "savedSearchName", "source"}``, or None on failure.
-        """
-        data = await self._request(
-            "get",
-            f"/dfe/saved-search/{saved_search_id}/sql",
-            op="saved_search_sql",
-            saved_search_id=saved_search_id,
-        )
-        return data if isinstance(data, dict) else None
-
-    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 

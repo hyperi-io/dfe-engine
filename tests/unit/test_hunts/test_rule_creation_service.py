@@ -8,6 +8,8 @@ from dfe_engine.hunts.rule_creation_service import (
     RuleCreateRequest,
     RuleCreationService,
 )
+from dfe_engine.hunts.rule_guard import VolumeBand
+from dfe_engine.settings import DetectionGuardSettings, HuntsSettings
 
 
 @pytest.fixture
@@ -56,8 +58,8 @@ class TestRuleCreateRequest:
             name="Test",
             user_sql="SELECT 1 FROM db.tbl WHERE x = 1",
         )
-        assert req.cost_window_minutes == 10
-        assert req.estimate_cost is False
+        assert req.cost_window_minutes is None
+        assert req.estimate_cost is True
 
 
 # ── Raw SQL rule creation ───────────────────────────────────
@@ -406,22 +408,69 @@ class TestSqlValidation:
 # ── Cost estimation ─────────────────────────────────────────
 
 
-class TestCostEstimation:
-    """Test EXPLAIN cost estimation behavior."""
+_NO_CLICKHOUSE = (
+    "The alert-volume preview could not finish: no ClickHouse is configured. "
+    "This rule's alert volume is unknown until it runs."
+)
 
-    def test_skipped_without_ch_config(self, service):
-        """Cost estimation is skipped when no ClickHouse config."""
+
+class TestVolumePreview:
+    """The preview's outcome when it cannot reach ClickHouse, and when it must not run."""
+
+    def test_without_clickhouse_the_volume_is_unknown_not_quiet(self, service):
         result = service.create_rule(
-            RuleCreateRequest(
-                name="Test",
-                user_sql="SELECT 1 FROM db.tbl WHERE x = 1",
-                estimate_cost=True,
-            ),
+            RuleCreateRequest(name="Test", user_sql="SELECT 1 FROM db.tbl WHERE x = 1"),
             rule_id="cost1",
         )
-        # No ch_config → cost_estimate is None (no table extraction either)
-        # or has warning if table was extracted
-        assert result.cost_estimate is None or len(result.cost_estimate.warnings) > 0
+
+        assert result.cost_estimate is not None
+        assert result.cost_estimate.band == VolumeBand.UNMEASURED
+        assert result.cost_estimate.estimated_rows is None
+        assert result.cost_estimate.window_minutes == 60
+        assert result.cost_estimate.warnings == [_NO_CLICKHOUSE]
+        assert _NO_CLICKHOUSE in result.rule.warnings
+
+    def test_opting_out_of_the_numbers_keeps_the_warning(self, service):
+        result = service.create_rule(
+            RuleCreateRequest(
+                name="Test", user_sql="SELECT 1 FROM db.tbl WHERE x = 1", estimate_cost=False
+            ),
+            rule_id="cost1b",
+        )
+
+        assert result.cost_estimate is None
+        assert _NO_CLICKHOUSE in result.rule.warnings
+
+    def test_a_disabled_guard_warns_nothing_and_measures_only_on_request(self):
+        hunts = HuntsSettings(detection_guard=DetectionGuardSettings(enabled=False))
+        service = RuleCreationService(hunts=hunts)
+
+        quiet = service.create_rule(
+            RuleCreateRequest(
+                name="Test", user_sql="SELECT 1 FROM db.tbl WHERE x = 1", estimate_cost=False
+            ),
+            rule_id="cost1c",
+        )
+        asked = service.create_rule(
+            RuleCreateRequest(name="Test", user_sql="SELECT 1 FROM db.tbl WHERE x = 1"),
+            rule_id="cost1d",
+        )
+
+        assert quiet.cost_estimate is None
+        assert asked.cost_estimate is not None
+        assert _NO_CLICKHOUSE not in quiet.rule.warnings + asked.rule.warnings
+
+    def test_a_zero_window_takes_the_deployment_window(self):
+        hunts = HuntsSettings(detection_guard=DetectionGuardSettings(preview_window_minutes=15))
+        result = RuleCreationService(hunts=hunts).create_rule(
+            RuleCreateRequest(
+                name="Test", user_sql="SELECT 1 FROM db.tbl WHERE x = 1", cost_window_minutes=0
+            ),
+            rule_id="cost1e",
+        )
+
+        assert result.cost_estimate is not None
+        assert result.cost_estimate.window_minutes == 15
 
     def test_skipped_without_source_table(self, service):
         """Cost estimation requires source_table on Rule."""
@@ -436,16 +485,35 @@ class TestCostEstimation:
         # No source table → cost estimation skipped
         assert result.cost_estimate is None
 
+    def test_a_rule_that_matches_everything_is_named_and_never_measured(self, service):
+        result = service.create_rule(
+            RuleCreateRequest(
+                name="All", user_sql="SELECT * FROM dfe.main WHERE notEmpty(_json) = 1"
+            ),
+            rule_id="all1",
+        )
+
+        assert result.matches_everything is not None
+        assert result.matches_everything.startswith("This rule matches every event in dfe.main")
+        assert result.cost_estimate is None
+        assert _NO_CLICKHOUSE not in result.rule.warnings
+
+    def test_an_empty_filter_is_left_to_the_execution_check(self, service):
+        result = service.create_rule(
+            RuleCreateRequest(name="Bare", user_sql="SELECT * FROM dfe.main"),
+            rule_id="bare1",
+        )
+
+        assert result.rule.validate_rule() == ["Rule has empty detection logic (WHERE clause)."]
+        assert result.matches_everything is None
+        assert result.cost_estimate is None
+
     def test_cost_estimate_model(self):
         """CostEstimate model structure."""
-        ce = CostEstimate(
-            estimated_rows=1000,
-            explain_plan="Rows: 1000",
-            explain_duration_ms=5.2,
-            window_minutes=10,
-        )
+        ce = CostEstimate(estimated_rows=1000, rows_in_window=4000, window_minutes=10)
         assert ce.estimated_rows == 1000
         assert ce.window_minutes == 10
+        assert ce.band == VolumeBand.UNMEASURED
 
 
 # ── AI analysis stub ────────────────────────────────────────
