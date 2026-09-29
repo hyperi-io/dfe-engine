@@ -19,6 +19,7 @@ from dataclasses import dataclass, field, replace
 
 from scalo.logger import logger
 
+from dfe_engine.clickhouse.quoting import quote_literal
 from dfe_engine.schema.engine_resolver import EngineResolver, ResolvedEngine, parse_engine
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.source.type_registry import (
@@ -420,8 +421,7 @@ class DDLGenerator:
         # COMMENT
         comment = self._table_comment(table_name, cfg)
         if comment:
-            escaped = comment.replace("'", "\\'")
-            lines.append(f"COMMENT '{escaped}'")
+            lines.append(f"COMMENT {quote_literal(comment)}")
 
         return "\n".join(lines) + ";\n"
 
@@ -643,8 +643,7 @@ class DDLGenerator:
         # COMMENT -- combines expr (DFE directive) + comment (human description)
         comment_text = _build_column_comment(col.expr, col.comment)
         if comment_text:
-            escaped = comment_text.replace("'", "\\'")
-            parts.append(f"COMMENT '{escaped}'")
+            parts.append(f"COMMENT {quote_literal(comment_text)}")
 
         # CODEC
         if codec:

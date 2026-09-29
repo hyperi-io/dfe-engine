@@ -113,6 +113,12 @@ class HuntRunnerMetrics:
             return
         self._claims.labels(hunt_id=hunt_id, outcome="won" if won else "lost").inc()
 
+    def claim_already_run(self, hunt_id: str) -> None:
+        """Record a claim won on a fire a peer had already run, released without running."""
+        if self._manager is None:
+            return
+        self._claims.labels(hunt_id=hunt_id, outcome="already_run").inc()
+
     def backlog(self, due: int) -> None:
         """Record the due-and-unclaimed count - the same number KEDA scales on."""
         if self._manager is None:

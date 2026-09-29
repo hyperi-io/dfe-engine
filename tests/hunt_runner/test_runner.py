@@ -147,7 +147,10 @@ class _RecordingCoordinator:
 
 
 class _WatermarkCoordinator(_RecordingCoordinator):
-    """A coordinator whose watermark advances the way the worker writes it."""
+    """A coordinator whose watermark reaches the fire before the lease is released.
+
+    That is the worker's order: it commits the watermark, then the runner releases.
+    """
 
     def __init__(self) -> None:
         super().__init__()
@@ -155,6 +158,14 @@ class _WatermarkCoordinator(_RecordingCoordinator):
 
     def get_watermark(self, hunt_id: str) -> int | None:
         return self.watermarks.get(hunt_id)
+
+    def release(self, hunt_id: str, fire: int) -> None:
+        self.calls.append("release")
+        self.watermarks[hunt_id] = fire
+
+
+class _PeerRanItCoordinator(_WatermarkCoordinator):
+    """A peer runs the fire and releases it between this runner's watermark read and its claim."""
 
     def try_claim(self, hunt_id: str, fire: int, now: int) -> bool:
         self.calls.append("try_claim")
@@ -322,5 +333,20 @@ def test_a_lost_claim_is_recorded_as_lease_churn(manager):
 
     assert [o.labels for o in manager.observed("hunt_claims_total")] == [
         {"hunt_id": "h", "outcome": "lost"}
+    ]
+    assert manager.observed("hunt_runs_total") == []
+
+
+def test_a_claim_won_on_a_fire_a_peer_already_ran_is_released_unrun(manager):
+    coord = _PeerRanItCoordinator()
+    worker = _CountingWorker()
+    runner, now = _due_runner(coord, worker, metrics=HuntRunnerMetrics(manager))
+
+    assert runner.tick(now) == 0
+
+    assert worker.runs == 0
+    assert coord.calls.count("release") == 1
+    assert [o.labels for o in manager.observed("hunt_claims_total")] == [
+        {"hunt_id": "h", "outcome": "already_run"}
     ]
     assert manager.observed("hunt_runs_total") == []

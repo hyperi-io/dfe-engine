@@ -40,6 +40,7 @@ from datetime import UTC, datetime, timedelta
 from pydantic import BaseModel, Field, field_validator
 from scalo.logger import logger
 
+from dfe_engine.clickhouse.quoting import quote_literal
 from dfe_engine.schema.require import require_objects
 from dfe_engine.schema.schema_ddl import quote_ident
 from dfe_engine.settings import default_data_database
@@ -190,20 +191,15 @@ def build_grouping_query(
     select_clause = ",\n    ".join(select_parts)
     group_by_clause = ", ".join(group_by_aliases)
 
-    # Escape single quotes in string values
-    hunt_name_esc = hunt_name.replace("'", "\\'")
-    rule_name_esc = rule_name.replace("'", "\\'")
-    customer_esc = customer.replace("'", "\\'")
-
     return (
         f"SELECT\n"
         f"    {select_clause}\n"
         f"FROM {quote_ident(target_db, what='database')}.{quote_ident(target_table, what='table name')}\n"
-        f"WHERE hunt_name = '{hunt_name_esc}'\n"
-        f"  AND rule_name = '{rule_name_esc}'\n"
-        f"  AND _org_id = '{customer_esc}'\n"
-        f"  AND _timestamp >= '{time_start}'\n"
-        f"  AND _timestamp < '{time_end}'\n"
+        f"WHERE hunt_name = {quote_literal(hunt_name)}\n"
+        f"  AND rule_name = {quote_literal(rule_name)}\n"
+        f"  AND _org_id = {quote_literal(customer)}\n"
+        f"  AND _timestamp >= {quote_literal(time_start)}\n"
+        f"  AND _timestamp < {quote_literal(time_end)}\n"
         f"GROUP BY {group_by_clause}\n"
         f"ORDER BY match_count DESC"
     )
