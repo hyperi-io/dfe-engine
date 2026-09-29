@@ -123,6 +123,30 @@ class TestCatalogue:
         marked = {e["transform_engine"] for e in listed if e["transform_engine"]}
         assert marked == catalogue.transform_engines()
 
+    def test_the_catalogue_carries_the_manifests_display_name(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # The console labels an app from this field, so the name stays manifest data.
+        _wire(app, tmp_path)
+        listed = client.get("/api/v1/apps", headers=admin_headers).json()
+        labels = {e["service"]: e["display_name"] for e in listed}
+        assert labels["hyperdx"] == "Search"
+        assert labels["dfe-loader"] is None
+
+    def test_the_instance_summary_carries_the_display_name(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        client.post(
+            "/api/v1/apps/hyperdx/instances",
+            json={"instance": "default"},
+            headers=admin_headers,
+        )
+        got = client.get("/api/v1/apps/hyperdx/default", headers=admin_headers)
+        assert got.status_code == 200, got.text
+        assert got.json()["service"] == "hyperdx"
+        assert got.json()["display_name"] == "Search"
+
     def test_the_routing_flag_matches_the_manifest(self, client, app, admin_headers, tmp_path):
         # Without it the UI can only find out by probing /routing for a 400.
         _wire(app, tmp_path)

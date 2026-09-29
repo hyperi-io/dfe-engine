@@ -262,8 +262,21 @@ def _idle_when_field() -> Any:
     )
 
 
+def _display_name_field() -> Any:
+    """A fresh field descriptor, since a FieldInfo belongs to one model."""
+    return Field(
+        default=None,
+        description=(
+            "The name a console shows a person for this app, from the app manifest. "
+            "Null when the manifest names none, and the service id is the label. A "
+            "label only: routes, charts and telemetry keep the service id."
+        ),
+    )
+
+
 class AppSummary(BaseModel):
     service: str
+    display_name: str | None = _display_name_field()
     instance: str
     telemetry_name: str
     scale_deployed: bool
@@ -279,6 +292,7 @@ class AppSummary(BaseModel):
 
 class CatalogueEntry(BaseModel):
     service: str
+    display_name: str | None = _display_name_field()
     scale_deployed: bool
     multiplicity: str
     has_compiled_routing: bool = _routing_flag()
@@ -883,6 +897,7 @@ def list_apps(
         entries.append(
             CatalogueEntry(
                 service=service,
+                display_name=desc.display_name or None,
                 scale_deployed=desc.scale_deployed,
                 multiplicity=str(desc.multiplicity),
                 has_compiled_routing=desc.has_compiled_routing,
@@ -972,6 +987,7 @@ def get_app(service: str, instance: str, user: CurrentUser, request: Request) ->
     desc = catalogue.descriptor(service)
     return AppSummary(
         service=app.service,
+        display_name=desc.display_name or None,
         instance=app.instance,
         telemetry_name=app.telemetry_name,
         scale_deployed=desc.scale_deployed,

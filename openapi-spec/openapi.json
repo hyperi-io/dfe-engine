@@ -24370,6 +24370,18 @@
             "type": "string",
             "title": "Service"
           },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "The name a console shows a person for this app, from the app manifest. Null when the manifest names none, and the service id is the label. A label only: routes, charts and telemetry keep the service id."
+          },
           "instance": {
             "type": "string",
             "title": "Instance"
@@ -25125,6 +25137,18 @@
           "service": {
             "type": "string",
             "title": "Service"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "The name a console shows a person for this app, from the app manifest. Null when the manifest names none, and the service id is the label. A label only: routes, charts and telemetry keep the service id."
           },
           "scale_deployed": {
             "type": "boolean",
