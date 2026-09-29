@@ -1,11 +1,15 @@
-"""Rule SQL rewriter -- transform user SQL for hunt execution.
+"""Rule SQL rewriter -- read user SQL into the parts a hunt runs.
 
-Takes a user-supplied SQL SELECT statement (typically from HyperDX)
-and rewrites it for hunt execution:
+Takes a user-supplied SQL SELECT (raw, or the base query the HyperDX sanitizer
+produced) and extracts:
 
-1. Detect and reject SELECT * (or rewrite to lean columns)
-2. Strip time-bound conditions from WHERE clause
-3. Extract the detection logic (WHERE clause without time bounds)
+1. The source table, from the top-level FROM
+2. The detection logic: the PREWHERE and WHERE predicates, with time bounds
+   removed so the hunt's own window applies
+3. Whether the SELECT list has a bare ``*``
+
+The SQL is read by ``hdx_sanitizer.split_time_window``, so a clause word inside
+a string literal, a comment or a subquery never ends the WHERE early.
 
 The rewriter does NOT generate the final INSERT INTO ... SELECT --
 that's done by HuntResultSchema.build_insert_select(). This module
@@ -25,10 +29,9 @@ Usage:
     # result.stripped_time_bounds == ["timestamp > '2026-01-01'"]
 """
 
-from __future__ import annotations
-
-import re
 from dataclasses import dataclass, field
+
+from .hdx_sanitizer import HdxSanitizeError, split_time_window
 
 # Common timestamp column patterns in DFE tables.
 _TIMESTAMP_COLUMNS = frozenset(
@@ -39,51 +42,6 @@ _TIMESTAMP_COLUMNS = frozenset(
         "timestamp_load",
         "@timestamp",
     }
-)
-
-
-def _build_time_bound_patterns(columns: frozenset[str]) -> list[re.Pattern]:
-    """Build regex patterns for time-bound conditions from column names."""
-    cols = "|".join(re.escape(c) for c in columns)
-    return [
-        re.compile(
-            rf"""\b({cols})\s*(?:>=?|<=?|=)\s*'[^']*'""",
-            re.IGNORECASE,
-        ),
-        re.compile(
-            rf"""\b({cols})\s*(?:>=?|<=?)\s*now\s*\(\)\s*-\s*INTERVAL\s+\S+(?:\s+\S+)?""",
-            re.IGNORECASE,
-        ),
-        re.compile(
-            rf"""\b({cols})\s+BETWEEN\s+'[^']*'\s+AND\s+'[^']*'""",
-            re.IGNORECASE,
-        ),
-        re.compile(
-            rf"""\b({cols})\s*(?:>=?|<=?)\s*\{{\{{[^}}]*\}}\}}""",
-            re.IGNORECASE,
-        ),
-    ]
-
-
-# Default patterns for module-level use.
-_TIME_BOUND_PATTERNS = _build_time_bound_patterns(_TIMESTAMP_COLUMNS)
-
-# SELECT * detection
-_SELECT_STAR_RE = re.compile(
-    r"\bSELECT\s+\*\s+FROM\b",
-    re.IGNORECASE,
-)
-
-# Extract source table from FROM clause
-_FROM_TABLE_RE = re.compile(
-    r"\bFROM\s+(?:(\w+)\.)?(\w+)\b",
-    re.IGNORECASE,
-)
-
-# Extract WHERE clause
-_WHERE_RE = re.compile(
-    r"\bWHERE\s+(.*?)(?:\bGROUP\s+BY\b|\bORDER\s+BY\b|\bLIMIT\b|\bHAVING\b|;|\Z)",
-    re.IGNORECASE | re.DOTALL,
 )
 
 
@@ -119,12 +77,7 @@ class RuleRewriter:
             timestamp_columns: Additional timestamp column names to
                 strip from WHERE clauses. Merged with the default set.
         """
-        if timestamp_columns:
-            self._ts_columns = _TIMESTAMP_COLUMNS | timestamp_columns
-            self._patterns = _build_time_bound_patterns(self._ts_columns)
-        else:
-            self._ts_columns = _TIMESTAMP_COLUMNS
-            self._patterns = _TIME_BOUND_PATTERNS
+        self._ts_columns = _TIMESTAMP_COLUMNS | (timestamp_columns or frozenset())
 
     def parse_user_sql(self, sql: str) -> ParsedRule:
         """Parse a user-supplied SQL SELECT statement.
@@ -136,71 +89,39 @@ class RuleRewriter:
             sql: User-supplied SQL SELECT statement.
 
         Returns:
-            ParsedRule with extracted components.
+            ParsedRule with extracted components. SQL that cannot be read gives
+            an empty ParsedRule carrying a warning, never an exception.
         """
         result = ParsedRule(original_sql=sql.strip())
+        try:
+            split = split_time_window(sql, self._ts_columns)
+        except HdxSanitizeError as exc:
+            result.warnings.append(f"Could not read the SQL: {exc}")
+            return result
 
-        # Detect SELECT *
-        result.had_select_star = bool(_SELECT_STAR_RE.search(sql))
+        result.source_db = split.source_db
+        result.source_table = split.source_table
+        result.had_select_star = split.select_star
+        result.where_clause = split.filter or ""
+        result.stripped_time_bounds = list(split.removed)
+
         if result.had_select_star:
             result.warnings.append(
                 "SELECT * detected -- hunt output will use lean columns "
                 "(matched_uuid + rule metadata + _json) instead."
             )
-
-        # Extract source table
-        from_match = _FROM_TABLE_RE.search(sql)
-        if from_match:
-            result.source_db = from_match.group(1)
-            result.source_table = from_match.group(2)
-        else:
+        if result.source_table is None:
             result.warnings.append("Could not extract source table from SQL.")
-
-        # Extract WHERE clause
-        where_match = _WHERE_RE.search(sql)
-        if where_match:
-            raw_where = where_match.group(1).strip()
-            result.where_clause = self._strip_time_bounds(raw_where, result.stripped_time_bounds)
-        else:
+        if split.filter is None and not split.removed:
             result.warnings.append("No WHERE clause found in SQL.")
-
+        for bound in split.stuck:
+            result.warnings.append(
+                f"A time bound sits under OR, NOT or a function call, so it stays in "
+                f"the rule alongside the hunt window: {bound}"
+            )
+        if split.ignored_clauses:
+            result.warnings.append(
+                "A rule filters rows of one table, so it does not apply: "
+                + ", ".join(split.ignored_clauses)
+            )
         return result
-
-    def _strip_time_bounds(self, where_clause: str, stripped: list[str]) -> str:
-        """Remove time-bound conditions from a WHERE clause.
-
-        Args:
-            where_clause: Original WHERE clause text.
-            stripped: List to append stripped conditions to.
-
-        Returns:
-            WHERE clause with time bounds removed.
-        """
-        result = where_clause
-
-        for pattern in self._patterns:
-            for match in pattern.finditer(result):
-                stripped.append(match.group(0))
-            result = pattern.sub("", result)
-
-        # Clean up residual AND/OR operators
-        result = self._clean_boolean_operators(result)
-
-        return result.strip()
-
-    @staticmethod
-    def _clean_boolean_operators(clause: str) -> str:
-        """Remove dangling AND/OR from stripped conditions."""
-        # Remove leading AND/OR
-        clause = re.sub(r"^\s*(?:AND|OR)\s+", "", clause, flags=re.IGNORECASE)
-        # Remove trailing AND/OR
-        clause = re.sub(r"\s+(?:AND|OR)\s*$", "", clause, flags=re.IGNORECASE)
-        # Remove doubled AND/OR (from middle removal)
-        clause = re.sub(r"\s+AND\s+AND\s+", " AND ", clause, flags=re.IGNORECASE)
-        clause = re.sub(r"\s+OR\s+OR\s+", " OR ", clause, flags=re.IGNORECASE)
-        # Remove AND/OR next to parentheses: ( AND ... or ... AND )
-        clause = re.sub(r"\(\s*(?:AND|OR)\s+", "(", clause, flags=re.IGNORECASE)
-        clause = re.sub(r"\s+(?:AND|OR)\s*\)", ")", clause, flags=re.IGNORECASE)
-        # Remove empty parentheses
-        clause = re.sub(r"\(\s*\)", "", clause)
-        return clause.strip()

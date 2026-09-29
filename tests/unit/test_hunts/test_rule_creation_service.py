@@ -108,6 +108,22 @@ class TestCreateRuleRaw:
         assert "process" in result.rule.where_clause
         assert "severity" in result.rule.where_clause
 
+    def test_raw_literal_and_quoted_table_reach_the_rule_whole(self, service):
+        """A raw rule's literal holding clause words and a quoted table both survive."""
+        result = service.create_rule(
+            RuleCreateRequest(
+                name="Literal",
+                user_sql=(
+                    "SELECT * FROM `dfe`.`win-events` WHERE msg = 'x ORDER BY y; LIMIT 1' "
+                    "AND _timestamp > now() - INTERVAL 1 DAY SETTINGS max_threads = 2"
+                ),
+            ),
+            rule_id="r4",
+        )
+        assert result.sql_errors == []
+        assert (result.rule.source_db, result.rule.source_table) == ("dfe", "win-events")
+        assert result.rule.where_clause == "msg = 'x ORDER BY y; LIMIT 1'"
+
     def test_raw_preserves_source(self, service):
         result = service.create_rule(
             RuleCreateRequest(
@@ -140,6 +156,7 @@ class TestCreateRuleHyperDX:
             ),
             rule_id="hdx1",
         )
+        assert result.sql_errors == []
         assert "fromUnixTimestamp64Milli" not in result.rule.where_clause
         assert "severity = 'high'" in result.rule.where_clause
         assert "stripped_time_bounds" in result.sanitize_summary
@@ -157,6 +174,7 @@ class TestCreateRuleHyperDX:
             ),
             rule_id="hdx2",
         )
+        assert result.sql_errors == []
         assert "SETTINGS" not in result.rule.original_sql
         assert "LIMIT" not in result.rule.original_sql
         assert "stripped_settings" in result.sanitize_summary
@@ -183,13 +201,14 @@ class TestCreateRuleHyperDX:
             ),
             rule_id="hdx3",
         )
+        assert result.sql_errors == []
         assert "__hdx_time_bucket" not in result.rule.original_sql
         assert "toStartOfInterval" not in result.rule.original_sql
         assert "ServiceName = 'api'" in result.rule.where_clause
         assert result.sanitize_summary.get("had_time_bucket") is True
 
     def test_preserves_detection_logic(self, service):
-        """All user detection logic is preserved after sanitization."""
+        """HAVING cannot become a row filter, so the request is refused, not widened."""
         result = service.create_rule(
             RuleCreateRequest(
                 name="Detection Logic",
@@ -207,8 +226,55 @@ class TestCreateRuleHyperDX:
             ),
             rule_id="hdx4",
         )
-        assert "process_name" in result.rule.where_clause
+        assert [e.message.split(",")[0] for e in result.sql_errors] == [
+            "HAVING filters aggregated groups"
+        ]
+        assert result.sanitize_summary == {}
+
+    def test_preserves_every_detection_predicate(self, service):
+        """Every user predicate survives; the window, grouping and SETTINGS do not."""
+        result = service.create_rule(
+            RuleCreateRequest(
+                name="Detection Logic",
+                source_type="hyperdx",
+                user_sql=(
+                    "SELECT count(),severity FROM default.logs "
+                    "WHERE (timestamp >= fromUnixTimestamp64Milli(1739318400000) "
+                    "AND timestamp <= fromUnixTimestamp64Milli(1739491200000)) "
+                    "AND process_name = 'certutil.exe' "
+                    "AND severity IN ('high', 'critical') "
+                    "GROUP BY severity "
+                    "SETTINGS optimize_read_in_order = 0"
+                ),
+            ),
+            rule_id="hdx6",
+        )
+        assert result.sql_errors == []
+        assert result.rule.where_clause == (
+            "process_name = 'certutil.exe' AND severity IN ('high', 'critical')"
+        )
+        assert result.rule.source_db == "default"
         assert result.rule.source_table == "logs"
+
+    def test_literal_holding_clause_words_reaches_the_rule_whole(self, service):
+        """A search term that spells ORDER BY is data, end to end."""
+        result = service.create_rule(
+            RuleCreateRequest(
+                name="Literal",
+                source_type="hyperdx",
+                user_sql=(
+                    "SELECT _timestamp,_json FROM dfe.main WHERE (_timestamp >= "
+                    "fromUnixTimestamp64Milli(1) AND _timestamp <= fromUnixTimestamp64Milli(2)) "
+                    "AND ((toString(`_json`.`message`) = 'failed ORDER BY LIMIT 5; HAVING x')) "
+                    "ORDER BY _timestamp DESC LIMIT 200"
+                ),
+            ),
+            rule_id="hdx7",
+        )
+        assert result.sql_errors == []
+        assert result.rule.where_clause == (
+            "((toString(`_json`.`message`) = 'failed ORDER BY LIMIT 5; HAVING x'))"
+        )
 
     def test_hyperdx_with_cel_filter(self, service):
         """HyperDX sanitization + CEL transpilation combined."""
@@ -226,6 +292,7 @@ class TestCreateRuleHyperDX:
             ),
             rule_id="hdx5",
         )
+        assert result.sql_errors == []
         assert "fromUnixTimestamp64Milli" not in result.rule.where_clause
         assert "severity" in result.rule.where_clause
         # CEL transpiled and ANDed
@@ -423,6 +490,7 @@ class TestSanitizeSummary:
             ),
             rule_id="sum2",
         )
+        assert result.sql_errors == []
         assert "stripped_time_bounds" in result.sanitize_summary
         assert len(result.sanitize_summary["stripped_time_bounds"]) == 2
 
@@ -437,6 +505,7 @@ class TestSanitizeSummary:
             ),
             rule_id="sum3",
         )
+        assert result.sql_errors == []
         assert "stripped_settings" in result.sanitize_summary
 
     def test_no_patterns_clean_summary(self, service):
@@ -449,4 +518,6 @@ class TestSanitizeSummary:
             ),
             rule_id="sum4",
         )
+        # A refusal also leaves the summary empty, so the clean result is checked first.
+        assert result.sql_errors == []
         assert result.sanitize_summary == {}
