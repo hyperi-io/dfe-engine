@@ -266,6 +266,11 @@ class TestGenerateCreateTable:
         assert "@profile: timeseries" in ddl
         assert "@profile_version: 1.0.0" in ddl
 
+    def test_table_comment_escapes_a_quote_and_a_trailing_backslash(self, gen: DDLGenerator):
+        cfg = DDLConfig(profile_name="analyst's C:\\Temp\\")
+        ddl = gen.generate_create_table("t", _basic_columns(), cfg)
+        assert "COMMENT '@profile: analyst''s C:\\\\Temp\\\\'" in ddl
+
     def test_settings(self, gen: DDLGenerator):
         ddl = gen.generate_create_table("t", _basic_columns())
         assert "index_granularity = 2048" in ddl
@@ -412,7 +417,12 @@ class TestComments:
     def test_column_comment_escaped(self, gen: DDLGenerator):
         cols = [_col(name="x", type="string", comment="it's a test")]
         ddl = gen.generate_create_table("t", cols)
-        assert "COMMENT 'it\\'s a test'" in ddl
+        assert "COMMENT 'it''s a test'" in ddl
+
+    def test_column_comment_escapes_a_trailing_backslash(self, gen: DDLGenerator):
+        cols = [_col(name="x", type="string", comment="Analyst's share C:\\Temp\\")]
+        ddl = gen.generate_create_table("t", cols)
+        assert "COMMENT 'Analyst''s share C:\\\\Temp\\\\'" in ddl
 
     def test_no_comment(self, gen: DDLGenerator):
         cols = [_col(name="x", type="string")]
