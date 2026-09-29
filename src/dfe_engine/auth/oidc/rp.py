@@ -206,7 +206,8 @@ class OidcRelyingParty:
     OIDC provider registry. Each provider registers with client_id/client_secret
     resolved through ``resolve_credential`` (store before env) and an OIDC
     discovery URL, so Authlib validates the id_token against the IdP JWKS on
-    callback.
+    callback. Every login sends a PKCE ``S256`` code challenge; its verifier
+    stays in the login session and goes with the code exchange.
 
     Zero enabled providers is a valid state: the RP holds an empty registry and
     every lookup reports the provider unknown (the router turns that into a 404).
@@ -243,7 +244,8 @@ class OidcRelyingParty:
                 server_metadata_url=(
                     f"{provider.issuer.rstrip('/')}/.well-known/openid-configuration"
                 ),
-                client_kwargs={"scope": provider.scopes},
+                # PKCE: an intercepted authorization code is useless without the session's verifier.
+                client_kwargs={"scope": provider.scopes, "code_challenge_method": "S256"},
             )
             self._providers[name] = provider
             logger.info("OIDC RP registered provider", provider=name, issuer=provider.issuer)

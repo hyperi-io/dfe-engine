@@ -10,9 +10,6 @@ server:
     enabled: false
   auth:
     mode: none
-    accepted_headers:
-      - name: x-hyperi-agent
-        values: ["1.0"]
 
 grpc:
   enabled: false

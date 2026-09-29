@@ -274,6 +274,31 @@ class TestEnvOverrides:
         settings = load_settings()
         assert "http://a.com" in settings.api.cors_origins
 
+    def test_api_key_default_ttl_is_ninety_days(self):
+        assert load_settings().auth.api_key_default_ttl_days == 90
+
+    def test_api_key_default_ttl_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS", "0")
+        assert load_settings().auth.api_key_default_ttl_days == 0
+
+    def test_api_cors_origins_trust_no_localhost_outside_a_dev_posture(self, monkeypatch):
+        monkeypatch.setenv("DFE_ENV", "production")
+        monkeypatch.setenv("DFE_API_JWT_SECRET", "a-production-secret-at-least-32-bytes-long")
+        assert load_settings().api.cors_origins == []
+
+    def test_api_cors_origins_trust_the_local_console_in_a_dev_posture(self):
+        assert load_settings().api.cors_origins == [
+            "http://localhost:5173",
+            "http://localhost:5174",
+            "http://localhost:3000",
+        ]
+
+    def test_api_cors_origins_set_in_production_are_taken_as_set(self, monkeypatch):
+        monkeypatch.setenv("DFE_ENV", "production")
+        monkeypatch.setenv("DFE_API_JWT_SECRET", "a-production-secret-at-least-32-bytes-long")
+        monkeypatch.setenv("DFE_API_CORS_ORIGINS", "https://console.example")
+        assert load_settings().api.cors_origins == ["https://console.example"]
+
     def test_api_forwarded_allow_ips_override(self, monkeypatch):
         monkeypatch.setenv("DFE_API_FORWARDED_ALLOW_IPS", "10.42.0.0/16")
         settings = load_settings()

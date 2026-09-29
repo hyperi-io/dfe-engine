@@ -69,16 +69,51 @@ class TestCreateAPIKey:
         )
         assert resp.status_code == 422
 
-    def test_create_without_expiry_never_expires(self, client, admin_headers):
+    def test_create_without_expiry_takes_the_default_lifetime(self, client, admin_headers):
+        before = datetime.now(UTC)
+        resp = client.post(
+            "/api/v1/auth/api-keys",
+            json={"name": "default-expiry-key"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        expiry = datetime.fromisoformat(data["expires_at"])
+        assert before + timedelta(days=90) <= expiry <= datetime.now(UTC) + timedelta(days=90)
+        assert data["expired"] is False
+
+    def test_a_configured_lifetime_is_the_default(self, client, app, admin_headers):
+        app.state.settings.auth.api_key_default_ttl_days = 7
+        resp = client.post(
+            "/api/v1/auth/api-keys",
+            json={"name": "week-key"},
+            headers=admin_headers,
+        )
+        expiry = datetime.fromisoformat(resp.json()["expires_at"])
+        assert expiry <= datetime.now(UTC) + timedelta(days=7)
+        assert expiry > datetime.now(UTC) + timedelta(days=6)
+
+    def test_a_zero_lifetime_creates_a_key_that_never_expires(self, client, app, admin_headers):
+        app.state.settings.auth.api_key_default_ttl_days = 0
         resp = client.post(
             "/api/v1/auth/api-keys",
             json={"name": "no-expiry-key"},
             headers=admin_headers,
         )
         assert resp.status_code == 201
-        data = resp.json()
-        assert data["expires_at"] is None
-        assert data["expired"] is False
+        assert resp.json()["expires_at"] is None
+        assert resp.json()["expired"] is False
+
+    def test_an_explicit_expiry_beats_the_default(self, client, admin_headers):
+        expires_at = _iso_in(days=365)
+        resp = client.post(
+            "/api/v1/auth/api-keys",
+            json={"name": "year-key", "expires_at": expires_at},
+            headers=admin_headers,
+        )
+        assert datetime.fromisoformat(resp.json()["expires_at"]) == datetime.fromisoformat(
+            expires_at
+        )
 
     def test_create_with_expiry(self, client, admin_headers):
         expires_at = _iso_in(days=30)
