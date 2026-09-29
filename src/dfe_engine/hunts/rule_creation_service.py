@@ -42,7 +42,7 @@ from pydantic import BaseModel, Field, model_validator
 from scalo.logger import logger
 from sqlglot.errors import ParseError
 
-from .hdx_sanitizer import HdxSanitizer, HdxSanitizeResult
+from .hdx_sanitizer import HdxSanitizeError, HdxSanitizer, HdxSanitizeResult
 from .rule_model import Rule, RuleCreate
 from .rule_rewriter import RuleRewriter
 
@@ -170,20 +170,27 @@ class RuleCreationService:
         """
         sanitize_summary: dict[str, Any] = {}
         clean_sql = request.user_sql
+        refusal: SqlValidationError | None = None
 
         # Phase 1: HyperDX sanitization (if source_type="hyperdx")
         if request.source_type == "hyperdx" and request.user_sql:
-            hdx_result = self._hdx_sanitizer.sanitize(request.user_sql)
-            clean_sql = hdx_result.clean_sql
-            sanitize_summary = self._build_sanitize_summary(hdx_result)
-            logger.debug(
-                f"HdxSanitizer stripped {len(hdx_result.stripped_time_bounds)} "
-                f"time bounds, had_time_bucket={hdx_result.had_time_bucket}"
-            )
+            try:
+                hdx_result = self._hdx_sanitizer.sanitize(request.user_sql)
+            except HdxSanitizeError as exc:
+                refusal = SqlValidationError(message=str(exc))
+            else:
+                clean_sql = hdx_result.clean_sql
+                sanitize_summary = self._build_sanitize_summary(hdx_result)
+                logger.debug(
+                    f"HdxSanitizer stripped {len(hdx_result.stripped_time_bounds)} "
+                    f"time bounds, had_time_bucket={hdx_result.had_time_bucket}"
+                )
 
         # Phase 2: SQL syntax validation
         sql_errors: list[SqlValidationError] = []
-        if clean_sql:
+        if refusal is not None:
+            sql_errors = [refusal]
+        elif clean_sql:
             sql_errors = self._validate_sql_syntax(clean_sql)
 
         # Phase 3: Create Rule via existing pipeline
@@ -424,6 +431,8 @@ class RuleCreationService:
             summary["stripped_time_bucket_refs"] = hdx_result.stripped_time_bucket_refs
         if hdx_result.had_time_bucket:
             summary["had_time_bucket"] = True
+        if hdx_result.stripped_clauses:
+            summary["stripped_clauses"] = hdx_result.stripped_clauses
         if hdx_result.warnings:
             summary["warnings"] = hdx_result.warnings
 
