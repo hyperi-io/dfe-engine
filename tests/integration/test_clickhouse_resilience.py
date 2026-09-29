@@ -49,7 +49,7 @@ def manager(ch_params):
     try:
         yield mgr
     finally:
-        mgr._cleanup()
+        mgr.close()
 
 
 def test_query_round_trips_through_resilient_wrapper(manager):

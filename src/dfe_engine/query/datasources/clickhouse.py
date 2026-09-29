@@ -206,5 +206,5 @@ class ClickHouseAdapter(DatasourceAdapter):
             self._restricted_client.close()
             self._restricted_client = None
         if self._manager is not None and self.config:
-            self._manager._cleanup()  # the manager has no public close
+            self._manager.close()
         self._manager = None

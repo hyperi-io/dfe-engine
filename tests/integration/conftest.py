@@ -458,7 +458,7 @@ def manager_client(ch_params):
     try:
         yield manager.get_clickhouse_client()
     finally:
-        manager._cleanup()  # no public close: reset_instance only serves the singleton
+        manager.close()
 
 
 @pytest.fixture

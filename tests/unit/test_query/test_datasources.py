@@ -165,7 +165,7 @@ class TestClickHouseAdapter:
         adapter._restricted_client = restricted
         adapter.close()
         restricted.close.assert_called_once()
-        shared._cleanup.assert_not_called()
+        shared.close.assert_not_called()
         assert adapter._manager is None
         assert adapter._restricted_client is None
 
@@ -183,7 +183,7 @@ class TestClickHouseAdapter:
         adapter = ClickHouseAdapter("default", config={"ch_host": "ch-a.example"})
         adapter._manager = owned
         adapter.close()
-        owned._cleanup.assert_called_once()
+        owned.close.assert_called_once()
         assert adapter._manager is None
 
 
