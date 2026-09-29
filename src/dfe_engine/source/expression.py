@@ -1,18 +1,19 @@
 """DFE Column Expression Validator + Builder.
 
-Parses and validates the ``expr`` field on SchemaColumn definitions.
-The expr field carries directives that tell the **loader** how to
-populate each column.
+Parses and validates the ``expr`` field on SchemaColumn definitions. dfe-loader
+acts on six directives (``DIRECTIVE_NAMES`` in its ``src/column_meta/mod.rs``):
+``@skip``, ``@default``, ``@source``, ``@renamed``, ``@computed`` and ``@coerce``.
+This validator accepts ``@source`` and ``@computed``, plus two descriptive
+labels, ``@generated`` and ``@config``, which the loader drops as unknown
+directives because what they describe comes from elsewhere.
 
 Directives:
     @source: field              Extract from source data field
     @source: field | fallback   Extract with fallback expression
-    @source: first(a/b/c)      First match from multiple candidate fields
-    @generated: expr            ClickHouse generates via DEFAULT -- loader omits
-    @captured: what             Captured from raw payload before transforms
-    @captured: what as TYPE     Captured and cast to type
+    @source: first(a/b/c)       First match from multiple candidate fields
     @computed: expr             Computed from other fields during data prep
-    @config: path               Mapping is configurable at runtime
+    @generated: expr            Descriptive: the column's DEFAULT clause fills it
+    @config: path               Descriptive: the mapping is configurable at runtime
 
 Usage:
     from dfe_engine.source.expression import ExpressionValidator, ExpressionBuilder
@@ -28,21 +29,18 @@ Usage:
     expr = ExpressionBuilder.source("timestamp", fallback="now()")
     assert expr == "@source: timestamp | now()"
 
-See the dfe-schemas README section "DFE Expressions" and
-dfe-loader DDL-EXPRESSION.md for the full expression language reference.
+See dfe-loader docs/clickhouse/DDL-DIRECTIVES.md for the full expression
+language reference.
 """
 
-from __future__ import annotations
-
 import re
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 # ---------------------------------------------------------------------------
 # Directive names
 # ---------------------------------------------------------------------------
 
-DIRECTIVES = frozenset({"source", "generated", "captured", "computed", "config"})
+DIRECTIVES = frozenset({"source", "computed", "generated", "config"})
 
 # ---------------------------------------------------------------------------
 # Regex patterns
@@ -66,15 +64,6 @@ _SOURCE_FIRST_RE = re.compile(
     re.IGNORECASE,
 )
 
-# @captured with cast: thing as TYPE
-_CAPTURED_AS_RE = re.compile(
-    r"^(?P<what>.+?)\s+as\s+(?P<cast_type>\w+)$",
-    re.IGNORECASE,
-)
-
-# ClickHouse function call: func(...) or func()
-_FUNCTION_CALL_RE = re.compile(r"^\w+\s*\(.*\)$", re.DOTALL)
-
 
 # ---------------------------------------------------------------------------
 # Validation result
@@ -94,10 +83,6 @@ class ExprValidationResult:
     source_field: str | None = None
     fallback: str | None = None
     candidate_fields: list[str] = field(default_factory=list)
-
-    # Captured-specific
-    captured_what: str | None = None
-    cast_type: str | None = None
 
     # Generated/computed
     expression: str | None = None
@@ -171,23 +156,6 @@ class ExpressionValidator:
         _VALIDATORS[directive](body, result)
         return result
 
-    @staticmethod
-    def validate_column_expr(
-        column_name: str,
-        expr: str | None,
-    ) -> list[str]:
-        """Validate an expression in the context of a column.
-
-        Returns a list of error strings (empty if valid).
-        Convenience for schema-load-time validation.
-        """
-        if expr is None:
-            return []
-        result = ExpressionValidator.validate(expr)
-        if not result.valid:
-            return [f"Column '{column_name}': {e}" for e in result.errors]
-        return []
-
 
 # ---------------------------------------------------------------------------
 # Directive-specific validators
@@ -245,24 +213,6 @@ def _validate_generated(body: str, result: ExprValidationResult) -> None:
     result.expression = body
 
 
-def _validate_captured(body: str, result: ExprValidationResult) -> None:
-    """Validate @captured directive body."""
-    as_m = _CAPTURED_AS_RE.match(body)
-    if as_m:
-        result.captured_what = as_m.group("what").strip()
-        result.cast_type = as_m.group("cast_type").strip()
-        if not result.captured_what:
-            result.valid = False
-            result.errors.append("@captured target before 'as' is empty")
-        return
-
-    if not body:
-        result.valid = False
-        result.errors.append("@captured expression is empty")
-        return
-    result.captured_what = body
-
-
 def _validate_computed(body: str, result: ExprValidationResult) -> None:
     """Validate @computed directive body."""
     if not body:
@@ -283,9 +233,8 @@ def _validate_config(body: str, result: ExprValidationResult) -> None:
 
 _VALIDATORS = {
     "source": _validate_source,
-    "generated": _validate_generated,
-    "captured": _validate_captured,
     "computed": _validate_computed,
+    "generated": _validate_generated,
     "config": _validate_config,
 }
 
@@ -296,11 +245,7 @@ _VALIDATORS = {
 
 
 class ExpressionBuilder:
-    """Build DFE expressions programmatically.
-
-    Provides type-safe construction of expression strings so the UI
-    and API consumers don't need to format strings manually.
-    """
+    """Build DFE expressions, so a caller never formats the directive by hand."""
 
     @staticmethod
     def source(
@@ -320,110 +265,3 @@ class ExpressionBuilder:
         if fallback:
             return f"@source: {field_name} | {fallback}"
         return f"@source: {field_name}"
-
-    @staticmethod
-    def source_first(fields: Sequence[str]) -> str:
-        """Build a @source: first(a/b/c) expression.
-
-        Args:
-            fields: Candidate field names in priority order.
-
-        Returns:
-            Expression string (e.g. ``@source: first(tags/_tags/meta)``).
-        """
-        return f"@source: first({'/'.join(fields)})"
-
-    @staticmethod
-    def generated(expression: str) -> str:
-        """Build a @generated expression.
-
-        Args:
-            expression: ClickHouse DEFAULT expression.
-
-        Returns:
-            Expression string (e.g. ``@generated: now64(3)``).
-        """
-        return f"@generated: {expression}"
-
-    @staticmethod
-    def captured(
-        what: str,
-        *,
-        cast_type: str | None = None,
-    ) -> str:
-        """Build a @captured expression.
-
-        Args:
-            what: What to capture (e.g. ``raw_payload``).
-            cast_type: Optional cast type (e.g. ``JSON``).
-
-        Returns:
-            Expression string (e.g. ``@captured: raw_payload as JSON``).
-        """
-        if cast_type:
-            return f"@captured: {what} as {cast_type}"
-        return f"@captured: {what}"
-
-    @staticmethod
-    def computed(expression: str) -> str:
-        """Build a @computed expression.
-
-        Args:
-            expression: Computation expression.
-
-        Returns:
-            Expression string (e.g. ``@computed: geoip(client_ip).country``).
-        """
-        return f"@computed: {expression}"
-
-    @staticmethod
-    def config(path: str) -> str:
-        """Build a @config expression.
-
-        Args:
-            path: Configuration path.
-
-        Returns:
-            Expression string (e.g. ``@config: routing.org_id_field``).
-        """
-        return f"@config: {path}"
-
-
-# ---------------------------------------------------------------------------
-# Autocomplete data -- for UI typeahead support
-# ---------------------------------------------------------------------------
-
-
-def list_directive_types() -> list[dict[str, str]]:
-    """List all valid directive types with descriptions.
-
-    Returns:
-        List of dicts with ``name`` and ``description`` keys.
-    """
-    return [
-        {
-            "name": "source",
-            "description": "Extract field from source data",
-            "syntax": "@source: field | fallback",
-        },
-        {
-            "name": "generated",
-            "description": "ClickHouse generates via DEFAULT -- loader omits",
-            "syntax": "@generated: expression",
-        },
-        {
-            "name": "captured",
-            "description": "Captured from raw payload before transforms",
-            "syntax": "@captured: what [as TYPE]",
-        },
-        {
-            "name": "computed",
-            "description": "Computed from other fields during data prep",
-            "syntax": "@computed: expression",
-        },
-        {
-            "name": "config",
-            "description": "Mapping is configurable at runtime",
-            "syntax": "@config: path",
-        },
-    ]

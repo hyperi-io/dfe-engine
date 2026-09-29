@@ -247,7 +247,10 @@ class DestinationsConfig(BaseModel):
     instances, so none of them can collide with ``default`` or ``rules``.
 
     A rule may name several at once, which is how an archived source reaches the
-    archiver beside the stage that loads it.
+    archiver beside the stage that loads it. The archiver's entry is
+    ``dfe-archiver: {grpc: {endpoint: uri, confirms_delivery: false}}``: its Push
+    listener answers once a record is queued, not written, so the receiver must not
+    count that leg towards the at-least-once guarantee it reports.
 
     The nesting is the receiver's own ``DestinationSpec`` (``src/config/mod.rs``):
     one transport block per destination, ``grpc: {endpoint}`` or ``kafka: {topic}``.

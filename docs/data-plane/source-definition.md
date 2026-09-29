@@ -27,6 +27,8 @@ transport: bus                          # bus (a broker holds records between st
                                         # nothing stored). Omit to take the deployment default
 archive: false                          # Keep the raw record as it arrived. On the bus the archiver
                                         # reads the landing topic; on direct it is sent the record
+                                        # by the receiver, so a fetched record, in its own source or
+                                        # routed to another, is archived only on the bus
 
 # --- Header ---
 # Common schema header. A new source starts as JUST this header -- the common

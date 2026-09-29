@@ -258,6 +258,9 @@ def _fetcher_route(
     through ``output.destinations`` and matches on the name (``config/mod.rs``
     ``OutputRoute``), so a rule carrying the address itself is refused at load.
     """
+    # Imported here for the same reason as in ``_flow``.
+    from dfe_engine.source.flow import route_archive_gap
+
     try:
         target = registry.get_source(route.source)
     except SourceNotFoundError as exc:
@@ -268,10 +271,17 @@ def _fetcher_route(
         raise RoutingNotApplicableError(
             f"source {flow.source!r} routes to {route.source!r}, which is {target.state}"
         )
-    if _flow(target, settings).transport != flow.transport:
+    target_flow = _flow(target, settings)
+    if target_flow.transport != flow.transport:
         raise RoutingNotApplicableError(
             f"source {flow.source!r} routes to {route.source!r}, which is on the other "
             "transport; a fetcher delivers over one"
+        )
+    # Refused at save only: refusing here would stop, and could remove, a running fetcher.
+    gap = route_archive_gap(flow, target_flow)
+    if gap is not None:
+        logger.warning(
+            f"{gap}. It is compiled as stored and archives none of the records it routes"
         )
     landing = _landing(target, settings)
     spec: dict[str, Any] = (

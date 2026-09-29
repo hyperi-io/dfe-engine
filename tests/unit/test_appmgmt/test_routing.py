@@ -68,6 +68,12 @@ def _fetched(name: str = "okta-audit", **fields):
     return Source.model_validate(doc)
 
 
+def _routed_into(target):
+    """A fetched source whose alert records belong to *target*, beside it."""
+    route = {"match": {"field": "event.kind", "value": "alert"}, "source": target.source}
+    return FakeRegistry([_fetched(fetcher={"routes": [route]}), target])
+
+
 @pytest.fixture
 def direct_transforms():
     """The catalogue as it is once a transform ships its Push listener.
@@ -464,6 +470,69 @@ class TestAStoredArchiveNothingCopies:
                 "destination": ["loader", ARCHIVER],
             }
         ]
+
+
+class TestAStoredRouteIntoAnArchivedSource:
+    """A direct fetcher route into an archived source: refused at save, compiled as stored."""
+
+    def test_its_fetcher_routing_is_what_it_is_without_the_archive(self, direct_settings):
+        fetcher = catalogue.descriptor(FETCHER)
+
+        plain = routing.compile_for(
+            fetcher, _routed_into(_matched("okta-alerts")), direct_settings, instance="okta-audit"
+        )
+        archived = routing.compile_for(
+            fetcher,
+            _routed_into(_matched("okta-alerts", archive=True)),
+            direct_settings,
+            instance="okta-audit",
+        )
+
+        assert archived == plain
+        assert archived["output"] == {
+            "type": "grpc",
+            "grpc": {"endpoint": LOADER_ENDPOINT},
+            "destinations": {"okta-alerts": {"grpc": {"endpoint": LOADER_ENDPOINT}}},
+            "routes": [
+                {"match_field": "event.kind", "match_value": "alert", "destination": "okta-alerts"}
+            ],
+        }
+
+    def test_the_fetcher_compile_names_the_route_and_its_target(self, direct_settings, monkeypatch):
+        warnings: list[str] = []
+        monkeypatch.setattr(
+            routing.logger, "warning", lambda message, **fields: warnings.append(message)
+        )
+
+        routing.compile_for(
+            catalogue.descriptor(FETCHER),
+            _routed_into(_matched("okta-alerts", archive=True)),
+            direct_settings,
+            instance="okta-audit",
+        )
+
+        assert [
+            w
+            for w in warnings
+            if "'okta-audit'" in w and "'okta-alerts'" in w and "archived source on the bus" in w
+        ]
+
+    def test_a_route_into_a_source_that_is_not_archived_is_not_named(
+        self, direct_settings, monkeypatch
+    ):
+        warnings: list[str] = []
+        monkeypatch.setattr(
+            routing.logger, "warning", lambda message, **fields: warnings.append(message)
+        )
+
+        routing.compile_for(
+            catalogue.descriptor(FETCHER),
+            _routed_into(_matched("okta-alerts")),
+            direct_settings,
+            instance="okta-audit",
+        )
+
+        assert warnings == []
 
 
 class TestArchiverStack:
