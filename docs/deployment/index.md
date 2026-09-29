@@ -233,3 +233,7 @@ cluster-secret annotations). Full swap matrix:
   then talks to internal Kafka (ClusterIP, private); isolation is by
   NetworkPolicy. The deployer applies whatever ingress-path controls they
   prefer.
+
+## Pipeline builds
+
+`POST /api/v1/pipeline/build` points every KEDA Prometheus trigger it renders at `PROMETHEUS_SERVER_ADDRESS`, the URL of the deployment's own Prometheus. It has no default: set it in the pipeline package or the engine's environment, or the build stops.

@@ -1,3 +1,4 @@
+import importlib.resources
 import os
 import tempfile
 
@@ -251,33 +252,46 @@ def test_dfe_config_structure(sample_dfe_config):
     assert "meta" in test_pipeline
 
 
-def test_build_ingestion_pipelines(sample_dfe_config, temp_dir):
-    """Test the build_ingestion_pipelines function with sample config."""
-    # Create a temporary dfe_package.yaml file
-    dfe_package_path = os.path.join(temp_dir, "dfe_package.yaml")
-    with open(dfe_package_path, "w") as f:
-        yaml.dump(sample_dfe_config, f)
+SHIPPED_TEMPLATE = importlib.resources.files("dfe_engine.pipeline") / "pipeline_template.yaml"
+PROMETHEUS = "http://prometheus.example.test:9090"
 
-    # Create output directory
+
+def _build_package(config: dict, temp_dir: str) -> str:
+    """Build a package the way POST /api/v1/pipeline/build does, and return the output dir."""
+    package_path = os.path.join(temp_dir, "dfe_package.yaml")
     output_path = os.path.join(temp_dir, "pipeline_output")
-    os.makedirs(output_path, exist_ok=True)
-
-    # Create log directory
-    log_path = os.path.join(temp_dir, "logs")
-    os.makedirs(log_path, exist_ok=True)
-
-    # Test the build function
-    try:
+    with importlib.resources.as_file(SHIPPED_TEMPLATE) as template:
+        config["global_settings"]["helm_template"] = str(template)
+        with open(package_path, "w") as f:
+            yaml.dump(config, f)
         PipelineBuilderController.build_ingestion_pipelines(
-            args_dfe_package_file_path=dfe_package_path,
+            args_dfe_package_file_path=package_path,
             args_ingestion_output_path=output_path,
-            args_log_path=log_path,
-            args_build_core=True,
+            args_log_path="",
+            args_build_core=False,
         )
-        # If no exception is raised, the function works correctly
-        assert True
-    except Exception:
-        assert True
-        # Expected errors in test environment (missing templates, dependencies, etc.)
-        # expected_errors = ["Error", "FileNotFoundError", "TemplateNotFound", "pipeline_template.yaml","PipelineSchemaError"]
-        # assert any(error in str(e) for error in expected_errors), f"Unexpected error: {e}"
+    return output_path
+
+
+def test_a_package_build_writes_one_manifest_per_pipeline(sample_dfe_config, temp_dir):
+    sample_dfe_config["global_settings"]["PROMETHEUS_SERVER_ADDRESS"] = PROMETHEUS
+
+    output_path = _build_package(sample_dfe_config, temp_dir)
+
+    assert os.listdir(output_path) == ["test-pipeline.yaml"]
+    with open(os.path.join(output_path, "test-pipeline.yaml")) as f:
+        manifest = yaml.safe_load(f)
+    env = {item["name"]: item.get("value") for item in manifest["env"]}
+    assert env["KAFKA_SOURCE_TOPIC_LIST"] == "['logs_test_load']"
+    triggers = manifest["extraObjects"][0]["spec"]["triggers"]
+    queried = [t["metadata"]["serverAddress"] for t in triggers if t["type"] == "prometheus"]
+    assert queried == [PROMETHEUS]
+
+
+def test_a_package_build_without_a_prometheus_address_is_refused(
+    sample_dfe_config, temp_dir, monkeypatch
+):
+    monkeypatch.delenv("PROMETHEUS_SERVER_ADDRESS", raising=False)
+
+    with pytest.raises(PipelineSchemaError, match="PROMETHEUS_SERVER_ADDRESS"):
+        _build_package(sample_dfe_config, temp_dir)

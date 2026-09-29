@@ -20,8 +20,6 @@ Queries live in config (``queries.yaml`` + an optional mounted override), not co
 so a HyperDX schema rename or a new scaling signal is a config edit, not a rebuild.
 """
 
-from __future__ import annotations
-
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -79,7 +77,8 @@ class QueryShim:
         catalogue = yaml_load(_BUILTIN_QUERIES) or {}
         override = self._settings.keda_shim.query_config
         if override and Path(override).exists():
-            catalogue = deep_merge(catalogue, yaml_load(Path(override)) or {})
+            # A query's params list is tied to its SQL placeholders, so an override's list replaces.
+            catalogue = deep_merge(catalogue, yaml_load(Path(override)) or {}, replace_lists=True)
         return catalogue.get("queries", {})
 
     @property
