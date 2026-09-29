@@ -13922,7 +13922,7 @@
           "schemas"
         ],
         "summary": "Promote Field",
-        "description": "Promote JSON path(s) into dedicated typed columns.\n\nCreates a new schema version on the source's meta-schema (or on ``schema_path``\nwhen the source has none), adding one column per path with an ``@source`` directive\nnaming the bare record path, which is what dfe-loader reads to fill the column on\nthe next ingest. Existing rows are not backfilled. Core meta-schemas are forked to\n``{source_name}_{schema_stem}`` under the same parent path before promoting.\n``?dry_run=true`` returns the proposed diff and DDL without forking core schemas,\nadding meta-schema versions, or updating the source.",
+        "description": "Promote JSON path(s) into dedicated typed columns.\n\nCreates a new schema version on the source's meta-schema (or on ``schema_path``\nwhen the source has none), adding one column per path with an ``@source`` directive\nnaming the bare record path, which is what dfe-loader reads to fill the column on\nthe next ingest. Existing rows are not backfilled. Core meta-schemas are forked to\n``{source_name}_{schema_stem}`` under the same parent path before promoting.\n``?dry_run=true`` returns the proposed diff and DDL without forking core schemas,\nadding meta-schema versions, or updating the source. A core source, such as the\nlanding source ``main``, is refused with 409 before any schema is resolved or\nwritten, dry run included; its ``json-paths`` and ``sample-rows`` reads stay open.",
         "operationId": "promote_field_api_v1_schemas__source_name__promote_field_post",
         "parameters": [
           {
@@ -13980,6 +13980,16 @@
           },
           "403": {
             "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The source is a core source the engine owns, such as the landing source main, whose columns no promotion may change (code conflict)",
             "content": {
               "application/json": {
                 "schema": {
