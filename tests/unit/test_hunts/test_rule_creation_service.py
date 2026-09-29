@@ -363,7 +363,9 @@ class TestSqlValidation:
     def test_raw_sql_with_having_is_refused_not_cut_short(self, service):
         """Stored as its WHERE alone, the rule would fire on every failed row, not six."""
         sql = "SELECT user, count() FROM dfe.main WHERE failed = 1 GROUP BY user HAVING count() = 6"
-        result = service.create_rule(RuleCreateRequest(name="Threshold", user_sql=sql), rule_id="r1")
+        result = service.create_rule(
+            RuleCreateRequest(name="Threshold", user_sql=sql), rule_id="r1"
+        )
         assert [e.message.split(",")[0] for e in result.sql_errors] == [
             "HAVING filters aggregated groups"
         ]

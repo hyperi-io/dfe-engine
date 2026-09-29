@@ -51,6 +51,7 @@ def strip_time_placeholder(where: str) -> str:
     """
     return _TIME_PLACEHOLDER_CONJUNCT.sub("", where).replace(TIME_PLACEHOLDER, "1").strip()
 
+
 # Common timestamp column patterns in DFE tables.
 _TIMESTAMP_COLUMNS = frozenset(
     {
