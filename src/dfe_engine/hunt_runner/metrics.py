@@ -24,8 +24,6 @@ one-shot ``materialise`` command and the unit suite run in, and it is why the
 runner's own tests need no metrics backend.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 RUNS = "hunt_runs_total"
@@ -35,6 +33,8 @@ OVERRUNS = "hunt_overruns_total"
 CLAIMS = "hunt_claims_total"
 BACKLOG = "hunt_backlog"
 TICK_DURATION = "hunt_tick_duration_seconds"
+DETECTIONS_CAPPED = "hunt_detections_capped_total"
+DETECTIONS_DROPPED = "hunt_detections_dropped_total"
 
 
 class HuntRunnerMetrics:
@@ -65,6 +65,16 @@ class HuntRunnerMetrics:
         )
         self._backlog = manager.gauge(BACKLOG, "Hunts due and unclaimed right now")
         self._tick_duration = manager.histogram(TICK_DURATION, "Seconds one runner tick took")
+        self._capped = manager.counter(
+            DETECTIONS_CAPPED,
+            "Runs where a rule matched more than its detection cap and was cut to it",
+            ["hunt_id", "rule_id"],
+        )
+        self._dropped = manager.counter(
+            DETECTIONS_DROPPED,
+            "Matches a rule's detection cap left unwritten",
+            ["hunt_id", "rule_id"],
+        )
 
     @property
     def enabled(self) -> bool:
@@ -115,6 +125,13 @@ class HuntRunnerMetrics:
             return
         self._tick_duration.observe(duration_seconds)
 
+    def detections_capped(self, hunt_id: str, rule_id: str, *, dropped: int) -> None:
+        """Record a rule cut to its detection cap, and how many matches it left out."""
+        if self._manager is None:
+            return
+        self._capped.labels(hunt_id=hunt_id, rule_id=rule_id).inc()
+        self._dropped.labels(hunt_id=hunt_id, rule_id=rule_id).inc(dropped)
+
 
 def create(app_name: str = "dfe-hunt-runner") -> HuntRunnerMetrics:
     """Build the instrument set on scalo's metrics backend.
@@ -136,6 +153,8 @@ def create(app_name: str = "dfe-hunt-runner") -> HuntRunnerMetrics:
 __all__ = [
     "BACKLOG",
     "CLAIMS",
+    "DETECTIONS_CAPPED",
+    "DETECTIONS_DROPPED",
     "OVERRUNS",
     "ROWS_WRITTEN",
     "RUNS",

@@ -27,7 +27,7 @@ from .interval import (
     parse_interval,
 )
 from .metrics import HuntRunnerMetrics
-from .models import HuntSpec, HuntState
+from .models import HuntSpec, HuntState, HuntStatement
 from .rule_compiler import compile_hunt_queries
 from .run_status import RunStatus, read_run_status
 from .runner import HuntRunner
@@ -47,6 +47,7 @@ __all__ = [
     "HuntSpec",
     "HuntState",
     "HuntStateRow",
+    "HuntStatement",
     "HuntWorker",
     "Lease",
     "RunStatus",

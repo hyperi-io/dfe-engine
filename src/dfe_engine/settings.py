@@ -59,6 +59,8 @@ Hunts:
 - DFE_HUNTS_JITTER_SECONDS -> hunts.jitter_seconds
 - DFE_HUNTS_ALERT_DESTINATIONS -> hunts.alert_destinations (JSON {name: apprise_url})
 - DFE_HUNTS_ALERT_DESTINATIONS_DIR -> hunts.alert_destinations_dir
+- DFE_HUNTS_MAX_DETECTIONS_PER_RUN -> hunts.max_detections_per_run
+- DFE_HUNTS_MAX_DETECTIONS_PER_RUN_CEILING -> hunts.max_detections_per_run_ceiling
 
 Artifactory:
 - DFE_ARTIFACTORY_URL -> artifactory.url
@@ -131,6 +133,8 @@ API (Elasticsearch template elastic-converter upload limits):
 """
 
 import os
+import string
+import urllib.parse
 from pathlib import Path
 from typing import Any, Literal
 
@@ -139,6 +143,9 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from .orgs.models import ORG_NAME_PATTERN
 from .transport import SourceTransport
 from .yaml_utils import yaml_load
+
+# The one placeholder services.metrics_manifest_url takes: the app's service name.
+_MANIFEST_SERVICE_FIELD = "service"
 
 
 def _get_env(primary: str, *fallbacks: str) -> str | None:
@@ -314,6 +321,11 @@ class ClickHouseSettings(BaseModel):
         return self.data_database or self.database
 
 
+# Shared by HuntsSettings and the hunt runner compiler's default, so the two cannot drift.
+MAX_DETECTIONS_PER_RUN = 1000
+MAX_DETECTIONS_PER_RUN_CEILING = 10_000
+
+
 class HuntsSettings(BaseModel):
     """Hunt scheduler settings."""
 
@@ -397,9 +409,18 @@ class HuntsSettings(BaseModel):
         default="1h",
         description="Default alert cooldown window for grouped alerts",
     )
-    default_max_alerts_per_run: int = Field(
-        default=0,
-        description="Default max alerts per execution (0 = unlimited)",
+    max_detections_per_run: int = Field(
+        default=MAX_DETECTIONS_PER_RUN,
+        gt=0,
+        description=(
+            "Detection rows one rule may write in one hunt run. Past it the run writes "
+            "this many plus one summary row carrying the true match count."
+        ),
+    )
+    max_detections_per_run_ceiling: int = Field(
+        default=MAX_DETECTIONS_PER_RUN_CEILING,
+        gt=0,
+        description="Upper bound on max_detections_per_run; a larger value is cut to this.",
     )
     default_max_sample_events: int = Field(
         default=10,
@@ -1111,14 +1132,16 @@ class FieldMapSettings(BaseModel):
 
 
 class ServicesSettings(BaseModel):
-    """Endpoints for managed DFE services (the transform-wasm compile/test proxy +
-    the Rust-services YAML config replica dir). The per-service health/metrics URLs
-    were dropped with services/state.py -- runtime state is the surfaces registry now.
+    """Where the engine reaches the managed DFE services.
+
+    The transform-wasm compile/test proxy, the Rust-services YAML config replica
+    dir, and where each app serves its metric manifest.
 
     Environment variables:
     - DFE_SERVICES_TRANSFORM_WASM_URL -> services.transform_wasm_url
     - DFE_SERVICES_TRANSFORM_WASM_COMPILER_URL -> services.transform_wasm_compiler_url
     - DFE_SERVICES_CONFIG_YAML_DIR -> services.config_yaml_dir
+    - DFE_SERVICES_METRICS_MANIFEST_URL -> services.metrics_manifest_url
     """
 
     transform_wasm_url: str = Field(default="http://localhost:8080")
@@ -1126,6 +1149,44 @@ class ServicesSettings(BaseModel):
     config_yaml_dir: str = Field(
         default="", description="YAML config replica directory for Rust services"
     )
+    metrics_manifest_url: str = Field(
+        default="",
+        description=(
+            "Where an app serves its metric manifest, as a URL with {service} in "
+            "place of the app's name, e.g. http://{service}:9090/metrics/manifest. "
+            "Injected by the deployer, which knows whether that port is reachable "
+            "from the engine. Empty means no app's manifest is fetched. "
+            "DFE_SERVICES_METRICS_MANIFEST_URL."
+        ),
+    )
+
+    @field_validator("metrics_manifest_url")
+    @classmethod
+    def _names_each_app_by_service(cls, value: str) -> str:
+        # A URL without {service} fetches every app's manifest from one address,
+        # and any other placeholder fails every refresh rather than the load.
+        if not value:
+            return value
+        try:
+            parts = list(string.Formatter().parse(value))
+        except ValueError as exc:
+            raise ValueError(f"services.metrics_manifest_url {value!r}: {exc}") from exc
+        placeholders = {(name, spec, conv) for _, name, spec, conv in parts if name is not None}
+        if placeholders != {(_MANIFEST_SERVICE_FIELD, "", None)}:
+            raise ValueError(
+                f"services.metrics_manifest_url {value!r} must name the app as "
+                f"{{{_MANIFEST_SERVICE_FIELD}}} and carry no other placeholder"
+            )
+        url = urllib.parse.urlsplit(value.format(**{_MANIFEST_SERVICE_FIELD: "dfe-app"}))
+        if url.scheme not in ("http", "https") or not url.hostname:
+            raise ValueError(f"services.metrics_manifest_url {value!r} is not an http(s) URL")
+        return value
+
+    def metrics_manifest_url_for(self, service: str) -> str:
+        """Return where *service* serves its metric manifest, or "" when none is set."""
+        if not self.metrics_manifest_url:
+            return ""
+        return self.metrics_manifest_url.format(**{_MANIFEST_SERVICE_FIELD: service})
 
 
 class HelmSettings(BaseModel):
@@ -1919,8 +1980,10 @@ def _get_env_overrides() -> dict:
         overrides["hunts"]["alert_destinations_dir"] = val
     if val := _get_env("DFE_HUNTS_DEFAULT_ALERT_COOLDOWN"):
         overrides["hunts"]["default_alert_cooldown"] = val
-    if val := _get_env("DFE_HUNTS_DEFAULT_MAX_ALERTS_PER_RUN"):
-        overrides["hunts"]["default_max_alerts_per_run"] = int(val)
+    if val := _get_env("DFE_HUNTS_MAX_DETECTIONS_PER_RUN"):
+        overrides["hunts"]["max_detections_per_run"] = int(val)
+    if val := _get_env("DFE_HUNTS_MAX_DETECTIONS_PER_RUN_CEILING"):
+        overrides["hunts"]["max_detections_per_run_ceiling"] = int(val)
     if val := _get_env("DFE_HUNTS_DEFAULT_MAX_SAMPLE_EVENTS"):
         overrides["hunts"]["default_max_sample_events"] = int(val)
 
@@ -2116,6 +2179,8 @@ def _get_env_overrides() -> dict:
         overrides["services"]["transform_wasm_compiler_url"] = val
     if val := _get_env("DFE_SERVICES_CONFIG_YAML_DIR"):
         overrides["services"]["config_yaml_dir"] = val
+    if val := _get_env("DFE_SERVICES_METRICS_MANIFEST_URL"):
+        overrides["services"]["metrics_manifest_url"] = val.strip()
 
     # Repository (small-object store) settings
     if val := _get_env("DFE_REPOSITORY_MAX_PREFS_BYTES"):

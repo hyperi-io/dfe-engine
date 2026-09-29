@@ -571,6 +571,39 @@ class TestEnvOverrides:
         settings = load_settings()
         assert settings.services.config_yaml_dir == "/custom/svc"
 
+    def test_metrics_manifest_url_names_each_app(self, monkeypatch):
+        monkeypatch.setenv(
+            "DFE_SERVICES_METRICS_MANIFEST_URL", " http://{service}:9090/metrics/manifest "
+        )
+        services = load_settings().services
+        assert services.metrics_manifest_url_for("dfe-loader") == (
+            "http://dfe-loader:9090/metrics/manifest"
+        )
+
+    def test_metrics_manifest_url_defaults_to_none(self):
+        services = load_settings().services
+        assert services.metrics_manifest_url == ""
+        assert services.metrics_manifest_url_for("dfe-loader") == ""
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "http://dfe-loader:9090/metrics/manifest",
+            "http://{service}.{namespace}.svc:9090/metrics/manifest",
+            "http://{service!r}:9090/metrics/manifest",
+            "http://{service:>20}:9090/metrics/manifest",
+            "http://{}:9090/metrics/manifest",
+            "http://{service:9090/metrics/manifest",
+            "{service}:9090/metrics/manifest",
+            "ftp://{service}/metrics/manifest",
+            "http:///{service}/metrics/manifest",
+        ],
+    )
+    def test_metrics_manifest_url_refuses_a_template_it_cannot_fill(self, monkeypatch, template):
+        monkeypatch.setenv("DFE_SERVICES_METRICS_MANIFEST_URL", template)
+        with pytest.raises(ValidationError, match="metrics_manifest_url"):
+            load_settings()
+
     def test_sources_dir_override(self, monkeypatch):
         monkeypatch.setenv("DFE_SOURCES_DIR", "/custom/sources")
         settings = load_settings()
@@ -581,10 +614,26 @@ class TestEnvOverrides:
         settings = load_settings()
         assert settings.hunts.default_alert_cooldown == "600"
 
-    def test_hunt_max_alerts_per_run_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_HUNTS_DEFAULT_MAX_ALERTS_PER_RUN", "50")
-        settings = load_settings()
-        assert settings.hunts.default_max_alerts_per_run == 50
+    def test_hunt_detection_cap_defaults(self):
+        hunts = load_settings().hunts
+        assert hunts.max_detections_per_run == 1000
+        assert hunts.max_detections_per_run_ceiling == 10_000
+
+    def test_hunt_detection_cap_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_HUNTS_MAX_DETECTIONS_PER_RUN", "50")
+        monkeypatch.setenv("DFE_HUNTS_MAX_DETECTIONS_PER_RUN_CEILING", "500")
+        hunts = load_settings().hunts
+        assert hunts.max_detections_per_run == 50
+        assert hunts.max_detections_per_run_ceiling == 500
+
+    @pytest.mark.parametrize("field", ["max_detections_per_run", "max_detections_per_run_ceiling"])
+    @pytest.mark.parametrize("value", [0, -1])
+    def test_hunt_detection_cap_refuses_unbounded(self, field, value):
+        # 0 would read as "no cap" to anyone used to 0 = unlimited; it is refused instead.
+        from dfe_engine.settings import HuntsSettings
+
+        with pytest.raises(ValidationError):
+            HuntsSettings(**{field: value})
 
     def test_hyperdx_api_key_env_override(self, monkeypatch):
         monkeypatch.setenv("DFE_HYPERDX_API_KEY_ENV", "MY_KEY_VAR")
@@ -839,7 +888,6 @@ class TestEverySettingIsRead:
         ("HuntsSettings", "resource_limit_execution_ms"),
         ("HuntsSettings", "alert_channels"),
         ("HuntsSettings", "default_alert_cooldown"),
-        ("HuntsSettings", "default_max_alerts_per_run"),
         ("HuntsSettings", "default_max_sample_events"),
         ("QuerySettings", "yaml_dir"),
         ("QueryViewSettings", "auto_bootstrap"),

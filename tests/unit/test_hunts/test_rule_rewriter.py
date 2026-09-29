@@ -198,3 +198,136 @@ class TestParsedRuleDefaults:
         sql = "SELECT * FROM t WHERE x = 1"
         result = rewriter.parse_user_sql(sql)
         assert result.original_sql == sql
+
+
+# Each case failed on the regex rewriter: a clause word in a literal or comment
+# ended the WHERE, a quoted table was not found, or a trailing clause leaked in.
+STATEMENT_CASES = [
+    (
+        "literal_holding_order_by",
+        "SELECT _timestamp, _json FROM dfe.main WHERE (msg = 'failed ORDER BY clause') AND (a = 1)",
+        ("dfe", "main", "(msg = 'failed ORDER BY clause') AND (a = 1)"),
+    ),
+    (
+        "literal_holding_where_limit",
+        "SELECT _timestamp FROM dfe.main WHERE (toString(`_json`.`message`) = 'WHERE LIMIT x')",
+        ("dfe", "main", "(toString(`_json`.`message`) = 'WHERE LIMIT x')"),
+    ),
+    (
+        "literal_holding_group_by_having_semicolon",
+        "SELECT * FROM dfe.main WHERE msg = 'GROUP BY a HAVING b; c' AND x = 1",
+        ("dfe", "main", "msg = 'GROUP BY a HAVING b; c' AND x = 1"),
+    ),
+    (
+        "backtick_table",
+        "SELECT _timestamp FROM `dfe`.`main` WHERE a = 1",
+        ("dfe", "main", "a = 1"),
+    ),
+    (
+        "backtick_table_with_dash",
+        "SELECT * FROM `dfe`.`win-events` WHERE a = 1",
+        ("dfe", "win-events", "a = 1"),
+    ),
+    (
+        "settings_after_where",
+        "SELECT * FROM dfe.main WHERE a = 1 SETTINGS max_threads = 2",
+        ("dfe", "main", "a = 1"),
+    ),
+    (
+        "format_after_where",
+        "SELECT * FROM dfe.main WHERE a = 1 FORMAT JSONEachRow",
+        ("dfe", "main", "a = 1"),
+    ),
+    (
+        "prewhere_is_a_filter",
+        "SELECT * FROM dfe.main PREWHERE _source = 'x' WHERE a = 1",
+        ("dfe", "main", "_source = 'x' AND a = 1"),
+    ),
+    (
+        "scalar_subquery_before_from",
+        "SELECT (SELECT max(v) FROM dfe.other WHERE k = 1) AS m, a FROM dfe.main WHERE b = 2",
+        ("dfe", "main", "b = 2"),
+    ),
+    (
+        "time_bound_under_or_is_left_in_place",
+        "SELECT * FROM dfe.main WHERE _timestamp > '2026-01-01' OR severity = 'high'",
+        ("dfe", "main", "(_timestamp > '2026-01-01' OR severity = 'high')"),
+    ),
+    (
+        "time_bound_inside_a_literal",
+        "SELECT * FROM dfe.main WHERE msg = 'x AND timestamp > ''2026'' AND y' AND a = 1",
+        ("dfe", "main", "msg = 'x AND timestamp > ''2026'' AND y' AND a = 1"),
+    ),
+    (
+        "select_alias_in_filter",
+        "SELECT SeverityText AS level FROM dfe.otel_logs WHERE level = 'error'",
+        ("dfe", "otel_logs", "SeverityText = 'error'"),
+    ),
+    (
+        "block_comment_holding_clause_words",
+        "SELECT * FROM dfe.main WHERE a = 1 /* ORDER BY x */ AND b = 2",
+        ("dfe", "main", "a = 1 AND b = 2"),
+    ),
+    (
+        "epoch_window_on_any_column",
+        "SELECT * FROM dfe.otel_logs WHERE (Timestamp >= fromUnixTimestamp64Milli(1) "
+        "AND Timestamp <= fromUnixTimestamp64Milli(2)) AND (a = 1)",
+        ("dfe", "otel_logs", "(a = 1)"),
+    ),
+]
+
+
+class TestReadsTheStatement:
+    """The rewriter reads SQL structure, so literals and comments are data."""
+
+    @pytest.mark.parametrize(
+        ("name", "sql", "expected"), STATEMENT_CASES, ids=[c[0] for c in STATEMENT_CASES]
+    )
+    def test_table_and_filter(self, rewriter, name, sql, expected):
+        result = rewriter.parse_user_sql(sql)
+        assert (result.source_db, result.source_table, result.where_clause) == expected
+
+    def test_equality_on_a_timestamp_is_user_logic(self, rewriter):
+        result = rewriter.parse_user_sql(
+            "SELECT * FROM t WHERE _timestamp = '2026-01-01' AND x = 1"
+        )
+        assert result.where_clause == "_timestamp = '2026-01-01' AND x = 1"
+        assert result.stripped_time_bounds == []
+
+    def test_timestamp_columns_match_any_case_and_quoting(self):
+        rewriter = RuleRewriter(timestamp_columns=frozenset({"Event_Time"}))
+        result = rewriter.parse_user_sql(
+            "SELECT * FROM t WHERE `EVENT_TIME` >= now() - INTERVAL 1 DAY AND x = 1"
+        )
+        assert result.where_clause == "x = 1"
+        assert result.stripped_time_bounds == ["`EVENT_TIME` >= now() - INTERVAL 1 DAY"]
+
+    def test_bound_under_or_is_reported(self, rewriter):
+        result = rewriter.parse_user_sql("SELECT a FROM t WHERE _timestamp > now() OR b = 1")
+        assert result.stripped_time_bounds == []
+        assert any("stays in the rule" in w for w in result.warnings)
+
+    def test_clauses_a_row_rule_cannot_carry_are_reported(self, rewriter):
+        result = rewriter.parse_user_sql(
+            "SELECT a, count() FROM t JOIN u ON t.id = u.id WHERE b = 1 GROUP BY a "
+            "HAVING count() > 5 UNION ALL SELECT a, 1 FROM v WHERE c = 2"
+        )
+        assert result.source_table == "t"
+        assert result.where_clause == "b = 1"
+        assert "does not apply: JOIN, HAVING, UNION" in result.warnings[-1]
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT a FROM t WHERE b = 'unterminated",
+            "SELECT a FROM t WHERE (b = 1",
+            "INSERT INTO t SELECT * FROM u",
+            "SELECT a FROM t WHERE",
+            f"SELECT a FROM t WHERE {'(' * 3000}b = 1{')' * 3000}",
+        ],
+    )
+    def test_unreadable_sql_is_a_warning_not_an_exception(self, rewriter, sql):
+        result = rewriter.parse_user_sql(sql)
+        assert result.source_table is None
+        assert result.where_clause == ""
+        assert result.warnings[0].startswith("Could not read the SQL: ")

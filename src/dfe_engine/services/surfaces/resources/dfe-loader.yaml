@@ -29,40 +29,27 @@ config_surface:
     description: "Maximum buffer age before flush"
     default: 10
 metrics_surface:
-  - name: dfe_loader_rows_inserted_total
+  - name: rows_inserted_total
     type: counter
-    group: sink
-    description: "Total rows inserted into ClickHouse"
-  - name: dfe_loader_batches_flushed_total
+    group: custom
+    description: "Total rows inserted to ClickHouse"
+  - name: batches_flushed_total
     type: counter
-    group: buffer
-    description: "Total buffer flush operations"
-  - name: dfe_loader_insert_duration_seconds
+    group: custom
+    description: "Total batches flushed to ClickHouse"
+  - name: clickhouse_insert_duration_seconds
     type: histogram
-    group: sink
-    description: "ClickHouse insert latency per table"
-    labels:
-      - table
-  - name: dfe_loader_buffer_rows_by_table
+    group: custom
+    description: "ClickHouse insert batch latency"
+  - name: buffer_records
     type: gauge
     group: buffer
-    description: "Current buffered row count per table"
-    labels:
-      - table
-  - name: dfe_loader_buffer_bytes_by_table
+    description: "Current buffered record count"
+  - name: buffer_bytes
     type: gauge
     group: buffer
-    description: "Current buffer bytes per table"
-    labels:
-      - table
-  - name: dfe_loader_salvage_attempts_total
+    description: "Current buffer size in bytes"
+  - name: dfe_loader_routing_field_absent_total
     type: counter
-    group: sink
-    description: "Schema mismatch salvage attempts"
-    labels:
-      - table
-  - name: dfe_loader_route_default_total
-    type: counter
-    group: app
-    description: "Messages routed to default table"
-manifest_url: "http://dfe-loader.dfe-prod.svc.cluster.local:9090/metrics/manifest"
+    group: custom
+    description: "Records on a source topic that named no table and fell back to the default"

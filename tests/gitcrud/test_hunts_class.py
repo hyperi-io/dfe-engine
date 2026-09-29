@@ -123,7 +123,7 @@ class TestHuntsLandWhereTheRunnerLooks:
         assert spec.interval_seconds == 300
         assert spec.target_table == "dfe.detection"
         assert len(spec.queries) == 1
-        assert "WHERE {window} AND (process_name = 'certutil.exe')" in spec.queries[0]
+        assert "WHERE {window} AND (process_name = 'certutil.exe')" in spec.queries[0].sql
 
     def test_a_rule_compiles_off_the_synced_rules_directory(self, rules, crud):
         rules.save(RULE)
@@ -131,7 +131,7 @@ class TestHuntsLandWhereTheRunnerLooks:
             dict(HUNT_CONFIG), "windows_hunt", rules_dir=crud.repo_path / "config" / "rules"
         )
         assert len(sql) == 1
-        assert sql[0].startswith("INSERT INTO dfe.detection")
+        assert sql[0].sql.startswith("INSERT INTO dfe.detection")
 
 
 class TestTheBytesAreUnchanged:

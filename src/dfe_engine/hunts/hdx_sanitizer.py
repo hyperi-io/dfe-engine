@@ -14,6 +14,9 @@ HAVING, a join, a union, a CTE, a metric chart, or a time bound under OR or NOT.
 User text is re-emitted token for token, never regenerated from a parse tree,
 so the predicates the rule runs are the predicates the user wrote.
 
+``split_time_window`` is the lenient reading of the same SQL. The rule rewriter
+and the authoring helper both use it, so one parser reads rule SQL.
+
 Usage::
 
     from dfe_engine.hunts.hdx_sanitizer import HdxSanitizer
@@ -23,7 +26,7 @@ Usage::
 """
 
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 
 _TOKEN_RE = re.compile(
@@ -234,6 +237,36 @@ class HdxSanitizeResult:
     had_time_bucket: bool = False
     stripped_clauses: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class WindowSplit:
+    """A SELECT split around its filter, with the time window taken out of the filter.
+
+    Attributes:
+        source_db: Database of the FROM table, unquoted, when one is named.
+        source_table: The FROM table, unquoted, or None for a subquery or table function.
+        select_star: Whether the SELECT list has a bare ``*``.
+        before_filter: The WITH, SELECT and FROM clauses as written.
+        filter: The PREWHERE and WHERE predicates without the time window, safe to
+            AND with another predicate, or None when nothing remains.
+        after_filter: Every clause after the filter as written: GROUP BY, HAVING,
+            ORDER BY, LIMIT, SETTINGS, FORMAT, a set operation.
+        removed: Each time-window comparison taken out of the filter.
+        stuck: Time bounds under OR, NOT or a function call, left in the filter
+            because removing them would change what it matches.
+        ignored_clauses: Clauses a single-table row filter cannot carry.
+    """
+
+    source_db: str | None
+    source_table: str | None
+    select_star: bool
+    before_filter: str
+    filter: str | None
+    after_filter: str
+    removed: list[str]
+    stuck: list[str]
+    ignored_clauses: list[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -469,8 +502,43 @@ def _is_column(toks: Sequence[_Tok]) -> bool:
     )
 
 
-def _is_time_bound(toks: Sequence[_Tok]) -> bool:
-    """True for ``col >= <instant>``, its mirror, or ``col BETWEEN <instant> AND <instant>``."""
+def _names_column(toks: Sequence[_Tok], columns: frozenset[str]) -> bool:
+    """True for ``col`` or ``qualifier.col`` where ``col`` is one of ``columns``."""
+    if len(toks) == 3 and toks[1].text == ".":
+        toks = toks[2:]
+    name = _name_of(toks[0]) if len(toks) == 1 else None
+    return name is not None and name.lower() in columns
+
+
+def _is_constant(toks: Sequence[_Tok]) -> bool:
+    """True for a value that reads no column: literals, calls, INTERVALs, ``{placeholders}``."""
+    if not toks:
+        return False
+    braces = 0
+    for i, tok in enumerate(toks):
+        braces += (tok.text == "{") - (tok.text == "}")
+        if tok.kind not in ("word", "ident") or braces:
+            continue
+        called = i + 1 < len(toks) and toks[i + 1].text == "("
+        unit = i > 0 and toks[i - 1].kind in ("number", "string")
+        if not (called or unit or tok.keyword == "INTERVAL"):
+            return False
+    return True
+
+
+def _is_time_bound(toks: Sequence[_Tok], columns: frozenset[str] = frozenset()) -> bool:
+    """True for a comparison that only bounds time.
+
+    That is ``col >= <epoch instant>``, its mirror, or ``col BETWEEN`` two instants,
+    on any column. When ``columns`` names time columns, a constant bound on one
+    of them counts too: ``_timestamp > now() - INTERVAL 1 HOUR``.
+    """
+
+    def bounded(col: Sequence[_Tok], *values: Sequence[_Tok]) -> bool:
+        if _is_column(col) and all(_is_bound(v) for v in values):
+            return True
+        return _names_column(col, columns) and all(_is_constant(v) for v in values)
+
     depths = _walk(toks)
     ops = [i for i, tok in enumerate(toks) if depths[i] == 0 and tok.text in _COMPARISON_OPS]
     betweens = [i for i, tok in enumerate(toks) if depths[i] == 0 and tok.keyword == "BETWEEN"]
@@ -479,15 +547,61 @@ def _is_time_bound(toks: Sequence[_Tok]) -> bool:
         left, right = toks[:at], toks[at + 1 :]
         if toks[at].text not in _WINDOW_OPS:
             return False
-        return (_is_column(left) and _is_bound(right)) or (_is_column(right) and _is_bound(left))
+        return bounded(left, right) or bounded(right, left)
     if len(betweens) == 1 and not ops:
         at = betweens[0]
         ands = [i for i in range(at + 1, len(toks)) if depths[i] == 0 and toks[i].keyword == "AND"]
         if len(ands) != 1:
             return False
-        low, high = toks[at + 1 : ands[0]], toks[ands[0] + 1 :]
-        return _is_column(toks[:at]) and _is_bound(low) and _is_bound(high)
+        return bounded(toks[:at], toks[at + 1 : ands[0]], toks[ands[0] + 1 :])
     return False
+
+
+def _has_time_bound(toks: Sequence[_Tok], columns: frozenset[str]) -> bool:
+    """True when a time bound appears anywhere in ``toks``, however deeply nested."""
+    if _has_epoch(toks):
+        return True
+    for i, tok in enumerate(toks[:-1]):
+        compared = toks[i + 1].text in _WINDOW_OPS or toks[i + 1].keyword == "BETWEEN"
+        if compared and _names_column([tok], columns):
+            return True
+    return False
+
+
+def _prune(
+    toks: list[_Tok],
+    drop: Callable[[list[_Tok]], bool],
+    check: Callable[[list[_Tok]], None],
+) -> _Pruned | None:
+    """Remove the AND-conjuncts ``drop`` accepts, at any depth of AND and brackets.
+
+    A conjunct under OR, NOT or a function call is never removed; ``check`` sees
+    every kept leaf and decides what that means.
+    """
+    if not toks:
+        raise HdxSanitizeError("The SQL has an empty filter clause.")
+    if _has_top_level(toks, frozenset({"OR", "?", "->"})):
+        check(toks)
+        return _Pruned(_render(toks), bare_or=True)
+    parts = _split_and(toks)
+    if len(parts) > 1:
+        kept = [p for p in (_prune(part, drop, check) for part in parts) if p is not None]
+        return _Pruned(" AND ".join(p.text for p in kept), bare_or=False) if kept else None
+    inner = _unwrap(toks)
+    if inner is not None:
+        pruned = _prune(inner, drop, check)
+        return None if pruned is None else _Pruned(f"({pruned.text})", bare_or=False)
+    if drop(toks):
+        return None
+    check(toks)
+    return _Pruned(_render(toks), bare_or=False)
+
+
+def _join_filters(parts: Sequence[_Pruned]) -> str | None:
+    """AND pruned filters together, bracketing any whose top level is an OR."""
+    if len(parts) == 1:
+        return parts[0].text
+    return " AND ".join(f"({p.text})" if p.bare_or else p.text for p in parts) or None
 
 
 class HdxSanitizer:
@@ -568,21 +682,18 @@ class HdxSanitizer:
         if not all(items):
             raise HdxSanitizeError("The SELECT list has an empty column.")
         projection = self._projection(items, aliases, result)
-        for item in items:
-            expr, alias = _split_alias(item)
-            if alias and alias not in aliases and not _is_aggregate(expr) and not _hdx_names(item):
-                aliases[alias] = _substitute(expr, aliases)
+        _add_select_aliases(items, aliases)
 
         pruned = [
-            self._prune(_substitute(by_name[name].body, aliases), result)
+            _prune(
+                _substitute(by_name[name].body, aliases),
+                lambda leaf: self._drop(leaf, result),
+                _check_leaf,
+            )
             for name in ("PREWHERE", "WHERE")
             if name in by_name
         ]
-        kept = [part for part in pruned if part is not None]
-        if len(kept) > 1:
-            where = " AND ".join(f"({p.text})" if p.bare_or else p.text for p in kept)
-        else:
-            where = kept[0].text if kept else None
+        where = _join_filters([part for part in pruned if part is not None])
 
         self._record_tail(clauses, result)
         return _Reduced(projection=projection, table=table, where=where)
@@ -643,29 +754,16 @@ class HdxSanitizer:
                 kept.append(_render(_substitute(item, aliases)))
         return kept or ["*"]
 
-    def _prune(self, toks: list[_Tok], result: HdxSanitizeResult) -> _Pruned | None:
-        """Drop time-window and series-cap conjuncts, keeping every other predicate."""
-        if not toks:
-            raise HdxSanitizeError("The SQL has an empty filter clause.")
-        if _has_top_level(toks, frozenset({"OR", "?", "->"})):
-            _check_leaf(toks)
-            return _Pruned(_render(toks), bare_or=True)
-        parts = _split_and(toks)
-        if len(parts) > 1:
-            kept = [p for p in (self._prune(part, result) for part in parts) if p is not None]
-            return _Pruned(" AND ".join(p.text for p in kept), bare_or=False) if kept else None
-        inner = _unwrap(toks)
-        if inner is not None:
-            pruned = self._prune(inner, result)
-            return None if pruned is None else _Pruned(f"({pruned.text})", bare_or=False)
+    @staticmethod
+    def _drop(toks: list[_Tok], result: HdxSanitizeResult) -> bool:
+        """Take out a time-window or series-cap conjunct, recording it."""
         if _is_time_bound(toks):
             result.stripped_time_bounds.append(_render(toks))
-            return None
+            return True
         if _SERIES_CAP in _hdx_names(toks):
             result.stripped_clauses.append(f"WHERE {_render(toks)}")
-            return None
-        _check_leaf(toks)
-        return _Pruned(_render(toks), bare_or=False)
+            return True
+        return False
 
     @staticmethod
     def _record_tail(clauses: list[_Clause], result: HdxSanitizeResult) -> None:
@@ -752,8 +850,12 @@ def _clause_name(toks: Sequence[_Tok], i: int) -> tuple[str, int] | None:
     return word, 1
 
 
-def _clauses(toks: list[_Tok]) -> list[_Clause]:
-    """Split one SELECT statement into its top-level clauses, in order."""
+def _clauses(toks: list[_Tok], *, strict: bool = True) -> list[_Clause]:
+    """Split one SELECT statement into its top-level clauses, in order.
+
+    Strict refuses clauses a rule cannot carry and clauses out of order; lenient
+    only requires the statement to open with WITH or SELECT.
+    """
     clauses: list[_Clause] = []
     depths = _walk(toks)
     i = 0
@@ -771,6 +873,8 @@ def _clauses(toks: list[_Tok]) -> list[_Clause]:
 
     if not clauses or clauses[0].name not in ("WITH", "SELECT"):
         raise HdxSanitizeError(f"The SQL is not a SELECT (it starts {_snippet(toks[:4])}).")
+    if not strict:
+        return clauses
     rank = -1
     seen: set[str] = set()
     for clause in clauses:
@@ -806,6 +910,134 @@ def _table(source: list[_Tok], result: HdxSanitizeResult) -> str:
                 "apply when it scans the table."
             )
     return _render(source)
+
+
+def _add_select_aliases(items: list[list[_Tok]], aliases: dict[str, list[_Tok]]) -> None:
+    """Record each row-level ``expr AS name`` in the SELECT list as an inlinable alias."""
+    for item in items:
+        expr, alias = _split_alias(item)
+        if alias and alias not in aliases and not _is_aggregate(expr) and not _hdx_names(item):
+            aliases[alias] = _substitute(expr, aliases)
+
+
+def _table_name(source: Sequence[_Tok]) -> tuple[str | None, str | None]:
+    """Read ``db.table`` or ``table`` from the start of a FROM clause, unquoted."""
+    names = [_name_of(tok) for tok in source[:3]]
+    if len(source) > 1 and source[1].text == "(":
+        return None, None
+    if len(source) >= 3 and source[1].text == "." and names[0] and names[2]:
+        return names[0], names[2]
+    return None, names[0] if names else None
+
+
+def split_time_window(
+    sql: str, time_columns: Iterable[str] = (), *, inline_aliases: bool = True
+) -> WindowSplit:
+    """Read a SELECT the way a rule does, taking the time window out of its filter.
+
+    Lenient where ``HdxSanitizer`` is strict: HAVING, joins, unions and CTEs are
+    named in ``ignored_clauses`` rather than refused, and a time bound under OR or
+    NOT stays in the filter and is named in ``stuck``.
+
+    Args:
+        sql: One SELECT statement.
+        time_columns: Columns whose constant bounds count as time window, as well
+            as the epoch bounds HyperDX renders on any column. Case-insensitive.
+        inline_aliases: Replace SELECT and WITH aliases the filter uses with the
+            expression they name, for a filter that runs without that SELECT list.
+
+    Returns:
+        The statement split around its filter.
+
+    Raises:
+        HdxSanitizeError: If the SQL does not tokenize, is unbalanced, or is not
+            a SELECT.
+    """
+    columns = frozenset(name.lower() for name in time_columns)
+    toks = _tokenize(sql)
+    _check_brackets(toks)
+    depths = _walk(toks)
+    ignored: list[str] = []
+    end = next((i for i, tok in enumerate(toks) if tok.text == ";" and not depths[i]), None)
+    if end is not None:
+        if any(tok.text != ";" for tok in toks[end:]):
+            ignored.append("a second statement")
+        toks = toks[:end]
+    try:
+        clauses = _clauses(_unwrap_all(toks), strict=False)
+        return _split_window(clauses, columns, inline_aliases, ignored)
+    except RecursionError:
+        raise HdxSanitizeError("The SQL is nested too deeply to read.") from None
+
+
+def _split_window(
+    clauses: list[_Clause], columns: frozenset[str], inline_aliases: bool, ignored: list[str]
+) -> WindowSplit:
+    """Body of ``split_time_window`` once the statement is split into clauses."""
+    names: list[str] = []
+    aliases: dict[str, list[_Tok]] = {}
+    for item in _split_commas(clauses[0].body) if clauses[0].name == "WITH" else []:
+        expr, alias = _split_alias(item)
+        if len(item) >= 4 and item[1].keyword == "AS" and item[3].keyword in ("SELECT", "WITH"):
+            names.append(f"the CTE {_name_of(item[0])}")
+        elif alias and expr:
+            aliases[alias] = _substitute(expr, aliases)
+
+    before: list[_Clause] = []
+    filters: list[_Clause] = []
+    after: list[_Clause] = []
+    for clause in clauses:
+        if after or clause.name in ("UNION", "INTERSECT", "EXCEPT"):
+            after.append(clause)
+        elif clause.name in ("WITH", "SELECT", "FROM", "JOIN") and not filters:
+            before.append(clause)
+        elif clause.name in ("PREWHERE", "WHERE") and clause.name not in {f.name for f in filters}:
+            filters.append(clause)
+        else:
+            after.append(clause)
+        if clause.name in _REFUSED_CLAUSES and clause.name not in names:
+            names.append(clause.name)
+    ignored[:0] = names
+
+    by_name = {clause.name: clause for clause in before}
+    items = _split_commas(by_name["SELECT"].body) if "SELECT" in by_name else []
+    _add_select_aliases(items, aliases)
+    if not inline_aliases:
+        aliases = {}
+
+    source = by_name["FROM"].body if "FROM" in by_name else []
+    source_db, source_table = _table_name(source)
+
+    removed: list[str] = []
+    stuck: list[str] = []
+
+    def drop(leaf: list[_Tok]) -> bool:
+        if _is_time_bound(leaf, columns):
+            removed.append(_render(leaf))
+            return True
+        return False
+
+    def check(leaf: list[_Tok]) -> None:
+        if _has_time_bound(leaf, columns):
+            stuck.append(_render(leaf))
+
+    pruned = [_prune(_substitute(f.body, aliases), drop, check) for f in filters]
+    kept = [part for part in pruned if part is not None]
+    kept_filter = _join_filters(kept)
+    if len(kept) == 1 and kept[0].bare_or:
+        kept_filter = f"({kept_filter})"
+
+    return WindowSplit(
+        source_db=source_db,
+        source_table=source_table,
+        select_star=any(len(item) == 1 and item[0].text == "*" for item in items),
+        before_filter=" ".join(_render([*c.head, *c.body]) for c in before),
+        filter=kept_filter,
+        after_filter=" ".join(_render([*c.head, *c.body]) for c in after),
+        removed=removed,
+        stuck=stuck,
+        ignored_clauses=ignored,
+    )
 
 
 def _substitute(toks: Sequence[_Tok], aliases: dict[str, list[_Tok]]) -> list[_Tok]:

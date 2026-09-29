@@ -20,7 +20,7 @@ import pytest
 import sqlglot
 from sqlglot.tokens import TokenType
 
-from dfe_engine.hunts.hdx_sanitizer import HdxSanitizeError, HdxSanitizer
+from dfe_engine.hunts.hdx_sanitizer import HdxSanitizeError, HdxSanitizer, split_time_window
 from dfe_engine.hunts.rule_creation_service import RuleCreateRequest, RuleCreationService
 
 FIXTURE = Path(__file__).parents[2] / "fixtures" / "hdx_sanitizer" / "rendered_views.json"
@@ -733,6 +733,83 @@ class TestResultRecord:
         result = sanitizer.sanitize(sql)
         assert result.clean_sql == ""
         assert result.warnings == []
+
+
+# -- The lenient reader --
+
+
+class TestSplitTimeWindow:
+    """split_time_window reads the same SQL the same way, without refusing."""
+
+    @pytest.mark.parametrize(
+        "sql",
+        [c["input"] for c in GOLDEN_KEPT] + [generate(seed)[0] for seed in range(0, 400, 5)],
+    )
+    def test_removes_exactly_what_the_sanitizer_removes(self, sql):
+        assert split_time_window(sql).removed == HdxSanitizer().sanitize(sql).stripped_time_bounds
+
+    def test_splits_around_the_filter_and_names_what_it_ignores(self):
+        split = split_time_window(
+            "WITH x AS (SELECT 1 FROM u) SELECT a, count() FROM `db`.`t` JOIN v ON t.id = v.id "
+            f"PREWHERE b = 1 WHERE {WINDOW} AND (c = 2 OR d = 3) GROUP BY a HAVING count() > 5 "
+            "ORDER BY a LIMIT 10 UNION ALL SELECT a, 1 FROM w WHERE e = 4"
+        )
+        assert (split.source_db, split.source_table, split.select_star) == ("db", "t", False)
+        assert split.before_filter == (
+            "WITH x AS (SELECT 1 FROM u) SELECT a, count() FROM `db`.`t` JOIN v ON t.id = v.id"
+        )
+        assert split.filter == "b = 1 AND (c = 2 OR d = 3)"
+        assert split.after_filter == (
+            "GROUP BY a HAVING count() > 5 ORDER BY a LIMIT 10 UNION ALL SELECT a, 1 FROM w "
+            "WHERE e = 4"
+        )
+        assert split.ignored_clauses == ["the CTE x", "JOIN", "HAVING", "UNION"]
+        assert split.removed == [
+            "_timestamp >= fromUnixTimestamp64Milli(1790553600000)",
+            "_timestamp <= fromUnixTimestamp64Milli(1790557200000)",
+        ]
+
+    def test_a_lone_disjunction_is_bracketed_for_anding(self):
+        split = split_time_window("SELECT * FROM t WHERE a = 1 OR b = 2")
+        assert split.filter == "(a = 1 OR b = 2)"
+
+    def test_named_time_columns_take_constant_bounds(self):
+        sql = (
+            "SELECT * FROM t WHERE Ts BETWEEN '2026-01-01' AND {{to}} AND ts > toDateTime(1) "
+            "AND ts > other_col AND n > 5"
+        )
+        split = split_time_window(sql, ["ts"])
+        assert split.removed == ["Ts BETWEEN '2026-01-01' AND {{to}}", "ts > toDateTime(1)"]
+        assert split.filter == "ts > other_col AND n > 5"
+        assert split_time_window(sql).removed == []
+
+    def test_bounds_it_cannot_remove_are_named(self):
+        split = split_time_window("SELECT * FROM t WHERE NOT (ts > 1) AND fn(ts < 2)", ["ts"])
+        assert split.removed == []
+        assert split.stuck == ["NOT (ts > 1)", "fn(ts < 2)"]
+
+    def test_aliases_are_inlined_only_on_request(self):
+        sql = "WITH (lower(Body)) AS b SELECT ServiceName AS svc FROM t WHERE svc = 'a' AND b = 'x'"
+        assert split_time_window(sql).filter == "ServiceName = 'a' AND (lower(Body)) = 'x'"
+        assert split_time_window(sql, inline_aliases=False).filter == "svc = 'a' AND b = 'x'"
+
+    @pytest.mark.parametrize(
+        ("sql", "fragment"),
+        [
+            ("SELECT a FROM t WHERE b = 'x", "unterminated"),
+            ("DROP TABLE t", "not a SELECT"),
+            ("SELECT a FROM t WHERE", "empty filter"),
+            (f"SELECT a FROM t WHERE {'(' * 3000}b = 1{')' * 3000}", "nested too deeply"),
+        ],
+    )
+    def test_unreadable_sql_raises(self, sql, fragment):
+        with pytest.raises(HdxSanitizeError, match=fragment):
+            split_time_window(sql)
+
+    def test_second_statement_is_ignored_and_named(self):
+        split = split_time_window("SELECT a FROM t WHERE b = 1; DROP TABLE t")
+        assert (split.filter, split.after_filter) == ("b = 1", "")
+        assert split.ignored_clauses == ["a second statement"]
 
 
 # -- The call site --
