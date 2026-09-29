@@ -55,4 +55,6 @@ jobs:
       bump: ${{ inputs.bump || 'auto' }}
       test-tier: ${{ inputs.test-tier || 'core' }}
       runner-test: arc-native-16cpu
+      # The producer-contract pin checks read GitHub; anonymous calls from shared runners hit the rate limit.
+      test-github-token: true
     secrets: inherit
