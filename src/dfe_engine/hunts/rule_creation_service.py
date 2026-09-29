@@ -134,10 +134,14 @@ class CostEstimate(BaseModel):
 
 
 class ChQueryClient(Protocol):
-    """A ClickHouse client the preview can run its count through."""
+    """A ClickHouse client the parse check and the preview run through."""
 
     def query(self, query: str, *args: Any, **kwargs: Any) -> Any:
         """Run a SELECT and return a result carrying ``result_rows``."""
+        ...
+
+    def command(self, cmd: str, *args: Any, **kwargs: Any) -> Any:
+        """Run a statement as sent, with no FORMAT clause appended."""
         ...
 
 
@@ -187,6 +191,26 @@ def _mask_quoted(sql: str) -> str:
     return _QUOTED_RE.sub(_blank_inside, sql)
 
 
+_EXPLAIN_PREFIX = "EXPLAIN AST "
+_CH_POSITION_RE = re.compile(r"failed at position (\d+)")
+
+
+def _syntax_error(message: str) -> SqlValidationError:
+    """ClickHouse's syntax error, with its 1-based position moved back onto the rule's SQL."""
+    detail = message[message.find("Syntax error") :].splitlines()[0]
+    detail = detail.split(" (version ")[0].strip()
+    position: int | None = None
+    found = _CH_POSITION_RE.search(detail)
+    if found:
+        position = max(int(found.group(1)) - 1 - len(_EXPLAIN_PREFIX), 0)
+        detail = _CH_POSITION_RE.sub(f"failed at position {position + 1}", detail, count=1)
+    return SqlValidationError(
+        message=f"ClickHouse could not parse this SQL: {detail}",
+        position=position,
+        suggestion="Fix the syntax at the position ClickHouse reports.",
+    )
+
+
 # ClickHouse error codes the preview names in its own words.
 _TOO_MANY_ROWS = 158
 _MEMORY_LIMIT_EXCEEDED = 241
@@ -225,8 +249,8 @@ class RuleCreationService:
             preview use the engine's pooled ClickHouse client.
         hunts: Hunt settings: the detection guard's thresholds and the load-time
             column the runner windows on. Defaults when omitted.
-        ch_client: ClickHouse client for the volume preview, in place of the
-            pooled one.
+        ch_client: ClickHouse client for the parse check and the volume preview,
+            in place of the pooled one.
     """
 
     def __init__(
@@ -442,23 +466,19 @@ class RuleCreationService:
         ClickHouse's own parser (``EXPLAIN AST``) is authoritative when it is
         configured and reachable; sqlglot's ClickHouse dialect stands in otherwise.
         """
-        if self._ch_config:
+        client = self._query_client()
+        if client is not None:
             try:
-                from ..clickhouse.clickhouse_manager import ClickHouseManager
-
-                client = ClickHouseManager.get_instance().get_clickhouse_client()
+                # command(), not query(): query() appends FORMAT Native, which binds to the explained SELECT and not to EXPLAIN's own output.
                 # Risk accepted: EXPLAIN AST only asks ClickHouse to parse the SQL, never to run it, and the SQL has already passed the sanitiser.
                 # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
-                client.execute(f"EXPLAIN AST {sql}")
+                client.command(f"{_EXPLAIN_PREFIX}{sql}")
                 return None
             except Exception as exc:
+                if "Syntax error" in str(exc):
+                    return _syntax_error(str(exc))
                 detail = str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__
-                if "Syntax error" in detail:
-                    return SqlValidationError(
-                        message=f"ClickHouse could not parse this SQL: {detail}",
-                        suggestion="Fix the syntax at the position ClickHouse reports.",
-                    )
-                logger.debug(f"EXPLAIN AST unavailable, parsing with sqlglot: {detail}")
+                logger.warning(f"EXPLAIN AST unavailable, parsing with sqlglot: {detail}")
 
         try:
             statements = sqlglot.parse(sql, read="clickhouse")
@@ -481,8 +501,8 @@ class RuleCreationService:
             )
         return None
 
-    def _preview_client(self) -> ChQueryClient | None:
-        """The client the preview counts through, or None when no ClickHouse is configured."""
+    def _query_client(self) -> ChQueryClient | None:
+        """The client the parse check and preview use, or None when no ClickHouse is configured."""
         if self._ch_client is not None:
             return self._ch_client
         if not self._ch_config:
@@ -510,7 +530,7 @@ class RuleCreationService:
             )
             return CostEstimate(window_minutes=window, warnings=[unmeasured_warning(reason)])
 
-        client = self._preview_client()
+        client = self._query_client()
         if client is None:
             return unmeasured("no ClickHouse is configured")
 
