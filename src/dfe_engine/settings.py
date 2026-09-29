@@ -59,6 +59,8 @@ Hunts:
 - DFE_HUNTS_JITTER_SECONDS -> hunts.jitter_seconds
 - DFE_HUNTS_ALERT_DESTINATIONS -> hunts.alert_destinations (JSON {name: apprise_url})
 - DFE_HUNTS_ALERT_DESTINATIONS_DIR -> hunts.alert_destinations_dir
+- DFE_HUNTS_MAX_DETECTIONS_PER_RUN -> hunts.max_detections_per_run
+- DFE_HUNTS_MAX_DETECTIONS_PER_RUN_CEILING -> hunts.max_detections_per_run_ceiling
 
 Artifactory:
 - DFE_ARTIFACTORY_URL -> artifactory.url
@@ -314,6 +316,11 @@ class ClickHouseSettings(BaseModel):
         return self.data_database or self.database
 
 
+# Shared by HuntsSettings and the hunt runner compiler's default, so the two cannot drift.
+MAX_DETECTIONS_PER_RUN = 1000
+MAX_DETECTIONS_PER_RUN_CEILING = 10_000
+
+
 class HuntsSettings(BaseModel):
     """Hunt scheduler settings."""
 
@@ -397,9 +404,18 @@ class HuntsSettings(BaseModel):
         default="1h",
         description="Default alert cooldown window for grouped alerts",
     )
-    default_max_alerts_per_run: int = Field(
-        default=0,
-        description="Default max alerts per execution (0 = unlimited)",
+    max_detections_per_run: int = Field(
+        default=MAX_DETECTIONS_PER_RUN,
+        gt=0,
+        description=(
+            "Detection rows one rule may write in one hunt run. Past it the run writes "
+            "this many plus one summary row carrying the true match count."
+        ),
+    )
+    max_detections_per_run_ceiling: int = Field(
+        default=MAX_DETECTIONS_PER_RUN_CEILING,
+        gt=0,
+        description="Upper bound on max_detections_per_run; a larger value is cut to this.",
     )
     default_max_sample_events: int = Field(
         default=10,
@@ -1919,8 +1935,10 @@ def _get_env_overrides() -> dict:
         overrides["hunts"]["alert_destinations_dir"] = val
     if val := _get_env("DFE_HUNTS_DEFAULT_ALERT_COOLDOWN"):
         overrides["hunts"]["default_alert_cooldown"] = val
-    if val := _get_env("DFE_HUNTS_DEFAULT_MAX_ALERTS_PER_RUN"):
-        overrides["hunts"]["default_max_alerts_per_run"] = int(val)
+    if val := _get_env("DFE_HUNTS_MAX_DETECTIONS_PER_RUN"):
+        overrides["hunts"]["max_detections_per_run"] = int(val)
+    if val := _get_env("DFE_HUNTS_MAX_DETECTIONS_PER_RUN_CEILING"):
+        overrides["hunts"]["max_detections_per_run_ceiling"] = int(val)
     if val := _get_env("DFE_HUNTS_DEFAULT_MAX_SAMPLE_EVENTS"):
         overrides["hunts"]["default_max_sample_events"] = int(val)
 

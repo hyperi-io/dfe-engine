@@ -21,13 +21,19 @@ The INSERT's row count is recorded with the fire it belongs to. ClickHouse is th
 only thing that knows how many rows a hunt wrote, and until now the worker read
 that number and threw it away, so the API could not say whether a hunt found
 anything.
+
+A statement compiled from a rule carries a LIMIT, the per-run detection cap. When
+it writes that many rows the worker counts every match in the window and, if the
+count is over the cap, writes one summary row carrying it, logs a WARN and bumps
+the capped and dropped counters. The watermark still advances and the run is still
+``completed``: holding the window would re-run the same flood on every fire.
 """
 
-from __future__ import annotations
-
+import json
 import time
 from typing import Any
 
+from clickhouse_connect.driver.exceptions import ClickHouseError
 from scalo.logger import logger
 
 from dfe_engine.clickhouse.attribution import DfeQueryTags
@@ -35,7 +41,8 @@ from dfe_engine.clickhouse.attribution import DfeQueryTags
 from .ch_coordinator import ChCoordinator
 from .checkpoint import predicate, window
 from .metrics import HuntRunnerMetrics
-from .models import HuntSpec
+from .models import HuntSpec, HuntStatement
+from .rule_compiler import MATCHED, SUMMARY
 
 WINDOW_TOKEN = "{window}"
 
@@ -100,7 +107,7 @@ class HuntWorker:
             EmptyHuntQuery: the hunt has no statement to run, so its rules named no
                 rule file the compiler could resolve. The watermark does NOT advance.
         """
-        statements = [sql for sql in spec.queries if sql.strip()]
+        statements = [statement for statement in spec.queries if statement.sql.strip()]
         if not statements:
             logger.error(
                 f"hunt {spec.hunt_id} has no query to run: its rules compiled to nothing, "
@@ -114,12 +121,15 @@ class HuntWorker:
         settings = query_settings(spec.hunt_id, self._workload)
         began = time.monotonic()
         written = 0
-        for sql in statements:
+        for statement in statements:
             # INSERT INTO <target> SELECT ... WHERE {window}. log_comment attributes
             # the query in system.query_log; workload (if configured) puts it in a CH
             # fair-share class.
-            result = self._ch.command(sql.replace(WINDOW_TOKEN, pred), settings=settings)
-            written += _written_rows(result)
+            result = self._ch.command(statement.sql.replace(WINDOW_TOKEN, pred), settings=settings)
+            rows = _written_rows(result)
+            written += rows
+            if statement.cap and rows >= statement.cap:
+                written += self._summarise_cap(spec, statement, scheduled_start, pred, settings)
         # Advance ONLY after every statement committed (crash-safe resume).
         self._coord.set_watermark(spec.hunt_id, end)
         self._coord.record_run(spec.hunt_id, scheduled_start, written)
@@ -134,3 +144,63 @@ class HuntWorker:
         )
         self._metrics.rows_written(spec.hunt_id, written)
         return end
+
+    def _summarise_cap(
+        self,
+        spec: HuntSpec,
+        statement: HuntStatement,
+        fire: int,
+        pred: str,
+        settings: dict[str, str],
+    ) -> int:
+        """Count a statement that filled its cap, and record what it left out.
+
+        The count runs only here, so a run under its cap pays nothing for it. A
+        failure is logged rather than raised: the capped rows are committed, and
+        failing the run would hold the window and write them again next fire.
+
+        Returns:
+            Rows written: 1 for the summary row, 0 when the count shows nothing was
+            left out or the count or summary could not run.
+        """
+        try:
+            counted = self._ch.query(
+                statement.count_sql.replace(WINDOW_TOKEN, pred), settings=settings
+            )
+            runtime = dict(zip(counted.column_names, counted.result_rows[0], strict=True))
+            matched = int(runtime.pop(MATCHED))
+            if matched <= statement.cap:
+                return 0
+            summary = {
+                "dfe_capped": True,
+                "matched": matched,
+                "written": statement.cap,
+                "rule_id": statement.rule_id,
+            }
+            self._ch.command(
+                statement.summary_sql,
+                parameters={**statement.summary_params, **runtime, SUMMARY: json.dumps(summary)},
+                settings=settings,
+            )
+        except ClickHouseError as exc:
+            logger.error(
+                "hunt detection cap summary failed; the capped rows stand without it",
+                hunt_id=spec.hunt_id,
+                rule_id=statement.rule_id,
+                fire=fire,
+                cap=statement.cap,
+                error=str(exc),
+            )
+            return 0
+        dropped = matched - statement.cap
+        logger.warning(
+            "hunt rule hit its detection cap",
+            hunt_id=spec.hunt_id,
+            rule_id=statement.rule_id,
+            fire=fire,
+            matched=matched,
+            written=statement.cap,
+            dropped=dropped,
+        )
+        self._metrics.detections_capped(spec.hunt_id, statement.rule_id, dropped=dropped)
+        return 1

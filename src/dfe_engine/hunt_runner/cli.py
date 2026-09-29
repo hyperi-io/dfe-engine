@@ -47,6 +47,7 @@ from dfe_engine.settings import DFESettings, load_settings
 from . import metrics as runner_metrics
 from .ch_coordinator import ChCoordinator
 from .daemon import run_loop
+from .rule_compiler import detection_cap
 from .runner import HuntRunner
 from .schedule import publish_schedule
 from .spec_loader import load_specs
@@ -73,14 +74,23 @@ def _ch_params(settings: DFESettings) -> dict[str, Any]:
     }
 
 
-def _spec_sources(settings: DFESettings, database: str) -> dict[str, str]:
-    """The loader's rule inputs: where rule YAML lives, and the default results table.
+def _spec_sources(settings: DFESettings, database: str) -> dict[str, Any]:
+    """The loader's rule inputs: rule YAML, the default results table, and the cap.
 
     A hunt names `rules`, so the loader has to read them to build its SQL. The
     default target is the core detection table in the resolved data database - never
     a hardcoded 'dfe' - used only when neither the rule entry nor the hunt names one.
+    Every compiled rule is capped at ``hunts.max_detections_per_run``, cut to its
+    ceiling.
     """
-    return {"rules_dir": settings.hunts.rules_dir, "default_target": f"{database}.detection"}
+    hunts = settings.hunts
+    return {
+        "rules_dir": hunts.rules_dir,
+        "default_target": f"{database}.detection",
+        "max_detections": detection_cap(
+            hunts.max_detections_per_run, hunts.max_detections_per_run_ceiling
+        ),
+    }
 
 
 def _build_ch(settings: DFESettings) -> tuple[Any, str]:

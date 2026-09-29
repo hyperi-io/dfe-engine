@@ -75,7 +75,7 @@ def test_hunt_added_after_the_loop_started_runs_without_a_restart(ch_client, dfe
     # phase offset (a hash into a 1-second window) can only be 0.
     fixed_now = int(time.time()) // 2 * 2
     ch_client.command(
-        f"INSERT INTO `{dfe_db}`.`default` (_timestamp_load, _timestamp, _org_id) VALUES "
+        f"INSERT INTO `{dfe_db}`.`main` (_timestamp_load, _timestamp, _org_id) VALUES "
         f"(toDateTime64({fixed_now - 1}, 3), toDateTime64({fixed_now - 1}, 3), '{marker}'), "
         f"(toDateTime64({fixed_now - 30}, 3), toDateTime64({fixed_now - 30}, 3), '{marker}')"
     )
@@ -143,7 +143,7 @@ def test_hunt_added_after_the_loop_started_runs_without_a_restart(ch_client, dfe
     # Exactly one: the row inside the [fire-2, fire) window. The 30s-old row is in
     # the table and out of the window, so this also pins the window arithmetic.
     assert len(rows) == 1
-    assert tuple(rows[0][:5]) == (hunt, rule, rule, "default", "high")
+    assert tuple(rows[0][:5]) == (hunt, rule, rule, "main", "high")
     assert int(rows[0][5]) == fixed_now - 1
 
 
@@ -246,7 +246,7 @@ def test_an_idle_loop_still_reads_as_a_live_runner(ch_client, dfe_db, tmp_path):
     )
     assert ticks == [0]  # nothing was due, which is the premise
 
-    # ensure_schema created the table alongside the rest of the coordination set.
+    # The fixture applies the heartbeat table from the manifest; ensure_schema only asserts it.
     assert ch_client.command(f"EXISTS TABLE `{dfe_db}`.hunt_runner_heartbeat") == 1
     assert live_runner_count(ch_client, dfe_db, fixed_now) == 1
     # Two polls on, the same beat is stale and the runner reads as gone.

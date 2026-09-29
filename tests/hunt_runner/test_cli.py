@@ -59,3 +59,23 @@ def test_ch_params_maps_settings_fields():
         "secure": True,
         "verify": False,
     }
+
+
+def test_spec_sources_carry_the_configured_detection_cap():
+    settings = DFESettings(env="test")
+    settings.hunts.rules_dir = "/rules"
+    settings.hunts.max_detections_per_run = 250
+
+    assert cli._spec_sources(settings, "tenant_a") == {
+        "rules_dir": "/rules",
+        "default_target": "tenant_a.detection",
+        "max_detections": 250,
+    }
+
+
+def test_a_cap_above_its_ceiling_is_cut_to_the_ceiling():
+    settings = DFESettings(env="test")
+    settings.hunts.max_detections_per_run = 50_000
+    settings.hunts.max_detections_per_run_ceiling = 10_000
+
+    assert cli._spec_sources(settings, "dfe")["max_detections"] == 10_000

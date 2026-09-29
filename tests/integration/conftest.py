@@ -387,17 +387,20 @@ def ch_client(ch_params):
 
 @pytest.fixture
 def dfe_db(ch_client):
-    """An isolated database carrying the REAL default and detection tables.
+    """An isolated database carrying the REAL landing, detection and coordination tables.
 
     Built from the same specs the core schema applies, so a hunt writes into the
     detection table a deployment actually has rather than a stand-in shaped to suit
-    the test.
+    the test. The runner only asserts its coordination tables exist, so they are
+    rendered from the manifest the engine's schema phase applies at boot.
     """
     import uuid
 
+    from dfe_engine.hunt_runner.ch_coordinator import _COORDINATION_IDS
     from dfe_engine.schema.applier import SchemaApplier
     from dfe_engine.schema.ddl_writer import DDLFileWriter
     from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
+    from dfe_engine.schema.plan import render_one
 
     db = f"dfe_core_{uuid.uuid4().hex[:8]}"
     resolver = EngineResolver(client=ch_client)
@@ -406,6 +409,9 @@ def dfe_db(ch_client):
     writer = DDLFileWriter(resolver=resolver, database=db)
     for spec in (writer.default_table_spec(), writer.detection_table_spec()):
         applier.ensure_table(db, spec.name, spec.columns, spec.config)
+    for object_id in _COORDINATION_IDS:
+        for statement in render_one(object_id, data_database=db).statements:
+            ch_client.command(statement)
     try:
         yield db
     finally:

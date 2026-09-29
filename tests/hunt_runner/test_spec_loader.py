@@ -13,10 +13,12 @@ hunt_id (never an in-file id), rate schedules resolve to interval_seconds, ancho
 and malformed hunts are skipped per-file without sinking the rest of the load.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 
+from common.hunt_files import write_hunt, write_rule
+from scalo.logger import logger
+
+from dfe_engine.hunt_runner.models import HuntStatement
 from dfe_engine.hunt_runner.spec_loader import load_specs
 
 
@@ -119,7 +121,7 @@ def test_query_target_and_timestamp_fields_read(tmp_path: Path):
         'timestamp_field: "event_time"\n',
     )
     spec = load_specs(tmp_path)["detail"]
-    assert spec.queries == ["SELECT * FROM src WHERE ts > {window}"]
+    assert spec.queries == [HuntStatement(sql="SELECT * FROM src WHERE ts > {window}")]
     assert spec.target_table == "dfe_hunts.results"
     assert spec.timestamp_field == "event_time"
 
@@ -194,7 +196,7 @@ def test_a_hunt_the_api_writes_loads_with_a_query_to_run(tmp_path: Path):
     spec = load_specs(hunts_dir, rules_dir=rules_dir)["api_hunt"]
     assert spec.interval_seconds == 60  # the schedule survives
     assert len(spec.queries) == 1
-    sql = spec.queries[0]
+    sql = spec.queries[0].sql
     assert sql.startswith("INSERT INTO dfe.detection")
     assert "FROM dfe.main" in sql
     assert "process_name = 'certutil.exe'" in sql
@@ -205,3 +207,34 @@ def test_a_hunt_the_api_writes_loads_with_a_query_to_run(tmp_path: Path):
     # checkpoint_timestamp_field is the API's name for the watermark column, and it
     # now reaches the runner rather than being dropped for the loader's default.
     assert spec.timestamp_field == "_timestamp_load"
+
+
+def test_a_compiled_rule_carries_the_cap_the_loader_was_given(tmp_path: Path):
+    write_rule(tmp_path / "rules", "noisy_rule", "a = 1")
+    write_hunt(tmp_path / "hunts", "noisy", "noisy_rule", "dfe")
+
+    spec = load_specs(tmp_path / "hunts", rules_dir=tmp_path / "rules", max_detections=40)["noisy"]
+
+    assert [(s.rule_id, s.cap) for s in spec.queries] == [("noisy_rule", 40)]
+    assert spec.queries[0].sql.endswith("\nLIMIT 40")
+
+
+def test_a_direct_query_is_run_uncapped_and_the_load_says_so(tmp_path: Path):
+    _write(
+        tmp_path,
+        "hand_written",
+        'schedule:\n  mode: rate\n  interval: "1m"\n'
+        'query: "INSERT INTO dfe.detection SELECT * FROM dfe.main WHERE {window}"\n',
+    )
+    captured: list = []
+    handler_id = logger.add(captured.append, level="INFO")
+    try:
+        spec = load_specs(tmp_path, max_detections=40)["hand_written"]
+    finally:
+        logger.remove(handler_id)
+
+    assert [(s.cap, s.count_sql, s.summary_sql) for s in spec.queries] == [(0, "", "")]
+    assert "LIMIT" not in spec.queries[0].sql
+    lines = [m for m in captured if "detection cap does not apply" in m]
+    assert len(lines) == 1
+    assert lines[0].record["extra"]["hunt_id"] == "hand_written"
