@@ -1297,9 +1297,13 @@ def set_app_config(
     A secret is written like any other option: it goes into the overlay as the rest
     of this surface writes one, and neither this response nor a read route on this
     surface says what it is. A masked value written back as it was read keeps the
-    stored credential; the mask where nothing is stored is a 400 ``masked_value``,
-    and the mask beside a changed field of the same entry is a 400
-    ``credential_reentry_required``.
+    stored credential; the mask where nothing is stored is a 400 ``masked_value``.
+    A changed field beside a stored credential, in the same mapping or with the
+    credential one mapping down (``brokers`` beside ``sasl.password``), is a 400
+    ``credential_reentry_required`` until that mapping is written whole with its
+    credentials typed again. A setting inside another mapping beside it, such as
+    ``producer.retries``, is not. ``config`` and ``extraEnv`` are roots, so a
+    setting directly under either never needs one.
 
     409 where the deployment already decides the value: a config path the chart
     derives, or an `extraEnv` name the chart sets for this app.
