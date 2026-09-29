@@ -36,7 +36,7 @@ from typing import Any
 from scalo.logger import logger
 
 from dfe_engine.hunts.hunt_output import HuntResultSchema
-from dfe_engine.hunts.rule_rewriter import RuleRewriter
+from dfe_engine.hunts.rule_rewriter import RuleRewriter, strip_time_placeholder
 from dfe_engine.settings import MAX_DETECTIONS_PER_RUN
 from dfe_engine.yaml_utils import yaml_load
 
@@ -116,7 +116,7 @@ def _detection_clause(payload: dict[str, Any], rewriter: RuleRewriter) -> tuple[
     rule YAML that carries only the original SELECT is put through the same
     rewriter here, so a time bound written into the rule cannot fight the window.
     """
-    where = str(payload.get("where_clause") or "").strip()
+    where = strip_time_placeholder(str(payload.get("where_clause") or ""))
     source_db = str(payload.get("source_db") or "")
     source_table = str(payload.get("source_table") or "")
     original_sql = str(payload.get("original_sql") or "")

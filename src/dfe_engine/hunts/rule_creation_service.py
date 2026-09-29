@@ -46,7 +46,7 @@ from sqlglot.errors import ParseError
 
 from ..clickhouse.errors import ErrorCategory, wrap_ch_error
 from ..settings import DetectionGuardSettings, HuntsSettings
-from .hdx_sanitizer import HdxSanitizeError, HdxSanitizer, HdxSanitizeResult
+from .hdx_sanitizer import REFUSED_CLAUSES, HdxSanitizeError, HdxSanitizer, HdxSanitizeResult
 from .rule_guard import (
     VolumeBand,
     VolumeMeasure,
@@ -58,7 +58,7 @@ from .rule_guard import (
     volume_verdict,
 )
 from .rule_model import Rule, RuleCreate
-from .rule_rewriter import RuleRewriter
+from .rule_rewriter import RuleRewriter, strip_time_placeholder
 
 # -- Request / Response models ------------------------------
 
@@ -308,7 +308,9 @@ class RuleCreationService:
                     f"time bounds, had_time_bucket={hdx_result.had_time_bucket}"
                 )
 
-        # Phase 2: SQL syntax validation
+        # Phase 2: SQL syntax validation, after the time placeholder the window replaces.
+        if clean_sql:
+            clean_sql = strip_time_placeholder(clean_sql)
         sql_errors: list[SqlValidationError] = []
         if refusal is not None:
             sql_errors = [refusal]
@@ -367,7 +369,7 @@ class RuleCreationService:
 
     def validate_sql(self, sql: str) -> list[SqlValidationError]:
         """Standalone SQL validation without rule creation."""
-        return self._validate_sql_syntax(sql)
+        return self._validate_sql_syntax(strip_time_placeholder(sql))
 
     # -- Internal methods ----------------------------------
 
@@ -382,6 +384,8 @@ class RuleCreationService:
         5. Parses as one ClickHouse SELECT (EXPLAIN AST when ClickHouse is
            configured, else sqlglot's ClickHouse dialect)
         6. Its FROM names a ``<db>.<table>``, read the way the rule model reads it
+        7. No clause a row filter cannot carry (HAVING, a join, a union, ...),
+           refused as the HyperDX sanitiser refuses it
         """
         errors: list[SqlValidationError] = []
         trimmed = sql.strip()
@@ -457,6 +461,15 @@ class RuleCreationService:
                         suggestion="Qualify the FROM table with its database, e.g. FROM dfe.main.",
                     )
                 )
+            # A rule stores only the row filter, so a clause beyond it would be dropped at save.
+            errors.extend(
+                SqlValidationError(
+                    message=REFUSED_CLAUSES[clause],
+                    suggestion="A rule matches single rows of one table.",
+                )
+                for clause in parsed.ignored_clauses
+                if clause in REFUSED_CLAUSES
+            )
 
         return errors
 
