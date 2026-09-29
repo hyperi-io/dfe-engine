@@ -12,14 +12,14 @@ The phase itself lives in :mod:`dfe_engine.schema.phase`, which applies the
 pinned dfe-schemas manifest and is the only code path in the engine that issues
 DDL for a declared object. This module is the daemon's way in and the place the
 source tables are brought to the deployment default retention afterwards, so a
-changed ``DFE_CLICKHOUSE_DEFAULT_TTL_DAYS`` reaches every table on restart.
+changed default reaches every deployed source's table on restart. The phase
+refuses a changed default on a core table as TTL drift; an admin's change through
+``PUT /api/v1/system/retention`` is what applies it there.
 
 The phase is a GATE, not best-effort: its outcome decides readiness. Disable it
 with ``DFE_CLICKHOUSE_BOOTSTRAP_TABLES=false``, which reports the schema state as
 unknown and gates nothing.
 """
-
-from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
