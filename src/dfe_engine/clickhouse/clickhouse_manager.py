@@ -289,6 +289,10 @@ class ClickHouseManager:
             cls._instance._cleanup()
             cls._instance = None
 
+    def close(self) -> None:
+        """Close this manager's pooled client and pool; the next op builds a fresh one."""
+        self._cleanup()
+
     def get_clickhouse_client(self) -> ClickHouseClientWrapper:
         """Get a ClickHouse client wrapper with connection pooling + resilience.
 
