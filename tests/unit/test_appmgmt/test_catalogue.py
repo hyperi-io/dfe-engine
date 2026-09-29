@@ -463,6 +463,7 @@ class TestManifestParsing:
         )
 
         assert catalogue.push_endpoint(apps["dfe-thing"], "auth") == "http://dfe-thing-ingest:6000"
+        assert catalogue.push_address(apps["dfe-thing"], "auth") == "dfe-thing-ingest:6000"
 
     def test_an_app_with_no_endpoint_cannot_be_sent_to(self, tmp_path):
         # No entry means no listener, which is a different thing from a listener
@@ -471,6 +472,8 @@ class TestManifestParsing:
 
         with pytest.raises(catalogue.MissingEndpointError, match="declares no 'push' endpoint"):
             catalogue.push_endpoint(apps["dfe-thing"], "auth")
+        with pytest.raises(catalogue.MissingEndpointError, match="declares no 'push' endpoint"):
+            catalogue.push_address(apps["dfe-thing"], "auth")
 
     def test_a_non_integer_endpoint_port_is_refused(self, tmp_path):
         path = self._manifest(tmp_path, {"endpoints": {"push": {"port": "six thousand"}}})
@@ -573,6 +576,16 @@ class TestNaming:
         vrl = catalogue.descriptor("dfe-transform-vrl")
 
         assert catalogue.push_endpoint(vrl, "auth") == "http://dfe-transform-vrl-auth:6000"
+
+    def test_the_push_address_is_the_endpoint_without_its_scheme(self):
+        loader = catalogue.descriptor("dfe-loader")
+        vrl = catalogue.descriptor("dfe-transform-vrl")
+
+        assert catalogue.push_address(loader) == "dfe-loader:6000"
+        assert catalogue.push_address(vrl, "auth") == "dfe-transform-vrl-auth:6000"
+        assert (
+            catalogue.push_endpoint(vrl, "auth") == f"http://{catalogue.push_address(vrl, 'auth')}"
+        )
 
     def test_transform_service_is_the_inverse_of_the_engine_name(self):
         for engine in catalogue.transform_engines():

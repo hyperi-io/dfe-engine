@@ -107,7 +107,8 @@ _template_overrides: dict[str, dict[str, Any]] = {
         },
     },
     "k8s": {
-        # No brokers: every deployment names its own.
+        # Empty: every deployment names its own brokers.
+        "kafka": {"consumer": {"brokers": []}, "producer": {"brokers": []}},
         "metrics": {"address": "0.0.0.0:9090"},
     },
 }

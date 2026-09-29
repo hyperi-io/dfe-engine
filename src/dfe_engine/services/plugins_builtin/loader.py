@@ -177,7 +177,9 @@ _template_overrides: dict[str, dict[str, Any]] = {
         "logging": {"format": "json"},
     },
     "k8s": {
-        # No brokers or ClickHouse hosts: every deployment names its own.
+        # Empty: every deployment names its own brokers and ClickHouse hosts.
+        "kafka": {"brokers": []},
+        "clickhouse": {"hosts": []},
         "metrics": {"address": "0.0.0.0:9090"},
         "memory": {"limit_bytes": 0},
         "logging": {"format": "json"},

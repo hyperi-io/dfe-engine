@@ -18,8 +18,9 @@ app's own ``docs/config-schema.json``, byte for byte, from the commit its
 in that schema, because each app's chart mounts its ``config`` block as the app's
 config file. Recopy both files when an app renames, retypes or re-defaults an option.
 
-The built-in service plugins and the configs the engine seeds ship to deployments
-the engine has never seen, so none of them may name an in-cluster address either.
+The built-in service plugins, the configs the engine seeds and the pipeline templates
+ship to deployments the engine has never seen, so none of them may name an in-cluster
+address either.
 """
 
 import importlib.resources
@@ -37,10 +38,17 @@ from tests.support.deployment_address import IN_CLUSTER_NAME
 MANIFESTS = Path(__file__).parents[2] / "fixtures" / "contract"
 SCHEMAS = Path(__file__).parents[2] / "fixtures" / "contract-main"
 RESOURCES = importlib.resources.files("dfe_engine.services.surfaces.resources")
-SERVICES = importlib.resources.files("dfe_engine.services")
+ENGINE = importlib.resources.files("dfe_engine")
 
 # Any URL, or an in-cluster DNS name with the namespace in it, is one deployment's address.
 _CLUSTER_ADDRESS = re.compile(rf"{IN_CLUSTER_NAME.pattern}|://")
+
+# Defaults and templates the engine ships, by package directory and the file types in it.
+_DEFAULT_DIRECTORIES = (
+    ("services/plugins_builtin", (".py",)),
+    ("services/default_configs", (".yaml",)),
+    ("pipeline", (".py", ".yaml")),
+)
 
 
 def _shipped() -> list[str]:
@@ -69,15 +77,17 @@ def _options(service: str) -> dict[str, contract.ConfigField]:
     return {option.path: option for option in contract.resolve_config(app, {}).fields}
 
 
-def _service_defaults() -> list[str]:
-    """Every built-in plugin module and seeded config, as ``<directory>/<file>``."""
-    shipped = [
-        f"{directory}/{entry.name}"
-        for directory, suffix in (("plugins_builtin", ".py"), ("default_configs", ".yaml"))
-        for entry in (SERVICES / directory).iterdir()
-        if entry.name.endswith(suffix)
-    ]
-    assert shipped, "no built-in plugins or seeded configs found"
+def _shipped_defaults() -> list[str]:
+    """Every file in ``_DEFAULT_DIRECTORIES``, as its path under the package."""
+    shipped: list[str] = []
+    for directory, suffixes in _DEFAULT_DIRECTORIES:
+        found = [
+            f"{directory}/{entry.name}"
+            for entry in ENGINE.joinpath(*directory.split("/")).iterdir()
+            if entry.name.endswith(suffixes)
+        ]
+        assert found, f"nothing shipped under {directory}"
+        shipped.extend(found)
     return sorted(shipped)
 
 
@@ -134,10 +144,9 @@ class TestShippedSurface:
             assert entry.default == options[key].default, key
 
 
-@pytest.mark.parametrize("shipped", _service_defaults())
-def test_no_service_default_names_an_in_cluster_address(shipped):
-    directory, _, filename = shipped.partition("/")
-    text = (SERVICES / directory / filename).read_text(encoding="utf-8")
+@pytest.mark.parametrize("shipped", _shipped_defaults())
+def test_no_shipped_default_names_an_in_cluster_address(shipped):
+    text = ENGINE.joinpath(*shipped.split("/")).read_text(encoding="utf-8")
 
     assert not IN_CLUSTER_NAME.search(text), f"{shipped} names a deployment's address"
 
