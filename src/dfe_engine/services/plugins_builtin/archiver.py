@@ -101,7 +101,8 @@ _template_overrides: dict[str, dict[str, Any]] = {
         "buffer": {"flush_bytes": 128 * 1024 * 1024, "writer_parallelism": 8},
     },
     "k8s": {
-        # No brokers: every deployment names its own.
+        # Empty: every deployment names its own brokers.
+        "kafka": {"brokers": []},
         "metrics": {"address": "0.0.0.0:9090"},
         "memory": {"limit_bytes": 0},
     },

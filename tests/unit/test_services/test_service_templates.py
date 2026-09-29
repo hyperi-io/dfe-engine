@@ -12,10 +12,25 @@ import json
 
 import pytest
 
+from dfe_engine.appmgmt import catalogue
 from dfe_engine.services.plugins import reset, valid_services
-from dfe_engine.services.plugins_builtin.receiver import loader_address
 from dfe_engine.services.templates import generate_template
 from tests.support.deployment_address import IN_CLUSTER_NAME
+
+# Every list naming where a service's brokers or ClickHouse live, as a dotted path.
+ADDRESS_LISTS = [
+    ("receiver", "kafka.brokers"),
+    ("loader", "kafka.brokers"),
+    ("loader", "clickhouse.hosts"),
+    ("archiver", "kafka.brokers"),
+    ("fetcher", "kafka.brokers"),
+    ("transform-vector", "kafka.consumer.brokers"),
+    ("transform-vector", "kafka.producer.brokers"),
+    ("transform-wasm", "kafka.consumer.brokers"),
+    ("transform-wasm", "kafka.producer.brokers"),
+    ("transform-vrl", "source.brokers"),
+    ("transform-vrl", "sink.brokers"),
+]
 
 
 @pytest.fixture(autouse=True)
@@ -163,21 +178,33 @@ class TestK8sProfile:
         result = generate_template("receiver", profile="k8s")
         assert isinstance(result, dict)
 
-    @pytest.mark.parametrize("service", ["receiver", "loader", "archiver", "fetcher"])
-    def test_k8s_adds_no_broker(self, service):
-        """The deployment names its brokers, so the profile keeps the app's own default."""
-        k8s = generate_template(service, profile="k8s")["kafka"]["brokers"]
-        assert k8s == generate_template(service, profile="default")["kafka"]["brokers"]
+    @pytest.mark.parametrize(("service", "path"), ADDRESS_LISTS)
+    def test_k8s_empties_every_broker_and_host_list(self, service, path):
+        """The deployment names its own, so the profile emits an empty list."""
+        value = generate_template(service, profile="k8s")
+        for key in path.split("."):
+            value = value[key]
+        assert value == []
 
-    def test_loader_k8s_adds_no_clickhouse_host(self):
-        k8s = generate_template("loader", profile="k8s")["clickhouse"]["hosts"]
-        assert k8s == generate_template("loader", profile="default")["clickhouse"]["hosts"]
+    def test_an_empty_list_replaces_the_app_s_localhost_default(self):
+        default = generate_template("loader", profile="default")
+        k8s = generate_template("loader", profile="k8s")
+
+        assert default["kafka"]["brokers"] == ["localhost:9092"]
+        assert default["clickhouse"]["hosts"] == ["localhost:8123"]
+        assert k8s["kafka"]["brokers"] == []
+        assert k8s["clickhouse"]["hosts"] == []
+
+    @pytest.mark.parametrize("service", sorted(valid_services()))
+    def test_no_localhost_survives_the_k8s_profile(self, service):
+        emitted = json.dumps(generate_template(service, profile="k8s"))
+        assert "localhost" not in emitted, f"{service}'s k8s template still names localhost"
 
     def test_receiver_k8s_dials_the_loader_the_app_manifest_places(self):
         address = generate_template("receiver", profile="k8s")["loader"]["address"]
         host, _, port = address.rpartition(":")
 
-        assert address == loader_address()
+        assert address == catalogue.push_address(catalogue.descriptor("dfe-loader"))
         assert port == "6000"
         assert "." not in host, f"{address} names a namespace"
 

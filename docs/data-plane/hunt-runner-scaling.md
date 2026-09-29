@@ -223,7 +223,8 @@ spec:
       metricType: AverageValue     # ceil(due / targetBacklog) workers
       metadata:
         targetValue: "10"          # huntRunner.autoscaling.targetBacklog
-        url: "http://dfe-keda-shim.dfe.svc.cluster.local:8080/keda/hunt-backlog"
+        # huntRunner.autoscaling.shimAddress, else the shim in the release's own namespace
+        url: "http://dfe-keda-shim.<release-namespace>.svc.cluster.local:8080/keda/hunt-backlog"
         valueLocation: "value"
 ```
 

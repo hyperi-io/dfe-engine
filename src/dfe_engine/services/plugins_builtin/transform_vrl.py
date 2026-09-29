@@ -81,7 +81,9 @@ _template_overrides: dict[str, dict[str, Any]] = {
         },
     },
     "k8s": {
-        # No brokers: every deployment names its own.
+        # Empty: every deployment names its own brokers.
+        "source": {"brokers": []},
+        "sink": {"brokers": []},
         "health": {"address": "0.0.0.0:9000"},
         "metrics": {"address": "0.0.0.0:9090"},
     },

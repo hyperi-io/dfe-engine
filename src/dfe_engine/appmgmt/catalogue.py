@@ -937,7 +937,18 @@ def push_endpoint(app: AppDescriptor, instance: str, mesh_namespace: str = "") -
     endpoint = _push(app)
     if mesh_namespace:
         return f"http://{_mesh_host(app, instance, mesh_namespace)}:{endpoint.port}"
-    return f"http://{endpoint.service or _deployed_name(app, instance)}:{endpoint.port}"
+    return f"http://{push_address(app, instance)}"
+
+
+def push_address(app: AppDescriptor, instance: str = "") -> str:
+    """This app's Push listener as ``host:port`` on its own Service, with no namespace.
+
+    The name resolves inside whatever namespace the suite is installed into, so a
+    config that dials it carries no deployment's address. A stack-wide app takes
+    no *instance*.
+    """
+    endpoint = _push(app)
+    return f"{endpoint.service or _deployed_name(app, instance)}:{endpoint.port}"
 
 
 def push_listen(app: AppDescriptor) -> str:

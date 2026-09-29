@@ -20,9 +20,9 @@ from pathlib import Path
 
 import pytest
 
+from dfe_engine.appmgmt import catalogue
 from dfe_engine.services.models.archiver import PATH_TEMPLATE_PLACEHOLDERS
 from dfe_engine.services.plugins import get_plugin
-from dfe_engine.services.plugins_builtin.receiver import loader_address
 from dfe_engine.services.registry import ServiceConfigRegistry
 from dfe_engine.yaml_utils import yaml_load_string
 
@@ -108,7 +108,9 @@ def test_every_shipped_receiver_config_sends_inside_the_hold(name: str, text: st
 def test_the_production_receiver_dials_the_loader_the_app_manifest_places():
     # The Service name with no namespace resolves wherever the suite is installed.
     production = yaml_load_string(dict(_RECEIVER)["receiver-production.yaml"]) or {}
-    assert production["loader"]["address"] == loader_address()
+    assert production["loader"]["address"] == catalogue.push_address(
+        catalogue.descriptor("dfe-loader")
+    )
 
 
 def test_no_shipped_fetcher_config_authors_a_dlq_topic():
