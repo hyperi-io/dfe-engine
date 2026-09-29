@@ -1,15 +1,14 @@
 """Integration tests for flexible attributes against a real document store.
 
-Runs only when ``DFE_TEST_MONGO_URI`` points at a reachable document store / mongo-wire
-server (the rig document store via port-forward, or a testcontainer in CI). Uses a
-throwaway database per test so it never touches real data, and drops it on teardown.
-Real dependency, no mocks - the inline ``set_attributes`` and the separate sensitive
-store must behave against a real store exactly as they do for the YAML backend.
+Runs against the harness's document store (``mongo_uri``: ``DFE_TEST_MONGO_URI``, else
+FerretDB on docker). Uses a throwaway database per test so it never touches real data,
+and drops it on teardown. Real dependency, no mocks - the inline ``set_attributes`` and
+the separate sensitive store must behave against a real store exactly as they do for the
+YAML backend.
 """
 
 from __future__ import annotations
 
-import os
 import uuid
 
 import pytest
@@ -21,16 +20,13 @@ from dfe_engine.store.documents import DocuStore
 
 pytestmark = pytest.mark.integration
 
-_URI = os.environ.get("DFE_TEST_MONGO_URI", "")
 _NESTED = {"team": {"role": "lead"}, "tags": ["a", "b"]}
 
 
 @pytest.fixture
-def doc():
-    if not _URI:
-        pytest.skip("DFE_TEST_MONGO_URI not set (needs a reachable document store)")
+def doc(mongo_uri):
     db_name = f"dfe_engine_test_{uuid.uuid4().hex[:8]}"
-    store = DocuStore(_URI, db_name)
+    store = DocuStore(mongo_uri, db_name)
     store.ping()  # fail fast if the server is unreachable / auth wrong
     try:
         yield store

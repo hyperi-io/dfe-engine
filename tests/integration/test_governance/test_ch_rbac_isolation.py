@@ -50,15 +50,14 @@ def _prefix_allowed(ch_client) -> bool:
         return False
 
 
-@pytest.fixture(scope="module")
-def tenant_world(admin_client, conn_params):
+@pytest.fixture
+def tenant_world(ch_client, ch_params):
     """Build a table + the shared tenant axis + four pinned-shape users.
 
-    The tenant role and policies are SHARED objects with fixed names, so this
-    fixture must not run concurrently with another instance of itself; the
-    uid-scoped db keeps the data isolated regardless.
+    The tenant role and policies are SHARED objects with fixed names, so on a
+    shared cluster this fixture must not run concurrently with another instance of
+    itself; the uid-scoped db keeps the data isolated regardless.
     """
-    ch_client = admin_client
     if not _prefix_allowed(ch_client):
         pytest.skip("server does not allow the SQL_ custom-settings prefix")
 
@@ -149,7 +148,7 @@ def tenant_world(admin_client, conn_params):
             raise
 
         yield {
-            "params": conn_params,
+            "params": ch_params,
             "table_fqn": table_fqn,
             "u_pinned": u_pinned,
             "u_open": u_open,

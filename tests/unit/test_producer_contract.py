@@ -16,7 +16,9 @@ engine still pins at an older release.
 
 import dataclasses
 import http.server
+import io
 import re
+import tarfile
 import threading
 
 import pytest
@@ -34,6 +36,7 @@ from tests.support.producer_contract import (
     hidden_private_reason,
     in_ci,
     producer_file,
+    producer_tree,
 )
 
 # Nothing listens on the discard port, so a fetch fails at once without leaving the host.
@@ -106,6 +109,20 @@ def _write(root, body: bytes):
     return copy
 
 
+_CHARTS = "helm/charts"
+
+
+def _archive(files: dict[str, bytes]) -> bytes:
+    """A tar.gz shaped like GitHub's: every path under one repo-and-ref directory."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        for name, body in files.items():
+            info = tarfile.TarInfo(f"public-probe-v0.0.0/{name}")
+            info.size = len(body)
+            tar.addfile(info, io.BytesIO(body))
+    return buffer.getvalue()
+
+
 @pytest.mark.usefixtures("no_checkout_named")
 def test_a_checkout_beside_this_one_wins_over_the_pin(tmp_path):
     copy = _write(tmp_path / "scalo-rs", b"uncommitted")
@@ -173,9 +190,10 @@ def test_the_dfe_loader_skip_says_why_and_when_it_ends():
     )
 
 
-def test_only_dfe_loader_may_skip_in_ci():
+def test_only_the_repos_private_until_ga_may_skip_in_ci():
     # Marking a public producer private would let its contract skip in CI unnoticed.
-    assert {producer.repo for producer in PRODUCERS if producer.private} == {"dfe-loader"}
+    private = {producer.repo for producer in PRODUCERS if producer.private}
+    assert private == {"dfe-loader", "dfe-transform-vrl"}
 
 
 def test_a_token_is_never_sent_off_github(monkeypatch, local_server):
@@ -183,6 +201,42 @@ def test_a_token_is_never_sent_off_github(monkeypatch, local_server):
     monkeypatch.setenv("GITHUB_TOKEN", "held-for-github")
     assert fetch_at("scalo-rs", "v0.0.0-token-probe", _CEL, base_url) == b"served"
     assert seen == [None]
+
+
+@pytest.mark.usefixtures("no_checkout_named")
+def test_a_tree_in_a_checkout_beside_this_one_wins_over_the_pin(tmp_path):
+    (tmp_path / "public-probe" / _CHARTS / "app").mkdir(parents=True)
+    found = producer_tree(
+        _PUBLIC, _CHARTS, tmp_path / "dest", checkouts=tmp_path, base_url=_UNREACHABLE
+    )
+    assert found == tmp_path / "public-probe" / _CHARTS
+
+
+@pytest.mark.usefixtures("no_checkout_named")
+def test_a_tree_comes_from_the_archive_at_the_pin_without_its_siblings(tmp_path, local_server):
+    base_url, _ = local_server(
+        200, _archive({f"{_CHARTS}/app/Chart.yaml": b"name: app", "docs/README.md": b"docs"})
+    )
+    dest = tmp_path / "dest"
+    found = producer_tree(_PUBLIC, _CHARTS, dest, checkouts=tmp_path, base_url=base_url)
+    assert found == dest / _CHARTS
+    assert (found / "app" / "Chart.yaml").read_bytes() == b"name: app"
+    assert not (dest / "docs").exists()
+
+
+@pytest.mark.usefixtures("no_checkout_named", "in_a_ci_run")
+def test_an_unreadable_tree_fails_in_ci(tmp_path):
+    with pytest.raises(pytest.fail.Exception, match=r"public-probe@v0\.0\.0 helm/charts could not"):
+        producer_tree(
+            _PUBLIC, _CHARTS, tmp_path / "dest", checkouts=tmp_path, base_url=_UNREACHABLE
+        )
+
+
+@pytest.mark.usefixtures("no_checkout_named")
+def test_an_archive_without_the_tree_fails(tmp_path, local_server):
+    base_url, _ = local_server(200, _archive({"docs/README.md": b"docs"}))
+    with pytest.raises(pytest.fail.Exception, match=r"public-probe@v0\.0\.0 has no helm/charts"):
+        producer_tree(_PUBLIC, _CHARTS, tmp_path / "dest", checkouts=tmp_path, base_url=base_url)
 
 
 def test_a_file_the_producer_does_not_declare_is_refused():

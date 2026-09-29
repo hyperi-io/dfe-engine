@@ -13,14 +13,13 @@ engine wrote the key it meant to, and a chart test proves the chart reads the ke
 expects, and neither notices when the two names stop agreeing. Every assertion here
 is about that seam.
 
-The charts are a sibling repo rather than a package, so the whole module skips when
-they or the ``helm`` binary are absent instead of failing a machine that only has
-dfe-engine checked out.
+The charts come from a dfe-infra checkout (``$DFE_INFRA_DIR``, or one beside this
+repo), else from the dfe-infra release pinned in ``tests/support/producer_contract.py``.
+The module skips when the ``helm`` binary is absent.
 """
 
 from __future__ import annotations
 
-import os
 import re
 import shutil
 import subprocess
@@ -33,11 +32,8 @@ import yaml
 from dfe_engine.appmgmt import catalogue, files, instances, scaling
 from dfe_engine.gitcrud.engine import set_path
 from dfe_engine.yaml_utils import yaml_dump_string
+from tests.support.producer_contract import DFE_INFRA, producer_tree
 
-CHARTS = Path(os.environ.get("DFE_INFRA_CHARTS", "/projects/dfe-infra/helm/charts"))
-
-if not CHARTS.is_dir():
-    pytest.skip(f"dfe-infra charts not found at {CHARTS}", allow_module_level=True)
 if shutil.which("helm") is None:
     pytest.skip("the helm binary is not on PATH", allow_module_level=True)
 
@@ -75,6 +71,12 @@ HOSTILE_BODIES = {
 }
 
 
+@pytest.fixture(scope="module")
+def charts(tmp_path_factory) -> Path:
+    """dfe-infra's chart directory, from a checkout or the pinned release."""
+    return producer_tree(DFE_INFRA, "helm/charts", tmp_path_factory.mktemp("dfe-infra"))
+
+
 # ── helpers ───────────────────────────────────────────────────
 
 
@@ -101,12 +103,12 @@ def bad_labels(doc: Any, path: str = "") -> list[str]:
     return found
 
 
-def render(service: str, doc: dict, release: str, tmp_path: Path) -> list[dict]:
+def render(charts: Path, service: str, doc: dict, release: str, tmp_path: Path) -> list[dict]:
     """Write the overlay to a values file and render the real chart through helm."""
     values_file = tmp_path / f"{release}-values.yaml"
     values_file.write_text(yaml_dump_string(doc), encoding="utf-8")
     result = subprocess.run(
-        ["helm", "template", release, str(CHARTS / service), "--values", str(values_file)],
+        ["helm", "template", release, str(charts / service), "--values", str(values_file)],
         capture_output=True,
         text=True,
         check=True,
@@ -167,83 +169,91 @@ def mount_path(objects: list[dict], volume_name: str) -> str:
 
 @pytest.mark.parametrize("service", TRANSFORM_SERVICES)
 class TestOverlayRendersThroughTheChart:
-    def test_the_chart_renders_at_all(self, service, tmp_path):
+    def test_the_chart_renders_at_all(self, charts, service, tmp_path):
         # The engine writing a key the chart does not expect is not caught by any
         # unit test on either side; a rendering failure here is the only signal.
-        objects = render(service, overlay_with_files(service, "edge", {}), "edge", tmp_path)
+        doc = overlay_with_files(service, "edge", {})
+        objects = render(charts, service, doc, "edge", tmp_path)
         kinds = {o["kind"] for o in objects}
         assert {"Deployment", "ConfigMap", "ServiceAccount"} <= kinds
 
-    def test_every_rendered_label_value_is_legal(self, service, tmp_path):
+    def test_every_rendered_label_value_is_legal(self, charts, service, tmp_path):
         # Writing the OTel name under `env` turned that string into a map and the
         # chart rendered `map[OTEL_SERVICE_NAME:...]` into dfe.hyperi.io/env, which
         # the API server rejects for every object in the release.
         doc = overlay_with_files(service, "edge", {FILE_FOR[service]: BODY_FOR[service]})
-        objects = render(service, doc, "edge", tmp_path)
+        objects = render(charts, service, doc, "edge", tmp_path)
         offending = [problem for o in objects for problem in bad_labels(o)]
         assert offending == []
 
-    def test_a_map_where_the_chart_wants_a_string_is_caught(self, service, tmp_path):
+    def test_a_map_where_the_chart_wants_a_string_is_caught(self, charts, service, tmp_path):
         # Proves the label check has teeth: the shape of the original defect must
         # still fail it, or the assertion above passes for the wrong reason.
         doc = overlay_with_files(service, "edge", {})
         doc["env"] = {"OTEL_SERVICE_NAME": "dfe-edge"}
-        objects = render(service, doc, "edge", tmp_path)
+        objects = render(charts, service, doc, "edge", tmp_path)
         assert [problem for o in objects for problem in bad_labels(o)] != []
 
-    def test_the_otel_service_name_reaches_the_container(self, service, tmp_path):
+    def test_the_otel_service_name_reaches_the_container(self, charts, service, tmp_path):
         # The engine's dial and the chart's dial have to be the same key, and the
         # value has to arrive as the instance's telemetry name, not the app's.
         app = instances.instance_of(service, "edge")
-        objects = render(service, instances.initial_overlay(app), app.telemetry_name, tmp_path)
+        doc = instances.initial_overlay(app)
+        objects = render(charts, service, doc, app.telemetry_name, tmp_path)
         assert env_of(objects)["OTEL_SERVICE_NAME"] == app.telemetry_name
         assert env_of(objects)["OTEL_SERVICE_NAME"] == f"{service}-edge"
 
-    def test_two_instances_are_distinguishable_in_telemetry(self, service, tmp_path):
+    def test_two_instances_are_distinguishable_in_telemetry(self, charts, service, tmp_path):
         names = set()
         for instance in ("edge", "core"):
             app = instances.instance_of(service, instance)
-            objects = render(service, instances.initial_overlay(app), app.telemetry_name, tmp_path)
+            doc = instances.initial_overlay(app)
+            objects = render(charts, service, doc, app.telemetry_name, tmp_path)
             names.add(env_of(objects)["OTEL_SERVICE_NAME"])
         assert len(names) == 2
 
-    def test_a_written_file_reaches_the_configmap_and_the_mount(self, service, tmp_path):
+    def test_a_written_file_reaches_the_configmap_and_the_mount(self, charts, service, tmp_path):
         # The whole storage decision rests on this: content lives in the overlay
         # because Helm cannot read a raw file out of an Argo $values source.
         name, body = FILE_FOR[service], BODY_FOR[service]
-        objects = render(
-            service, overlay_with_files(service, "edge", {name: body}), "edge", tmp_path
-        )
+        doc = overlay_with_files(service, "edge", {name: body})
+        objects = render(charts, service, doc, "edge", tmp_path)
 
         assert transforms_configmap(objects)["data"][name] == body
         # The app reads the directory this env var names, so the mount has to land
         # exactly there or the files are delivered somewhere nothing looks.
         assert mount_path(objects, "transforms") == env_of(objects)[TRANSFORMS_DIR_ENV]
 
-    def test_files_absent_from_the_overlay_render_no_configmap(self, service, tmp_path):
-        objects = render(service, overlay_with_files(service, "edge", {}), "edge", tmp_path)
+    def test_files_absent_from_the_overlay_render_no_configmap(self, charts, service, tmp_path):
+        doc = overlay_with_files(service, "edge", {})
+        objects = render(charts, service, doc, "edge", tmp_path)
         names = {o["metadata"]["name"] for o in objects if o["kind"] == "ConfigMap"}
         assert not any(n.endswith("-transforms") for n in names)
 
     @pytest.mark.parametrize("case", sorted(HOSTILE_BODIES))
-    def test_hostile_content_survives_byte_exact(self, service, case, tmp_path):
+    def test_hostile_content_survives_byte_exact(self, charts, service, case, tmp_path):
         body = HOSTILE_BODIES[case]
         name = FILE_FOR[service]
-        objects = render(
-            service, overlay_with_files(service, "edge", {name: body}), "edge", tmp_path
-        )
+        doc = overlay_with_files(service, "edge", {name: body})
+        objects = render(charts, service, doc, "edge", tmp_path)
         assert transforms_configmap(objects)["data"][name] == body
 
-    def test_content_cannot_forge_a_sibling_key_in_the_rendered_objects(self, service, tmp_path):
-        # A body that breaks out of its own scalar would set replicaCount, which the
-        # Deployment reads directly - so the rendered replica count is the evidence.
+    def test_content_cannot_forge_a_sibling_key_in_the_rendered_objects(
+        self, charts, service, tmp_path
+    ):
+        # A body that breaks out of its own scalar would set replicaCount. The chart
+        # renders replicas only while KEDA is off, so the replica count is the evidence.
         doc = overlay_with_files(
             service, "edge", {FILE_FOR[service]: HOSTILE_BODIES["carriage-return-injection"]}
         )
-        objects = render(service, doc, "edge", tmp_path)
+        for path, value in scaling.changes(doc, keda_enabled=False).items():
+            set_path(doc, path, value)
+        objects = render(charts, service, doc, "edge", tmp_path)
         assert only(objects, "Deployment")["spec"]["replicas"] == 1
 
-    def test_scaling_dials_reach_the_scaledobject_and_the_container(self, service, tmp_path):
+    def test_scaling_dials_reach_the_scaledobject_and_the_container(
+        self, charts, service, tmp_path
+    ):
         doc = overlay_with_files(service, "edge", {})
         dials = scaling.changes(
             doc,
@@ -256,7 +266,7 @@ class TestOverlayRendersThroughTheChart:
         )
         for path, value in dials.items():
             set_path(doc, path, value)
-        objects = render(service, doc, "edge", tmp_path)
+        objects = render(charts, service, doc, "edge", tmp_path)
 
         scaled = only(objects, "ScaledObject")
         assert scaled["spec"]["minReplicaCount"] == 3
@@ -268,8 +278,9 @@ class TestOverlayRendersThroughTheChart:
         assert resources["limits"]["cpu"] == "2"
         assert resources["limits"]["memory"] == "2Gi"
 
-    def test_the_scaledobject_targets_the_rendered_deployment(self, service, tmp_path):
-        objects = render(service, overlay_with_files(service, "edge", {}), "edge", tmp_path)
+    def test_the_scaledobject_targets_the_rendered_deployment(self, charts, service, tmp_path):
+        doc = overlay_with_files(service, "edge", {})
+        objects = render(charts, service, doc, "edge", tmp_path)
         target = only(objects, "ScaledObject")["spec"]["scaleTargetRef"]["name"]
         assert target == only(objects, "Deployment")["metadata"]["name"]
 
@@ -277,27 +288,29 @@ class TestOverlayRendersThroughTheChart:
 class TestPerConfigInstancesDoNotCollide:
     """dfe-fetcher runs many configs side by side, so their object names must differ."""
 
-    def _names(self, instance: str, tmp_path: Path) -> set[str]:
+    def _names(self, charts: Path, instance: str, tmp_path: Path) -> set[str]:
         app = instances.instance_of(FETCHER, instance)
-        objects = render(FETCHER, instances.initial_overlay(app), app.telemetry_name, tmp_path)
+        doc = instances.initial_overlay(app)
+        objects = render(charts, FETCHER, doc, app.telemetry_name, tmp_path)
         assert objects
         return {f"{o['kind']}/{o['metadata']['name']}" for o in objects}
 
-    def test_two_instances_render_no_shared_object_name(self, tmp_path):
+    def test_two_instances_render_no_shared_object_name(self, charts, tmp_path):
         # dfe-common.fullname is {project}-{component} with no instance of its own,
         # so without the per-instance component the two Argo Applications would own
         # the same objects and fight over them under self-heal.
-        alpha = self._names("alpha", tmp_path)
-        beta = self._names("beta", tmp_path)
+        alpha = self._names(charts, "alpha", tmp_path)
+        beta = self._names(charts, "beta", tmp_path)
         assert alpha & beta == set()
         assert {n.split("/", 1)[0] for n in alpha} == {n.split("/", 1)[0] for n in beta}
 
-    def test_every_object_name_carries_the_instance(self, tmp_path):
+    def test_every_object_name_carries_the_instance(self, charts, tmp_path):
         for instance in ("alpha", "beta"):
-            for name in self._names(instance, tmp_path):
+            for name in self._names(charts, instance, tmp_path):
                 assert instance in name
 
-    def test_the_rendered_labels_stay_legal(self, tmp_path):
+    def test_the_rendered_labels_stay_legal(self, charts, tmp_path):
         app = instances.instance_of(FETCHER, "alpha")
-        objects = render(FETCHER, instances.initial_overlay(app), app.telemetry_name, tmp_path)
+        doc = instances.initial_overlay(app)
+        objects = render(charts, FETCHER, doc, app.telemetry_name, tmp_path)
         assert [problem for o in objects for problem in bad_labels(o)] == []
