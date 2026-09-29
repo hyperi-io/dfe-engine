@@ -10,11 +10,9 @@
 
 Each service surface describes what a Rust service exposes:
 - config_surface: settings the UI can edit (pushed via Helm values)
-- metrics_surface: metrics the service emits (from DFE metrics standard)
-- manifest_url: endpoint for live metric manifest discovery (Phase 1.5)
+- metrics_surface: metrics the service emits, as its own metric manifest names them
+- manifest_url: where the service serves that manifest in this deployment
 """
-
-from __future__ import annotations
 
 from typing import Any
 
@@ -51,5 +49,6 @@ class ServiceSurface(BaseModel):
     description: str = ""
     config_surface: dict[str, ConfigSurfaceEntry] = Field(default_factory=dict)
     metrics_surface: list[MetricEntry] = Field(default_factory=list)
+    # Derived on load from services.metrics_manifest_url, empty where that is unset.
     manifest_url: str = ""
     discovered_at: str = ""
