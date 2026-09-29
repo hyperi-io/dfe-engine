@@ -865,8 +865,9 @@ def instance_name(app: AppDescriptor, source: str) -> str:
     """The deployed name of this app's instance for *source*.
 
     The one place the ``dfe-<component>-<source>`` convention lives. It is the
-    Argo Application name, the OTel ``service.name``, and the stem of every
-    Kubernetes object the instance's chart renders, so all three move together.
+    Argo Application name and the stem of every Kubernetes object the instance's
+    chart renders, so the two move together. What the workload REPORTS itself as
+    is ``deployed_name``, which is this only for a per-config app.
     """
     return f"{app.service}-{source}"
 
@@ -897,10 +898,13 @@ def _push(app: AppDescriptor) -> AppEndpoint:
     return endpoint
 
 
-def _deployed_name(app: AppDescriptor, instance: str) -> str:
+def deployed_name(app: AppDescriptor, instance: str) -> str:
     """The name this app's own chart renders the deployment under.
 
-    A stack-wide app is named for itself; a per-config app for its instance.
+    A stack-wide app is named for itself; a per-config app for its instance. It
+    is also the OTel ``service.name`` the workload reports, because a component
+    names itself the way it is deployed - so a stack-wide app carries no
+    ``-default`` suffix, which nothing would ever report.
     """
     return instance_name(app, instance) if app.component_is_per_instance else app.service
 
@@ -918,7 +922,7 @@ def _mesh_host(app: AppDescriptor, instance: str, namespace: str) -> str:
             "declares no mesh.host_pattern to address them by"
         )
     return MESH_HOST_PATTERN.format(
-        **{MESH_INSTANCE: _deployed_name(app, instance), MESH_NAMESPACE: namespace}
+        **{MESH_INSTANCE: deployed_name(app, instance), MESH_NAMESPACE: namespace}
     )
 
 
@@ -948,7 +952,7 @@ def push_address(app: AppDescriptor, instance: str = "") -> str:
     no *instance*.
     """
     endpoint = _push(app)
-    return f"{endpoint.service or _deployed_name(app, instance)}:{endpoint.port}"
+    return f"{endpoint.service or deployed_name(app, instance)}:{endpoint.port}"
 
 
 def push_listen(app: AppDescriptor) -> str:
