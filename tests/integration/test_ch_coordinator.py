@@ -8,33 +8,17 @@
 """Live-ClickHouse tests of the insert-and-resolve claim + watermark + state.
 
 No mocks: runs against the ClickHouse the .env configures, else a docker
-ClickHouse (see conftest ch_client), and drops its isolated database after. Covers
-the guarantees the runner leans on: claim exclusivity, lease expiry + reclaim,
-release, the cap input (active_count), crash-safe watermark resume, and the
-too-aggressive overrun signal.
+ClickHouse (see conftest ch_client), in the ``dfe_db`` database that carries the
+coordination tables the schema phase applies. Covers the guarantees the runner
+leans on: claim exclusivity, lease expiry + reclaim, release, the cap input
+(active_count), crash-safe watermark resume, and the too-aggressive overrun signal.
 """
 
 from __future__ import annotations
 
-import uuid
-
 import pytest
 
 from dfe_engine.hunt_runner import ChCoordinator
-
-
-@pytest.fixture
-def coord_db(ch_client):
-    """An isolated CH database for coordination tables; dropped after."""
-    db = f"dfe_coord_{uuid.uuid4().hex[:8]}"
-    ch_client.command(f"CREATE DATABASE `{db}`")
-    try:
-        yield db
-    finally:
-        try:
-            ch_client.command(f"DROP DATABASE IF EXISTS `{db}`")
-        except Exception:
-            pass
 
 
 def _coord(ch_client, db, worker_id, *, now=None, lease_seconds=300):
@@ -51,9 +35,9 @@ def _coord(ch_client, db, worker_id, *, now=None, lease_seconds=300):
     )
 
 
-def test_claim_is_exclusive_between_workers(ch_client, coord_db):
-    w1 = _coord(ch_client, coord_db, "w1")
-    w2 = _coord(ch_client, coord_db, "w2")
+def test_claim_is_exclusive_between_workers(ch_client, dfe_db):
+    w1 = _coord(ch_client, dfe_db, "w1")
+    w2 = _coord(ch_client, dfe_db, "w2")
     w1.ensure_schema()
 
     assert w1.try_claim("h", fire=1000, now=100) is True
@@ -63,9 +47,9 @@ def test_claim_is_exclusive_between_workers(ch_client, coord_db):
     assert w1.try_claim("h", fire=1000, now=106) is True
 
 
-def test_lease_expiry_allows_reclaim(ch_client, coord_db):
-    w1 = _coord(ch_client, coord_db, "w1")
-    w2 = _coord(ch_client, coord_db, "w2")
+def test_lease_expiry_allows_reclaim(ch_client, dfe_db):
+    w1 = _coord(ch_client, dfe_db, "w1")
+    w2 = _coord(ch_client, dfe_db, "w2")
     w1.ensure_schema()
 
     assert (
@@ -76,7 +60,7 @@ def test_lease_expiry_allows_reclaim(ch_client, coord_db):
         )
         is True
     )  # lease_until default+100
-    w1_short = _coord(ch_client, coord_db, "w1", lease_seconds=10)
+    w1_short = _coord(ch_client, dfe_db, "w1", lease_seconds=10)
     assert w1_short.try_claim("h2", fire=1000, now=100) is True  # lease_until=110
     # still held before expiry
     assert w2.try_claim("h2", fire=1000, now=105) is False
@@ -84,9 +68,9 @@ def test_lease_expiry_allows_reclaim(ch_client, coord_db):
     assert w2.try_claim("h2", fire=1000, now=200) is True
 
 
-def test_release_frees_the_slot(ch_client, coord_db):
-    w1 = _coord(ch_client, coord_db, "w1")
-    w2 = _coord(ch_client, coord_db, "w2")
+def test_release_frees_the_slot(ch_client, dfe_db):
+    w1 = _coord(ch_client, dfe_db, "w1")
+    w2 = _coord(ch_client, dfe_db, "w2")
     w1.ensure_schema()
 
     assert w1.try_claim("h", fire=1000, now=100) is True
@@ -97,8 +81,8 @@ def test_release_frees_the_slot(ch_client, coord_db):
     assert w2.try_claim("h", fire=1000, now=106) is True
 
 
-def test_active_count_reflects_multiple_hunts(ch_client, coord_db):
-    w1 = _coord(ch_client, coord_db, "w1")
+def test_active_count_reflects_multiple_hunts(ch_client, dfe_db):
+    w1 = _coord(ch_client, dfe_db, "w1")
     w1.ensure_schema()
     for i in range(3):
         assert w1.try_claim(f"h{i}", fire=1000, now=100) is True
@@ -107,22 +91,22 @@ def test_active_count_reflects_multiple_hunts(ch_client, coord_db):
     assert w1.active_count(now=10_000) == 0
 
 
-def test_watermark_roundtrip_and_crash_resume(ch_client, coord_db):
-    w1 = _coord(ch_client, coord_db, "w1")
+def test_watermark_roundtrip_and_crash_resume(ch_client, dfe_db):
+    w1 = _coord(ch_client, dfe_db, "w1")
     w1.ensure_schema()
     assert w1.get_watermark("h") is None
     w1.set_watermark("h", 1300)
     assert w1.get_watermark("h") == 1300
     # a fresh coordinator (crash/restart) still reads the committed watermark
-    w1b = _coord(ch_client, coord_db, "w1")
+    w1b = _coord(ch_client, dfe_db, "w1")
     assert w1b.get_watermark("h") == 1300
     # latest write wins
     w1.set_watermark("h", 1900)
     assert w1b.get_watermark("h") == 1900
 
 
-def test_record_overrun_flags_too_aggressive(ch_client, coord_db):
-    w1 = _coord(ch_client, coord_db, "w1")
+def test_record_overrun_flags_too_aggressive(ch_client, dfe_db):
+    w1 = _coord(ch_client, dfe_db, "w1")
     w1.ensure_schema()
     assert w1.get_state("h") is None
     w1.record_overrun("h")

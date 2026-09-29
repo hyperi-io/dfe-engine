@@ -166,7 +166,19 @@ class TestSelectExpression:
             hunt_name="hunt",
             severity="low",
         )
-        assert "it\\'s_a_rule" in expr
+        assert "'it''s_a_rule' AS rule_id" in expr
+
+    def test_escapes_backslashes_before_quotes(self):
+        """A trailing backslash must not escape the literal's closing quote."""
+        schema = HuntResultSchema()
+        expr = schema.select_expression(
+            rule_id="r1",
+            rule_name="Analyst's share C:\\Temp\\",
+            source_table="src",
+            hunt_name="hunt",
+            severity="low",
+        )
+        assert "'Analyst''s share C:\\\\Temp\\\\' AS rule_name" in expr
 
 
 class TestBuildInsertSelect:

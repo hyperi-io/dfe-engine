@@ -28,6 +28,7 @@ from dataclasses import dataclass
 
 from scalo.logger import logger
 
+from ..clickhouse.quoting import quote_literal
 from ..schema.schema_loader import SchemaLoader
 
 # Common header columns to copy from source -> hunt results.
@@ -200,8 +201,7 @@ class HuntResultSchema:
             if dc.select_expr:
                 parts.append(f"{dc.select_expr} AS {dc.name}")
             else:
-                escaped = literals[dc.name].replace("'", "\\'")
-                parts.append(f"'{escaped}' AS {dc.name}")
+                parts.append(f"{quote_literal(literals[dc.name])} AS {dc.name}")
 
         # JSON copy of the full matched record
         if self._include_json_copy and self._has_json:

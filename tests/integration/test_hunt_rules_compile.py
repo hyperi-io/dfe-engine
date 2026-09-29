@@ -71,3 +71,34 @@ def test_a_hunt_created_through_the_api_writes_detections(ch_client, dfe_db, tmp
     assert tuple(rows[0][:5]) == (hunt, rule_id, "Marked Org Activity", "main", "high")
     assert int(rows[0][5]) == fire - 1
     assert rows[0][6] == marker
+
+
+def test_a_rule_name_with_a_quote_and_a_trailing_backslash_lands_verbatim(
+    ch_client, dfe_db, tmp_path
+):
+    """The name is spliced into the INSERT as a literal, so it must survive ClickHouse's escapes."""
+    hunt = f"api_hunt_{uuid.uuid4().hex[:8]}"
+    rule_id = f"{hunt}_rule"
+    marker = f"org-{uuid.uuid4().hex[:8]}"
+    name = "Analyst's share C:\\Temp\\"
+
+    write_rule(tmp_path / "rules", rule_id, f"_org_id = '{marker}'", name=name)
+    write_hunt(tmp_path / "hunts", hunt, rule_id, dfe_db)
+
+    fire = current_fire(hunt, _INTERVAL, int(time.time()))
+    ch_client.command(
+        f"INSERT INTO `{dfe_db}`.`main` (_timestamp_load, _timestamp, _org_id) VALUES "
+        f"(toDateTime64({fire - 1}, 3), toDateTime64({fire - 1}, 3), '{marker}')"
+    )
+
+    coord = ChCoordinator(ch_client, database=dfe_db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord.ensure_schema()
+    specs = load_specs(tmp_path / "hunts", rules_dir=tmp_path / "rules")
+    runner = HuntRunner(coord, HuntWorker(ch_client, coord), specs, cap=8)
+    assert runner.tick(fire + 1) == 1
+
+    rows = ch_client.query(
+        f"SELECT rule_name FROM `{dfe_db}`.detection WHERE hunt_name = {{h:String}}",
+        parameters={"h": hunt},
+    ).result_rows
+    assert [row[0] for row in rows] == [name]
