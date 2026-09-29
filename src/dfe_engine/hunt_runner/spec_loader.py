@@ -18,20 +18,23 @@ A hunt states what it runs one of two ways: a direct `query` (pre-compiled, one
 statement) or `rules` (rule YAML names), which is what the API writes. Rules are
 compiled here, through rule_compiler, so a hunt made in the UI runs without anyone
 hand-editing its YAML.
-"""
 
-from __future__ import annotations
+Only a compiled rule carries the per-run detection cap. A direct `query` is SQL the
+author wrote whole, so no LIMIT can be put into it safely; it runs uncapped, and
+the load says so.
+"""
 
 from pathlib import Path
 from typing import Any
 
 from scalo.logger import logger
 
+from dfe_engine.settings import MAX_DETECTIONS_PER_RUN
 from dfe_engine.yaml_utils import yaml_load
 
 from .checkpoint import TIMESTAMP_FIELD
 from .interval import parse_interval
-from .models import HuntSpec
+from .models import HuntSpec, HuntStatement
 from .rule_compiler import compile_hunt_queries
 
 
@@ -93,6 +96,7 @@ def _build_spec(
     stem: str,
     rules_dir: str | Path,
     default_target: str,
+    max_detections: int,
 ) -> HuntSpec | None:
     """Build one HuntSpec from a parsed hunt def, or None if it must be skipped.
 
@@ -109,13 +113,20 @@ def _build_spec(
         return None
 
     query = str(definition.get("query", "")).strip()
-    queries = (
-        [query]
-        if query
-        else compile_hunt_queries(
-            definition, stem, rules_dir=rules_dir, default_target=default_target
+    if query:
+        logger.info(
+            "hunt runs a direct query, so the per-run detection cap does not apply",
+            hunt_id=stem,
         )
-    )
+        queries = [HuntStatement(sql=query)]
+    else:
+        queries = compile_hunt_queries(
+            definition,
+            stem,
+            rules_dir=rules_dir,
+            default_target=default_target,
+            max_detections=max_detections,
+        )
 
     return HuntSpec(
         hunt_id=stem,
@@ -131,6 +142,7 @@ def load_specs(
     *,
     rules_dir: str | Path = "",
     default_target: str = "",
+    max_detections: int = MAX_DETECTIONS_PER_RUN,
 ) -> dict[str, HuntSpec]:
     """Load every *.yaml hunt def in hunt_dir into HuntSpec objects keyed by hunt_id.
 
@@ -145,6 +157,7 @@ def load_specs(
             hunt names `rules` instead of carrying a `query`.
         default_target: ``db.table`` a compiled rule writes to when neither the rule
             entry nor the hunt names one.
+        max_detections: Detection rows each compiled rule may write in one run.
     """
     directory = Path(hunt_dir)
     if not directory.is_dir():
@@ -159,7 +172,7 @@ def load_specs(
             if not isinstance(definition, dict):
                 logger.warning(f"skipping hunt {stem}: not a YAML mapping")
                 continue
-            spec = _build_spec(definition, stem, rules_dir, default_target)
+            spec = _build_spec(definition, stem, rules_dir, default_target, max_detections)
             if spec is not None:
                 specs[stem] = spec
         except Exception as exc:  # one bad file must never break the whole load

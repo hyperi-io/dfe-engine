@@ -581,10 +581,26 @@ class TestEnvOverrides:
         settings = load_settings()
         assert settings.hunts.default_alert_cooldown == "600"
 
-    def test_hunt_max_alerts_per_run_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_HUNTS_DEFAULT_MAX_ALERTS_PER_RUN", "50")
-        settings = load_settings()
-        assert settings.hunts.default_max_alerts_per_run == 50
+    def test_hunt_detection_cap_defaults(self):
+        hunts = load_settings().hunts
+        assert hunts.max_detections_per_run == 1000
+        assert hunts.max_detections_per_run_ceiling == 10_000
+
+    def test_hunt_detection_cap_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_HUNTS_MAX_DETECTIONS_PER_RUN", "50")
+        monkeypatch.setenv("DFE_HUNTS_MAX_DETECTIONS_PER_RUN_CEILING", "500")
+        hunts = load_settings().hunts
+        assert hunts.max_detections_per_run == 50
+        assert hunts.max_detections_per_run_ceiling == 500
+
+    @pytest.mark.parametrize("field", ["max_detections_per_run", "max_detections_per_run_ceiling"])
+    @pytest.mark.parametrize("value", [0, -1])
+    def test_hunt_detection_cap_refuses_unbounded(self, field, value):
+        # 0 would read as "no cap" to anyone used to 0 = unlimited; it is refused instead.
+        from dfe_engine.settings import HuntsSettings
+
+        with pytest.raises(ValidationError):
+            HuntsSettings(**{field: value})
 
     def test_hyperdx_api_key_env_override(self, monkeypatch):
         monkeypatch.setenv("DFE_HYPERDX_API_KEY_ENV", "MY_KEY_VAR")
@@ -839,7 +855,6 @@ class TestEverySettingIsRead:
         ("HuntsSettings", "resource_limit_execution_ms"),
         ("HuntsSettings", "alert_channels"),
         ("HuntsSettings", "default_alert_cooldown"),
-        ("HuntsSettings", "default_max_alerts_per_run"),
         ("HuntsSettings", "default_max_sample_events"),
         ("QuerySettings", "yaml_dir"),
         ("QueryViewSettings", "auto_bootstrap"),
