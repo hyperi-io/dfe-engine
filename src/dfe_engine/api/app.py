@@ -96,6 +96,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     from dfe_engine.api.deps import get_source_registry_optional
     from dfe_engine.clickhouse.bootstrap import bootstrap_clickhouse
+    from dfe_engine.gitcrud.retention import effective_settings
 
     source_registry = get_source_registry_optional()
     try:
@@ -103,7 +104,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     except Exception as exc:  # the core tables still bootstrap without the source list
         logger.warning("sources unreadable; their TTL is left to the next start", error=str(exc))
         deployed_candidates = []
-    schema_state = bootstrap_clickhouse(settings=settings, sources=deployed_candidates)
+    # The admin's default TTL override, so the boot renders what the console set.
+    ttl_settings = effective_settings(settings, gitcrud)
+    schema_state = bootstrap_clickhouse(settings=ttl_settings, sources=deployed_candidates)
     tables_bootstrapped = schema_state.converged
 
     # After the bootstrap, which is what makes the landing table exist: the seed records the source as deployed, and that must not be claimed before it is true.
@@ -113,7 +116,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         try:
             seed_core_sources(
                 registry=source_registry,
-                settings=settings,
+                settings=ttl_settings,
                 tables_bootstrapped=tables_bootstrapped,
             )
         except Exception as exc:  # a failed seed must never break startup

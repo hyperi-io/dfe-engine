@@ -12,8 +12,6 @@ Wraps ``SchemaManager`` for version management and ``SchemaBuilderV2``
 for DDL pipeline execution.
 """
 
-from __future__ import annotations
-
 from typing import Any, Literal, cast
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
@@ -27,6 +25,7 @@ from dfe_engine.api.deps import (
     SchemaReg,
     SourceReg,
     require_action,
+    ttl_settings,
 )
 from dfe_engine.api.errors import ErrorResponse, raise_exchange_http
 from dfe_engine.api.pagination import (
@@ -1268,7 +1267,7 @@ async def get_schema_columns(
 
 
 @router.post("/{source_name}/build", response_model=SchemaBuildResult)
-async def build_schema(
+def build_schema(
     source_name: str,
     request: Request,
     user: CurrentUser,
@@ -1316,7 +1315,7 @@ async def build_schema(
             },
         )
 
-    settings = get_settings()
+    settings = ttl_settings(request, get_settings())
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
