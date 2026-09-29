@@ -1,6 +1,9 @@
+import copy
 import os
 import re
 from enum import Enum
+
+from dfe_engine.yaml_utils import deep_merge
 
 
 class VectorStepType(Enum):
@@ -241,6 +244,7 @@ def gather_env_variables_for_pipeline(package_config: dict, pipeline_name: str) 
 
     # Gather step-specific env vars
     step_env_vars = {}
+    step_inputs = {}
     for i, step in enumerate(steps):
         vector_step = step["id"]
         # Get env vars required by this step
@@ -249,7 +253,7 @@ def gather_env_variables_for_pipeline(package_config: dict, pipeline_name: str) 
 
         # Handle step input
         if "input" in step:
-            step_env_vars[vector_step_name_to_input(vector_step)] = step["input"]
+            step_inputs[vector_step_name_to_input(vector_step)] = step["input"]
         # Use previous step's output as input if not specified
         elif (
             find_vector_type(vector_step)
@@ -258,10 +262,14 @@ def gather_env_variables_for_pipeline(package_config: dict, pipeline_name: str) 
         ):
             input_name = vector_step_name_to_input(vector_step)
             if input_name in step_vars and input_name not in required_env_vars:
-                step_env_vars[input_name] = [vector_step_name_to_output(steps[i - 1]["id"])]
+                step_inputs[input_name] = [vector_step_name_to_output(steps[i - 1]["id"])]
+    step_env_vars.update(step_inputs)
 
-    # Update required_env_vars with step-specific vars
-    required_env_vars.update(step_env_vars)
+    # A template's own default, or None for a var it requires, only fills a gap the
+    # package and pipeline left; a step's input wiring wins over both.
+    for key, value in step_env_vars.items():
+        if key in step_inputs or key not in required_env_vars:
+            required_env_vars[key] = value
 
     # Fill in any None values with global defaults
     for key, value in required_env_vars.items():
@@ -275,42 +283,16 @@ def gather_env_variables_for_pipeline(package_config: dict, pipeline_name: str) 
 
 
 def merge_configs(default_yaml: dict, override_yaml: dict) -> dict:
+    """Merge a package config over the core config, leaving both inputs unchanged.
+
+    Dictionaries merge recursively; a list or scalar the package sets replaces the
+    core one, so a package naming its own topic list gets exactly that list.
+
+    Args:
+        default_yaml: The core config to merge over.
+        override_yaml: The package config, which wins wherever both set a key.
+
+    Returns:
+        A new dictionary holding the merged config.
     """
-    Recursively merges two dictionaries.
-
-    - Scalar values in the override yaml dictionary overwrite scalar values in the default yaml.
-    - Lists are extended and deduplicated.
-    - Dictionaries are recursively merged.
-
-    :param default_yaml: The base dictionary to merge into.
-    :param override_yaml: The dictionary to merge on top of the base.
-    :return: A new dictionary that is the result of merging the two.
-
-    """
-    # Start with a copy of the base dictionary
-    merged = default_yaml.copy()
-
-    for key, overlay_value in override_yaml.items():
-        if key in merged:
-            base_value = merged[key]
-            # If both values are dictionaries, recurse
-            if isinstance(base_value, dict) and isinstance(overlay_value, dict):
-                merged[key] = merge_configs(base_value, overlay_value)
-            # If both values are lists, extend and deduplicate
-            elif isinstance(base_value, list) and isinstance(overlay_value, list):
-                # Extend the base list with items from the overlay list
-                extended_list = base_value + overlay_value
-                # Deduplicate while preserving order
-                deduped_list = []
-                for item in extended_list:
-                    if item not in deduped_list:
-                        deduped_list.append(item)
-                merged[key] = deduped_list
-            # Otherwise, the overlay value replaces the base value
-            else:
-                merged[key] = overlay_value
-        else:
-            # If the key is not in the base, just add it
-            merged[key] = overlay_value
-
-    return merged
+    return deep_merge(copy.deepcopy(default_yaml), override_yaml)

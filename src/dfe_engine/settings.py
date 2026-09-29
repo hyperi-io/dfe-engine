@@ -2434,7 +2434,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
     from dfe_engine.yaml_utils import deep_merge
 
     result = copy.deepcopy(base)
-    deep_merge(result, override, replace_lists=True)
+    deep_merge(result, override)
     return result
 
 

@@ -696,19 +696,9 @@ Creating an org does not create its ClickHouse user. The CH RBAC reconcile does,
 
 ---
 
-## 8. Argo CD RBAC Export
+## 8. Argo CD Permissions
 
-```mermaid
-flowchart LR
-    ROLES["roles.yaml<br/>argo:* permissions"] --> GEN["generate_rbac_csv()"]
-    GROUPS["GroupStore<br/>group→role mapping"] --> GEN
-    GEN --> CSV["argocd-rbac-cm<br/>policy.csv"]
-    GEN --> PROJ["AppProject<br/>.spec.roles"]
-```
-
-`helm/argo_rbac.py` maps DFE roles with `argo:{resource}:{action}`
-permissions to Argo CD Casbin policy lines. Handles wildcards and OIDC group
-bindings. Unknown argo actions logged as warnings (not errors).
+Roles carry `argo:{resource}:{action}` permissions in `roles.yaml`, and the scope catalogue publishes the `argo:` prefix (`auth/rbac_scopes`). The engine does not export them: it writes no `argocd-rbac-cm` policy and no AppProject roles.
 
 ---
 

@@ -77,8 +77,7 @@ class QueryShim:
         catalogue = yaml_load(_BUILTIN_QUERIES) or {}
         override = self._settings.keda_shim.query_config
         if override and Path(override).exists():
-            # A query's params list is tied to its SQL placeholders, so an override's list replaces.
-            catalogue = deep_merge(catalogue, yaml_load(Path(override)) or {}, replace_lists=True)
+            catalogue = deep_merge(catalogue, yaml_load(Path(override)) or {})
         return catalogue.get("queries", {})
 
     @property

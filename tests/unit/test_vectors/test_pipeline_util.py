@@ -200,6 +200,33 @@ def test_gather_env_variables_for_pipeline(sample_package_config):
     assert env_vars["_1_TRANSFORM_STEP_INPUT"] == "custom_input"
 
 
+def test_a_pipeline_value_fills_a_var_the_step_requires(sample_package_config):
+    pipeline = sample_package_config["ingestion_pipelines"]["test-pipeline"]
+    pipeline["env"]["REQUIRED_VAR"] = "from-pipeline"
+
+    env_vars, vector_env_vars = gather_env_variables_for_pipeline(
+        sample_package_config, "test-pipeline"
+    )
+
+    assert env_vars["REQUIRED_VAR"] == "from-pipeline"
+    assert vector_env_vars["REQUIRED_VAR"] == "from-pipeline"
+
+
+def test_a_package_default_wins_over_the_template_default(sample_package_config):
+    sample_package_config["default_env_vars"]["COMPRESSION"] = "zstd"
+
+    env_vars, _ = gather_env_variables_for_pipeline(sample_package_config, "test-pipeline")
+
+    assert env_vars["COMPRESSION"] == "zstd"
+
+
+def test_an_unset_var_keeps_the_template_default_or_stays_unset(sample_package_config):
+    env_vars, _ = gather_env_variables_for_pipeline(sample_package_config, "test-pipeline")
+
+    assert env_vars["TRANSFORM_SOURCE"] == "default"
+    assert env_vars["REQUIRED_VAR"] is None
+
+
 # Edge cases and error handling
 def test_empty_package_config():
     empty_config = {}
@@ -277,15 +304,23 @@ def test_merge_configs():
     assert result["e"] == 4
 
 
-def test_merge_configs_list_handling():
+def test_a_package_list_replaces_the_core_list():
     from dfe_engine.pipeline.pipeline_util import merge_configs
 
-    # Test list merging and deduplication
-    default = {"items": [1, 2, 3]}
-    override = {"items": [3, 4, 5]}
+    default = {"default_env_vars": {"KAFKA_SOURCE_TOPIC_LIST": ["^(logs)_.*_load$"]}}
+    override = {"default_env_vars": {"KAFKA_SOURCE_TOPIC_LIST": ["logs_acme_load"]}}
     result = merge_configs(default, override)
 
-    assert result["items"] == [1, 2, 3, 4, 5]
+    assert result["default_env_vars"]["KAFKA_SOURCE_TOPIC_LIST"] == ["logs_acme_load"]
+
+
+def test_merge_configs_leaves_the_core_config_untouched():
+    from dfe_engine.pipeline.pipeline_util import merge_configs
+
+    default = {"default_env_vars": {"TOPICS": ["core"], "KEEP": "same"}}
+    merge_configs(default, {"default_env_vars": {"TOPICS": ["package"], "KEEP": "new"}})
+
+    assert default == {"default_env_vars": {"TOPICS": ["core"], "KEEP": "same"}}
 
 
 def test_merge_configs_scalar_override():

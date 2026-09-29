@@ -49,7 +49,7 @@ def generate_template(service: str, profile: str = "default") -> dict[str, Any]:
     overrides = plugin.config_template_overrides.get(profile, {})
     if overrides:
         merged = copy.deepcopy(base)
-        deep_merge(merged, overrides, replace_lists=True)
+        deep_merge(merged, overrides)
         return merged
 
     return base

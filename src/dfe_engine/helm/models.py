@@ -96,10 +96,9 @@ class HelmServiceValues(BaseModel):
 class CompilationResult(BaseModel):
     """Result of compiling Helm values for all services.
 
-    NOTE: ``argo_*`` are still GENERATED for now but no longer PUBLISHED to the
-    deploy repo -- dfe-infra's ApplicationSets own deployment; the engine writes
-    only overlay values + DDL (see gitops/artifacts.py). The argo_* generation is
-    dead-weight to be removed once the appset git-generator is the sole path.
+    Nothing writes the ``argo_*`` fields: dfe-infra's ApplicationSets own
+    deployment, and only overlay values + DDL reach the deploy repo (see
+    gitops/artifacts.py).
     """
 
     helm_values: dict[str, HelmServiceValues] = Field(
