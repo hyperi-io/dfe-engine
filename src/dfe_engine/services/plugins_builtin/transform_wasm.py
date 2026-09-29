@@ -5,8 +5,6 @@ for the WASM-based transform service. Type 2 service (multi-source)
 with flat source list (no config tree -- tree is vector-only).
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from dfe_engine.services.descriptor import KafkaRole, ServiceDescriptor
@@ -108,14 +106,7 @@ _template_overrides: dict[str, dict[str, Any]] = {
         },
     },
     "k8s": {
-        "kafka": {
-            "consumer": {
-                "brokers": ["kafka-bootstrap.kafka.svc.cluster.local:9092"],
-            },
-            "producer": {
-                "brokers": ["kafka-bootstrap.kafka.svc.cluster.local:9092"],
-            },
-        },
+        # No brokers: every deployment names its own.
         "metrics": {"address": "0.0.0.0:9090"},
     },
 }

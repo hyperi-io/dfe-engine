@@ -4,8 +4,7 @@
 sources: []
 
 kafka:
-  brokers:
-    - kafka-bootstrap.kafka.svc.cluster.local:9092
+  brokers: []  # every deployment names its own brokers
   client_id: dfe-fetcher
   compression: lz4
   batch_size: 8388608

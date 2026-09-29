@@ -1,5 +1,5 @@
 # DFE Receiver -- Production (K8s)
-# TLS + bearer auth, K8s service DNS, tuned for throughput
+# TLS + bearer auth, tuned for throughput
 #
 # K8s resource sizing (medium):
 #   requests: { cpu: 500m, memory: 512Mi }
@@ -52,8 +52,7 @@ destinations:
   rules: []
 
 kafka:
-  brokers:
-    - kafka-bootstrap.kafka.svc.cluster.local:9092
+  brokers: []  # every deployment names its own brokers
   client_id: dfe-receiver
   sasl:
     enabled: true
@@ -72,7 +71,7 @@ kafka:
     retries: 5
 
 loader:
-  address: "dfe-loader.dfe.svc.cluster.local:6000"
+  address: "dfe-loader:6000"  # the app manifest's push listener, in the suite's own namespace
   transport: kafka
   timeout_ms: 20000  # inside the 25 s a listener holds its answer
 

@@ -37,6 +37,14 @@ class SurfaceNotFoundError(Exception):
     """Raised when a service surface is not found."""
 
 
+def _merged(listed: list[MetricEntry], live: list[MetricEntry]) -> list[MetricEntry]:
+    """``listed`` with each ``live`` entry replacing its namesake in place, new names appended."""
+    by_name = {entry.name: entry for entry in listed}
+    for entry in live:
+        by_name[entry.name] = entry
+    return list(by_name.values())
+
+
 class SurfaceRegistry:
     """Registry of service surface definitions, loaded from YAML files.
 
@@ -125,7 +133,11 @@ class SurfaceRegistry:
     # -- Manifest refresh -------------------------------------
 
     async def refresh_manifest(self, service_name: str) -> ServiceSurface | None:
-        """Fetch the service's live metric manifest and store its metrics.
+        """Fetch the service's live metric manifest and merge its metrics into the surface.
+
+        A metric the manifest names is updated in place and a new one is appended.
+        A listed metric the manifest leaves out is kept: an idle app serves only
+        the metrics it has registered so far.
 
         Returns:
             The updated surface, or None when nothing was fetched: the surface
@@ -169,7 +181,7 @@ class SurfaceRegistry:
             logger.warning("Manifest metrics do not validate", service=service_name, error=str(e))
             return None
 
-        surface.metrics_surface = metrics
+        surface.metrics_surface = _merged(surface.metrics_surface, metrics)
         surface.discovered_at = datetime.now(UTC).isoformat()
         self._write_surface(self._path_for(service_name), surface)
         logger.info("Refreshed manifest", service=service_name)

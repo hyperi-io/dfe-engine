@@ -104,20 +104,20 @@ class TestSurfaceConfigDetail:
         resp = client.get("/api/v1/service-surfaces/dfe-receiver", headers=admin_headers)
         assert resp.status_code == 200
         config = resp.json()["config_surface"]
-        assert "config.kafka.bootstrap_servers" in config
-        assert "config.server.listen_address" in config
+        assert "config.kafka.brokers" in config
+        assert "config.server.bind_address" in config
 
     def test_loader_config_has_clickhouse(self, client, admin_headers):
         resp = client.get("/api/v1/service-surfaces/dfe-loader", headers=admin_headers)
         assert resp.status_code == 200
         config = resp.json()["config_surface"]
-        assert "config.clickhouse.host" in config
+        assert config["config.clickhouse.hosts"]["default"] == ["localhost:8123"]
 
-    def test_archiver_config_has_storage(self, client, admin_headers):
+    def test_archiver_config_has_its_destination(self, client, admin_headers):
         resp = client.get("/api/v1/service-surfaces/dfe-archiver", headers=admin_headers)
         assert resp.status_code == 200
         config = resp.json()["config_surface"]
-        assert "config.storage.backend" in config
+        assert "config.archive.destination" in config
 
 
 class TestSurfaceMetricsDetail:

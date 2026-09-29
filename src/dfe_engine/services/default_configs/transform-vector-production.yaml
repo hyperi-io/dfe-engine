@@ -3,8 +3,7 @@
 
 kafka:
   consumer:
-    brokers:
-      - kafka-bootstrap.kafka.svc.cluster.local:9092
+    brokers: []  # every deployment names its own brokers
     group: dfe-transform-vector
     topics: []
     client_id: dfe-transform-vector
@@ -16,8 +15,7 @@ kafka:
     tls:
       enabled: true
   producer:
-    brokers:
-      - kafka-bootstrap.kafka.svc.cluster.local:9092
+    brokers: []  # every deployment names its own brokers
     client_id: dfe-transform-vector
     compression: lz4
     batch_size: 8388608
