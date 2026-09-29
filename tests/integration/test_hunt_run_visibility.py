@@ -37,22 +37,14 @@ from dfe_engine.hunt_runner.spread import current_fire
 
 
 @pytest.fixture
-def scratch_db(ch_client):
-    """An isolated CH database with a source and a target table; dropped after."""
-    db = f"dfe_runvis_{uuid.uuid4().hex[:8]}"
-    ch_client.command(f"CREATE DATABASE `{db}`")
+def scratch_db(ch_client, dfe_db):
+    """``dfe_db`` plus a scratch source and target table for the direct query here."""
     ch_client.command(
-        f"CREATE TABLE `{db}`.src (timestamp_load Int64, ev String) "
+        f"CREATE TABLE `{dfe_db}`.src (timestamp_load Int64, ev String) "
         "ENGINE = MergeTree ORDER BY timestamp_load"
     )
-    ch_client.command(f"CREATE TABLE `{db}`.tgt (ev String) ENGINE = MergeTree ORDER BY ev")
-    try:
-        yield db
-    finally:
-        try:
-            ch_client.command(f"DROP DATABASE IF EXISTS `{db}`")
-        except Exception:
-            pass
+    ch_client.command(f"CREATE TABLE `{dfe_db}`.tgt (ev String) ENGINE = MergeTree ORDER BY ev")
+    return dfe_db
 
 
 def _spec(hunt_id: str, db: str) -> HuntSpec:
