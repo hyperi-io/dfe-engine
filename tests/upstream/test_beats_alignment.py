@@ -33,7 +33,7 @@ _UPSTREAM = {
     "filebeat/nginx": f"{_RAW}/filebeat/module/nginx/access/_meta/fields.yml",
     "filebeat/system": f"{_RAW}/filebeat/module/system/auth/_meta/fields.yml",
     "auditbeat/auditd": f"{_RAW}/auditbeat/module/auditd/_meta/fields.yml",
-    "winlogbeat/security": f"{_RAW}/winlogbeat/module/security/_meta/fields.yml",
+    "winlogbeat/security": f"{_RAW}/x-pack/winlogbeat/module/security/_meta/fields.yml",
 }
 
 _PRIMITIVES = {

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import pytest
 
-from dfe_engine.clickhouse.clickhouse_manager import ClickHouseClientWrapper
 from dfe_engine.services.schema.json_promotion_service import discover_paths, sample_rows
 
 pytestmark = pytest.mark.integration
@@ -55,56 +54,53 @@ def seeded_table(clickhouse_client, clickhouse_test_database):
     clickhouse_client.command(f"DROP TABLE IF EXISTS {db}.{TABLE}")
 
 
-def _by_path(seeded_table, clickhouse_client, **kwargs):
-    wrapped = ClickHouseClientWrapper(clickhouse_client)
+def _by_path(seeded_table, manager_client, **kwargs):
     discovered = discover_paths(
-        wrapped, db=seeded_table, source=TABLE, existing_columns=[], **kwargs
+        manager_client, db=seeded_table, source=TABLE, existing_columns=[], **kwargs
     )
     return {d.path: d for d in discovered}
 
 
 class TestDiscoverPathsIntegration:
-    def test_discovers_paths_and_types(self, seeded_table, clickhouse_client):
-        by_path = _by_path(seeded_table, clickhouse_client)
+    def test_discovers_paths_and_types(self, seeded_table, manager_client):
+        by_path = _by_path(seeded_table, manager_client)
         assert "user.email" in by_path
         assert by_path["user.email"].types == ["String"]
         assert by_path["user.email"].is_consistent is True
 
-    def test_inconsistent_path_flips(self, seeded_table, clickhouse_client):
-        by_path = _by_path(seeded_table, clickhouse_client)
+    def test_inconsistent_path_flips(self, seeded_table, manager_client):
+        by_path = _by_path(seeded_table, manager_client)
         mixed = by_path["user.mixed"]
         assert mixed.is_consistent is False
         assert len(mixed.types) >= 2
 
-    def test_samples_are_distinct(self, seeded_table, clickhouse_client):
-        by_path = _by_path(seeded_table, clickhouse_client, samples=3)
+    def test_samples_are_distinct(self, seeded_table, manager_client):
+        by_path = _by_path(seeded_table, manager_client, samples=3)
         samples = by_path["user.email"].samples
         assert samples is not None
         assert len(samples) == len(set(samples))
         assert len(samples) <= 3
 
-    def test_stats_are_sane(self, seeded_table, clickhouse_client):
-        by_path = _by_path(seeded_table, clickhouse_client, stats=True)
+    def test_stats_are_sane(self, seeded_table, manager_client):
+        by_path = _by_path(seeded_table, manager_client, stats=True)
         email = by_path["user.email"]
         assert email.coverage_pct is not None
         assert 0.0 < email.coverage_pct <= 100.0
         assert email.distinct_count is not None
         assert email.distinct_count >= 3
 
-    def test_paths_filter_narrows(self, seeded_table, clickhouse_client):
-        by_path = _by_path(seeded_table, clickhouse_client, paths=["user.email"])
+    def test_paths_filter_narrows(self, seeded_table, manager_client):
+        by_path = _by_path(seeded_table, manager_client, paths=["user.email"])
         assert set(by_path) == {"user.email"}
 
 
 class TestSampleRowsIntegration:
-    def test_samples_whole_table(self, seeded_table, clickhouse_client):
-        wrapped = ClickHouseClientWrapper(clickhouse_client)
-        columns, rows = sample_rows(wrapped, db=seeded_table, source=TABLE, limit=3)
+    def test_samples_whole_table(self, seeded_table, manager_client):
+        columns, rows = sample_rows(manager_client, db=seeded_table, source=TABLE, limit=3)
         assert columns == ["_json"]
         assert 1 <= len(rows) <= 3
         assert all("_json" in row for row in rows)
 
-    def test_limit_caps_row_count(self, seeded_table, clickhouse_client):
-        wrapped = ClickHouseClientWrapper(clickhouse_client)
-        _columns, rows = sample_rows(wrapped, db=seeded_table, source=TABLE, limit=2)
+    def test_limit_caps_row_count(self, seeded_table, manager_client):
+        _columns, rows = sample_rows(manager_client, db=seeded_table, source=TABLE, limit=2)
         assert len(rows) == 2
