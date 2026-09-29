@@ -1,7 +1,7 @@
 import json
 import os
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -24,6 +24,15 @@ def _validate_identifier(name: str, label: str = "identifier") -> str:
     if not _SAFE_IDENTIFIER.match(name):
         raise ValueError(f"Invalid {label}: {name!r}")
     return name
+
+
+def _utc(value: str) -> datetime:
+    """Parse a checkpoint timestamp, which callers write in UTC.
+
+    A naive datetime is inserted as the host's local time, which moves every
+    checkpoint by the host's UTC offset on any host not set to UTC.
+    """
+    return datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
 
 
 class Status(Enum):
@@ -444,18 +453,17 @@ class HuntCheckpointManager:
             )
             # clickhouse-connect's insert() needs real datetime objects for the
             # DateTime columns, not strings (the batch path already does this).
-            _fmt = "%Y-%m-%d %H:%M:%S"
             data = [
                 (
                     customer,
                     rule,
                     thread_id,
                     int(log_buffer),
-                    datetime.strptime(query_schedule_time_str, _fmt),
-                    datetime.strptime(execution_time_str, _fmt),
-                    datetime.strptime(end_time_str, _fmt),
-                    datetime.strptime(previous_successful_checkpoint_str, _fmt),
-                    datetime.strptime(query_checkpoint_time_str, _fmt),
+                    _utc(query_schedule_time_str),
+                    _utc(execution_time_str),
+                    _utc(end_time_str),
+                    _utc(previous_successful_checkpoint_str),
+                    _utc(query_checkpoint_time_str),
                     execution_time_ms,
                     hunt_name,
                     query_id,
@@ -566,14 +574,11 @@ class HuntCheckpointManager:
                     str(checkpoint.get("rule_name", "na")),
                     str(checkpoint.get("thread_id", "na")),
                     int(checkpoint.get("log_buffer", 0)),
-                    datetime.strptime(checkpoint["query_schedule_time"], "%Y-%m-%d %H:%M:%S"),
-                    datetime.strptime(checkpoint["execution_time"], "%Y-%m-%d %H:%M:%S"),
-                    datetime.strptime(checkpoint["end_time"], "%Y-%m-%d %H:%M:%S"),
-                    datetime.strptime(
-                        checkpoint["previous_successful_checkpoint"],
-                        "%Y-%m-%d %H:%M:%S",
-                    ),
-                    datetime.strptime(checkpoint["query_checkpoint_time"], "%Y-%m-%d %H:%M:%S"),
+                    _utc(checkpoint["query_schedule_time"]),
+                    _utc(checkpoint["execution_time"]),
+                    _utc(checkpoint["end_time"]),
+                    _utc(checkpoint["previous_successful_checkpoint"]),
+                    _utc(checkpoint["query_checkpoint_time"]),
                     int(checkpoint.get("execution_time_ms", 0)),
                     str(checkpoint.get("hunt_name", "na")),
                     str(checkpoint.get("query_id", "na")),

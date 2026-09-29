@@ -27,7 +27,7 @@ import uuid
 import pytest
 
 from dfe_engine.hunt_runner import ChCoordinator, HuntRunner, HuntSpec, HuntWorker
-from dfe_engine.hunt_runner.spread import current_fire
+from dfe_engine.hunt_runner.spread import current_fire, latest_fire
 
 
 def _count(ch, table: str) -> int:
@@ -148,9 +148,10 @@ def test_multi_pod_exactly_once_and_distributed(ch_params, ch_client, dfe_db):
         )
         for i in range(m)
     }
-    fires = {hid: current_fire(hid, 600, now) for hid in specs}
+    # The fire the runner's own tick computes, so round 1 and round 2 agree on it.
+    fires = {hid: latest_fire(hid, 600, now) for hid in specs}
 
-    ran: list[tuple[str, str]] = []  # (hunt_id, worker_id) - who ran what
+    ran: list[tuple[str, str]] = []  # (hunt_id, worker_id) - who ran what in round 1
     lock = threading.Lock()
     hids = list(specs)
     # Round 1 makes distribution DETERMINISTIC (not a latency race): each pod claims
@@ -158,10 +159,10 @@ def test_multi_pod_exactly_once_and_distributed(ch_params, ch_client, dfe_db):
     # anyone releases -> N pods provably do work. (A free-running loop cannot promise
     # this: try_claim is "latest claim wins", so one fast pod legitimately cascades
     # through and does everything - valid, but NOT a property to assert.) Round 2 is
-    # then a single BOUNDED pass per pod over every hunt: every pod passes every hunt,
-    # so each remaining hunt is claimed+run by exactly one pod, and a single pass always
-    # terminates - no free-running loop that could zombie past the fixture's DROP
-    # DATABASE. Daemon threads are the backstop if a pass somehow hangs.
+    # then ONE HuntRunner.tick per pod over every hunt - the product's own claim path,
+    # so exactly-once is a property of the runner rather than of this test's loop. A
+    # single tick always terminates - no free-running loop that could zombie past the
+    # fixture's DROP DATABASE. Daemon threads are the backstop if a tick somehow hangs.
     start = threading.Barrier(n)
 
     def pod(k: int) -> None:
@@ -181,18 +182,8 @@ def test_multi_pod_exactly_once_and_distributed(ch_params, ch_client, dfe_db):
             coord.release(mine, fires[mine])
             with lock:
                 ran.append((mine, wid))
-            # Round 2: one bounded pass, claiming any hunt not yet done or held.
-            for hid in hids:
-                if (coord.get_watermark(hid) or -1) >= fires[hid]:
-                    continue  # already done
-                lease = coord.current_lease(hid)
-                if lease is not None and lease.lease_until > now:
-                    continue  # another pod holds it
-                if coord.try_claim(hid, fires[hid], now):
-                    worker.run(specs[hid], fires[hid])
-                    coord.release(hid, fires[hid])
-                    with lock:
-                        ran.append((hid, wid))
+            # Round 2: one tick of the real runner, competing for every hunt.
+            HuntRunner(coord, worker, specs, cap=m).tick(now)
         finally:
             if client is not None:
                 client.close()

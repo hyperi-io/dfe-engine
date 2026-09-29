@@ -4,9 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.hunts.checkpoint import HuntCheckpointManager
-from dfe_engine.settings import get_settings
 
 # These tests require a running ClickHouse instance
 pytestmark = pytest.mark.integration
@@ -21,51 +19,28 @@ def setup_paths(tmp_path) -> dict:
     return {"tmp/logs": dfe_root_log_path}
 
 
-@pytest.fixture(scope="module")
-def ch_client():
-    settings = get_settings()
-    config = {
-        "ch_host": settings.clickhouse.host,
-        "ch_port": settings.clickhouse.port,
-        "ch_username": settings.clickhouse.username,
-        "ch_password": settings.clickhouse.password,
-        "ch_secure": settings.clickhouse.secure,
-        "ch_verify": settings.clickhouse.verify,
-    }
-    ch_client = ClickHouseManager.get_instance(target_config_data=config).get_clickhouse_client()
-    return ch_client
-
-
-@pytest.fixture
-def unique_names():
-    """A unique (database, table) pair per test so runs never collide and each
-    test creates + drops its own throwaway audit table on the shared cluster."""
-    unique_id = uuid.uuid4().hex
-    return f"dfe_audit_{unique_id}", f"detection_checkpoint_{unique_id}"
-
-
 @pytest.mark.parametrize(
     ("log_prefix", "ensure_kwargs", "expected_result"),
     [
         (
             "test-checkpoint-hunt-schema",
-            {"create_missing_database": True, "no_cluster_declarations_needed": True},
+            {"create_missing_database": True},
             True,
         ),
         (
             "dfe-scheduler-hunt",
-            {"create_missing_database": True, "no_cluster_declarations_needed": True},
+            {"create_missing_database": True},
             True,
         ),
         (
             "dfe-scheduler-hunt",
-            {"create_missing_tables": True, "no_cluster_declarations_needed": True},
+            {"create_missing_tables": True},
             True,
         ),
     ],
 )
 def test_ensure_table_exists(
-    log_prefix, unique_names, ensure_kwargs, expected_result, ch_client, setup_paths
+    log_prefix, unique_names, ensure_kwargs, expected_result, manager_client, setup_paths
 ):
     database_name, table_name = unique_names
     setup_paths["tmp/logs"]
@@ -77,7 +52,7 @@ def test_ensure_table_exists(
     try:
         while retries < max_retries:
             try:
-                result = manager.ensure_table_exists(ch_client, **ensure_kwargs)
+                result = manager.ensure_table_exists(manager_client, **ensure_kwargs)
                 assert result == expected_result
                 success = True
                 break
@@ -92,18 +67,18 @@ def test_ensure_table_exists(
     finally:
         if success:
             manager.drop_database_and_table(
-                ch_client, database_name=database_name, table_name=table_name
+                manager_client, database_name=database_name, table_name=table_name
             )
         else:
             manager.drop_database_and_table(
-                ch_client, database_name=database_name, table_name=table_name
+                manager_client, database_name=database_name, table_name=table_name
             )
             if retries == max_retries:
                 pytest.fail("Failed to ensure table exists after maximum retries.")
 
 
 @pytest.mark.parametrize(("hunt_name", "rule_name"), [("test_hunt", "pc_posh_test_rule")])
-def test_create_checkpoint(hunt_name, rule_name, ch_client, setup_paths, unique_names):
+def test_create_checkpoint(hunt_name, rule_name, manager_client, setup_paths, unique_names):
     database_name, table_name = unique_names
     manager = HuntCheckpointManager(database_name=database_name, table_name=table_name)
     try:
@@ -119,11 +94,9 @@ def test_create_checkpoint(hunt_name, rule_name, ch_client, setup_paths, unique_
         scheduled_start_time_w_buffer = scheduled_start_time - timedelta(seconds=log_buffer)
         last_success_time = scheduled_start_time - timedelta(seconds=query_window_seconds)
 
-        manager.ensure_table_exists(
-            ch_client, create_missing_database=True, no_cluster_declarations_needed=True
-        )
+        manager.ensure_table_exists(manager_client, create_missing_database=True)
         manager.checkpoint_rule(
-            ch_client=ch_client,
+            ch_client=manager_client,
             customer=customer,
             rule=rule_name,
             checkpoint_destination="clickhouse",
@@ -137,10 +110,9 @@ def test_create_checkpoint(hunt_name, rule_name, ch_client, setup_paths, unique_
             query_id=generated_query_id,
             query_schedule_time_str=scheduled_start_time.strftime("%Y-%m-%d %H:%M:%S"),
         )
-        time.sleep(5)
 
         query_checkpoint_time = manager.get_last_successful_run_clickhouse(
-            ch_client=ch_client,
+            ch_client=manager_client,
             hunt_name=hunt_name,
             rule_name=rule_name,
             customer=customer,
@@ -148,12 +120,12 @@ def test_create_checkpoint(hunt_name, rule_name, ch_client, setup_paths, unique_
         assert query_checkpoint_time is not None
     finally:
         manager.drop_database_and_table(
-            ch_client, database_name=database_name, table_name=table_name
+            manager_client, database_name=database_name, table_name=table_name
         )
 
 
 @pytest.mark.parametrize("num_records", [10, 100, 20000])
-def test_create_batch_checkpoint(num_records: int, ch_client, setup_paths, unique_names):
+def test_create_batch_checkpoint(num_records: int, manager_client, setup_paths, unique_names):
     database_name, table_name = unique_names
     manager = HuntCheckpointManager(database_name=database_name, table_name=table_name)
     try:
@@ -161,9 +133,7 @@ def test_create_batch_checkpoint(num_records: int, ch_client, setup_paths, uniqu
         log_buffer = 60
         query_window_seconds = 600
 
-        manager.ensure_table_exists(
-            ch_client, create_missing_database=True, no_cluster_declarations_needed=True
-        )
+        manager.ensure_table_exists(manager_client, create_missing_database=True)
 
         checkpoints = []
         now = datetime.now(UTC)
@@ -196,19 +166,22 @@ def test_create_batch_checkpoint(num_records: int, ch_client, setup_paths, uniqu
 
             checkpoints.append(checkpoint)
 
-        manager.create_batch_checkpoint_clickhouse(ch_client, checkpoints)
+        manager.create_batch_checkpoint_clickhouse(manager_client, checkpoints)
 
-        time.sleep(5)
         for checkpoint in checkpoints[0:5]:
             query_checkpoint_time = manager.get_last_successful_run_clickhouse(
-                ch_client=ch_client,
+                ch_client=manager_client,
                 hunt_name=checkpoint["hunt_name"],
                 rule_name=checkpoint["rule_name"],
                 customer=customer,
             )
             assert query_checkpoint_time is not None
+            if query_checkpoint_time.tzinfo is None:
+                query_checkpoint_time = query_checkpoint_time.replace(tzinfo=UTC)
+            # Every checkpoint in the batch was written for the same UTC instant.
+            assert query_checkpoint_time == scheduled_start_time_w_buffer.replace(microsecond=0)
 
     finally:
         manager.drop_database_and_table(
-            ch_client, database_name=database_name, table_name=table_name
+            manager_client, database_name=database_name, table_name=table_name
         )

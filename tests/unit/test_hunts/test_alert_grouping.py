@@ -240,6 +240,22 @@ class TestBuildGroupingQuery:
         assert "_timestamp >= '2026-01-01 00:00:00'" in sql
         assert "_timestamp < '2026-01-01 01:00:00'" in sql
 
+    def test_where_values_escape_a_quote_and_a_trailing_backslash(self):
+        sql = build_grouping_query(
+            target_db="acme",
+            target_table="logs_alerts",
+            hunt_name="analyst's hunt C:\\Temp\\",
+            rule_name="it's a rule\\",
+            customer="o'brien\\",
+            group_by=["severity"],
+            time_start="2026-01-01 00:00:00",
+            time_end="2026-01-01 01:00:00",
+            results_table_columns=self.RESULTS_COLS,
+        )
+        assert "hunt_name = 'analyst''s hunt C:\\\\Temp\\\\'" in sql
+        assert "rule_name = 'it''s a rule\\\\'" in sql
+        assert "_org_id = 'o''brien\\\\'" in sql
+
     def test_order_by_match_count(self):
         sql = build_grouping_query(
             target_db="acme",

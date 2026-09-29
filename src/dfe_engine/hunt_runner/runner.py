@@ -62,6 +62,11 @@ class HuntRunner:
         # No manager wired records nothing, which is what the unit suite runs on.
         self._metrics = metrics or HuntRunnerMetrics()
 
+    def _already_run(self, hunt_id: str, fire: int) -> bool:
+        """Whether the watermark has reached *fire*, so that fire's window is committed."""
+        watermark = self._coord.get_watermark(hunt_id)
+        return watermark is not None and watermark >= fire
+
     def _fire_for(self, spec: HuntSpec, now: int, requested: dict[str, int]) -> int | None:
         """The fire this tick should run for the hunt, or None if there is nothing.
 
@@ -71,8 +76,7 @@ class HuntRunner:
         run cannot double-run one already in flight.
         """
         fire = latest_fire(spec.hunt_id, spec.interval_seconds, now)
-        watermark = self._coord.get_watermark(spec.hunt_id)
-        if watermark is None or watermark < fire:
+        if not self._already_run(spec.hunt_id, fire):
             return fire
         return requested.get(spec.hunt_id)
 
@@ -124,6 +128,11 @@ class HuntRunner:
                 self._metrics.overrun(spec.hunt_id)
                 continue
             claimed = self._coord.try_claim(spec.hunt_id, fire, now)
+            if claimed and self._already_run(spec.hunt_id, fire):
+                # A peer ran and released this fire after the watermark read above.
+                self._metrics.claim_already_run(spec.hunt_id)
+                self._coord.release(spec.hunt_id, fire)
+                continue
             self._metrics.claim(spec.hunt_id, won=claimed)
             if not claimed:
                 continue  # lost the settle-window race -> another worker has it

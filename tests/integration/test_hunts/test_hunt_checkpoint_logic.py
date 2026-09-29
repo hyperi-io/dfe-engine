@@ -1,15 +1,9 @@
-import time
 import uuid
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 import pytest
-import yaml
-from scalo.logger import logger
 
-from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.hunts.checkpoint import HuntCheckpointManager
-from dfe_engine.settings import get_settings
 
 # These tests require a running ClickHouse instance
 pytestmark = pytest.mark.integration
@@ -20,71 +14,36 @@ def create_unique_name(base_name: str) -> str:
     return f"{base_name}_{uuid.uuid4()}"
 
 
-def load_config(file_path: Path) -> dict:
-    """Loads the configuration from a YAML file."""
-    with open(file_path) as f:
-        config = yaml.safe_load(f)
-    return config
-
-
-@pytest.fixture(scope="module")
-def ch_client():
-    """Fixture for setting up the ClickHouse client."""
-    settings = get_settings()
-    config = {
-        "ch_host": settings.clickhouse.host,
-        "ch_port": settings.clickhouse.port,
-        "ch_username": settings.clickhouse.username,
-        "ch_password": settings.clickhouse.password,
-        "ch_secure": settings.clickhouse.secure,
-        "ch_verify": settings.clickhouse.verify,
-    }
-    ch_client = ClickHouseManager.get_instance(target_config_data=config).get_clickhouse_client()
-    return ch_client
-
-
-@pytest.fixture
-def test_logger(tmp_path):
-    """Return the scalo logger for hunt tests."""
-    return logger
-
-
-def test_ensure_table_exists(ch_client, unique_names):
+def test_ensure_table_exists(manager_client, unique_names):
     database_name, table_name = unique_names
     manager = HuntCheckpointManager(database_name=database_name, table_name=table_name)
     try:
-        assert manager.ensure_table_exists(
-            ch_client, create_missing_database=True, no_cluster_declarations_needed=True
-        )
+        assert manager.ensure_table_exists(manager_client, create_missing_database=True)
     finally:
         manager.drop_database_and_table(
-            ch_client, database_name=database_name, table_name=table_name
+            manager_client, database_name=database_name, table_name=table_name
         )
 
 
-def test_ensure_database_not_exists(ch_client, unique_names):
+def test_ensure_database_not_exists(manager_client, unique_names):
     database_name, table_name = unique_names
     manager = HuntCheckpointManager(database_name=database_name, table_name=table_name)
     try:
-        assert manager.ensure_table_exists(
-            ch_client, create_missing_database=True, no_cluster_declarations_needed=True
-        )
+        assert manager.ensure_table_exists(manager_client, create_missing_database=True)
     finally:
         manager.drop_database_and_table(
-            ch_client, database_name=database_name, table_name=table_name
+            manager_client, database_name=database_name, table_name=table_name
         )
 
 
-def test_ensure_table_not_exists(ch_client, unique_names):
+def test_ensure_table_not_exists(manager_client, unique_names):
     database_name, table_name = unique_names
     manager = HuntCheckpointManager(database_name=database_name, table_name=table_name)
     try:
-        assert manager.ensure_table_exists(
-            ch_client, create_missing_tables=True, no_cluster_declarations_needed=True
-        )
+        assert manager.ensure_table_exists(manager_client, create_missing_tables=True)
     finally:
         manager.drop_database_and_table(
-            ch_client, database_name=database_name, table_name=table_name
+            manager_client, database_name=database_name, table_name=table_name
         )
 
 
@@ -93,7 +52,7 @@ customer = create_unique_name("detectionlab")
 rule_name = create_unique_name("pc_posh_test_rule")
 
 
-def test_create_and_update_checkpoint_success(ch_client, unique_names):
+def test_create_and_update_checkpoint_success(manager_client, unique_names):
     database_name, table_name = unique_names
     manager = HuntCheckpointManager(database_name=database_name, table_name=table_name)
 
@@ -115,11 +74,9 @@ def test_create_and_update_checkpoint_success(ch_client, unique_names):
             "%Y-%m-%d %H:%M:%S"
         )
 
-        manager.ensure_table_exists(
-            ch_client, create_missing_database=True, no_cluster_declarations_needed=True
-        )
+        manager.ensure_table_exists(manager_client, create_missing_database=True)
         manager.create_checkpoint_clickhouse(
-            ch_client=ch_client,
+            ch_client=manager_client,
             customer=customer,
             rule=rule_name,
             hunt_name=hunt_name,
@@ -135,9 +92,8 @@ def test_create_and_update_checkpoint_success(ch_client, unique_names):
         )
         assert execution_time_str is not None
 
-        time.sleep(3)
         query_checkpoint_time = manager.get_last_successful_run_clickhouse(
-            ch_client=ch_client,
+            ch_client=manager_client,
             hunt_name=hunt_name,
             rule_name=rule_name,
             customer=customer,
@@ -146,11 +102,11 @@ def test_create_and_update_checkpoint_success(ch_client, unique_names):
 
     finally:
         manager.drop_database_and_table(
-            ch_client, database_name=database_name, table_name=table_name
+            manager_client, database_name=database_name, table_name=table_name
         )
 
 
-def test_create_and_update_checkpoint_success_windows_validation(ch_client, unique_names):
+def test_create_and_update_checkpoint_success_windows_validation(manager_client, unique_names):
     database_name, table_name = unique_names
     manager = HuntCheckpointManager(database_name=database_name, table_name=table_name)
 
@@ -159,11 +115,8 @@ def test_create_and_update_checkpoint_success_windows_validation(ch_client, uniq
         customer = "detectionlab"
         rule_name = "pc_posh_test_rule"
 
-        manager.ensure_table_exists(
-            ch_client, create_missing_database=True, no_cluster_declarations_needed=True
-        )
+        manager.ensure_table_exists(manager_client, create_missing_database=True)
 
-        previous_success_time = None
         execution_time = datetime.now(UTC)
         end_time = datetime.now(UTC)
         scheduled_start_time = datetime.now(UTC)
@@ -180,7 +133,7 @@ def test_create_and_update_checkpoint_success_windows_validation(ch_client, uniq
         )
 
         manager.create_checkpoint_clickhouse(
-            ch_client=ch_client,
+            ch_client=manager_client,
             customer=customer,
             rule=rule_name,
             hunt_name=hunt_name,
@@ -195,11 +148,8 @@ def test_create_and_update_checkpoint_success_windows_validation(ch_client, uniq
             query_id=generated_query_id,
         )
 
-        logger.info("Sleeping for 5 seconds before creating the next checkpoint...")
-        time.sleep(5)
-
         query_checkpoint_time = manager.get_last_successful_run(
-            ch_client=ch_client,
+            ch_client=manager_client,
             hunt_name=hunt_name,
             rule_name=rule_name,
             customer=customer,
@@ -210,24 +160,10 @@ def test_create_and_update_checkpoint_success_windows_validation(ch_client, uniq
 
         if query_checkpoint_time.tzinfo is None:
             query_checkpoint_time = query_checkpoint_time.replace(tzinfo=UTC)
-
-        logger.info(f"Retrieved previous successful run time: {previous_success_time}")
-        logger.info(f"Retrieved last successful run time: {query_checkpoint_time}")
-
-        current_time = datetime.now(UTC)
-        time_diff = current_time - query_checkpoint_time
-        logger.info(f"Time difference between checkpoints: {time_diff.total_seconds()} seconds")
-
-        if not (5 <= time_diff.total_seconds() < 10):
-            logger.warning(
-                f"Checkpoints not spaced by 5 to 10 seconds: Actual time difference is {time_diff.total_seconds()} seconds"
-            )
-
-        logger.info(
-            f"Completed test for checkpoint creation and window validation for hunt {hunt_name}"
-        )
+        # The window read back is the one written: the schedule time less the log buffer.
+        assert query_checkpoint_time == scheduled_start_time_w_buffer.replace(microsecond=0)
 
     finally:
         manager.drop_database_and_table(
-            ch_client, database_name=database_name, table_name=table_name
+            manager_client, database_name=database_name, table_name=table_name
         )

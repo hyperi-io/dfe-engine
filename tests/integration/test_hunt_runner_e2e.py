@@ -17,9 +17,22 @@ coordination tables the schema phase applies.
 
 from __future__ import annotations
 
-import pytest
+import time
+import uuid
+from collections.abc import Callable
 
-from dfe_engine.hunt_runner import ChCoordinator, HuntRunner, HuntSpec, HuntWorker
+import pytest
+from common.hunt_files import write_hunt, write_rule
+
+from dfe_engine.hunt_runner import (
+    ChCoordinator,
+    HuntRunner,
+    HuntSpec,
+    HuntWorker,
+    load_specs,
+    read_run_status,
+)
+from dfe_engine.hunt_runner.ch_coordinator import Lease
 from dfe_engine.hunt_runner.spread import current_fire
 
 
@@ -105,3 +118,68 @@ def test_tick_never_double_runs_a_leased_hunt(ch_client, ch_db):
     state = coord.get_state("h3")
     assert state is not None
     assert state.too_aggressive is True
+
+
+class _PeerFinishesFirst(ChCoordinator):
+    """A real coordinator that lets a peer runner finish the fire just before it reads the lease.
+
+    The tick reads the watermark, then the lease. Nothing injectable sits between the two,
+    so this is where a second runner's whole run is put.
+    """
+
+    def __init__(self, *args, before_first_lease_read: Callable[[], None], **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._before_first_lease_read: Callable[[], None] | None = before_first_lease_read
+
+    def current_lease(self, hunt_id: str) -> Lease | None:
+        hook, self._before_first_lease_read = self._before_first_lease_read, None
+        if hook is not None:
+            hook()
+        return super().current_lease(hunt_id)
+
+
+def test_a_fire_a_peer_finishes_mid_tick_is_not_run_again(ch_client, dfe_db, tmp_path):
+    """Runner B reads the watermark, runner A runs and releases the fire, then B claims it.
+
+    B wins that claim fairly: the lease it sees is released. Only a second look at the
+    watermark stops B running the fire again and overwriting its run record with an
+    empty window's 0 rows.
+    """
+    hunt = f"race_{uuid.uuid4().hex[:8]}"
+    rule_id = f"{hunt}_rule"
+    org = f"org-{uuid.uuid4().hex[:8]}"
+    write_rule(tmp_path / "rules", rule_id, f"_org_id = '{org}'")
+    write_hunt(tmp_path / "hunts", hunt, rule_id, dfe_db)
+    specs = load_specs(tmp_path / "hunts", rules_dir=tmp_path / "rules")
+
+    fire = current_fire(hunt, 60, int(time.time()))
+    now = fire + 1
+    ch_client.command(
+        f"INSERT INTO `{dfe_db}`.`main` (_timestamp_load, _timestamp, _org_id) "
+        f"SELECT toDateTime64({fire} - 1 - number, 3), toDateTime64({fire} - 1 - number, 3), "
+        f"'{org}' FROM numbers(3)"
+    )
+
+    coord_a = _coord(ch_client, dfe_db, "runner-a")
+    coord_a.ensure_schema()
+    runner_a = HuntRunner(coord_a, HuntWorker(ch_client, coord_a), specs, cap=8)
+    ran_a: list[int] = []
+    coord_b = _PeerFinishesFirst(
+        ch_client,
+        database=dfe_db,
+        worker_id="runner-b",
+        settle_seconds=0.0,
+        sleep=lambda _s: None,
+        before_first_lease_read=lambda: ran_a.append(runner_a.tick(now)),
+    )
+    runner_b = HuntRunner(coord_b, HuntWorker(ch_client, coord_b), specs, cap=8)
+
+    assert runner_b.tick(now) == 0
+    assert ran_a == [1]
+    assert coord_b.active_count(now) == 0  # B released the claim it did not use
+    assert read_run_status(ch_client, dfe_db, [hunt], now=now)[hunt].last_run_rows == 3
+    detections = ch_client.query(
+        f"SELECT count() FROM `{dfe_db}`.detection WHERE hunt_name = {{h:String}}",
+        parameters={"h": hunt},
+    ).result_rows[0][0]
+    assert detections == 3

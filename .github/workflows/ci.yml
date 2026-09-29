@@ -13,6 +13,9 @@ name: CI
   pull_request:
     # A PR based on any other branch gets no run here, and pr-base-guard.yml fails it so the absence is visible.
     branches: [main]
+  schedule:
+    # Nightly at 02:37 AEST: hyperi-ci runs a schedule at the full tier, which adds the integration tests core deselects, and publishes nothing.
+    - cron: "37 16 * * *"
   workflow_dispatch:
     inputs:
       tag:
@@ -30,6 +33,12 @@ name: CI
         required: false
         default: "auto"
         description: "Version resolution for from-head: auto | patch | minor (forced) | X.Y.Z (exact version)."
+      test-tier:
+        type: choice
+        required: false
+        default: "core"
+        options: [core, full]
+        description: "full also runs the tests core deselects (integration, e2e). core never lowers a scheduled run."
 
 permissions:
   contents: write
@@ -44,5 +53,6 @@ jobs:
       tag: ${{ inputs.tag || '' }}
       from-head: ${{ inputs.from-head || '' }}
       bump: ${{ inputs.bump || 'auto' }}
+      test-tier: ${{ inputs.test-tier || 'core' }}
       runner-test: arc-native-16cpu
     secrets: inherit
