@@ -1691,6 +1691,7 @@ class APISettings(BaseModel):
     - DFE_API_CORS_ORIGINS -> api.cors_origins (comma-separated)
     - DFE_API_FORWARDED_ALLOW_IPS -> api.forwarded_allow_ips (comma-separated)
     - DFE_API_JWT_EXPIRE_MINUTES -> api.jwt_expire_minutes
+    - DFE_API_DOCS_ENABLED -> api.docs_enabled (true/false)
     - DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES -> api.elastic_converter_max_upload_bytes
     - DFE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE -> api.elastic_converter_read_chunk_size
     - DFE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES ->
@@ -1745,6 +1746,15 @@ class APISettings(BaseModel):
         description=(
             "Secret keying the signed session cookie SessionMiddleware uses for the "
             "OIDC RP flow (Authlib state/nonce). Empty -> falls back to jwt_secret."
+        ),
+    )
+    docs_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "Serve Swagger UI at /docs and ReDoc at /redoc. Both pages load their "
+            "scripts from a public CDN into the engine's own origin, so unset serves "
+            "them in a dev posture only. /openapi.json is served either way. "
+            "DFE_API_DOCS_ENABLED."
         ),
     )
     elastic_converter_max_upload_bytes: int = Field(
@@ -2511,6 +2521,8 @@ def _get_env_overrides() -> dict:
         overrides["api"]["forwarded_allow_ips"] = val.strip()
     if val := _get_env("DFE_API_JWT_EXPIRE_MINUTES"):
         overrides["api"]["jwt_expire_minutes"] = int(val)
+    if val := _get_env("DFE_API_DOCS_ENABLED"):
+        overrides["api"]["docs_enabled"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES"):
         overrides["api"]["elastic_converter_max_upload_bytes"] = int(val)
     if val := _get_env("DFE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE"):

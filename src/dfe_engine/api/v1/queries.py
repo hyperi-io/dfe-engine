@@ -201,7 +201,7 @@ async def execute_view(
 @router.post(
     "/raw",
     response_model=QueryResponse,
-    dependencies=[Depends(require_action(scopes_dict["query_execute"]))],
+    dependencies=[Depends(require_action(scopes_dict["raw_query_execute"]))],
 )
 async def execute_raw_query(
     request: RawQueryRequest,
@@ -210,8 +210,9 @@ async def execute_raw_query(
     """Execute a raw query against a registered datasource adapter.
 
     This is the lower-level query path -- for ad-hoc queries against
-    datasource adapters rather than parameterized views. Requires
-    ``query:execute`` permission.
+    datasource adapters rather than parameterized views. The SQL runs as the
+    engine's own ClickHouse user, so it requires ``raw_query:execute``, which no
+    built-in role but ``admin`` holds, and ClickHouse runs it read-only.
     """
     from dfe_engine.query.datasources import get_adapter
 

@@ -86,10 +86,15 @@ class ClickHouseAdapter(DatasourceAdapter):
         params: dict[str, Any] | None = None,
         timeout_seconds: int = 30,
     ) -> tuple[list[dict[str, Any]], list[str]]:
-        """Execute query and return (rows, column_names)."""
+        """Execute a read-only query and return (rows, column_names).
+
+        ClickHouse refuses anything but a read here: the query runs as the engine's
+        own user, which may write, and ``readonly=2`` still lets the client send
+        its per-query settings.
+        """
         client = self.manager.get_clickhouse_client()
 
-        settings = {"max_execution_time": timeout_seconds}
+        settings = {"max_execution_time": timeout_seconds, "readonly": 2}
         result = client.query(query, parameters=params or {}, settings=settings)
 
         columns = list(result.column_names)

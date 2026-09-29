@@ -12,6 +12,7 @@ import json
 import socket
 
 import pytest
+from clickhouse_connect.driver.exceptions import DatabaseError
 
 from dfe_engine.clickhouse import ClickHouseManager
 from dfe_engine.query.datasources.clickhouse import ClickHouseAdapter
@@ -135,6 +136,39 @@ class TestExecute:
             "SELECT getSetting('max_execution_time') AS limit", timeout_seconds=7
         )
         assert rows[0]["limit"] == 7
+
+
+class TestReadOnly:
+    """The adapter runs as the engine's own user, which may write, so ClickHouse refuses it."""
+
+    def test_a_create_is_refused(self, adapter, clickhouse_test_database):
+        with pytest.raises(DatabaseError, match="readonly"):
+            adapter.execute(
+                f"CREATE TABLE `{clickhouse_test_database}`.made (x UInt8) ENGINE = Log"
+            )
+
+    def test_an_insert_is_refused_and_writes_nothing(self, adapter, ch_client, people):
+        with pytest.raises(DatabaseError, match="readonly"):
+            adapter.execute(f"INSERT INTO {people} (id, name, value) VALUES (99, 'Z', 0)")
+        assert ch_client.query(f"SELECT count() FROM {people}").result_rows == [(5,)]
+
+    def test_a_drop_is_refused(self, adapter, ch_client, people):
+        with pytest.raises(DatabaseError, match="readonly"):
+            adapter.execute(f"DROP TABLE {people}")
+        assert ch_client.query(f"SELECT count() FROM {people}").result_rows == [(5,)]
+
+    def test_a_query_cannot_lift_the_restriction(self, adapter, ch_client, people):
+        with pytest.raises(DatabaseError, match="readonly"):
+            adapter.execute(
+                f"INSERT INTO {people} (id, name, value) SETTINGS readonly = 0 VALUES (98, 'Y', 0)"
+            )
+        with pytest.raises(DatabaseError, match="readonly"):
+            adapter.execute("SELECT 1 SETTINGS readonly = 0")
+        assert ch_client.query(f"SELECT count() FROM {people}").result_rows == [(5,)]
+
+    def test_a_read_still_changes_its_own_settings(self, adapter):
+        rows, _ = adapter.execute("SELECT getSetting('max_threads') AS t SETTINGS max_threads = 3")
+        assert rows == [{"t": 3}]
 
 
 class TestAnEmptyResult:
