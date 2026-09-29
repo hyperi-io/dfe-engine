@@ -346,6 +346,22 @@ def _check_archive(
         )
 
 
+def archive_gap(flow: SourceFlow) -> str | None:
+    """Why this flow asks to be archived and nothing will copy it, or None.
+
+    On direct only the receiver fans a record out to the archiver, and a fetched
+    source never passes the receiver. Kept out of ``resolve_flow`` because that
+    also compiles stored sources, where a refusal would stop a running fetcher.
+    """
+    if not (flow.outputs.archive and flow.transport == "direct" and flow.origin == "fetcher"):
+        return None
+    return (
+        f"source {flow.source!r} is fetched on the direct transport and asks to be archived, "
+        "which would keep nothing: a fetched source is archived on the bus transport, because "
+        f"on direct only the receiver copies records to {ARCHIVER_SERVICE}"
+    )
+
+
 def resolve_flow(
     source: Source,
     settings: DFESettings,

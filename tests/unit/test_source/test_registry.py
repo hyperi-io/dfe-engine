@@ -382,6 +382,38 @@ class TestList:
 
         assert registry.get_source("auth").archive is True
 
+    def test_a_fetched_source_archived_on_direct_is_refused(
+        self, registry: SourceRegistry, direct_deployment
+    ):
+        # On direct only the receiver copies a record to the archiver, and a
+        # fetched record never passes the receiver.
+        fetched = Source.model_validate(
+            {
+                "source": "okta-audit",
+                "fetcher": {"source_type": "okta", "config": {}},
+                "transport": "direct",
+                "archive": True,
+            }
+        )
+        with pytest.raises(SourceValidationError, match="archived on the bus transport"):
+            registry.save_source(fetched)
+
+        assert not registry.source_exists("okta-audit")
+
+    def test_a_fetched_source_archived_on_the_bus_is_accepted(self, registry: SourceRegistry):
+        registry.save_source(
+            Source.model_validate(
+                {
+                    "source": "okta-audit",
+                    "fetcher": {"source_type": "okta", "config": {}},
+                    "transport": "bus",
+                    "archive": True,
+                }
+            )
+        )
+
+        assert registry.get_source("okta-audit").archive is True
+
     def test_a_transform_that_does_not_carry_the_transport_is_refused(
         self, registry: SourceRegistry, direct_deployment
     ):
