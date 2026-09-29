@@ -827,16 +827,20 @@ class SourceRegistry:
         """The source's stages must be runnable on this deployment.
 
         The resolver holds every transport rule (what the deployment offers, what
-        each app carries, archive needing the bus), so the save path asks it
-        rather than restating any of them.
+        each app carries, what archiving needs), so the save path asks it rather
+        than restating any of them. An archive nothing would copy is refused here
+        and not in the resolver, which also compiles the sources already stored.
         """
         from dfe_engine.settings import get_settings
-        from dfe_engine.source.flow import FlowError, resolve_flow
+        from dfe_engine.source.flow import FlowError, archive_gap, resolve_flow
 
         try:
-            resolve_flow(source, get_settings())
+            flow = resolve_flow(source, get_settings())
         except FlowError as exc:
             raise SourceValidationError(str(exc)) from exc
+        gap = archive_gap(flow)
+        if gap is not None:
+            raise SourceValidationError(gap)
 
     def _validate_instance_room(self, source: Source) -> None:
         """A stage needing its OWN deployment must have one free here.

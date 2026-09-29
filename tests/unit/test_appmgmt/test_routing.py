@@ -364,7 +364,7 @@ class TestArchivedOnDirect:
 
         assert compiled["destinations"] == {
             "default": "loader",
-            "dfe-archiver": {"grpc": {"endpoint": ARCHIVER_ENDPOINT}},
+            "dfe-archiver": {"grpc": {"endpoint": ARCHIVER_ENDPOINT, "confirms_delivery": False}},
             "rules": [
                 {
                     "match_field": "_json.app",
@@ -373,6 +373,23 @@ class TestArchivedOnDirect:
                 }
             ],
         }
+
+    def test_only_the_archiver_leg_is_declared_as_not_confirming_delivery(
+        self, direct_settings, direct_transforms
+    ):
+        # The archiver answers a push once the record is queued, so the receiver
+        # must not report that leg at least once. The loader and a transform confirm.
+        registry = FakeRegistry(
+            [_matched("auth", archive=True, transform={"engine": "vrl"}), _matched("syslog")]
+        )
+
+        destinations = routing.compile_for(
+            catalogue.descriptor(RECEIVER), registry, direct_settings
+        )["destinations"]
+
+        assert destinations[ARCHIVER]["grpc"]["confirms_delivery"] is False
+        assert destinations["dfe-transform-vrl-auth"] == {"grpc": {"endpoint": VRL_AUTH_ENDPOINT}}
+        assert "loader" not in destinations
 
     def test_the_raw_copy_is_taken_before_the_transform_not_after(
         self, direct_settings, direct_transforms
@@ -406,7 +423,47 @@ class TestArchivedOnDirect:
         compiled = routing.compile_for(catalogue.descriptor(RECEIVER), registry, direct_settings)
 
         assert compiled["destinations"]["default"] == ["loader", ARCHIVER]
-        assert compiled["destinations"][ARCHIVER] == {"grpc": {"endpoint": ARCHIVER_ENDPOINT}}
+        assert compiled["destinations"][ARCHIVER] == {
+            "grpc": {"endpoint": ARCHIVER_ENDPOINT, "confirms_delivery": False}
+        }
+
+
+class TestAStoredArchiveNothingCopies:
+    """Fetched and archived on direct: refused at save, compiled exactly as stored."""
+
+    def test_its_fetcher_routing_is_what_it_is_without_the_archive(self, direct_settings):
+        fetcher = catalogue.descriptor(FETCHER)
+
+        plain = routing.compile_for(
+            fetcher, FakeRegistry([_fetched()]), direct_settings, instance="okta-audit"
+        )
+        archived = routing.compile_for(
+            fetcher, FakeRegistry([_fetched(archive=True)]), direct_settings, instance="okta-audit"
+        )
+
+        assert archived == plain
+        assert archived["output"] == {"type": "grpc", "grpc": {"endpoint": LOADER_ENDPOINT}}
+
+    def test_the_receiver_compile_names_it_and_keeps_its_rule(self, direct_settings, monkeypatch):
+        from dfe_engine.services import source_routing
+
+        warnings: list[str] = []
+        monkeypatch.setattr(
+            source_routing.logger, "warning", lambda message, **fields: warnings.append(message)
+        )
+
+        compiled = routing.compile_for(
+            catalogue.descriptor(RECEIVER), FakeRegistry([_fetched(archive=True)]), direct_settings
+        )
+
+        assert [w for w in warnings if "'okta-audit'" in w and "archived on the bus" in w]
+        assert compiled["destinations"]["rules"] == [
+            {
+                "match_field": "_source",
+                "match_value": "okta-audit",
+                "destination": ["loader", ARCHIVER],
+            }
+        ]
 
 
 class TestArchiverStack:

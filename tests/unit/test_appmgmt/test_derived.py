@@ -276,6 +276,19 @@ class TestFetcherInstances:
         _apply(crud, derived.plan(crud, registry, settings))
         assert derived.plan(crud, registry, settings) == []
 
+    def test_a_stored_archive_the_save_now_refuses_leaves_its_fetcher_running(
+        self, crud, direct_settings
+    ):
+        # Archiving a fetched source on direct is refused at save, never here: a
+        # compile refusal would plan its running fetcher's removal.
+        running = derived.plan(crud, _Registry([_fetcher_source()]), direct_settings)
+        assert [(c.app.instance, c.action) for c in running] == [("crates-audit", "deploy")]
+        _apply(crud, running)
+        stored = _fetcher_source()
+        stored.versions["1.0.0"].archive = True
+
+        assert derived.plan(crud, _Registry([stored]), direct_settings) == []
+
     def test_a_main_landing_source_gets_its_instance_straight_off_the_create(self, crud, settings):
         write = SourceWriteRequest.model_validate(
             {
