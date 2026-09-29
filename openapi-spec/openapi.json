@@ -121,7 +121,7 @@
           "Auth"
         ],
         "summary": "Get Me",
-        "description": "Get the current authenticated user's info.\n\nA session on an issued password reports the flag and no roles, permissions,\ngroups or orgs, because its token carries none until the change.",
+        "description": "Get the current authenticated user's info.\n\nA session on an issued password reports the flag and no roles, permissions,\ngroups or orgs, because its token carries none until the change.\n\n``hyperdx_role`` and ``hyperdx_identity`` are what dfe-hyperdx takes a\nsession's dashboard role and team from; it caches this answer for 30 seconds,\nso a group change reaches HyperDX in that window rather than at token expiry.",
         "operationId": "get_me_api_v1_auth_me_get",
         "responses": {
           "200": {
@@ -29052,7 +29052,7 @@
           "team_name": {
             "type": "string",
             "title": "Team Name",
-            "description": "HyperDX team name; the caller's OIDC group"
+            "description": "HyperDX team name: the ClickHouse user its members read as"
           },
           "sources": {
             "items": {
@@ -39855,6 +39855,18 @@
             "title": "Password Change Required",
             "description": "True until the account replaces an issued password. A console shows the change screen before anything else while it is set.",
             "default": false
+          },
+          "hyperdx_role": {
+            "type": "string",
+            "title": "Hyperdx Role",
+            "description": "The role dfe-hyperdx gates team-wide dashboard changes on, resolved from the account's groups at this request: 'admin' for a system-scope admin or infra_admin, else 'member'.",
+            "default": ""
+          },
+          "hyperdx_identity": {
+            "type": "string",
+            "title": "Hyperdx Identity",
+            "description": "The ClickHouse username GET /api/v1/hyperdx/connection hands this session, without its password. dfe-hyperdx names the session's team after it. Empty when that read would refuse the session.",
+            "default": ""
           }
         },
         "type": "object",

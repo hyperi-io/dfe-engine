@@ -33,17 +33,21 @@ def _org(name: str, ids: list[str]) -> SimpleNamespace:
 
 
 class _FakeAdminClient:
-    """Records executed DDL; every discovery query returns no rows.
+    """Records executed DDL; every discovery query returns no rows but the group-user one.
 
     Enough to exercise the whole ``reconcile`` apply path without a cluster: the
     empty result_rows mean no existing objects to drop, so only the rendered
     create/alter/grant DDL is executed - which is exactly what we assert on.
+    ``group_users`` stands in for the ``dfe_grp_*`` users already in ClickHouse.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, group_users: list[str] | None = None) -> None:
         self.executed: list[str] = []
+        self._group_users = group_users or []
 
     def query(self, sql: str, parameters: dict | None = None) -> SimpleNamespace:
+        if "system.users" in sql and (parameters or {}).get("prefix") == "dfe_grp_":
+            return SimpleNamespace(result_rows=[(name,) for name in self._group_users])
         return SimpleNamespace(result_rows=[])
 
     def command(self, stmt: str) -> None:
@@ -144,6 +148,18 @@ class TestReconcilePasswordSync:
             f"ALTER USER `dfe_org_acme` IDENTIFIED WITH sha256_hash BY '{expected}'"
             in client.executed
         )
+
+    def test_a_reconcile_drops_the_user_of_a_group_that_no_longer_exists(self, tmp_path):
+        client = _FakeAdminClient(group_users=["dfe_grp_soc", "dfe_grp_deleted"])
+        result = ChRbacReconciler(client, secrets_store=self._store(tmp_path)).reconcile(
+            tiers=self._analyst_tiers(),
+            service_roles=[],
+            orgs=[],
+            bindings=[GroupChBinding(group="soc")],
+        )
+        assert result.dropped == ["DROP USER IF EXISTS `dfe_grp_deleted`"]
+        assert "DROP USER IF EXISTS `dfe_grp_deleted`" in client.executed
+        assert not any("DROP USER IF EXISTS `dfe_grp_soc`" in s for s in client.executed)
 
     def test_service_user_password_matches_the_served_secret(self, tmp_path):
         store = self._store(tmp_path)
@@ -440,6 +456,43 @@ class TestComputeDrops:
         assert all("analyst_bob" not in d for d in drops)
         assert all("dfe_grp_soc" not in d for d in drops)
         assert any("dfe_org_gone_role" in d for d in drops)
+
+    def test_a_deleted_groups_user_is_dropped(self):
+        """The group is gone, so its credential - unrestricted for a platform group - goes too."""
+        drops = compute_drops(
+            set(),
+            [],
+            set(),
+            [],
+            [],
+            existing_group_users={"dfe_grp_soc", "dfe_grp_gone"},
+            bindings=[GroupChBinding(group="soc")],
+        )
+        assert drops == ["DROP USER IF EXISTS `dfe_grp_gone`"]
+
+    def test_a_group_user_under_its_own_name_is_kept(self):
+        drops = compute_drops(
+            set(),
+            [],
+            set(),
+            [],
+            [],
+            existing_group_users={"dfe_grp_custom"},
+            bindings=[GroupChBinding(group="soc", ch_user="dfe_grp_custom")],
+        )
+        assert drops == []
+
+    def test_the_group_sweep_leaves_hand_made_users_alone(self):
+        drops = compute_drops(
+            set(),
+            [],
+            set(),
+            [],
+            [],
+            existing_group_users={"analyst_bob", "dfegrp_x"},
+            bindings=[],
+        )
+        assert drops == []
 
     def test_deny_policies_are_desired_not_dropped(self):
         """A non-_org_id table's deny policy must survive the drop sweep."""
