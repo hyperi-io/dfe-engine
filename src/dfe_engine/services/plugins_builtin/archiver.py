@@ -4,8 +4,6 @@ Consolidates archiver-specific descriptor, validation, sizing, and template
 overrides.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from dfe_engine.services.descriptor import KafkaRole, ServiceDescriptor
@@ -103,7 +101,7 @@ _template_overrides: dict[str, dict[str, Any]] = {
         "buffer": {"flush_bytes": 128 * 1024 * 1024, "writer_parallelism": 8},
     },
     "k8s": {
-        "kafka": {"brokers": ["kafka-bootstrap.kafka.svc.cluster.local:9092"]},
+        # No brokers: every deployment names its own.
         "metrics": {"address": "0.0.0.0:9090"},
         "memory": {"limit_bytes": 0},
     },

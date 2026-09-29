@@ -5,9 +5,9 @@ overrides that were previously scattered across validators.py, templates.py,
 sizing.py, and state.py.
 """
 
-from __future__ import annotations
-
+import copy
 from typing import Any
+from urllib.parse import urlsplit
 
 from dfe_engine.services.descriptor import KafkaRole, ServiceDescriptor
 from dfe_engine.services.plugin import ServicePlugin
@@ -126,18 +126,31 @@ _template_overrides: dict[str, dict[str, Any]] = {
     },
     "k8s": {
         "server": {"bind_address": "0.0.0.0:8080"},
-        "kafka": {"brokers": ["kafka-bootstrap.kafka.svc.cluster.local:9092"]},
-        "loader": {"address": "dfe-loader.dfe.svc.cluster.local:6000"},
+        # No brokers: every deployment names its own.
         "metrics": {"address": "0.0.0.0:9090"},
         "buffer": {"memory_limit": 0},
     },
 }
 
 
+def loader_address() -> str:
+    """The loader's gRPC listener as ``host:port``, where the app manifest places it.
+
+    The Service name and no namespace, so it resolves inside whatever namespace
+    the suite is deployed to.
+    """
+    from dfe_engine.appmgmt import catalogue
+
+    endpoint = catalogue.push_endpoint(catalogue.descriptor("dfe-loader"), "")
+    return urlsplit(endpoint).netloc
+
+
 def _make_plugin() -> ServicePlugin:
     from dfe_engine.deployment.models.receiver import ReceiverDeploymentConfig
     from dfe_engine.services.models.receiver import ReceiverConfig
 
+    overrides = copy.deepcopy(_template_overrides)
+    overrides["k8s"]["loader"] = {"address": loader_address()}
     return ServicePlugin(
         descriptor=descriptor,
         config_class=ReceiverConfig,
@@ -146,7 +159,7 @@ def _make_plugin() -> ServicePlugin:
         sizing_overrides=_sizing_overrides,
         keda_defaults=_keda_defaults,
         default_size="small",
-        config_template_overrides=_template_overrides,
+        config_template_overrides=overrides,
     )
 
 

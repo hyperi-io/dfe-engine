@@ -1,8 +1,9 @@
 """Tests for the SurfaceRegistry — YAML-backed service surface CRUD."""
 
+import importlib.resources
 import json
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -17,6 +18,30 @@ from dfe_engine.services.surfaces.registry import SurfaceNotFoundError, SurfaceR
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 MANIFESTS = Path(__file__).parents[2] / "fixtures" / "contract"
+RESOURCES = importlib.resources.files("dfe_engine.services.surfaces.resources")
+
+
+def _manifest(service: str) -> dict:
+    """The app's full metric manifest, as its ``metrics-manifest`` command prints it."""
+    return json.loads((MANIFESTS / service / "metrics-manifest.json").read_text())
+
+
+def _shipped_metrics(service: str) -> list[MetricEntry]:
+    """The metrics the built-in surface for *service* lists."""
+    with importlib.resources.as_file(RESOURCES / f"{service}.yaml") as path:
+        return ServiceSurface(**yaml_load(path)).metrics_surface
+
+
+def _idle_manifest(service: str) -> dict:
+    """The app's manifest with every metric its built-in surface lists taken out.
+
+    That is the shape an idle app serves: its runtime metrics, and none of the
+    curated ones.
+    """
+    manifest = _manifest(service)
+    curated = {entry.name for entry in _shipped_metrics(service)}
+    manifest["metrics"] = [m for m in manifest["metrics"] if m["name"] not in curated]
+    return manifest
 
 
 def _make_surface(
@@ -306,6 +331,21 @@ class _ManifestServer:
 
 
 @pytest.fixture
+def serve() -> Iterator[Callable[[dict[str, tuple[int, bytes]]], _ManifestServer]]:
+    """Start a manifest server per call, every one closed at teardown."""
+    servers: list[_ManifestServer] = []
+
+    def start(routes: dict[str, tuple[int, bytes]]) -> _ManifestServer:
+        server = _ManifestServer(routes)
+        servers.append(server)
+        return server
+
+    yield start
+    for server in servers:
+        server.close()
+
+
+@pytest.fixture
 def loader_app() -> Iterator[_ManifestServer]:
     """dfe-loader's real manifest, served where the resolver below points."""
     manifest = (MANIFESTS / "dfe-loader" / "metrics-manifest.json").read_bytes()
@@ -334,19 +374,22 @@ class TestRefreshManifest:
         assert await registry.refresh_manifest("dfe-nothing") is None
         assert loader_app.hits == []
 
-    async def test_the_app_s_manifest_replaces_the_metrics(self, tmp_path: Path, loader_app):
+    async def test_the_app_s_full_manifest_adds_what_the_surface_left_out(
+        self, tmp_path: Path, loader_app
+    ):
         registry = SurfaceRegistry(tmp_path / "surfaces", manifest_url_for=_at(loader_app.base))
-        manifest = json.loads((MANIFESTS / "dfe-loader" / "metrics-manifest.json").read_text())
-        published = manifest["metrics"]
+        published = [m["name"] for m in _manifest("dfe-loader")["metrics"]]
+        curated = [m.name for m in _shipped_metrics("dfe-loader")]
 
         refreshed = await registry.refresh_manifest("dfe-loader")
 
         assert loader_app.hits == ["/dfe-loader/metrics/manifest"]
         assert refreshed is not None
         assert refreshed.discovered_at
-        assert [m.name for m in refreshed.metrics_surface] == [m["name"] for m in published]
-        stored = _got(registry, "dfe-loader")
-        assert [m.name for m in stored.metrics_surface] == [m["name"] for m in published]
+        stored = [m.name for m in _got(registry, "dfe-loader").metrics_surface]
+        assert stored == [m.name for m in refreshed.metrics_surface]
+        assert stored[: len(curated)] == curated
+        assert sorted(stored) == sorted(published)
         assert "manifest_url" not in yaml_load(tmp_path / "surfaces" / "dfe-loader.yaml")
 
     async def test_a_non_success_answer_is_not_a_refresh(self, tmp_path: Path, loader_app):
@@ -367,3 +410,51 @@ class TestRefreshManifest:
 
         assert await registry.refresh_manifest(service) is None
         assert (tmp_path / "surfaces" / f"{service}.yaml").read_text() == before
+
+
+def _served(manifest: dict) -> tuple[int, bytes]:
+    return 200, json.dumps(manifest).encode()
+
+
+class TestRefreshMerges:
+    """A refresh adds and updates metrics, and never drops one the surface lists."""
+
+    async def test_an_idle_app_keeps_every_curated_metric(self, tmp_path: Path, serve):
+        idle = _idle_manifest("dfe-archiver")
+        curated = _shipped_metrics("dfe-archiver")
+        assert 0 < len(idle["metrics"]) < len(_manifest("dfe-archiver")["metrics"])
+        app = serve({"/dfe-archiver/metrics/manifest": _served(idle)})
+        registry = SurfaceRegistry(tmp_path / "surfaces", manifest_url_for=_at(app.base))
+
+        refreshed = await registry.refresh_manifest("dfe-archiver")
+
+        assert refreshed is not None
+        stored = _got(registry, "dfe-archiver").metrics_surface
+        assert stored[: len(curated)] == curated
+        assert [m.name for m in stored[len(curated) :]] == [m["name"] for m in idle["metrics"]]
+
+    async def test_a_listed_metric_the_app_describes_is_updated_in_place(
+        self, tmp_path: Path, serve
+    ):
+        curated = _shipped_metrics("dfe-archiver")
+        described = {**curated[2].model_dump(), "description": "Archive files opened"}
+        app = serve({"/dfe-archiver/metrics/manifest": _served({"metrics": [described]})})
+        registry = SurfaceRegistry(tmp_path / "surfaces", manifest_url_for=_at(app.base))
+
+        await registry.refresh_manifest("dfe-archiver")
+
+        stored = _got(registry, "dfe-archiver").metrics_surface
+        assert [m.name for m in stored] == [m.name for m in curated]
+        assert stored[2].description == "Archive files opened"
+        assert stored[:2] + stored[3:] == curated[:2] + curated[3:]
+
+    async def test_a_second_refresh_lists_nothing_twice(self, tmp_path: Path, serve):
+        app = serve({"/dfe-archiver/metrics/manifest": _served(_idle_manifest("dfe-archiver"))})
+        registry = SurfaceRegistry(tmp_path / "surfaces", manifest_url_for=_at(app.base))
+
+        first = await registry.refresh_manifest("dfe-archiver")
+        second = await registry.refresh_manifest("dfe-archiver")
+
+        assert first is not None
+        assert second is not None
+        assert [m.name for m in second.metrics_surface] == [m.name for m in first.metrics_surface]

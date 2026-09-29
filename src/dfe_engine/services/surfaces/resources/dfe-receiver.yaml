@@ -1,18 +1,19 @@
 service: dfe-receiver
 description: "High-throughput Rust ingest endpoint"
 config_surface:
-  config.kafka.bootstrap_servers:
-    type: string
-    description: "Kafka bootstrap servers"
-  config.server.listen_address:
+  config.kafka.brokers:
+    type: array
+    description: "Kafka broker addresses, as host:port"
+    default: []
+  config.server.bind_address:
     type: string
     description: "HTTP listen address"
     default: "0.0.0.0:8080"
-  config.buffer.max_bytes:
+  config.buffer.memory_limit:
     type: integer
-    description: "Buffer size limit in bytes"
-    default: 67108864
-  config.server.max_body_bytes:
+    description: "Buffer memory limit in bytes. 0 sizes it from the container's memory limit"
+    default: 0
+  config.server.max_body_size:
     type: integer
     description: "Maximum request body size in bytes"
     default: 10485760
