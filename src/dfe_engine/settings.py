@@ -1854,6 +1854,7 @@ def _get_env_overrides() -> dict:
         "services": {},
         "repository": {},
         "deployment": {},
+        "transform_validation": {},
         "helm": {},
         "auth": {},
         "orgs": {},
@@ -2427,13 +2428,13 @@ def _get_env_overrides() -> dict:
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
-    """Deep merge two dicts. Override wins on conflicts."""
+    """Deep merge two dicts. Override wins on conflicts, and a list it sets is the whole list."""
     import copy
 
     from dfe_engine.yaml_utils import deep_merge
 
     result = copy.deepcopy(base)
-    deep_merge(result, override)
+    deep_merge(result, override, replace_lists=True)
     return result
 
 

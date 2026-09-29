@@ -13,6 +13,7 @@ from dfe_engine.settings import (
     reset_settings,
 )
 from dfe_engine.transport import SourceTransport
+from dfe_engine.yaml_utils import yaml_dump_string
 
 
 @pytest.fixture(autouse=True)
@@ -661,6 +662,114 @@ class TestEnvOverrides:
         assert settings.clickhouse.port == 9000
         assert settings.api.port == 9090
         assert settings.auth.enabled is True
+
+    @pytest.mark.parametrize(
+        ("env_name", "field"),
+        [
+            ("DFE_TRANSFORM_VALIDATION_ENABLED", "enabled"),
+            ("DFE_TRANSFORM_VALIDATION_BLOCKING", "blocking"),
+            ("DFE_TRANSFORM_DRY_RUN_ENABLED", "dry_run"),
+        ],
+    )
+    def test_transform_validation_override(self, monkeypatch, env_name, field):
+        default = getattr(load_settings().transform_validation, field)
+        monkeypatch.setenv(env_name, "false" if default else "true")
+        assert getattr(load_settings().transform_validation, field) is not default
+
+
+def _listed(settings: DFESettings, path: str, key: str | None) -> list:
+    """The list at a dotted settings path, reduced to each item's ``key`` when given."""
+    value = settings.model_dump()
+    for part in path.split("."):
+        value = value[part]
+    return value if key is None else [item[key] for item in value]
+
+
+# Every list-typed setting load_settings() carries: its path, the env var that sets
+# it, the env value, the item key that identifies an entry, and what that value reads as.
+_LIST_SETTINGS = [
+    pytest.param(
+        "api.cors_origins",
+        "DFE_API_CORS_ORIGINS",
+        "https://env.example",
+        None,
+        ["https://env.example"],
+        id="api.cors_origins",
+    ),
+    pytest.param(
+        "hunts.alert_channels",
+        "DFE_HUNTS_ALERT_CHANNELS",
+        "json://env.example",
+        None,
+        ["json://env.example"],
+        id="hunts.alert_channels",
+    ),
+    pytest.param(
+        "auth.local.seed_accounts",
+        "DFE_AUTH_LOCAL_SEED_ACCOUNTS",
+        '[{"username": "from-env"}]',
+        "username",
+        ["from-env"],
+        id="auth.local.seed_accounts",
+    ),
+    pytest.param(
+        "orgs.seed_orgs",
+        "DFE_ORGS_SEED_ORGS",
+        '[{"name": "from-env"}]',
+        "name",
+        ["from-env"],
+        id="orgs.seed_orgs",
+    ),
+]
+
+# The same fields as a config file sets them, plus admin_links, whose env form is a string.
+_FILE_LISTS = {
+    "api.cors_origins": (["https://file.example"], None, ["https://file.example"]),
+    "hunts.alert_channels": (["json://file.example"], None, ["json://file.example"]),
+    "auth.local.seed_accounts": ([{"username": "from-file"}], "username", ["from-file"]),
+    "orgs.seed_orgs": ([{"name": "from-file"}], "name", ["from-file"]),
+    "deployment.admin_links": (
+        [{"name": "Argo CD", "purpose": "gitops", "url": "https://argo.example"}],
+        "name",
+        ["Argo CD"],
+    ),
+}
+
+
+def _config_file(tmp_path, path: str, value: list) -> str:
+    """Write a config file that sets one dotted settings path, and return its path."""
+    doc: dict = {}
+    node = doc
+    *parents, leaf = path.split(".")
+    for part in parents:
+        node = node.setdefault(part, {})
+    node[leaf] = value
+    target = tmp_path / "dfe.yaml"
+    target.write_text(yaml_dump_string(doc), encoding="utf-8")
+    return str(target)
+
+
+class TestListsAcrossLayers:
+    """A list is the whole value its layer sets: the layer above replaces it, never extends it."""
+
+    @pytest.mark.parametrize("path", sorted(_FILE_LISTS))
+    def test_a_config_file_list_is_taken_exactly(self, tmp_path, path):
+        value, key, expected = _FILE_LISTS[path]
+        settings = load_settings(_config_file(tmp_path, path, value))
+        assert _listed(settings, path, key) == expected
+
+    @pytest.mark.parametrize(("path", "env_name", "env_value", "key", "expected"), _LIST_SETTINGS)
+    def test_an_env_list_replaces_the_config_file_list(
+        self, monkeypatch, tmp_path, path, env_name, env_value, key, expected
+    ):
+        file_value = _FILE_LISTS[path][0]
+        monkeypatch.setenv(env_name, env_value)
+        settings = load_settings(_config_file(tmp_path, path, file_value))
+        assert _listed(settings, path, key) == expected
+
+    def test_an_env_list_replaces_the_shipped_default(self, monkeypatch):
+        monkeypatch.setenv("DFE_API_CORS_ORIGINS", "https://a.example,https://b.example")
+        assert load_settings().api.cors_origins == ["https://a.example", "https://b.example"]
 
 
 class TestTransportAvailability:
