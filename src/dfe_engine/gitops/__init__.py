@@ -12,11 +12,9 @@ dfe-engine authors declarative artifacts and commits them to the deploy repo;
 Argo CD applies them. The engine needs only git-write, never kubectl.
 """
 
-from dfe_engine.gitops.artifacts import collect_deploy_artifacts
 from dfe_engine.gitops.repo import GitopsRepo, PublishResult
 
 __all__ = [
     "GitopsRepo",
     "PublishResult",
-    "collect_deploy_artifacts",
 ]
