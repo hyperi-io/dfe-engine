@@ -914,7 +914,6 @@ class TestCredentialsAreNotEchoed:
         assert shown["auth"]["token"] == contract.REDACTED
         assert "rest-tok-7731" not in read.text
 
-        shown["topic"] = "t-2"
         written = client.put(
             f"{base}/config",
             json={"changes": {"config.sources.rest": {"primary": shown}}},
@@ -922,7 +921,45 @@ class TestCredentialsAreNotEchoed:
         )
         assert written.status_code == 200, written.text
         stored = gc.get("helmvars", "dfe-fetcher-alpha-values")["config"]["sources"]["rest"]
-        assert stored == {"primary": {**entry, "topic": "t-2"}}
+        assert stored == {"primary": entry}
+
+    @pytest.mark.parametrize(
+        ("path", "value"),
+        [
+            pytest.param("config.sources.rest.primary.url", "https://attacker.example", id="leaf"),
+            pytest.param(
+                "config.sources.rest",
+                {
+                    "primary": {
+                        "url": "https://attacker.example",
+                        "topic": "t",
+                        "auth": {"token": contract.REDACTED},
+                    }
+                },
+                id="section",
+            ),
+        ],
+    )
+    def test_a_fetcher_source_moved_beside_its_masked_token_is_refused(
+        self, client, app, admin_headers, tmp_path, path, value
+    ):
+        """The token nests a mapping below the url it is sent to, and the url is still its."""
+        gc = _wire(app, tmp_path)
+        _deploy_fetcher(client, admin_headers, "alpha")
+        base = "/api/v1/apps/dfe-fetcher/alpha"
+        entry = {"url": "https://api.example", "topic": "t", "auth": {"token": "rest-tok-7732"}}
+        client.put(
+            f"{base}/config",
+            json={"changes": {"config.sources.rest": {"primary": entry}}},
+            headers=admin_headers,
+        )
+        before = gc.head_revision()
+
+        resp = client.put(f"{base}/config", json={"changes": {path: value}}, headers=admin_headers)
+
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "credential_reentry_required"
+        assert gc.head_revision() == before
 
     def test_the_fetcher_ingest_token_is_masked_on_both_reads(
         self, client, app, admin_headers, tmp_path
@@ -1047,7 +1084,8 @@ class TestCredentialsAreNotEchoed:
             client,
             admin_headers,
             {
-                "config.server.auth.mode": "header",
+                "config.config_reload_secs": 45,
+                "config.server.auth.mode": auth["mode"],
                 "config.server.auth.bearer.tokens": auth["bearer"]["tokens"],
                 "config.server.auth.accepted_headers": auth["accepted_headers"],
                 "config.server.auth.header_values": auth["header_values"],
@@ -1057,8 +1095,9 @@ class TestCredentialsAreNotEchoed:
         assert resp.status_code == 200, resp.text
 
         stored = gc.get("helmvars", "dfe-receiver-default-values")
+        assert stored["config"]["config_reload_secs"] == 45
         assert stored["config"]["server"]["auth"] == {
-            "mode": "header",
+            "mode": "bearer",
             "bearer": {"tokens": ["tok-1", "tok-2"]},
             "accepted_headers": [{"name": "x-api-key", "values": ["hv-1"]}],
             "header_values": ["legacy-1"],

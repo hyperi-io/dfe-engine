@@ -6523,7 +6523,7 @@
           "Services"
         ],
         "summary": "Save Service Config",
-        "description": "Create or update a service config.\n\nA read shows every set secret masked, so a masked value written back keeps the\nsecret stored there, matched as the app surface matches one. A mask with nothing\nstored behind it, or in a list entry that cannot be told apart, is a 400\n``masked_value`` and nothing is saved. A mask beside a field of the same object\nthat changed is a 400 ``credential_reentry_required``: the secret is typed again.",
+        "description": "Create or update a service config.\n\nA read shows every set secret masked, so a masked value written back keeps the\nsecret stored there, matched as the app surface matches one. A mask with nothing\nstored behind it, or in a list entry that cannot be told apart, is a 400\n``masked_value`` and nothing is saved. A changed field beside a masked secret,\nin the same mapping or with the secret one mapping down, is a 400\n``credential_reentry_required``: the secret is typed again.",
         "operationId": "save_service_config_api_v1_services__service___instance__put",
         "parameters": [
           {
@@ -18488,7 +18488,7 @@
           "App Management"
         ],
         "summary": "Set App Config",
-        "description": "Write options the app declares, and environment keys it does not.\n\nJudged against the app's own contract before anything is committed, so a value\nthe app would refuse at startup leaves the deploy repo where it was rather than\nlanding a commit an operator then has to revert.\n\nA secret is written like any other option: it goes into the overlay as the rest\nof this surface writes one, and neither this response nor a read route on this\nsurface says what it is. A masked value written back as it was read keeps the\nstored credential; the mask where nothing is stored is a 400 ``masked_value``,\nand the mask beside a changed field of the same entry is a 400\n``credential_reentry_required``.\n\n409 where the deployment already decides the value: a config path the chart\nderives, or an `extraEnv` name the chart sets for this app.",
+        "description": "Write options the app declares, and environment keys it does not.\n\nJudged against the app's own contract before anything is committed, so a value\nthe app would refuse at startup leaves the deploy repo where it was rather than\nlanding a commit an operator then has to revert.\n\nA secret is written like any other option: it goes into the overlay as the rest\nof this surface writes one, and neither this response nor a read route on this\nsurface says what it is. A masked value written back as it was read keeps the\nstored credential; the mask where nothing is stored is a 400 ``masked_value``.\nA changed field beside a stored credential, in the same mapping or with the\ncredential one mapping down (``brokers`` beside ``sasl.password``), is a 400\n``credential_reentry_required`` until that mapping is written whole with its\ncredentials typed again. A setting inside another mapping beside it, such as\n``producer.retries``, is not. ``config`` and ``extraEnv`` are roots, so a\nsetting directly under either never needs one.\n\n409 where the deployment already decides the value: a config path the chart\nderives, or an `extraEnv` name the chart sets for this app.",
         "operationId": "set_app_config_api_v1_apps__service___instance__config_put",
         "parameters": [
           {
