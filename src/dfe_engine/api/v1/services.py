@@ -156,8 +156,8 @@ async def save_service_config(
     A read shows every set secret masked, so a masked value written back keeps the
     secret stored there, matched as the app surface matches one. A mask with nothing
     stored behind it, or in a list entry that cannot be told apart, is a 400
-    ``masked_value`` and nothing is saved. A field changed inside a mapping that
-    holds a masked secret, at any depth below the config's own top level, is a 400
+    ``masked_value`` and nothing is saved. A changed field beside a masked secret,
+    in the same mapping or with the secret one mapping down, is a 400
     ``credential_reentry_required``: the secret is typed again.
     """
     try:

@@ -1365,8 +1365,8 @@ class TestAMaskedCredentialRestoresOnlyWhereItWasSet:
         ]
 
 
-class TestTheNearestMappingHoldingACredentialDecides:
-    """A write is judged at the nearest mapping above it that holds a stored credential.
+class TestTheMappingBesideACredentialDecides:
+    """A write is judged at the mapping it sits in, which counts a credential one mapping down.
 
     ``kafka.brokers`` and ``kafka.sasl.password`` sit at different levels, so a check
     at the credential's own level alone lets a PUT move the host it is sent to.
@@ -1398,11 +1398,26 @@ class TestTheNearestMappingHoldingACredentialDecides:
         with pytest.raises(contract.CredentialReentryError, match=r"config\.kafka changed brokers"):
             contract.restore_masked_at(self.DOC, "config.kafka", written)
 
-    def test_a_setting_below_the_holder_is_judged_there_too(self):
-        with pytest.raises(
-            contract.CredentialReentryError, match=r"config\.kafka changed producer"
-        ):
-            contract.restore_masked_at(self.DOC, "config.kafka.producer.retries", 9)
+    def test_a_setting_in_a_mapping_beside_the_credential_is_no_redirect(self):
+        assert contract.restore_masked_at(self.DOC, "config.kafka.producer.retries", 9) == 9
+
+    def test_a_section_put_changing_a_mapping_beside_the_credential_is_taken(self):
+        written = {
+            "brokers": ["kafka-1:9092"],
+            "producer": {"retries": 9},
+            "sasl": {"username": "dfe", "password": self.R},
+        }
+        assert contract.restore_masked_at(self.DOC, "config.kafka", written) == {
+            **self.DOC["config"]["kafka"],
+            "producer": {"retries": 9},
+        }
+
+    def test_a_credential_two_mappings_down_guards_nothing_above(self):
+        """The narrow rule's cost: a host beside a credential nested this deep may move."""
+        doc = {"config": {"sink": {"url": "https://a.example", "conn": {"auth": {"token": "t-1"}}}}}
+        assert contract.restore_masked_at(doc, "config.sink.url", "https://b.example") == (
+            "https://b.example"
+        )
 
     def test_the_host_moves_with_the_credential_typed_again(self):
         written = {
