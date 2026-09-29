@@ -127,6 +127,19 @@ _FORBIDDEN_KEYWORDS_RE = re.compile(
     re.IGNORECASE,
 )
 
+# String literals and quoted identifiers, with ClickHouse's doubled-quote and backslash escapes.
+_QUOTED_RE = re.compile(r"'(?:[^'\\]|\\.|'')*'|`(?:[^`\\]|\\.|``)*`|\"(?:[^\"\\]|\\.|\"\")*\"")
+
+
+def _blank_inside(match: re.Match[str]) -> str:
+    quoted = match.group(0)
+    return quoted[0] + " " * (len(quoted) - 2) + quoted[-1]
+
+
+def _mask_quoted(sql: str) -> str:
+    """Blank the inside of every quoted span, keeping each character's position."""
+    return _QUOTED_RE.sub(_blank_inside, sql)
+
 
 # -- Service ------------------------------------------------
 
@@ -190,14 +203,15 @@ class RuleCreationService:
         sql_errors: list[SqlValidationError] = []
         if refusal is not None:
             sql_errors = [refusal]
-        elif clean_sql:
-            sql_errors = self._validate_sql_syntax(clean_sql)
+        elif request.user_sql:
+            sql_errors = self._validate_sql_syntax(clean_sql or "")
 
-        # Phase 3: Create Rule via existing pipeline
+        # Phase 3: Create Rule via existing pipeline; SQL the sanitiser emptied keeps
+        # the caller's text so the result can carry the errors rather than raise.
         rule_create = RuleCreate(
             name=request.name,
             severity=request.severity,
-            user_sql=clean_sql,
+            user_sql=clean_sql or request.user_sql,
             cel_filter=request.cel_filter,
             hunt_name=request.hunt_name,
             source=request.source,
@@ -244,9 +258,12 @@ class RuleCreationService:
         4. Balanced parentheses
         5. Parses as one ClickHouse SELECT (EXPLAIN AST when ClickHouse is
            configured, else sqlglot's ClickHouse dialect)
+        6. Its FROM names a ``<db>.<table>``, read the way the rule model reads it
         """
         errors: list[SqlValidationError] = []
         trimmed = sql.strip()
+        # Keywords and parentheses inside a literal are data, not structure.
+        structure = _mask_quoted(trimmed)
 
         if not trimmed.upper().startswith("SELECT"):
             errors.append(
@@ -257,7 +274,7 @@ class RuleCreationService:
                 )
             )
 
-        if not re.search(r"\bFROM\b", trimmed, re.IGNORECASE):
+        if not re.search(r"\bFROM\b", structure, re.IGNORECASE):
             errors.append(
                 SqlValidationError(
                     message="SQL must contain a FROM clause.",
@@ -265,7 +282,7 @@ class RuleCreationService:
                 )
             )
 
-        ddl_match = _FORBIDDEN_KEYWORDS_RE.search(trimmed)
+        ddl_match = _FORBIDDEN_KEYWORDS_RE.search(structure)
         if ddl_match:
             keyword = ddl_match.group(0).upper()
             errors.append(
@@ -278,7 +295,7 @@ class RuleCreationService:
 
         # Balanced parentheses
         depth = 0
-        for i, ch in enumerate(trimmed):
+        for i, ch in enumerate(structure):
             if ch == "(":
                 depth += 1
             elif ch == ")":
@@ -305,6 +322,18 @@ class RuleCreationService:
             parse_error = self._parse_error(trimmed)
             if parse_error is not None:
                 errors.append(parse_error)
+
+        # The hunt runner scans the rule's own <db>.<table>, and an unqualified one
+        # compiles to no source at all.
+        if not errors:
+            parsed = self._rewriter.parse_user_sql(trimmed)
+            if not (parsed.source_db and parsed.source_table):
+                errors.append(
+                    SqlValidationError(
+                        message="SQL names no <db>.<table> source for the hunt runner to scan.",
+                        suggestion="Qualify the FROM table with its database, e.g. FROM dfe.main.",
+                    )
+                )
 
         return errors
 

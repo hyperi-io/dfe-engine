@@ -2,6 +2,23 @@
 
 import pytest
 
+from dfe_engine.api.deps import get_rule_registry
+from dfe_engine.hunts.rule_model import Rule
+
+# What HyperDX's search export emitted before it rendered the view's own table:
+# the legacy template, which names no table and does not parse.
+_HYPERDX_TEMPLATE_SQL = (
+    "SELECT _timestamp,_json FROM {{org_id}}.{{source_table_name}} "
+    "WHERE ({{timestamp_condition}}) ORDER BY _timestamp DESC"
+)
+
+# What the export renders for a search-bar condition and a side-panel filter on `main`.
+_HYPERDX_RENDERED_SQL = (
+    "SELECT _timestamp,_json FROM dfe.main WHERE (toString(`_tags`.marker) = 'run-1' "
+    "AND (toString(_json.event_type) = 'login_failure')) AND "
+    "((toString(_json.`user_name`) IN ('root'))) ORDER BY _timestamp DESC"
+)
+
 
 def _sample_create_payload(**overrides):
     payload = {
@@ -106,17 +123,17 @@ class TestRulesListAndDetail:
         assert resp.json()["sql_errors"] == []
 
     def test_get_rule_detail_includes_sql_errors(self, client, admin_headers):
-        create = client.post(
-            "/api/v1/rules",
-            json=_sample_create_payload(
-                name="bad_sql_rule", user_sql="INSERT INTO logs VALUES (1)"
-            ),
-            headers=admin_headers,
+        # The API refuses such a rule, so it is written the way a hand-authored
+        # rule file reaches the deploy repo.
+        get_rule_registry().save(
+            Rule(
+                rule_id="bad_sql_rule",
+                name="Bad SQL Rule",
+                original_sql="INSERT INTO logs VALUES (1)",
+            )
         )
-        assert create.status_code == 201
-        rule_name = create.json()["rule"]["name"]
 
-        resp = client.get(f"/api/v1/rules/{rule_name}", headers=admin_headers)
+        resp = client.get("/api/v1/rules/bad_sql_rule", headers=admin_headers)
         assert resp.status_code == 200
         assert len(resp.json()["sql_errors"]) > 0
 
@@ -487,3 +504,130 @@ class TestRulesFromHyperdxSavedSearch:
         )
         assert resp.status_code == 403
         assert fake_hyperdx.asked_for is None
+
+
+def _assert_refused(resp) -> list[dict]:
+    """The invalid_sql refusal, returning the SQL errors it carries."""
+    assert resp.status_code == 422, resp.text
+    body = resp.json()
+    assert body["code"] == "invalid_sql"
+    sql_errors = body["context"]["sql_errors"]
+    assert sql_errors
+    assert all(error["message"] for error in sql_errors)
+    assert sql_errors[0]["message"] in body["message"]
+    return sql_errors
+
+
+class TestRulesRefuseUncompilable:
+    """A rule the hunt runner cannot compile is refused with 422 and never written."""
+
+    def test_hyperdx_template_is_refused_and_not_saved(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"raw_sql": _HYPERDX_TEMPLATE_SQL},
+            headers=admin_headers,
+        )
+
+        _assert_refused(resp)
+        assert client.get("/api/v1/rules", headers=admin_headers).json()["total"] == 0
+        assert client.get("/api/v1/rules/hyperdx-rule", headers=admin_headers).status_code == 404
+
+    def test_rendered_hyperdx_view_keeps_its_table_and_filters(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"raw_sql": _HYPERDX_RENDERED_SQL, "saved_search_name": "Root rulecycle"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["sql_errors"] == []
+        rule = client.get("/api/v1/rules/root-rulecycle", headers=admin_headers).json()
+        assert (rule["source_db"], rule["source_table"]) == ("dfe", "main")
+        assert "toString(_json.event_type) = 'login_failure'" in rule["where_clause"]
+        assert "toString(_json.`user_name`) IN ('root')" in rule["where_clause"]
+        assert rule["sql_errors"] == []
+
+    def test_search_with_no_filter_is_refused(self, client, admin_headers):
+        # The template's time condition stripped, what is left matches every row.
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"raw_sql": "SELECT _timestamp,_json FROM dfe.main ORDER BY _timestamp DESC"},
+            headers=admin_headers,
+        )
+
+        sql_errors = _assert_refused(resp)
+        assert [e["message"] for e in sql_errors] == [
+            "Rule has empty detection logic (WHERE clause)."
+        ]
+        assert client.get("/api/v1/rules", headers=admin_headers).json()["total"] == 0
+
+    def test_create_refuses_sql_that_does_not_parse(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules",
+            json=_sample_create_payload(
+                name="unparsed", user_sql="SELECT count() FROM default.events WHERE x = "
+            ),
+            headers=admin_headers,
+        )
+
+        _assert_refused(resp)
+        assert client.get("/api/v1/rules/unparsed", headers=admin_headers).status_code == 404
+
+    def test_create_refuses_a_from_with_no_database(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules",
+            json=_sample_create_payload(
+                name="unqualified", user_sql="SELECT * FROM events WHERE severity = 'high'"
+            ),
+            headers=admin_headers,
+        )
+
+        sql_errors = _assert_refused(resp)
+        assert any("<db>.<table>" in error["message"] for error in sql_errors)
+        assert client.get("/api/v1/rules/unqualified", headers=admin_headers).status_code == 404
+
+    def test_create_refuses_dml(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules",
+            json=_sample_create_payload(name="dml", user_sql="INSERT INTO logs VALUES (1)"),
+            headers=admin_headers,
+        )
+
+        _assert_refused(resp)
+        assert client.get("/api/v1/rules/dml", headers=admin_headers).status_code == 404
+
+    def test_create_refuses_empty_sql(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules",
+            json=_sample_create_payload(name="empty", user_sql=""),
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert client.get("/api/v1/rules/empty", headers=admin_headers).status_code == 404
+
+    def test_update_refuses_and_keeps_the_stored_rule(self, client, admin_headers):
+        payload = _sample_create_payload(name="kept")
+        assert client.post("/api/v1/rules", json=payload, headers=admin_headers).status_code == 201
+
+        resp = client.put(
+            "/api/v1/rules/kept",
+            json=_sample_create_payload(user_sql=_HYPERDX_TEMPLATE_SQL),
+            headers=admin_headers,
+        )
+
+        _assert_refused(resp)
+        stored = client.get("/api/v1/rules/kept", headers=admin_headers).json()
+        assert stored["original_sql"] == payload["user_sql"]
+        assert stored["sql_errors"] == []
+
+    def test_validate_names_the_missing_database(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules/validate",
+            json={"sql": "SELECT * FROM events WHERE severity = 'high'"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["valid"] is False
+        assert any("<db>.<table>" in error["message"] for error in resp.json()["errors"])
