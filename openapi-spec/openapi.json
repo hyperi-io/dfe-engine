@@ -8282,7 +8282,7 @@
           "Rules"
         ],
         "summary": "Create Rule",
-        "description": "Create a new hunt rule via RuleCreationService.\n\nThe service sanitizes the SQL, applies CEL->SQL transpilation,\nvalidates column references, and optionally estimates query cost.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so.",
+        "description": "Create a new hunt rule via RuleCreationService.\n\nThe service sanitizes the SQL, applies CEL->SQL transpilation,\nvalidates column references, and optionally estimates query cost. A rule\nwhose SQL the hunt runner could not compile is refused with 422.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so.",
         "operationId": "create_rule_api_v1_rules_post",
         "requestBody": {
           "required": true,
@@ -8326,11 +8326,11 @@
             }
           },
           "422": {
-            "description": "Validation Error",
+            "description": "Refused, nothing written: the body failed validation (code validation_error), or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, or has no WHERE to detect with (code invalid_sql, the errors in context.sql_errors)",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -8349,7 +8349,7 @@
           "Rules"
         ],
         "summary": "Create Rule From Hyperdx",
-        "description": "Create a hunt rule from a HyperDX view's expanded query.\n\nWraps the create pipeline with ``source_type='hyperdx'`` and auto-derives a\nunique rule id from the saved-search name, so the caller need not supply one.\nRBAC: ``rule:write`` (data_analyst) -- ``org_viewer`` has neither this grant nor\nthe UI button.",
+        "description": "Create a hunt rule from a HyperDX view's expanded query.\n\nWraps the create pipeline with ``source_type='hyperdx'`` and auto-derives a\nunique rule id from the saved-search name, so the caller need not supply one.\nA view whose SQL the hunt runner could not compile is refused with 422.\nRBAC: ``rule:write`` (data_analyst) -- ``org_viewer`` has neither this grant nor\nthe UI button.",
         "operationId": "create_rule_from_hyperdx_api_v1_rules_from_hyperdx_post",
         "requestBody": {
           "content": {
@@ -8393,11 +8393,11 @@
             }
           },
           "422": {
-            "description": "Validation Error",
+            "description": "Refused, nothing written: the body failed validation (code validation_error), or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, or has no WHERE to detect with (code invalid_sql, the errors in context.sql_errors)",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -8549,7 +8549,7 @@
           "Rules"
         ],
         "summary": "Update Rule",
-        "description": "Replace a detection rule (re-runs creation pipeline, preserves created_at).\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so.",
+        "description": "Replace a detection rule (re-runs creation pipeline, preserves created_at).\n\nA replacement the hunt runner could not compile is refused with 422 and the\nstored rule is left as it was. A production+team write is routed to a review\nbranch instead of the branch the runner git-syncs, and the\n``X-DFE-Review-Required`` header says so.",
         "operationId": "update_rule_api_v1_rules__name__put",
         "parameters": [
           {
@@ -8604,11 +8604,11 @@
             }
           },
           "422": {
-            "description": "Validation Error",
+            "description": "Refused, nothing written: the body failed validation (code validation_error), or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, or has no WHERE to detect with (code invalid_sql, the errors in context.sql_errors)",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -33881,6 +33881,7 @@
           },
           "user_sql": {
             "type": "string",
+            "minLength": 1,
             "title": "User Sql",
             "description": "Full detection query: SELECT ... FROM <db>.<table> WHERE ... (the FROM names the source table)"
           },
@@ -34341,6 +34342,7 @@
           },
           "user_sql": {
             "type": "string",
+            "minLength": 1,
             "title": "User Sql",
             "description": "Full detection query: SELECT ... FROM <db>.<table> WHERE ... (the FROM names the source table)"
           },

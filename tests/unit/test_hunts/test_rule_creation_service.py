@@ -291,6 +291,39 @@ class TestSqlValidation:
         )
         assert service.validate_sql(sql) == []
 
+    @pytest.mark.parametrize(
+        "condition",
+        [
+            "action = 'delete'",
+            "operation IN ('CREATE', 'UPDATE', 'DROP')",
+            "message LIKE '%(%'",
+            "message = 'it''s (unbalanced'",
+            "`drop` = 1",
+        ],
+    )
+    def test_a_keyword_or_paren_inside_a_literal_is_data(self, service, condition):
+        assert service.validate_sql(f"SELECT * FROM dfe.main WHERE {condition}") == []
+
+    def test_reject_a_from_with_no_database(self, service):
+        errors = service.validate_sql("SELECT * FROM events WHERE severity = 'high'")
+        assert [e.message for e in errors] == [
+            "SQL names no <db>.<table> source for the hunt runner to scan."
+        ]
+
+    def test_reject_a_templated_table(self, service):
+        errors = service.validate_sql(
+            "SELECT _timestamp,_json FROM {{org_id}}.{{source_table_name}} "
+            "WHERE ({{timestamp_condition}}) ORDER BY _timestamp DESC"
+        )
+        assert errors, "a table left as a template placeholder must not validate"
+
+    def test_hyperdx_sql_that_sanitises_to_nothing_is_an_error(self, service):
+        result = service.create_rule(
+            RuleCreateRequest(name="Nothing", source_type="hyperdx", user_sql="LIMIT 100"),
+            rule_id="nothing",
+        )
+        assert result.sql_errors
+
     def test_sql_errors_in_result(self, service):
         """Validation errors appear in RuleCreateResult."""
         result = service.create_rule(
