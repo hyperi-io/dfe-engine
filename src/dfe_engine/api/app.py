@@ -360,7 +360,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         surfaces_dir = Path(surfaces_config_dir) / "service-surfaces"
     else:
         surfaces_dir = Path("config") / "service-surfaces"
-    app.state.surface_registry = SurfaceRegistry(surfaces_dir)
+    app.state.surface_registry = SurfaceRegistry(
+        surfaces_dir, manifest_url_for=settings.services.metrics_manifest_url_for
+    )
 
     # Bootstrap HyperDX client (optional)
     if settings.hyperdx.enabled and settings.hyperdx.base_url:

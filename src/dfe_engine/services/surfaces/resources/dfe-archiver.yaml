@@ -36,46 +36,45 @@ config_surface:
     description: "Maximum archive file age before roll"
     default: 300
 metrics_surface:
-  - name: dfe_archiver_files_created_total
+  - name: files_created_total
     type: counter
-    group: sink
+    group: custom
     description: "Total archive files created"
-  - name: dfe_archiver_files_closed_total
+  - name: files_closed_total
     type: counter
-    group: sink
-    description: "Total archive files closed and uploaded"
-  - name: dfe_archiver_archive_roll_total
+    group: custom
+    description: "Total archive files closed (rolled)"
+  - name: archive_roll_total
     type: counter
-    group: buffer
-    description: "Archive file roll events"
+    group: custom
+    description: "Archive file roll events by trigger"
     labels:
       - trigger
-  - name: dfe_archiver_archive_file_size_bytes
+  - name: archive_file_size_bytes
     type: histogram
-    group: sink
-    description: "Archive file sizes at close"
-  - name: dfe_archiver_hot_buffers_active
+    group: custom
+    description: "Final compressed archive file sizes at roll time"
+  - name: hot_buffers_active
     type: gauge
-    group: buffer
+    group: custom
     description: "Number of active hot buffers"
-  - name: dfe_archiver_hot_buffers_bytes
+  - name: hot_buffers_bytes
     type: gauge
-    group: buffer
-    description: "Total bytes across active hot buffers"
-  - name: dfe_archiver_compression_ratio
+    group: custom
+    description: "Total bytes in hot buffers"
+  - name: compression_ratio
     type: gauge
-    group: app
-    description: "Current compression ratio"
-  - name: dfe_archiver_compression_duration_seconds
+    group: custom
+    description: "Running compression ratio (compressed/uncompressed)"
+  - name: compression_duration_seconds
     type: histogram
-    group: app
-    description: "Compression operation latency"
-  - name: dfe_archiver_bytes_compressed_total
+    group: custom
+    description: "Time to compress a buffer flush"
+  - name: bytes_compressed_total
     type: counter
-    group: app
-    description: "Total bytes compressed"
-  - name: dfe_archiver_pipeline_last_batch_timestamp_seconds
+    group: custom
+    description: "Total bytes written (post-compression)"
+  - name: pipeline_last_batch_timestamp_seconds
     type: gauge
-    group: app
-    description: "Timestamp of most recent batch (staleness detection)"
-manifest_url: "http://dfe-archiver.dfe-prod.svc.cluster.local:9090/metrics/manifest"
+    group: custom
+    description: "Unix timestamp of last completed batch"

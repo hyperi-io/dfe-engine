@@ -14,17 +14,22 @@ adding a YAML file -- zero Python code.
 
 Built-in surface definitions are seeded from package resources on first
 load when the target directory is empty.
-"""
 
-from __future__ import annotations
+Where a service publishes its live metric manifest is a fact of the
+deployment, not of the surface, so ``manifest_url`` is derived on every load
+and never stored.
+"""
 
 import builtins
 import importlib.resources
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
+from pydantic import ValidationError
 from scalo.logger import logger
 
-from dfe_engine.services.surfaces.models import ServiceSurface
+from dfe_engine.services.surfaces.models import MetricEntry, ServiceSurface
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 
@@ -39,8 +44,21 @@ class SurfaceRegistry:
     configurable settings and metrics.
     """
 
-    def __init__(self, surfaces_dir: Path) -> None:
+    def __init__(
+        self,
+        surfaces_dir: Path,
+        manifest_url_for: Callable[[str], str] | None = None,
+    ) -> None:
+        """Open the surfaces directory, seeding the built-ins into an empty one.
+
+        Args:
+            surfaces_dir: Directory holding one ``<service>.yaml`` per surface.
+            manifest_url_for: Maps a service name to the address its metric
+                manifest is served at, or "" where the deployment names none.
+                None names no address for any service.
+        """
         self._dir = Path(surfaces_dir)
+        self._manifest_url_for = manifest_url_for
         self._dir.mkdir(parents=True, exist_ok=True)
         self._seed_if_empty()
 
@@ -107,24 +125,19 @@ class SurfaceRegistry:
     # -- Manifest refresh -------------------------------------
 
     async def refresh_manifest(self, service_name: str) -> ServiceSurface | None:
-        """Fetch /metrics/manifest from the service and update the surface.
+        """Fetch the service's live metric manifest and store its metrics.
 
-        Returns None if the service is unreachable or has no manifest_url.
-        This is a placeholder for Phase 1.5 of scalo-rs -- when scalo-rs
-        exposes a /metrics/manifest endpoint, this method will fetch it
-        and update the metrics_surface.
+        Returns:
+            The updated surface, or None when nothing was fetched: the surface
+            does not exist, the deployment names no manifest address, or the
+            service did not answer with a manifest.
         """
-        from datetime import UTC, datetime
-
         surface = self.get(service_name)
         if surface is None:
             return None
         if not surface.manifest_url:
-            logger.debug(
-                "No manifest_url configured",
-                service=service_name,
-            )
-            return surface
+            logger.debug("No manifest address configured", service=service_name)
+            return None
 
         try:
             from scalo.http import AsyncHttpClient
@@ -137,7 +150,7 @@ class SurfaceRegistry:
                         service=service_name,
                         status=response.status_code,
                     )
-                    return surface
+                    return None
                 manifest = response.json()
         except Exception as e:
             logger.warning(
@@ -145,18 +158,18 @@ class SurfaceRegistry:
                 service=service_name,
                 error=str(e),
             )
-            return surface
+            return None
 
-        # Update metrics_surface from manifest if it has a metrics list
-        from dfe_engine.services.surfaces.models import MetricEntry
+        if not isinstance(manifest, dict) or not isinstance(manifest.get("metrics"), list):
+            logger.warning("Manifest carries no metrics list", service=service_name)
+            return None
+        try:
+            metrics = [MetricEntry.model_validate(m) for m in manifest["metrics"]]
+        except ValidationError as e:
+            logger.warning("Manifest metrics do not validate", service=service_name, error=str(e))
+            return None
 
-        if isinstance(manifest, dict) and "metrics" in manifest:
-            metrics = []
-            for m in manifest["metrics"]:
-                if isinstance(m, dict) and "name" in m:
-                    metrics.append(MetricEntry(**m))
-            surface.metrics_surface = metrics
-
+        surface.metrics_surface = metrics
         surface.discovered_at = datetime.now(UTC).isoformat()
         self._write_surface(self._path_for(service_name), surface)
         logger.info("Refreshed manifest", service=service_name)
@@ -175,7 +188,7 @@ class SurfaceRegistry:
             if not isinstance(data, dict):
                 logger.warning("Invalid surface file (not a dict)", path=str(path))
                 return None
-            return ServiceSurface(**data)
+            surface = ServiceSurface(**data)
         except Exception as e:
             logger.warning(
                 "Failed to load surface",
@@ -183,10 +196,15 @@ class SurfaceRegistry:
                 error=str(e),
             )
             return None
+        if self._manifest_url_for is None:
+            surface.manifest_url = ""
+        else:
+            surface.manifest_url = self._manifest_url_for(surface.service)
+        return surface
 
     def _write_surface(self, path: Path, surface: ServiceSurface) -> None:
-        """Serialise a surface to YAML."""
-        data = surface.model_dump(mode="json")
+        """Serialise a surface to YAML, leaving out the derived manifest address."""
+        data = surface.model_dump(mode="json", exclude={"manifest_url"})
         yaml_dump(data, path)
 
     def _seed_if_empty(self) -> None:

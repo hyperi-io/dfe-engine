@@ -21,34 +21,7 @@ config_surface:
     description: "Enable OTLP ingest endpoint"
     default: false
 metrics_surface:
-  - name: dfe_receiver_requests_total
+  - name: records_received_total
     type: counter
-    group: app
-    description: "Total requests received"
-    labels:
-      - transport
-  - name: dfe_receiver_request_duration_seconds
-    type: histogram
-    group: app
-    description: "Request processing latency"
-    labels:
-      - transport
-  - name: dfe_receiver_active_connections
-    type: gauge
-    group: app
-    description: "Current active connections"
-    labels:
-      - transport
-  - name: dfe_receiver_body_size_rejected_total
-    type: counter
-    group: app
-    description: "Requests rejected for oversized body"
-  - name: dfe_receiver_messages_spilled_total
-    type: counter
-    group: app
-    description: "Messages spilled to disk spool"
-  - name: dfe_receiver_messages_drained_total
-    type: counter
-    group: app
-    description: "Messages drained from disk spool"
-manifest_url: "http://dfe-receiver.dfe-prod.svc.cluster.local:8080/metrics/manifest"
+    group: platform
+    description: "Records received from all sources"

@@ -1,7 +1,5 @@
 """Tests for the service-surfaces API router."""
 
-from __future__ import annotations
-
 
 class TestListServiceSurfaces:
     def test_list_returns_seeded_surfaces(self, client, admin_headers):
@@ -81,8 +79,8 @@ class TestRefreshManifest:
         )
         assert resp.status_code == 404
 
-    def test_refresh_unreachable_returns_not_refreshed(self, client, admin_headers):
-        """Refresh against an unreachable manifest_url returns refreshed=false."""
+    def test_refresh_with_no_manifest_address_is_not_refreshed(self, client, admin_headers):
+        """No DFE_SERVICES_METRICS_MANIFEST_URL here, so nothing is fetched."""
         resp = client.post(
             "/api/v1/service-surfaces/dfe-receiver/metrics/refresh",
             headers=admin_headers,
@@ -90,11 +88,8 @@ class TestRefreshManifest:
         assert resp.status_code == 200
         data = resp.json()
         assert data["service"] == "dfe-receiver"
-        # The manifest_url points to a K8s-internal address, so it will
-        # fail in test — that is expected behaviour (graceful degradation).
-        # refreshed may be false or the discovered_at may be empty.
-        assert "refreshed" in data
-        assert "metrics_count" in data
+        assert data["refreshed"] is False
+        assert data["discovered_at"] == ""
 
     def test_refresh_requires_write(self, client, viewer_headers):
         resp = client.post(
@@ -130,14 +125,17 @@ class TestSurfaceMetricsDetail:
         resp = client.get("/api/v1/service-surfaces/dfe-receiver", headers=admin_headers)
         metrics = resp.json()["metrics_surface"]
         metric_names = {m["name"] for m in metrics}
-        assert "dfe_receiver_requests_total" in metric_names
-        assert "dfe_receiver_active_connections" in metric_names
+        assert "records_received_total" in metric_names
 
     def test_loader_metrics_names(self, client, admin_headers):
         resp = client.get("/api/v1/service-surfaces/dfe-loader", headers=admin_headers)
         metrics = resp.json()["metrics_surface"]
         metric_names = {m["name"] for m in metrics}
-        assert "dfe_loader_rows_inserted_total" in metric_names
+        assert "rows_inserted_total" in metric_names
+
+    def test_no_surface_names_a_manifest_address_by_default(self, client, admin_headers):
+        resp = client.get("/api/v1/service-surfaces", headers=admin_headers)
+        assert {s["manifest_url"] for s in resp.json()} == {""}
 
     def test_metrics_have_type_field(self, client, admin_headers):
         resp = client.get("/api/v1/service-surfaces/dfe-receiver", headers=admin_headers)

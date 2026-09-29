@@ -1,0 +1,1240 @@
+{
+  "schema_version": 1,
+  "app": "dfe-loader",
+  "namespace": "",
+  "version": "1.18.2",
+  "commit": "6d9ffaaea0ed496056629f2a71efd36075557962",
+  "registered_at": "",
+  "metrics": [
+    {
+      "name": "transport_sent_total",
+      "type": "counter",
+      "description": "Messages successfully sent to transport",
+      "unit": "",
+      "labels": [
+        "transport",
+        "path"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_send_errors_total",
+      "type": "counter",
+      "description": "Messages that failed to send",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_backpressured_total",
+      "type": "counter",
+      "description": "Messages delayed due to backpressure",
+      "unit": "",
+      "labels": [
+        "transport",
+        "reason"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_refused_total",
+      "type": "counter",
+      "description": "Messages refused by transport (circuit open, capacity)",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_healthy",
+      "type": "gauge",
+      "description": "Transport health (1=healthy, 0=unhealthy)",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_queue_size",
+      "type": "gauge",
+      "description": "Current number of messages in transport queue",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_queue_capacity",
+      "type": "gauge",
+      "description": "Maximum transport queue capacity",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_inflight",
+      "type": "gauge",
+      "description": "Messages currently in-flight (sent but not acked)",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_commit_errors_total",
+      "type": "counter",
+      "description": "Source commits that failed after the block was delivered",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_recv_errors_total",
+      "type": "counter",
+      "description": "Receive failures by class (transient: retried, permanent: returned)",
+      "unit": "",
+      "labels": [
+        "transport",
+        "class"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_consumer_rebuilds_total",
+      "type": "counter",
+      "description": "Consumers replaced after librdkafka flagged them fatal, by the protocol rejoined with",
+      "unit": "",
+      "labels": [
+        "transport",
+        "protocol"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_send_duration_seconds",
+      "type": "histogram",
+      "description": "Time to send a batch to transport",
+      "unit": "seconds",
+      "labels": [
+        "transport"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_sent_bytes_total",
+      "type": "counter",
+      "description": "Raw bytes written to transport (egress)",
+      "unit": "bytes",
+      "labels": [
+        "transport"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_received_bytes_total",
+      "type": "counter",
+      "description": "Raw bytes read from transport (ingress)",
+      "unit": "bytes",
+      "labels": [
+        "transport"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_received_events_total",
+      "type": "counter",
+      "description": "Events received off the transport (ingress count)",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "pipeline_retries_total",
+      "type": "counter",
+      "description": "Run-loop steps retried after a transient source or sink failure",
+      "unit": "",
+      "labels": [
+        "stage"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "pipeline_idle",
+      "type": "gauge",
+      "description": "Service has no work configured (1=idle, 0=working)",
+      "unit": "",
+      "labels": [],
+      "group": "platform"
+    },
+    {
+      "name": "pipeline_ready",
+      "type": "gauge",
+      "description": "Pipeline readiness (1=ready, 0=not ready)",
+      "unit": "",
+      "labels": [],
+      "group": "platform"
+    },
+    {
+      "name": "pipeline_stall_seconds_total",
+      "type": "counter",
+      "description": "Cumulative seconds the pipeline was stalled",
+      "unit": "seconds",
+      "labels": [],
+      "group": "platform"
+    },
+    {
+      "name": "pipeline_delivery_guarantee",
+      "type": "gauge",
+      "description": "Delivery guarantee the pipeline gives (1 = active), with the reason, and the listener when the app names one",
+      "unit": "",
+      "labels": [
+        "guarantee",
+        "reason",
+        "listener"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "pipeline_dead_letters_dropped_total",
+      "type": "counter",
+      "description": "Dead letters dropped with nowhere to go: no DLQ, a disabled DLQ, a record a gRPC send_batch left out of a block, or one a downstream peer refused for good",
+      "unit": "",
+      "labels": [
+        "reason"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_ack_held",
+      "type": "gauge",
+      "description": "Records whose source acknowledgement is held until delivery",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_ack_held_bytes",
+      "type": "gauge",
+      "description": "Payload bytes whose source acknowledgement is held until delivery",
+      "unit": "bytes",
+      "labels": [
+        "transport"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_ack_withheld",
+      "type": "gauge",
+      "description": "Kafka offsets released Errored and still held: each pins its partition's commit until a restart or a revoke",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_ack_released_total",
+      "type": "counter",
+      "description": "Records whose source acknowledgement was released, by outcome",
+      "unit": "",
+      "labels": [
+        "transport",
+        "outcome"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_ack_refused_total",
+      "type": "counter",
+      "description": "Requests refused before their acknowledgement was held, by reason",
+      "unit": "",
+      "labels": [
+        "transport",
+        "reason"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_ack_latency_seconds",
+      "type": "histogram",
+      "description": "Time from receipt to the release of a source acknowledgement",
+      "unit": "seconds",
+      "labels": [
+        "transport",
+        "outcome"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_redelivered_total",
+      "type": "counter",
+      "description": "Sends retried after the receiver may already have taken them",
+      "unit": "",
+      "labels": [
+        "transport",
+        "reason"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "records_received_total",
+      "type": "counter",
+      "description": "Records received from all sources",
+      "unit": "",
+      "labels": [],
+      "group": "platform"
+    },
+    {
+      "name": "records_delivered_total",
+      "type": "counter",
+      "description": "Records successfully delivered to sink",
+      "unit": "",
+      "labels": [],
+      "group": "platform"
+    },
+    {
+      "name": "records_filtered_total",
+      "type": "counter",
+      "description": "Records dropped by filter/routing rules",
+      "unit": "",
+      "labels": [],
+      "group": "platform"
+    },
+    {
+      "name": "records_dlq_total",
+      "type": "counter",
+      "description": "Records sent to dead letter queue",
+      "unit": "",
+      "labels": [],
+      "group": "platform"
+    },
+    {
+      "name": "scaling_pressure",
+      "type": "gauge",
+      "description": "Normalised scaling pressure (0-100)",
+      "unit": "",
+      "labels": [],
+      "group": "platform"
+    },
+    {
+      "name": "scaling_circuit_open",
+      "type": "gauge",
+      "description": "Circuit breaker state (1=open, 0=closed)",
+      "unit": "",
+      "labels": [],
+      "group": "platform"
+    },
+    {
+      "name": "scaling_memory_pressure",
+      "type": "gauge",
+      "description": "Memory pressure ratio (0.0-1.0)",
+      "unit": "",
+      "labels": [],
+      "group": "platform"
+    },
+    {
+      "name": "spool_bytes",
+      "type": "gauge",
+      "description": "Current spool size in bytes",
+      "unit": "",
+      "labels": [],
+      "group": "platform"
+    },
+    {
+      "name": "spool_messages",
+      "type": "gauge",
+      "description": "Current spool message count",
+      "unit": "",
+      "labels": [],
+      "group": "platform"
+    },
+    {
+      "name": "spool_disk_available",
+      "type": "gauge",
+      "description": "Available disk space for spool in bytes",
+      "unit": "",
+      "labels": [],
+      "group": "platform"
+    },
+    {
+      "name": "dlq_dropped_total",
+      "type": "counter",
+      "description": "Dead letters no DLQ backend holds, by reason",
+      "unit": "",
+      "labels": [
+        "reason"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "dlq_cascade_fallthrough_total",
+      "type": "counter",
+      "description": "Dead letters a later cascade backend took after an earlier one gave them up",
+      "unit": "",
+      "labels": [
+        "from",
+        "to",
+        "reason"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "auth_failures_total",
+      "type": "counter",
+      "description": "Authentication failures by reason",
+      "unit": "",
+      "labels": [
+        "reason"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "validation_failures_total",
+      "type": "counter",
+      "description": "Validation failures by reason",
+      "unit": "",
+      "labels": [
+        "reason"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "info",
+      "type": "gauge",
+      "description": "Application info for service discovery",
+      "unit": "",
+      "labels": [
+        "version",
+        "commit"
+      ],
+      "group": "app"
+    },
+    {
+      "name": "start_time_seconds",
+      "type": "gauge",
+      "description": "Unix timestamp of process start",
+      "unit": "",
+      "labels": [],
+      "group": "app"
+    },
+    {
+      "name": "config_reloads_total",
+      "type": "counter",
+      "description": "Config reload attempts",
+      "unit": "",
+      "labels": [
+        "result"
+      ],
+      "group": "app"
+    },
+    {
+      "name": "records_processed_total",
+      "type": "counter",
+      "description": "Records successfully processed",
+      "unit": "",
+      "labels": [],
+      "group": "app"
+    },
+    {
+      "name": "records_error_total",
+      "type": "counter",
+      "description": "Records that failed processing",
+      "unit": "",
+      "labels": [],
+      "group": "app"
+    },
+    {
+      "name": "bytes_received_total",
+      "type": "counter",
+      "description": "Bytes received from source",
+      "unit": "",
+      "labels": [],
+      "group": "app"
+    },
+    {
+      "name": "bytes_written_total",
+      "type": "counter",
+      "description": "Bytes written to sink",
+      "unit": "",
+      "labels": [],
+      "group": "app"
+    },
+    {
+      "name": "memory_used_bytes",
+      "type": "gauge",
+      "description": "Current memory usage (cgroup-aware)",
+      "unit": "",
+      "labels": [],
+      "group": "app"
+    },
+    {
+      "name": "memory_limit_bytes",
+      "type": "gauge",
+      "description": "Effective memory limit",
+      "unit": "",
+      "labels": [],
+      "group": "app"
+    },
+    {
+      "name": "worker_pool_active_threads",
+      "type": "gauge",
+      "description": "Permits currently leased (in-flight worker count)",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "worker_pool_target_threads",
+      "type": "gauge",
+      "description": "Target thread count from scaler (admission ceiling)",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "worker_pool_available_threads",
+      "type": "gauge",
+      "description": "Headroom: leasable permits right now (target - leased)",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "worker_pool_max_threads",
+      "type": "gauge",
+      "description": "Maximum pool threads",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "worker_pool_cpu_utilisation",
+      "type": "gauge",
+      "description": "Current CPU utilisation sample",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "worker_pool_memory_utilisation",
+      "type": "gauge",
+      "description": "Effective memory pressure",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "worker_pool_saturation",
+      "type": "gauge",
+      "description": "Pool saturation ratio (active/max)",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "worker_pool_tasks_total",
+      "type": "counter",
+      "description": "Total tasks submitted to rayon pool",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "worker_pool_task_duration_seconds",
+      "type": "histogram",
+      "description": "Per-task execution time",
+      "unit": "seconds",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "worker_pool_batch_duration_seconds",
+      "type": "histogram",
+      "description": "End-to-end batch processing time",
+      "unit": "seconds",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "worker_pool_semaphore_wait_seconds",
+      "type": "histogram",
+      "description": "Time waiting for semaphore permit",
+      "unit": "seconds",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "worker_pool_scale_events_total",
+      "type": "counter",
+      "description": "Scaling events",
+      "unit": "",
+      "labels": [
+        "direction"
+      ],
+      "group": "custom"
+    },
+    {
+      "name": "worker_pool_async_inflight",
+      "type": "gauge",
+      "description": "Current async fan-out tasks in flight",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "batch_engine_messages_received_total",
+      "type": "counter",
+      "description": "Messages received from transport",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "batch_engine_messages_parsed_total",
+      "type": "counter",
+      "description": "Messages successfully SIMD-parsed",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "batch_engine_messages_filtered_total",
+      "type": "counter",
+      "description": "Messages filtered at pre-route",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "batch_engine_messages_dlq_total",
+      "type": "counter",
+      "description": "Messages routed to DLQ",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "batch_engine_parse_errors_total",
+      "type": "counter",
+      "description": "Parse failures",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "batch_engine_parse_duration_seconds",
+      "type": "histogram",
+      "description": "SIMD parse time per chunk",
+      "unit": "seconds",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "batch_engine_transform_duration_seconds",
+      "type": "histogram",
+      "description": "App transform time per chunk",
+      "unit": "seconds",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "batch_engine_chunk_size",
+      "type": "histogram",
+      "description": "Actual items per chunk",
+      "unit": "seconds",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "batch_engine_pre_route_duration_seconds",
+      "type": "histogram",
+      "description": "Pre-route extraction time per chunk",
+      "unit": "seconds",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "batch_engine_intern_table_size",
+      "type": "gauge",
+      "description": "Interned field name count",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "self_regulation_byte_budget",
+      "type": "gauge",
+      "description": "Current AIMD byte budget (inbound block size lever)",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "self_regulation_recv_block_bytes",
+      "type": "gauge",
+      "description": "Bytes in the most recent received block (vs the byte budget)",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "self_regulation_pressure_ratio",
+      "type": "gauge",
+      "description": "Combined self-regulation pressure level (0.0-1.0)",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "self_regulation_inbound_paused",
+      "type": "gauge",
+      "description": "1 while the inbound gate is holding under pressure, else 0 (per source)",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "self_regulation_inbound_pauses_total",
+      "type": "counter",
+      "description": "Inbound gate pause (rising-edge) events (per source)",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "self_regulation_kafka_gate_errors_total",
+      "type": "counter",
+      "description": "Kafka pause/resume actuator failures (brake degraded)",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "dfe_loader_header_pass_skipped_total",
+      "type": "counter",
+      "description": "Messages rejected because the header pass promoted no columns",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "dfe_loader_routing_field_absent_total",
+      "type": "counter",
+      "description": "Records on a source topic that named no table and fell back to the default",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "buffer_flush_trigger_total",
+      "type": "counter",
+      "description": "Buffer flush trigger reason",
+      "unit": "",
+      "labels": [
+        "trigger"
+      ],
+      "group": "buffer"
+    },
+    {
+      "name": "buffer_bytes",
+      "type": "gauge",
+      "description": "Current buffer size in bytes",
+      "unit": "",
+      "labels": [],
+      "group": "buffer"
+    },
+    {
+      "name": "buffer_records",
+      "type": "gauge",
+      "description": "Current buffered record count",
+      "unit": "",
+      "labels": [],
+      "group": "buffer"
+    },
+    {
+      "name": "buffer_flush_total",
+      "type": "counter",
+      "description": "Buffer flush operations",
+      "unit": "",
+      "labels": [],
+      "group": "buffer"
+    },
+    {
+      "name": "buffer_flush_duration_seconds",
+      "type": "histogram",
+      "description": "Buffer flush latency",
+      "unit": "seconds",
+      "labels": [],
+      "group": "buffer",
+      "buckets": [
+        0.001,
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0,
+        5.0
+      ]
+    },
+    {
+      "name": "consumer_lag",
+      "type": "gauge",
+      "description": "Kafka consumer lag per topic/partition",
+      "unit": "",
+      "labels": [
+        "topic",
+        "partition"
+      ],
+      "group": "consumer"
+    },
+    {
+      "name": "consumer_partitions_assigned",
+      "type": "gauge",
+      "description": "Current assigned partition count",
+      "unit": "",
+      "labels": [],
+      "group": "consumer"
+    },
+    {
+      "name": "consumer_rebalance_total",
+      "type": "counter",
+      "description": "Consumer group rebalance events",
+      "unit": "",
+      "labels": [],
+      "group": "consumer"
+    },
+    {
+      "name": "consumer_poll_duration_seconds",
+      "type": "histogram",
+      "description": "Time per Kafka poll/recv call",
+      "unit": "seconds",
+      "labels": [],
+      "group": "consumer"
+    },
+    {
+      "name": "offsets_committed_total",
+      "type": "counter",
+      "description": "Kafka offsets committed after successful processing",
+      "unit": "",
+      "labels": [],
+      "group": "consumer"
+    },
+    {
+      "name": "sink_duration_seconds",
+      "type": "histogram",
+      "description": "Sink write latency",
+      "unit": "seconds",
+      "labels": [
+        "backend"
+      ],
+      "group": "sink"
+    },
+    {
+      "name": "sink_errors_total",
+      "type": "counter",
+      "description": "Sink write errors",
+      "unit": "",
+      "labels": [
+        "backend"
+      ],
+      "group": "sink"
+    },
+    {
+      "name": "bytes_sent_total",
+      "type": "counter",
+      "description": "Bytes sent to sink",
+      "unit": "",
+      "labels": [
+        "format"
+      ],
+      "group": "sink"
+    },
+    {
+      "name": "concurrent_inserts",
+      "type": "gauge",
+      "description": "In-flight insert/write operations",
+      "unit": "",
+      "labels": [],
+      "group": "sink"
+    },
+    {
+      "name": "backpressure_events_total",
+      "type": "counter",
+      "description": "Backpressure activation events",
+      "unit": "",
+      "labels": [],
+      "group": "backpressure"
+    },
+    {
+      "name": "backpressure_duration_seconds_total",
+      "type": "counter",
+      "description": "Cumulative time paused by backpressure",
+      "unit": "",
+      "labels": [],
+      "group": "backpressure"
+    },
+    {
+      "name": "enrichment_cache_hits_total",
+      "type": "counter",
+      "description": "Enrichment cache hits",
+      "unit": "",
+      "labels": [
+        "type"
+      ],
+      "group": "enrichment"
+    },
+    {
+      "name": "enrichment_cache_misses_total",
+      "type": "counter",
+      "description": "Enrichment cache misses",
+      "unit": "",
+      "labels": [
+        "type"
+      ],
+      "group": "enrichment"
+    },
+    {
+      "name": "enrichment_cache_size",
+      "type": "gauge",
+      "description": "Current enrichment cache entries",
+      "unit": "",
+      "labels": [
+        "type"
+      ],
+      "group": "enrichment"
+    },
+    {
+      "name": "enrichment_duration_seconds",
+      "type": "histogram",
+      "description": "Enrichment lookup latency",
+      "unit": "seconds",
+      "labels": [
+        "type"
+      ],
+      "group": "enrichment"
+    },
+    {
+      "name": "schema_recovery_total",
+      "type": "counter",
+      "description": "Schema mismatch recovery events",
+      "unit": "",
+      "labels": [
+        "table"
+      ],
+      "group": "schema_cache"
+    },
+    {
+      "name": "schema_cache_hits_total",
+      "type": "counter",
+      "description": "Schema cache hits",
+      "unit": "",
+      "labels": [],
+      "group": "schema_cache"
+    },
+    {
+      "name": "schema_cache_misses_total",
+      "type": "counter",
+      "description": "Schema cache misses (triggers fetch)",
+      "unit": "",
+      "labels": [],
+      "group": "schema_cache"
+    },
+    {
+      "name": "schema_cache_tables",
+      "type": "gauge",
+      "description": "Number of cached table schemas",
+      "unit": "",
+      "labels": [],
+      "group": "schema_cache"
+    },
+    {
+      "name": "messages_received_total",
+      "type": "counter",
+      "description": "Total messages received from Kafka",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "messages_processed_total",
+      "type": "counter",
+      "description": "Total messages successfully processed",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "messages_dlq_total",
+      "type": "counter",
+      "description": "Total messages sent to DLQ",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "batches_flushed_total",
+      "type": "counter",
+      "description": "Total batches flushed to ClickHouse",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "rows_inserted_total",
+      "type": "counter",
+      "description": "Total rows inserted to ClickHouse",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "insert_errors_total",
+      "type": "counter",
+      "description": "Total insert errors",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "kafka_offsets_committed_total",
+      "type": "counter",
+      "description": "Total Kafka offsets committed after successful insert",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "buffer_rows",
+      "type": "gauge",
+      "description": "Current rows buffered",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "buffer_tables",
+      "type": "gauge",
+      "description": "Number of active table buffers",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "insert_latency_seconds",
+      "type": "histogram",
+      "description": "Insert batch latency in seconds",
+      "unit": "seconds",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "memory_bytes",
+      "type": "gauge",
+      "description": "Estimated memory used by loader",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "clickhouse_pool_max",
+      "type": "gauge",
+      "description": "Max connections in pool",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "clickhouse_pool_active",
+      "type": "gauge",
+      "description": "Active connections in pool",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "clickhouse_pool_idle",
+      "type": "gauge",
+      "description": "Idle connections in pool",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "clickhouse_pool_waiting",
+      "type": "gauge",
+      "description": "Tasks waiting for a connection",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "insert_bytes_total",
+      "type": "counter",
+      "description": "Total uncompressed bytes inserted to ClickHouse",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "insert_transactions_total",
+      "type": "counter",
+      "description": "Total INSERT statements committed",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "events_per_second",
+      "type": "gauge",
+      "description": "Current events processed per second",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "clickhouse_insert_duration_seconds",
+      "type": "histogram",
+      "description": "ClickHouse insert batch latency",
+      "unit": "seconds",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "clickhouse_flush_rows",
+      "type": "histogram",
+      "description": "Rows per flush to ClickHouse (flush size)",
+      "unit": "seconds",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "clickhouse_flush_bytes",
+      "type": "histogram",
+      "description": "Uncompressed bytes per flush to ClickHouse (flush size)",
+      "unit": "seconds",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "clickhouse_inserter_inflight",
+      "type": "gauge",
+      "description": "In-flight concurrent ClickHouse insert tasks (inserter queue depth)",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "clickhouse_insert_errors_total",
+      "type": "counter",
+      "description": "Terminal ClickHouse insert errors (after retry/salvage)",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "clickhouse_rows_per_second",
+      "type": "gauge",
+      "description": "Rows inserted to ClickHouse per second (sink throughput)",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "dfe_loader_pending_schema_overflow_total",
+      "type": "counter",
+      "description": "Messages DLQ'd because a pending-schema buffer hit its cap",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "dfe_loader_pending_schema_expired_total",
+      "type": "counter",
+      "description": "Pending-schema messages DLQ'd by the expire sweep",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "dfe_loader_pending_schema_messages",
+      "type": "gauge",
+      "description": "Messages held awaiting schema resolution",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "dfe_loader_rows_lost_total",
+      "type": "counter",
+      "description": "Rows neither ClickHouse nor a DLQ took, which nothing will deliver again",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "dfe_loader_schema_prewarm_retries_total",
+      "type": "counter",
+      "description": "Schema pre-warm retry rounds beyond the first",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "dfe_loader_schema_prewarm_failed_tables",
+      "type": "gauge",
+      "description": "Tables still failing schema pre-warm after the retry budget",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "dfe_loader_batched_array_messages_total",
+      "type": "counter",
+      "description": "Received messages carrying a batch of records as a JSON array",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "dfe_loader_batched_array_records_total",
+      "type": "counter",
+      "description": "Records split out of batched-array messages",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "dfe_loader_batched_ndjson_messages_total",
+      "type": "counter",
+      "description": "Received messages carrying newline-separated JSON records",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "dfe_loader_batched_ndjson_records_total",
+      "type": "counter",
+      "description": "Records split out of newline-separated messages",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    }
+  ]
+}

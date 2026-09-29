@@ -571,6 +571,39 @@ class TestEnvOverrides:
         settings = load_settings()
         assert settings.services.config_yaml_dir == "/custom/svc"
 
+    def test_metrics_manifest_url_names_each_app(self, monkeypatch):
+        monkeypatch.setenv(
+            "DFE_SERVICES_METRICS_MANIFEST_URL", " http://{service}:9090/metrics/manifest "
+        )
+        services = load_settings().services
+        assert services.metrics_manifest_url_for("dfe-loader") == (
+            "http://dfe-loader:9090/metrics/manifest"
+        )
+
+    def test_metrics_manifest_url_defaults_to_none(self):
+        services = load_settings().services
+        assert services.metrics_manifest_url == ""
+        assert services.metrics_manifest_url_for("dfe-loader") == ""
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "http://dfe-loader:9090/metrics/manifest",
+            "http://{service}.{namespace}.svc:9090/metrics/manifest",
+            "http://{service!r}:9090/metrics/manifest",
+            "http://{service:>20}:9090/metrics/manifest",
+            "http://{}:9090/metrics/manifest",
+            "http://{service:9090/metrics/manifest",
+            "{service}:9090/metrics/manifest",
+            "ftp://{service}/metrics/manifest",
+            "http:///{service}/metrics/manifest",
+        ],
+    )
+    def test_metrics_manifest_url_refuses_a_template_it_cannot_fill(self, monkeypatch, template):
+        monkeypatch.setenv("DFE_SERVICES_METRICS_MANIFEST_URL", template)
+        with pytest.raises(ValidationError, match="metrics_manifest_url"):
+            load_settings()
+
     def test_sources_dir_override(self, monkeypatch):
         monkeypatch.setenv("DFE_SOURCES_DIR", "/custom/sources")
         settings = load_settings()
