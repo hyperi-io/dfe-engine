@@ -102,7 +102,7 @@ Full system map, invariants, and the docs tree:
 | Area | Code | Docs |
 |------|------|------|
 | API + auth + RBAC | `src/dfe_engine/api/`, `auth/` | [control-plane/](docs/control-plane/index.md) |
-| Governed gitops CRUD | `gitcrud/`, `gitops/`, `governance/`, `helm/` | [control-plane/governed-ops-design.md](docs/control-plane/governed-ops-design.md) |
+| Governed gitops CRUD | `gitcrud/`, `gitops/`, `governance/` | [control-plane/governed-ops-design.md](docs/control-plane/governed-ops-design.md) |
 | Sources, schemas, DDL | `source/`, `schema/`, `fieldmap/`, `cel/`, `sigma/` | [data-plane/](docs/data-plane/index.md) |
 | Query API | `query/` | [data-plane/query-api.md](docs/data-plane/query-api.md) |
 | Hunts | `hunts/`, `hunt_runner/`, `keda_shim/` | [data-plane/hunt-runner-scaling.md](docs/data-plane/hunt-runner-scaling.md) |
