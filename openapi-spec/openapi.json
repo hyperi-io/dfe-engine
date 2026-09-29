@@ -6523,7 +6523,7 @@
           "Services"
         ],
         "summary": "Save Service Config",
-        "description": "Create or update a service config.\n\nA read shows every set secret masked, so a masked value written back keeps the\nsecret stored there, matched as the app surface matches one. A mask with nothing\nstored behind it, or in a list entry that cannot be told apart, is a 400\n``masked_value`` and nothing is saved. A changed field beside a masked secret,\nin the same mapping or with the secret one mapping down, is a 400\n``credential_reentry_required``: the secret is typed again.",
+        "description": "Create or update a service config.\n\nEach top-level section in the body replaces the stored one, and a section the\nbody leaves out is kept as stored, so a form that sends some sections cannot\ndrop the rest and the secrets in them. A section written as ``null`` is removed.\n\nA read shows every set secret masked, so a masked value written back keeps the\nsecret stored there, matched as the app surface matches one. A mask with nothing\nstored behind it, or in a list entry that cannot be told apart, is a 400\n``masked_value`` and nothing is saved. A changed field beside a masked secret,\nin the same mapping or with the secret one mapping down, is a 400\n``credential_reentry_required``: the secret is typed again.",
         "operationId": "save_service_config_api_v1_services__service___instance__put",
         "parameters": [
           {

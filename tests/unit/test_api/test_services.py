@@ -234,6 +234,47 @@ class TestLegacySecretsAreStoredAndMaskedOnTheWayOut:
         assert _saved(api_settings, "customsvc-one")["db"]["password"] == "raw-pw-8814"
 
 
+class TestASectionThePutLeavesOutIsKept:
+    """A form sends some sections; the rest, and the secrets in them, stay as stored."""
+
+    URL = "/api/v1/services/customsvc/sections"
+    TABLE = "customsvc-sections"
+    STORED = {
+        "db": {"host": "db-1", "password": "db-pw-8840"},
+        "cache": {"host": "cache-1", "token": "cache-tok-8841"},
+        "log_level": "info",
+    }
+
+    def test_a_put_of_one_section_keeps_the_others(self, client, admin_headers, api_settings):
+        assert client.put(self.URL, json=self.STORED, headers=admin_headers).status_code == 200
+
+        resp = client.put(self.URL, json={"log_level": "debug"}, headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert _saved(api_settings, self.TABLE) == {**self.STORED, "log_level": "debug"}
+
+    def test_a_section_sent_replaces_the_stored_one_whole(
+        self, client, admin_headers, api_settings
+    ):
+        assert client.put(self.URL, json=self.STORED, headers=admin_headers).status_code == 200
+
+        body = {"cache": {"host": "cache-2", "token": "cache-tok-8842"}}
+        resp = client.put(self.URL, json=body, headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert _saved(api_settings, self.TABLE) == {**self.STORED, **body}
+
+    def test_a_section_sent_as_null_is_removed(self, client, admin_headers, api_settings):
+        assert client.put(self.URL, json=self.STORED, headers=admin_headers).status_code == 200
+
+        resp = client.put(self.URL, json={"cache": None}, headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        saved = _saved(api_settings, self.TABLE)
+        assert "cache" not in saved
+        assert saved["db"] == self.STORED["db"]
+
+
 class TestALegacyMaskedCredentialRestoresOnlyWhereItWasSet:
     """A masked credential written back beside a changed field has to be typed again."""
 
