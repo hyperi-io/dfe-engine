@@ -85,6 +85,8 @@ dependencies = [
     "pymongo>=4.9.0",
     # Alerting / notifications
     "apprise>=1.11.0",
+    # Transitive floor (apprise -> requests-oauthlib): CVE-2026-49265, PKCE verifier timing compare, fixed in 4.0.0.
+    "oauthlib>=4.0.0",
     # API server
     "fastapi>=0.141.1",
     "python-multipart>=0.0.32",
@@ -92,7 +94,8 @@ dependencies = [
     # Floor 50: GHSA PKCS#7 Bleichenbacher oracle, vulnerable >=44,<50.
     "cryptography>=50.0.0",
     "uvicorn[standard]>=0.52.1",
-    "PyJWT[crypto]>=2.13.0",
+    # Must stay >=2.14.0: CVE-2026-102274, one malformed JWK aborts parsing of the whole JWK Set.
+    "PyJWT[crypto]>=2.15.1",
     "sse-starlette>=3.4.5",
     # Transitive override: diskcache pulled in by pySigma for MITRE ATT&CK caching.
     # CVE-2025-69872 (unsafe pickle, CVSS 9.8): no upstream fix — maintainer unresponsive
