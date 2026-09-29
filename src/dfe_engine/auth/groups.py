@@ -236,8 +236,19 @@ class GroupStore:
         *,
         members: builtins.list[str] | None = None,
         scope: str = GROUP_SCOPE_SYSTEM,
+        source_provider: str = "",
+        source_id: str = "",
     ) -> Group:
         """Create a new group and persist it to YAML.
+
+        Args:
+            name: The group's name, and its file's stem.
+            roles: Roles every member holds.
+            description: Human-readable description.
+            members: Member usernames, de-duplicated in order.
+            scope: ``system`` or ``org:<name>``.
+            source_provider: The OIDC provider whose group this is, empty for a local group.
+            source_id: That provider's id for the group.
 
         Raises:
             GroupExistsError: A group file already holds this name, loadable or not.
@@ -261,6 +272,8 @@ class GroupStore:
             description=description,
             members=member_list,
             scope=scope,
+            source_provider=source_provider,
+            source_id=source_id,
         )
         self._write(group)
         return group
@@ -475,8 +488,10 @@ class DocuStoreGroupStore:
         *,
         members: builtins.list[str] | None = None,
         scope: str = GROUP_SCOPE_SYSTEM,
+        source_provider: str = "",
+        source_id: str = "",
     ) -> Group:
-        """Create a new group.
+        """Create a new group. The arguments are :meth:`GroupStore.create`'s.
 
         Raises:
             GroupExistsError: A document already holds this name, loadable or not.
@@ -499,6 +514,8 @@ class DocuStoreGroupStore:
             description=description,
             members=member_list,
             scope=scope,
+            source_provider=source_provider,
+            source_id=source_id,
         )
         self._c.put(name, group)
         return group

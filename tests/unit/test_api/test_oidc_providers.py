@@ -313,6 +313,46 @@ class TestSyncProvider:
         assert resp.status_code == 200, resp.text
         assert (resp.json()["created"], resp.json()["groups_skipped"]) == (1, 1)
 
+    def test_an_idp_group_cannot_take_the_seeded_admins_by_name(
+        self, client, app, admin_headers, tmp_path, monkeypatch
+    ):
+        """A directory group whose display name slugs to dfe-admins gets no link and no role."""
+        from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+
+        attacker = "attacker-guid-123"
+        directory = tmp_path / "directory.json"
+        group = {"id": attacker, "name": "DFE Admins", "email": ""}
+        directory.write_text(json.dumps({"groups": [group]}), encoding="utf-8")
+        monkeypatch.setenv("DFE_TEST_SYNC_DIRECTORY", str(directory))
+        app.state.oidc_provider_registry.create(
+            "mock-dir",
+            OIDCProvider(
+                type="entra_id",
+                enabled=True,
+                issuer="https://login.example.com/tenant/v2.0",
+                groups=GroupResolutionConfig(
+                    mode="api",
+                    directory_backend="mock",
+                    mock_directory_env="DFE_TEST_SYNC_DIRECTORY",
+                ),
+            ),
+        )
+        before = app.state.group_store.get("dfe-admins")
+
+        resp = client.post("/api/v1/auth/oidc-providers/mock-dir/sync", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert (body["created"], body["updated"], body["groups_skipped"]) == (0, 0, 1)
+        assert app.state.group_store.get("dfe-admins") == before
+        me = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "mallory@example.com", "X-Oidc-Groups": attacker},
+        )
+        assert me.status_code == 200, me.text
+        assert "admin" not in me.json()["roles"]
+        assert "dfe-admins" not in me.json()["groups"]
+
     def test_sync_nonexistent_returns_404(self, client, admin_headers):
         resp = client.post("/api/v1/auth/oidc-providers/ghost/sync", headers=admin_headers)
         assert resp.status_code == 404
