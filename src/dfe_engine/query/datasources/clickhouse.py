@@ -38,14 +38,18 @@ class ClickHouseAdapter(DatasourceAdapter):
 
     @property
     def manager(self):
-        """Lazy-load ClickHouseManager."""
+        """This adapter's ClickHouseManager, built on first use.
+
+        A config gets a manager of its own, which ``close()`` cleans up. With no config
+        the adapter uses the process-wide manager the engine seeds at startup, and never
+        closes it.
+        """
         if self._manager is None:
             from dfe_engine.clickhouse import ClickHouseManager
 
             if self.config:
-                self._manager = ClickHouseManager.get_instance(self.config)
+                self._manager = ClickHouseManager(self.config)
             else:
-                # No explicit config -> the default settings-backed singleton.
                 self._manager = ClickHouseManager.get_instance()
         return self._manager
 
@@ -197,8 +201,10 @@ class ClickHouseAdapter(DatasourceAdapter):
             return False
 
     def close(self) -> None:
-        """Close the restricted client this adapter opened; the shared manager stays open."""
+        """Close what this adapter opened: its restricted client, and a manager it built."""
         if self._restricted_client:
             self._restricted_client.close()
             self._restricted_client = None
+        if self._manager is not None and self.config:
+            self._manager._cleanup()  # the manager has no public close
         self._manager = None

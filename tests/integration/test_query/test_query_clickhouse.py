@@ -9,6 +9,7 @@ import csv
 import datetime
 import io
 import json
+import socket
 
 import pytest
 
@@ -22,25 +23,43 @@ pytestmark = pytest.mark.integration
 NAMES = ["Alice", "Bob", "Charlie", "Diana", "Eve"]
 
 
+def _config(ch_params) -> dict:
+    """The manager config for the harness's ClickHouse."""
+    return {
+        "ch_host": ch_params["host"],
+        "ch_port": ch_params["port"],
+        "ch_username": ch_params["username"],
+        "ch_password": ch_params["password"],
+        "ch_secure": ch_params["secure"],
+    }
+
+
 @pytest.fixture
 def adapter(ch_params):
     """The adapter on the harness's ClickHouse, through the config a caller passes."""
-    # The config lands in the process-wide manager, so no test may inherit another's.
-    ClickHouseManager.reset_instance()
-    adapter = ClickHouseAdapter(
-        "default",
-        config={
-            "ch_host": ch_params["host"],
-            "ch_port": ch_params["port"],
-            "ch_username": ch_params["username"],
-            "ch_password": ch_params["password"],
-            "ch_secure": ch_params["secure"],
-        },
-    )
+    adapter = ClickHouseAdapter("default", config=_config(ch_params))
     try:
         yield adapter
     finally:
+        adapter.close()
+
+
+@pytest.fixture
+def shared_adapter(ch_params):
+    """An adapter with no config, on the process-wide manager the engine seeds at startup."""
+    ClickHouseManager.reset_instance()
+    ClickHouseManager.get_instance(_config(ch_params))
+    try:
+        yield ClickHouseAdapter("default")
+    finally:
         ClickHouseManager.reset_instance()
+
+
+def _refused_port() -> int:
+    """A local port nothing listens on: bound once for its number, then released."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
 
 
 @pytest.fixture
@@ -198,12 +217,34 @@ def test_healthcheck(adapter):
     assert adapter.healthcheck() is True
 
 
-def test_closing_the_adapter_leaves_the_shared_client_open(adapter):
-    adapter.execute("SELECT 1")
-    adapter.close()
-    shared = ClickHouseManager.get_instance().get_clickhouse_client()
-    assert shared.query("SELECT 1").result_rows == [(1,)]
-    assert adapter.execute("SELECT 2 AS n") == ([{"n": 2}], ["n"])
+class TestTheManagerAnAdapterUses:
+    def test_two_configured_adapters_reach_their_own_servers(self, ch_params):
+        harness = ClickHouseAdapter("default", config=_config(ch_params))
+        refused = {**_config(ch_params), "ch_host": "127.0.0.1", "ch_port": _refused_port()}
+        elsewhere = ClickHouseAdapter("default", config=refused)
+        try:
+            assert harness.manager.ping() is True
+            assert elsewhere.manager.ping() is False
+        finally:
+            harness.close()
+            elsewhere.close()
+
+    def test_closing_a_configured_adapter_closes_its_own_client(self, adapter):
+        adapter.execute("SELECT 1")
+        owned = adapter.manager
+        adapter.close()
+        assert owned._client is None
+        assert adapter.execute("SELECT 2 AS n") == ([{"n": 2}], ["n"])
+
+    def test_an_adapter_with_no_config_uses_the_shared_manager(self, shared_adapter):
+        assert shared_adapter.manager is ClickHouseManager.get_instance()
+
+    def test_closing_it_leaves_the_shared_client_open(self, shared_adapter):
+        shared_adapter.execute("SELECT 1")
+        shared_adapter.close()
+        shared = ClickHouseManager.get_instance().get_clickhouse_client()
+        assert shared.query("SELECT 1").result_rows == [(1,)]
+        assert shared_adapter.execute("SELECT 2 AS n") == ([{"n": 2}], ["n"])
 
 
 class TestExportsOfRealRows:
