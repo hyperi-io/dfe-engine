@@ -16,10 +16,9 @@ history/survivability come free (spec section G):
   * upstream changed, no local edit  -> UPDATE to upstream
   * upstream changed AFTER a local edit -> MERGE, local-edit-wins, drift recorded
 
-The merge REUSES the deep_merge existing-wins pattern already used for the gitops
-publish merge (collect_deploy_artifacts): the incoming upstream rule is the base,
-the operator's local edits are the override that wins - so a re-import never
-clobbers a local edit. Each stored rule carries provenance
+The merge is a deep_merge with the incoming upstream rule as the base and the
+operator's local edits as the override that wins - so a re-import never clobbers
+a local edit. Each stored rule carries provenance
 {origin, upstream_modified, local_edited, drift, source_ref}.
 
 Three gitcrud classes live in a sigma-local registry (NOT the shared
@@ -186,14 +185,9 @@ class SigmaCatalogStore:
         recorded when the upstream change signal moved.
         """
         existing_rule = existing.get("rule", {}) or {}
-        # replace_lists: the operator's list (tags, references, detection value
-        # lists) wins WHOLESALE over upstream. Without it deep_merge APPENDS, so
-        # every re-sync duplicates shared list items (and reinstates ones the
-        # operator removed), the merged doc never equals the stored one, and every
-        # poll commits churn.
-        merged_rule = deep_merge(
-            copy.deepcopy(doc.rule), copy.deepcopy(existing_rule), replace_lists=True
-        )
+        # The operator's lists (tags, references, detection values) replace upstream's
+        # wholesale, so a re-sync neither duplicates items nor reinstates removed ones.
+        merged_rule = deep_merge(copy.deepcopy(doc.rule), copy.deepcopy(existing_rule))
         prev = existing.get("provenance", {}) or {}
         new_upstream = doc.change_key
         return {

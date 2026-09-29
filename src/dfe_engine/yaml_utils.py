@@ -279,19 +279,16 @@ def literal_block(text: str) -> LiteralScalarString | str:
     return LiteralScalarString(text if text.endswith("\n") else text + "\n")
 
 
-def deep_merge(base: dict, override: dict, *, replace_lists: bool = False) -> dict:
+def deep_merge(base: dict, override: dict) -> dict:
     """Recursively merge *override* into *base*, mutating *base* in-place.
 
     - dicts: merge recursively
-    - lists: append override items, OR replace wholesale when ``replace_lists``
+    - lists: the override's list replaces the base's wholesale, as Helm does
     - sets:  union
     - type mismatch or non-container: override wins
 
-    ``replace_lists=True`` gives override-wins list semantics (matching Helm's own
-    list behaviour). Required by any caller that re-merges its OWN prior output --
-    e.g. the gitops publish merge and the sigma local-edit merge -- where the
-    default APPEND duplicates every shared list on every pass, growing unboundedly
-    and making the operation non-idempotent.
+    A list is replaced rather than appended because whoever sets one expects
+    exactly that list back, and a merge re-run over its own output stays idempotent.
     """
     for key, nxt in override.items():
         if key not in base:
@@ -299,12 +296,9 @@ def deep_merge(base: dict, override: dict, *, replace_lists: bool = False) -> di
             continue
         prev = base[key]
         if isinstance(prev, dict) and isinstance(nxt, dict):
-            deep_merge(prev, nxt, replace_lists=replace_lists)
+            deep_merge(prev, nxt)
         elif isinstance(prev, list) and isinstance(nxt, list):
-            if replace_lists:
-                base[key] = nxt
-            else:
-                prev.extend(nxt)
+            base[key] = nxt
         elif isinstance(prev, set) and isinstance(nxt, set):
             prev |= nxt
         else:
