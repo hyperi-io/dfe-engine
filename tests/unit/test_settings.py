@@ -1023,6 +1023,9 @@ class TestEverySettingIsRead:
         # catalogue in dfe-schemas, not from these.
         ("QueryViewSettings", "max_memory_usage"),
         ("QueryViewSettings", "max_rows_to_read"),
+        # Its one reader was HuntCheckpointManager, deleted as dead code; the field
+        # is the same leftover as checkpoint_path and goes with it.
+        ("HuntsSettings", "checkpoint_destination"),
     }
 
     # Names a ClickHouse SERVER setting also carries, where SQL naming the

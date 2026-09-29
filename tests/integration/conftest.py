@@ -36,11 +36,17 @@ the service and the owning pid. To sweep whatever a killed run left behind:
 
 Every test also DROPs the databases it creates. No Postgres: the hunt runner
 coordinates through ClickHouse.
+
+The document store resolves separately (``mongo_uri``): ``DFE_TEST_MONGO_URI`` if
+set, else one FerretDB per xdist worker on the same docker host, named
+`dfe-engine-test-integration-<worker>-<pid>-ferretdb` and removed at session end.
+DFE_TEST_KEEP does not apply to it.
 """
 
 from __future__ import annotations
 
 import os
+import secrets
 import subprocess
 import time
 import warnings
@@ -57,6 +63,13 @@ import pytest
 # renovate: datasource=docker depName=clickhouse/clickhouse-server
 _CH_TAG = "26.3"
 _DEFAULT_IMAGE = f"clickhouse/clickhouse-server:{_CH_TAG}"
+
+# The document store production runs (dfe-infra versions.yaml); the eval image
+# bundles its PostgreSQL + DocumentDB backend into one container.
+# renovate: datasource=docker depName=ghcr.io/ferretdb/ferretdb-eval
+_FERRETDB_TAG = "2.7.0"
+_FERRETDB_IMAGE = f"ghcr.io/ferretdb/ferretdb-eval:{_FERRETDB_TAG}"
+_FERRETDB_USER = "dfe"
 
 
 def _truthy(name: str) -> bool:
@@ -422,3 +435,131 @@ def dfe_db(ch_client):
             ch_client.command(f"DROP DATABASE IF EXISTS `{db}`{on_cluster} SYNC")
         except Exception:
             pass
+
+
+@pytest.fixture
+def manager_client(ch_params):
+    """The engine's own ClickHouseManager client wrapper, on the harness's ClickHouse.
+
+    Code that calls ``execute`` or goes through the manager's resilience layer needs
+    this wrapper; the raw ``ch_client`` is not a substitute.
+    """
+    from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+
+    manager = ClickHouseManager(
+        target_config_data={
+            "ch_host": ch_params["host"],
+            "ch_port": ch_params["port"],
+            "ch_username": ch_params["username"],
+            "ch_password": ch_params["password"],
+            "ch_secure": ch_params["secure"],
+        }
+    )
+    try:
+        yield manager.get_clickhouse_client()
+    finally:
+        manager._cleanup()  # no public close: reset_instance only serves the singleton
+
+
+@pytest.fixture
+def clickhouse_test_database(ch_client):
+    """An empty isolated database on the harness's ClickHouse; dropped after the test."""
+    import uuid
+
+    db = f"dfe_test_{uuid.uuid4().hex[:8]}"
+    ch_client.command(f"CREATE DATABASE IF NOT EXISTS `{db}`")
+    try:
+        yield db
+    finally:
+        try:
+            ch_client.command(f"DROP DATABASE IF EXISTS `{db}`")
+        except Exception:
+            pass
+
+
+@pytest.fixture
+def clickhouse_client(ch_params, clickhouse_test_database):
+    """A raw client on the harness's ClickHouse whose default database is the test one."""
+    import clickhouse_connect
+
+    client = clickhouse_connect.get_client(**ch_params, database=clickhouse_test_database)
+    try:
+        yield client
+    finally:
+        client.close()
+
+
+def _mongo_when_ready(uri: str, attempts: int = 60, delay: float = 1.0) -> None:
+    """Poll until an authenticated listDatabases succeeds; ping answers before the backend."""
+    from pymongo import MongoClient
+
+    last: Exception | None = None
+    for _ in range(attempts):
+        client = MongoClient(uri, serverSelectionTimeoutMS=1000)
+        try:
+            client.list_database_names()
+            return
+        except Exception as exc:  # FerretDB or its PostgreSQL still starting
+            last = exc
+            time.sleep(delay)
+        finally:
+            client.close()
+    raise last if last is not None else RuntimeError("document store unreachable")
+
+
+@pytest.fixture(scope="session")
+def mongo_uri():
+    """A mongo-wire document store URI: ``DFE_TEST_MONGO_URI``, else FerretDB on docker.
+
+    Session-scoped, so each xdist worker starts one container and its tests share it;
+    every test isolates itself in a throwaway database. The name carries the pid
+    because concurrent runs on one host each have a ``gw0``.
+    """
+    configured = os.environ.get("DFE_TEST_MONGO_URI", "").strip()
+    if configured:
+        yield configured
+        return
+
+    spec = os.environ.get("DFE_TEST_DOCKER_HOST") or "local"
+    docker = _docker_prefix(spec)
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    name = _container_name(f"{worker}-{os.getpid()}", "ferretdb")
+    password = secrets.token_hex(16)
+    run_cmd = [
+        *docker,
+        "run",
+        "-d",
+        "--name",
+        name,
+        *_container_labels("ferretdb"),
+        "-p",
+        "0:27017",
+        "-e",
+        f"POSTGRES_USER={_FERRETDB_USER}",
+        "-e",
+        f"POSTGRES_PASSWORD={password}",
+        _FERRETDB_IMAGE,
+    ]
+    try:
+        _run(run_cmd, timeout=240)  # first image pull can be slow
+    except (subprocess.SubprocessError, FileNotFoundError) as exc:
+        pytest.skip(f"docker host '{spec}' cannot start FerretDB: {exc}")
+
+    def teardown() -> None:
+        try:
+            _run([*docker, "rm", "-f", name], timeout=60)
+        except subprocess.SubprocessError, FileNotFoundError:
+            pass
+
+    try:
+        out = _run([*docker, "port", name, "27017"], timeout=30).stdout.strip()
+        port = int(out.splitlines()[-1].rsplit(":", 1)[-1])
+        uri = f"mongodb://{_FERRETDB_USER}:{password}@{_reach_address(spec)}:{port}/"
+        _mongo_when_ready(uri)
+    except Exception as exc:
+        teardown()
+        pytest.skip(f"FerretDB on '{spec}' did not come up: {exc}")
+    try:
+        yield uri
+    finally:
+        teardown()

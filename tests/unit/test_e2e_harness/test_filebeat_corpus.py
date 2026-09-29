@@ -21,6 +21,7 @@ import tarfile
 import pytest
 
 from tests.e2e import filebeat_corpus as corpus
+from tests.support.producer_contract import DFE_TRANSFORM_VRL, producer_file
 
 
 @pytest.fixture
@@ -124,25 +125,24 @@ class TestWrapping:
         assert [b["message"] for b in wrapped] == [s.line for s in found]
 
 
+@pytest.fixture(scope="module")
+def shipped(tmp_path_factory):
+    """The archive dfe-transform-vrl ships, from a checkout or its pinned release."""
+    path = tmp_path_factory.mktemp("corpus") / "filebeat-testdata.tar.gz"
+    path.write_bytes(producer_file(DFE_TRANSFORM_VRL, corpus.CORPUS_FILE).data)
+    return path
+
+
 class TestTheRealCorpus:
-    """Against the shipped archive, skipped where it is not checked out."""
+    """Against the shipped archive: a checkout, else the pinned release."""
 
-    def test_the_corpus_is_present(self):
-        if not corpus.available():
-            pytest.skip("dfe-transform-vrl corpus not checked out")
-        assert corpus.available()
-
-    def test_every_module_has_samples(self):
-        if not corpus.available():
-            pytest.skip("dfe-transform-vrl corpus not checked out")
+    def test_every_module_has_samples(self, shipped):
         by_module: dict[str, int] = {}
-        for sample in corpus.samples():
+        for sample in corpus.samples(shipped):
             by_module[sample.module] = by_module.get(sample.module, 0) + 1
         assert set(by_module) == set(corpus.MODULES)
         assert all(count > 0 for count in by_module.values())
 
-    def test_the_umbrella_subset_needs_no_enrichment_table(self):
-        if not corpus.available():
-            pytest.skip("dfe-transform-vrl corpus not checked out")
-        found = corpus.samples(modules=(corpus.NO_ENRICHMENT_MODULE,))
+    def test_the_umbrella_subset_needs_no_enrichment_table(self, shipped):
+        found = corpus.samples(shipped, modules=(corpus.NO_ENRICHMENT_MODULE,))
         assert found, "the no-enrichment subset must not be empty"

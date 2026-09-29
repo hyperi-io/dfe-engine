@@ -1,42 +1,18 @@
 #  Project:      dfe-engine
 #  File:         tests/integration/test_governance/conftest.py
-#  Purpose:      Shared live-ClickHouse fixtures for the governance integration tests
+#  Purpose:      Shared live-ClickHouse helpers for the governance integration tests
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""Connection fixtures shared by the CH-RBAC integration modules."""
+"""Helpers shared by the CH-RBAC integration modules.
+
+The server comes from the tiered harness in ``tests/integration/conftest.py``
+(``ch_params`` / ``ch_client``): a configured cluster, a remote docker host, or a
+throwaway local container, each owned by the one test.
+"""
 
 from __future__ import annotations
-
-import pytest
-
-
-@pytest.fixture(scope="module")
-def conn_params():
-    """Module-scoped CH connection params from settings (.env cluster tier)."""
-    from dfe_engine.settings import get_settings
-
-    s = get_settings().clickhouse
-    if not s.host or s.host in ("localhost", "127.0.0.1"):
-        pytest.skip("CH-RBAC isolation needs a configured cluster (.env DFE_CLICKHOUSE_*)")
-    return {
-        "host": s.host,
-        "port": s.port,
-        "username": s.username,
-        "password": s.password,
-        "secure": s.secure,
-    }
-
-
-@pytest.fixture(scope="module")
-def admin_client(conn_params):
-    """A module-scoped admin CH client (raw clickhouse_connect, has command())."""
-    import clickhouse_connect
-
-    client = clickhouse_connect.get_client(**conn_params)
-    yield client
-    client.close()
 
 
 def count_as(params: dict, user: str, password: str, table_fqn: str) -> int:

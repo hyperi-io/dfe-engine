@@ -9,7 +9,9 @@
 
 The corpus is dfe-transform-vrl's, pinned to elastic/integrations @ c7bc530 -
 the same vintage the bundled filebeat VRL was generated against, so its golden
-outputs are the reference for what the transform should produce.
+outputs are the reference for what the transform should produce. ``CORPUS`` is the
+archive in a dfe-transform-vrl checkout (``$DFE_TRANSFORM_VRL_DIR``, or one beside
+this repo).
 
 Two shapes have to be bridged, and doing it here rather than in the test keeps
 the reason in one place:
@@ -41,7 +43,13 @@ import tarfile
 from dataclasses import dataclass
 from pathlib import Path
 
-CORPUS = Path("/projects/dfe-transform-vrl/tests/fixtures/filebeat/filebeat-testdata.tar.gz")
+from tests.support.producer_contract import CHECKOUTS, DFE_TRANSFORM_VRL, checkout_path
+
+CORPUS_FILE = DFE_TRANSFORM_VRL.files[0]
+CORPUS = (
+    checkout_path(DFE_TRANSFORM_VRL, CORPUS_FILE)
+    or CHECKOUTS / DFE_TRANSFORM_VRL.repo / CORPUS_FILE
+)
 
 MODULES = ("cisco_umbrella", "cisco_ios", "cisco_meraki")
 

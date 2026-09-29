@@ -1,7 +1,6 @@
 import os
 import shutil
 import stat
-import uuid
 
 import pytest
 import yaml
@@ -121,14 +120,6 @@ def setup_paths():
         hunt_rules_path,
         hunt_checkpoint_path,
     )
-
-
-@pytest.fixture(scope="session")
-def unique_names():
-    unique_id = str(uuid.uuid4()).replace("-", "")
-    database_name = f"dfe_audit_{unique_id}"
-    table_name = f"detection_checkpoint_{unique_id}"
-    return database_name, table_name
 
 
 @pytest.fixture(scope="session")

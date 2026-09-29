@@ -1,4 +1,8 @@
-"""Integration tests for the ClickHouse startup bootstrap against a real ClickHouse."""
+"""Integration tests for the ClickHouse startup bootstrap against a real ClickHouse.
+
+Everything DFE writes lands in the one data database -- the landing table, hunt
+output and the engine's own state -- so both tables are asserted there.
+"""
 
 import pytest
 
@@ -10,16 +14,15 @@ from dfe_engine.settings import get_clickhouse_config, load_settings
 pytestmark = pytest.mark.integration
 
 
-def _hunts_database(database: str) -> str:
-    """Hunts database for a test run - derived so it is torn down with the data one."""
-    return f"{database}_hunts"
-
-
-def _bootstrap_settings(*, database):
+def _bootstrap_settings(*, database, ch_params):
+    """Settings aimed at the harness's ClickHouse, never at whatever .env names."""
     settings = load_settings()
+    settings.clickhouse.host = ch_params["host"]
+    settings.clickhouse.port = ch_params["port"]
+    settings.clickhouse.username = ch_params["username"]
+    settings.clickhouse.password = ch_params["password"]
+    settings.clickhouse.secure = ch_params["secure"]
     settings.clickhouse.data_database = database
-    settings.clickhouse.hunts_database = _hunts_database(database)
-    settings.clickhouse.secure = False
     settings.clickhouse.bootstrap_tables = True
     # These assert ClickHouse objects; the topic step would reach whatever broker .env names.
     settings.kafka.bootstrap_topics = False
@@ -31,23 +34,8 @@ def _table_names(*, client, database) -> set[str]:
     return {row[0] for row in rows}
 
 
-@pytest.fixture(autouse=True, scope="module")
-def _drop_hunts_database(clickhouse_test_database):
-    """Tear down the hunts database the bootstrap creates.
-
-    The clickhouse_test_database fixture only drops the data one, and the
-    bootstrap now creates a second database beside it.
-    """
-    yield
-    ClickHouseManager.reset_instance()
-    settings = _bootstrap_settings(database=clickhouse_test_database)
-    manager = ClickHouseManager.get_instance(get_clickhouse_config(settings=settings))
-    manager.get_clickhouse_client().command(
-        f"DROP DATABASE IF EXISTS {_hunts_database(clickhouse_test_database)}"
-    )
-
-
-def _bootstrap_and_client(database):
+@pytest.fixture
+def bootstrap(clickhouse_test_database, ch_params):
     """Bootstrap the DB, then return the SAME manager connection it used.
 
     On a load-balanced multi-node cluster a SEPARATE connection may hit a
@@ -55,30 +43,32 @@ def _bootstrap_and_client(database):
     keeping create + verify on the bootstrap's own connection makes the assertion
     deterministic (fixes the multi-node flake - it is a wrong-setup, not a flake).
     """
-    ClickHouseManager.reset_instance()
-    settings = _bootstrap_settings(database=database)
-    bootstrap_clickhouse(settings=settings)
-    manager = ClickHouseManager.get_instance(get_clickhouse_config(settings=settings))
-    return manager.get_clickhouse_client()
+
+    def run():
+        ClickHouseManager.reset_instance()
+        settings = _bootstrap_settings(database=clickhouse_test_database, ch_params=ch_params)
+        bootstrap_clickhouse(settings=settings)
+        manager = ClickHouseManager.get_instance(get_clickhouse_config(settings=settings))
+        return manager.get_clickhouse_client()
+
+    try:
+        yield run
+    finally:
+        ClickHouseManager.reset_instance()
 
 
 class TestBootstrapClickhouse:
-    def test_creates_default_and_detection_tables(self, clickhouse_test_database):
-        client = _bootstrap_and_client(clickhouse_test_database)
-        assert "default" in _table_names(client=client, database=clickhouse_test_database)
-        # Hunt output lands in its own database (dfe-engine#127).
-        assert "detection" in _table_names(
-            client=client, database=_hunts_database(clickhouse_test_database)
-        )
+    def test_creates_the_landing_and_detection_tables(self, clickhouse_test_database, bootstrap):
+        client = bootstrap()
+        tables = _table_names(client=client, database=clickhouse_test_database)
+        assert {"main", "detection"} <= tables
 
-    def test_is_idempotent(self, clickhouse_test_database):
-        client = _bootstrap_and_client(clickhouse_test_database)
+    def test_is_idempotent(self, clickhouse_test_database, bootstrap):
+        bootstrap()
         # A second bootstrap must not error and the tables stay present.
-        bootstrap_clickhouse(settings=_bootstrap_settings(database=clickhouse_test_database))
-        assert "default" in _table_names(client=client, database=clickhouse_test_database)
-        assert "detection" in _table_names(
-            client=client, database=_hunts_database(clickhouse_test_database)
-        )
+        client = bootstrap()
+        tables = _table_names(client=client, database=clickhouse_test_database)
+        assert {"main", "detection"} <= tables
 
 
 class TestBootstrapMatchesServerTopology:
@@ -92,16 +82,16 @@ class TestBootstrapMatchesServerTopology:
     land on.
     """
 
-    def test_engine_matches_sensed_topology(self, clickhouse_test_database):
-        client = _bootstrap_and_client(clickhouse_test_database)
+    def test_engine_matches_sensed_topology(self, clickhouse_test_database, bootstrap):
+        client = bootstrap()
         sensed = EngineResolver(client=client).resolve(
             parse_engine("MergeTree"), clickhouse_test_database
         )
         rows = client.query(
             f"SELECT engine FROM system.tables WHERE database = '{clickhouse_test_database}' "
-            "AND name = 'default'"
+            "AND name = 'main'"
         ).result_rows
-        assert rows, "bootstrap did not create the default table"
+        assert rows, "bootstrap did not create the landing table"
         engine = rows[0][0]
         if sensed.topology == "replicated":
             assert engine.startswith("Replicated"), (
@@ -111,11 +101,11 @@ class TestBootstrapMatchesServerTopology:
         else:
             assert engine == "MergeTree"
 
-    def test_table_exists_on_every_replica(self, clickhouse_test_database):
+    def test_table_exists_on_every_replica(self, clickhouse_test_database, bootstrap):
         """On a real cluster the table must exist on ALL nodes, not just the one
         the bootstrap connection landed on. clusterAllReplicas fans the check out.
         """
-        client = _bootstrap_and_client(clickhouse_test_database)
+        client = bootstrap()
         sensed = EngineResolver(client=client)
         resolved = sensed.resolve(parse_engine("MergeTree"), clickhouse_test_database)
         if not resolved.on_cluster:
@@ -130,6 +120,6 @@ class TestBootstrapMatchesServerTopology:
         ).result_rows[0][0]
         found = client.query(
             f"SELECT count() FROM clusterAllReplicas('{cluster}', system.tables) "
-            f"WHERE database = '{clickhouse_test_database}' AND name = 'default'"
+            f"WHERE database = '{clickhouse_test_database}' AND name = 'main'"
         ).result_rows[0][0]
-        assert found == replicas, f"default table on {found}/{replicas} replicas"
+        assert found == replicas, f"landing table on {found}/{replicas} replicas"
