@@ -169,6 +169,23 @@ class TestClickHouseAdapter:
         assert adapter._manager is None
         assert adapter._restricted_client is None
 
+    def test_a_configured_adapter_builds_its_own_manager(self):
+        before = ClickHouseManager._instance
+        first = ClickHouseAdapter("default", config={"ch_host": "ch-a.example"})
+        second = ClickHouseAdapter("default", config={"ch_host": "ch-b.example"})
+        assert first.manager is not second.manager
+        assert first.manager.target_config_data == {"ch_host": "ch-a.example"}
+        assert second.manager.target_config_data == {"ch_host": "ch-b.example"}
+        assert ClickHouseManager._instance is before
+
+    def test_close_cleans_up_the_manager_a_configured_adapter_owns(self):
+        owned = MagicMock(spec=ClickHouseManager)
+        adapter = ClickHouseAdapter("default", config={"ch_host": "ch-a.example"})
+        adapter._manager = owned
+        adapter.close()
+        owned._cleanup.assert_called_once()
+        assert adapter._manager is None
+
 
 class TestClickHouseAdapterExplainParsing:
     def test_classify_step_read(self):
