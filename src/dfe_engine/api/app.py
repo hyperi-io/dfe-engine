@@ -642,6 +642,13 @@ def create_app(
         trusted=TrustedProxies.parse(settings.api.forwarded_allow_ips),
     )
 
+    # Outermost of all, so a request's duration covers the whole stack; the app
+    # status page reads its rate, error rate and p95 from this one histogram.
+    if metrics_manager is not None:
+        from scalo.metrics.http_server import HttpServerMetricsMiddleware
+
+        app.add_middleware(HttpServerMetricsMiddleware, metrics=metrics_manager)
+
     # Exception handlers
     from dfe_engine.api.errors import install_exception_handlers
 
