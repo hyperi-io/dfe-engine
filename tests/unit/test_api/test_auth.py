@@ -384,6 +384,91 @@ class TestTheHyperdxRoleClaim:
         assert claim == hyperdx_role.MEMBER
 
 
+class TestTheHyperdxSessionFields:
+    """/auth/me answers the fork's two questions live: the dashboard role and the team."""
+
+    def test_an_admin_reads_as_the_platform_reader_with_the_admin_role(
+        self, client: TestClient, admin_headers: dict
+    ):
+        me = client.get("/api/v1/auth/me", headers=admin_headers)
+
+        assert me.status_code == 200, me.text
+        assert me.json()["hyperdx_role"] == hyperdx_role.TEAM_ADMIN
+        assert me.json()["hyperdx_identity"] == "dfe_query_reader"
+
+    def test_the_identity_is_what_the_connection_read_hands_the_same_session(
+        self, client: TestClient, api_settings, viewer_headers: dict
+    ):
+        from dfe_engine.secrets import build_secrets
+
+        build_secrets(api_settings.secrets).put("ch/service/query_reader", "qr-pw")
+        me = client.get("/api/v1/auth/me", headers=viewer_headers)
+        conn = client.get("/api/v1/hyperdx/connection", headers=viewer_headers)
+
+        assert me.status_code == 200, me.text
+        assert conn.status_code == 200, conn.text
+        assert me.json()["hyperdx_identity"] == conn.json()["username"] == "dfe_query_reader"
+        assert "password" not in me.json()
+        assert "qr-pw" not in me.text
+
+    def test_a_group_change_reaches_the_role_without_a_new_token(
+        self, client: TestClient, admin_headers: dict, viewer_headers: dict
+    ):
+        # The viewer's token says member; the account's groups decide at each request.
+        before = client.get("/api/v1/auth/me", headers=viewer_headers)
+        assert before.json()["hyperdx_role"] == hyperdx_role.MEMBER
+
+        client.post(
+            "/api/v1/auth/groups",
+            json={"name": "hdx-role-live", "roles": ["admin"], "members": ["viewer"]},
+            headers=admin_headers,
+        )
+        promoted = client.get("/api/v1/auth/me", headers=viewer_headers)
+        assert promoted.json()["hyperdx_role"] == hyperdx_role.TEAM_ADMIN
+        assert promoted.json()["hyperdx_identity"] == "dfe_query_reader"
+
+        client.delete("/api/v1/auth/groups/hdx-role-live/members/viewer", headers=admin_headers)
+        demoted = client.get("/api/v1/auth/me", headers=viewer_headers)
+        assert demoted.json()["hyperdx_role"] == hyperdx_role.MEMBER
+
+    def test_an_org_scoped_admin_is_a_member_on_its_org_identity(
+        self, client: TestClient, app, api_settings
+    ):
+        app.state.org_registry.create("acme", org_ids=["acme"])
+        app.state.account_store.create(
+            "acme-lead", secrets.token_urlsafe(16), groups=["acme-leads"]
+        )
+        app.state.group_store.create(
+            "acme-leads", ["org_viewer", "admin"], members=["acme-lead"], scope="org:acme"
+        )
+
+        me = client.get("/api/v1/auth/me", headers=_bearer(api_settings, "acme-lead"))
+
+        assert me.status_code == 200, me.text
+        assert me.json()["hyperdx_role"] == hyperdx_role.MEMBER
+        assert me.json()["hyperdx_identity"] == "dfe_org_acme"
+
+    def test_a_session_with_no_groups_has_no_identity(
+        self, client: TestClient, admin_headers: dict, api_settings
+    ):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "hdx-nogrp",
+                "password": secrets.token_urlsafe(16),
+                "email": "hdx-nogrp@example.com",
+                "groups": [],
+            },
+            headers=admin_headers,
+        )
+
+        me = client.get("/api/v1/auth/me", headers=_bearer(api_settings, "hdx-nogrp"))
+
+        assert me.status_code == 200, me.text
+        assert me.json()["hyperdx_identity"] == ""
+        assert me.json()["hyperdx_role"] == hyperdx_role.MEMBER
+
+
 def _bearer(api_settings, sub: str, **claims) -> dict[str, str]:
     """Headers for an engine token with *sub* and whatever claims the test names."""
     token = create_access_token(

@@ -21,7 +21,8 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from dfe_engine.api.v1.hyperdx import hyperdx_connection, hyperdx_sources
+from dfe_engine.api.v1.hyperdx import hyperdx_connection, hyperdx_identity, hyperdx_sources
+from dfe_engine.auth import Scope, ScopedGrant
 from dfe_engine.auth.models import AuthContext
 from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import SecretsSettings
@@ -242,6 +243,98 @@ async def test_org_without_a_credential_is_503(tmp_path):
     with pytest.raises(HTTPException) as exc:
         await hyperdx_connection(req, user, settings)
     assert exc.value.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# hyperdx_identity: the username /auth/me reports, which names the fork's team
+# ---------------------------------------------------------------------------
+#
+# The fork seeds a team only with a connection of the team's own name, so the two reads must agree.
+
+_ACME = Scope(type="org", id="acme")
+
+_GRANTED = [
+    pytest.param(
+        AuthContext(user_id="u", roles=["org_viewer"], org_ids=["acme"]),
+        "dfe_org_acme",
+        id="org-viewer",
+    ),
+    pytest.param(
+        AuthContext(user_id="u", roles=["data_analyst"], org_ids=[]),
+        "dfe_query_reader",
+        id="platform-analyst",
+    ),
+    pytest.param(
+        AuthContext(
+            user_id="acme-admin",
+            roles=["org_viewer", "admin"],
+            org_ids=["acme"],
+            grants=[
+                ScopedGrant(role="org_viewer", scope=_ACME),
+                ScopedGrant(role="admin", scope=_ACME),
+            ],
+        ),
+        "dfe_org_acme",
+        id="org-scoped-admin",
+    ),
+    pytest.param(
+        AuthContext(user_id="u", roles=["org_viewer", "data_analyst"], org_ids=["acme"]),
+        "dfe_query_reader",
+        id="viewer-beside-platform-role",
+    ),
+]
+
+
+@pytest.mark.parametrize(("user", "username"), _GRANTED)
+async def test_the_identity_is_the_username_the_connection_hands_over(tmp_path, user, username):
+    settings = _settings(tmp_path)
+    store = build_secrets(settings.secrets)
+    store.put("ch/service/query_reader", "qr-pw")
+    store.put("ch/orgs/acme", "acme-pw")
+    req = _request([_org("acme", ["acme"]), _org("nerk", ["nerk"])])
+
+    conn = await hyperdx_connection(req, user, settings)
+
+    assert conn.username == username
+    assert hyperdx_identity(req, user) == conn.username
+
+
+@pytest.mark.parametrize(
+    "user",
+    [
+        pytest.param(
+            AuthContext(
+                user_id="operator",
+                roles=["dfe_operator"],
+                org_ids=[],
+                grants=[ScopedGrant(role="dfe_operator", scope=Scope())],
+            ),
+            id="no-query-execute",
+        ),
+        pytest.param(AuthContext(user_id="u", roles=["org_viewer"], org_ids=[]), id="no-org"),
+        pytest.param(
+            AuthContext(user_id="u", roles=["org_viewer"], org_ids=["acme", "nerk"]),
+            id="two-orgs",
+        ),
+        pytest.param(AuthContext(user_id="nobody"), id="no-roles"),
+    ],
+)
+async def test_a_caller_the_connection_refuses_has_no_identity(tmp_path, user):
+    settings = _settings(tmp_path)
+    req = _request([_org("acme", ["acme"]), _org("nerk", ["nerk"])])
+
+    with pytest.raises(HTTPException) as exc:
+        await hyperdx_connection(req, user, settings)
+
+    assert exc.value.status_code == 403
+    assert hyperdx_identity(req, user) == ""
+
+
+def test_an_org_with_no_credential_yet_still_has_an_identity():
+    """Named without the secret, so the fork creates the team and retries the seed."""
+    user = AuthContext(user_id="u", roles=["org_viewer"], org_ids=["acme"])
+
+    assert hyperdx_identity(_request([_org("acme", ["acme"])]), user) == "dfe_org_acme"
 
 
 # ---------------------------------------------------------------------------

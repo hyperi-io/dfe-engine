@@ -5,18 +5,22 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""The ``role`` claim dfe-hyperdx reads off an engine token.
+"""The role dfe-hyperdx gates team-wide dashboard changes on.
 
-The fork gates deleting and restoring the shipped dashboards on this claim: a
-token carrying ``admin`` or ``owner`` may change what the whole team sees, any
-other value is refused with 403, and a token with no claim at all keeps the old
+The fork gates deleting and restoring the shipped dashboards on this value: a
+session carrying ``admin`` or ``owner`` may change what the whole team sees, any
+other value is refused with 403, and a session with no value at all keeps the old
 team-membership behaviour. So the value is always written - an account with no
 team-admin role carries :data:`MEMBER`, which is a refusal rather than a
 fallback (dfe-hyperdx ``packages/api/src/dfe/middleware/role-claim.ts``).
 
+The fork reads it from ``GET /api/v1/auth/me`` (``hyperdx_role``), resolved from
+the account's groups at that request, and falls back to the token's ``role``
+claim only when the engine's answer carries none.
+
 The engine resolves one grant set per account, as the union across its groups, so
-the claim is the account's standing across the deployment; the fork applies it to
-whichever team the token's groups select. That is why only a system-scope grant
+the value is the account's standing across the deployment; the fork applies it to
+whichever team the session lands on. That is why only a system-scope grant
 counts: an admin bound at one org's scope must not change what another org's team
 sees. Nothing in the engine's own authorisation reads the claim back - ``deps.py``
 resolves grants from the group files on every request and ignores what a token
@@ -28,7 +32,7 @@ from collections.abc import Iterable
 from dfe_engine.auth.models import ScopedGrant, platform_grants
 
 CLAIM = "role"
-"""The claim name the fork reads (its ``jwt-verify.ts`` takes ``payload.role``)."""
+"""The token claim the fork falls back to when ``/auth/me`` carries no ``hyperdx_role``."""
 
 TEAM_ADMIN = "admin"
 """What an account holding a team-admin engine role carries."""

@@ -23,11 +23,18 @@ fenced to its single org, whatever else it holds: a role bound at one org's scop
 never reaches every org's rows. A caller that resolves to no single org fails
 closed. The ``query:execute`` gate keeps callers with no data-plane access out.
 
+The fork names a caller's team after the username this read hands it, so
+``GET /api/v1/auth/me`` reports the same username as ``hyperdx_identity``, decided
+by the same function (:func:`hyperdx_identity`) and without the password.
+
 GET /api/v1/hyperdx/sources - every HyperDX team and the DFE sources on it.
 
 A deploy writes its source to every team over that team's own connection, so this
 is the read that says where it landed; ``source:read`` gates it.
 """
+
+from dataclasses import dataclass
+from typing import NamedTuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -62,8 +69,8 @@ def _ch_host_url(settings) -> str:
     return f"{scheme}://{ch.host}:{ch.port}"
 
 
-def _require_query_execute(request: Request, user) -> None:
-    """Gate the connection on ``query:execute``, evaluated scope-aware.
+def _can_execute_queries(request: Request, user) -> bool:
+    """Whether the caller holds ``query:execute``, evaluated scope-aware.
 
     An org_viewer holds ``query:execute`` only at its OWN org scope, so a plain
     system-scope check (the default ``require_action``) locks every org_viewer out
@@ -72,16 +79,10 @@ def _require_query_execute(request: Request, user) -> None:
     """
     action = scopes_dict["query_execute"]
     if is_action_allowed(request, user, action):
-        return
-    for org_id in user.org_ids:
-        if is_action_allowed(request, user, action, scope=Scope(type="org", id=org_id)):
-            return
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail={
-            "code": "forbidden",
-            "message": "query:execute required (at system or your org scope)",
-        },
+        return True
+    return any(
+        is_action_allowed(request, user, action, scope=Scope(type="org", id=org_id))
+        for org_id in user.org_ids
     )
 
 
@@ -102,6 +103,55 @@ def _reads_every_org(request: Request, user) -> bool:
     return is_action_allowed(request, beyond_viewer, scopes_dict["query_execute"])
 
 
+@dataclass(frozen=True, slots=True)
+class ConnectionIdentity:
+    """The ClickHouse user a caller reads as, and the secret path of its password."""
+
+    name: str
+    username: str
+    secret_path: str
+
+
+class _Refusal(NamedTuple):
+    code: str
+    message: str
+
+
+def _resolve_identity(request: Request, user) -> ConnectionIdentity | _Refusal:
+    """Decide which ClickHouse user the caller reads as, or why it gets none."""
+    if not _can_execute_queries(request, user):
+        return _Refusal("forbidden", "query:execute required (at system or your org scope)")
+
+    if _reads_every_org(request, user):
+        return ConnectionIdentity("platform", _PLATFORM_USERNAME, _PLATFORM_SECRET)
+
+    # Org-scoped: resolve the caller to exactly ONE registered org. org_ids carry
+    # both the owning org name and the group's tenant ids, so match on either.
+    org_registry = getattr(request.app.state, "org_registry", None)
+    orgs = list(org_registry.list()) if org_registry is not None else []
+    caller = set(user.org_ids)
+    matched = [o for o in orgs if o.name in caller or (set(o.org_ids) & caller)]
+    if len(matched) != 1:
+        return _Refusal("no_single_org", "caller does not resolve to exactly one org")
+
+    org = matched[0]
+    return ConnectionIdentity(org.name, org_user_name(org.name), f"ch/orgs/{org.name}")
+
+
+def hyperdx_identity(request: Request, user) -> str:
+    """The ClickHouse username ``GET /hyperdx/connection`` hands this caller.
+
+    Args:
+        request: The request, for the role config and the org registry.
+        user: The caller's auth context.
+
+    Returns:
+        The username, or ``""`` when the connection read would refuse the caller.
+    """
+    identity = _resolve_identity(request, user)
+    return identity.username if isinstance(identity, ConnectionIdentity) else ""
+
+
 @router.get(
     "/connection",
     response_model=HyperDXConnection,
@@ -119,58 +169,36 @@ async def hyperdx_connection(
     that resolves to zero or several separate orgs is refused (403) so isolation
     fails closed rather than guessing.
     """
-    _require_query_execute(request, user)
+    identity = _resolve_identity(request, user)
+    if isinstance(identity, _Refusal):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": identity.code, "message": identity.message},
+        )
 
     from dfe_engine.secrets import build_secrets
 
     store = build_secrets(settings.secrets)
-    host = _ch_host_url(settings)
-
-    def _secret(path: str) -> str:
-        return store.get(path) if store.exists(path) else ""
-
-    if _reads_every_org(request, user):
-        password = _secret(_PLATFORM_SECRET)
-        if not password:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "code": "platform_reader_unprovisioned",
-                    "message": "the platform ClickHouse reader has no credential yet",
-                },
-            )
-        return HyperDXConnection(
-            name="platform", host=host, username=_PLATFORM_USERNAME, password=password
-        )
-
-    # Org-scoped: resolve the caller to exactly ONE registered org. org_ids carry
-    # both the owning org name and the group's tenant ids, so match on either.
-    org_registry = getattr(request.app.state, "org_registry", None)
-    orgs = list(org_registry.list()) if org_registry is not None else []
-    caller = set(user.org_ids)
-    matched = [o for o in orgs if o.name in caller or (set(o.org_ids) & caller)]
-
-    if len(matched) != 1:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "code": "no_single_org",
-                "message": "caller does not resolve to exactly one org",
-            },
-        )
-
-    org = matched[0]
-    password = _secret(f"ch/orgs/{org.name}")
+    path = identity.secret_path
+    password = store.get(path) if store.exists(path) else ""
     if not password:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
+        if identity.username == _PLATFORM_USERNAME:
+            detail = {
+                "code": "platform_reader_unprovisioned",
+                "message": "the platform ClickHouse reader has no credential yet",
+            }
+        else:
+            detail = {
                 "code": "org_unprovisioned",
-                "message": f"org '{org.name}' has no ClickHouse credential yet",
-            },
-        )
+                "message": f"org '{identity.name}' has no ClickHouse credential yet",
+            }
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
+
     return HyperDXConnection(
-        name=org.name, host=host, username=org_user_name(org.name), password=password
+        name=identity.name,
+        host=_ch_host_url(settings),
+        username=identity.username,
+        password=password,
     )
 
 
@@ -189,7 +217,7 @@ class HyperDXTeamSources(BaseModel):
     """One HyperDX team and the DFE sources it holds."""
 
     team: str = Field(description="HyperDX team id")
-    team_name: str = Field(description="HyperDX team name; the caller's OIDC group")
+    team_name: str = Field(description="HyperDX team name: the ClickHouse user its members read as")
     sources: list[HyperDXTeamSource] = Field(default_factory=list)
 
 
