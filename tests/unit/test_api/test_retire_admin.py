@@ -87,7 +87,7 @@ def _admin_after_its_change(client: TestClient, settings: DFESettings) -> dict[s
     headers = _token(settings, "admin")
     resp = client.post(
         "/api/v1/auth/accounts/reset-password",
-        json={"new_password": secrets.token_urlsafe(16)},
+        json={"current_password": MINTED_ADMIN, "new_password": secrets.token_urlsafe(16)},
         headers=headers,
     )
     assert resp.status_code == 200, resp.text

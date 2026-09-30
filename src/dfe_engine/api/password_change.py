@@ -15,9 +15,8 @@ route with 403 ``password_change_required``, except the ones the change itself
 needs.
 
 Login still succeeds and says a change is required, so a console can sign the
-owner in and put the change screen in front of everything else. Logging out needs
-no route: a session is a bearer token the client discards. The setup status is
-public and never reaches this gate.
+owner in and put the change screen in front of everything else. The owner may
+also log out. The setup status is public and never reaches this gate.
 """
 
 from typing import Any
@@ -34,13 +33,14 @@ PASSWORD_CHANGE_CLAIM = "password_change_required"
 CHANGE_PASSWORD_ROUTE = ("POST", "/api/v1/auth/accounts/reset-password")
 
 # Routes a session may call while its password must change: the change itself, the
-# token refresh that keeps the session alive through it, and the reads that tell a
-# console who is signed in and whether the account can set a local password. None
-# takes a path parameter, so each matches the request path exactly.
+# token refresh that keeps the session alive through it, logging out, and the reads
+# that tell a console who is signed in and whether the account can set a local
+# password. None takes a path parameter, so each matches the request path exactly.
 ALLOWED_BEFORE_CHANGE: frozenset[tuple[str, str]] = frozenset(
     {
         CHANGE_PASSWORD_ROUTE,
         ("POST", "/api/v1/auth/refresh"),
+        ("POST", "/api/v1/auth/logout"),
         ("GET", "/api/v1/auth/me"),
         ("GET", "/api/v1/auth/accounts/me"),
     }

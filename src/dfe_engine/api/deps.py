@@ -37,6 +37,7 @@ from dfe_engine.auth.jit import (
 )
 from dfe_engine.auth.membership import groups_held, linked_groups, linked_providers
 from dfe_engine.auth.roles import RoleConfig
+from dfe_engine.auth.sessions import session_ended
 from dfe_engine.gitcrud.retention import effective_settings
 from dfe_engine.settings import DFESettings, is_dev_posture
 
@@ -700,6 +701,18 @@ async def get_current_user(request: Request) -> AuthContext:
         jwt_user_id = payload.get("sub", "")
         jwt_email = payload.get("email") or None
         account = require_local_account_enabled(request, jwt_user_id)
+        if session_ended(account, payload):
+            audit_login_denied(jwt_user_id, "jwt", client_ip, "session_ended")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "code": "session_ended",
+                    "message": "This session has ended; sign in again",
+                },
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        # The refresh route carries the session's sign-in time forward from these.
+        request.state.token_claims = payload
         refuse_until_password_changed(request, account)
         if account is not None and account.password_change_required:
             # Its token carries no roles, groups or orgs, so neither does the session.

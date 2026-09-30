@@ -25,7 +25,9 @@ Usage::
 """
 
 import builtins
+import hashlib
 import os
+import secrets
 import tempfile
 from datetime import UTC, datetime
 from functools import cache
@@ -126,6 +128,19 @@ class Account(BaseModel):
 
     Kept after the owner's change, so the boot reconcile can tell an injected
     password it already issued from one the deployment has since rotated."""
+    session_epoch: str = ""
+    """Replaced whenever every session of the account ends: its owner logs out, or it
+    is disabled, blocked, re-enabled or unblocked. Empty until that first happens."""
+
+    def session_marker(self) -> str:
+        """The value a session token minted for this account now carries.
+
+        It moves with the session epoch, the password and the creation time, so a
+        token outlives none of a logout, a password change, or the account being
+        deleted and created again under its name.
+        """
+        material = "\n".join((self.session_epoch, self.created_at, self.password_hash))
+        return hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
 
     def session_denied(self) -> tuple[str, str] | None:
         """Return ``(code, message)`` when this account may not hold a session."""
@@ -297,7 +312,7 @@ class AccountStore:
         account = self._read(path)
         if not allow_protected:
             self.protected.check_account_update(username, fields, account.groups)
-        updates = _apply_access_stamps({k: fields[k] for k in _UPDATABLE_FIELDS if k in fields})
+        updates = _access_updates(account, fields)
         account = account.model_copy(update={**updates, "updated_at": _now()})
         self._write(path, account)
         return account
@@ -323,6 +338,27 @@ class AccountStore:
         account = self._read(path)
         account = account.model_copy(update=_password_update(new_password, change_required))
         self._write(path, account)
+
+    def end_sessions(self, username: str) -> Account:
+        """End every session of an account: each token minted for it before now is refused.
+
+        Args:
+            username: Account whose sessions end.
+
+        Returns:
+            The updated Account.
+
+        Raises:
+            KeyError: If no account with *username* exists.
+        """
+        path = self._stored(username)
+        if path is None:
+            raise KeyError(username)
+
+        account = self._read(path)
+        account = account.model_copy(update=_sessions_ended())
+        self._write(path, account)
+        return account
 
     def set_attributes(self, username: str, attributes: dict) -> Account:
         """Full-replace the non-sensitive ``attributes`` blob on an account.
@@ -578,7 +614,7 @@ class DocuStoreAccountStore:
         account = self._existing(username)
         if not allow_protected:
             self.protected.check_account_update(username, fields, account.groups)
-        updates = _apply_access_stamps({k: fields[k] for k in _UPDATABLE_FIELDS if k in fields})
+        updates = _access_updates(account, fields)
         account = account.model_copy(update={**updates, "updated_at": _now()})
         self._c.put(username, account)
         return account
@@ -593,6 +629,12 @@ class DocuStoreAccountStore:
         account = self._existing(username)
         account = account.model_copy(update=_password_update(new_password, change_required))
         self._c.put(username, account)
+
+    def end_sessions(self, username: str) -> Account:
+        """End every session of an account. Raises KeyError if it does not exist."""
+        account = self._existing(username).model_copy(update=_sessions_ended())
+        self._c.put(username, account)
+        return account
 
     def set_attributes(self, username: str, attributes: dict) -> Account:
         """Full-replace the non-sensitive ``attributes`` blob. Raises KeyError if missing."""
@@ -657,6 +699,29 @@ def discard_created(store: AccountStore | DocuStoreAccountStore, created: Accoun
             username=created.username,
             error=type(exc).__name__,
         )
+
+
+def _new_session_epoch() -> str:
+    """A fresh session epoch; no token minted before it carries a marker made from it."""
+    return secrets.token_urlsafe(16)
+
+
+def _sessions_ended() -> dict[str, object]:
+    """The fields that end every session of an account."""
+    return {"session_epoch": _new_session_epoch(), "updated_at": _now()}
+
+
+def _access_updates(account: Account, fields: dict[str, object]) -> dict[str, object]:
+    """The permitted *fields* of an update to *account*, stamped.
+
+    A change to ``enabled`` or ``blocked`` also ends every session, so a token minted
+    before an account was disabled does not come back when it is enabled again.
+    """
+    updates = _apply_access_stamps({k: fields[k] for k in _UPDATABLE_FIELDS if k in fields})
+    access = ("enabled", "blocked")
+    if any(key in updates and updates[key] != getattr(account, key) for key in access):
+        updates["session_epoch"] = _new_session_epoch()
+    return updates
 
 
 def _apply_access_stamps(updates: dict[str, object]) -> dict[str, object]:

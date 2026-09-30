@@ -548,6 +548,74 @@ class TestResetPassword:
 
 
 # ---------------------------------------------------------------------------
+# Session marker: what a token carries, and what moves it
+# ---------------------------------------------------------------------------
+
+
+class TestSessionMarker:
+    def test_it_is_stable_while_nothing_changes(self, store):
+        store.create("alice", "password123")
+        store.update("alice", name="Alice", email="alice@example.com")
+
+        assert store.get("alice").session_marker() == store.get("alice").session_marker()
+        assert store.get("alice").session_epoch == ""
+
+    def test_a_password_change_moves_it(self, store):
+        store.create("alice", "password123")
+        before = store.get("alice").session_marker()
+
+        store.reset_password("alice", "another-password")
+
+        assert store.get("alice").session_marker() != before
+
+    def test_ending_the_sessions_moves_it_and_sets_the_epoch(self, store):
+        store.create("alice", "password123")
+        before = store.get("alice").session_marker()
+
+        ended = store.end_sessions("alice")
+
+        assert ended.session_epoch
+        assert store.get("alice").session_marker() != before
+        assert store.get("alice") == ended
+
+    @pytest.mark.parametrize(
+        ("field", "first", "second"), [("enabled", False, True), ("blocked", True, False)]
+    )
+    def test_each_change_of_access_moves_it(self, store, field, first, second):
+        store.create("alice", "password123")
+        markers = [store.get("alice").session_marker()]
+
+        store.update("alice", **{field: first})
+        markers.append(store.get("alice").session_marker())
+        store.update("alice", **{field: second})
+        markers.append(store.get("alice").session_marker())
+
+        assert len(set(markers)) == 3
+
+    def test_restating_the_access_it_has_leaves_it(self, store):
+        store.create("alice", "password123")
+        before = store.get("alice").session_marker()
+
+        store.update("alice", enabled=True, blocked=False)
+
+        assert store.get("alice").session_marker() == before
+
+    def test_an_account_created_again_under_the_name_has_another(self, store):
+        store.create("alice", "password123")
+        before = store.get("alice").session_marker()
+        store.delete("alice")
+        time.sleep(0.001)
+
+        store.create("alice", "password123")
+
+        assert store.get("alice").session_marker() != before
+
+    def test_ending_the_sessions_of_nobody_raises(self, store):
+        with pytest.raises(KeyError, match="nobody"):
+            store.end_sessions("nobody")
+
+
+# ---------------------------------------------------------------------------
 # AccountStore.delete
 # ---------------------------------------------------------------------------
 

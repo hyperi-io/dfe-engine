@@ -253,7 +253,10 @@ _ADMIN_OWN_PASSWORD = f"e2e-admin-{secrets.token_urlsafe(12)}"
 
 
 def _admin(client: TestClient) -> dict[str, str]:
-    """Admin headers, after the forced change a fresh deployment's admin is due."""
+    """Admin headers, after the forced change a fresh deployment's admin is due.
+
+    The change ends the session that made it, so the admin signs in again after it.
+    """
     for password in (_ISSUED_ADMIN_PASSWORD, _ADMIN_OWN_PASSWORD):
         login = client.post("/api/v1/auth/login", json={"username": "admin", "password": password})
         if login.status_code == 200:
@@ -263,10 +266,15 @@ def _admin(client: TestClient) -> dict[str, str]:
     if login.json()["password_change_required"]:
         changed = client.post(
             "/api/v1/auth/accounts/reset-password",
-            json={"new_password": _ADMIN_OWN_PASSWORD},
+            json={"current_password": password, "new_password": _ADMIN_OWN_PASSWORD},
             headers=headers,
         )
         assert changed.status_code == 200, changed.text
+        login = client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": _ADMIN_OWN_PASSWORD}
+        )
+        assert login.status_code == 200, login.text
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
     return headers
 
 

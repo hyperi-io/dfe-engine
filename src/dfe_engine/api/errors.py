@@ -175,7 +175,12 @@ def install_exception_handlers(app: FastAPI) -> None:
             body = ErrorResponse(code=code, message=message, context=ctx or None)
         else:
             body = ErrorResponse(code="request_error", message=str(exc.detail))
-        return JSONResponse(status_code=exc.status_code, content=_error_response_json(body))
+        # Kept so a 401 names its scheme and a 429 says when to retry.
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=_error_response_json(body),
+            headers=exc.headers,
+        )
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):

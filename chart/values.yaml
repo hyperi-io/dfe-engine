@@ -86,6 +86,9 @@ config:
   api:
     host: "0.0.0.0"
     port: 8000
+    # -- Longest a session lasts from its sign-in, in minutes. A refresh never
+    # extends a token past it. Empty keeps the engine's default, 720.
+    max_session_minutes: ""
     # -- Comma-separated list of allowed CORS origins
     cors_origins: ""
     # -- Comma-separated peers or CIDRs whose X-Forwarded-Proto and X-Forwarded-For
@@ -110,6 +113,14 @@ config:
     local:
       enabled: true
       org_id: "default"
+    # -- Back-off on failed password sign-ins, per username and per client address.
+    # The count lives in each engine pod, so it resets on restart. Empty keeps the
+    # engine's default: on, 5 username failures, 20 address failures, 900 seconds.
+    login_throttle:
+      enabled: ""
+      username_failures: ""
+      client_failures: ""
+      max_delay_seconds: ""
   # -- Synthetic data standing demo streams. DEFAULT OFF: set autostart_schemas
   # (comma-separated pack refs, e.g. "meta/syslog,meta/otel/logs") plus the
   # receiver ingest URL and the engine keeps a live-tail synthetic stream

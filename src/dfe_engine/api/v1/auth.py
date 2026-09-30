@@ -1,15 +1,20 @@
-"""Auth router -- login, token refresh, user info, permissions.
+"""Auth router -- login, token refresh, logout, user info, permissions.
 
 POST /api/v1/auth/login             -> JWT token (LocalAuthProvider)
 POST /api/v1/auth/refresh           -> Refreshed JWT token
+POST /api/v1/auth/logout            -> End every session of the caller's account
 GET  /api/v1/auth/me                -> Current user info
 GET  /api/v1/auth/permissions       -> Resolved permissions for current user's roles
 GET  /api/v1/auth/setup-status      -> Initial setup required? (public, pre-login)
 POST /api/v1/auth/setup/retire-admin -> Retire the bootstrap admin (admin, or itself)
 """
 
-from fastapi import APIRouter, HTTPException, Request
+import time
+from datetime import timedelta
+
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
+from scalo.concurrency import run_blocking
 
 from dfe_engine.api.deps import (
     CurrentUser,
@@ -24,9 +29,12 @@ from dfe_engine.api.deps import (
     resolve_live_groups_for_user,
 )
 from dfe_engine.api.errors import ErrorResponse
+from dfe_engine.api.metrics import ApiMetrics
 from dfe_engine.api.password_change import PASSWORD_CHANGE_CLAIM
+from dfe_engine.api.v1.oidc_login import TOKEN_COOKIE
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth import account_durability, admin_retirement, breakglass, hyperdx_role
+from dfe_engine.auth.accounts import Account
 from dfe_engine.auth.audit import (
     audit_account_change,
     audit_breakglass_login,
@@ -35,8 +43,15 @@ from dfe_engine.auth.audit import (
 )
 from dfe_engine.auth.bootstrap import admin_account_name, admin_on_default_password
 from dfe_engine.auth.local_provider import LocalAuthProvider
+from dfe_engine.auth.login_throttle import LoginThrottle
 from dfe_engine.auth.models import AuthenticationError, ScopedGrant
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.auth.sessions import (
+    remaining_seconds,
+    session_auth_time,
+    session_claims,
+    token_lifetime,
+)
 from dfe_engine.auth.setup_status import SetupStatus, evaluate_initial_setup
 from dfe_engine.settings import DFESettings
 
@@ -161,6 +176,43 @@ def _token_data(
     }
 
 
+def throttled(request: Request, wait: int) -> HTTPException:
+    """The 429 a sign-in or password check answers while its caller must wait, counted."""
+    metrics = getattr(request.app.state, "api_metrics", None) or ApiMetrics()
+    route = str(getattr(request.scope.get("route"), "path", "")) or "unknown"
+    metrics.sign_in_throttled(route)
+    return HTTPException(
+        status_code=429,
+        detail={
+            "code": "too_many_attempts",
+            "message": f"Too many failed attempts; try again in {wait} seconds",
+        },
+        headers={"Retry-After": str(wait)},
+    )
+
+
+def _mint(
+    data: dict,
+    account: Account | None,
+    settings: DFESettings,
+    *,
+    auth_time: int,
+    now: int,
+) -> tuple[str, int]:
+    """Sign *data* with the session claims, returning the token and its lifetime in seconds."""
+    lifetime = token_lifetime(
+        auth_time,
+        now=now,
+        expire_minutes=settings.api.jwt_expire_minutes,
+        max_session_minutes=settings.api.max_session_minutes,
+    )
+    claims = {**data, **session_claims(account, auth_time=auth_time)}
+    token = create_access_token(
+        data=claims, settings=settings, expires_delta=timedelta(seconds=lifetime)
+    )
+    return token, lifetime
+
+
 # -- Endpoints ------------------------------------------------
 
 
@@ -177,12 +229,28 @@ def _token_data(
             "model": ErrorResponse,
             "description": "The break-glass account is disabled in governance settings",
         },
+        429: {
+            "model": ErrorResponse,
+            "description": "Too many failed sign-ins for this username or from this "
+            "address; Retry-After gives the seconds to wait",
+        },
     },
 )
 async def login(body: LoginRequest, request: Request, settings: Settings):
-    """Authenticate with local credentials and receive a JWT token."""
+    """Authenticate with local credentials and receive a JWT token.
+
+    The password check runs off the event loop. Failed attempts back off per
+    username and per client address (``auth.login_throttle``); a waiting attempt is
+    refused with 429 before the password is checked.
+    """
     provider: LocalAuthProvider = request.app.state.auth_provider
+    throttle: LoginThrottle = request.app.state.login_throttle
     client_ip = _get_client_ip(request)
+
+    wait = throttle.retry_after(body.username, client_ip)
+    if wait:
+        audit_login_denied(body.username, "jwt", client_ip, "throttled")
+        raise throttled(request, wait)
 
     # The break-glass account bypasses the IdP, so every attempt is audited and the
     # governance switch is consulted before the password is even checked.
@@ -204,7 +272,8 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
             )
 
     try:
-        auth_ctx = provider.authenticate(
+        auth_ctx = await run_blocking(
+            provider.authenticate,
             body.username,
             body.password,
             request_id=request.headers.get("X-Request-ID"),
@@ -212,10 +281,12 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
             user_agent=request.headers.get("User-Agent"),
         )
     except AuthenticationError as exc:
+        throttle.failed(body.username, client_ip)
         # Audited here rather than in the app-wide 401 handler, which also answers
         # expired tokens on ordinary requests - those are already audited in deps.py.
         audit_login_denied(body.username, "jwt", client_ip, str(exc))
         raise
+    throttle.succeeded(body.username)
 
     # The password is exchanged for a token here, so this is the login the
     # audit trail counts - not the per-request token check in get_current_user.
@@ -233,11 +304,14 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
         auth_ctx.org_ids,
         change_required=change_required,
     )
-    token = create_access_token(data=data, settings=settings)
+    now = int(time.time())
+    token, lifetime = _mint(
+        data, bound_account(request, auth_ctx.user_id), settings, auth_time=now, now=now
+    )
 
     return TokenResponse(
         access_token=token,
-        expires_in=settings.api.jwt_expire_minutes * 60,
+        expires_in=lifetime,
         user_id=auth_ctx.user_id,
         roles=data["roles"],
         default_credentials=_default_credentials(request, settings),
@@ -245,15 +319,43 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
     )
 
 
-@router.post("/refresh", response_model=TokenResponse)
+@router.post(
+    "/refresh",
+    response_model=TokenResponse,
+    responses={
+        401: {
+            "model": ErrorResponse,
+            "description": "The session is older than api.max_session_minutes "
+            "(session_expired), has ended, or no account backs it",
+        },
+    },
+)
 async def refresh_token(user: CurrentUser, request: Request, settings: Settings):
-    """Refresh the current JWT token. Requires a valid existing token."""
+    """Refresh the current JWT token. Requires a valid existing token.
+
+    The new token keeps the session's sign-in time, so a session renews only until
+    it is ``api.max_session_minutes`` old, and no token outlives that.
+    """
     account = require_local_account_enabled(request, user.user_id)
     # Each refresh issues a new expiry, so only a session an account backs may renew.
     if account is None and settings.auth.enabled:
         raise HTTPException(
             status_code=401,
             detail={"code": "unauthorized", "message": "No account is bound to this session"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    now = int(time.time())
+    auth_time = session_auth_time(getattr(request.state, "token_claims", None), now=now)
+    left = remaining_seconds(
+        auth_time, now=now, max_session_minutes=settings.api.max_session_minutes
+    )
+    if left <= 0:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "session_expired",
+                "message": "The session is past its maximum age; sign in again",
+            },
             headers={"WWW-Authenticate": "Bearer"},
         )
     change_required = _password_change_required(request, user.user_id)
@@ -268,16 +370,33 @@ async def refresh_token(user: CurrentUser, request: Request, settings: Settings)
         live.org_ids,
         change_required=change_required,
     )
-    token = create_access_token(data=data, settings=settings)
+    token, lifetime = _mint(data, account, settings, auth_time=auth_time, now=now)
 
     return TokenResponse(
         access_token=token,
-        expires_in=settings.api.jwt_expire_minutes * 60,
+        expires_in=lifetime,
         user_id=user.user_id,
         roles=data["roles"],
         default_credentials=_default_credentials(request, settings),
         password_change_required=change_required,
     )
+
+
+@router.post("/logout", status_code=204)
+async def logout(user: CurrentUser, request: Request) -> Response:
+    """End every session of the caller's account, on every device.
+
+    Each token minted for the account before this call is refused from now on,
+    this one included, and the engine's login cookie is cleared. A peer that
+    verifies engine tokens by signature alone still accepts one until it expires.
+    """
+    account = bound_account(request, user.user_id)
+    if account is not None:
+        request.app.state.account_store.end_sessions(account.username)
+        audit_account_change(user.user_id, account.username, "sessions_ended")
+    response = Response(status_code=204)
+    response.delete_cookie(TOKEN_COOKIE, secure=True, httponly=True, samesite="lax")
+    return response
 
 
 @router.get("/me", response_model=UserResponse)

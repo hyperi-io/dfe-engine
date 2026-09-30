@@ -167,6 +167,30 @@ class TestDocuStoreAccountStore:
         assert stored.external is True
         assert stored.source_provider == "entra"
 
+    def test_ending_the_sessions_is_stored(self, store):
+        store.create("gina", "pw-Aa1")
+        before = store.get("gina").session_marker()
+
+        ended = store.end_sessions("gina")
+
+        assert ended.session_epoch
+        assert store.get("gina") == ended
+        assert store.get("gina").session_marker() != before
+
+    def test_a_change_of_access_ends_the_sessions(self, store):
+        store.create("hank", "pw-Aa1")
+        before = store.get("hank").session_marker()
+
+        store.update("hank", enabled=False)
+        store.update("hank", enabled=True)
+
+        assert store.get("hank").session_epoch
+        assert store.get("hank").session_marker() != before
+
+    def test_ending_the_sessions_of_nobody_raises(self, store):
+        with pytest.raises(KeyError):
+            store.end_sessions("ghost")
+
 
 class TestReplicasCreatingOneAccountAtOnce:
     """Each replica holds its own client, so only the store can decide which create wins."""
