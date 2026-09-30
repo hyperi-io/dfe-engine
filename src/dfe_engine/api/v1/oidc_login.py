@@ -28,6 +28,8 @@ These endpoints are deliberately unauthenticated - they ARE the login. Unknown
 or disabled providers return 404.
 """
 
+import time
+from datetime import timedelta
 from typing import Literal
 from urllib.parse import urlencode, urlsplit
 
@@ -50,11 +52,12 @@ from dfe_engine.auth.jit import (
     JitIdentityCollisionError,
     JitSubjectUnusableError,
 )
+from dfe_engine.auth.sessions import session_claims, token_lifetime
 
 router = APIRouter(prefix="/auth/oidc", tags=["OIDC Login"])
 
 # Name of the cookie carrying the re-minted engine token to a browser client.
-_TOKEN_COOKIE = "dfe_token"
+TOKEN_COOKIE = "dfe_token"
 
 # Session key holding the validated return_to between login and callback.
 _RETURN_TO_SESSION_KEY = "oidc_return_to"
@@ -272,7 +275,7 @@ async def oidc_callback(
                 },
             ) from exc
 
-    require_local_account_enabled(request, identity.subject)
+    account = require_local_account_enabled(request, identity.subject)
 
     # From the group files rather than the IdP token, for the claim and the audit.
     live = resolve_live_grants_for_user(request, identity.subject)
@@ -280,6 +283,13 @@ async def oidc_callback(
 
     # RE-MINT: the engine's own ES384 identity token is the ONLY token downstream
     # apps ever see. iss/iat/exp are set by the authority.
+    now = int(time.time())
+    lifetime = token_lifetime(
+        now,
+        now=now,
+        expire_minutes=settings.api.jwt_expire_minutes,
+        max_session_minutes=settings.api.max_session_minutes,
+    )
     token = jwt_authority_for(settings).sign(
         {
             "sub": identity.subject,
@@ -287,7 +297,9 @@ async def oidc_callback(
             "groups": identity.groups,
             # dfe-hyperdx gates changing what a team sees on this one value.
             hyperdx_role.CLAIM: hyperdx_role.role_claim(live.grants),
-        }
+            **session_claims(account, auth_time=now),
+        },
+        expires_delta=timedelta(seconds=lifetime),
     )
 
     logger.info(
@@ -315,11 +327,11 @@ async def oidc_callback(
     else:
         response = JSONResponse(payload.model_dump())
     response.set_cookie(
-        _TOKEN_COOKIE,
+        TOKEN_COOKIE,
         token,
         httponly=True,
         secure=True,
         samesite="lax",
-        max_age=settings.api.jwt_expire_minutes * 60,
+        max_age=lifetime,
     )
     return response

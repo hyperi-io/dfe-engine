@@ -12,7 +12,7 @@
           "Auth"
         ],
         "summary": "Login",
-        "description": "Authenticate with local credentials and receive a JWT token.",
+        "description": "Authenticate with local credentials and receive a JWT token.\n\nThe password check runs off the event loop. Failed attempts back off per\nusername and per client address (``auth.login_throttle``); a waiting attempt is\nrefused with 429 before the password is checked.",
         "operationId": "login_api_v1_auth_login_post",
         "requestBody": {
           "content": {
@@ -55,6 +55,16 @@
               }
             }
           },
+          "429": {
+            "description": "Too many failed sign-ins for this username or from this address; Retry-After gives the seconds to wait",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -74,7 +84,7 @@
           "Auth"
         ],
         "summary": "Refresh Token",
-        "description": "Refresh the current JWT token. Requires a valid existing token.",
+        "description": "Refresh the current JWT token. Requires a valid existing token.\n\nThe new token keeps the session's sign-in time, so a session renews only until\nit is ``api.max_session_minutes`` old, and no token outlives that.",
         "operationId": "refresh_token_api_v1_auth_refresh_post",
         "responses": {
           "200": {
@@ -86,6 +96,46 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "The session is older than api.max_session_minutes (session_expired), has ended, or no account backs it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Logout",
+        "description": "End every session of the caller's account, on every device.\n\nEach token minted for the account before this call is refused from now on,\nthis one included, and the engine's login cookie is cleared. A peer that\nverifies engine tokens by signature alone still accepts one until it expires.",
+        "operationId": "logout_api_v1_auth_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
           },
           "401": {
             "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
@@ -944,13 +994,13 @@
           "Accounts"
         ],
         "summary": "Reset Current User Password",
-        "description": "Reset the authenticated user's password.\n\nThe username is taken from the session, not the request, so a caller cannot\nreset another account through this route. An IdP-owned (``external``)\naccount is refused: it has no local password. The live store takes the new\npassword immediately; the ``git`` block reports whether the durable mirror\nmerged, is pending review, or is a no-op for a non-git-backed account.\n\nAn account on an issued password may call this and nothing else that\nchanges state, and the reset clears ``password_change_required``.",
+        "description": "Change the authenticated user's own password, given the current one.\n\nThe username is taken from the session, not the request, so a caller cannot\nreset another account through this route. ``current_password`` must be the\naccount's password, so a stolen session token cannot take the account over;\nwrong guesses back off as sign-in failures do. An IdP-owned (``external``)\naccount is refused: it has no local password. The live store takes the new\npassword immediately and every session the account held ends, this one\nincluded, so the owner signs in again. The ``git`` block reports whether the\ndurable mirror merged, is pending review, or is a no-op for a non-git-backed\naccount.\n\nAn account on an issued password may call this and nothing else that\nchanges state, and the reset clears ``password_change_required``.",
         "operationId": "reset_current_user_password_api_v1_auth_accounts_reset_password_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ResetPasswordRequest"
+                "$ref": "#/components/schemas/ChangeOwnPasswordRequest"
               }
             }
           },
@@ -978,7 +1028,7 @@
             }
           },
           "403": {
-            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "description": "current_password is not the account's password (invalid_current_password)",
             "content": {
               "application/json": {
                 "schema": {
@@ -993,6 +1043,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many wrong current passwords; Retry-After gives the seconds to wait",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -25563,6 +25623,29 @@
         ],
         "title": "CelCheckResponse",
         "description": "Result of a single CEL expression check."
+      },
+      "ChangeOwnPasswordRequest": {
+        "properties": {
+          "new_password": {
+            "type": "string",
+            "minLength": 12,
+            "title": "New Password",
+            "description": "New plaintext password; at least 12 characters"
+          },
+          "current_password": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Current Password",
+            "description": "The account's password now. A session token alone cannot change it."
+          }
+        },
+        "type": "object",
+        "required": [
+          "new_password",
+          "current_password"
+        ],
+        "title": "ChangeOwnPasswordRequest",
+        "description": "The owner's own change, which proves the password as well as the session."
       },
       "ClassInfo": {
         "properties": {

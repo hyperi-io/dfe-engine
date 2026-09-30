@@ -47,7 +47,13 @@ from dfe_engine.api.v1 import (
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.source import catalogue as source_catalogue_module
 
-from .test_e2e_server import _admin, _seed, _settings, _stood_up_as_on_kubernetes
+from .test_e2e_server import (
+    _ADMIN_OWN_PASSWORD,
+    _admin,
+    _seed,
+    _settings,
+    _stood_up_as_on_kubernetes,
+)
 
 _PROBE = "/api/e2e/status"
 _WAIT_SECONDS = 10.0
@@ -223,7 +229,11 @@ _DEPLOY_REPO_CASES: list[tuple[str, str, dict | None]] = [
     ("PUT", "/api/v1/auth/accounts/admin", {"name": "Loop Probe"}),
     ("PUT", "/api/v1/auth/accounts/me", {"name": "Loop Probe"}),
     ("POST", "/api/v1/auth/accounts/admin/reset-password", {"new_password": _NEW_PASSWORD}),
-    ("POST", "/api/v1/auth/accounts/reset-password", {"new_password": _NEW_PASSWORD}),
+    (
+        "POST",
+        "/api/v1/auth/accounts/reset-password",
+        {"current_password": _ADMIN_OWN_PASSWORD, "new_password": _NEW_PASSWORD},
+    ),
     ("GET", "/api/v1/auth/accounts/admin/git-status", None),
 ]
 
@@ -242,6 +252,31 @@ def test_the_loop_answers_while_a_handler_waits_on_the_deploy_repo(
     status = _assert_the_loop_answers(client, park, method, path, body, headers)
 
     assert status < 500, f"{method} {path} answered {status}"
+
+
+_PASSWORD_CHECK_CASES: list[tuple[str, str, dict]] = [
+    ("POST", "/api/v1/auth/login", {"username": "admin", "password": "not-the-password"}),
+    (
+        "POST",
+        "/api/v1/auth/accounts/reset-password",
+        {"current_password": "not-the-password", "new_password": _NEW_PASSWORD},
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    _PASSWORD_CHECK_CASES,
+    ids=[f"{m} {p}" for m, p, _ in _PASSWORD_CHECK_CASES],
+)
+def test_the_loop_answers_while_a_password_is_checked(seeded, monkeypatch, method, path, body):
+    """A bcrypt check is a quarter of a second of CPU; on the loop it stalls every caller."""
+    client, headers = seeded
+    park = _Park.on_function(client.app.state.account_store, "verify_password", monkeypatch)
+
+    status = _assert_the_loop_answers(client, park, method, path, body, headers)
+
+    assert status in (401, 403), status
 
 
 def test_the_loop_answers_while_the_source_catalogue_is_read(seeded, monkeypatch):

@@ -307,6 +307,29 @@ class TestEnvOverrides:
     def test_api_forwarded_allow_ips_defaults_to_loopback(self):
         assert APISettings().forwarded_allow_ips == "127.0.0.1"
 
+    def test_api_max_session_minutes_defaults_to_twelve_hours(self):
+        assert load_settings().api.max_session_minutes == 720
+
+    def test_api_max_session_minutes_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_API_MAX_SESSION_MINUTES", "90")
+        assert load_settings().api.max_session_minutes == 90
+
+    def test_login_throttle_defaults(self):
+        throttle = load_settings().auth.login_throttle
+        assert throttle.enabled is True
+        assert (throttle.username_failures, throttle.client_failures) == (5, 20)
+        assert throttle.max_delay_seconds == 900
+
+    def test_login_throttle_overrides(self, monkeypatch):
+        monkeypatch.setenv("DFE_AUTH_LOGIN_THROTTLE_ENABLED", "false")
+        monkeypatch.setenv("DFE_AUTH_LOGIN_THROTTLE_USERNAME_FAILURES", "3")
+        monkeypatch.setenv("DFE_AUTH_LOGIN_THROTTLE_CLIENT_FAILURES", "40")
+        monkeypatch.setenv("DFE_AUTH_LOGIN_THROTTLE_MAX_DELAY_SECONDS", "120")
+        throttle = load_settings().auth.login_throttle
+        assert throttle.enabled is False
+        assert (throttle.username_failures, throttle.client_failures) == (3, 40)
+        assert throttle.max_delay_seconds == 120
+
     def test_api_elastic_converter_max_upload_override(self, monkeypatch):
         monkeypatch.setenv("DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES", "1048576")
         settings = load_settings()

@@ -59,9 +59,15 @@ def _bearer(body: dict) -> dict[str, str]:
     return {"Authorization": f"Bearer {body['access_token']}"}
 
 
-def _change(client: TestClient, headers: dict[str, str]) -> None:
-    resp = client.post(_CHANGE, json={"new_password": _OWN_PASSWORD}, headers=headers)
+def _change(client: TestClient, headers: dict[str, str]) -> dict[str, str]:
+    """Replace the issued password; the change ends the session, so sign in again."""
+    resp = client.post(
+        _CHANGE,
+        json={"current_password": ADMIN_PASSWORD, "new_password": _OWN_PASSWORD},
+        headers=headers,
+    )
     assert resp.status_code == 200, resp.text
+    return _bearer(_login(client, _OWN_PASSWORD))
 
 
 class TestTheIssuedAdmin:
@@ -129,8 +135,7 @@ class TestTheIssuedAdmin:
 
 class TestTheChangedAccount:
     def test_a_refresh_after_the_change_carries_the_accounts_standing(self, fresh):
-        headers = _bearer(_login(fresh))
-        _change(fresh, headers)
+        headers = _change(fresh, _bearer(_login(fresh)))
 
         refreshed = fresh.post("/api/v1/auth/refresh", headers=headers).json()
         claims = fresh.app.state.jwt_authority.verify(refreshed["access_token"])
@@ -141,12 +146,24 @@ class TestTheChangedAccount:
         assert claims["role"] == "admin"
         assert PASSWORD_CHANGE_CLAIM not in claims
 
+    def test_the_issued_session_cannot_refresh_into_the_accounts_standing(self, fresh):
+        """The token minted on the issued password must not become an admin's."""
+        issued = _bearer(_login(fresh))
+        _change(fresh, issued)
+
+        refreshed = fresh.post("/api/v1/auth/refresh", headers=issued)
+        read = fresh.get("/api/v1/sources", headers=issued)
+
+        assert refreshed.status_code == 401, refreshed.text
+        assert refreshed.json()["code"] == "session_ended"
+        assert read.status_code == 401, read.text
+
 
 class TestTheChange:
     def test_changing_the_password_clears_the_flag(self, fresh):
-        headers = _bearer(_login(fresh))
+        issued = _bearer(_login(fresh))
 
-        _change(fresh, headers)
+        headers = _change(fresh, issued)
 
         assert fresh.get("/api/v1/sources", headers=headers).status_code == 200
         assert (
@@ -154,6 +171,7 @@ class TestTheChange:
             is False
         )
         assert _login(fresh, _OWN_PASSWORD)["password_change_required"] is False
+        assert fresh.get("/api/v1/sources", headers=issued).status_code == 401
 
     def test_the_issued_password_stops_working(self, fresh):
         _change(fresh, _bearer(_login(fresh)))
@@ -165,7 +183,11 @@ class TestTheChange:
     def test_the_issued_password_is_refused_as_the_new_one(self, fresh):
         headers = _bearer(_login(fresh))
 
-        resp = fresh.post(_CHANGE, json={"new_password": ADMIN_PASSWORD}, headers=headers)
+        resp = fresh.post(
+            _CHANGE,
+            json={"current_password": ADMIN_PASSWORD, "new_password": ADMIN_PASSWORD},
+            headers=headers,
+        )
 
         assert resp.status_code == 400
         assert resp.json()["code"] == "password_reused"
@@ -173,10 +195,13 @@ class TestTheChange:
         assert fresh.get("/api/v1/sources", headers=headers).status_code == 403
 
     def test_the_issued_password_cannot_be_readopted_after_the_change(self, fresh):
-        headers = _bearer(_login(fresh))
-        _change(fresh, headers)
+        headers = _change(fresh, _bearer(_login(fresh)))
 
-        resp = fresh.post(_CHANGE, json={"new_password": ADMIN_PASSWORD}, headers=headers)
+        resp = fresh.post(
+            _CHANGE,
+            json={"current_password": _OWN_PASSWORD, "new_password": ADMIN_PASSWORD},
+            headers=headers,
+        )
 
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == "password_reused"
@@ -193,7 +218,11 @@ class TestTheFloorOnTheChange:
         headers = _bearer(_login(fresh))
         short = _password_of(MIN_ADMIN_PASSWORD_LENGTH - 1)
 
-        resp = fresh.post(_CHANGE, json={"new_password": short}, headers=headers)
+        resp = fresh.post(
+            _CHANGE,
+            json={"current_password": ADMIN_PASSWORD, "new_password": short},
+            headers=headers,
+        )
 
         assert resp.status_code == 422, resp.text
         assert resp.json()["errors"][0]["field"] == "new_password"
@@ -207,7 +236,11 @@ class TestTheFloorOnTheChange:
         headers = _bearer(_login(fresh))
         at_floor = _password_of(MIN_ADMIN_PASSWORD_LENGTH)
 
-        resp = fresh.post(_CHANGE, json={"new_password": at_floor}, headers=headers)
+        resp = fresh.post(
+            _CHANGE,
+            json={"current_password": ADMIN_PASSWORD, "new_password": at_floor},
+            headers=headers,
+        )
 
         assert resp.status_code == 200, resp.text
         assert _login(fresh, at_floor)["password_change_required"] is False
@@ -235,8 +268,7 @@ class TestWhatAFlaggedSessionReports:
         assert own.json()["groups"] == []
 
     def test_the_standing_is_reported_once_the_password_is_changed(self, fresh):
-        headers = _bearer(_login(fresh))
-        _change(fresh, headers)
+        headers = _change(fresh, _bearer(_login(fresh)))
 
         me = fresh.get("/api/v1/auth/me", headers=headers).json()
         own = fresh.get("/api/v1/auth/accounts/me", headers=headers).json()
@@ -323,9 +355,10 @@ def test_a_floor_refusal_is_counted_by_route(api_settings):
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             headers = _bearer(_login(client))
-            client.post(_CHANGE, json={"new_password": short}, headers=headers)
-            client.post(_CHANGE, json={"new_password": short}, headers=headers)
-            _change(client, headers)
+            too_short = {"current_password": ADMIN_PASSWORD, "new_password": short}
+            client.post(_CHANGE, json=too_short, headers=headers)
+            client.post(_CHANGE, json=too_short, headers=headers)
+            headers = _change(client, headers)
             client.post(
                 "/api/v1/scim/v2/Users",
                 json={
