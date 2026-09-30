@@ -362,7 +362,7 @@ disjoint claims, lease reclaim, and incremental resume with no duplicate rows.
 
 ## The smaller pieces
 
-- **Runtime config** -- `GET /api/v1/config/client` (public, no secrets) hands the UI
+- **Runtime config** -- `GET /api/v1/config/client` (authenticated, any role) hands the UI
   its API base, HyperDX URL, auth mode, and feature flags at runtime. This is what
   lets one UI image run in every environment instead of baking the URLs in at build
   time.

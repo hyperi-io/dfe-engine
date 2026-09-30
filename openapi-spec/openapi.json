@@ -23116,7 +23116,7 @@
           "Client Config"
         ],
         "summary": "Client Config",
-        "description": "Runtime config for the web UI (no secrets).",
+        "description": "Runtime config for the web UI.\n\nAuthenticated but ungated: every console pane may read it, and the HyperDX URL\nit returns is internal to the deployment.",
         "operationId": "client_config_api_v1_config_client_get",
         "responses": {
           "200": {
@@ -23128,8 +23128,33 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
-        }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/hyperdx/connection": {
