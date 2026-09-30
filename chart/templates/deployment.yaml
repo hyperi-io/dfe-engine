@@ -114,6 +114,10 @@ spec:
             - name: DFE_API_FORWARDED_ALLOW_IPS
               value: {{ .Values.config.api.forwarded_allow_ips | quote }}
             {{- end }}
+            {{- if ne (toString .Values.config.api.docs_enabled) "" }}
+            - name: DFE_API_DOCS_ENABLED
+              value: {{ toString .Values.config.api.docs_enabled | quote }}
+            {{- end }}
             - name: DFE_API_JWT_SECRET
               valueFrom:
                 secretKeyRef:

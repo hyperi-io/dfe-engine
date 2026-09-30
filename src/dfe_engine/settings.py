@@ -1695,6 +1695,7 @@ class APISettings(BaseModel):
     - DFE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE -> api.elastic_converter_read_chunk_size
     - DFE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES ->
       api.elastic_converter_content_length_slack_bytes
+    - DFE_API_DOCS_ENABLED -> api.docs_enabled (true/false)
     """
 
     host: str = Field(default="0.0.0.0", description="API server bind address")  # noqa: S104
@@ -1745,6 +1746,15 @@ class APISettings(BaseModel):
         description=(
             "Secret keying the signed session cookie SessionMiddleware uses for the "
             "OIDC RP flow (Authlib state/nonce). Empty -> falls back to jwt_secret."
+        ),
+    )
+    docs_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "Serve Swagger UI at /docs and ReDoc at /redoc. Both pages load their "
+            "scripts from a public CDN into the engine's own origin, so unset serves "
+            "them in a dev posture only. /openapi.json is served either way. "
+            "DFE_API_DOCS_ENABLED."
         ),
     )
     elastic_converter_max_upload_bytes: int = Field(
@@ -2517,6 +2527,8 @@ def _get_env_overrides() -> dict:
         overrides["api"]["elastic_converter_read_chunk_size"] = int(val)
     if val := _get_env("DFE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES"):
         overrides["api"]["elastic_converter_content_length_slack_bytes"] = int(val)
+    if val := _get_env("DFE_API_DOCS_ENABLED"):
+        overrides["api"]["docs_enabled"] = val.lower() in ("true", "1", "yes")
 
     # Secrets settings (the scalo.secrets seam for minted secrets)
     if val := _get_env("DFE_SECRETS_PROVIDER"):

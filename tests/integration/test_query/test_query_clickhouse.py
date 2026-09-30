@@ -12,6 +12,7 @@ import json
 import socket
 
 import pytest
+from clickhouse_connect.driver.exceptions import DatabaseError
 
 from dfe_engine.clickhouse import ClickHouseManager
 from dfe_engine.query.datasources.clickhouse import ClickHouseAdapter
@@ -135,6 +136,72 @@ class TestExecute:
             "SELECT getSetting('max_execution_time') AS limit", timeout_seconds=7
         )
         assert rows[0]["limit"] == 7
+
+
+READONLY_REFUSAL = "Code: 164"
+
+# ClickHouse's own HTTP port, as the server itself reaches it.
+SELF_URL = "http://127.0.0.1:8123/?query="
+
+
+class TestReadOnly:
+    """The adapter runs as the engine's own user, which may write, so it sends readonly=1."""
+
+    def test_a_plain_select_runs_read_only_with_its_timeout(self, adapter, people):
+        rows, _ = adapter.execute(
+            f"SELECT count() AS n, getSetting('readonly') AS ro, "
+            f"getSetting('max_execution_time') AS limit FROM {people}",
+            timeout_seconds=11,
+        )
+        assert rows == [{"n": 5, "ro": 1, "limit": 11}]
+
+    def test_insert_into_function_url_is_refused(self, adapter, ch_client, people):
+        target = f"INSERT%20INTO%20{people.replace('`', '')}%20(id)%20FORMAT%20TSV"
+        with pytest.raises(DatabaseError, match=READONLY_REFUSAL):
+            adapter.execute(
+                f"INSERT INTO FUNCTION url('{SELF_URL}{target}', 'TSV', 'id UInt64') VALUES (97)"
+            )
+        assert ch_client.query(f"SELECT count() FROM {people}").result_rows == [(5,)]
+
+    def test_insert_into_function_file_is_refused(self, adapter):
+        with pytest.raises(DatabaseError, match=READONLY_REFUSAL):
+            adapter.execute(
+                "INSERT INTO FUNCTION file('dfe_readonly_probe.tsv', 'TSV', 'x String') "
+                "VALUES ('written')"
+            )
+
+    def test_a_read_through_url_is_refused(self, adapter):
+        with pytest.raises(DatabaseError, match=READONLY_REFUSAL):
+            adapter.execute(f"SELECT * FROM url('{SELF_URL}SELECT%201', 'TSV', 'x String')")
+
+    def test_a_create_is_refused(self, adapter, clickhouse_test_database):
+        with pytest.raises(DatabaseError, match="readonly"):
+            adapter.execute(
+                f"CREATE TABLE `{clickhouse_test_database}`.made (x UInt8) ENGINE = Log"
+            )
+
+    def test_an_insert_is_refused_and_writes_nothing(self, adapter, ch_client, people):
+        with pytest.raises(DatabaseError, match="readonly"):
+            adapter.execute(f"INSERT INTO {people} (id, name, value) VALUES (99, 'Z', 0)")
+        assert ch_client.query(f"SELECT count() FROM {people}").result_rows == [(5,)]
+
+    def test_a_drop_is_refused(self, adapter, ch_client, people):
+        with pytest.raises(DatabaseError, match="readonly"):
+            adapter.execute(f"DROP TABLE {people}")
+        assert ch_client.query(f"SELECT count() FROM {people}").result_rows == [(5,)]
+
+    def test_a_query_cannot_lift_the_restriction(self, adapter, ch_client, people):
+        with pytest.raises(DatabaseError, match="readonly"):
+            adapter.execute(
+                f"INSERT INTO {people} (id, name, value) SETTINGS readonly = 0 VALUES (98, 'Y', 0)"
+            )
+        with pytest.raises(DatabaseError, match="readonly"):
+            adapter.execute("SELECT 1 SETTINGS readonly = 0")
+        assert ch_client.query(f"SELECT count() FROM {people}").result_rows == [(5,)]
+
+    def test_a_settings_clause_is_refused(self, adapter):
+        with pytest.raises(DatabaseError, match=READONLY_REFUSAL):
+            adapter.execute("SELECT getSetting('max_threads') AS t SETTINGS max_threads = 3")
 
 
 class TestAnEmptyResult:
