@@ -208,9 +208,9 @@ def test_uptime_reads_the_start_time_every_dfe_app_emits():
 BOUNDS = [0.1, 0.5, 1.0]
 
 
-def _series(*, first, last, server_error=False, span=240):
+def _series(*, first, last, server_error=False, span=240, started_in_window=False):
     """One series row as http_request_histogram returns it."""
-    return (server_error, BOUNDS, first, last, sum(first), sum(last), span)
+    return (server_error, BOUNDS, first, last, sum(first), sum(last), span, started_in_window)
 
 
 def test_rates_and_p95_come_from_the_change_across_the_window():
@@ -272,3 +272,16 @@ def test_metrics_carries_the_http_readings():
 
     assert readings.rates[HTTP_REQUESTS] == 24 / 240
     assert readings.gauges[HTTP_P95] == pytest.approx(0.095)
+
+
+def test_a_series_born_in_the_window_counts_its_first_export():
+    # A first 5xx on a route is its own new series; its only export must still count.
+    rows = [
+        _series(first=[0, 0, 0, 0], last=[40, 0, 0, 0]),
+        _series(first=[1, 0, 0, 0], last=[1, 0, 0, 0], server_error=True, started_in_window=True),
+    ]
+
+    rates, _ = http_readings(rows=rows)
+
+    assert rates[HTTP_SERVER_ERRORS] == 1 / 240
+    assert rates[HTTP_REQUESTS] == 41 / 240

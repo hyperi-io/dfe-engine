@@ -85,7 +85,8 @@ queries:
         argMax(BucketCounts, TimeUnix) AS last_buckets,
         argMin(Count, TimeUnix) AS first_count,
         argMax(Count, TimeUnix) AS last_count,
-        dateDiff('second', min(TimeUnix), max(TimeUnix)) AS span_seconds
+        dateDiff('second', min(TimeUnix), max(TimeUnix)) AS span_seconds,
+        min(StartTimeUnix) >= now() - INTERVAL {window_seconds:UInt32} SECOND AS started_in_window
       FROM __DB__.otel_metrics_histogram
       WHERE ServiceName = {service:String}
         AND MetricName = 'http.server.request.duration'

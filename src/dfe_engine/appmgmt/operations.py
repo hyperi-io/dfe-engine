@@ -300,14 +300,9 @@ def _percentile(
 
 
 def http_readings(*, rows: Sequence[tuple]) -> tuple[dict[str, float], dict[str, float]]:
-    """Request rate, 5xx rate and p95 duration from ``http_request_histogram`` rows.
+    """Request rate, 5xx rate and p95 duration from ``http_request_histogram`` rows, as ``(rates, gauges)``.
 
-    Each row is one series' first and last cumulative state in the window, so a
-    series' contribution is its last minus its first. A series whose counts went
-    backwards restarted within the window and is left out rather than subtracted.
-
-    Returns:
-        ``(rates, gauges)``: both empty when the service reported no histogram.
+    Each row is one series' first and last cumulative state in the window, so a series' contribution is its last minus its first. A series whose counts went backwards restarted within the window and is left out rather than subtracted. Both dicts are empty when the service reported no histogram.
     """
     if not (rows):
         return {}, {}
@@ -324,7 +319,12 @@ def http_readings(*, rows: Sequence[tuple]) -> tuple[dict[str, float], dict[str,
         first_count,
         last_count,
         span_seconds,
+        started_in_window,
     ) in rows:
+        # A series born inside the window started from zero, so its first export is counted too.
+        if started_in_window:
+            first_count = 0
+            first_buckets = [0] * len(last_buckets)
         delta = float(last_count) - float(first_count)
         if delta < 0:
             continue
