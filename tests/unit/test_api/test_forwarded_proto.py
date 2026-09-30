@@ -11,7 +11,7 @@
 ``request.url_for`` builds the OIDC ``redirect_uri`` from the request scheme, so
 behind a TLS-terminating gateway that scheme has to come from X-Forwarded-Proto
 or the IdP is handed an ``http`` callback. create_app installs
-``ProxyHeadersMiddleware`` keyed on ``api.forwarded_allow_ips``, and these tests
+``ForwardedHeadersMiddleware`` keyed on ``api.forwarded_allow_ips``, and these tests
 drive it through the real app with a non-loopback peer address - the shape the
 gateway pod presents.
 

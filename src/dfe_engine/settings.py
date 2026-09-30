@@ -1471,13 +1471,12 @@ class AuthSettings(BaseModel):
     trust_proxy_auth_headers: bool = Field(
         default=False,
         description=(
-            "Trust proxy-set request headers: X-Oidc-* for the identity (auth "
-            "Path 1) and X-Forwarded-For for the address recorded in the audit "
-            "trail. Enable ONLY when a trusted proxy (e.g. Envoy Gateway) "
-            "authenticates the user and injects these headers AND the engine is "
-            "reachable only via that proxy. Default off = fail closed: "
-            "standalone/unfronted deployments ignore these client-spoofable "
-            "headers and audit the socket address instead."
+            "Trust the proxy-set X-Oidc-* identity headers (auth Path 1). Enable "
+            "ONLY when a trusted proxy (e.g. Envoy Gateway) authenticates the user "
+            "and injects these headers AND the engine is reachable only via that "
+            "proxy. Default off = fail closed: standalone/unfronted deployments "
+            "ignore these client-spoofable headers. The audited client address is "
+            "decided by api.forwarded_allow_ips, not by this."
         ),
     )
     proxy_provider: str = Field(
@@ -1730,8 +1729,12 @@ class APISettings(BaseModel):
             "The scheme the engine builds OIDC redirect URIs from comes from this: "
             "behind a TLS-terminating gateway the peer is the gateway pod, so unless "
             "its address is listed here the request reads as http and the IdP is sent "
-            "an http callback URI. Default is the loopback-only value uvicorn ships, "
-            "which fails closed for an engine nothing fronts."
+            "an http callback URI. So does the client address the audit trail records: "
+            "behind a listed peer it is the right-most X-Forwarded-For entry that is "
+            "not itself listed, so list every proxy hop, the console pods included. "
+            "'*' trusts every hop and records the left-most entry, which the caller "
+            "wrote. An entry that is not an address or network stops startup. Default "
+            "is loopback only, which fails closed for an engine nothing fronts."
         ),
     )
     jwt_secret: str = Field(
