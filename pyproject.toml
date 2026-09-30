@@ -25,9 +25,10 @@ dependencies = [
     #            This is the fix for the metrics bug the extras note below describes.
     # >=2.30.2:  SecretsConfig.exclude_rules, and scalo's internal Kafka consumer
     #            group ids derived from config.
-    # >=2.30.6:  gauges export as OTel Gauges, so the engine's info and start time
-    #            land in otel_metrics_gauge beside the Rust services' and app status
-    #            can see it.
+    # >=2.30.7:  gauges export as OTel Gauges on every collection, so app status
+    #            keeps seeing the engine's info and start time; ResourceMetrics
+    #            (memory, CPU, fds) and HttpServerMetricsMiddleware, which api/app.py
+    #            imports.
     # Upper bound: <3 is the API-stability boundary. An unbounded `>=` is invisible
     # to Renovate -- the constraint is satisfied by every future release, so no PR
     # is ever raised and the version moves silently in the lock.
@@ -39,7 +40,7 @@ dependencies = [
     # /metrics 404s, and self-monitoring (one of the two default E2E acceptance tests)
     # goes green while reporting nothing. [opentelemetry] is no longer a separate
     # extra: [metrics] carries the SDK.
-    "scalo[expression,http,metrics]>=2.30.6",
+    "scalo[expression,http,metrics]>=2.30.7",
     # The DFE schema trees as package data under dfe_schemas/data/, replacing
     # the `schemas` git submodule. schema_loader resolves them through
     # importlib.resources; the Dockerfile bakes its seed from the installed
