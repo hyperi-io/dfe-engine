@@ -26,7 +26,6 @@ PUBLIC_OPERATIONS = frozenset(
         "GET /api/v1/auth/setup-status",
         "GET /api/v1/auth/oidc/{provider}/login",
         "GET /api/v1/auth/oidc/{provider}/callback",
-        "GET /api/v1/config/client",
         "GET /api/v1/scim/v2/ServiceProviderConfig",
         "GET /api/v1/scim/v2/ResourceTypes",
         "GET /api/v1/scim/v2/Schemas",
