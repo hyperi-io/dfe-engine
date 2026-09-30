@@ -97,6 +97,9 @@ config:
     jwt_expire_minutes: 60
   auth:
     enabled: true
+    # -- Days an API key created without expires_at lasts; 0 creates it with no
+    # expiry. Empty keeps the engine's default, 90.
+    api_key_default_ttl_days: ""
     local:
       enabled: true
       org_id: "default"
