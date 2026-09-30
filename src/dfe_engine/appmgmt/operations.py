@@ -76,6 +76,11 @@ COUNTER_METRICS = (
     RECORDS_DLQ,
 )
 
+# Readings derived from an HTTP service's request-duration histogram.
+HTTP_REQUESTS = "http_requests_total"
+HTTP_SERVER_ERRORS = "http_server_errors_total"
+HTTP_P95 = "http_request_duration_p95_seconds"
+
 
 class MetricsUnavailableError(RuntimeError):
     """Raised when the otel database cannot answer."""
@@ -195,11 +200,16 @@ class OperationalReader:
     def metrics(self, telemetry_name: str) -> AppMetrics:
         """Current gauge readings and counter rates for the instance."""
         service = self._safe_identifier(telemetry_name)
+        gauges = self._gauges(service)
+        rates = self._rates(service)
+        http_rates, http_gauges = http_readings(
+            rows=self._run("http_request_histogram", {"service": service})
+        )
         return AppMetrics(
+            gauges=gauges | http_gauges,
+            rates=rates | http_rates,
             telemetry_name=telemetry_name,
             window_seconds=self._window,
-            gauges=self._gauges(service),
-            rates=self._rates(service),
         )
 
     def resource_series(
@@ -263,6 +273,77 @@ class OperationalReader:
     def _rates(self, service: str) -> dict[str, float]:
         rows = self._run("counter_rates", {"service": service, "names": list(COUNTER_METRICS)})
         return {str(name): float(value) for name, value in rows}
+
+
+def _percentile(
+    *, bounds: Sequence[float], counts: Sequence[float], quantile: float
+) -> float | None:
+    """Linear interpolation of *quantile* across histogram buckets; None when empty.
+
+    ``counts`` has one more entry than ``bounds``: the last bucket is everything
+    above the top bound, which can only be reported as that bound.
+    """
+    total = sum(counts)
+    if total <= 0:
+        return None
+    target = quantile * total
+    below = 0.0
+    for index, count in enumerate(counts):
+        if (count > 0) and (below + count >= target):
+            if index >= len(bounds):
+                return float(bounds[-1]) if bounds else None
+            lower = float(bounds[index - 1]) if index > 0 else 0.0
+            upper = float(bounds[index])
+            return lower + (upper - lower) * (target - below) / count
+        below += count
+    return None
+
+
+def http_readings(*, rows: Sequence[tuple]) -> tuple[dict[str, float], dict[str, float]]:
+    """Request rate, 5xx rate and p95 duration from ``http_request_histogram`` rows.
+
+    Each row is one series' first and last cumulative state in the window, so a
+    series' contribution is its last minus its first. A series whose counts went
+    backwards restarted within the window and is left out rather than subtracted.
+
+    Returns:
+        ``(rates, gauges)``: both empty when the service reported no histogram.
+    """
+    if not (rows):
+        return {}, {}
+    requests = 0.0
+    server_errors = 0.0
+    span = 1.0
+    reference_bounds = None
+    buckets = []
+    for (
+        server_error,
+        bounds,
+        first_buckets,
+        last_buckets,
+        first_count,
+        last_count,
+        span_seconds,
+    ) in rows:
+        delta = float(last_count) - float(first_count)
+        if delta < 0:
+            continue
+        span = max(span, float(span_seconds))
+        requests += delta
+        if server_error:
+            server_errors += delta
+        if reference_bounds is None:
+            reference_bounds = [float(bound) for bound in bounds]
+            buckets = [0.0] * (len(reference_bounds) + 1)
+        if [float(bound) for bound in bounds] != reference_bounds:
+            continue
+        for index, (first, last) in enumerate(zip(first_buckets, last_buckets, strict=True)):
+            buckets[index] += float(last) - float(first)
+
+    rates = {HTTP_REQUESTS: requests / span, HTTP_SERVER_ERRORS: server_errors / span}
+    p95 = _percentile(bounds=reference_bounds or [], counts=buckets, quantile=0.95)
+    gauges = {} if p95 is None else {HTTP_P95: p95}
+    return rates, gauges
 
 
 def _rate_per_minute(points: Sequence[tuple[float, float]]) -> float | None:

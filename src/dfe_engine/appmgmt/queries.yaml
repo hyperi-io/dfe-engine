@@ -72,6 +72,30 @@ queries:
       window_seconds: 300
     timeout_seconds: 10
 
+  # The request-duration histogram's first and last cumulative state per series in
+  # the window. A series is one attribute set on one process run, so a restart or a
+  # second replica is differenced on its own rather than against another.
+  http_request_histogram:
+    database: otel
+    sql: >
+      SELECT
+        startsWith(Attributes['http.response.status_code'], '5') AS server_error,
+        any(ExplicitBounds) AS bounds,
+        argMin(BucketCounts, TimeUnix) AS first_buckets,
+        argMax(BucketCounts, TimeUnix) AS last_buckets,
+        argMin(Count, TimeUnix) AS first_count,
+        argMax(Count, TimeUnix) AS last_count,
+        dateDiff('second', min(TimeUnix), max(TimeUnix)) AS span_seconds
+      FROM __DB__.otel_metrics_histogram
+      WHERE ServiceName = {service:String}
+        AND MetricName = 'http.server.request.duration'
+        AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
+      GROUP BY cityHash64(Attributes, ResourceAttributes['service.instance.id'], StartTimeUnix), server_error
+    params: [service]
+    binds:
+      window_seconds: 300
+    timeout_seconds: 10
+
   # Bucketed resource usage for graphing. Each bucket aggregates ACROSS every pod
   # reporting for this instance, which is also the only grouping the data supports:
   # the OTel resource carries no pod identity. A per-config app deploys each config

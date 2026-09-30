@@ -19,10 +19,14 @@ import pytest
 
 from dfe_engine.appmgmt.operations import (
     GAUGE_METRICS,
+    HTTP_P95,
+    HTTP_REQUESTS,
+    HTTP_SERVER_ERRORS,
     RESOURCE_METRICS,
     SCALING_PRESSURE,
     MetricsUnavailableError,
     OperationalReader,
+    http_readings,
 )
 
 LOADERS = ["dfe-loader-main"]
@@ -197,3 +201,74 @@ def test_uptime_reads_the_start_time_every_dfe_app_emits():
     status = OperationalReader(ch, "dfe").status("dfe-engine")
 
     assert status.started_epoch == 1757000000.0
+
+
+# ── HTTP readings from the request-duration histogram ───────────
+
+BOUNDS = [0.1, 0.5, 1.0]
+
+
+def _series(*, first, last, server_error=False, span=240):
+    """One series row as http_request_histogram returns it."""
+    return (server_error, BOUNDS, first, last, sum(first), sum(last), span)
+
+
+def test_rates_and_p95_come_from_the_change_across_the_window():
+    rows = [_series(first=[10, 0, 0, 0], last=[90, 15, 4, 1])]
+
+    rates, gauges = http_readings(rows=rows)
+
+    assert rates == {HTTP_REQUESTS: 100 / 240, HTTP_SERVER_ERRORS: 0.0}
+    # 80 of 100 in the first bucket, so the 95th sits at the top of the second.
+    assert gauges == {HTTP_P95: pytest.approx(0.5)}
+
+
+def test_server_errors_count_only_5xx_series():
+    rows = [
+        _series(first=[0, 0, 0, 0], last=[30, 0, 0, 0]),
+        _series(first=[0, 0, 0, 0], last=[6, 0, 0, 0], server_error=True),
+    ]
+
+    rates, _ = http_readings(rows=rows)
+
+    assert rates[HTTP_REQUESTS] == 36 / 240
+    assert rates[HTTP_SERVER_ERRORS] == 6 / 240
+
+
+def test_a_series_that_went_backwards_is_left_out():
+    rows = [
+        _series(first=[0, 0, 0, 0], last=[12, 0, 0, 0]),
+        _series(first=[50, 0, 0, 0], last=[5, 0, 0, 0]),
+    ]
+
+    rates, _ = http_readings(rows=rows)
+
+    assert rates[HTTP_REQUESTS] == 12 / 240
+
+
+def test_requests_above_the_top_bound_report_that_bound():
+    rows = [_series(first=[0, 0, 0, 0], last=[0, 0, 0, 20])]
+
+    _, gauges = http_readings(rows=rows)
+
+    assert gauges == {HTTP_P95: 1.0}
+
+
+def test_no_histogram_gives_no_http_readings_and_no_traffic_gives_no_p95():
+    assert http_readings(rows=[]) == ({}, {})
+
+    rates, gauges = http_readings(rows=[_series(first=[5, 0, 0, 0], last=[5, 0, 0, 0])])
+
+    assert rates == {HTTP_REQUESTS: 0.0, HTTP_SERVER_ERRORS: 0.0}
+    assert gauges == {}
+
+
+def test_metrics_carries_the_http_readings():
+    ch = PerQueryClickHouse(
+        {"http.server.request.duration": [_series(first=[0, 0, 0, 0], last=[24, 0, 0, 0])]}
+    )
+
+    readings = OperationalReader(ch, "dfe").metrics("dfe-engine")
+
+    assert readings.rates[HTTP_REQUESTS] == 24 / 240
+    assert readings.gauges[HTTP_P95] == pytest.approx(0.095)
