@@ -89,10 +89,12 @@ config:
     # -- Comma-separated list of allowed CORS origins
     cors_origins: ""
     # -- Comma-separated peers or CIDRs whose X-Forwarded-Proto and X-Forwarded-For
-    # are believed ("*" believes any peer). Empty follows the loopback-only code
-    # default. Behind a TLS-terminating gateway the peer is the gateway pod, so
-    # leaving this unset makes the engine build http OIDC redirect URIs; set it to
-    # the pod network the gateway runs on.
+    # are believed (DFE_API_FORWARDED_ALLOW_IPS). Empty follows the loopback-only
+    # code default. Behind a TLS-terminating gateway the peer is the gateway pod, so
+    # leaving this unset makes the engine build http OIDC redirect URIs and audit the
+    # gateway's address instead of the caller's; set it to the pod network the
+    # gateway and the console run on. "*" believes any peer and audits the left-most
+    # forwarded address, which the caller wrote.
     forwarded_allow_ips: ""
     jwt_expire_minutes: 60
     # -- Serve Swagger UI at /docs and ReDoc at /redoc: "true" or "false". Both pages

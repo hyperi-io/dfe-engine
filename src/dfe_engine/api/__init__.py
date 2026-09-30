@@ -76,8 +76,8 @@ class _DfeEngineApp:
                     health_manager=self.health(),
                     metrics_manager=self._metrics,
                 )
-                # proxy_headers off here: create_app installs the same middleware
-                # keyed on api.forwarded_allow_ips, so trust is decided once.
+                # proxy_headers off here: create_app resolves the forwarded client
+                # and scheme from api.forwarded_allow_ips, so trust is decided once.
                 server = uvicorn.Server(
                     uvicorn.Config(
                         app,
