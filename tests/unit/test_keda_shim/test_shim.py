@@ -12,9 +12,11 @@ unit suite. The fail-safe tests are the important ones - a metric outage must ho
 last-good / cold value, never scale up.
 """
 
+from unittest.mock import patch
+
 import pytest
 
-from dfe_engine.keda_shim.shim import QueryShim
+from dfe_engine.keda_shim.shim import QueryShim, _ch_client
 from dfe_engine.settings import DFESettings
 
 
@@ -40,6 +42,36 @@ class _FakeClient:
 
 def _shim(client: _FakeClient) -> QueryShim:
     return QueryShim(DFESettings(env="test"), client_factory=lambda: client)
+
+
+class TestChClientTls:
+    """The shim's raw client takes the engine's ClickHouseSettings TLS posture."""
+
+    def test_secure_settings_pass_verify_and_ca_cert(self, tmp_path):
+        ca = tmp_path / "internal-ca.pem"
+        ca.write_text("cert")
+        settings = DFESettings(env="test")
+        settings.clickhouse.secure = True
+        settings.clickhouse.verify = True
+        settings.clickhouse.ca_cert = str(ca)
+
+        with patch("clickhouse_connect.get_client") as get_client:
+            _ch_client(settings)
+        kwargs = get_client.call_args[1]
+        assert kwargs["secure"] is True
+        assert kwargs["verify"] is True
+        assert kwargs["ca_cert"] == str(ca)
+
+    def test_insecure_settings_pass_no_tls_kwargs(self):
+        settings = DFESettings(env="test")
+        settings.clickhouse.secure = False
+
+        with patch("clickhouse_connect.get_client") as get_client:
+            _ch_client(settings)
+        kwargs = get_client.call_args[1]
+        assert "secure" not in kwargs
+        assert "verify" not in kwargs
+        assert "ca_cert" not in kwargs
 
 
 def test_pressure_returns_value():

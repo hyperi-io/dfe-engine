@@ -42,6 +42,7 @@ from typing import Any
 import clickhouse_connect
 import typer
 
+from dfe_engine.clickhouse.tls import resolve_clickhouse_tls
 from dfe_engine.settings import DFESettings, load_settings
 
 from . import metrics as runner_metrics
@@ -60,17 +61,17 @@ def _ch_params(settings: DFESettings) -> dict[str, Any]:
     """The clickhouse-connect kwargs for the raw client, derived from settings.
 
     Pure (opens no connection) so the settings -> params mapping is unit-testable
-    without a live ClickHouse - the same host/port/username/password/secure/verify
-    the integration ``ch_client`` fixture builds a client from.
+    without a live ClickHouse - the same host/port/username/password/secure/verify/
+    ca_cert the integration ``ch_client`` fixture builds a client from.
     """
     ch = settings.clickhouse
+    tls = resolve_clickhouse_tls(secure=ch.secure, verify=ch.verify, ca_cert=ch.ca_cert)
     return {
         "host": ch.host,
         "port": ch.port,
         "username": ch.username,
         "password": ch.password,
-        "secure": ch.secure,
-        "verify": ch.verify,
+        **tls.connect_kwargs(),
     }
 
 
