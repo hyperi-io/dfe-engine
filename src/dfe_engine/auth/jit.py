@@ -23,6 +23,7 @@ from dfe_engine.auth.audit import (
     audit_jit_team_assigned,
 )
 from dfe_engine.auth.groups import Group, GroupStore
+from dfe_engine.auth.membership import linked_groups, linked_providers
 from dfe_engine.auth.models import AuthenticationError, Scope, ScopedGrant, platform_grants
 from dfe_engine.auth.protected_accounts import resolve_floor
 from dfe_engine.auth.store_names import VALID_NAME
@@ -209,12 +210,12 @@ class JitProvisioner:
             discard_created(self._accounts, created)
             raise
 
-        _, org_ids = self._resolve_grants(oidc_groups)
+        _, org_ids = self._resolve_grants(oidc_groups, source_provider)
 
         audit_jit_account_created(user_id, source_provider, oidc_groups, org_ids)
 
         # HyperDX team assignment
-        team = self.resolve_hyperdx_team(oidc_groups)
+        team = self.resolve_hyperdx_team(oidc_groups, source_provider)
         if team:
             audit_jit_team_assigned(user_id, team, "broadest-wins")
 
@@ -321,20 +322,18 @@ class JitProvisioner:
         audit_jit_login_refused(user_id, source_provider, reason)
         raise JitAccountUnavailableError(user_id, reason)
 
-    def _resolve_group(self, identifier: str) -> Group | None:
-        """A group by name, else by the provider identifier the sync recorded.
+    def _linked(self, oidc_groups: list[str], source_provider: str) -> list[Group]:
+        """The stored groups the token's identifiers are linked to for *source_provider*.
 
-        Entra sends object GUIDs and Google sends group keys, so the token's
-        value is not the group's name. Same two-step the role resolution uses
-        (``api/deps.py`` ``_resolve_group_grants``), so org_ids and the HyperDX
-        team cannot see a different group set from the roles.
+        The lookup the session's roles resolve through (``membership.groups_held``), so
+        org_ids and the HyperDX team cannot see a different group set from the roles.
         """
-        group = self._groups.get(identifier)
-        if group is not None:
-            return group
-        return self._groups.by_source_id().get(identifier)
+        providers = linked_providers([source_provider], self._bindings)
+        return linked_groups(oidc_groups, self._groups.list(), providers)
 
-    def _resolve_grants(self, oidc_groups: list[str]) -> tuple[list[ScopedGrant], list[str]]:
+    def _resolve_grants(
+        self, oidc_groups: list[str], source_provider: str
+    ) -> tuple[list[ScopedGrant], list[str]]:
         """The scoped grants and org ids the token's groups carry.
 
         Roles bind where ``api/deps.py`` binds them: an org-scoped group's at that
@@ -343,10 +342,7 @@ class JitProvisioner:
         """
         grants: list[ScopedGrant] = []
         org_ids: list[str] = []
-        for gname in oidc_groups:
-            group = self._resolve_group(gname)
-            if group is None:
-                continue
+        for group in self._linked(oidc_groups, source_provider):
             scope = Scope(type="org", id=group.scope_org) if group.scope_org else Scope()
             grants.extend(ScopedGrant(role=role, scope=scope) for role in group.roles)
             if group.org_ids:
@@ -355,15 +351,16 @@ class JitProvisioner:
                 org_ids.append(group.scope_org)
         return grants, org_ids
 
-    def resolve_hyperdx_team(self, oidc_groups: list[str]) -> str:
+    def resolve_hyperdx_team(self, oidc_groups: list[str], source_provider: str) -> str:
         """Determine the HyperDX team: a platform team, else the caller's org team.
 
         A platform team goes only to a grant ``platform_grants`` keeps, broadest first,
         which is the filter the CH group bindings and the HyperDX connection read share.
         An org-scoped group's roles cover its org alone, so its member gets that org's
-        team whatever roles the group holds.
+        team whatever roles the group holds. Only groups linked to *source_provider*
+        count (:func:`~dfe_engine.auth.membership.linked_groups`).
         """
-        grants, org_ids = self._resolve_grants(oidc_groups)
+        grants, org_ids = self._resolve_grants(oidc_groups, source_provider)
         platform_roles = {grant.role for grant in platform_grants(grants)}
         for role, team in _ROLE_TO_TEAM.items():
             if role in platform_roles:

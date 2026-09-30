@@ -197,7 +197,8 @@ class TestAuthWithoutProviderRegistry:
         oidc_registry: OIDCProviderRegistry = app.state.oidc_provider_registry
         assert oidc_registry.list() == []
 
-        # dfe-admins group is seeded by bootstrap_auth — send its name in header
+        # dfe-admins group is seeded by bootstrap_auth; linked to the name the IdP sends
+        app.state.group_store.update("dfe-admins", source_id="dfe-admins")
         response = client.get(
             "/api/v1/auth/me",
             headers={
@@ -460,9 +461,11 @@ class TestAuthFlowWithNoExternalDependencies:
         """Complete OIDC auth flow: header → group resolution → role check.
 
         No Envoy, no IdP, no network — just headers and YAML files on disk.
-        Bootstrap seeds dfe-admins with the 'admin' role. Sending that group
-        name in X-Oidc-Groups must resolve to admin role and grant access.
+        Bootstrap seeds dfe-admins with the 'admin' role. Once an operator links
+        it to the identifier the IdP sends, that identifier in X-Oidc-Groups
+        must resolve to admin role and grant access.
         """
+        app.state.group_store.update("dfe-admins", source_id="dfe-admins")
         # Step 1: authenticate via OIDC headers (simulating Envoy forwarding)
         me_response = client.get(
             "/api/v1/auth/me",

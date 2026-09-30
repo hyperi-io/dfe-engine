@@ -129,6 +129,10 @@ spec:
             # Auth
             - name: DFE_AUTH_ENABLED
               value: {{ .Values.config.auth.enabled | quote }}
+            {{- if ne (toString .Values.config.auth.api_key_default_ttl_days) "" }}
+            - name: DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS
+              value: {{ toString .Values.config.auth.api_key_default_ttl_days | quote }}
+            {{- end }}
             - name: DFE_AUTH_LOCAL_ENABLED
               value: {{ .Values.config.auth.local.enabled | quote }}
             - name: DFE_AUTH_LOCAL_ORG_ID

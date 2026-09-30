@@ -16,7 +16,11 @@ IdP) is out of scope here and validated against a real dex in integration - no
 Authlib network calls are mocked.
 """
 
+import base64
+import hashlib
 import shutil
+import time
+from urllib.parse import parse_qs, urlsplit
 
 import jwt as pyjwt
 import pytest
@@ -174,6 +178,57 @@ def test_rp_registers_a_provider_with_no_credentials_at_all(tmp_path):
     assert _registered_client(rp, "acme").client_secret is None
 
 
+# -- PKCE: every login sends an S256 challenge --------------------
+
+
+def _rp_with_known_idp(registry: OIDCProviderRegistry, name: str):
+    """An RP whose Authlib client already holds the IdP's discovery document.
+
+    ``_loaded_at`` is how Authlib marks the document fetched, so nothing here
+    reaches the network.
+    """
+    rp = build_relying_party(registry, secrets=None)
+    assert rp is not None
+    _registered_client(rp, name).server_metadata.update(
+        {
+            "issuer": "https://idp.example",
+            "authorization_endpoint": "https://idp.example/authorize",
+            "token_endpoint": "https://idp.example/token",
+            "_loaded_at": time.time(),
+        }
+    )
+    return rp
+
+
+async def test_the_authorization_url_carries_an_s256_challenge_of_the_kept_verifier(tmp_path):
+    registry = _registry_with(tmp_path, client_id="acme-client")
+    client = _registered_client(_rp_with_known_idp(registry, "acme"), "acme")
+
+    rv = await client.create_authorization_url("https://dfe.example/api/v1/auth/oidc/acme/callback")
+    query = parse_qs(urlsplit(rv["url"]).query)
+
+    digest = hashlib.sha256(rv["code_verifier"].encode("ascii")).digest()
+    expected = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    assert query["code_challenge_method"] == ["S256"]
+    assert query["code_challenge"] == [expected]
+    assert len(rv["code_verifier"]) >= 43
+
+
+def test_the_login_route_hands_out_a_pkce_authorization_url(client, app):
+    app.state.oidc_provider_registry.create(
+        "pkce-idp", OIDCProvider(type="generic", issuer="https://idp.example", client_id="c")
+    )
+    app.state.oidc_rp = _rp_with_known_idp(app.state.oidc_provider_registry, "pkce-idp")
+
+    resp = client.get("/api/v1/auth/oidc/pkce-idp/login", params={"redirect": "false"})
+
+    assert resp.status_code == 200, resp.text
+    query = parse_qs(urlsplit(resp.json()["authorization_url"]).query)
+    assert query["code_challenge_method"] == ["S256"]
+    assert query["code_challenge"][0]
+    assert "code_verifier" not in query
+
+
 # ── router wiring (real app, no live IdP) ────────────────────────
 
 
@@ -323,6 +378,28 @@ def test_validate_return_to_rejects_other_origins():
         with pytest.raises(HTTPException) as excinfo:
             validate_return_to(bad, origin, ["http://localhost:3000"])
         assert excinfo.value.status_code == 400
+
+
+def test_a_production_posture_trusts_no_localhost_by_default(client, app):
+    """The dev servers' origins are neither CORS origins nor a place a token is handed back to."""
+    app.state.oidc_rp = _FakeOidcRp()
+
+    login = client.get(
+        "/api/v1/auth/oidc/stub/login",
+        params={"redirect": "false", "return_to": "http://localhost:3000/login/oidc"},
+    )
+    preflight = client.options(
+        "/api/v1/auth/me",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert app.state.settings.api.cors_origins == []
+    assert login.status_code == 400
+    assert login.json()["code"] == "invalid_return_to"
+    assert "access-control-allow-origin" not in preflight.headers
 
 
 def test_login_rejects_untrusted_return_to(client, app):

@@ -1451,6 +1451,7 @@ class AuthSettings(BaseModel):
     Environment variables:
     - DFE_AUTH_ENABLED -> auth.enabled
     - DFE_AUTH_DIR -> auth.auth_dir
+    - DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS -> auth.api_key_default_ttl_days
     """
 
     enabled: bool = Field(
@@ -1520,6 +1521,15 @@ class AuthSettings(BaseModel):
         ),
     )
     accounts_store: AccountStoreSettings = Field(default_factory=AccountStoreSettings)
+    api_key_default_ttl_days: int = Field(
+        default=90,
+        ge=0,
+        description=(
+            "Lifetime of an API key created without expires_at, in days. 0 creates "
+            "such a key with no expiry. A key that names its own expires_at keeps it. "
+            "DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS."
+        ),
+    )
 
 
 class HyperDXSettings(BaseModel):
@@ -1666,6 +1676,9 @@ _DEV_JWT_SECRET = "dev-secret-key-change-in-production"
 # "production") is treated as production for the placeholder-secret guard.
 _NON_PROD_ENVS = frozenset({"dev", "development", "local", "test", "ci"})
 
+# The local console dev servers, trusted only by a dev posture that names no origins itself.
+_DEV_CORS_ORIGINS = ("http://localhost:5173", "http://localhost:5174", "http://localhost:3000")
+
 
 def is_dev_posture(env: str) -> bool:
     """True when DFE_ENV declares a non-production posture (dev/local/test/ci)."""
@@ -1701,12 +1714,13 @@ class APISettings(BaseModel):
     host: str = Field(default="0.0.0.0", description="API server bind address")  # noqa: S104
     port: int = Field(default=8000, description="API server port")
     cors_origins: list[str] = Field(
-        default_factory=lambda: [
-            "http://localhost:5173",
-            "http://localhost:5174",
-            "http://localhost:3000",
-        ],
-        description="CORS allowed origins",
+        default_factory=list,
+        description=(
+            "CORS allowed origins, which are also the only origins an OIDC login hands "
+            "its token back to (return_to). Empty by default. Left unset in a dev "
+            "posture, the local console dev servers' origins are allowed. "
+            "DFE_API_CORS_ORIGINS, comma-separated."
+        ),
     )
     forwarded_allow_ips: str = Field(
         default="127.0.0.1",
@@ -1908,6 +1922,13 @@ class DFESettings(BaseModel):
             "(seed-admin). DFE_E2E_SERVER. Refused in a production posture."
         ),
     )
+
+    @model_validator(mode="after")
+    def _dev_cors_origins(self) -> DFESettings:
+        # A production console's origin is the deployment's own; localhost is a dev server.
+        if is_dev_posture(self.env) and "cors_origins" not in self.api.model_fields_set:
+            self.api.cors_origins = list(_DEV_CORS_ORIGINS)
+        return self
 
     @model_validator(mode="after")
     def _reject_insecure_production_posture(self) -> DFESettings:
@@ -2385,6 +2406,8 @@ def _get_env_overrides() -> dict:
         overrides["auth"]["trust_proxy_auth_headers"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_AUTH_PROXY_PROVIDER"):
         overrides["auth"]["proxy_provider"] = val
+    if val := _get_env("DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS"):
+        overrides["auth"]["api_key_default_ttl_days"] = int(val)
     if val := _get_env("DFE_AUTH_SOURCE_PROVIDER_BINDINGS"):
         # A JSON object of {source_provider_stamp: oidc_provider_name}. Fail loudly
         # on malformed config: a dropped binding locks every bound user out at login.

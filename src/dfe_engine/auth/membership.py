@@ -10,30 +10,82 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable, Mapping
 
 from dfe_engine.auth.accounts import Account, AccountStore
 from dfe_engine.auth.groups import Group, GroupStore
 
 
-def groups_held(account: Account, groups: Iterable[Group]) -> list[str]:
-    """The groups *account* holds, by the identifier its roles resolve from (never a token).
+def linked_providers(names: Iterable[str], bindings: Mapping[str, str]) -> frozenset[str]:
+    """The provider names *names* answer for: each one, and each that a binding joins to it.
+
+    ``auth.source_provider_bindings`` declares a SCIM stamp and an OIDC provider one
+    identity source, so a group either of them linked is linked for both.
+
+    Args:
+        names: Provider names or source stamps, empties ignored.
+        bindings: ``auth.source_provider_bindings``, stamp to OIDC provider name.
+
+    Returns:
+        The names, plus every stamp bound to one of them and every provider one is bound to.
+    """
+    own = {name for name in names if name}
+    related = {target for stamp, target in bindings.items() if stamp in own}
+    related |= {stamp for stamp, target in bindings.items() if target in own}
+    return frozenset(name for name in own | related if name)
+
+
+def linked_groups(
+    identifiers: Iterable[str], groups: Iterable[Group], providers: Collection[str]
+) -> list[Group]:
+    """The stored groups an identity provider's asserted *identifiers* are linked to.
+
+    A group is linked when its ``source_id`` is the identifier and it names no provider
+    or one of *providers*. Its name never links: a directory user can pick a group's
+    display name, but not the id the directory assigns it. The OIDC group sync links
+    by the same rule.
+
+    Args:
+        identifiers: What the IdP asserted: group ids, or names where it sends names.
+        groups: Every stored group, listed once by the caller.
+        providers: The providers the assertion answers for (:func:`linked_providers`).
+
+    Returns:
+        The linked groups, in stored order.
+    """
+    wanted = set(identifiers)
+    return [
+        group
+        for group in groups
+        if group.source_id
+        and group.source_id in wanted
+        and (not group.source_provider or group.source_provider in providers)
+    ]
+
+
+def groups_held(
+    account: Account, groups: Iterable[Group], *, bindings: Mapping[str, str]
+) -> list[str]:
+    """The names of the groups *account* holds, which its roles resolve from (never a token).
 
     The group files are the authority, so a member removed there loses the group even
-    while the account's own list still names it. An IdP-owned account also holds its
-    own list: that is what its IdP asserts, as names or as provider ids, so a group an
-    operator adds it to by hand is held beside those, not in place of them.
+    while the account's own list still names it. An IdP-owned account's own list is
+    what its IdP asserts, and holds only the groups those identifiers are linked to
+    (:func:`linked_groups`), beside any an operator added it to by hand.
 
     Args:
         account: The account.
         groups: Every stored group, listed once by the caller.
+        bindings: ``auth.source_provider_bindings``.
 
     Returns:
-        Sorted group identifiers, each a group name or an IdP-asserted provider id.
+        Sorted group names.
     """
-    held = {group.name for group in groups if account.username in group.members}
+    listed = list(groups)
+    held = {group.name for group in listed if account.username in group.members}
     if account.source_provider:
-        held.update(account.groups)
+        providers = linked_providers([account.source_provider], bindings)
+        held.update(group.name for group in linked_groups(account.groups, listed, providers))
     return sorted(held)
 
 
