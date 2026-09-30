@@ -9,7 +9,8 @@
 
 The route runs caller SQL as the engine's own ClickHouse user, which may write.
 A viewer is refused before any SQL is sent; an admin reads, and ClickHouse refuses
-the admin's writes because the adapter sends ``readonly=2``.
+the admin's writes, table-function writes included, because the adapter sends
+``readonly=1``.
 """
 
 import uuid
@@ -125,8 +126,10 @@ def test_an_admin_reads(stack):
         "INSERT INTO `{db}`.events VALUES (3)",
         "DROP TABLE `{db}`.events",
         "ALTER TABLE `{db}`.events DELETE WHERE 1",
+        "INSERT INTO FUNCTION url('http://127.0.0.1:8123/?query=INSERT%20INTO%20{db}.events"
+        "%20FORMAT%20TSV', 'TSV', 'id UInt64') VALUES (3)",
     ],
-    ids=["create", "insert", "drop", "alter"],
+    ids=["create", "insert", "drop", "alter", "insert-into-url"],
 )
 def test_an_admin_write_is_refused_by_clickhouse(stack, ch_client, statement):
     resp = _raw(stack, stack.admin, statement.format(db=stack.database))

@@ -95,6 +95,11 @@ config:
     # the pod network the gateway runs on.
     forwarded_allow_ips: ""
     jwt_expire_minutes: 60
+    # -- Serve Swagger UI at /docs and ReDoc at /redoc: "true" or "false". Both pages
+    # load their scripts from a public CDN into the engine's origin, so empty serves
+    # them only when `env` is a dev posture (dev, development, local, test, ci).
+    # /openapi.json is served either way.
+    docs_enabled: ""
   auth:
     enabled: true
     local:

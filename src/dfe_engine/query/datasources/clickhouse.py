@@ -88,13 +88,16 @@ class ClickHouseAdapter(DatasourceAdapter):
     ) -> tuple[list[dict[str, Any]], list[str]]:
         """Execute a read-only query and return (rows, column_names).
 
-        ClickHouse refuses anything but a read here: the query runs as the engine's
-        own user, which may write, and ``readonly=2`` still lets the client send
-        its per-query settings.
+        The query runs as the engine's own ClickHouse user, which may write, so it
+        is sent with ``readonly=1``. ClickHouse then refuses every write and DDL
+        statement, any ``INSERT INTO FUNCTION`` (``url()``, ``file()``, ``s3()``,
+        ...), any read through ``url()``, and any ``SETTINGS`` clause in the query.
+        ``readonly=2`` would allow those table-function writes and reads. The
+        ``max_execution_time`` sent with the query still applies.
         """
         client = self.manager.get_clickhouse_client()
 
-        settings = {"max_execution_time": timeout_seconds, "readonly": 2}
+        settings = {"max_execution_time": timeout_seconds, "readonly": 1}
         result = client.query(query, parameters=params or {}, settings=settings)
 
         columns = list(result.column_names)

@@ -40,7 +40,11 @@ class StorageListingError(Exception):
 
 @register_adapter("s3")
 class S3Adapter(DatasourceAdapter):
-    """S3/MinIO datasource adapter for directory listing."""
+    """S3/MinIO datasource adapter for directory listing.
+
+    The ClickHouse adapter's ``readonly`` setting does not apply here. This adapter
+    only lists objects, with the engine's own S3 credentials, and never writes.
+    """
 
     def __init__(self, target: str, config: dict[str, Any] | None = None):
         super().__init__(target, config)
@@ -182,12 +186,17 @@ class S3Adapter(DatasourceAdapter):
 
 @register_adapter("minio")
 class MinIOAdapter(S3Adapter):
-    """MinIO datasource adapter (S3-compatible)."""
+    """MinIO datasource adapter (S3-compatible). ``readonly`` does not apply, as for S3."""
 
 
 @register_adapter("file")
 class FilesystemAdapter(DatasourceAdapter):
-    """Local filesystem datasource adapter for directory listing."""
+    """Local filesystem datasource adapter for directory listing.
+
+    The ClickHouse adapter's ``readonly`` setting does not apply here. This adapter
+    only lists files under its base path, refusing a path that leaves it, and never
+    writes.
+    """
 
     def __init__(self, target: str, config: dict[str, Any] | None = None):
         super().__init__(target, config)
