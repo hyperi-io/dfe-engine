@@ -625,13 +625,17 @@ def create_app(
 
     # Added last so it is the outermost middleware: every route below it reads the
     # scheme and client address the trusted gateway forwarded, which is what keeps
-    # the OIDC redirect_uri on the https the caller arrived on. Lives in the app,
-    # not the ASGI server, so one setting decides trust whatever serves it.
-    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+    # the OIDC redirect_uri on the https the caller arrived on and the audit trail
+    # on the caller's address. Lives in the app, not the ASGI server, so one setting
+    # decides trust whatever serves it. Parsed here so a bad entry stops startup.
+    from dfe_engine.api.middleware.forwarded_headers import (
+        ForwardedHeadersMiddleware,
+        TrustedProxies,
+    )
 
     app.add_middleware(
-        ProxyHeadersMiddleware,
-        trusted_hosts=settings.api.forwarded_allow_ips,
+        ForwardedHeadersMiddleware,
+        trusted=TrustedProxies.parse(settings.api.forwarded_allow_ips),
     )
 
     # Exception handlers

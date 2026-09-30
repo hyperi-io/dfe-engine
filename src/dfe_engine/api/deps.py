@@ -338,22 +338,13 @@ ClickHouseClient = Annotated[Any, Depends(get_clickhouse_client)]
 def _get_client_ip(request: Request) -> str | None:
     """Caller address for the audit trail.
 
-    X-Forwarded-For is whatever the caller typed unless a trusted proxy rewrote
-    it, so it is read only behind ``auth.trust_proxy_auth_headers`` - the same
-    gate the X-Oidc-* identity headers sit behind.
-
-    The fallback is NOT necessarily the socket peer: ProxyHeadersMiddleware is the
-    app's outermost middleware, so where ``api.forwarded_allow_ips`` trusts the
-    gateway it has already rewritten ``scope["client"]`` from X-Forwarded-For. So
-    this returns the proxy-forwarded address behind a trusted proxy, and the socket
-    peer otherwise - which is the address the audit trail wants either way, because
-    behind a gateway the socket peer is only ever the gateway.
+    ForwardedHeadersMiddleware, the app's outermost middleware, has already set
+    ``request.client``: the TCP peer, or behind a peer ``api.forwarded_allow_ips``
+    trusts, the right-most X-Forwarded-For entry that is not itself a trusted
+    proxy. No header is read here, so every caller records the address that one
+    rule decided. ``auth.trust_proxy_auth_headers`` governs the X-Oidc-* identity
+    headers only.
     """
-    settings: DFESettings = request.app.state.settings
-    if settings.auth.trust_proxy_auth_headers:
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
     return request.client.host if request.client else None
 
 
