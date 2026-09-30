@@ -9,14 +9,16 @@
 
 Fixes the Next.js build-time NEXT_PUBLIC_* trap: instead of baking the API/HyperDX
 URLs into the image, the UI reads them at runtime here -> one image, every
-environment, gitops-driven. Public (no secrets) so it can load before auth.
+environment, gitops-driven. Any authenticated caller may read it; an anonymous
+request gets 401.
 """
-
-from __future__ import annotations
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 from scalo.logger import logger
+
+from dfe_engine.api.cli_exposure import CLI_HIDDEN
+from dfe_engine.api.deps import CurrentUser
 
 router = APIRouter(prefix="/config", tags=["Client Config"])
 
@@ -32,8 +34,9 @@ class ClientConfig(BaseModel):
     auth_mode: str = Field(
         default="jwt",
         description=(
-            "'oidc' when an enabled OIDC provider is registered, so the UI offers "
-            "the SSO button; 'jwt' otherwise. Local login stays available in both."
+            "'oidc' when an enabled OIDC provider is registered, 'jwt' otherwise; "
+            "shown on the System Management page. Local login stays available in "
+            "both."
         ),
     )
     features: dict[str, bool] = {}
@@ -59,9 +62,13 @@ def _oidc_available(request: Request) -> bool:
         return False
 
 
-@router.get("/client", response_model=ClientConfig)
-async def client_config(request: Request) -> ClientConfig:
-    """Runtime config for the web UI (no secrets)."""
+@router.get("/client", response_model=ClientConfig, openapi_extra=CLI_HIDDEN)
+async def client_config(user: CurrentUser, request: Request) -> ClientConfig:
+    """Runtime config for the web UI.
+
+    Authenticated but ungated: every console pane may read it, and the HyperDX URL
+    it returns is internal to the deployment.
+    """
     settings = request.app.state.settings
     hyperdx = HyperDXConfig(
         enabled=bool(getattr(settings.hyperdx, "enabled", False)),
