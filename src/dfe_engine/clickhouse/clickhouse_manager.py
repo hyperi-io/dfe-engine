@@ -33,13 +33,13 @@ from typing import TYPE_CHECKING, Annotated, Any, TypeVar
 
 import clickhouse_connect
 from clickhouse_connect.driver import Client, httputil
-from scalo.crypto import tls_parts
 from scalo.logger import logger
 from scalo.resilience import ReconnectingResilience, ResilienceConfig, ServiceUnavailable
 
 from ..settings import get_settings
 from .attribution import merge_log_comment
 from .errors import is_connection_error, is_retryable_error
+from .tls import resolve_clickhouse_tls
 
 if TYPE_CHECKING:
     from ..settings import DFESettings
@@ -419,11 +419,10 @@ class ClickHouseManager:
             verify = self.target_config_data.get("ch_verify")
             ca_cert = self.target_config_data.get("ch_ca_cert")
 
-            # scalo crypto posture in PRIMITIVES form: clickhouse-connect / urllib3
-            # take a verify flag + CA path, not a full SSLContext. This carries
-            # cert verification (ON by default) and the internal-CA trust anchor;
-            # tls_parts.verify resolves None via the escape valve.
-            tls = tls_parts(ca_paths=[ca_cert] if ca_cert else None, verify=verify)
+            # The one TLS resolver every clickhouse-connect client in the engine
+            # goes through: verify defaults ON, and an unreadable ca_cert refuses
+            # here rather than silently connecting without a trust anchor.
+            tls = resolve_clickhouse_tls(secure=secure, verify=verify, ca_cert=ca_cert)
 
             is_password_set = password is not None
 
@@ -445,7 +444,7 @@ class ClickHouseManager:
                 maxsize=self.connections_max,
                 num_pools=10,
                 verify=tls.verify,
-                ca_cert=(tls.ca_paths[0] if tls.ca_paths else None),
+                ca_cert=tls.ca_cert,
             )
 
             # Build connection parameters. Typed dict[str, Any] because the values
@@ -466,8 +465,10 @@ class ClickHouseManager:
             if password is not None:
                 connect_params["password"] = password
 
-            # Configure HTTPS
-            if secure:
+            # Configure HTTPS. ca_cert is NOT repeated here -- it is already baked
+            # into pool_mgr above, and clickhouse-connect ignores a ca_cert kwarg
+            # once a pool_mgr is supplied.
+            if tls.secure:
                 connect_params["secure"] = True
                 connect_params["verify"] = tls.verify
 

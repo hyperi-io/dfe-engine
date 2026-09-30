@@ -58,11 +58,13 @@ class ClickHouseAdapter(DatasourceAdapter):
         if self._restricted_client is None:
             import clickhouse_connect
 
+            from dfe_engine.clickhouse.tls import resolve_clickhouse_tls
             from dfe_engine.settings import get_settings
 
             settings = get_settings()
             ch = settings.clickhouse
             qv = settings.query_views
+            tls = resolve_clickhouse_tls(secure=ch.secure, verify=ch.verify, ca_cert=ch.ca_cert)
 
             connect_params: dict[str, Any] = {
                 "host": ch.host,
@@ -71,10 +73,7 @@ class ClickHouseAdapter(DatasourceAdapter):
                 "password": qv.restricted_password,
                 "database": ch.database,
             }
-
-            if ch.secure:
-                connect_params["secure"] = True
-                connect_params["verify"] = ch.verify
+            connect_params.update(tls.connect_kwargs())
 
             self._restricted_client = clickhouse_connect.get_client(**connect_params)
 

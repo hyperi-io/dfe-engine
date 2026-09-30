@@ -21,8 +21,10 @@ local-CH test, deliberately not attempted here.
 
 from __future__ import annotations
 
+import pytest
 from typer.testing import CliRunner
 
+from dfe_engine.clickhouse.tls import ClickHouseCaCertUnreadable
 from dfe_engine.hunt_runner import cli
 from dfe_engine.settings import DFESettings
 
@@ -58,6 +60,38 @@ def test_ch_params_maps_settings_fields():
         "password": "secret",
         "secure": True,
         "verify": False,
+    }
+
+
+def test_ch_params_carries_a_readable_ca_cert(tmp_path):
+    ca = tmp_path / "internal-ca.pem"
+    ca.write_text("cert")
+    settings = DFESettings(env="test")
+    settings.clickhouse.secure = True
+    settings.clickhouse.ca_cert = str(ca)
+
+    assert cli._ch_params(settings)["ca_cert"] == str(ca)
+
+
+def test_ch_params_refuses_an_unreadable_ca_cert(tmp_path):
+    missing = tmp_path / "does-not-exist.pem"
+    settings = DFESettings(env="test")
+    settings.clickhouse.secure = True
+    settings.clickhouse.ca_cert = str(missing)
+
+    with pytest.raises(ClickHouseCaCertUnreadable, match="DFE_CLICKHOUSE_CA_CERT"):
+        cli._ch_params(settings)
+
+
+def test_ch_params_omits_tls_kwargs_when_insecure():
+    settings = DFESettings(env="test")
+    settings.clickhouse.secure = False
+
+    assert cli._ch_params(settings) == {
+        "host": settings.clickhouse.host,
+        "port": settings.clickhouse.port,
+        "username": settings.clickhouse.username,
+        "password": settings.clickhouse.password,
     }
 
 

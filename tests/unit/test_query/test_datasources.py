@@ -1,6 +1,6 @@
 """Unit tests for datasource adapters."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -13,6 +13,7 @@ from dfe_engine.query.datasources import (
 )
 from dfe_engine.query.datasources.clickhouse import ClickHouseAdapter
 from dfe_engine.query.models import ExplainPlan, ExplainStepType
+from dfe_engine.settings import DFESettings
 
 
 class TestAdapterRegistry:
@@ -185,6 +186,40 @@ class TestClickHouseAdapter:
         adapter.close()
         owned.close.assert_called_once()
         assert adapter._manager is None
+
+
+class TestGetRestrictedClientTls:
+    """The restricted query client takes the engine's ClickHouseSettings TLS posture."""
+
+    def test_secure_settings_pass_verify_and_ca_cert(self, monkeypatch, tmp_path) -> None:
+        ca = tmp_path / "internal-ca.pem"
+        ca.write_text("cert")
+        settings = DFESettings(env="test")
+        settings.clickhouse.secure = True
+        settings.clickhouse.verify = True
+        settings.clickhouse.ca_cert = str(ca)
+        monkeypatch.setattr("dfe_engine.settings.get_settings", lambda: settings)
+
+        adapter = ClickHouseAdapter("default")
+        with patch("clickhouse_connect.get_client") as get_client:
+            adapter.get_restricted_client()
+        kwargs = get_client.call_args[1]
+        assert kwargs["secure"] is True
+        assert kwargs["verify"] is True
+        assert kwargs["ca_cert"] == str(ca)
+
+    def test_insecure_settings_pass_no_tls_kwargs(self, monkeypatch) -> None:
+        settings = DFESettings(env="test")
+        settings.clickhouse.secure = False
+        monkeypatch.setattr("dfe_engine.settings.get_settings", lambda: settings)
+
+        adapter = ClickHouseAdapter("default")
+        with patch("clickhouse_connect.get_client") as get_client:
+            adapter.get_restricted_client()
+        kwargs = get_client.call_args[1]
+        assert "secure" not in kwargs
+        assert "verify" not in kwargs
+        assert "ca_cert" not in kwargs
 
 
 class TestClickHouseAdapterExplainParsing:

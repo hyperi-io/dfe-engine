@@ -344,7 +344,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         logger.info(f"Loaded connection config from {conn_config_path}")
     else:
         conn_config = ConnectionConfigLoader.load_default()
-    app.state.connection_registry = ConnectionRegistry(conn_config)
+    app.state.connection_registry = ConnectionRegistry(conn_config, settings.clickhouse)
 
     # Bootstrap org registry
     from dfe_engine.orgs.registry import OrgRegistry

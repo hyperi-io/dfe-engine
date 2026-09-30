@@ -29,6 +29,7 @@ import clickhouse_connect
 from scalo.logger import logger
 
 from dfe_engine import scaling_pressure
+from dfe_engine.clickhouse.tls import resolve_clickhouse_tls
 from dfe_engine.settings import DFESettings
 from dfe_engine.yaml_utils import deep_merge, yaml_load
 
@@ -44,17 +45,17 @@ def _ch_client(settings: DFESettings) -> Any:
 
     Raw (not the ClickHouseManager resilience wrapper): the shim is a tiny read-only
     poller, so it wants the plain client, not the autowake/pool machinery. Same
-    host/port/username/password/secure/verify the hunt-runner and the integration
-    ``ch_client`` fixture build from.
+    host/port/username/password/secure/verify/ca_cert the hunt-runner and the
+    integration ``ch_client`` fixture build from.
     """
     ch = settings.clickhouse
+    tls = resolve_clickhouse_tls(secure=ch.secure, verify=ch.verify, ca_cert=ch.ca_cert)
     return clickhouse_connect.get_client(
         host=ch.host,
         port=ch.port,
         username=ch.username,
         password=ch.password,
-        secure=ch.secure,
-        verify=ch.verify,
+        **tls.connect_kwargs(),
     )
 
 

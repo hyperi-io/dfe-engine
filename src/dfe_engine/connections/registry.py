@@ -13,22 +13,37 @@ of the registry.
 """
 
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from scalo.logger import logger
 
+from dfe_engine.clickhouse.tls import resolve_clickhouse_tls
 from dfe_engine.connections.config import ConnectionConfig
+
+if TYPE_CHECKING:
+    from dfe_engine.settings import ClickHouseSettings
 
 
 class ConnectionRegistry:
     """Resolve and cache ClickHouse clients by connection name.
 
+    Every named connection is a different CH user on the SAME cluster the
+    engine's own ``ClickHouseSettings`` describes (RBAC scoping, not a
+    different server), so they all take that cluster's TLS posture.
+
     Args:
         config: Validated connection configuration.
+        clickhouse: The engine's ClickHouse settings (secure/verify/ca_cert).
+            Read lazily from ``get_settings()`` when omitted.
     """
 
-    def __init__(self, config: ConnectionConfig) -> None:
+    def __init__(
+        self,
+        config: ConnectionConfig,
+        clickhouse: ClickHouseSettings | None = None,
+    ) -> None:
         self._config = config
+        self._clickhouse = clickhouse
         self._clients: dict[str, Any] = {}
 
     def get_client(self, connection_name: str) -> Any:
@@ -57,6 +72,13 @@ class ConnectionRegistry:
         if conn.password_env:
             password = os.environ.get(conn.password_env, "")
 
+        ch = self._clickhouse
+        if ch is None:
+            from dfe_engine.settings import get_settings
+
+            ch = get_settings().clickhouse
+        tls = resolve_clickhouse_tls(secure=ch.secure, verify=ch.verify, ca_cert=ch.ca_cert)
+
         import clickhouse_connect
 
         client = clickhouse_connect.get_client(
@@ -65,6 +87,7 @@ class ConnectionRegistry:
             database=conn.database,
             username=conn.user,
             password=password,
+            **tls.connect_kwargs(),
         )
 
         self._clients[connection_name] = client
