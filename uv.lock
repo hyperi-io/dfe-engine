@@ -622,7 +622,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },
-    { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.30.5" },
+    { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.30.7" },
     { name = "scim2-models", specifier = ">=0.6.12" },
     { name = "sqlglot", specifier = ">=30.17.0" },
     { name = "sse-starlette", specifier = ">=3.4.5" },
@@ -1981,7 +1981,7 @@ wheels = [
 
 [[package]]
 name = "scalo"
-version = "2.30.5"
+version = "2.30.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -1999,9 +1999,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4c/bc/8454e5fae055d344d9a90a51822f11c828f17a40e9163638b89bb9b9cad5/scalo-2.30.5.tar.gz", hash = "sha256:6e9998527c183a2630804dc244ef0e96105de0efe74b051aa41ef9ef5f4aeb43", size = 340267, upload-time = "2026-09-27T00:03:01.969Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3b/bc/01065092f367c796728fcd23b030f601033909c057040f4509f6ac75408f/scalo-2.30.7.tar.gz", hash = "sha256:eace89c2c47353740d8f8b7511a4aa4cd2c4886abbaa84ed133db5b501af9c64", size = 344410, upload-time = "2026-09-30T04:18:24.29Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fe/4d/dacdd75b70cb126bc4c9d13d41a6d8cb5b3862c1036319d18f5cdd05b0a0/scalo-2.30.5-py3-none-any.whl", hash = "sha256:c1485fcc07a31d723fa0ed7806e42f2319334ac87ca2f5c54fd56526a6ab5f35", size = 413186, upload-time = "2026-09-27T00:03:00.139Z" },
+    { url = "https://files.pythonhosted.org/packages/88/87/b1063688e68d567efd406863728ab9a728ac31b1545d65e80f7cb8ae4b06/scalo-2.30.7-py3-none-any.whl", hash = "sha256:465fdf49a9b2c156db71ffe7bf12641bbb56d8a62291845e1e50f7a8df1d3588", size = 418402, upload-time = "2026-09-30T04:18:22.444Z" },
 ]
 
 [package.optional-dependencies]
