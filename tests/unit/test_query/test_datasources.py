@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from dfe_engine.clickhouse import ClickHouseManager
 from dfe_engine.query.datasources import (
     DatasourceAdapter,
     get_adapter,
@@ -155,11 +156,34 @@ class TestClickHouseAdapter:
         adapter._manager = mock_manager
         assert adapter.healthcheck() is False
 
-    def test_close(self, mock_manager):
+    def test_close_releases_only_what_the_adapter_opened(self):
+        # spec= refuses any method ClickHouseManager does not have.
+        shared = MagicMock(spec=ClickHouseManager)
+        restricted = MagicMock()
         adapter = ClickHouseAdapter("default")
-        adapter._manager = mock_manager
+        adapter._manager = shared
+        adapter._restricted_client = restricted
         adapter.close()
-        mock_manager.close.assert_called_once()
+        restricted.close.assert_called_once()
+        shared.close.assert_not_called()
+        assert adapter._manager is None
+        assert adapter._restricted_client is None
+
+    def test_a_configured_adapter_builds_its_own_manager(self):
+        before = ClickHouseManager._instance
+        first = ClickHouseAdapter("default", config={"ch_host": "ch-a.example"})
+        second = ClickHouseAdapter("default", config={"ch_host": "ch-b.example"})
+        assert first.manager is not second.manager
+        assert first.manager.target_config_data == {"ch_host": "ch-a.example"}
+        assert second.manager.target_config_data == {"ch_host": "ch-b.example"}
+        assert ClickHouseManager._instance is before
+
+    def test_close_cleans_up_the_manager_a_configured_adapter_owns(self):
+        owned = MagicMock(spec=ClickHouseManager)
+        adapter = ClickHouseAdapter("default", config={"ch_host": "ch-a.example"})
+        adapter._manager = owned
+        adapter.close()
+        owned.close.assert_called_once()
         assert adapter._manager is None
 
 

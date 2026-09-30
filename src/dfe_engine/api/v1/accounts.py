@@ -14,7 +14,7 @@ GET    /api/v1/auth/accounts/{username}             -> Get account detail
 GET    /api/v1/auth/accounts/me                     -> Get own account (session)
 PUT    /api/v1/auth/accounts/me                     -> Update own contact fields (session)
 PUT    /api/v1/auth/accounts/{username}             -> Update account (admin)
-POST   /api/v1/auth/accounts/reset-password         -> Reset own password (session)
+POST   /api/v1/auth/accounts/reset-password         -> Change own password (session + current)
 POST   /api/v1/auth/accounts/{username}/reset-password -> Reset password (admin)
 DELETE /api/v1/auth/accounts/{username}             -> Delete account
 
@@ -33,9 +33,12 @@ from scalo.concurrency import run_blocking
 from dfe_engine.api.deps import (
     CurrentUser,
     Settings,
+    _get_client_ip,
     account_for_session_subject,
+    provider_bindings,
     require_action,
 )
+from dfe_engine.api.errors import ErrorResponse
 from dfe_engine.api.pagination import (
     PaginatedResponse,
     PaginationParams,
@@ -43,17 +46,19 @@ from dfe_engine.api.pagination import (
     apply_sort,
 )
 from dfe_engine.api.v1.account_groups import check_group_changes
+from dfe_engine.api.v1.auth import throttled
 from dfe_engine.auth import account_durability
 from dfe_engine.auth.account_durability import AccountGitState
 from dfe_engine.auth.accounts import Account, AccountExistsError, matches_digest
 from dfe_engine.auth.attributes import check_attribute_depth
-from dfe_engine.auth.audit import audit_account_change
+from dfe_engine.auth.audit import audit_account_change, audit_login_denied
 from dfe_engine.auth.bootstrap import (
     MIN_ADMIN_PASSWORD_LENGTH,
     admin_account_name,
     default_credentials_in_use,
 )
 from dfe_engine.auth.groups import Group
+from dfe_engine.auth.login_throttle import LoginThrottle
 from dfe_engine.auth.membership import forget_member, groups_held
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
@@ -165,6 +170,15 @@ class ResetPasswordRequest(BaseModel):
     )
 
 
+class ChangeOwnPasswordRequest(ResetPasswordRequest):
+    """The owner's own change, which proves the password as well as the session."""
+
+    current_password: str = Field(
+        min_length=1,
+        description="The account's password now. A session token alone cannot change it.",
+    )
+
+
 class ResetPasswordResponse(BaseModel):
     """Reset outcome plus where the change stands in the durable deploy repo."""
 
@@ -218,8 +232,9 @@ class AccountResponse(BaseModel):
     disabled_at: str = ""
     blocked_at: str = ""
     groups: list[str] = Field(
-        description="Groups the account holds: those whose group file lists it, plus the "
-        "groups its identity provider asserts when one owns it.",
+        description="Names of the groups the account holds: those whose group file lists "
+        "it, plus, when an identity provider owns it, the groups the provider's asserted "
+        "ids are linked to by source_id.",
     )
     email: str
     phone: str = ""
@@ -247,10 +262,11 @@ class AttributesRequest(BaseModel):
         return check_attribute_depth(value)
 
 
-def _account_response(account: Account, groups: list[Group]) -> AccountResponse:
+def _account_response(request: Request, account: Account, groups: list[Group]) -> AccountResponse:
     """Map a stored account to the public response (never includes password_hash).
 
     Args:
+        request: The request, for the provider bindings the groups resolve under.
         account: The stored account.
         groups: Every stored group, listed once per request.
     """
@@ -260,7 +276,7 @@ def _account_response(account: Account, groups: list[Group]) -> AccountResponse:
         blocked=account.blocked,
         disabled_at=account.disabled_at,
         blocked_at=account.blocked_at,
-        groups=groups_held(account, groups),
+        groups=groups_held(account, groups, bindings=provider_bindings(request)),
         email=account.email,
         phone=account.phone,
         name=account.name,
@@ -310,6 +326,39 @@ def _require_own_account(store: Any, user_id: str) -> Account:
     return account
 
 
+def _refuse_external(account: Account) -> None:
+    """Refuse a local password for an account its identity provider authenticates."""
+    if account.external:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "external_account",
+                "message": (
+                    f"Account '{account.username}' authenticates through its identity "
+                    "provider; a local password cannot be set"
+                ),
+            },
+        )
+
+
+def _write_new_password(store: Any, existing: Account, new_password: str) -> bool:
+    """Store *new_password* on *existing*, unless it is the current or last issued one.
+
+    Blocking: three bcrypt operations, so the caller runs it off the event loop.
+
+    Returns:
+        False when the password was refused as reused, True once it is stored.
+    """
+    # No history is stored: the current password and the last one issued are all there is.
+    reused = store.verify_password(existing.username, new_password) or matches_digest(
+        new_password, existing.seeded_password_hash
+    )
+    if reused:
+        return False
+    store.reset_password(existing.username, new_password)
+    return True
+
+
 async def _reset_stored_password(
     request: Request,
     settings: Settings,
@@ -318,7 +367,10 @@ async def _reset_stored_password(
     new_password: str,
     actor: str,
 ) -> ResetPasswordResponse:
-    """Apply a password reset in the live store and mirror it if git-backed."""
+    """Apply a password reset in the live store and mirror it if git-backed.
+
+    The new password ends every session the account held (its session marker moves).
+    """
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
@@ -328,22 +380,8 @@ async def _reset_stored_password(
             status_code=404,
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
         )
-    if existing.external:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "external_account",
-                "message": (
-                    f"Account '{username}' authenticates through its identity "
-                    "provider; a local password cannot be set"
-                ),
-            },
-        )
-    # No history is stored: the current password and the last one issued are all there is.
-    reused = store.verify_password(username, new_password) or matches_digest(
-        new_password, existing.seeded_password_hash
-    )
-    if reused:
+    _refuse_external(existing)
+    if not await run_blocking(_write_new_password, store, existing, new_password):
         raise HTTPException(
             status_code=400,
             detail={
@@ -354,7 +392,6 @@ async def _reset_stored_password(
                 ),
             },
         )
-    store.reset_password(username, new_password)
     git = await _persist_account(
         request,
         settings,
@@ -395,8 +432,10 @@ async def create_account(
         raise conflict
     check_group_changes(request, user, group_store.list(), (), body.groups)
     # The create decides: another replica can take the name after the lookup above.
+    # It hashes the password, so it runs off the event loop.
     try:
-        account = store.create(
+        account = await run_blocking(
+            store.create,
             body.username,
             body.password,
             groups=body.groups,
@@ -425,7 +464,7 @@ async def create_account(
         summary="create account",
         actor=user.user_id,
     )
-    return _account_response(account, group_store.list())
+    return _account_response(request, account, group_store.list())
 
 
 @router.get(
@@ -461,7 +500,7 @@ async def list_accounts(
     if blocked is not None:
         accounts = [account for account in accounts if account.blocked is blocked]
     groups = request.app.state.group_store.list()
-    rows = [_account_response(a, groups).model_dump() for a in accounts]
+    rows = [_account_response(request, a, groups).model_dump() for a in accounts]
     rows = apply_search(rows, search, ["username", "name", "email"])
     rows = apply_sort(rows, sort_by, sort_order)
     summaries = [AccountResponse.model_validate(row) for row in rows]
@@ -482,7 +521,7 @@ async def get_current_user_account(
 
     store: AccountStore = request.app.state.account_store
     account = _require_own_account(store, user.user_id)
-    response = _account_response(account, request.app.state.group_store.list())
+    response = _account_response(request, account, request.app.state.group_store.list())
     if account.password_change_required:
         response.groups = []
     return response
@@ -514,7 +553,7 @@ async def update_current_user_account(
         summary="update own account",
         actor=user.user_id,
     )
-    return _account_response(account, request.app.state.group_store.list())
+    return _account_response(request, account, request.app.state.group_store.list())
 
 
 @router.get(
@@ -537,7 +576,7 @@ async def get_account(
             status_code=404,
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
         )
-    return _account_response(account, request.app.state.group_store.list())
+    return _account_response(request, account, request.app.state.group_store.list())
 
 
 @router.put(
@@ -561,7 +600,8 @@ async def update_account(
     existing = _require_account(store, username)
     if body.groups is not None:
         groups = group_store.list()
-        check_group_changes(request, user, groups, groups_held(existing, groups), body.groups)
+        held = groups_held(existing, groups, bindings=provider_bindings(request))
+        check_group_changes(request, user, groups, held, body.groups)
     update_fields: dict[str, object] = _contact_updates(body)
     if body.groups is not None:
         update_fields["groups"] = body.groups
@@ -590,32 +630,66 @@ async def update_account(
         summary="update account",
         actor=user.user_id,
     )
-    return _account_response(account, group_store.list())
+    return _account_response(request, account, group_store.list())
 
 
 @router.post(
     "/reset-password",
     status_code=200,
     response_model=ResetPasswordResponse,
+    responses={
+        403: {
+            "model": ErrorResponse,
+            "description": "current_password is not the account's password "
+            "(invalid_current_password)",
+        },
+        429: {
+            "model": ErrorResponse,
+            "description": "Too many wrong current passwords; Retry-After gives the "
+            "seconds to wait",
+        },
+    },
 )
 async def reset_current_user_password(
-    body: ResetPasswordRequest,
+    body: ChangeOwnPasswordRequest,
     user: CurrentUser,
     request: Request,
     settings: Settings,
 ) -> ResetPasswordResponse:
-    """Reset the authenticated user's password.
+    """Change the authenticated user's own password, given the current one.
 
     The username is taken from the session, not the request, so a caller cannot
-    reset another account through this route. An IdP-owned (``external``)
+    reset another account through this route. ``current_password`` must be the
+    account's password, so a stolen session token cannot take the account over;
+    wrong guesses back off as sign-in failures do. An IdP-owned (``external``)
     account is refused: it has no local password. The live store takes the new
-    password immediately; the ``git`` block reports whether the durable mirror
-    merged, is pending review, or is a no-op for a non-git-backed account.
+    password immediately and every session the account held ends, this one
+    included, so the owner signs in again. The ``git`` block reports whether the
+    durable mirror merged, is pending review, or is a no-op for a non-git-backed
+    account.
 
     An account on an issued password may call this and nothing else that
     changes state, and the reset clears ``password_change_required``.
     """
-    account = _require_own_account(request.app.state.account_store, user.user_id)
+    store = request.app.state.account_store
+    account = _require_own_account(store, user.user_id)
+    _refuse_external(account)
+    throttle: LoginThrottle = request.app.state.login_throttle
+    client_ip = _get_client_ip(request)
+    wait = throttle.retry_after(account.username, client_ip)
+    if wait:
+        raise throttled(request, wait)
+    if not await run_blocking(store.verify_password, account.username, body.current_password):
+        throttle.failed(account.username, client_ip)
+        audit_login_denied(user.user_id, "password_change", client_ip, "wrong_current_password")
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "invalid_current_password",
+                "message": "current_password is not this account's password",
+            },
+        )
+    throttle.succeeded(account.username)
     return await _reset_stored_password(
         request,
         settings,
@@ -785,7 +859,8 @@ async def delete_account(
         )
     # Deleting an account takes it out of every group it holds, so it needs their roles.
     groups = group_store.list()
-    check_group_changes(request, user, groups, groups_held(existing, groups), ())
+    held = groups_held(existing, groups, bindings=provider_bindings(request))
+    check_group_changes(request, user, groups, held, ())
     # The store refuses the break-glass admin, the one account the deploy repo carries.
     store.delete(username)
     forget_member(group_store, username)

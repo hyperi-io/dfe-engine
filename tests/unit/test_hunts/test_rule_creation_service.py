@@ -360,6 +360,54 @@ class TestSqlValidation:
         )
         assert service.validate_sql(sql) == []
 
+    def test_raw_sql_with_having_is_refused_not_cut_short(self, service):
+        """Stored as its WHERE alone, the rule would fire on every failed row, not six."""
+        sql = "SELECT user, count() FROM dfe.main WHERE failed = 1 GROUP BY user HAVING count() = 6"
+        result = service.create_rule(
+            RuleCreateRequest(name="Threshold", user_sql=sql), rule_id="r1"
+        )
+        assert [e.message.split(",")[0] for e in result.sql_errors] == [
+            "HAVING filters aggregated groups"
+        ]
+
+    @pytest.mark.parametrize(
+        ("sql", "refusal"),
+        [
+            (
+                "SELECT * FROM dfe.main AS a JOIN dfe.other AS b ON a.id = b.id WHERE a.x = 1",
+                "The query joins tables",
+            ),
+            (
+                "SELECT * FROM dfe.main WHERE x = 1 UNION ALL SELECT * FROM dfe.main WHERE y = 2",
+                "The query unions several SELECTs",
+            ),
+        ],
+    )
+    def test_raw_sql_refuses_what_the_hyperdx_path_refuses(self, service, sql, refusal):
+        errors = service.validate_sql(sql)
+        assert any(e.message.startswith(refusal) for e in errors), errors
+
+    def test_raw_sql_grouping_without_having_is_a_row_filter(self, service):
+        """The grouping only shapes the view; the rule matches the rows the WHERE keeps."""
+        sql = "SELECT host, count() FROM dfe.main WHERE failed = 1 GROUP BY host"
+        result = service.create_rule(RuleCreateRequest(name="Grouped", user_sql=sql), rule_id="r2")
+        assert result.sql_errors == []
+        assert result.rule.where_clause == "failed = 1"
+
+    def test_the_time_placeholder_is_stripped_at_save(self, service):
+        sql = "SELECT * FROM dfe.main WHERE {timestamp_condition} AND (action = 'delete')"
+        result = service.create_rule(RuleCreateRequest(name="Sigma", user_sql=sql), rule_id="r4")
+        assert result.sql_errors == []
+        assert result.rule.where_clause == "(action = 'delete')"
+        assert "{timestamp_condition}" not in result.rule.original_sql
+
+    def test_a_bare_where_fragment_is_refused(self, service):
+        result = service.create_rule(
+            RuleCreateRequest(name="Fragment", user_sql="failed = 1"), rule_id="r3"
+        )
+        assert result.sql_errors
+        assert "Rule has empty detection logic (WHERE clause)." in result.rule.validate_rule()
+
     @pytest.mark.parametrize(
         "condition",
         [

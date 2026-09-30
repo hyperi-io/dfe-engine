@@ -6,15 +6,19 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
+import json
 
 import pytest
 from prometheus_client.parser import text_string_to_metric_families
 from scalo.logger import logger
 from scalo.metrics import create_metrics
 
+from dfe_engine.api.deps import _resolve_roles_from_groups
+from dfe_engine.auth.bootstrap import bootstrap_auth
 from dfe_engine.auth.groups import GROUPS_SKIPPED, GroupMetrics, GroupStore
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
+from dfe_engine.auth.oidc.adapters.mock import MockDirectoryAdapter
+from dfe_engine.auth.oidc.adapters.okta import _group_info_from_okta
 from dfe_engine.auth.oidc.models import GroupInfo, GroupResolutionConfig, OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.sync import SYNC_GROUPS_SKIPPED, SyncMetrics, _safe_name, sync_provider
@@ -194,17 +198,20 @@ class TestSyncCreatesNewGroups:
         assert created.roles == []
 
 
-class TestSyncPreservesExistingRoles:
+class TestSyncUpdatesTheGroupsLinkedToIt:
+    """A stored group linked to this provider group is refreshed, and keeps its roles."""
+
     async def test_roles_kept_on_update(self, registries, api_provider):
         provider_registry, group_store = registries
         provider_registry.create("test-sso", api_provider)
 
-        # Pre-create the group with roles assigned by an admin
+        # Pre-create the group with roles assigned by an admin, linked to g1
         group_store.create(
             name="admins-example.com",
             roles=["admin", "data_analyst"],
             description="Old description",
         )
+        group_store.update("admins-example.com", source_provider="test-sso", source_id="g1")
 
         groups = [
             GroupInfo(
@@ -220,6 +227,7 @@ class TestSyncPreservesExistingRoles:
 
         assert result["created"] == 0
         assert result["updated"] == 1
+        assert result["groups_skipped"] == 0
 
         updated = group_store.get("admins-example.com")
         assert updated is not None
@@ -227,23 +235,181 @@ class TestSyncPreservesExistingRoles:
         assert sorted(updated.roles) == ["admin", "data_analyst"]
         # Description updated from provider
         assert updated.description == "New description from provider"
+        assert (updated.source_provider, updated.source_id) == ("test-sso", "g1")
 
-    async def test_source_metadata_updated_on_existing_group(self, registries, api_provider):
+    async def test_a_second_sync_updates_every_group_the_first_created(
+        self, registries, api_provider
+    ):
         provider_registry, group_store = registries
         provider_registry.create("test-sso", api_provider)
-
-        group_store.create(name="ops-example.com", roles=["infra_viewer"])
-
-        groups = [GroupInfo(id="new-id-456", name="ops", email="ops@example.com")]
+        groups = [
+            GroupInfo(id="g1", name="Security Operators", email=""),
+            GroupInfo(id="g2", name="ops", email="ops@example.com"),
+        ]
         adapter = FakeAdapter(api_provider, groups)
-
         await sync_provider("test-sso", provider_registry, group_store, adapter=adapter)
 
-        updated = group_store.get("ops-example.com")
-        assert updated is not None
-        assert updated.source_provider == "test-sso"
-        assert updated.source_id == "new-id-456"
-        assert updated.roles == ["infra_viewer"]
+        again = await sync_provider("test-sso", provider_registry, group_store, adapter=adapter)
+
+        assert (again["created"], again["updated"], again["groups_skipped"]) == (0, 2, 0)
+        assert provider_registry.get("test-sso").last_sync_status == "ok"
+
+
+class TestSyncNeverTakesAGroupNoAdminLinked:
+    """An IdP group reaches a stored group only through a link an admin made, never its name.
+
+    A display name is not unique in a directory, and in a tenant that lets users
+    create groups anyone can pick one, so a name match is no evidence of identity.
+    """
+
+    ATTACKER = "attacker-guid-123"
+
+    @pytest.fixture
+    def seeded(self, tmp_path, api_provider):
+        """The boot seed's group store, dfe-admins carrying admin, and a provider in api mode."""
+        _, group_store, *_ = bootstrap_auth(tmp_path / "auth")
+        provider_registry = OIDCProviderRegistry(tmp_path / "oidc")
+        provider_registry.create("test-sso", api_provider)
+        return provider_registry, group_store
+
+    @staticmethod
+    def _entra(provider, tmp_path, monkeypatch, attacker):
+        # An Entra security group has no mail, so its displayName names it.
+        return FakeAdapter(provider, [GroupInfo(id=attacker, name="DFE Admins", email="")])
+
+    @staticmethod
+    def _okta(provider, tmp_path, monkeypatch, attacker):
+        item = {"id": attacker, "profile": {"name": "DFE Admins", "description": ""}}
+        return FakeAdapter(provider, [_group_info_from_okta(item)])
+
+    @staticmethod
+    def _mock_directory(provider, tmp_path, monkeypatch, attacker):
+        fixture = tmp_path / "directory.json"
+        group = {"id": attacker, "name": "DFE Admins", "email": ""}
+        fixture.write_text(json.dumps({"groups": [group]}), encoding="utf-8")
+        monkeypatch.setenv("DFE_OIDC_MOCK_DIRECTORY", str(fixture))
+        return MockDirectoryAdapter(provider)
+
+    @pytest.mark.parametrize("directory", ["_entra", "_okta", "_mock_directory"])
+    async def test_a_group_named_like_the_seeded_admins_is_skipped(
+        self, seeded, api_provider, tmp_path, monkeypatch, directory
+    ):
+        provider_registry, group_store = seeded
+        before = group_store.get("dfe-admins")
+        adapter = getattr(self, directory)(api_provider, tmp_path, monkeypatch, self.ATTACKER)
+        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+
+        result = await sync_provider(
+            "test-sso",
+            provider_registry,
+            group_store,
+            adapter=adapter,
+            metrics=SyncMetrics(manager),
+        )
+
+        assert (result["created"], result["updated"], result["groups_skipped"]) == (0, 0, 1)
+        assert group_store.get("dfe-admins") == before
+        assert before.source_provider == ""
+        assert before.source_id == ""
+        assert _resolve_roles_from_groups([self.ATTACKER], group_store) == ([], [])
+        assert _sync_skips(manager) == {"name_taken": 1.0}
+        assert provider_registry.get("test-sso").last_sync_status == (
+            "partial: 1 of 1 groups skipped, their name is held by a group not linked to them"
+        )
+
+    async def test_a_group_keyed_on_its_email_is_skipped_the_same_way(
+        self, registries, api_provider
+    ):
+        """A Google group always has an email, so its email slug is the name it collides on."""
+        provider_registry, group_store = registries
+        provider_registry.create("test-sso", api_provider)
+        group_store.create("soc-example.com", roles=["data_analyst"], description="Ours")
+        groups = [GroupInfo(id=self.ATTACKER, name="SOC", email="soc@example.com")]
+
+        result = await sync_provider(
+            "test-sso", provider_registry, group_store, adapter=FakeAdapter(api_provider, groups)
+        )
+
+        assert result["groups_skipped"] == 1
+        stored = group_store.get("soc-example.com")
+        assert (stored.source_provider, stored.source_id, stored.description) == ("", "", "Ours")
+        assert _resolve_roles_from_groups([self.ATTACKER], group_store) == ([], [])
+
+    async def test_a_group_linked_to_another_idp_group_keeps_its_link(
+        self, registries, api_provider
+    ):
+        provider_registry, group_store = registries
+        provider_registry.create("test-sso", api_provider)
+        group_store.create("soc-team", roles=["data_analyst"])
+        group_store.update("soc-team", source_provider="test-sso", source_id="g-soc")
+        groups = [GroupInfo(id=self.ATTACKER, name="SOC Team", email="")]
+
+        result = await sync_provider(
+            "test-sso", provider_registry, group_store, adapter=FakeAdapter(api_provider, groups)
+        )
+
+        assert (result["updated"], result["groups_skipped"]) == (0, 1)
+        assert group_store.get("soc-team").source_id == "g-soc"
+        assert _resolve_roles_from_groups([self.ATTACKER], group_store) == ([], [])
+        assert _resolve_roles_from_groups(["g-soc"], group_store) == (["data_analyst"], [])
+
+    async def test_a_group_linked_by_id_alone_syncs_and_gains_its_provider(
+        self, registries, api_provider
+    ):
+        """SCIM and a hand-edited group file set only source_id, and that id is the link."""
+        provider_registry, group_store = registries
+        provider_registry.create("test-sso", api_provider)
+        group_store.create("soc-team", roles=["data_analyst"], description="Old")
+        group_store.update("soc-team", source_id="g-soc")
+        groups = [GroupInfo(id="g-soc", name="SOC Team", email="", description="New")]
+
+        result = await sync_provider(
+            "test-sso", provider_registry, group_store, adapter=FakeAdapter(api_provider, groups)
+        )
+
+        assert (result["updated"], result["groups_skipped"]) == (1, 0)
+        stored = group_store.get("soc-team")
+        assert (stored.source_provider, stored.source_id) == ("test-sso", "g-soc")
+        assert (stored.roles, stored.description) == (["data_analyst"], "New")
+
+    async def test_an_idp_group_with_no_id_links_nothing(self, seeded, api_provider):
+        """An empty id would otherwise match every group that carries no source_id."""
+        provider_registry, group_store = seeded
+        before = group_store.get("dfe-admins")
+        groups = [GroupInfo(id="", name="DFE Admins", email="")]
+
+        result = await sync_provider(
+            "test-sso", provider_registry, group_store, adapter=FakeAdapter(api_provider, groups)
+        )
+
+        assert (result["updated"], result["groups_skipped"]) == (0, 1)
+        assert group_store.get("dfe-admins") == before
+
+    async def test_a_skipped_group_does_not_stop_the_rest(self, seeded, api_provider):
+        provider_registry, group_store = seeded
+        groups = [
+            GroupInfo(id=self.ATTACKER, name="DFE Admins", email=""),
+            GroupInfo(id="g-new", name="Threat Hunters", email=""),
+        ]
+        warnings: list[str] = []
+        handler = logger.add(lambda m: warnings.append(m.record["message"]), level="WARNING")
+        try:
+            result = await sync_provider(
+                "test-sso",
+                provider_registry,
+                group_store,
+                adapter=FakeAdapter(api_provider, groups),
+            )
+        finally:
+            logger.remove(handler)
+
+        assert (result["created"], result["groups_skipped"]) == (1, 1)
+        created = group_store.get("threat-hunters")
+        assert (created.source_provider, created.source_id) == ("test-sso", "g-new")
+        assert (
+            "OIDC group sync skipped a group whose name is held by a group not linked to it"
+            in warnings
+        )
 
 
 class TestSyncOverAGroupFileThatDoesNotLoad:

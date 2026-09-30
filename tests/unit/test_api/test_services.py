@@ -142,6 +142,21 @@ class TestLegacySecretsAreStoredAndMaskedOnTheWayOut:
         assert saved["server"]["auth"]["bearer"]["tokens"] == ["tok-8813"]
         assert MASK not in json.dumps(saved)
 
+    def test_a_kafka_setting_changed_beside_its_masked_password_is_refused(
+        self, client, admin_headers, api_settings
+    ):
+        """The check runs at kafka, the nearest mapping holding the credential."""
+        assert client.put(self.URL, json=self._body(), headers=admin_headers).status_code == 200
+        before = _saved(api_settings, "receiver-placeholder")
+        shown = client.get(self.URL, headers=admin_headers).json()["config"]
+        shown["kafka"]["brokers"] = ["attacker.example:9092"]
+
+        resp = client.put(self.URL, json=shown, headers=admin_headers)
+
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "credential_reentry_required"
+        assert _saved(api_settings, "receiver-placeholder") == before
+
     def test_the_placeholder_with_nothing_stored_is_refused(
         self, client, admin_headers, api_settings
     ):
@@ -217,6 +232,47 @@ class TestLegacySecretsAreStoredAndMaskedOnTheWayOut:
         assert resp.json()["config"]["db"] == {"host": "db-1", "password": contract.REDACTED}
         assert "raw-pw-8814" not in resp.text
         assert _saved(api_settings, "customsvc-one")["db"]["password"] == "raw-pw-8814"
+
+
+class TestASectionThePutLeavesOutIsKept:
+    """A form sends some sections; the rest, and the secrets in them, stay as stored."""
+
+    URL = "/api/v1/services/customsvc/sections"
+    TABLE = "customsvc-sections"
+    STORED = {
+        "db": {"host": "db-1", "password": "db-pw-8840"},
+        "cache": {"host": "cache-1", "token": "cache-tok-8841"},
+        "log_level": "info",
+    }
+
+    def test_a_put_of_one_section_keeps_the_others(self, client, admin_headers, api_settings):
+        assert client.put(self.URL, json=self.STORED, headers=admin_headers).status_code == 200
+
+        resp = client.put(self.URL, json={"log_level": "debug"}, headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert _saved(api_settings, self.TABLE) == {**self.STORED, "log_level": "debug"}
+
+    def test_a_section_sent_replaces_the_stored_one_whole(
+        self, client, admin_headers, api_settings
+    ):
+        assert client.put(self.URL, json=self.STORED, headers=admin_headers).status_code == 200
+
+        body = {"cache": {"host": "cache-2", "token": "cache-tok-8842"}}
+        resp = client.put(self.URL, json=body, headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert _saved(api_settings, self.TABLE) == {**self.STORED, **body}
+
+    def test_a_section_sent_as_null_is_removed(self, client, admin_headers, api_settings):
+        assert client.put(self.URL, json=self.STORED, headers=admin_headers).status_code == 200
+
+        resp = client.put(self.URL, json={"cache": None}, headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        saved = _saved(api_settings, self.TABLE)
+        assert "cache" not in saved
+        assert saved["db"] == self.STORED["db"]
 
 
 class TestALegacyMaskedCredentialRestoresOnlyWhereItWasSet:

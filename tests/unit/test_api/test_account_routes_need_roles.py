@@ -168,7 +168,8 @@ class TestDeletingAnAccountNeedsItsGroupsRoles:
 
     @_DELETE_ROUTES
     def test_deleting_an_idp_admin_is_refused(self, client, app, mgr, route):
-        """An IdP-owned account holds the groups its own list names."""
+        """An IdP-owned account holds the groups its own list's ids are linked to."""
+        app.state.group_store.update("dfe-admins", source_id="dfe-admins")
         app.state.account_store.create("jane-corp-com", "", groups=["dfe-admins"])
         app.state.account_store.update("jane-corp-com", external=True, source_provider="entra")
 

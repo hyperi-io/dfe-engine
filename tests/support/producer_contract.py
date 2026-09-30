@@ -9,12 +9,13 @@
 """The files the cross-repo contract tests compare against, and where they come from.
 
 A contract test holds an engine fixture or model against what a producer repo ships.
-``producer_file`` reads the producer's copy from the first of:
+``producer_file`` reads the producer's copy, and ``producer_tree`` a whole directory of
+it, from the first of:
 
 1. a checkout named by the producer's variable (``DFE_LOADER_DIR``, ``SCALO_RS_DIR``);
 2. a checkout beside this one (``../dfe-loader``, ``../scalo-rs``), so an uncommitted
    producer change is tested before it ships;
-3. GitHub, at the release pinned in ``PRODUCERS``.
+3. GitHub, at the release pinned in ``PRODUCERS`` (or ``DFE_INFRA``).
 
 When none of them answers, a CI run fails and a local run skips: a skip in CI is a green
 build that compared nothing. The one exception is a producer marked ``private``, which
@@ -26,14 +27,17 @@ with no checkout beside this one so they read the pin. ``check_pin`` warns with
 ``ContractPinWarning`` when a producer's latest release has changed a pinned file.
 """
 
+import io
 import json
 import os
 import random
+import tarfile
 import time
 import warnings
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
+from typing import NoReturn
 
 import httpx
 import pytest
@@ -41,6 +45,7 @@ import pytest
 OWNER = "hyperi-io"
 RAW_BASE = "https://raw.githubusercontent.com"
 API_BASE = "https://api.github.com"
+ARCHIVE_BASE = "https://codeload.github.com"
 
 # Where a developer keeps the producer repos: the directory holding this checkout.
 CHECKOUTS = Path(__file__).resolve().parents[2].parent
@@ -120,7 +125,25 @@ SCALO_RS = Producer(
     files=("tests/fixtures/cel_classifier_parity.json",),
     private=False,
 )
-PRODUCERS = (DFE_LOADER, SCALO_RS)
+DFE_TRANSFORM_VRL = Producer(
+    repo="dfe-transform-vrl",
+    ref="v1.1.29",
+    dir_env="DFE_TRANSFORM_VRL_DIR",
+    files=("tests/fixtures/filebeat/filebeat-testdata.tar.gz",),
+    # Risk accepted until GA, as for dfe-loader.
+    private=True,
+)
+PRODUCERS = (DFE_LOADER, SCALO_RS, DFE_TRANSFORM_VRL)
+
+# Read as whole chart directories, which check_pin cannot compare, so it stays out of
+# PRODUCERS. Tagged with the suite version, which carries no leading v.
+DFE_INFRA = Producer(
+    repo="dfe-infra",
+    ref="2.2.0-rc.14",
+    dir_env="DFE_INFRA_DIR",
+    files=(),
+    private=False,
+)
 
 
 def in_ci() -> bool:
@@ -238,13 +261,35 @@ def check_pin(producer: Producer, *, api_base: str = API_BASE, base_url: str = R
         )
 
 
-def _checkout_file(producer: Producer, relative: str, checkouts: Path) -> Path | None:
+def checkout_path(
+    producer: Producer, relative: str, checkouts: Path = CHECKOUTS, *, directory: bool = False
+) -> Path | None:
+    """The producer path in the named checkout, else the one beside this repo, else None."""
     roots = [Path(named)] if (named := os.environ.get(producer.dir_env)) else []
     roots.append(checkouts / producer.repo)
     for root in roots:
-        if (candidate := root / relative).is_file():
+        candidate = root / relative
+        if candidate.is_dir() if directory else candidate.is_file():
             return candidate
     return None
+
+
+def _unreadable(
+    producer: Producer, relative: str, exc: ContractUnreadableError, checkouts: Path
+) -> NoReturn:
+    """Skip, or fail in CI, a test whose producer path neither a checkout nor GitHub gave."""
+    if hidden := hidden_private_reason(producer, exc):
+        pytest.skip(hidden)
+    reason = (
+        f"{OWNER}/{producer.repo}@{producer.ref} {relative} could not be read ({exc}), "
+        f"and there is no checkout at ${producer.dir_env} or {checkouts / producer.repo}."
+    )
+    if exc.status == httpx.codes.NOT_FOUND:
+        # GitHub answers 404, not 403, for a private repo the caller cannot read.
+        reason += " A private repo needs GH_TOKEN or GITHUB_TOKEN with read access to it."
+    if in_ci():
+        pytest.fail(reason, pytrace=False)
+    pytest.skip(reason)
 
 
 def producer_file(
@@ -274,22 +319,56 @@ def producer_file(
     """
     if relative not in producer.files:
         raise ValueError(f"{producer.repo} does not declare {relative!r} in its files")
-    local = _checkout_file(producer, relative, checkouts)
+    local = checkout_path(producer, relative, checkouts)
     if local is not None:
         return ProducerFile(local.read_bytes(), str(local))
     try:
         data = fetch_at(producer.repo, producer.ref, relative, base_url)
     except ContractUnreadableError as exc:
-        if hidden := hidden_private_reason(producer, exc):
-            pytest.skip(hidden)
-        reason = (
-            f"{OWNER}/{producer.repo}@{producer.ref} {relative} could not be read ({exc}), "
-            f"and there is no checkout at ${producer.dir_env} or {checkouts / producer.repo}."
-        )
-        if exc.status == httpx.codes.NOT_FOUND:
-            # GitHub answers 404, not 403, for a private repo the caller cannot read.
-            reason += " A private repo needs GH_TOKEN or GITHUB_TOKEN with read access to it."
-        if in_ci():
-            pytest.fail(reason, pytrace=False)
-        pytest.skip(reason)
+        _unreadable(producer, relative, exc, checkouts)
     return ProducerFile(data, f"{OWNER}/{producer.repo}@{producer.ref}")
+
+
+def producer_tree(
+    producer: Producer,
+    relative: str,
+    dest: Path,
+    *,
+    checkouts: Path = CHECKOUTS,
+    base_url: str = ARCHIVE_BASE,
+) -> Path:
+    """A producer directory from a checkout, else extracted from its archive at the pin.
+
+    Skips or fails exactly as ``producer_file`` does when neither answers. The archive
+    endpoint takes no token, so only a public producer can be read from it.
+
+    Args:
+        producer: The repo that ships the directory.
+        relative: The directory's path in that repo.
+        dest: Where an archived copy is extracted; the result is ``dest / relative``.
+        checkouts: Directory holding a checkout of the producer beside this one.
+        base_url: Where the release archive is fetched from.
+
+    Returns:
+        The directory, in a checkout or under ``dest``.
+    """
+    local = checkout_path(producer, relative, checkouts, directory=True)
+    if local is not None:
+        return local
+    try:
+        archive = _get(f"{base_url}/{OWNER}/{producer.repo}/tar.gz/{producer.ref}")
+    except ContractUnreadableError as exc:
+        _unreadable(producer, relative, exc, checkouts)
+    prefix = relative.strip("/") + "/"
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
+        members = []
+        for member in tar.getmembers():
+            # GitHub wraps the tree in one top-level directory named for the repo and ref.
+            inner = member.name.partition("/")[2]
+            if inner.startswith(prefix):
+                member.name = inner
+                members.append(member)
+        if not members:
+            pytest.fail(f"{OWNER}/{producer.repo}@{producer.ref} has no {relative}", pytrace=False)
+        tar.extractall(dest, members=members, filter="data")
+    return dest / relative

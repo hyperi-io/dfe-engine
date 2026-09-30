@@ -314,6 +314,13 @@ class AppDescriptor:
     that name; off it, the Compose writer renders the same content there.
     """
 
+    display_name: str = ""
+    """The label a console shows for this app; empty where the service id is the label.
+
+    A label only: the service id still names the chart, the routes and the
+    telemetry, so nothing the engine derives reads this.
+    """
+
     def carries(self, transport: str) -> bool:
         """Whether this app can carry a source on *transport*."""
         return transport in self.transports
@@ -514,6 +521,7 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
         variant_path=str(raw.get("variant_path", "")),
         catalogue=_catalogue_from(service, raw.get("catalogue")),
         config_file=_config_file_from(service, raw.get("consumes")),
+        display_name=_display_name_from(service, raw.get("display_name")),
     )
     # The variant is written into one of the derived blocks, so a path outside
     # them would be compiled and then dropped on the next sync.
@@ -542,6 +550,22 @@ def _config_file_from(service: str, raw: object) -> str:
             "because the directory belongs to whoever mounts it"
         )
     return name
+
+
+def _display_name_from(service: str, raw: object) -> str:
+    """The label a console shows for this app, empty when the manifest names none.
+
+    Refused unless it is a non-blank string: an unquoted ``true`` or ``2024``
+    parses as a boolean or a number, and would otherwise reach a console as one.
+    """
+    if raw is None:
+        return ""
+    if not isinstance(raw, str) or not raw.strip():
+        raise CatalogueError(
+            f"{service}: display_name must be a non-empty string, got {raw!r}; "
+            "omit the key to show the service id"
+        )
+    return raw.strip()
 
 
 def _reload_setting_from(service: str, raw: object, *, hot_reload: bool) -> str:
@@ -865,8 +889,9 @@ def instance_name(app: AppDescriptor, source: str) -> str:
     """The deployed name of this app's instance for *source*.
 
     The one place the ``dfe-<component>-<source>`` convention lives. It is the
-    Argo Application name, the OTel ``service.name``, and the stem of every
-    Kubernetes object the instance's chart renders, so all three move together.
+    Argo Application name and the stem of every Kubernetes object the instance's
+    chart renders, so the two move together. What the workload REPORTS itself as
+    is ``deployed_name``, which is this only for a per-config app.
     """
     return f"{app.service}-{source}"
 
@@ -897,10 +922,13 @@ def _push(app: AppDescriptor) -> AppEndpoint:
     return endpoint
 
 
-def _deployed_name(app: AppDescriptor, instance: str) -> str:
+def deployed_name(app: AppDescriptor, instance: str) -> str:
     """The name this app's own chart renders the deployment under.
 
-    A stack-wide app is named for itself; a per-config app for its instance.
+    A stack-wide app is named for itself; a per-config app for its instance. It
+    is also the OTel ``service.name`` the workload reports, because a component
+    names itself the way it is deployed - so a stack-wide app carries no
+    ``-default`` suffix, which nothing would ever report.
     """
     return instance_name(app, instance) if app.component_is_per_instance else app.service
 
@@ -918,7 +946,7 @@ def _mesh_host(app: AppDescriptor, instance: str, namespace: str) -> str:
             "declares no mesh.host_pattern to address them by"
         )
     return MESH_HOST_PATTERN.format(
-        **{MESH_INSTANCE: _deployed_name(app, instance), MESH_NAMESPACE: namespace}
+        **{MESH_INSTANCE: deployed_name(app, instance), MESH_NAMESPACE: namespace}
     )
 
 
@@ -948,7 +976,7 @@ def push_address(app: AppDescriptor, instance: str = "") -> str:
     no *instance*.
     """
     endpoint = _push(app)
-    return f"{endpoint.service or _deployed_name(app, instance)}:{endpoint.port}"
+    return f"{endpoint.service or deployed_name(app, instance)}:{endpoint.port}"
 
 
 def push_listen(app: AppDescriptor) -> str:

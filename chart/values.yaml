@@ -86,20 +86,41 @@ config:
   api:
     host: "0.0.0.0"
     port: 8000
+    # -- Longest a session lasts from its sign-in, in minutes. A refresh never
+    # extends a token past it. Empty keeps the engine's default, 720.
+    max_session_minutes: ""
     # -- Comma-separated list of allowed CORS origins
     cors_origins: ""
     # -- Comma-separated peers or CIDRs whose X-Forwarded-Proto and X-Forwarded-For
-    # are believed ("*" believes any peer). Empty follows the loopback-only code
-    # default. Behind a TLS-terminating gateway the peer is the gateway pod, so
-    # leaving this unset makes the engine build http OIDC redirect URIs; set it to
-    # the pod network the gateway runs on.
+    # are believed (DFE_API_FORWARDED_ALLOW_IPS). Empty follows the loopback-only
+    # code default. Behind a TLS-terminating gateway the peer is the gateway pod, so
+    # leaving this unset makes the engine build http OIDC redirect URIs and audit the
+    # gateway's address instead of the caller's; set it to the pod network the
+    # gateway and the console run on. "*" believes any peer and audits the left-most
+    # forwarded address, which the caller wrote.
     forwarded_allow_ips: ""
     jwt_expire_minutes: 60
+    # -- Serve Swagger UI at /docs and ReDoc at /redoc: "true" or "false". Both pages
+    # load their scripts from a public CDN into the engine's origin, so empty serves
+    # them only when `env` is a dev posture (dev, development, local, test, ci).
+    # /openapi.json is served either way.
+    docs_enabled: ""
   auth:
     enabled: true
+    # -- Days an API key created without expires_at lasts; 0 creates it with no
+    # expiry. Empty keeps the engine's default, 90.
+    api_key_default_ttl_days: ""
     local:
       enabled: true
       org_id: "default"
+    # -- Back-off on failed password sign-ins, per username and per client address.
+    # The count lives in each engine pod, so it resets on restart. Empty keeps the
+    # engine's default: on, 5 username failures, 20 address failures, 900 seconds.
+    login_throttle:
+      enabled: ""
+      username_failures: ""
+      client_failures: ""
+      max_delay_seconds: ""
   # -- Synthetic data standing demo streams. DEFAULT OFF: set autostart_schemas
   # (comma-separated pack refs, e.g. "meta/syslog,meta/otel/logs") plus the
   # receiver ingest URL and the engine keeps a live-tail synthetic stream

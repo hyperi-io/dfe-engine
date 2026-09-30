@@ -262,8 +262,21 @@ def _idle_when_field() -> Any:
     )
 
 
+def _display_name_field() -> Any:
+    """A fresh field descriptor, since a FieldInfo belongs to one model."""
+    return Field(
+        default=None,
+        description=(
+            "The name a console shows a person for this app, from the app manifest. "
+            "Null when the manifest names none, and the service id is the label. A "
+            "label only: routes, charts and telemetry keep the service id."
+        ),
+    )
+
+
 class AppSummary(BaseModel):
     service: str
+    display_name: str | None = _display_name_field()
     instance: str
     telemetry_name: str
     scale_deployed: bool
@@ -279,6 +292,7 @@ class AppSummary(BaseModel):
 
 class CatalogueEntry(BaseModel):
     service: str
+    display_name: str | None = _display_name_field()
     scale_deployed: bool
     multiplicity: str
     has_compiled_routing: bool = _routing_flag()
@@ -883,6 +897,7 @@ def list_apps(
         entries.append(
             CatalogueEntry(
                 service=service,
+                display_name=desc.display_name or None,
                 scale_deployed=desc.scale_deployed,
                 multiplicity=str(desc.multiplicity),
                 has_compiled_routing=desc.has_compiled_routing,
@@ -972,6 +987,7 @@ def get_app(service: str, instance: str, user: CurrentUser, request: Request) ->
     desc = catalogue.descriptor(service)
     return AppSummary(
         service=app.service,
+        display_name=desc.display_name or None,
         instance=app.instance,
         telemetry_name=app.telemetry_name,
         scale_deployed=desc.scale_deployed,
@@ -1297,9 +1313,13 @@ def set_app_config(
     A secret is written like any other option: it goes into the overlay as the rest
     of this surface writes one, and neither this response nor a read route on this
     surface says what it is. A masked value written back as it was read keeps the
-    stored credential; the mask where nothing is stored is a 400 ``masked_value``,
-    and the mask beside a changed field of the same entry is a 400
-    ``credential_reentry_required``.
+    stored credential; the mask where nothing is stored is a 400 ``masked_value``.
+    A changed field beside a stored credential, in the same mapping or with the
+    credential one mapping down (``brokers`` beside ``sasl.password``), is a 400
+    ``credential_reentry_required`` until that mapping is written whole with its
+    credentials typed again. A setting inside another mapping beside it, such as
+    ``producer.retries``, is not. ``config`` and ``extraEnv`` are roots, so a
+    setting directly under either never needs one.
 
     409 where the deployment already decides the value: a config path the chart
     derives, or an `extraEnv` name the chart sets for this app.

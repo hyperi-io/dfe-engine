@@ -24,6 +24,16 @@ from dfe_engine import __version__
 from dfe_engine.settings import DFESettings, e2e_routes_enabled, is_dev_posture, load_settings
 
 
+def docs_served(settings: DFESettings) -> bool:
+    """True when Swagger UI (/docs) and ReDoc (/redoc) are mounted.
+
+    ``api.docs_enabled`` decides when set; unset, only a dev posture serves them.
+    """
+    if settings.api.docs_enabled is not None:
+        return settings.api.docs_enabled
+    return is_dev_posture(settings.env)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan: bootstrap registries on startup, cleanup on shutdown."""
@@ -96,6 +106,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     from dfe_engine.api.deps import get_source_registry_optional
     from dfe_engine.clickhouse.bootstrap import bootstrap_clickhouse
+    from dfe_engine.gitcrud.retention import effective_settings
 
     source_registry = get_source_registry_optional()
     try:
@@ -103,7 +114,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     except Exception as exc:  # the core tables still bootstrap without the source list
         logger.warning("sources unreadable; their TTL is left to the next start", error=str(exc))
         deployed_candidates = []
-    schema_state = bootstrap_clickhouse(settings=settings, sources=deployed_candidates)
+    # The admin's default TTL override, so the boot renders what the console set.
+    ttl_settings = effective_settings(settings, gitcrud)
+    schema_state = bootstrap_clickhouse(settings=ttl_settings, sources=deployed_candidates)
     tables_bootstrapped = schema_state.converged
 
     # After the bootstrap, which is what makes the landing table exist: the seed records the source as deployed, and that must not be claimed before it is true.
@@ -113,7 +126,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         try:
             seed_core_sources(
                 registry=source_registry,
-                settings=settings,
+                settings=ttl_settings,
                 tables_bootstrapped=tables_bootstrapped,
             )
         except Exception as exc:  # a failed seed must never break startup
@@ -538,6 +551,7 @@ def create_app(
     """
     settings = settings or load_settings()
     e2e_docs = e2e_routes_enabled(settings)
+    docs = docs_served(settings)
 
     openapi_tags = None
     if e2e_docs:
@@ -549,8 +563,9 @@ def create_app(
         description="Data Fusion Engine -- configuration, scheduling, and query API",
         version=__version__,
         lifespan=lifespan,
-        docs_url=None if e2e_docs else "/docs",
-        redoc_url="/redoc",
+        # The e2e server mounts its own /docs with a spec selector.
+        docs_url="/docs" if docs and not e2e_docs else None,
+        redoc_url="/redoc" if docs else None,
         openapi_tags=openapi_tags,
     )
 
@@ -568,6 +583,10 @@ def create_app(
 
     app.state.metrics_manager = metrics_manager
     app.state.api_metrics = ApiMetrics(metrics_manager)
+
+    from dfe_engine.auth.login_throttle import LoginThrottle
+
+    app.state.login_throttle = LoginThrottle(settings.auth.login_throttle)
     app.state.seed_metrics = SeedMetrics(metrics_manager)
     app.state.oidc_sync_metrics = SyncMetrics(metrics_manager)
     # Every store writes YAML without the app in reach, so its refusals count process-wide.
@@ -610,13 +629,17 @@ def create_app(
 
     # Added last so it is the outermost middleware: every route below it reads the
     # scheme and client address the trusted gateway forwarded, which is what keeps
-    # the OIDC redirect_uri on the https the caller arrived on. Lives in the app,
-    # not the ASGI server, so one setting decides trust whatever serves it.
-    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+    # the OIDC redirect_uri on the https the caller arrived on and the audit trail
+    # on the caller's address. Lives in the app, not the ASGI server, so one setting
+    # decides trust whatever serves it. Parsed here so a bad entry stops startup.
+    from dfe_engine.api.middleware.forwarded_headers import (
+        ForwardedHeadersMiddleware,
+        TrustedProxies,
+    )
 
     app.add_middleware(
-        ProxyHeadersMiddleware,
-        trusted_hosts=settings.api.forwarded_allow_ips,
+        ForwardedHeadersMiddleware,
+        trusted=TrustedProxies.parse(settings.api.forwarded_allow_ips),
     )
 
     # Exception handlers

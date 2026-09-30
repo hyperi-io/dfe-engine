@@ -159,6 +159,34 @@ def test_a_rule_with_only_sql_is_put_through_the_rewriter(tmp_path: Path):
     assert "2026-01-01" not in sql[0]
 
 
+@pytest.mark.parametrize(
+    ("stored", "compiled"),
+    [
+        pytest.param(
+            "ServiceName = 'dfe-loader' AND {timestamp_condition}",
+            "WHERE {window} AND (ServiceName = 'dfe-loader')",
+            id="trailing",
+        ),
+        pytest.param(
+            "{timestamp_condition} AND (action = 'delete')",
+            "WHERE {window} AND ((action = 'delete'))",
+            id="leading-sigma",
+        ),
+    ],
+)
+def test_a_stored_time_placeholder_leaves_only_the_window(tmp_path: Path, stored, compiled):
+    """The worker fills in only the window; ClickHouse refuses any other placeholder."""
+    _save_rule(tmp_path, rule_id="ph", name="Placeholder", where_clause=stored)
+    sql = _compiled_sql(
+        {"rules": ["ph"], "global_source_table_name": "dfe.main"},
+        "h",
+        rules_dir=tmp_path,
+        default_target="dfe.detection",
+    )
+    assert compiled in sql[0]
+    assert "{timestamp_condition}" not in sql[0]
+
+
 def test_a_hunt_with_no_rules_compiles_to_nothing(tmp_path: Path):
     assert compile_hunt_queries({"rules": []}, "h", rules_dir=tmp_path) == []
 

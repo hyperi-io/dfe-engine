@@ -237,7 +237,12 @@ class TestAProxiedIdentity:
         store = client.app.state.account_store
         stored_hash = store.get(name).password_hash
 
-        resp = client.post(_OWN_CHANGE, json={"new_password": _CHOSEN}, headers=_proxied(subject))
+        # The right current password, so only the proxied identity can stop the change.
+        resp = client.post(
+            _OWN_CHANGE,
+            json={"current_password": ADMIN_PASSWORD, "new_password": _CHOSEN},
+            headers=_proxied(subject),
+        )
 
         assert store.get(name).password_hash == stored_hash, resp.text
         assert _login_status(client, name, _CHOSEN) == 401
@@ -281,7 +286,9 @@ class TestAProxiedIdentity:
 
         read = client.get("/api/v1/sources", headers=_proxied(username))
         change = client.post(
-            _OWN_CHANGE, json={"new_password": _CHOSEN}, headers=_proxied(username)
+            _OWN_CHANGE,
+            json={"current_password": _ISSUED, "new_password": _CHOSEN},
+            headers=_proxied(username),
         )
 
         assert read.status_code == 401, read.text

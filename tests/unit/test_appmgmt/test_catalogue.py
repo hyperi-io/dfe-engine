@@ -100,6 +100,18 @@ class TestShippedManifest:
         assert "config.destinations" in receiver.restart_paths
         assert "config.routing" not in receiver.restart_paths
 
+    def test_every_block_the_engine_writes_into_a_fetcher_reports_a_restart(self):
+        # A fetcher reload re-reads a source's filter and interval but adds no
+        # source and rebuilds no output, so a Compose operator told nothing would
+        # keep running the old source.
+        fetcher = catalogue.descriptor("dfe-fetcher")
+
+        written = set(fetcher.routing_paths.values())
+
+        assert fetcher.hot_reload is True
+        assert written
+        assert written <= set(fetcher.restart_paths)
+
     def test_vector_reloads_its_transform_files_in_place(self):
         # It SIGHUPs Vector when only the transform files changed; the enrichment
         # tables are not watched, so they still roll.
@@ -284,6 +296,15 @@ class TestShippedManifest:
     def test_a_package_no_family_polls_has_none(self):
         assert catalogue.source_type_for_package("zoom") is None
 
+    def test_hyperdx_is_the_one_app_a_console_labels_by_another_name(self):
+        labelled = {
+            name: app.display_name
+            for name, app in catalogue.APP_CATALOGUE.items()
+            if app.display_name
+        }
+
+        assert labelled == {"hyperdx": "Search"}
+
 
 class TestManifestParsing:
     def _manifest(self, tmp_path, app: dict, **top):
@@ -382,6 +403,21 @@ class TestManifestParsing:
     def test_profile_keys_that_are_not_lists_are_refused(self, tmp_path):
         with pytest.raises(CatalogueError, match="default_in must be a list"):
             load_catalogue(self._manifest(tmp_path, {"default_in": "scale"}))
+
+    def test_an_app_naming_no_display_name_is_labelled_by_its_id(self, tmp_path):
+        apps = load_catalogue(self._manifest(tmp_path, {"multiplicity": "single"}))
+
+        assert apps["dfe-thing"].display_name == ""
+
+    def test_the_display_name_is_read_as_the_manifest_gives_it(self, tmp_path):
+        apps = load_catalogue(self._manifest(tmp_path, {"display_name": "Thing Console"}))
+
+        assert apps["dfe-thing"].display_name == "Thing Console"
+
+    @pytest.mark.parametrize("value", [True, 2024, "", "   ", ["Search"]])
+    def test_a_display_name_that_is_not_a_non_blank_string_is_refused(self, tmp_path, value):
+        with pytest.raises(CatalogueError, match="display_name must be a non-empty string"):
+            load_catalogue(self._manifest(tmp_path, {"display_name": value}))
 
     def test_an_app_naming_no_idle_condition_always_has_work(self, tmp_path):
         apps = load_catalogue(self._manifest(tmp_path, {"multiplicity": "single"}))

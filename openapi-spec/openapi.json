@@ -12,7 +12,7 @@
           "Auth"
         ],
         "summary": "Login",
-        "description": "Authenticate with local credentials and receive a JWT token.",
+        "description": "Authenticate with local credentials and receive a JWT token.\n\nThe password check runs off the event loop. Failed attempts back off per\nusername and per client address (``auth.login_throttle``); a waiting attempt is\nrefused with 429 before the password is checked.",
         "operationId": "login_api_v1_auth_login_post",
         "requestBody": {
           "content": {
@@ -55,6 +55,16 @@
               }
             }
           },
+          "429": {
+            "description": "Too many failed sign-ins for this username or from this address; Retry-After gives the seconds to wait",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -74,7 +84,7 @@
           "Auth"
         ],
         "summary": "Refresh Token",
-        "description": "Refresh the current JWT token. Requires a valid existing token.",
+        "description": "Refresh the current JWT token. Requires a valid existing token.\n\nThe new token keeps the session's sign-in time, so a session renews only until\nit is ``api.max_session_minutes`` old, and no token outlives that.",
         "operationId": "refresh_token_api_v1_auth_refresh_post",
         "responses": {
           "200": {
@@ -86,6 +96,46 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "The session is older than api.max_session_minutes (session_expired), has ended, or no account backs it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Logout",
+        "description": "End every session of the caller's account, on every device.\n\nEach token minted for the account before this call is refused from now on,\nthis one included, and the engine's login cookie is cleared. A peer that\nverifies engine tokens by signature alone still accepts one until it expires.",
+        "operationId": "logout_api_v1_auth_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
           },
           "401": {
             "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
@@ -944,13 +994,13 @@
           "Accounts"
         ],
         "summary": "Reset Current User Password",
-        "description": "Reset the authenticated user's password.\n\nThe username is taken from the session, not the request, so a caller cannot\nreset another account through this route. An IdP-owned (``external``)\naccount is refused: it has no local password. The live store takes the new\npassword immediately; the ``git`` block reports whether the durable mirror\nmerged, is pending review, or is a no-op for a non-git-backed account.\n\nAn account on an issued password may call this and nothing else that\nchanges state, and the reset clears ``password_change_required``.",
+        "description": "Change the authenticated user's own password, given the current one.\n\nThe username is taken from the session, not the request, so a caller cannot\nreset another account through this route. ``current_password`` must be the\naccount's password, so a stolen session token cannot take the account over;\nwrong guesses back off as sign-in failures do. An IdP-owned (``external``)\naccount is refused: it has no local password. The live store takes the new\npassword immediately and every session the account held ends, this one\nincluded, so the owner signs in again. The ``git`` block reports whether the\ndurable mirror merged, is pending review, or is a no-op for a non-git-backed\naccount.\n\nAn account on an issued password may call this and nothing else that\nchanges state, and the reset clears ``password_change_required``.",
         "operationId": "reset_current_user_password_api_v1_auth_accounts_reset_password_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ResetPasswordRequest"
+                "$ref": "#/components/schemas/ChangeOwnPasswordRequest"
               }
             }
           },
@@ -978,7 +1028,7 @@
             }
           },
           "403": {
-            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "description": "current_password is not the account's password (invalid_current_password)",
             "content": {
               "application/json": {
                 "schema": {
@@ -993,6 +1043,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many wrong current passwords; Retry-After gives the seconds to wait",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -6523,7 +6583,7 @@
           "Services"
         ],
         "summary": "Save Service Config",
-        "description": "Create or update a service config.\n\nA read shows every set secret masked, so a masked value written back keeps the\nsecret stored there, matched as the app surface matches one. A mask with nothing\nstored behind it, or in a list entry that cannot be told apart, is a 400\n``masked_value`` and nothing is saved. A mask beside a field of the same object\nthat changed is a 400 ``credential_reentry_required``: the secret is typed again.",
+        "description": "Create or update a service config.\n\nEach top-level section in the body replaces the stored one, and a section the\nbody leaves out is kept as stored, so a form that sends some sections cannot\ndrop the rest and the secrets in them. A section written as ``null`` is removed.\n\nA read shows every set secret masked, so a masked value written back keeps the\nsecret stored there, matched as the app surface matches one. A mask with nothing\nstored behind it, or in a list entry that cannot be told apart, is a 400\n``masked_value`` and nothing is saved. A changed field beside a masked secret,\nin the same mapping or with the secret one mapping down, is a 400\n``credential_reentry_required``: the secret is typed again.",
         "operationId": "save_service_config_api_v1_services__service___instance__put",
         "parameters": [
           {
@@ -9522,7 +9582,7 @@
           "System"
         ],
         "summary": "Get Retention",
-        "description": "The deployment default TTL.",
+        "description": "The effective default TTL, the admin's override and the deployment's own value.",
         "operationId": "get_retention_api_v1_system_retention_get",
         "responses": {
           "200": {
@@ -9547,6 +9607,91 @@
           },
           "403": {
             "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Put Retention",
+        "description": "Store the override in the deploy repo, then apply it to every table that follows it.\n\nThe engine's own tables and every deployed source's table are brought to the new\neffective default in this request, with ``ALTER TABLE ... MODIFY TTL`` (or\n``REMOVE TTL`` for 0). A table that declares its own TTL is left alone. A\nClickHouse failure answers 502 with the override ALREADY committed; sending the\nsame value again applies it.",
+        "operationId": "put_retention_api_v1_system_retention_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetentionUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetentionUpdateResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "reconcile_failed: the value is stored, and applying it to ClickHouse failed; sending the same value again applies it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not_configured: gitops is off, so there is nowhere to store the value",
             "content": {
               "application/json": {
                 "schema": {
@@ -10633,7 +10778,7 @@
           "queries"
         ],
         "summary": "Execute Raw Query",
-        "description": "Execute a raw query against a registered datasource adapter.\n\nThis is the lower-level query path -- for ad-hoc queries against\ndatasource adapters rather than parameterized views. Requires\n``query:execute`` permission.",
+        "description": "Execute a raw query against a registered datasource adapter.\n\nThis is the lower-level query path -- for ad-hoc queries against\ndatasource adapters rather than parameterized views. The SQL runs as the\nengine's own ClickHouse user, so it requires ``raw_query:execute``, which no\nbuilt-in role but ``admin`` holds, and ClickHouse runs it read-only.",
         "operationId": "execute_raw_query_api_v1_queries_raw_post",
         "requestBody": {
           "content": {
@@ -18488,7 +18633,7 @@
           "App Management"
         ],
         "summary": "Set App Config",
-        "description": "Write options the app declares, and environment keys it does not.\n\nJudged against the app's own contract before anything is committed, so a value\nthe app would refuse at startup leaves the deploy repo where it was rather than\nlanding a commit an operator then has to revert.\n\nA secret is written like any other option: it goes into the overlay as the rest\nof this surface writes one, and neither this response nor a read route on this\nsurface says what it is. A masked value written back as it was read keeps the\nstored credential; the mask where nothing is stored is a 400 ``masked_value``,\nand the mask beside a changed field of the same entry is a 400\n``credential_reentry_required``.\n\n409 where the deployment already decides the value: a config path the chart\nderives, or an `extraEnv` name the chart sets for this app.",
+        "description": "Write options the app declares, and environment keys it does not.\n\nJudged against the app's own contract before anything is committed, so a value\nthe app would refuse at startup leaves the deploy repo where it was rather than\nlanding a commit an operator then has to revert.\n\nA secret is written like any other option: it goes into the overlay as the rest\nof this surface writes one, and neither this response nor a read route on this\nsurface says what it is. A masked value written back as it was read keeps the\nstored credential; the mask where nothing is stored is a 400 ``masked_value``.\nA changed field beside a stored credential, in the same mapping or with the\ncredential one mapping down (``brokers`` beside ``sasl.password``), is a 400\n``credential_reentry_required`` until that mapping is written whole with its\ncredentials typed again. A setting inside another mapping beside it, such as\n``producer.retries``, is not. ``config`` and ``extraEnv`` are roots, so a\nsetting directly under either never needs one.\n\n409 where the deployment already decides the value: a config path the chart\nderives, or an `extraEnv` name the chart sets for this app.",
         "operationId": "set_app_config_api_v1_apps__service___instance__config_put",
         "parameters": [
           {
@@ -23939,7 +24084,7 @@
             },
             "type": "array",
             "title": "Groups",
-            "description": "Groups the account holds: those whose group file lists it, plus the groups its identity provider asserts when one owns it."
+            "description": "Names of the groups the account holds: those whose group file lists it, plus, when an identity provider owns it, the groups the provider's asserted ids are linked to by source_id."
           },
           "email": {
             "type": "string",
@@ -24284,6 +24429,18 @@
           "service": {
             "type": "string",
             "title": "Service"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "The name a console shows a person for this app, from the app manifest. Null when the manifest names none, and the service id is the label. A label only: routes, charts and telemetry keep the service id."
           },
           "instance": {
             "type": "string",
@@ -25041,6 +25198,18 @@
             "type": "string",
             "title": "Service"
           },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "The name a console shows a person for this app, from the app manifest. Null when the manifest names none, and the service id is the label. A label only: routes, charts and telemetry keep the service id."
+          },
           "scale_deployed": {
             "type": "boolean",
             "title": "Scale Deployed"
@@ -25454,6 +25623,29 @@
         ],
         "title": "CelCheckResponse",
         "description": "Result of a single CEL expression check."
+      },
+      "ChangeOwnPasswordRequest": {
+        "properties": {
+          "new_password": {
+            "type": "string",
+            "minLength": 12,
+            "title": "New Password",
+            "description": "New plaintext password; at least 12 characters"
+          },
+          "current_password": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Current Password",
+            "description": "The account's password now. A session token alone cannot change it."
+          }
+        },
+        "type": "object",
+        "required": [
+          "new_password",
+          "current_password"
+        ],
+        "title": "ChangeOwnPasswordRequest",
+        "description": "The owner's own change, which proves the password as well as the session."
       },
       "ClassInfo": {
         "properties": {
@@ -26196,7 +26388,7 @@
               }
             ],
             "title": "Expires At",
-            "description": "Optional ISO-8601 expiry (UTC if no offset given); omit for a key that never expires"
+            "description": "Optional ISO-8601 expiry (UTC if no offset given). Omitted, the key expires after auth.api_key_default_ttl_days (90 unless configured; 0 there means it never expires)."
           }
         },
         "type": "object",
@@ -33726,20 +33918,172 @@
         ],
         "title": "ResourceSeriesResponse"
       },
+      "RetentionReconcileSummary": {
+        "properties": {
+          "core_tables_altered": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Core Tables Altered",
+            "description": "database.table: <old> -> <new> days, for each engine table whose TTL moved."
+          },
+          "source_tables_altered": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Source Tables Altered",
+            "description": "database.table for each deployed source's table the apply altered."
+          },
+          "sources_reconciled": {
+            "type": "integer",
+            "title": "Sources Reconciled",
+            "description": "Deployed sources whose table was brought current."
+          },
+          "sources_skipped": {
+            "type": "integer",
+            "title": "Sources Skipped",
+            "description": "Deployed sources left to their next deploy: table absent, build failed or ClickHouse refused."
+          }
+        },
+        "type": "object",
+        "required": [
+          "core_tables_altered",
+          "source_tables_altered",
+          "sources_reconciled",
+          "sources_skipped"
+        ],
+        "title": "RetentionReconcileSummary",
+        "description": "What applying the new default did to the live tables."
+      },
       "RetentionStatus": {
         "properties": {
           "default_ttl_days": {
             "type": "integer",
             "title": "Default Ttl Days",
-            "description": "Retention in days a time-series table gets when it declares none; 0 = no TTL. Set by DFE_CLICKHOUSE_DEFAULT_TTL_DAYS and applied to every table on engine start."
+            "description": "Effective retention in days for every table that follows the default; 0 = no TTL. The override when one is stored, else deployment_default."
+          },
+          "stored": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stored",
+            "description": "The admin's override, committed in the deploy repo; null when none is set."
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "override",
+              "deployment"
+            ],
+            "title": "Origin",
+            "description": "override when the stored value wins, deployment when deployment_default does."
+          },
+          "deployment_default": {
+            "type": "integer",
+            "title": "Deployment Default",
+            "description": "DFE_CLICKHOUSE_DEFAULT_TTL_DAYS as deployed; applies whenever no override is set."
+          },
+          "editable": {
+            "type": "boolean",
+            "title": "Editable",
+            "description": "Whether this deployment can store an override. False without gitops, where a PUT answers 503."
+          }
+        },
+        "type": "object",
+        "required": [
+          "default_ttl_days",
+          "stored",
+          "origin",
+          "deployment_default",
+          "editable"
+        ],
+        "title": "RetentionStatus",
+        "description": "The default TTL a time-series table gets when it declares none, and where it comes from."
+      },
+      "RetentionUpdate": {
+        "properties": {
+          "default_ttl_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 36500.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Ttl Days",
+            "description": "Retention in days for every table that follows the default; 0 keeps rows forever. null clears the override, so deployment_default applies again."
           }
         },
         "type": "object",
         "required": [
           "default_ttl_days"
         ],
-        "title": "RetentionStatus",
-        "description": "The deployment default TTL, as the environment sets it."
+        "title": "RetentionUpdate",
+        "description": "An admin's change to the default TTL."
+      },
+      "RetentionUpdateResponse": {
+        "properties": {
+          "default_ttl_days": {
+            "type": "integer",
+            "title": "Default Ttl Days",
+            "description": "Effective retention in days for every table that follows the default; 0 = no TTL. The override when one is stored, else deployment_default."
+          },
+          "stored": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stored",
+            "description": "The admin's override, committed in the deploy repo; null when none is set."
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "override",
+              "deployment"
+            ],
+            "title": "Origin",
+            "description": "override when the stored value wins, deployment when deployment_default does."
+          },
+          "deployment_default": {
+            "type": "integer",
+            "title": "Deployment Default",
+            "description": "DFE_CLICKHOUSE_DEFAULT_TTL_DAYS as deployed; applies whenever no override is set."
+          },
+          "editable": {
+            "type": "boolean",
+            "title": "Editable",
+            "description": "Whether this deployment can store an override. False without gitops, where a PUT answers 503."
+          },
+          "reconcile": {
+            "$ref": "#/components/schemas/RetentionReconcileSummary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "default_ttl_days",
+          "stored",
+          "origin",
+          "deployment_default",
+          "editable",
+          "reconcile"
+        ],
+        "title": "RetentionUpdateResponse",
+        "description": "The default TTL after the change, and what applying it did."
       },
       "ReviewRequest": {
         "properties": {
@@ -36130,7 +36474,7 @@
           "clickhouse_default_ttl_days": {
             "type": "integer",
             "title": "Clickhouse Default Ttl Days",
-            "description": "Retention in days a time-series table gets when it declares none; 0 = none."
+            "description": "Retention in days a time-series table gets when it declares none; 0 = none. The admin's override when one is set, else DFE_CLICKHOUSE_DEFAULT_TTL_DAYS."
           },
           "sources_dir": {
             "type": "string",
@@ -40903,7 +41247,7 @@
           "groups_skipped": {
             "type": "integer",
             "title": "Groups Skipped",
-            "description": "Provider groups left unsynced: an identifier that makes no valid group name, or a name held by a stored group that does not load. Each is counted on auth_oidc_sync_groups_skipped_total{reason}.",
+            "description": "Provider groups left unsynced: an identifier that makes no valid group name, a name held by a stored group that does not load, or a name held by a stored group not linked to that provider group. Each is counted on auth_oidc_sync_groups_skipped_total{reason}.",
             "default": 0
           },
           "error": {

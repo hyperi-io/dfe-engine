@@ -18,7 +18,15 @@ Access the API on port {{ .Values.service.httpPort }} (the primary Service port
   echo "API: http://localhost:8000"
 {{- end }}
 
-Swagger UI: /docs
+{{- $docs := toString .Values.config.api.docs_enabled }}
+{{- $devPosture := has (lower .Values.env) (list "dev" "development" "local" "test" "ci") }}
+{{- if or (eq $docs "true") (and (eq $docs "") $devPosture) }}
+
+Swagger UI: /docs   ReDoc: /redoc   OpenAPI spec: /openapi.json
+{{- else }}
+
+OpenAPI spec: /openapi.json (Swagger UI and ReDoc are off; config.api.docs_enabled)
+{{- end }}
 Health check: /readyz (served on both the API port and the
 observability port {{ .Values.service.port }}, which is the probe target)
 

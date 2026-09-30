@@ -35,8 +35,10 @@ from dfe_engine.auth.jit import (
     JitIdentityCollisionError,
     JitSubjectUnusableError,
 )
-from dfe_engine.auth.membership import groups_held
+from dfe_engine.auth.membership import groups_held, linked_groups, linked_providers
 from dfe_engine.auth.roles import RoleConfig
+from dfe_engine.auth.sessions import session_ended
+from dfe_engine.gitcrud.retention import effective_settings
 from dfe_engine.settings import DFESettings, is_dev_posture
 
 if TYPE_CHECKING:
@@ -51,6 +53,14 @@ def get_app_settings(request: Request) -> DFESettings:
 
 
 Settings = Annotated[DFESettings, Depends(get_app_settings)]
+
+
+def ttl_settings(request: Request, settings: DFESettings) -> DFESettings:
+    """*settings* carrying the admin's default TTL, for a path that builds table DDL.
+
+    Blocking: it reads the deploy repo, so call it off the event loop.
+    """
+    return effective_settings(settings, getattr(request.app.state, "gitcrud", None))
 
 
 # -- Registry lifecycle ----------------------------------------
@@ -329,22 +339,13 @@ ClickHouseClient = Annotated[Any, Depends(get_clickhouse_client)]
 def _get_client_ip(request: Request) -> str | None:
     """Caller address for the audit trail.
 
-    X-Forwarded-For is whatever the caller typed unless a trusted proxy rewrote
-    it, so it is read only behind ``auth.trust_proxy_auth_headers`` - the same
-    gate the X-Oidc-* identity headers sit behind.
-
-    The fallback is NOT necessarily the socket peer: ProxyHeadersMiddleware is the
-    app's outermost middleware, so where ``api.forwarded_allow_ips`` trusts the
-    gateway it has already rewritten ``scope["client"]`` from X-Forwarded-For. So
-    this returns the proxy-forwarded address behind a trusted proxy, and the socket
-    peer otherwise - which is the address the audit trail wants either way, because
-    behind a gateway the socket peer is only ever the gateway.
+    ForwardedHeadersMiddleware, the app's outermost middleware, has already set
+    ``request.client``: the TCP peer, or behind a peer ``api.forwarded_allow_ips``
+    trusts, the right-most X-Forwarded-For entry that is not itself a trusted
+    proxy. No header is read here, so every caller records the address that one
+    rule decided. ``auth.trust_proxy_auth_headers`` governs the X-Oidc-* identity
+    headers only.
     """
-    settings: DFESettings = request.app.state.settings
-    if settings.auth.trust_proxy_auth_headers:
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
     return request.client.host if request.client else None
 
 
@@ -364,24 +365,23 @@ def _resolve_group_grants(
 ) -> GroupResolution:
     """Resolve roles, org_ids, scoped grants and the matched groups from group identifiers.
 
+    The identifiers are ones an operator chose -- the group names an API key or a
+    group file carries, or the names an IdP assertion was already resolved to by
+    :func:`~dfe_engine.auth.membership.linked_groups`. An IdP's raw assertion never
+    comes here, because a name it sends would take the stored group of that name.
     Each identifier is looked up by group NAME first, then by provider
-    ``source_id`` (so a token carrying Entra GUIDs or Google group keys resolves
-    against the sync-populated group files). Unknown identifiers are silently
-    skipped (no error -- the user just gets fewer roles). A system group's roles
-    bind at system scope; an org-scoped group's roles bind at that org's scope
-    only. org_ids collects the caller's org memberships (the owning org of each
-    org-scoped group, plus each group's org_ids list).
+    ``source_id``. Unknown identifiers are silently skipped (no error -- the user
+    just gets fewer roles). A system group's roles bind at system scope; an
+    org-scoped group's roles bind at that org's scope only. org_ids collects the
+    caller's org memberships (the owning org of each org-scoped group, plus each
+    group's org_ids list).
     """
     roles: set[str] = set()
     org_ids: set[str] = set()
     matched: set[str] = set()
     grants: list[ScopedGrant] = []
     seen_grants: set[tuple[str, str]] = set()
-    # Providers that emit opaque group identifiers rather than names (Entra sends
-    # object GUIDs, Google sends group keys) arrive here as those identifiers.
-    # Resolve by name first - the common case, and what dex/okta/local all use -
-    # then fall back to the sync-populated source_id index. The index is built
-    # only when a name misses, so name-only workloads pay nothing for it.
+    # The source_id index is built only when a name misses, so name-only lookups pay nothing for it.
     source_index: dict[str, Group] | None = None
     for group_name in groups:
         group = group_store.get(group_name)
@@ -453,6 +453,12 @@ def get_role_config(request: Request) -> RoleConfig:
     return RoleConfig.load_builtin()
 
 
+def provider_bindings(request: Request) -> dict[str, str]:
+    """``auth.source_provider_bindings``, or none while settings are not yet on the app."""
+    settings: DFESettings | None = getattr(request.app.state, "settings", None)
+    return settings.auth.source_provider_bindings if settings is not None else {}
+
+
 def resolve_live_grants_for_user(request: Request, user_id: str) -> GroupResolution:
     """Resolve roles/org_ids/grants from the bound account's groups, never a token claim.
 
@@ -463,7 +469,8 @@ def resolve_live_grants_for_user(request: Request, user_id: str) -> GroupResolut
     account = bound_account(request, user_id)
     if group_store is None or account is None:
         return GroupResolution([], [], [], [])
-    return _resolve_group_grants(groups_held(account, group_store.list()), group_store)
+    held = groups_held(account, group_store.list(), bindings=provider_bindings(request))
+    return _resolve_group_grants(held, group_store)
 
 
 def resolve_live_groups_for_user(request: Request, user_id: str) -> list[str]:
@@ -472,7 +479,8 @@ def resolve_live_groups_for_user(request: Request, user_id: str) -> list[str]:
     if account is None:
         return []
     group_store: GroupStore | None = getattr(request.app.state, "group_store", None)
-    return groups_held(account, group_store.list() if group_store is not None else [])
+    groups = group_store.list() if group_store is not None else []
+    return groups_held(account, groups, bindings=provider_bindings(request))
 
 
 def account_for_session_subject(store: Any, user_id: str):
@@ -567,7 +575,12 @@ async def get_current_user(request: Request) -> AuthContext:
         group_store: GroupStore = request.app.state.group_store
         oidc_email = request.headers.get("X-Oidc-Email") or None
         raw_groups = request.headers.get("X-Oidc-Groups", "")
-        groups = [g.strip() for g in raw_groups.split(",") if g.strip()]
+        asserted = [g.strip() for g in raw_groups.split(",") if g.strip()]
+        providers = linked_providers(
+            [settings.auth.proxy_provider], settings.auth.source_provider_bindings
+        )
+        # Names of the groups the assertion is linked to; a name the IdP sends links nothing.
+        groups = sorted(g.name for g in linked_groups(asserted, group_store.list(), providers))
         resolution = _resolve_group_grants(groups, group_store)
         roles, org_ids = resolution.roles, resolution.org_ids
         logger.debug("OIDC auth", user_id=oidc_subject, groups=groups, roles=roles)
@@ -581,7 +594,7 @@ async def get_current_user(request: Request) -> AuthContext:
                 # or the guard reads its second path as another identity.
                 jit.ensure_account(
                     oidc_subject,
-                    groups,
+                    asserted,
                     settings.auth.proxy_provider,
                     email=oidc_email or "",
                 )
@@ -688,6 +701,18 @@ async def get_current_user(request: Request) -> AuthContext:
         jwt_user_id = payload.get("sub", "")
         jwt_email = payload.get("email") or None
         account = require_local_account_enabled(request, jwt_user_id)
+        if session_ended(account, payload):
+            audit_login_denied(jwt_user_id, "jwt", client_ip, "session_ended")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "code": "session_ended",
+                    "message": "This session has ended; sign in again",
+                },
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        # The refresh route carries the session's sign-in time forward from these.
+        request.state.token_claims = payload
         refuse_until_password_changed(request, account)
         if account is not None and account.password_change_required:
             # Its token carries no roles, groups or orgs, so neither does the session.

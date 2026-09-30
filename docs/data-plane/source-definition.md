@@ -27,6 +27,8 @@ transport: bus                          # bus (a broker holds records between st
                                         # nothing stored). Omit to take the deployment default
 archive: false                          # Keep the raw record as it arrived. On the bus the archiver
                                         # reads the landing topic; on direct it is sent the record
+                                        # by the receiver, so a fetched record, in its own source or
+                                        # routed to another, is archived only on the bus
 
 # --- Header ---
 # Common schema header. A new source starts as JUST this header -- the common
@@ -109,7 +111,7 @@ receiver's router splits on. It is not a ClickHouse column reference: a
 `_json.` prefix would be read as a first path segment that no payload has.
 
 `ttl_days` is optional. A source that leaves it unset gets the deployment
-default (`DFE_CLICKHOUSE_DEFAULT_TTL_DAYS`, 90 days shipped, 0 = none); a value
+default (the admin's console value, else `DFE_CLICKHOUSE_DEFAULT_TTL_DAYS`, 90 days shipped, 0 = none); a value
 here wins over that default and over the table's dfe-schemas definition. The
 next schema apply moves an existing table onto a changed value with `ALTER
 TABLE ... MODIFY TTL`, and shortening it expires the rows older than the new

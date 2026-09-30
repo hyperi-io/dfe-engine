@@ -99,6 +99,10 @@ const query_scopes = {
   query_execute: "query:execute",
 } as const;
 
+const raw_query_scopes = {
+  raw_query_execute: "raw_query:execute",
+} as const;
+
 const repository_scopes = {
   repository_read: "repository:read",
   repository_write: "repository:write",
@@ -218,6 +222,7 @@ export const scopes = {
   ...org_scopes,
   ...pipeline_scopes,
   ...query_scopes,
+  ...raw_query_scopes,
   ...repository_scopes,
   ...role_scopes,
   ...sampler_scopes,

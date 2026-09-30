@@ -1,14 +1,12 @@
 """Integration tests for the document-store-backed group store + document layer.
 
-Runs only when ``DFE_TEST_MONGO_URI`` points at a reachable document store / mongo-wire
-server (the rig document store via port-forward, or a testcontainer in CI). Uses a
-throwaway database per test so it never touches real data, and drops it on
-teardown. Real dependency, no mocks - the name-validation, member de-duplication,
-scope and delete-with-members semantics must hold against a real store exactly as
-they do for the YAML backend.
+Runs against the harness's document store (``mongo_uri``: ``DFE_TEST_MONGO_URI``, else
+FerretDB on docker). Uses a throwaway database per test so it never touches real data,
+and drops it on teardown. Real dependency, no mocks - the name-validation, member
+de-duplication, scope and delete-with-members semantics must hold against a real store
+exactly as they do for the YAML backend.
 """
 
-import os
 import uuid
 
 import pytest
@@ -35,15 +33,11 @@ from dfe_engine.store.documents import DocuStore
 
 pytestmark = pytest.mark.integration
 
-_URI = os.environ.get("DFE_TEST_MONGO_URI", "")
-
 
 @pytest.fixture
-def docu():
-    if not _URI:
-        pytest.skip("DFE_TEST_MONGO_URI not set (needs a reachable document store)")
+def docu(mongo_uri):
     db_name = f"dfe_engine_test_{uuid.uuid4().hex[:8]}"
-    doc = DocuStore(_URI, db_name)
+    doc = DocuStore(mongo_uri, db_name)
     doc.ping()  # fail fast if the server is unreachable / auth wrong
     try:
         yield doc
@@ -317,6 +311,25 @@ class TestTheProviderIdsAGroupCarries:
         assert result["created"] == 1
         got = store.get("analysts")
         assert (got.source_provider, got.source_id) == ("entra", self.GUID)
+
+    async def test_the_oidc_sync_leaves_a_group_no_admin_linked(self, store, tmp_path):
+        store.create(RECOVERY_GROUP, ["admin"])
+        provider = OIDCProvider(
+            type="entra_id",
+            enabled=True,
+            issuer="https://sso.example.com",
+            groups=GroupResolutionConfig(mode="api"),
+        )
+        registry = OIDCProviderRegistry(tmp_path / "oidc")
+        registry.create("entra", provider)
+        adapter = _Directory(provider, [GroupInfo(id=self.GUID, name="DFE Admins")])
+
+        result = await sync_provider("entra", registry, store, adapter=adapter)
+
+        assert (result["updated"], result["groups_skipped"]) == (0, 1)
+        got = store.get(RECOVERY_GROUP)
+        assert (got.source_provider, got.source_id) == ("", "")
+        assert self.GUID not in store.by_source_id()
 
 
 class _Directory(OIDCGroupAdapter):

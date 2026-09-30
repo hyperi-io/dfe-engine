@@ -47,7 +47,7 @@ The machine is pure. It reads a :class:`SetupContext` -- never a Request -- so
 it can be evaluated in a unit test with hand-built stores.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self
 
@@ -66,6 +66,7 @@ from dfe_engine.auth.deployment_hints import (
     detect_deploy_kind,
 )
 from dfe_engine.auth.oidc.models import OIDCProvider
+from dfe_engine.gitcrud import retention
 from dfe_engine.orgs.models import Org
 
 if TYPE_CHECKING:
@@ -126,6 +127,8 @@ class SetupContext:
     admin_retired: bool = False
     # A deploy repo is configured, so a retirement has somewhere durable to be recorded.
     gitops_enabled: bool = False
+    # auth.source_provider_bindings, which decide the groups an IdP-owned account holds.
+    provider_bindings: Mapping[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_app_state(cls, state: Any) -> Self:
@@ -150,7 +153,9 @@ class SetupContext:
         # The schema builder treats a blank default as MergeTree, so report the same.
         default_engine = getattr(clickhouse, "default_engine", "") or "MergeTree"
         if clickhouse is not None:
-            default_ttl_days = int(getattr(clickhouse, "default_ttl_days", 0) or 0)
+            default_ttl_days = retention.resolve_state(
+                getattr(state, "gitcrud", None), state.settings
+            ).effective
         return cls(
             account_store=account_store,
             group_store=getattr(state, "group_store", None),
@@ -172,6 +177,9 @@ class SetupContext:
             default_ttl_days=default_ttl_days,
             admin_retired=admin_retirement.is_retired(getattr(state, "gitcrud", None)),
             gitops_enabled=getattr(state, "gitcrud", None) is not None,
+            provider_bindings=dict(
+                _attr_path(state, "settings", "auth", "source_provider_bindings") or {}
+            ),
         )
 
 
@@ -456,7 +464,10 @@ def retire_admin_available(ctx: SetupContext, setup_complete: bool) -> bool:
         and ctx.gitops_enabled
         and not ctx.admin_retired
         and admin_retirement.another_admin_exists(
-            ctx.account_store, ctx.group_store, ctx.bootstrap_admin_name
+            ctx.account_store,
+            ctx.group_store,
+            ctx.bootstrap_admin_name,
+            bindings=ctx.provider_bindings,
         )
     )
 

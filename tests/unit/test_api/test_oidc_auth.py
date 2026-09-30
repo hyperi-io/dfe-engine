@@ -11,6 +11,12 @@ from dfe_engine.auth.jit import JitProvisioner
 from tests.support.failing_stores import StampFailingAccountStore
 
 
+def _link(app, *names: str) -> None:
+    """Link each group to what an IdP that sends group names asserts for it: its name."""
+    for name in names:
+        app.state.group_store.update(name, source_id=name)
+
+
 class TestOidcAuthentication:
     """OIDC headers (X-Oidc-Subject, X-Oidc-Groups) authenticate without JWT."""
 
@@ -27,6 +33,7 @@ class TestOidcAuthentication:
     def test_oidc_groups_resolve_roles(self, client: TestClient, app):
         """Groups from X-Oidc-Groups resolve to roles via GroupStore."""
         # dfe-admins group was seeded by bootstrap with roles=["admin"]
+        _link(app, "dfe-admins")
         resp = client.get(
             "/api/v1/auth/me",
             headers={
@@ -52,6 +59,7 @@ class TestOidcAuthentication:
         # A synced group: friendly name on the file, provider GUID as source_id.
         group_store.create("entra-admins", roles=["admin"], description="synced")
         group_store.update("entra-admins", source_provider="entra", source_id=guid)
+        app.state.settings.auth.proxy_provider = "entra"
 
         resp = client.get(
             "/api/v1/auth/me",
@@ -65,9 +73,8 @@ class TestOidcAuthentication:
         data = resp.json()
         assert "admin" in data["roles"]
 
-    def test_source_id_resolution_does_not_shadow_names(self, client: TestClient, app):
-        """The source_id fallback only fires when a name misses - a plain name
-        still resolves the ordinary way and is unaffected by the index."""
+    def test_a_group_name_the_idp_asserts_takes_no_stored_group(self, client: TestClient, app):
+        """A directory user can name a group dfe-admins; only the id the directory assigns links."""
         group_store = app.state.group_store
         group_store.create("okta-viewers", roles=["data_viewer"], description="synced")
         group_store.update("okta-viewers", source_provider="okta", source_id="00g-xyz")
@@ -76,14 +83,41 @@ class TestOidcAuthentication:
             "/api/v1/auth/me",
             headers={
                 "X-Oidc-Subject": "heidi@example.com",
-                # dfe-admins matches by NAME; okta-viewers by NAME too (not id).
                 "X-Oidc-Groups": "dfe-admins, okta-viewers",
             },
         )
+
         assert resp.status_code == 200
-        data = resp.json()
-        assert "admin" in data["roles"]
-        assert "data_viewer" in data["roles"]
+        assert resp.json()["roles"] == []
+        assert resp.json()["groups"] == []
+
+    def test_a_group_linked_to_another_provider_is_not_taken(self, client: TestClient, app):
+        """Two IdPs: one cannot assert the other's group id to take its group."""
+        group_store = app.state.group_store
+        group_store.create("okta-admins", roles=["admin"], description="synced")
+        group_store.update("okta-admins", source_provider="okta", source_id="00g-admins")
+        app.state.settings.auth.proxy_provider = "entra"
+
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "ivy@example.com", "X-Oidc-Groups": "00g-admins"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["roles"] == []
+
+    def test_a_group_linked_by_its_id_alone_answers_any_provider(self, client: TestClient, app):
+        """A group file an operator linked carries only source_id, as the sync fills the rest."""
+        app.state.group_store.update("dfe-analysts", source_id="00g-analysts")
+
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "jon@example.com", "X-Oidc-Groups": "00g-analysts"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["roles"] == ["data_analyst"]
+        assert resp.json()["groups"] == ["dfe-analysts"]
 
     def test_the_proxy_path_stamps_the_configured_provider(self, client: TestClient, app):
         """The stamp is a provider name, not the protocol -- ``auth.proxy_provider``."""
@@ -165,14 +199,14 @@ class TestOidcAuthentication:
         resp = client.post(
             "/api/v1/auth/accounts/reset-password",
             headers={"X-Oidc-Subject": "olga@example.com", "X-Oidc-Groups": "dfe-viewers"},
-            json={"new_password": "a-long-enough-password-1"},
+            json={"current_password": "anything", "new_password": "a-long-enough-password-1"},
         )
 
         assert resp.status_code == 409
         assert resp.json()["code"] == "external_account"
 
     def test_unknown_groups_no_roles(self, client: TestClient):
-        """Unknown groups authenticate but yield no roles."""
+        """Unknown groups authenticate but yield no roles and hold no group."""
         resp = client.get(
             "/api/v1/auth/me",
             headers={
@@ -184,11 +218,12 @@ class TestOidcAuthentication:
         data = resp.json()
         assert data["user_id"] == "bob@example.com"
         assert data["roles"] == []
-        assert "unknown-group-xyz" in data["groups"]
+        assert data["groups"] == []
 
     def test_multiple_comma_separated_groups(self, client: TestClient, app):
         """Multiple groups are split on comma and all roles collected."""
         # dfe-admins has ["admin"], dfe-analysts has ["data_analyst"]
+        _link(app, "dfe-admins", "dfe-analysts")
         resp = client.get(
             "/api/v1/auth/me",
             headers={
@@ -256,6 +291,7 @@ class TestOidcAuthentication:
 
     def test_oidc_whitespace_in_groups_stripped(self, client: TestClient, app):
         """Whitespace around group names is stripped."""
+        _link(app, "dfe-admins", "dfe-viewers")
         resp = client.get(
             "/api/v1/auth/me",
             headers={
@@ -394,6 +430,7 @@ class TestAJitFailureRefusesTheLogin:
         self, client: TestClient, app, audit_events
     ):
         """An unstamped account would read as a local one and refuse every later login."""
+        _link(app, "dfe-admins")
         healthy = app.state.jit_provisioner
         app.state.jit_provisioner = JitProvisioner(
             account_store=StampFailingAccountStore(app.state.account_store._dir),

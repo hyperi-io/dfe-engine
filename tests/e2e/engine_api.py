@@ -72,10 +72,14 @@ class EngineAPI:
         changed = self._request(
             "POST",
             f"{self.base}/api/v1/auth/accounts/reset-password",
-            {"new_password": self.new_password},
+            {"current_password": self.password, "new_password": self.new_password},
         )
         assert changed.status_code == 200, f"forced password change failed: {changed.text}"
         self.password = self.new_password
+        # The change ends the session that made it.
+        relogin = self._login(self.password)
+        assert relogin.status_code == 200, f"engine login after the change failed: {relogin.text}"
+        self.token = str(relogin.json()["access_token"])
 
     def call(self, method: str, path: str, body: Any = None) -> httpx.Response:
         """One API call, returning the response whatever its status.

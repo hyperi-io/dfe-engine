@@ -16,12 +16,14 @@ All endpoints require admin role (org:write).
 The full key is ONLY returned in the create response -- it cannot be
 recovered from stored metadata.
 
-A key may carry an optional ``expires_at``; once it passes, the key stops
+A key's ``expires_at`` is the caller's, else ``auth.api_key_default_ttl_days``
+from now, and none only when that setting is 0. Once it passes, the key stops
 authenticating but stays listed (``expired: true``) until it is revoked.
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -53,7 +55,11 @@ class CreateAPIKeyRequest(BaseModel):
     description: str = Field("", description="Optional description")
     expires_at: str | None = Field(
         None,
-        description="Optional ISO-8601 expiry (UTC if no offset given); omit for a key that never expires",
+        description=(
+            "Optional ISO-8601 expiry (UTC if no offset given). Omitted, the key "
+            "expires after auth.api_key_default_ttl_days (90 unless configured; 0 "
+            "there means it never expires)."
+        ),
     )
 
 
@@ -119,12 +125,16 @@ async def create_api_key(
     # The key's session takes every role its groups carry, so minting it hands them out.
     for group in groups_named(body.groups, request.app.state.group_store.list()):
         check_role_assignment(request, user, group.roles, scope_of(group))
+    expires_at = body.expires_at
+    ttl_days = request.app.state.settings.auth.api_key_default_ttl_days
+    if expires_at is None and ttl_days > 0:
+        expires_at = (datetime.now(UTC) + timedelta(days=ttl_days)).isoformat()
     try:
         key_meta, full_key = store.create(
             body.name,
             groups=body.groups,
             description=body.description,
-            expires_at=body.expires_at,
+            expires_at=expires_at,
         )
     except ValueError as exc:
         # Bad/past expires_at -- the duplicate-name case is caught above.

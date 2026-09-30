@@ -134,7 +134,7 @@ ONLY place the remaining quirks live:
 | id stable, name mutable | directories rename groups | map roles on `id`, display `name` | source_id is the stable key |
 | overage (entra >200 -> a Graph pointer) | token size limits | detect the marker, fall back to the directory API | not yet built |
 | nested / transitive groups | AD/entra/google nesting | take the closure the provider already emits, or walk it when it does not | MEASURED: entra emits the full closure in-token; honour it (per-provider fact, not a global toggle) |
-| name collisions across tenants | bare names aren't unique | namespace the key (source+domain) | not yet built |
+| name collisions across tenants | bare names aren't unique | namespace the key (source+domain) | a name held by a group not linked to that IdP group is skipped (`name_taken`); namespacing not yet built |
 | non-role groups (mailing lists) | not all groups grant access | filter by group type | not yet built |
 
 ### Adapters
@@ -147,10 +147,7 @@ if group resolution degrades.
 
 ### Sync and control-plane independence
 
-`auth/oidc/sync.py` enumerates a provider's groups (api mode) and creates/updates
-group files (preserving existing roles, tagging `source_provider`). Detaching a
-provider does NOT delete its groups - they orphan with `source_provider` set,
-reported on delete.
+`auth/oidc/sync.py` enumerates a provider's groups (api mode). It creates a group file for each new one, linked by `source_provider` and `source_id`, and updates only files already linked to that IdP group (their `source_id` is its id), preserving their roles. A file of the same name with no link is skipped as `name_taken`: a display name is no identity, so linking one is an admin's act (rbac.md section 4.4). Detaching a provider does NOT delete its groups - they orphan with `source_provider` set, reported on delete.
 
 **The OIDC auth flow does not depend on dfe-engine running.** Envoy (fallback
 path) keeps doing OIDC from a static CRD; group files on disk keep resolving

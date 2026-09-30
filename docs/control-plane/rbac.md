@@ -223,7 +223,7 @@ flowchart TD
     end
 
     subgraph "Role Resolution (what roles?)"
-        ROLE_RES["Each group by name, else by provider source_id<br/>Union of roles, scoped grants and org_ids"]
+        ROLE_RES["Member groups by name, IdP identifiers by linked source_id<br/>Union of roles, scoped grants and org_ids"]
     end
 
     subgraph "Permission Check (can you do this?)"
@@ -248,8 +248,7 @@ flowchart TD
     style DENY fill:#f44,color:#fff
 ```
 
-OIDC groups and local groups are unified — an OIDC group name that matches a
-group file in `config/auth/groups/` inherits that group's roles.
+An identifier an IdP asserts, in a token's groups claim, `X-Oidc-Groups` or a SCIM record, takes a group only when that group's `source_id` is the identifier and its `source_provider` is empty or the provider the login came through (or one `auth.source_provider_bindings` joins to it). A group's name links nothing, so an IdP group that happens to be called `dfe-admins` gets no roles until an admin links it. Logins through `X-Oidc-Groups` count as the provider named in `auth.proxy_provider` (default `oidc`).
 
 For a local account the group files are the authority. The account's own `groups` list is kept in step by the API routes, but it grants nothing. A member removed from a group file in the live store loses that group's roles and orgs at its next engine request, whether the API removed it, someone edited the file in the engine's auth directory, or the Helm chart's `authConfig.groupsConfigMap` copied a new file in at pod start. The deploy repo's `governance/rbac` classes are neither read nor written at runtime, so an edit there changes nothing. An account an IdP owns (JIT or SCIM) also holds the groups its record says the IdP asserts, so a group an operator adds it to by hand sits beside those.
 
@@ -415,7 +414,7 @@ updated_at: "2026-03-31T02:00:00Z"
 description: "SOC analyst team"
 roles: ["data_analyst"]
 members: ["analyst1", "analyst2"]
-source_provider: ""              # OIDC provider name (if synced)
+source_provider: ""              # OIDC provider the group is linked to (see 4.4)
 source_id: ""                    # Provider-specific group ID
 ```
 
@@ -595,21 +594,25 @@ sequenceDiagram
 
     loop Each remote group
         Sync->>GS: get(group_name)
-        alt Group exists
+        alt No group of that name
+            Sync->>GS: create(empty roles,<br/>source_provider + source_id)
+        else Group linked to this IdP group
             Sync->>GS: update(metadata only,<br/>preserve existing roles)
-        else New group
-            Sync->>GS: create(empty roles,<br/>set source_provider)
+        else Group not linked to it
+            Note over Sync: skip, count name_taken
         end
     end
 
     Sync->>Reg: update(last_sync_at,<br/>last_sync_status)
 ```
 
-Key behaviour: existing groups keep their roles. Sync only updates
-description and source metadata. Admins assign roles to synced groups
-manually.
+The sync updates a stored group only when it is already linked to that IdP group: its `source_id` is the IdP group's id. The directory assigns that id, so a user cannot choose it the way they choose a display name. A group the sync creates is linked in the same write. A linked group keeps its roles, and the sync refreshes only its description and source metadata. Admins assign roles to synced groups by hand.
 
-One bad group never aborts the sync. A provider group whose email, name or id makes no valid group name, or whose name is held by a stored group that does not load, is skipped and counted on `auth_oidc_sync_groups_skipped_total{reason}` (`invalid_name`, `stored_unloadable`), and the provider's `last_sync_status` reads `partial` with each reason.
+A name match links nothing. Directory display names are not unique, and in a tenant where users can create groups anyone can pick one, so an IdP group named `DFE Admins` would otherwise take the seeded `dfe-admins` and its `admin` role. A stored group of the same name with no `source_id`, or carrying another IdP group's id, is left untouched and counted as `name_taken`.
+
+Linking an IdP group to the stored group that holds its name is an admin's act. Set `source_id` to the IdP group's id in that group's file, in the live store or through the chart's `authConfig.groupsConfigMap`; the next sync fills in `source_provider`. The groups API sets neither field. `PUT /api/v1/scim/v2/Groups/{name}` sets `source_id` from `externalId`, which links the group for logins and for the sync alike.
+
+One bad group never aborts the sync. A provider group whose email, name or id makes no valid group name, whose name is held by a stored group that does not load, or whose name is held by a stored group not linked to it, is skipped and counted on `auth_oidc_sync_groups_skipped_total{reason}` (`invalid_name`, `stored_unloadable`, `name_taken`), and the provider's `last_sync_status` reads `partial` with each reason.
 
 ---
 

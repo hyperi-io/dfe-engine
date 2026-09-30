@@ -1443,6 +1443,44 @@ class AccountStoreSettings(BaseModel):
     collection: str = Field(default="accounts", description="Accounts collection name")
 
 
+class LoginThrottleSettings(BaseModel):
+    """Backoff after failed sign-ins, per username and per client address.
+
+    Counted in each engine process, so N replicas allow up to N times the attempts.
+    Past the threshold each further failure doubles the wait, from two seconds up to
+    ``max_delay_seconds``; a key forgets its failures after the same span with none.
+
+    Environment variables:
+    - DFE_AUTH_LOGIN_THROTTLE_ENABLED -> auth.login_throttle.enabled
+    - DFE_AUTH_LOGIN_THROTTLE_USERNAME_FAILURES -> auth.login_throttle.username_failures
+    - DFE_AUTH_LOGIN_THROTTLE_CLIENT_FAILURES -> auth.login_throttle.client_failures
+    - DFE_AUTH_LOGIN_THROTTLE_MAX_DELAY_SECONDS -> auth.login_throttle.max_delay_seconds
+    """
+
+    enabled: bool = Field(default=True, description="Throttle failed sign-ins")
+    username_failures: int = Field(
+        default=5,
+        ge=1,
+        description=(
+            "Failed sign-ins for one username before it must wait. Counted whatever "
+            "address they come from, so an attacker can hold one account's sign-in "
+            "back for up to max_delay_seconds at a time."
+        ),
+    )
+    client_failures: int = Field(
+        default=20,
+        ge=1,
+        description=(
+            "Failed sign-ins from one client address before it must wait. The address "
+            "is the proxy's unless api.forwarded_allow_ips trusts it, and then every "
+            "caller shares one count."
+        ),
+    )
+    max_delay_seconds: int = Field(
+        default=900, ge=1, description="Longest wait one failure can impose, in seconds"
+    )
+
+
 class AuthSettings(BaseModel):
     """Authorization settings.
 
@@ -1451,6 +1489,7 @@ class AuthSettings(BaseModel):
     Environment variables:
     - DFE_AUTH_ENABLED -> auth.enabled
     - DFE_AUTH_DIR -> auth.auth_dir
+    - DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS -> auth.api_key_default_ttl_days
     """
 
     enabled: bool = Field(
@@ -1470,13 +1509,12 @@ class AuthSettings(BaseModel):
     trust_proxy_auth_headers: bool = Field(
         default=False,
         description=(
-            "Trust proxy-set request headers: X-Oidc-* for the identity (auth "
-            "Path 1) and X-Forwarded-For for the address recorded in the audit "
-            "trail. Enable ONLY when a trusted proxy (e.g. Envoy Gateway) "
-            "authenticates the user and injects these headers AND the engine is "
-            "reachable only via that proxy. Default off = fail closed: "
-            "standalone/unfronted deployments ignore these client-spoofable "
-            "headers and audit the socket address instead."
+            "Trust the proxy-set X-Oidc-* identity headers (auth Path 1). Enable "
+            "ONLY when a trusted proxy (e.g. Envoy Gateway) authenticates the user "
+            "and injects these headers AND the engine is reachable only via that "
+            "proxy. Default off = fail closed: standalone/unfronted deployments "
+            "ignore these client-spoofable headers. The audited client address is "
+            "decided by api.forwarded_allow_ips, not by this."
         ),
     )
     proxy_provider: str = Field(
@@ -1509,6 +1547,7 @@ class AuthSettings(BaseModel):
     )
     oidc: OIDCSettings = Field(default_factory=OIDCSettings)
     local: LocalAuthSettings = Field(default_factory=LocalAuthSettings)
+    login_throttle: LoginThrottleSettings = Field(default_factory=LoginThrottleSettings)
     store_backend: str = Field(
         default="auto",
         description=(
@@ -1520,6 +1559,15 @@ class AuthSettings(BaseModel):
         ),
     )
     accounts_store: AccountStoreSettings = Field(default_factory=AccountStoreSettings)
+    api_key_default_ttl_days: int = Field(
+        default=90,
+        ge=0,
+        description=(
+            "Lifetime of an API key created without expires_at, in days. 0 creates "
+            "such a key with no expiry. A key that names its own expires_at keeps it. "
+            "DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS."
+        ),
+    )
 
 
 class HyperDXSettings(BaseModel):
@@ -1666,6 +1714,9 @@ _DEV_JWT_SECRET = "dev-secret-key-change-in-production"
 # "production") is treated as production for the placeholder-secret guard.
 _NON_PROD_ENVS = frozenset({"dev", "development", "local", "test", "ci"})
 
+# The local console dev servers, trusted only by a dev posture that names no origins itself.
+_DEV_CORS_ORIGINS = ("http://localhost:5173", "http://localhost:5174", "http://localhost:3000")
+
 
 def is_dev_posture(env: str) -> bool:
     """True when DFE_ENV declares a non-production posture (dev/local/test/ci)."""
@@ -1691,21 +1742,24 @@ class APISettings(BaseModel):
     - DFE_API_CORS_ORIGINS -> api.cors_origins (comma-separated)
     - DFE_API_FORWARDED_ALLOW_IPS -> api.forwarded_allow_ips (comma-separated)
     - DFE_API_JWT_EXPIRE_MINUTES -> api.jwt_expire_minutes
+    - DFE_API_MAX_SESSION_MINUTES -> api.max_session_minutes
     - DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES -> api.elastic_converter_max_upload_bytes
     - DFE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE -> api.elastic_converter_read_chunk_size
     - DFE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES ->
       api.elastic_converter_content_length_slack_bytes
+    - DFE_API_DOCS_ENABLED -> api.docs_enabled (true/false)
     """
 
     host: str = Field(default="0.0.0.0", description="API server bind address")  # noqa: S104
     port: int = Field(default=8000, description="API server port")
     cors_origins: list[str] = Field(
-        default_factory=lambda: [
-            "http://localhost:5173",
-            "http://localhost:5174",
-            "http://localhost:3000",
-        ],
-        description="CORS allowed origins",
+        default_factory=list,
+        description=(
+            "CORS allowed origins, which are also the only origins an OIDC login hands "
+            "its token back to (return_to). Empty by default. Left unset in a dev "
+            "posture, the local console dev servers' origins are allowed. "
+            "DFE_API_CORS_ORIGINS, comma-separated."
+        ),
     )
     forwarded_allow_ips: str = Field(
         default="127.0.0.1",
@@ -1715,8 +1769,12 @@ class APISettings(BaseModel):
             "The scheme the engine builds OIDC redirect URIs from comes from this: "
             "behind a TLS-terminating gateway the peer is the gateway pod, so unless "
             "its address is listed here the request reads as http and the IdP is sent "
-            "an http callback URI. Default is the loopback-only value uvicorn ships, "
-            "which fails closed for an engine nothing fronts."
+            "an http callback URI. So does the client address the audit trail records: "
+            "behind a listed peer it is the right-most X-Forwarded-For entry that is "
+            "not itself listed, so list every proxy hop, the console pods included. "
+            "'*' trusts every hop and records the left-most entry, which the caller "
+            "wrote. An entry that is not an address or network stops startup. Default "
+            "is loopback only, which fails closed for an engine nothing fronts."
         ),
     )
     jwt_secret: str = Field(
@@ -1732,6 +1790,15 @@ class APISettings(BaseModel):
         description="JWT signing algorithm - ES384 (ECDSA P-384 + SHA-384, CNSA-aligned). Crypto-agile.",
     )
     jwt_expire_minutes: int = Field(default=60, description="JWT token expiry in minutes")
+    max_session_minutes: int = Field(
+        default=720,
+        ge=1,
+        description=(
+            "Longest a session runs from its sign-in, in minutes. POST /auth/refresh "
+            "is refused past it and never mints a token that outlives it, so the "
+            "owner signs in again. DFE_API_MAX_SESSION_MINUTES."
+        ),
+    )
     jwt_issuer: str = Field(
         default="https://dfe.local/api",
         description="JWT issuer (iss) claim + JWKS issuer; set to the deployment engine origin.",
@@ -1745,6 +1812,15 @@ class APISettings(BaseModel):
         description=(
             "Secret keying the signed session cookie SessionMiddleware uses for the "
             "OIDC RP flow (Authlib state/nonce). Empty -> falls back to jwt_secret."
+        ),
+    )
+    docs_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "Serve Swagger UI at /docs and ReDoc at /redoc. Both pages load their "
+            "scripts from a public CDN into the engine's own origin, so unset serves "
+            "them in a dev posture only. /openapi.json is served either way. "
+            "DFE_API_DOCS_ENABLED."
         ),
     )
     elastic_converter_max_upload_bytes: int = Field(
@@ -1898,6 +1974,13 @@ class DFESettings(BaseModel):
             "(seed-admin). DFE_E2E_SERVER. Refused in a production posture."
         ),
     )
+
+    @model_validator(mode="after")
+    def _dev_cors_origins(self) -> DFESettings:
+        # A production console's origin is the deployment's own; localhost is a dev server.
+        if is_dev_posture(self.env) and "cors_origins" not in self.api.model_fields_set:
+            self.api.cors_origins = list(_DEV_CORS_ORIGINS)
+        return self
 
     @model_validator(mode="after")
     def _reject_insecure_production_posture(self) -> DFESettings:
@@ -2375,6 +2458,8 @@ def _get_env_overrides() -> dict:
         overrides["auth"]["trust_proxy_auth_headers"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_AUTH_PROXY_PROVIDER"):
         overrides["auth"]["proxy_provider"] = val
+    if val := _get_env("DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS"):
+        overrides["auth"]["api_key_default_ttl_days"] = int(val)
     if val := _get_env("DFE_AUTH_SOURCE_PROVIDER_BINDINGS"):
         # A JSON object of {source_provider_stamp: oidc_provider_name}. Fail loudly
         # on malformed config: a dropped binding locks every bound user out at login.
@@ -2427,6 +2512,20 @@ def _get_env_overrides() -> dict:
         except json.JSONDecodeError as exc:
             raise ValueError(f"DFE_ORGS_SEED_ORGS is not valid JSON: {exc}") from exc
         overrides["orgs"]["seed_orgs"] = seed
+
+    # Failed sign-in backoff (nested under auth.login_throttle)
+    if val := _get_env("DFE_AUTH_LOGIN_THROTTLE_ENABLED"):
+        overrides["auth"].setdefault("login_throttle", {})["enabled"] = val.lower() in (
+            "true",
+            "1",
+            "yes",
+        )
+    if val := _get_env("DFE_AUTH_LOGIN_THROTTLE_USERNAME_FAILURES"):
+        overrides["auth"].setdefault("login_throttle", {})["username_failures"] = int(val)
+    if val := _get_env("DFE_AUTH_LOGIN_THROTTLE_CLIENT_FAILURES"):
+        overrides["auth"].setdefault("login_throttle", {})["client_failures"] = int(val)
+    if val := _get_env("DFE_AUTH_LOGIN_THROTTLE_MAX_DELAY_SECONDS"):
+        overrides["auth"].setdefault("login_throttle", {})["max_delay_seconds"] = int(val)
 
     # OIDC settings (nested under auth.oidc)
     if val := _get_env("DFE_AUTH_OIDC_PROVIDERS_DIR"):
@@ -2511,12 +2610,16 @@ def _get_env_overrides() -> dict:
         overrides["api"]["forwarded_allow_ips"] = val.strip()
     if val := _get_env("DFE_API_JWT_EXPIRE_MINUTES"):
         overrides["api"]["jwt_expire_minutes"] = int(val)
+    if val := _get_env("DFE_API_MAX_SESSION_MINUTES"):
+        overrides["api"]["max_session_minutes"] = int(val)
     if val := _get_env("DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES"):
         overrides["api"]["elastic_converter_max_upload_bytes"] = int(val)
     if val := _get_env("DFE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE"):
         overrides["api"]["elastic_converter_read_chunk_size"] = int(val)
     if val := _get_env("DFE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES"):
         overrides["api"]["elastic_converter_content_length_slack_bytes"] = int(val)
+    if val := _get_env("DFE_API_DOCS_ENABLED"):
+        overrides["api"]["docs_enabled"] = val.lower() in ("true", "1", "yes")
 
     # Secrets settings (the scalo.secrets seam for minted secrets)
     if val := _get_env("DFE_SECRETS_PROVIDER"):

@@ -490,6 +490,18 @@ class TestGroupSourceProvider:
         assert group.source_provider == "google-workspace"
         assert group.source_id == "grp-abc123"
 
+    def test_create_writes_the_provider_link_with_the_group(self, tmp_path):
+        """The OIDC sync links a group it creates in the same write, never a second one."""
+        groups_dir = tmp_path / "groups"
+        GroupStore(groups_dir).create(
+            "ops", roles=[], source_provider="entra-id", source_id="obj-xyz"
+        )
+
+        group = GroupStore(groups_dir).get("ops")
+
+        assert group is not None
+        assert (group.source_provider, group.source_id) == ("entra-id", "obj-xyz")
+
     def test_source_provider_persists_through_fresh_store_instance(self, tmp_path):
         """source_provider survives across separate GroupStore instances (written to YAML)."""
         groups_dir = tmp_path / "groups"

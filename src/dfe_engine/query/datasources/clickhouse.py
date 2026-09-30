@@ -13,8 +13,18 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from clickhouse_connect.driver.exceptions import DatabaseError
+
 from dfe_engine.query.datasources import DatasourceAdapter, register_adapter
 from dfe_engine.query.models import ExplainPlan, ExplainStep, ExplainStepType
+
+
+def _estimated_rows(estimate: Any) -> int | None:
+    """Rows EXPLAIN ESTIMATE expects the query to read; None when it lists no MergeTree read."""
+    if not estimate.result_rows:
+        return None
+    rows_at = list(estimate.column_names).index("rows")
+    return sum(int(row[rows_at]) for row in estimate.result_rows)
 
 
 @register_adapter("clickhouse")
@@ -28,14 +38,18 @@ class ClickHouseAdapter(DatasourceAdapter):
 
     @property
     def manager(self):
-        """Lazy-load ClickHouseManager."""
+        """This adapter's ClickHouseManager, built on first use.
+
+        A config gets a manager of its own, which ``close()`` cleans up. With no config
+        the adapter uses the process-wide manager the engine seeds at startup, and never
+        closes it.
+        """
         if self._manager is None:
             from dfe_engine.clickhouse import ClickHouseManager
 
             if self.config:
-                self._manager = ClickHouseManager.get_instance(self.config)
+                self._manager = ClickHouseManager(self.config)
             else:
-                # No explicit config -> the default settings-backed singleton.
                 self._manager = ClickHouseManager.get_instance()
         return self._manager
 
@@ -72,15 +86,42 @@ class ClickHouseAdapter(DatasourceAdapter):
         params: dict[str, Any] | None = None,
         timeout_seconds: int = 30,
     ) -> tuple[list[dict[str, Any]], list[str]]:
-        """Execute query and return (rows, column_names)."""
+        """Execute a read-only query and return (rows, column_names).
+
+        The query runs as the engine's own ClickHouse user, which may write, so it
+        is sent with ``readonly=1``. ClickHouse then refuses every write and DDL
+        statement, any ``INSERT INTO FUNCTION`` (``url()``, ``file()``, ``s3()``,
+        ...), any read through ``url()``, and any ``SETTINGS`` clause in the query.
+        ``readonly=2`` would allow those table-function writes and reads. The
+        ``max_execution_time`` sent with the query still applies.
+        """
         client = self.manager.get_clickhouse_client()
 
-        settings = {"max_execution_time": timeout_seconds}
+        settings = {"max_execution_time": timeout_seconds, "readonly": 1}
         result = client.query(query, parameters=params or {}, settings=settings)
 
-        columns = result.column_names
+        columns = list(result.column_names)
         rows = [dict(zip(columns, row, strict=True)) for row in result.result_rows]
+        if not columns:
+            columns = self._describe_columns(client, query, params, settings)
         return rows, columns
+
+    def _describe_columns(
+        self, client: Any, query: str, params: dict[str, Any] | None, settings: dict[str, Any]
+    ) -> list[str]:
+        """Column names of a query that returned no rows, from ClickHouse's analysis of it.
+
+        ClickHouse sends no Native block for an empty result, so the names are not in the
+        response. DESCRIBE analyses the query without running it; a statement it cannot
+        wrap, such as SHOW or one with a FORMAT clause, has no names to give.
+        """
+        # The newline ends a trailing line comment before the closing parenthesis.
+        described_sql = f"DESCRIBE TABLE (\n{query.rstrip().rstrip(';')}\n)"
+        try:
+            described = client.query(described_sql, parameters=params or {}, settings=settings)
+        except DatabaseError:
+            return []
+        return [str(row[0]) for row in described.result_rows]
 
     def explain(
         self,
@@ -102,11 +143,8 @@ class ClickHouseAdapter(DatasourceAdapter):
         steps = self._parse_explain_plan(raw_plan)
 
         try:
-            estimate_result = client.query(
-                f"EXPLAIN ESTIMATE {query}",
-                parameters=params or {},
-            )
-            total_rows = sum(int(row[2]) for row in estimate_result.result_rows if len(row) > 2)
+            estimate = client.query(f"EXPLAIN ESTIMATE {query}", parameters=params or {})
+            total_rows = _estimated_rows(estimate)
         except Exception:
             total_rows = None
 
@@ -171,9 +209,10 @@ class ClickHouseAdapter(DatasourceAdapter):
             return False
 
     def close(self) -> None:
+        """Close what this adapter opened: its restricted client, and a manager it built."""
         if self._restricted_client:
             self._restricted_client.close()
             self._restricted_client = None
-        if self._manager:
+        if self._manager is not None and self.config:
             self._manager.close()
-            self._manager = None
+        self._manager = None

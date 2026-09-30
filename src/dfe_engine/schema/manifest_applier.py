@@ -32,11 +32,11 @@ What is REFUSED and named:
   actioned
 
 A refusal is not a failure of the pass. The object is named, the rest of the
-manifest still converges, and an operator applies the change deliberately with
-``dfe schema apply --allow-drift``.
+manifest still converges, a column the same table gains is still added, and an
+operator applies the refused change deliberately with
+``dfe schema apply --allow-drift``. A table whose TTL is the deployment default
+also takes an admin's change of that default through :meth:`ManifestApplier.reconcile_ttl`.
 """
-
-from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
@@ -93,7 +93,11 @@ class ObjectOutcome:
             added = ", ".join(self.columns_added)
             return f"altered {self.qualified}: added {len(self.columns_added)} column(s) [{added}]"
         if self.action == "refused":
-            return f"refused {self.qualified}: {'; '.join(self.drift) or self.reason}"
+            refused = f"refused {self.qualified}: {'; '.join(self.drift) or self.reason}"
+            if self.columns_added:
+                added = ", ".join(self.columns_added)
+                refused += f"; added {len(self.columns_added)} column(s) [{added}]"
+            return refused
         if self.action == "skipped":
             return f"skipped {self.qualified}: {self.reason}"
         return f"unchanged {self.qualified}"
@@ -237,11 +241,20 @@ def _normalise_type(ch_type: str) -> str:
     return "".join(ch_type.split())
 
 
-def _declared_ttl_days(statement: str) -> int | None:
+def _declared_ttl_clause(statement: str) -> str | None:
+    """The rendered CREATE TABLE's TTL expressions, without the keyword; None for none."""
     _, sep, tail = statement.partition("\nTTL ")
     if not sep:
         return None
-    match = _TTL_DAYS_RE.search(tail.split("\nSETTINGS", 1)[0])
+    return tail.split("\nSETTINGS", 1)[0].strip()
+
+
+def declared_ttl_days(statement: str) -> int | None:
+    """The day TTL a rendered CREATE TABLE declares, or None when it declares none."""
+    clause = _declared_ttl_clause(statement)
+    if clause is None:
+        return None
+    match = _TTL_DAYS_RE.search(clause)
     return int(match.group(1) or match.group(2)) if match else None
 
 
@@ -330,6 +343,36 @@ class ManifestApplier:
                 rendered, "skipped", reason="optional object the server would not take"
             )
 
+    def reconcile_ttl(self, rendered: RenderedObject) -> str:
+        """Bring one existing table's TTL to the rendered one, and change nothing else.
+
+        The path an admin's change of the deployment default takes for a table that
+        follows it, so a render with no TTL removes the live one. Only call it for
+        such a table: one that declares its own TTL keeps the drift refusal.
+
+        Returns:
+            The move as ``"<live> -> <rendered>"`` in days, or "" when the table is
+            absent or already there. An absent table is created by the next apply.
+
+        Raises:
+            ManifestApplyError: ClickHouse refused the ALTER or could not be read.
+        """
+        database = rendered.database or ""
+        if rendered.kind != "table" or not self._table_exists(database, rendered.name):
+            return ""
+        statement = rendered.statements[0]
+        wanted = declared_ttl_days(statement)
+        live = self._live_ttl_days(self._live_shape(database, rendered.name).get("engine_full", ""))
+        if wanted == live:
+            return ""
+        target = f"{self._target(database, rendered.name)}{self._on_cluster(statement)}"
+        clause = _declared_ttl_clause(statement)
+        if clause is None:
+            self._run(f"ALTER TABLE {target} REMOVE TTL")
+        else:
+            self._run(f"ALTER TABLE {target} MODIFY TTL {clause}")
+        return f"{'none' if live is None else live} -> {'none' if wanted is None else wanted}"
+
     # -- per kind ------------------------------------------------------------
 
     def _apply_database(self, rendered: RenderedObject) -> ObjectOutcome:
@@ -353,22 +396,30 @@ class ManifestApplier:
         extra = [name for name in live if name not in declared]
         drift = self._table_drift(rendered, declared, live)
 
-        if drift and not self._allow_drift:
-            return self._record(rendered, "refused", drift=tuple(drift), extra_columns=tuple(extra))
-
         added: list[str] = []
         for name in missing:
             if not rendered.additive:
                 return self._record(
                     rendered,
                     "refused",
-                    drift=(f"{name} is a new column on an object declared non-additive",),
+                    drift=(f"{name} is a new column on an object declared non-additive", *drift),
                 )
             self._run(
                 f"ALTER TABLE {self._target(database, rendered.name)}{self._on_cluster(statement)} "
                 f"ADD COLUMN IF NOT EXISTS `{name}` {clauses[name]}"
             )
             added.append(name)
+
+        # A new column is additive whatever else drifted, so a refusal never holds one back.
+        if drift and not self._allow_drift:
+            return self._record(
+                rendered,
+                "refused",
+                columns_added=tuple(added),
+                drift=tuple(drift),
+                extra_columns=tuple(extra),
+            )
+
         for message in drift:
             self._apply_drift(rendered, message, clauses)
 
@@ -458,7 +509,7 @@ class ManifestApplier:
                     f"the schema declares {wanted!r}"
                 )
 
-        declared_ttl = _declared_ttl_days(statement)
+        declared_ttl = declared_ttl_days(statement)
         live_ttl = self._live_ttl_days(shape.get("engine_full", ""))
         if declared_ttl is not None and declared_ttl != live_ttl:
             drift.append(
@@ -490,9 +541,8 @@ class ManifestApplier:
             self._run(f"ALTER TABLE {target} MODIFY COLUMN `{name}` {clauses[name]}")
             return
         if message.startswith("TTL is"):
-            _, sep, tail = rendered.statements[0].partition("\nTTL ")
-            if sep:
-                clause = tail.split("\nSETTINGS", 1)[0].strip()
+            clause = _declared_ttl_clause(rendered.statements[0])
+            if clause:
                 self._run(f"ALTER TABLE {target} MODIFY TTL {clause}")
             return
         logger.warning(

@@ -24,12 +24,27 @@ release:
 
 test:
   min_coverage: 70  # Current: 75%. Target: 80%. Ratchet up as coverage improves.
+  native_tools: [helm]
   python:
     parallel: auto
   full:
     python:
       # Live tests need a deployed DFE; the full tier runs everything else.
       markers: "not live"
+      # Skips the full tier accepts, each for something CI cannot provide.
+      allow_skip:
+        # Entra ID group sync is tested against a real tenant, never a mock.
+        - "^Needs Entra sandbox$"
+        # Google Workspace group sync is tested against a real tenant, never a mock.
+        - "^Needs Google Workspace sandbox"
+        # dfe-loader and dfe-transform-vrl are private until GA, so CI's token cannot read them (#553).
+        - "^[a-z-]+ is private until GA; "
+        # The case-folding account checks only apply on a case-insensitive filesystem; CI's is not.
+        - "^this filesystem tells names apart by case$"
+        # The HyperDX client tests need a running HyperDX, which CI does not stand up.
+        - "^Requires running HyperDX instance$"
+        # The replica fan-out check needs an ON CLUSTER target; the harness is one node.
+        - "^not an ON CLUSTER deployment"
 
 quality:
   python:

@@ -274,6 +274,31 @@ class TestEnvOverrides:
         settings = load_settings()
         assert "http://a.com" in settings.api.cors_origins
 
+    def test_api_key_default_ttl_is_ninety_days(self):
+        assert load_settings().auth.api_key_default_ttl_days == 90
+
+    def test_api_key_default_ttl_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS", "0")
+        assert load_settings().auth.api_key_default_ttl_days == 0
+
+    def test_api_cors_origins_trust_no_localhost_outside_a_dev_posture(self, monkeypatch):
+        monkeypatch.setenv("DFE_ENV", "production")
+        monkeypatch.setenv("DFE_API_JWT_SECRET", "a-production-secret-at-least-32-bytes-long")
+        assert load_settings().api.cors_origins == []
+
+    def test_api_cors_origins_trust_the_local_console_in_a_dev_posture(self):
+        assert load_settings().api.cors_origins == [
+            "http://localhost:5173",
+            "http://localhost:5174",
+            "http://localhost:3000",
+        ]
+
+    def test_api_cors_origins_set_in_production_are_taken_as_set(self, monkeypatch):
+        monkeypatch.setenv("DFE_ENV", "production")
+        monkeypatch.setenv("DFE_API_JWT_SECRET", "a-production-secret-at-least-32-bytes-long")
+        monkeypatch.setenv("DFE_API_CORS_ORIGINS", "https://console.example")
+        assert load_settings().api.cors_origins == ["https://console.example"]
+
     def test_api_forwarded_allow_ips_override(self, monkeypatch):
         monkeypatch.setenv("DFE_API_FORWARDED_ALLOW_IPS", "10.42.0.0/16")
         settings = load_settings()
@@ -281,6 +306,29 @@ class TestEnvOverrides:
 
     def test_api_forwarded_allow_ips_defaults_to_loopback(self):
         assert APISettings().forwarded_allow_ips == "127.0.0.1"
+
+    def test_api_max_session_minutes_defaults_to_twelve_hours(self):
+        assert load_settings().api.max_session_minutes == 720
+
+    def test_api_max_session_minutes_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_API_MAX_SESSION_MINUTES", "90")
+        assert load_settings().api.max_session_minutes == 90
+
+    def test_login_throttle_defaults(self):
+        throttle = load_settings().auth.login_throttle
+        assert throttle.enabled is True
+        assert (throttle.username_failures, throttle.client_failures) == (5, 20)
+        assert throttle.max_delay_seconds == 900
+
+    def test_login_throttle_overrides(self, monkeypatch):
+        monkeypatch.setenv("DFE_AUTH_LOGIN_THROTTLE_ENABLED", "false")
+        monkeypatch.setenv("DFE_AUTH_LOGIN_THROTTLE_USERNAME_FAILURES", "3")
+        monkeypatch.setenv("DFE_AUTH_LOGIN_THROTTLE_CLIENT_FAILURES", "40")
+        monkeypatch.setenv("DFE_AUTH_LOGIN_THROTTLE_MAX_DELAY_SECONDS", "120")
+        throttle = load_settings().auth.login_throttle
+        assert throttle.enabled is False
+        assert (throttle.username_failures, throttle.client_failures) == (3, 40)
+        assert throttle.max_delay_seconds == 120
 
     def test_api_elastic_converter_max_upload_override(self, monkeypatch):
         monkeypatch.setenv("DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES", "1048576")
@@ -296,6 +344,14 @@ class TestEnvOverrides:
         monkeypatch.setenv("DFE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES", "65536")
         settings = load_settings()
         assert settings.api.elastic_converter_content_length_slack_bytes == 65_536
+
+    @pytest.mark.parametrize(("value", "expected"), [("true", True), ("false", False)])
+    def test_api_docs_enabled_override(self, monkeypatch, value, expected):
+        monkeypatch.setenv("DFE_API_DOCS_ENABLED", value)
+        assert load_settings().api.docs_enabled is expected
+
+    def test_api_docs_enabled_is_unset_by_default(self):
+        assert load_settings().api.docs_enabled is None
 
     def test_auth_enabled_override(self, monkeypatch):
         monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
@@ -1023,6 +1079,9 @@ class TestEverySettingIsRead:
         # catalogue in dfe-schemas, not from these.
         ("QueryViewSettings", "max_memory_usage"),
         ("QueryViewSettings", "max_rows_to_read"),
+        # Its one reader was HuntCheckpointManager, deleted as dead code; the field
+        # is the same leftover as checkpoint_path and goes with it.
+        ("HuntsSettings", "checkpoint_destination"),
     }
 
     # Names a ClickHouse SERVER setting also carries, where SQL naming the

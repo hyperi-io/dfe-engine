@@ -5,10 +5,10 @@ engine rendered nothing. This drives the real path instead - org registry + grou
 store -> `derive_group_bindings` -> `reconcile` - and connects as the users the
 reconciler itself minted.
 
-RUN THIS SERIALLY (`-n 0`). A reconcile is cluster-global: it sweeps stale
-`dfe_org_*` users and `dfe_rowpol_*` policies, so two concurrent workers delete
-each other's objects. The fixture refuses to run where that would destroy
-objects it did not create.
+A reconcile is cluster-global: it sweeps stale `dfe_org_*` users and
+`dfe_rowpol_*` policies. On the harness's own per-test ClickHouse nothing else is
+there to sweep; on a shared cluster, run this serially (`-n 0`), and the fixture
+refuses to run where it would destroy objects it did not create.
 
 No mocks (project policy): a real CH, a real file-backed secrets store.
 """
@@ -21,14 +21,18 @@ from types import SimpleNamespace
 import pytest
 
 from dfe_engine.governance.ch.models import TENANT_ROLE, org_user_name
+from dfe_engine.schema.plan import render_one
 
 from .conftest import count_as, drop_safely
 
 pytestmark = pytest.mark.integration
 
+# The manifest objects the reconcile's dfe_meta projection writes into.
+_META_IDS = ("db.meta", "meta.orgs", "meta.ch_tiers")
 
-@pytest.fixture(scope="module")
-def reconciled_world(admin_client, conn_params, tmp_path_factory):
+
+@pytest.fixture
+def reconciled_world(ch_client, ch_params, tmp_path_factory):
     """Reconcile a uid-scoped world through the real entry point.
 
     Every object is uid-suffixed and dropped in teardown. The reconcile also
@@ -41,7 +45,6 @@ def reconciled_world(admin_client, conn_params, tmp_path_factory):
     from dfe_engine.secrets import build_secrets
     from dfe_engine.settings import SecretsSettings
 
-    ch_client = admin_client
     try:
         ch_client.command("SET SQL_current_tenant_id = 'probe'")
     except Exception:
@@ -129,6 +132,10 @@ def reconciled_world(admin_client, conn_params, tmp_path_factory):
         drop_safely(ch_client, "DROP ROLE IF EXISTS dfe_otel_reader_role")
 
     try:
+        # The reconcile writes the dfe_meta projection, which the schema phase creates.
+        for object_id in _META_IDS:
+            for statement in render_one(object_id).statements:
+                ch_client.command(statement)
         ch_client.command(f"CREATE DATABASE IF NOT EXISTS {db}")
         ch_client.command(
             f"CREATE TABLE {table_fqn} "
@@ -154,7 +161,7 @@ def reconciled_world(admin_client, conn_params, tmp_path_factory):
         assert not result.errors, f"reconcile emitted errors: {result.errors}"
 
         yield {
-            "params": conn_params,
+            "params": ch_params,
             "table_fqn": table_fqn,
             "otel_table": otel_table,
             "store": store,
@@ -315,14 +322,14 @@ class TestReconcilerPinsTheTenant:
         )
         assert n == 0
 
-    def test_old_design_leftovers_are_swept(self, reconciled_world, admin_client):
+    def test_old_design_leftovers_are_swept(self, reconciled_world, ch_client):
         """Upgrade path: no per-org roles survive a reconcile."""
-        rows = admin_client.query(
+        rows = ch_client.query(
             "SELECT name FROM system.roles WHERE name LIKE 'dfe_org_%'"
         ).result_rows
         assert rows == []
         assert (
-            admin_client.query(
+            ch_client.query(
                 "SELECT count() FROM system.roles WHERE name = %(r)s",
                 parameters={"r": TENANT_ROLE},
             ).result_rows[0][0]

@@ -13,7 +13,6 @@ from .alert_grouping import (
     build_grouping_query,
     parse_duration,
 )
-from .checkpoint import HuntCheckpointManager
 from .hdx_sanitizer import HdxSanitizer, HdxSanitizeResult
 from .hunt_output import HuntResultSchema
 from .rule_creation_service import (
@@ -47,7 +46,6 @@ __all__ = [
     "CostEstimate",
     "HdxSanitizeResult",
     "HdxSanitizer",
-    "HuntCheckpointManager",
     "HuntResultSchema",
     "HuntValidator",
     "ParsedRule",
