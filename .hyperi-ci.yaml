@@ -57,6 +57,9 @@ quality:
     vulture: warn
     ty: warn
     bandit_exclude_tests: true
-    pip_audit:
-      mode: warn
-      reason: "diskcache CVE-2025-69872 (unsafe pickle) has no upstream fix: 5.6.3, released 2023-08-31, is the latest. Mitigated by pod isolation."
+  ignore:
+    - tool: pip-audit
+      ids:
+        - CVE-2025-69872
+        - PYSEC-2026-2447
+      reason: "diskcache unsafe pickle: no upstream fix (5.6.3, released 2023-08-31, is the latest); pySigma pulls it in and dfe-engine never imports it; mitigated by pod isolation."
