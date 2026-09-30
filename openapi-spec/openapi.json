@@ -10718,7 +10718,7 @@
           "queries"
         ],
         "summary": "Execute Raw Query",
-        "description": "Execute a raw query against a registered datasource adapter.\n\nThis is the lower-level query path -- for ad-hoc queries against\ndatasource adapters rather than parameterized views. Requires\n``query:execute`` permission.",
+        "description": "Execute a raw query against a registered datasource adapter.\n\nThis is the lower-level query path -- for ad-hoc queries against\ndatasource adapters rather than parameterized views. The SQL runs as the\nengine's own ClickHouse user, so it requires ``raw_query:execute``, which no\nbuilt-in role but ``admin`` holds, and ClickHouse runs it read-only.",
         "operationId": "execute_raw_query_api_v1_queries_raw_post",
         "requestBody": {
           "content": {

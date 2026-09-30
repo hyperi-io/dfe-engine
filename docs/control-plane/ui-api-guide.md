@@ -210,7 +210,7 @@ K8s/KEDA deployment config (replicas, resources, scaling).
 | GET | `/queries/views/namespaces` | List view namespaces |
 | GET | `/queries/views/{label}` | View definition + parameters |
 | POST | `/queries/views/{label}/execute` | Execute view -> JSON |
-| POST | `/queries/raw` | Raw query -> JSON |
+| POST | `/queries/raw` | Raw read-only query -> JSON. Needs `raw_query:execute`, which only `admin` holds |
 | GET | `/queries/health` | Query engine health |
 
 View execution returns **JSON** (`QueryResponse`) with fields:

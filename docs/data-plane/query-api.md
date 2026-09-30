@@ -77,10 +77,9 @@ validates against, and `org_id` is injected from the auth context.
 
 ### Access control on the raw path
 
-`POST /api/v1/queries/raw` executes against a registered datasource adapter
-(`clickhouse:...` or `storage:...`). It is governed by the `query:execute`
-RBAC scope plus the grants of the ClickHouse user the engine connects as -
-the CH GRANTs are authoritative for what a deployment exposes.
+`POST /api/v1/queries/raw` executes against a registered datasource adapter (`clickhouse:...`, `s3:...`, `minio:...` or `file:...`). The SQL runs as the engine's own ClickHouse user, not a tenant's, so the route needs `raw_query:execute`. That action sits outside `query:*`, and no built-in role but `admin` holds it.
+
+ClickHouse runs the query with `readonly=1`. That refuses every write and DDL statement, every `INSERT INTO FUNCTION` (`url()`, `file()`, `s3()`), a read through `url()`, and any `SETTINGS` clause in the query. The request's timeout still applies. The `s3`, `minio` and `file` adapters only list objects and never write, so `readonly` does not apply to them.
 
 ---
 
@@ -145,7 +144,7 @@ All routes live under `/api/v1/queries`:
 | `GET /api/v1/queries/views/namespaces` | `query:read` | list view namespaces |
 | `GET /api/v1/queries/views/{label}` | `query:read` | one view definition with parameters |
 | `POST /api/v1/queries/views/{label}/execute` | `query:execute` | execute a parameterized view |
-| `POST /api/v1/queries/raw` | `query:execute` | ad-hoc query against a datasource adapter |
+| `POST /api/v1/queries/raw` | `raw_query:execute` | ad-hoc read-only query against a datasource adapter, as the engine's own ClickHouse user |
 
 ### Execute a view
 
@@ -648,7 +647,8 @@ there is no per-query role list:
 | Scope | Grants |
 |---|---|
 | `query:read` | browse the view catalog (list/get views, namespaces) |
-| `query:execute` | execute views and raw datasource queries |
+| `query:execute` | execute views |
+| `raw_query:execute` | run raw datasource queries; only `admin` holds it |
 
 ```mermaid
 flowchart TD

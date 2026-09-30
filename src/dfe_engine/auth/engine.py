@@ -51,6 +51,7 @@ API_ENFORCED_ACTIONS: frozenset[str] = frozenset(
         "query:execute",
         "query:read",
         "query:write",
+        "raw_query:execute",
         "schema:delete",
         "schema:read",
         "schema:write",

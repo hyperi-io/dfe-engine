@@ -24,6 +24,16 @@ from dfe_engine import __version__
 from dfe_engine.settings import DFESettings, e2e_routes_enabled, is_dev_posture, load_settings
 
 
+def docs_served(settings: DFESettings) -> bool:
+    """True when Swagger UI (/docs) and ReDoc (/redoc) are mounted.
+
+    ``api.docs_enabled`` decides when set; unset, only a dev posture serves them.
+    """
+    if settings.api.docs_enabled is not None:
+        return settings.api.docs_enabled
+    return is_dev_posture(settings.env)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan: bootstrap registries on startup, cleanup on shutdown."""
@@ -541,6 +551,7 @@ def create_app(
     """
     settings = settings or load_settings()
     e2e_docs = e2e_routes_enabled(settings)
+    docs = docs_served(settings)
 
     openapi_tags = None
     if e2e_docs:
@@ -552,8 +563,9 @@ def create_app(
         description="Data Fusion Engine -- configuration, scheduling, and query API",
         version=__version__,
         lifespan=lifespan,
-        docs_url=None if e2e_docs else "/docs",
-        redoc_url="/redoc",
+        # The e2e server mounts its own /docs with a spec selector.
+        docs_url="/docs" if docs and not e2e_docs else None,
+        redoc_url="/redoc" if docs else None,
         openapi_tags=openapi_tags,
     )
 

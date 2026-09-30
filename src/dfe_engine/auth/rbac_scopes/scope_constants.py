@@ -108,6 +108,11 @@ query_scopes = {
     "query_execute": "query:execute",
 }
 
+# Arbitrary SQL as the engine's own ClickHouse user: outside query:* so only a bare * grants it.
+raw_query_scopes = {
+    "raw_query_execute": "raw_query:execute",
+}
+
 repository_scopes = {
     "repository_read": "repository:read",
     "repository_write": "repository:write",

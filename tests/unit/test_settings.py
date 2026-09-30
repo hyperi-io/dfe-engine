@@ -297,6 +297,14 @@ class TestEnvOverrides:
         settings = load_settings()
         assert settings.api.elastic_converter_content_length_slack_bytes == 65_536
 
+    @pytest.mark.parametrize(("value", "expected"), [("true", True), ("false", False)])
+    def test_api_docs_enabled_override(self, monkeypatch, value, expected):
+        monkeypatch.setenv("DFE_API_DOCS_ENABLED", value)
+        assert load_settings().api.docs_enabled is expected
+
+    def test_api_docs_enabled_is_unset_by_default(self):
+        assert load_settings().api.docs_enabled is None
+
     def test_auth_enabled_override(self, monkeypatch):
         monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
         monkeypatch.setenv("DFE_ENV", "dev")  # dev posture: placeholder secret allowed
