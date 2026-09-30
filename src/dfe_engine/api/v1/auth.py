@@ -31,6 +31,7 @@ from dfe_engine.api.deps import (
 from dfe_engine.api.errors import ErrorResponse
 from dfe_engine.api.metrics import ApiMetrics
 from dfe_engine.api.password_change import PASSWORD_CHANGE_CLAIM
+from dfe_engine.api.v1.hyperdx import hyperdx_identity
 from dfe_engine.api.v1.oidc_login import TOKEN_COOKIE
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth import account_durability, admin_retirement, breakglass, hyperdx_role
@@ -115,6 +116,18 @@ class UserResponse(BaseModel):
         default=False,
         description="True until the account replaces an issued password. A console "
         "shows the change screen before anything else while it is set.",
+    )
+    hyperdx_role: str = Field(
+        default="",
+        description="The role dfe-hyperdx gates team-wide dashboard changes on, "
+        "resolved from the account's groups at this request: 'admin' for a "
+        "system-scope admin or infra_admin, else 'member'.",
+    )
+    hyperdx_identity: str = Field(
+        default="",
+        description="The ClickHouse username GET /api/v1/hyperdx/connection hands "
+        "this session, without its password. dfe-hyperdx names the session's team "
+        "after it. Empty when that read would refuse the session.",
     )
 
 
@@ -405,6 +418,10 @@ async def get_me(user: CurrentUser, request: Request):
 
     A session on an issued password reports the flag and no roles, permissions,
     groups or orgs, because its token carries none until the change.
+
+    ``hyperdx_role`` and ``hyperdx_identity`` are what dfe-hyperdx takes a
+    session's dashboard role and team from; it caches this answer for 30 seconds,
+    so a group change reaches HyperDX in that window rather than at token expiry.
     """
     role_config = get_role_config(request)
     permissions = sorted(role_config.resolve_permissions(user.roles))
@@ -421,6 +438,8 @@ async def get_me(user: CurrentUser, request: Request):
         disabled_at=account.disabled_at if account else "",
         blocked_at=account.blocked_at if account else "",
         password_change_required=bool(account and account.password_change_required),
+        hyperdx_role=hyperdx_role.role_claim(user.grants),
+        hyperdx_identity=hyperdx_identity(request, user),
     )
 
 

@@ -23,7 +23,14 @@ from typing import Any
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
-from .models import DB, DEFAULT_SERVICE_ROLES, DEFAULT_TIERS, org_user_name, tenant_policy_name
+from .models import (
+    DB,
+    DEFAULT_SERVICE_ROLES,
+    DEFAULT_TIERS,
+    GROUP_USER_PREFIX,
+    org_user_name,
+    tenant_policy_name,
+)
 from .render import (
     _bq,
     render_materialise,
@@ -103,10 +110,12 @@ def compute_drops(
     orgs: list[Any],
     org_tables: list[tuple[str, str]],
     deny_tables: list[tuple[str, str]] | None = None,
+    existing_group_users: set[str] | None = None,
+    bindings: list[Any] | None = None,
 ) -> list[str]:
     """Pure diff: DROP DDL for tenant objects with no config behind them.
 
-    Three sweeps, each prefix-scoped so hand-made CH objects are safe:
+    Four sweeps, each prefix-scoped so hand-made CH objects are safe:
 
     - ``dfe_rowpol_*`` policies not in the desired tenant set. This also retires
       the pre-pinned design's per-org literal policies on upgrade.
@@ -115,12 +124,17 @@ def compute_drops(
     - ``dfe_org_*`` users for orgs no longer registered. An offboarded org whose
       credential stays live is still a tenant of the platform; the drop is the
       revocation.
+    - ``dfe_grp_*`` users no binding renders any more: the group was deleted, or
+      now claims an org that is unregistered or ambiguous. A platform group's
+      user reads every org's rows, so leaving it live after the group goes is a
+      credential nothing governs.
 
     ``existing_policies`` is ``(short_name, db, table)`` from system.row_policies.
     """
     desired_policies = {tenant_policy_name(db, t) for (db, t) in org_tables}
     desired_policies |= {tenant_policy_name(db, t) for (db, t) in (deny_tables or [])}
     desired_users = {org_user_name(o.name) for o in orgs}
+    desired_group_users = {b.user() for b in bindings or []}
     drops: list[str] = []
     for short_name, db, table in existing_policies:
         if short_name.startswith("dfe_rowpol_") and short_name not in desired_policies:
@@ -130,6 +144,9 @@ def compute_drops(
             drops.append(f"DROP ROLE IF EXISTS {_bq(role)}")
     for user in sorted(existing_org_users):
         if user.startswith("dfe_org_") and user not in desired_users:
+            drops.append(f"DROP USER IF EXISTS {_bq(user)}")
+    for user in sorted(existing_group_users or set()):
+        if user.startswith(GROUP_USER_PREFIX) and user not in desired_group_users:
             drops.append(f"DROP USER IF EXISTS {_bq(user)}")
     return drops
 
@@ -204,6 +221,13 @@ class ChRbacReconciler:
     def _existing_org_users(self) -> set[str]:
         rows = self._client.query(
             "SELECT name FROM system.users WHERE name LIKE 'dfe_org_%'"
+        ).result_rows
+        return {r[0] for r in rows}
+
+    def _existing_group_users(self) -> set[str]:
+        rows = self._client.query(
+            "SELECT name FROM system.users WHERE startsWith(name, {prefix:String})",
+            parameters={"prefix": GROUP_USER_PREFIX},
         ).result_rows
         return {r[0] for r in rows}
 
@@ -352,6 +376,8 @@ class ChRbacReconciler:
             orgs,
             org_tables,
             deny_tables,
+            existing_group_users=self._existing_group_users(),
+            bindings=bindings,
         )
         materialise = render_materialise(orgs, tiers)
 

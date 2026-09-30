@@ -140,6 +140,15 @@ def org_user_name(org: str) -> str:
     return _naming("org_user").format(org=org)
 
 
+def group_user_name(group: str) -> str:
+    """An RBAC group's CH user, when its binding names none of its own."""
+    return _naming("group_user").format(group=group)
+
+
+GROUP_USER_PREFIX = group_user_name("")
+"""What every derived group user name starts with; the drop sweep is scoped to it."""
+
+
 # ---- Config models --------------------------------------------------------
 
 
@@ -215,7 +224,7 @@ class GroupChBinding(BaseModel):
     ch_roles: list[str] = Field(default_factory=list)
 
     def user(self) -> str:
-        return self.ch_user or f"dfe_grp_{self.group}"
+        return self.ch_user or group_user_name(self.group)
 
 
 # ---- Seeded defaults, read from the dfe-schemas catalogue ------------------
