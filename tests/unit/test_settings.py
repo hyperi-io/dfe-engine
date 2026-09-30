@@ -1,6 +1,7 @@
 """Tests for DFE settings, particularly DFE_CONFIG_DIR resolution."""
 
 import os
+from unittest import mock
 
 import pytest
 from pydantic import ValidationError
@@ -532,22 +533,25 @@ class TestEnvOverrides:
 
     def test_dfe_tls_verify_bridges_to_scalo_env(self, monkeypatch):
         # The DFE_-prefixed valve maps onto scalo's env seam so one setting flips
-        # every scalo client. monkeypatch.delenv restores SCALO_TLS_VERIFY on teardown.
+        # every scalo client. load_settings writes SCALO_TLS_VERIFY straight into
+        # os.environ, which monkeypatch never recorded, so patch.dict removes it.
         from scalo.crypto import tls_verify_default
 
         monkeypatch.delenv("SCALO_TLS_VERIFY", raising=False)
         monkeypatch.setenv("DFE_TLS_VERIFY", "false")
-        load_settings()
-        assert os.environ.get("SCALO_TLS_VERIFY") == "false"
-        assert tls_verify_default() is False
+        with mock.patch.dict(os.environ):
+            load_settings()
+            assert os.environ.get("SCALO_TLS_VERIFY") == "false"
+            assert tls_verify_default() is False
 
     def test_dfe_tls_allow_weak_bridges_to_scalo_env(self, monkeypatch):
         from scalo.crypto import tls_allow_weak
 
         monkeypatch.delenv("SCALO_TLS_ALLOW_WEAK", raising=False)
         monkeypatch.setenv("DFE_TLS_ALLOW_WEAK", "true")
-        load_settings()
-        assert tls_allow_weak() is True
+        with mock.patch.dict(os.environ):
+            load_settings()
+            assert tls_allow_weak() is True
 
     def test_clickhouse_password_override(self, monkeypatch):
         monkeypatch.setenv("DFE_CLICKHOUSE_PASSWORD", "secret123")
