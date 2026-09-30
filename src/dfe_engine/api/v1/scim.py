@@ -62,7 +62,7 @@ from scim2_models import (
     User as ScimUser,
 )
 
-from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.deps import CurrentUser, provider_bindings, require_action
 from dfe_engine.api.password_floor import FLOOR_MESSAGE, below_floor, count_floor_refusal
 from dfe_engine.api.v1.account_groups import check_group_changes, check_role_assignment, scope_of
 from dfe_engine.auth.accounts import AccountExistsError, discard_created
@@ -223,10 +223,11 @@ async def list_users(user: CurrentUser, request: Request) -> Response:
     window = accounts[start_index - 1 : start_index - 1 + count] if count else []
 
     groups = group_store.list()
+    bindings = provider_bindings(request)
     resources = [
         account_to_scim_user(
             a,
-            groups=groups_held(a, groups),
+            groups=groups_held(a, groups, bindings=bindings),
             location=_location(request, "Users", a.username),
         )
         for a in window
@@ -254,7 +255,7 @@ async def get_user(user_id: str, user: CurrentUser, request: Request) -> Respons
     account = store.get(user_id)
     if account is None:
         return scim_error(404, f"User '{user_id}' not found")
-    groups = groups_held(account, group_store.list())
+    groups = groups_held(account, group_store.list(), bindings=provider_bindings(request))
     scim_user = account_to_scim_user(
         account, groups=groups, location=_location(request, "Users", user_id)
     )
@@ -344,7 +345,7 @@ async def replace_user(user_id: str, user: CurrentUser, request: Request) -> Res
         external_id=fields["external_id"],
     )
     account = store.get(user_id)
-    groups = groups_held(account, group_store.list())
+    groups = groups_held(account, group_store.list(), bindings=provider_bindings(request))
     scim_user = account_to_scim_user(
         account, groups=groups, location=_location(request, "Users", user_id)
     )
@@ -381,7 +382,7 @@ async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Respo
         # on /Groups) are ignored - the record stays consistent either way.
 
     account = store.get(user_id)
-    groups = groups_held(account, group_store.list())
+    groups = groups_held(account, group_store.list(), bindings=provider_bindings(request))
     scim_user = account_to_scim_user(
         account, groups=groups, location=_location(request, "Users", user_id)
     )
@@ -401,7 +402,8 @@ async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Resp
         return scim_error(404, f"User '{user_id}' not found")
     # Deleting a user takes it out of every group it holds, so it needs their roles.
     groups = group_store.list()
-    check_group_changes(request, user, groups, groups_held(existing, groups), ())
+    held = groups_held(existing, groups, bindings=provider_bindings(request))
+    check_group_changes(request, user, groups, held, ())
     store.delete(user_id)
     forget_member(group_store, user_id)
     logger.info("SCIM user deleted", username=user_id)

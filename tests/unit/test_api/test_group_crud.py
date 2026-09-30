@@ -252,6 +252,7 @@ class TestTakingARoleOffAGroupNeedsIt:
     """A role taken off a group is taken from every member, the recovery credentials included."""
 
     def test_admin_cannot_be_taken_off_the_admin_group(self, client, app, operator_headers):
+        app.state.group_store.update("dfe-admins", source_id="dfe-admins")
         resp = client.put(
             "/api/v1/auth/groups/dfe-admins",
             json={"roles": ["infra_admin"]},

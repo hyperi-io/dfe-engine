@@ -22,9 +22,6 @@ server:
     refresh_interval_secs: 3600
   auth:
     mode: bearer
-    accepted_headers:
-      - name: x-hyperi-agent
-        values: ["1.0"]
     bearer:
       secret_source: "vault:secret/dfe/receiver:bearer_tokens"
       refresh_interval_secs: 300

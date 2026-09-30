@@ -24024,7 +24024,7 @@
             },
             "type": "array",
             "title": "Groups",
-            "description": "Groups the account holds: those whose group file lists it, plus the groups its identity provider asserts when one owns it."
+            "description": "Names of the groups the account holds: those whose group file lists it, plus, when an identity provider owns it, the groups the provider's asserted ids are linked to by source_id."
           },
           "email": {
             "type": "string",
@@ -26305,7 +26305,7 @@
               }
             ],
             "title": "Expires At",
-            "description": "Optional ISO-8601 expiry (UTC if no offset given); omit for a key that never expires"
+            "description": "Optional ISO-8601 expiry (UTC if no offset given). Omitted, the key expires after auth.api_key_default_ttl_days (90 unless configured; 0 there means it never expires)."
           }
         },
         "type": "object",

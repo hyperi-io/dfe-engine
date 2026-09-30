@@ -34,6 +34,7 @@ from dfe_engine.api.deps import (
     CurrentUser,
     Settings,
     account_for_session_subject,
+    provider_bindings,
     require_action,
 )
 from dfe_engine.api.pagination import (
@@ -218,8 +219,9 @@ class AccountResponse(BaseModel):
     disabled_at: str = ""
     blocked_at: str = ""
     groups: list[str] = Field(
-        description="Groups the account holds: those whose group file lists it, plus the "
-        "groups its identity provider asserts when one owns it.",
+        description="Names of the groups the account holds: those whose group file lists "
+        "it, plus, when an identity provider owns it, the groups the provider's asserted "
+        "ids are linked to by source_id.",
     )
     email: str
     phone: str = ""
@@ -247,10 +249,11 @@ class AttributesRequest(BaseModel):
         return check_attribute_depth(value)
 
 
-def _account_response(account: Account, groups: list[Group]) -> AccountResponse:
+def _account_response(request: Request, account: Account, groups: list[Group]) -> AccountResponse:
     """Map a stored account to the public response (never includes password_hash).
 
     Args:
+        request: The request, for the provider bindings the groups resolve under.
         account: The stored account.
         groups: Every stored group, listed once per request.
     """
@@ -260,7 +263,7 @@ def _account_response(account: Account, groups: list[Group]) -> AccountResponse:
         blocked=account.blocked,
         disabled_at=account.disabled_at,
         blocked_at=account.blocked_at,
-        groups=groups_held(account, groups),
+        groups=groups_held(account, groups, bindings=provider_bindings(request)),
         email=account.email,
         phone=account.phone,
         name=account.name,
@@ -425,7 +428,7 @@ async def create_account(
         summary="create account",
         actor=user.user_id,
     )
-    return _account_response(account, group_store.list())
+    return _account_response(request, account, group_store.list())
 
 
 @router.get(
@@ -461,7 +464,7 @@ async def list_accounts(
     if blocked is not None:
         accounts = [account for account in accounts if account.blocked is blocked]
     groups = request.app.state.group_store.list()
-    rows = [_account_response(a, groups).model_dump() for a in accounts]
+    rows = [_account_response(request, a, groups).model_dump() for a in accounts]
     rows = apply_search(rows, search, ["username", "name", "email"])
     rows = apply_sort(rows, sort_by, sort_order)
     summaries = [AccountResponse.model_validate(row) for row in rows]
@@ -482,7 +485,7 @@ async def get_current_user_account(
 
     store: AccountStore = request.app.state.account_store
     account = _require_own_account(store, user.user_id)
-    response = _account_response(account, request.app.state.group_store.list())
+    response = _account_response(request, account, request.app.state.group_store.list())
     if account.password_change_required:
         response.groups = []
     return response
@@ -514,7 +517,7 @@ async def update_current_user_account(
         summary="update own account",
         actor=user.user_id,
     )
-    return _account_response(account, request.app.state.group_store.list())
+    return _account_response(request, account, request.app.state.group_store.list())
 
 
 @router.get(
@@ -537,7 +540,7 @@ async def get_account(
             status_code=404,
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
         )
-    return _account_response(account, request.app.state.group_store.list())
+    return _account_response(request, account, request.app.state.group_store.list())
 
 
 @router.put(
@@ -561,7 +564,8 @@ async def update_account(
     existing = _require_account(store, username)
     if body.groups is not None:
         groups = group_store.list()
-        check_group_changes(request, user, groups, groups_held(existing, groups), body.groups)
+        held = groups_held(existing, groups, bindings=provider_bindings(request))
+        check_group_changes(request, user, groups, held, body.groups)
     update_fields: dict[str, object] = _contact_updates(body)
     if body.groups is not None:
         update_fields["groups"] = body.groups
@@ -590,7 +594,7 @@ async def update_account(
         summary="update account",
         actor=user.user_id,
     )
-    return _account_response(account, group_store.list())
+    return _account_response(request, account, group_store.list())
 
 
 @router.post(
@@ -785,7 +789,8 @@ async def delete_account(
         )
     # Deleting an account takes it out of every group it holds, so it needs their roles.
     groups = group_store.list()
-    check_group_changes(request, user, groups, groups_held(existing, groups), ())
+    held = groups_held(existing, groups, bindings=provider_bindings(request))
+    check_group_changes(request, user, groups, held, ())
     # The store refuses the break-glass admin, the one account the deploy repo carries.
     store.delete(username)
     forget_member(group_store, username)

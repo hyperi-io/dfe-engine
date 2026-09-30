@@ -72,9 +72,7 @@ class AuthConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mode: str = Field(default="none", description="none, header, bearer, mtls, both")
-    accepted_headers: list[AcceptedHeader] = Field(
-        default_factory=lambda: [AcceptedHeader(name="x-hyperi-agent", values=[SecretStr("1.0")])]
-    )
+    accepted_headers: list[AcceptedHeader] = Field(default_factory=list)
     bearer: BearerConfig = Field(default_factory=BearerConfig)
     header_name: str = ""
     header_values: list[SecretStr] = []

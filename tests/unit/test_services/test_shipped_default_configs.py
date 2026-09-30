@@ -105,6 +105,19 @@ def test_every_shipped_receiver_config_sends_inside_the_hold(name: str, text: st
     assert shipped == app, name
 
 
+@pytest.mark.parametrize(("name", "text"), _RECEIVER, ids=[n for n, _ in _RECEIVER])
+def test_no_shipped_receiver_config_accepts_a_published_header(name: str, text: str):
+    # dfe-receiver #173: x-hyperi-agent: 1.0 is public, so it admits nobody.
+    auth = (yaml_load_string(text) or {})["server"]["auth"]
+    assert auth.get("accepted_headers", []) == [], name
+
+
+def test_the_receiver_model_accepts_no_header_by_default():
+    model = get_plugin("receiver").config_class.model_validate({})
+    assert model.server.auth.accepted_headers == []
+    assert _app_default("contract", "dfe-receiver", "server")["auth"]["accepted_headers"] == []
+
+
 def test_the_production_receiver_dials_the_loader_the_app_manifest_places():
     # The Service name with no namespace resolves wherever the suite is installed.
     production = yaml_load_string(dict(_RECEIVER)["receiver-production.yaml"]) or {}

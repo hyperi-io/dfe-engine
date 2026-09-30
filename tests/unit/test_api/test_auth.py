@@ -392,6 +392,12 @@ def _bearer(api_settings, sub: str, **claims) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _link(app, *names: str) -> None:
+    """Link each group to what an IdP that sends group names asserts for it: its name."""
+    for name in names:
+        app.state.group_store.update(name, source_id=name)
+
+
 class TestRolesFollowTheBoundAccount:
     """A session's store roles are those of the account it binds to, and no other's."""
 
@@ -400,6 +406,7 @@ class TestRolesFollowTheBoundAccount:
         self, client: TestClient, app, api_settings, held_by
     ):
         """alice-smith-corp records Alice.Smith@corp, so a token for the bare stem binds nothing."""
+        _link(app, "dfe-admins")
         signed_in = client.get(
             "/api/v1/auth/me",
             headers={"X-Oidc-Subject": "Alice.Smith@corp", "X-Oidc-Groups": "dfe-admins"},
@@ -419,6 +426,7 @@ class TestRolesFollowTheBoundAccount:
         self, client: TestClient, app, api_settings
     ):
         """Members see their own groups, and the bare stem is not a member of Alice's."""
+        _link(app, "dfe-analysts")
         client.get(
             "/api/v1/auth/me",
             headers={"X-Oidc-Subject": "Alice.Smith@corp", "X-Oidc-Groups": "dfe-analysts"},
@@ -430,7 +438,10 @@ class TestRolesFollowTheBoundAccount:
         assert resp.status_code == 200, resp.text
         assert resp.json()["items"] == []
 
-    def test_a_proxied_user_with_no_local_account_gets_its_claim_groups(self, client: TestClient):
+    def test_a_proxied_user_with_no_local_account_gets_its_claim_groups(
+        self, client: TestClient, app
+    ):
+        _link(app, "dfe-analysts")
         resp = client.get(
             "/api/v1/auth/me",
             headers={"X-Oidc-Subject": "nia@example.com", "X-Oidc-Groups": "dfe-analysts"},
@@ -470,8 +481,9 @@ class TestRolesFollowTheBoundAccount:
         assert resp.json()["roles"] == []
         assert resp.json()["groups"] == []
 
-    def test_a_bound_idp_user_gets_its_accounts_roles(self, client: TestClient, api_settings):
+    def test_a_bound_idp_user_gets_its_accounts_roles(self, client: TestClient, app, api_settings):
         """Alice.Smith@corp binds alice-smith-corp through the stem; the claim is not consulted."""
+        _link(app, "dfe-analysts")
         client.get(
             "/api/v1/auth/me",
             headers={"X-Oidc-Subject": "Alice.Smith@corp", "X-Oidc-Groups": "dfe-analysts"},
@@ -525,6 +537,8 @@ class TestRolesFollowTheBoundAccount:
         store = app.state.account_store
         store.create("jane-doe", secrets.token_urlsafe(16), groups=["dfe-analysts"])
         store.update("jane-doe", source_provider="scim", subject="jane.doe")
+        # SCIM lists its members in the group, which is what a SCIM group grants by.
+        app.state.group_store.add_member("dfe-analysts", "jane-doe")
 
         resp = client.get("/api/v1/auth/me", headers=_bearer(api_settings, "jane.doe"))
 
@@ -644,6 +658,7 @@ class TestRolesFollowTheBoundAccount:
         self, client: TestClient, app, admin_headers: dict, api_settings
     ):
         """jane's IdP asserts dfe-admins; an operator adding her to dfe-viewers adds, not replaces."""
+        _link(app, "dfe-admins")
         signed_in = client.get(
             "/api/v1/auth/me",
             headers={"X-Oidc-Subject": "jane@example.com", "X-Oidc-Groups": "dfe-admins"},
@@ -668,8 +683,9 @@ class TestATokenWhoseSubjectNamesAnAccountItDoesNotBind:
     """alice-smith-corp records Alice.Smith@corp, so a token for the bare name is not hers."""
 
     @pytest.fixture
-    def laundered(self, client: TestClient, api_settings) -> dict[str, str]:
+    def laundered(self, client: TestClient, app, api_settings) -> dict[str, str]:
         """A token for the bare name whose claim carries Alice's groups, as a refresh once wrote."""
+        _link(app, "dfe-admins")
         signed_in = client.get(
             "/api/v1/auth/me",
             headers={"X-Oidc-Subject": "Alice.Smith@corp", "X-Oidc-Groups": "dfe-admins"},
@@ -700,12 +716,14 @@ def _listed(client: TestClient, headers: dict[str, str]) -> list[str]:
 class TestAMemberSeesTheGroupsItHolds:
     """No group:read, so only the groups the session's own roles come from are listed."""
 
-    def test_a_proxied_idp_user_sees_its_idp_group(self, client: TestClient):
+    def test_a_proxied_idp_user_sees_its_idp_group(self, client: TestClient, app):
+        _link(app, "dfe-analysts")
         headers = {"X-Oidc-Subject": "nia@example.com", "X-Oidc-Groups": "dfe-analysts"}
 
         assert _listed(client, headers) == ["dfe-analysts"]
 
-    def test_a_bound_idp_token_sees_its_idp_group(self, client: TestClient, api_settings):
+    def test_a_bound_idp_token_sees_its_idp_group(self, client: TestClient, app, api_settings):
+        _link(app, "dfe-analysts")
         client.get(
             "/api/v1/auth/me",
             headers={"X-Oidc-Subject": "nia@example.com", "X-Oidc-Groups": "dfe-analysts"},
@@ -727,25 +745,22 @@ class TestAMemberSeesTheGroupsItHolds:
 
         assert _listed(client, {"X-API-Key": key}) == ["dfe-analysts"]
 
-    def test_a_group_it_does_not_hold_stays_hidden(self, client: TestClient):
+    def test_a_group_it_does_not_hold_stays_hidden(self, client: TestClient, app):
+        _link(app, "dfe-analysts")
         headers = {"X-Oidc-Subject": "nia@example.com", "X-Oidc-Groups": "dfe-analysts"}
 
         resp = client.get("/api/v1/auth/groups/dfe-admins", headers=headers)
 
         assert resp.status_code == 404, resp.text
 
-    @pytest.mark.parametrize("session", ["proxied-idp", "api-key"])
-    def test_a_group_whose_provider_id_is_a_held_groups_name_stays_hidden(
-        self, client: TestClient, app, session
+    def test_an_api_keys_group_named_as_anothers_provider_id_stays_hidden(
+        self, client: TestClient, app
     ):
-        """The identifier resolves by name first, so the other group grants the session nothing."""
+        """An API key's groups are names an operator chose, so the name decides first."""
         app.state.group_store.create("shadow-analysts", ["admin"])
         app.state.group_store.update("shadow-analysts", source_id="dfe-analysts")
-        if session == "api-key":
-            _, key = app.state.api_key_store.create("ci-analyst", groups=["dfe-analysts"])
-            headers = {"X-API-Key": key}
-        else:
-            headers = {"X-Oidc-Subject": "nia@example.com", "X-Oidc-Groups": "dfe-analysts"}
+        _, key = app.state.api_key_store.create("ci-analyst", groups=["dfe-analysts"])
+        headers = {"X-API-Key": key}
 
         listed = _listed(client, headers)
         fetched = client.get("/api/v1/auth/groups/shadow-analysts", headers=headers)
@@ -754,6 +769,22 @@ class TestAMemberSeesTheGroupsItHolds:
         assert listed == ["dfe-analysts"]
         assert fetched.status_code == 404, fetched.text
         assert me.json()["roles"] == ["data_analyst"]
+
+    def test_an_idp_assertion_takes_the_group_linked_to_it_not_the_one_of_its_name(
+        self, client: TestClient, app
+    ):
+        """A group of the asserted name is not the IdP's; the group linked to that id is."""
+        app.state.group_store.create("linked-analysts", ["data_viewer"])
+        app.state.group_store.update("linked-analysts", source_id="dfe-analysts")
+        headers = {"X-Oidc-Subject": "nia@example.com", "X-Oidc-Groups": "dfe-analysts"}
+
+        listed = _listed(client, headers)
+        fetched = client.get("/api/v1/auth/groups/dfe-analysts", headers=headers)
+        me = client.get("/api/v1/auth/me", headers=headers)
+
+        assert listed == ["linked-analysts"]
+        assert fetched.status_code == 404, fetched.text
+        assert me.json()["roles"] == ["data_viewer"]
 
 
 class TestOnlyASessionBoundToAnAccountRefreshes:
@@ -805,8 +836,9 @@ class TestOnlyASessionBoundToAnAccountRefreshes:
         assert resp.status_code == 200, resp.text
         assert sorted(resp.json()["roles"]) == ["data_analyst", "infra_admin"]
 
-    def test_a_bound_idp_user_still_refreshes(self, client: TestClient, api_settings):
+    def test_a_bound_idp_user_still_refreshes(self, client: TestClient, app, api_settings):
         """Alice.Smith@corp binds alice-smith-corp through the stem, which records her."""
+        _link(app, "dfe-analysts")
         client.get(
             "/api/v1/auth/me",
             headers={"X-Oidc-Subject": "Alice.Smith@corp", "X-Oidc-Groups": "dfe-analysts"},

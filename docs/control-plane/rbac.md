@@ -223,7 +223,7 @@ flowchart TD
     end
 
     subgraph "Role Resolution (what roles?)"
-        ROLE_RES["Each group by name, else by provider source_id<br/>Union of roles, scoped grants and org_ids"]
+        ROLE_RES["Member groups by name, IdP identifiers by linked source_id<br/>Union of roles, scoped grants and org_ids"]
     end
 
     subgraph "Permission Check (can you do this?)"
@@ -248,8 +248,7 @@ flowchart TD
     style DENY fill:#f44,color:#fff
 ```
 
-OIDC groups and local groups are unified — an OIDC group name that matches a
-group file in `config/auth/groups/` inherits that group's roles.
+An identifier an IdP asserts, in a token's groups claim, `X-Oidc-Groups` or a SCIM record, takes a group only when that group's `source_id` is the identifier and its `source_provider` is empty or the provider the login came through (or one `auth.source_provider_bindings` joins to it). A group's name links nothing, so an IdP group that happens to be called `dfe-admins` gets no roles until an admin links it. Logins through `X-Oidc-Groups` count as the provider named in `auth.proxy_provider` (default `oidc`).
 
 For a local account the group files are the authority. The account's own `groups` list is kept in step by the API routes, but it grants nothing. A member removed from a group file in the live store loses that group's roles and orgs at its next engine request, whether the API removed it, someone edited the file in the engine's auth directory, or the Helm chart's `authConfig.groupsConfigMap` copied a new file in at pod start. The deploy repo's `governance/rbac` classes are neither read nor written at runtime, so an edit there changes nothing. An account an IdP owns (JIT or SCIM) also holds the groups its record says the IdP asserts, so a group an operator adds it to by hand sits beside those.
 

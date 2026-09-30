@@ -37,6 +37,8 @@ from dfe_engine.gitcrud.commit_policy import CommitContext, build_message
 from dfe_engine.gitcrud.engine import ResourceNotFoundError
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from dfe_engine.auth.accounts import AccountStore, DocuStoreAccountStore
     from dfe_engine.auth.groups import DocuStoreGroupStore, GroupStore
     from dfe_engine.gitcrud.engine import GitCrud
@@ -89,6 +91,8 @@ def another_admin_exists(
     account_store: AccountStore | DocuStoreAccountStore | None,
     group_store: GroupStore | DocuStoreGroupStore | None,
     admin_name: str,
+    *,
+    bindings: Mapping[str, str],
 ) -> bool:
     """True when an account other than the seeded pair can sign in holding the admin role.
 
@@ -97,11 +101,11 @@ def another_admin_exists(
     the bootstrap admin nor ``breakglass`` counts: retiring onto the recovery
     credential is what this exists to avoid. Only a system-scope group counts --
     an org-scoped group's roles bind inside that org, so its members cannot run
-    the deployment. The account must hold that group the way a session does: its
-    identifiers (:func:`~dfe_engine.auth.membership.groups_held`) resolved as login
-    resolves them (:func:`~dfe_engine.auth.membership.groups_named`). It must also be
-    enabled, unblocked and past any issued password, since until then its session
-    holds no roles.
+    the deployment. The account must hold that group the way a session does
+    (:func:`~dfe_engine.auth.membership.groups_held`, under *bindings*, the
+    deployment's ``auth.source_provider_bindings``). It must also be enabled,
+    unblocked and past any issued password, since until then its session holds
+    no roles.
     """
     from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
     from dfe_engine.auth.groups import GROUP_SCOPE_SYSTEM
@@ -121,7 +125,7 @@ def another_admin_exists(
             continue
         if account.password_change_required:
             continue
-        held = groups_named(groups_held(account, groups), groups)
+        held = groups_named(groups_held(account, groups, bindings=bindings), groups)
         if any(group.name in admin_names for group in held):
             return True
     return False

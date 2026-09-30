@@ -519,14 +519,14 @@ class TestAnotherAdminExists:
     def test_the_seeded_pair_does_not_count(self, tmp_path: Path, crud):
         store, groups = self._stores(tmp_path, crud)
 
-        assert admin_retirement.another_admin_exists(store, groups, "admin") is False
+        assert admin_retirement.another_admin_exists(store, groups, "admin", bindings={}) is False
 
     def test_an_enabled_admin_group_member_counts(self, tmp_path: Path, crud):
         store, groups = self._stores(tmp_path, crud)
         store.create("alice", MINTED_SEED, groups=["dfe-admins"])
         groups.add_member("dfe-admins", "alice")
 
-        assert admin_retirement.another_admin_exists(store, groups, "admin") is True
+        assert admin_retirement.another_admin_exists(store, groups, "admin", bindings={}) is True
 
     def test_an_admin_group_named_only_in_the_account_record_does_not_count(
         self, tmp_path: Path, crud
@@ -535,15 +535,28 @@ class TestAnotherAdminExists:
         store, groups = self._stores(tmp_path, crud)
         store.create("ops", MINTED_SEED, groups=["dfe-admins"])
 
-        assert admin_retirement.another_admin_exists(store, groups, "admin") is False
+        assert admin_retirement.another_admin_exists(store, groups, "admin", bindings={}) is False
 
-    def test_an_idp_account_asserting_the_admin_group_counts(self, tmp_path: Path, crud):
-        """An IdP-owned account holds what its IdP asserts, as a session does."""
+    def test_an_idp_account_asserting_the_admin_groups_name_does_not_count(
+        self, tmp_path: Path, crud
+    ):
+        """A name the IdP sends links no group, so its session holds no admin role."""
         store, groups = self._stores(tmp_path, crud)
         store.create("jane-corp-com", "", groups=["dfe-admins"])
         store.update("jane-corp-com", external=True, source_provider="entra")
 
-        assert admin_retirement.another_admin_exists(store, groups, "admin") is True
+        assert admin_retirement.another_admin_exists(store, groups, "admin", bindings={}) is False
+
+    def test_an_idp_account_asserting_the_id_the_admin_group_is_linked_to_counts(
+        self, tmp_path: Path, crud
+    ):
+        """An IdP-owned account holds the groups its assertion is linked to, as a session does."""
+        store, groups = self._stores(tmp_path, crud)
+        groups.update("dfe-admins", source_id="dfe-admins")
+        store.create("jane-corp-com", "", groups=["dfe-admins"])
+        store.update("jane-corp-com", external=True, source_provider="entra")
+
+        assert admin_retirement.another_admin_exists(store, groups, "admin", bindings={}) is True
 
     def test_an_idp_account_asserting_the_admin_groups_provider_id_counts(
         self, tmp_path: Path, crud
@@ -555,19 +568,29 @@ class TestAnotherAdminExists:
         store.create("jane-corp-com", "", groups=[guid])
         store.update("jane-corp-com", external=True, source_provider="entra")
 
-        assert admin_retirement.another_admin_exists(store, groups, "admin") is True
+        assert admin_retirement.another_admin_exists(store, groups, "admin", bindings={}) is True
 
-    def test_a_group_named_as_the_admin_groups_provider_id_does_not_count(
+    def test_the_group_an_idp_id_is_linked_to_counts_not_the_group_of_that_name(
         self, tmp_path: Path, crud
     ):
-        """Login resolves the identifier by name first, so the session holds analyst roles only."""
+        """Login takes the group the asserted id is linked to, so the session holds admin."""
         store, groups = self._stores(tmp_path, crud)
         groups.create("entra-analysts", roles=["data_analyst"])
         groups.update("dfe-admins", source_id="entra-analysts")
         store.create("jane-corp-com", "", groups=["entra-analysts"])
         store.update("jane-corp-com", external=True, source_provider="entra")
 
-        assert admin_retirement.another_admin_exists(store, groups, "admin") is False
+        assert admin_retirement.another_admin_exists(store, groups, "admin", bindings={}) is True
+
+    def test_a_group_linked_to_another_provider_does_not_count(self, tmp_path: Path, crud):
+        store, groups = self._stores(tmp_path, crud)
+        groups.update("dfe-admins", source_provider="okta", source_id="00g-admins")
+        store.create("jane-corp-com", "", groups=["00g-admins"])
+        store.update("jane-corp-com", external=True, source_provider="entra")
+
+        assert admin_retirement.another_admin_exists(store, groups, "admin", bindings={}) is False
+        bound = {"entra": "okta"}
+        assert admin_retirement.another_admin_exists(store, groups, "admin", bindings=bound)
 
     @pytest.mark.parametrize(
         "state",
@@ -584,7 +607,7 @@ class TestAnotherAdminExists:
         groups.add_member("dfe-admins", "alice")
         store.update("alice", **state)
 
-        assert admin_retirement.another_admin_exists(store, groups, "admin") is False
+        assert admin_retirement.another_admin_exists(store, groups, "admin", bindings={}) is False
 
     def test_an_account_on_an_issued_password_does_not_count(self, tmp_path: Path, crud):
         """Until the change its session holds no roles, so it cannot run the deployment."""
@@ -592,13 +615,13 @@ class TestAnotherAdminExists:
         store.create("alice", MINTED_SEED, groups=["dfe-admins"], change_required=True)
         groups.add_member("dfe-admins", "alice")
 
-        assert admin_retirement.another_admin_exists(store, groups, "admin") is False
+        assert admin_retirement.another_admin_exists(store, groups, "admin", bindings={}) is False
 
     def test_a_user_without_the_admin_role_does_not_count(self, tmp_path: Path, crud):
         store, groups = self._stores(tmp_path, crud)
         store.create("bob", MINTED_SEED, groups=["dfe-viewers"])
 
-        assert admin_retirement.another_admin_exists(store, groups, "admin") is False
+        assert admin_retirement.another_admin_exists(store, groups, "admin", bindings={}) is False
 
     def test_an_org_scoped_admin_does_not_count(self, tmp_path: Path, crud):
         """Org-scoped roles bind inside that org, so its members cannot run the deployment."""
@@ -606,7 +629,7 @@ class TestAnotherAdminExists:
         groups.create("acme-admins", roles=["admin"], members=["carol"], scope="org:acme")
         store.create("carol", MINTED_SEED, groups=["acme-admins"])
 
-        assert admin_retirement.another_admin_exists(store, groups, "admin") is False
+        assert admin_retirement.another_admin_exists(store, groups, "admin", bindings={}) is False
 
 
 # ── Deployment hints ─────────────────────────────────────────

@@ -92,6 +92,7 @@ class TestCredentialExchangeWritesTheEvent:
 
     def test_oidc_callback_writes_one_event(self, client: TestClient, app):
         app.state.oidc_rp = _CallbackRp()
+        app.state.group_store.update("dfe-admins", source_id="dfe-admins")
 
         with patch(AUDIT_LOGGER) as mock_logger:
             resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)

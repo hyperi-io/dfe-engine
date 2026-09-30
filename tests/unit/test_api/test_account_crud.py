@@ -562,12 +562,17 @@ class TestTheGroupsAnAccountShows:
         assert resp.status_code == 200, resp.text
         assert not resp.json().get("groups")
 
-    def test_an_idp_account_shows_the_groups_its_idp_asserts(self, client, app, admin_headers):
-        app.state.account_store.create("jane-corp-com", "", groups=["dfe-analysts"])
+    def test_an_idp_account_shows_the_groups_its_assertion_is_linked_to(
+        self, client, app, admin_headers
+    ):
+        guid = "7b1d0f3e-0000-4000-8000-000000000003"
+        app.state.group_store.update("dfe-analysts", source_id=guid)
+        app.state.account_store.create("jane-corp-com", "", groups=[guid, "dfe-admins"])
         app.state.account_store.update("jane-corp-com", external=True, source_provider="entra")
 
         resp = client.get("/api/v1/auth/accounts/jane-corp-com", headers=admin_headers)
 
+        # dfe-admins is only a name the IdP sent, so it links nothing.
         assert resp.status_code == 200, resp.text
         assert resp.json()["groups"] == ["dfe-analysts"]
 

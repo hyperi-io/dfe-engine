@@ -35,7 +35,7 @@ from dfe_engine.auth.jit import (
     JitIdentityCollisionError,
     JitSubjectUnusableError,
 )
-from dfe_engine.auth.membership import groups_held
+from dfe_engine.auth.membership import groups_held, linked_groups, linked_providers
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.gitcrud.retention import effective_settings
 from dfe_engine.settings import DFESettings, is_dev_posture
@@ -373,24 +373,23 @@ def _resolve_group_grants(
 ) -> GroupResolution:
     """Resolve roles, org_ids, scoped grants and the matched groups from group identifiers.
 
+    The identifiers are ones an operator chose -- the group names an API key or a
+    group file carries, or the names an IdP assertion was already resolved to by
+    :func:`~dfe_engine.auth.membership.linked_groups`. An IdP's raw assertion never
+    comes here, because a name it sends would take the stored group of that name.
     Each identifier is looked up by group NAME first, then by provider
-    ``source_id`` (so a token carrying Entra GUIDs or Google group keys resolves
-    against the sync-populated group files). Unknown identifiers are silently
-    skipped (no error -- the user just gets fewer roles). A system group's roles
-    bind at system scope; an org-scoped group's roles bind at that org's scope
-    only. org_ids collects the caller's org memberships (the owning org of each
-    org-scoped group, plus each group's org_ids list).
+    ``source_id``. Unknown identifiers are silently skipped (no error -- the user
+    just gets fewer roles). A system group's roles bind at system scope; an
+    org-scoped group's roles bind at that org's scope only. org_ids collects the
+    caller's org memberships (the owning org of each org-scoped group, plus each
+    group's org_ids list).
     """
     roles: set[str] = set()
     org_ids: set[str] = set()
     matched: set[str] = set()
     grants: list[ScopedGrant] = []
     seen_grants: set[tuple[str, str]] = set()
-    # Providers that emit opaque group identifiers rather than names (Entra sends
-    # object GUIDs, Google sends group keys) arrive here as those identifiers.
-    # Resolve by name first - the common case, and what dex/okta/local all use -
-    # then fall back to the sync-populated source_id index. The index is built
-    # only when a name misses, so name-only workloads pay nothing for it.
+    # The source_id index is built only when a name misses, so name-only lookups pay nothing for it.
     source_index: dict[str, Group] | None = None
     for group_name in groups:
         group = group_store.get(group_name)
@@ -462,6 +461,12 @@ def get_role_config(request: Request) -> RoleConfig:
     return RoleConfig.load_builtin()
 
 
+def provider_bindings(request: Request) -> dict[str, str]:
+    """``auth.source_provider_bindings``, or none while settings are not yet on the app."""
+    settings: DFESettings | None = getattr(request.app.state, "settings", None)
+    return settings.auth.source_provider_bindings if settings is not None else {}
+
+
 def resolve_live_grants_for_user(request: Request, user_id: str) -> GroupResolution:
     """Resolve roles/org_ids/grants from the bound account's groups, never a token claim.
 
@@ -472,7 +477,8 @@ def resolve_live_grants_for_user(request: Request, user_id: str) -> GroupResolut
     account = bound_account(request, user_id)
     if group_store is None or account is None:
         return GroupResolution([], [], [], [])
-    return _resolve_group_grants(groups_held(account, group_store.list()), group_store)
+    held = groups_held(account, group_store.list(), bindings=provider_bindings(request))
+    return _resolve_group_grants(held, group_store)
 
 
 def resolve_live_groups_for_user(request: Request, user_id: str) -> list[str]:
@@ -481,7 +487,8 @@ def resolve_live_groups_for_user(request: Request, user_id: str) -> list[str]:
     if account is None:
         return []
     group_store: GroupStore | None = getattr(request.app.state, "group_store", None)
-    return groups_held(account, group_store.list() if group_store is not None else [])
+    groups = group_store.list() if group_store is not None else []
+    return groups_held(account, groups, bindings=provider_bindings(request))
 
 
 def account_for_session_subject(store: Any, user_id: str):
@@ -576,7 +583,12 @@ async def get_current_user(request: Request) -> AuthContext:
         group_store: GroupStore = request.app.state.group_store
         oidc_email = request.headers.get("X-Oidc-Email") or None
         raw_groups = request.headers.get("X-Oidc-Groups", "")
-        groups = [g.strip() for g in raw_groups.split(",") if g.strip()]
+        asserted = [g.strip() for g in raw_groups.split(",") if g.strip()]
+        providers = linked_providers(
+            [settings.auth.proxy_provider], settings.auth.source_provider_bindings
+        )
+        # Names of the groups the assertion is linked to; a name the IdP sends links nothing.
+        groups = sorted(g.name for g in linked_groups(asserted, group_store.list(), providers))
         resolution = _resolve_group_grants(groups, group_store)
         roles, org_ids = resolution.roles, resolution.org_ids
         logger.debug("OIDC auth", user_id=oidc_subject, groups=groups, roles=roles)
@@ -590,7 +602,7 @@ async def get_current_user(request: Request) -> AuthContext:
                 # or the guard reads its second path as another identity.
                 jit.ensure_account(
                     oidc_subject,
-                    groups,
+                    asserted,
                     settings.auth.proxy_provider,
                     email=oidc_email or "",
                 )
