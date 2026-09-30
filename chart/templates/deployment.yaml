@@ -106,6 +106,10 @@ spec:
               value: {{ .Values.config.api.port | quote }}
             - name: DFE_API_JWT_EXPIRE_MINUTES
               value: {{ .Values.config.api.jwt_expire_minutes | quote }}
+            {{- if ne (toString .Values.config.api.max_session_minutes) "" }}
+            - name: DFE_API_MAX_SESSION_MINUTES
+              value: {{ toString .Values.config.api.max_session_minutes | quote }}
+            {{- end }}
             {{- if .Values.config.api.cors_origins }}
             - name: DFE_API_CORS_ORIGINS
               value: {{ .Values.config.api.cors_origins | quote }}
@@ -129,6 +133,24 @@ spec:
               value: {{ .Values.config.auth.local.enabled | quote }}
             - name: DFE_AUTH_LOCAL_ORG_ID
               value: {{ .Values.config.auth.local.org_id | quote }}
+            {{- with .Values.config.auth.login_throttle }}
+            {{- if ne (toString .enabled) "" }}
+            - name: DFE_AUTH_LOGIN_THROTTLE_ENABLED
+              value: {{ toString .enabled | quote }}
+            {{- end }}
+            {{- if ne (toString .username_failures) "" }}
+            - name: DFE_AUTH_LOGIN_THROTTLE_USERNAME_FAILURES
+              value: {{ toString .username_failures | quote }}
+            {{- end }}
+            {{- if ne (toString .client_failures) "" }}
+            - name: DFE_AUTH_LOGIN_THROTTLE_CLIENT_FAILURES
+              value: {{ toString .client_failures | quote }}
+            {{- end }}
+            {{- if ne (toString .max_delay_seconds) "" }}
+            - name: DFE_AUTH_LOGIN_THROTTLE_MAX_DELAY_SECONDS
+              value: {{ toString .max_delay_seconds | quote }}
+            {{- end }}
+            {{- end }}
             # The minted admin password. The engine reasserts it on every boot and
             # refuses to start on "changeme" unless env is a dev posture.
             - name: DFE_AUTH_LOCAL_ADMIN_PASSWORD
