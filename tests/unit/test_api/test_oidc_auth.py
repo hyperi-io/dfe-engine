@@ -46,6 +46,26 @@ class TestOidcAuthentication:
         assert "admin" in data["roles"]
         assert "dfe-admins" in data["groups"]
 
+    def test_a_manual_proxy_provider_ignores_the_asserted_groups(self, client: TestClient, app):
+        # Membership for a manual provider lives in the engine, so the gateway's groups header grants nothing.
+        from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+
+        _link(app, "dfe-admins")
+        app.state.oidc_provider_registry.create(
+            "oidc",
+            OIDCProvider(
+                type="generic",
+                issuer="https://sso.example.com",
+                groups=GroupResolutionConfig(mode="manual"),
+            ),
+        )
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "mia@example.com", "X-Oidc-Groups": "dfe-admins"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert ("admin" in resp.json()["roles"], resp.json()["groups"]) == (False, [])
+
     def test_groups_resolve_by_source_id(self, client: TestClient, app):
         """A provider that sends opaque group ids (Entra GUIDs, Google keys)
         resolves against the source_id the sync stored on the group file, not

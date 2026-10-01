@@ -24,10 +24,13 @@ provider YAML keeps only the store PATH. A response carries the client id, the
 secret paths and the env var names, never a secret value.
 """
 
+import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field, field_validator
 
 from dfe_engine.api.deps import CurrentUser, require_action
@@ -39,12 +42,13 @@ from dfe_engine.api.pagination import (
 )
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.oidc.credential_env import is_env_var_name, provider_secret_path
+from dfe_engine.auth.oidc.field_rules import FieldProblem, field_problems
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.store_names import VALID_NAME
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
 
 if TYPE_CHECKING:
-    from dfe_engine.auth.oidc.models import OIDCProvider
+    from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
     from dfe_engine.secrets import DfeSecrets
 
 router = APIRouter(prefix="/oidc-providers", tags=["OIDC Providers"])
@@ -52,6 +56,16 @@ router = APIRouter(prefix="/oidc-providers", tags=["OIDC Providers"])
 _ENV_NAME_HELP = (
     "must be an environment variable name such as OKTA_CLIENT_SECRET, not the "
     "credential itself - send the credential in the matching value field instead"
+)
+
+# An Entra tenant GUID or domain: letters, digits, dots and hyphens, starting with a letter or digit.
+_TENANT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}\Z")
+
+# Each directory secret a groups block can carry: its request field, its secret-store field and the config field that keeps the path.
+_GROUP_SECRETS = (
+    ("api_token", "groups_api_token", "api_token_path"),
+    ("client_secret", "groups_client_secret", "client_secret_path"),
+    ("service_account_json", "groups_service_account_json", "service_account_json_path"),
 )
 
 
@@ -67,11 +81,11 @@ def _reject_non_env_name(value: str) -> str:
 
 class GroupResolutionRequest(BaseModel):
     mode: Literal["manual", "token_claim", "api"] = Field(
-        default="manual",
+        default="token_claim",
         description="Group resolution mode: manual, token_claim, api",
     )
     claim_name: str = Field(default="groups", description="Token claim name for group IDs")
-    sync_interval: int = Field(default=3600, description="Seconds between API sync cycles")
+    sync_interval: int = Field(default=3600, ge=60, description="Seconds between API sync cycles")
     enrich_on_login: bool = Field(
         default=False,
         description="Fetch the user's groups from the directory API at each login "
@@ -85,11 +99,17 @@ class GroupResolutionRequest(BaseModel):
     service_account_json_env: str = Field(default="", description="Env var for Google SA JSON")
     admin_email: str = Field(default="", description="Google Workspace admin email")
     domain: str = Field(default="", description="Google Workspace domain")
-    tenant_id_env: str = Field(default="", description="Env var for Entra ID tenant ID")
+    tenant_id: str = Field(
+        default="", description="Entra ID tenant ID. Not a secret, so it is stored in config."
+    )
+    tenant_id_env: str = Field(
+        default="", description="Env var for Entra ID tenant ID, read when tenant_id is empty"
+    )
     client_secret: str = Field(
         default="",
         description="Entra ID application client secret. Write-only: it goes to the "
-        "secret store and only its path is kept in config.",
+        "secret store and only its path is kept in config. When neither this nor "
+        "client_secret_env is set, the login client secret is used.",
     )
     client_secret_env: str = Field(default="", description="Env var for Entra ID client secret")
     api_token: str = Field(
@@ -107,12 +127,23 @@ class GroupResolutionRequest(BaseModel):
     def _env_name_only(cls, value: str) -> str:
         return _reject_non_env_name(value)
 
+    @field_validator("tenant_id")
+    @classmethod
+    def _tenant_id_shape(cls, value: str) -> str:
+        """The tenant id becomes a path segment of the Entra authority URL, so it may only be a GUID or a domain."""
+        if value and not (_TENANT_ID.match(value)):
+            raise ValueError(
+                "must be the tenant's GUID or its domain, such as contoso.onmicrosoft.com"
+            )
+        return value
+
 
 class CreateProviderRequest(BaseModel):
     name: str = Field(description="Unique provider name (used as filename stem)")
     type: Literal["generic", "google", "entra_id", "okta"] = Field(
         description="Provider type: generic, google, entra_id, okta"
     )
+    enabled: bool = Field(default=True, description="Whether the provider serves logins")
     display_name: str = Field(default="", description="Human-readable label")
     issuer: str = Field(default="", description="OIDC issuer URL")
     client_id: str = Field(
@@ -178,6 +209,7 @@ class GroupResolutionResponse(BaseModel):
     service_account_json_path: str
     admin_email: str
     domain: str
+    tenant_id: str
     tenant_id_env: str
     client_secret_env: str
     client_secret_path: str
@@ -283,6 +315,7 @@ def _provider_to_response(name: str, provider: OIDCProvider) -> ProviderResponse
             service_account_json_path=p.groups.service_account_json_path,
             admin_email=p.groups.admin_email,
             domain=p.groups.domain,
+            tenant_id=p.groups.tenant_id,
             tenant_id_env=p.groups.tenant_id_env,
             client_secret_env=p.groups.client_secret_env,
             client_secret_path=p.groups.client_secret_path,
@@ -319,33 +352,65 @@ def _secrets(request: Request) -> DfeSecrets:
     return store
 
 
-def _store_secret(request: Request, name: str, field: str, value: str) -> str:
-    """Write one provider secret through the seam and return the path to record."""
-    path = provider_secret_path(name, field)
-    _secrets(request).put(path, value)
-    return path
+def _store_secret(*, field: str, name: str, request: Request, value: str) -> None:
+    """Write one provider secret through the seam, at the path the provider records."""
+    _secrets(request).put(provider_secret_path(field=field, provider_name=name), value)
 
 
-def _store_group_secrets(
-    request: Request, name: str, groups: GroupResolutionRequest
-) -> dict[str, str]:
-    """Write whichever directory-API secrets the groups block carries.
+def _group_config(
+    *, groups: GroupResolutionRequest, kept: Mapping[str, object], provider_type: str
+) -> GroupResolutionConfig:
+    """The groups block to store for a request: its fields minus the secret values, plus what the provider keeps.
 
-    Returns only the paths that were written, so a request that omits a value
-    leaves the provider's existing path - and its stored secret - alone.
+    A google provider always enriches on login, because its tokens carry no groups.
     """
-    paths: dict[str, str] = {}
-    if groups.service_account_json:
-        paths["service_account_json_path"] = _store_secret(
-            request, name, "groups_service_account_json", groups.service_account_json
+    from dfe_engine.auth.oidc.models import GroupResolutionConfig
+
+    secret_values = {value_field for value_field, _store_field, _path_field in _GROUP_SECRETS}
+    fields = {**groups.model_dump(exclude=secret_values), **kept}
+    if provider_type == "google":
+        fields["enrich_on_login"] = True
+    return GroupResolutionConfig.model_validate(fields)
+
+
+def _group_secret_paths(*, groups: GroupResolutionRequest, name: str) -> dict[str, str]:
+    """The store path of each directory secret the groups block carries, keyed by the config field that keeps it."""
+    return {
+        path_field: provider_secret_path(field=store_field, provider_name=name)
+        for value_field, store_field, path_field in _GROUP_SECRETS
+        if getattr(groups, value_field)
+    }
+
+
+def _refuse_field_problems(*, problems: list[FieldProblem]) -> None:
+    """Answer 422 naming each field the provider rules refuse, the same way a malformed body is answered."""
+    if problems:
+        raise RequestValidationError(
+            [
+                {
+                    "loc": ("body", *problem.field.split(".")),
+                    "msg": problem.message,
+                    "type": problem.code,
+                }
+                for problem in problems
+            ]
         )
-    if groups.client_secret:
-        paths["client_secret_path"] = _store_secret(
-            request, name, "groups_client_secret", groups.client_secret
-        )
-    if groups.api_token:
-        paths["api_token_path"] = _store_secret(request, name, "groups_api_token", groups.api_token)
-    return paths
+
+
+def _sent_group_fields(*, groups: GroupResolutionRequest | None) -> frozenset[str]:
+    """The groups fields the caller set to something, so the rules refuse only what this request sends."""
+    if groups is None:
+        return frozenset()
+    return frozenset(field for field, value in groups.model_dump().items() if value)
+
+
+def _store_group_secrets(*, groups: GroupResolutionRequest, name: str, request: Request) -> None:
+    """Write whichever directory-API secrets the groups block carries; a secret it omits keeps the one already stored."""
+    for value_field, store_field, _path_field in _GROUP_SECRETS:
+        if getattr(groups, value_field):
+            _store_secret(
+                field=store_field, name=name, request=request, value=getattr(groups, value_field)
+            )
 
 
 def _delete_stored_secrets(request: Request, provider: OIDCProvider) -> None:
@@ -353,12 +418,11 @@ def _delete_stored_secrets(request: Request, provider: OIDCProvider) -> None:
     store = getattr(request.app.state, "dfe_secrets", None)
     if store is None:
         return
-    for path in (
-        provider.client_secret_path,
-        provider.groups.service_account_json_path,
-        provider.groups.client_secret_path,
-        provider.groups.api_token_path,
-    ):
+    group_paths = [
+        getattr(provider.groups, path_field)
+        for _value_field, _store_field, path_field in _GROUP_SECRETS
+    ]
+    for path in (provider.client_secret_path, *group_paths):
         if path:
             store.delete(path)
 
@@ -395,11 +459,9 @@ async def create_provider(
 ):
     """Create a new OIDC provider configuration (admin only).
 
-    Secret values in the body are written to the secret store before the YAML is
-    written, so nothing is stored against a name that already belongs to someone
-    else's provider.
+    Secret values in the body are written to the secret store before the YAML, and only once the name is free and the provider passes the field rules for its type and mode, so a refused provider leaves nothing behind.
     """
-    from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+    from dfe_engine.auth.oidc.models import OIDCProvider
 
     registry = _get_registry(request)
     if registry.get(body.name) is not None:
@@ -408,39 +470,35 @@ async def create_provider(
             detail={"code": "conflict", "message": f"OIDC provider '{body.name}' already exists"},
         )
 
-    groups_config = GroupResolutionConfig(
-        mode=body.groups.mode,
-        claim_name=body.groups.claim_name,
-        sync_interval=body.groups.sync_interval,
-        enrich_on_login=body.groups.enrich_on_login,
-        service_account_json_env=body.groups.service_account_json_env,
-        admin_email=body.groups.admin_email,
-        domain=body.groups.domain,
-        tenant_id_env=body.groups.tenant_id_env,
-        client_secret_env=body.groups.client_secret_env,
-        api_token_env=body.groups.api_token_env,
-        okta_domain=body.groups.okta_domain,
-        **_store_group_secrets(request, body.name, body.groups),
-    )
-
     client_secret_path = (
-        _store_secret(request, body.name, "client_secret", body.client_secret)
+        provider_secret_path(field="client_secret", provider_name=body.name)
         if body.client_secret
         else ""
     )
-
+    group_paths = _group_secret_paths(groups=body.groups, name=body.name)
     provider = OIDCProvider(
         type=body.type,
-        enabled=True,
+        enabled=body.enabled,
         display_name=body.display_name,
         issuer=body.issuer,
         client_id=body.client_id,
         client_id_env=body.client_id_env,
         client_secret_env=body.client_secret_env,
         client_secret_path=client_secret_path,
-        groups=groups_config,
+        groups=_group_config(groups=body.groups, kept=group_paths, provider_type=body.type),
         created_at=datetime.now(UTC).isoformat(),
     )
+    _refuse_field_problems(
+        problems=field_problems(
+            provider=provider, sent_group_fields=_sent_group_fields(groups=body.groups)
+        )
+    )
+
+    _store_group_secrets(groups=body.groups, name=body.name, request=request)
+    if body.client_secret:
+        _store_secret(
+            field="client_secret", name=body.name, request=request, value=body.client_secret
+        )
 
     try:
         registry.create(body.name, provider)
@@ -511,11 +569,8 @@ async def update_provider(
 ):
     """Update an OIDC provider configuration (admin only).
 
-    A secret the body omits keeps the path the provider already holds, so an
-    update that only flips ``enabled`` does not strand a stored credential.
+    A secret the body omits keeps the path the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential. Any update that touches more than ``enabled`` or ``display_name`` must leave the provider passing the field rules, checked before a secret is written.
     """
-    from dfe_engine.auth.oidc.models import GroupResolutionConfig
-
     registry = _get_registry(request)
     current = registry.get(name)
     if current is None:
@@ -536,30 +591,38 @@ async def update_provider(
     if body.client_secret_env is not None:
         update_fields["client_secret_env"] = body.client_secret_env
     if body.client_secret:
-        update_fields["client_secret_path"] = _store_secret(
-            request, name, "client_secret", body.client_secret
+        update_fields["client_secret_path"] = provider_secret_path(
+            field="client_secret", provider_name=name
         )
     if body.groups is not None:
-        group_paths = {
-            "service_account_json_path": current.groups.service_account_json_path,
-            "client_secret_path": current.groups.client_secret_path,
-            "api_token_path": current.groups.api_token_path,
+        kept = {
+            path_field: getattr(current.groups, path_field)
+            for _value_field, _store_field, path_field in _GROUP_SECRETS
         }
-        group_paths.update(_store_group_secrets(request, name, body.groups))
-        update_fields["groups"] = GroupResolutionConfig(
-            mode=body.groups.mode,
-            claim_name=body.groups.claim_name,
-            sync_interval=body.groups.sync_interval,
-            enrich_on_login=body.groups.enrich_on_login,
-            service_account_json_env=body.groups.service_account_json_env,
-            admin_email=body.groups.admin_email,
-            domain=body.groups.domain,
-            tenant_id_env=body.groups.tenant_id_env,
-            client_secret_env=body.groups.client_secret_env,
-            api_token_env=body.groups.api_token_env,
-            okta_domain=body.groups.okta_domain,
-            **group_paths,
+        # The directory backend is not settable through this API, so a groups edit carries it over.
+        kept.update(
+            directory_backend=current.groups.directory_backend,
+            mock_directory_env=current.groups.mock_directory_env,
         )
+        kept.update(_group_secret_paths(groups=body.groups, name=name))
+        update_fields["groups"] = _group_config(
+            groups=body.groups, kept=kept, provider_type=current.type
+        )
+
+    if body.model_dump(exclude={"display_name", "enabled"}, exclude_none=True):
+        candidate = current.model_copy(update=update_fields)
+        problems = field_problems(
+            provider=candidate, sent_group_fields=_sent_group_fields(groups=body.groups)
+        )
+        # An update cannot change the issuer, so a missing one is not the caller's to fix here.
+        _refuse_field_problems(
+            problems=[problem for problem in problems if problem.field != "issuer"]
+        )
+
+    if body.client_secret:
+        _store_secret(field="client_secret", name=name, request=request, value=body.client_secret)
+    if body.groups is not None:
+        _store_group_secrets(groups=body.groups, name=name, request=request)
 
     provider = registry.update(name, **update_fields)
     # Picks up an enable/disable flip and a rotated client secret alike.

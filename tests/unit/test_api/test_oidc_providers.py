@@ -50,7 +50,7 @@ class TestCreateProvider:
         assert data["display_name"] == "Test Provider"
         assert data["issuer"] == "https://accounts.example.com"
         assert data["client_id_env"] == "OIDC_CLIENT_ID"
-        assert data["groups"]["mode"] == "manual"
+        assert data["groups"]["mode"] == "token_claim"
         assert data["created_at"] != ""
 
     def test_create_with_groups_config(self, client, admin_headers):
@@ -58,9 +58,11 @@ class TestCreateProvider:
             client,
             admin_headers,
             name="api-provider",
+            type="entra_id",
             groups={
                 "mode": "api",
                 "sync_interval": 1800,
+                "tenant_id": "contoso-tenant",
                 "tenant_id_env": "ENTRA_TENANT_ID",
                 "client_secret_env": "ENTRA_CLIENT_SECRET",
             },
@@ -69,7 +71,14 @@ class TestCreateProvider:
         data = resp.json()
         assert data["groups"]["mode"] == "api"
         assert data["groups"]["sync_interval"] == 1800
+        assert data["groups"]["tenant_id"] == "contoso-tenant"
         assert data["groups"]["tenant_id_env"] == "ENTRA_TENANT_ID"
+
+    def test_create_honours_enabled(self, client, app, admin_headers):
+        resp = _create_provider(client, admin_headers, name="off-at-birth", enabled=False)
+        assert resp.status_code == 201
+        assert resp.json()["enabled"] is False
+        assert not app.state.oidc_rp.has_provider("off-at-birth")
 
     def test_create_sets_rp_client_secret_env(self, client, admin_headers):
         """The RP client_secret_env round-trips - without it a provider created
@@ -186,10 +195,17 @@ class TestUpdateProvider:
         assert resp.json()["display_name"] == "New Name"
 
     def test_update_groups_config(self, client, admin_headers):
-        _create_provider(client, admin_headers, name="upd-groups")
+        _create_provider(client, admin_headers, name="upd-groups", type="okta")
         resp = client.put(
             "/api/v1/auth/oidc-providers/upd-groups",
-            json={"groups": {"mode": "api", "sync_interval": 900}},
+            json={
+                "groups": {
+                    "api_token_env": "OKTA_API_TOKEN",
+                    "mode": "api",
+                    "okta_domain": "acme.okta.com",
+                    "sync_interval": 900,
+                }
+            },
             headers=admin_headers,
         )
         assert resp.status_code == 200
@@ -269,12 +285,12 @@ class TestSyncProvider:
     """POST /api/v1/auth/oidc-providers/{name}/sync"""
 
     def test_sync_generic_provider(self, client, admin_headers):
-        """Generic adapter returns empty — sync reports skipped (mode is manual)."""
+        """Generic adapter returns empty — sync reports skipped (mode is token_claim)."""
         _create_provider(client, admin_headers, name="sync-test")
         resp = client.post("/api/v1/auth/oidc-providers/sync-test/sync", headers=admin_headers)
         assert resp.status_code == 200
         data = resp.json()
-        # Generic provider with manual mode gets skipped
+        # A provider outside api mode gets skipped
         assert data["total"] == 0
 
     def test_a_skipped_group_is_reported(self, client, app, admin_headers, tmp_path, monkeypatch):
@@ -529,9 +545,14 @@ class TestRelyingPartyStaysInSync:
         assert not app.state.oidc_rp.has_provider("detached")
 
     def test_provider_with_no_issuer_does_not_break_the_write(self, client, app, admin_headers):
-        """An unregisterable provider is skipped, and the others still register."""
-        _create_provider(client, admin_headers, name="good")
-        resp = _create_provider(client, admin_headers, name="no-issuer", issuer="")
+        """An unregisterable provider is skipped, and the others still register.
+
+        The API refuses a provider with no issuer, so this one is written out of band.
+        """
+        from dfe_engine.auth.oidc.models import OIDCProvider
+
+        app.state.oidc_provider_registry.create("no-issuer", OIDCProvider(type="generic"))
+        resp = _create_provider(client, admin_headers, name="good")
         assert resp.status_code == 201
         assert app.state.oidc_rp.has_provider("good")
         assert not app.state.oidc_rp.has_provider("no-issuer")
@@ -699,3 +720,163 @@ class TestEnvNameFieldsRejectPastedSecrets:
         assert _field_errors(resp) == ["name"]
         assert [sorted(path.rglob("*")) for path in written] == before
         assert not app.state.dfe_secrets.exists(f"oidc/{name}/client_secret")
+
+
+class TestProviderFieldRules:
+    """Create and update refuse fields a provider's type and mode cannot use, before anything is written.
+
+    The rules themselves are covered in test_auth/test_oidc/test_field_rules.py; these check the wiring.
+    """
+
+    @pytest.mark.parametrize(
+        ("overrides", "fields"),
+        [
+            ({"groups": {"mode": "api"}}, ["groups.mode"]),
+            (
+                {"groups": {"api_token": "okta-ssws-token", "mode": "api"}, "type": "okta"},
+                ["groups.okta_domain"],
+            ),
+            ({"issuer": ""}, ["issuer"]),
+            ({"client_id_env": ""}, ["client_id"]),
+            (
+                {"groups": {"okta_domain": "acme.okta.com"}, "type": "entra_id"},
+                ["groups.okta_domain"],
+            ),
+            ({"groups": {"sync_interval": 30}}, ["groups.sync_interval"]),
+            ({"groups": {"api_token": "okta-ssws-token"}}, ["groups.api_token"]),
+            (
+                {"groups": {"tenant_id": "evil.example/../x"}, "type": "entra_id"},
+                ["groups.tenant_id"],
+            ),
+        ],
+        ids=[
+            "generic-api-mode",
+            "okta-api-without-domain",
+            "no-issuer",
+            "no-client-id",
+            "another-types-field",
+            "sync-under-a-minute",
+            "directory-token-on-generic",
+            "tenant-id-not-a-guid-or-domain",
+        ],
+    )
+    def test_create_refuses_and_writes_nothing(
+        self, admin_headers, api_settings, client, overrides, fields
+    ):
+        written = [
+            Path(api_settings.secrets.path),
+            Path(api_settings.auth.auth_dir) / "oidc-providers",
+        ]
+        before = [sorted(path.rglob("*")) for path in written]
+
+        resp = _create_provider(
+            client, admin_headers, name="refused", client_secret="rp-client-secret", **overrides
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert _field_errors(resp) == fields
+        assert [sorted(path.rglob("*")) for path in written] == before
+
+    def test_update_refuses_and_writes_nothing(self, client, app, admin_headers):
+        _create_provider(
+            client, admin_headers, name="okta-claim", type="okta", client_secret="first"
+        )
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/okta-claim",
+            json={
+                "client_secret": "second",
+                "groups": {"api_token": "okta-ssws-token", "mode": "api"},
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422, resp.text
+        assert _field_errors(resp) == ["groups.okta_domain"]
+        assert app.state.dfe_secrets.get("oidc/okta-claim/client_secret") == "first"
+        assert not app.state.dfe_secrets.exists("oidc/okta-claim/groups_api_token")
+        got = client.get("/api/v1/auth/oidc-providers/okta-claim", headers=admin_headers)
+        assert got.json()["groups"]["mode"] == "token_claim"
+
+    def test_a_toggle_skips_the_rules(self, client, app, admin_headers):
+        # A provider written out of band that breaks the rules can still be switched off.
+        from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+
+        app.state.oidc_provider_registry.create(
+            "legacy",
+            OIDCProvider(
+                type="generic",
+                issuer="https://sso.example.com",
+                groups=GroupResolutionConfig(mode="api"),
+            ),
+        )
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/legacy", json={"enabled": False}, headers=admin_headers
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["enabled"] is False
+
+    def test_a_groups_edit_keeps_the_directory_backend(self, client, app, admin_headers):
+        # The directory backend is set in YAML only, so the API must not reset it.
+        from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+
+        app.state.oidc_provider_registry.create(
+            "mock-okta",
+            OIDCProvider(
+                type="okta",
+                issuer="https://acme.okta.com",
+                client_id="c",
+                groups=GroupResolutionConfig(
+                    api_token_env="OKTA_API_TOKEN",
+                    directory_backend="mock",
+                    mock_directory_env="DFE_TEST_SYNC_DIRECTORY",
+                    mode="api",
+                    okta_domain="acme.okta.com",
+                ),
+            ),
+        )
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/mock-okta",
+            json={
+                "groups": {
+                    "api_token_env": "OKTA_API_TOKEN",
+                    "mode": "api",
+                    "okta_domain": "acme.okta.com",
+                    "sync_interval": 900,
+                }
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        stored = app.state.oidc_provider_registry.get("mock-okta").groups
+        assert (stored.directory_backend, stored.mock_directory_env) == (
+            "mock",
+            "DFE_TEST_SYNC_DIRECTORY",
+        )
+
+    def test_google_always_enriches_on_login(self, client, admin_headers):
+        resp = _create_provider(
+            client,
+            admin_headers,
+            name="gws",
+            type="google",
+            issuer="https://accounts.google.com",
+            groups={
+                "admin_email": "admin@acme.com",
+                "mode": "api",
+                "service_account_json_env": "GOOGLE_SA_JSON",
+            },
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["groups"]["enrich_on_login"] is True
+
+    def test_an_update_is_not_refused_for_an_issuer_it_cannot_set(self, client, app, admin_headers):
+        from dfe_engine.auth.oidc.models import OIDCProvider
+
+        app.state.oidc_provider_registry.create(
+            "no-issuer", OIDCProvider(type="generic", client_id="c")
+        )
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/no-issuer",
+            json={"groups": {"mode": "manual"}},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text

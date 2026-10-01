@@ -14,9 +14,23 @@ from typing import Any
 
 from authlib.integrations.starlette_client import OAuth
 
+from dfe_engine.auth.oidc.adapters.entra import GraphCredentials
+from dfe_engine.auth.oidc.field_rules import FieldProblem
 from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.auth.oidc.rp import NormalizedIdentity
 from tests.unit.test_auth.test_oidc.local_idp import LocalIdp
+
+
+def make_field_problem(*, code: str, field: str, message: str) -> FieldProblem:
+    """Build an auth.oidc.field_rules.FieldProblem."""
+    return FieldProblem(code=code, field=field, message=message)
+
+
+def make_graph_credentials(
+    *, client_id: str, client_secret: str, tenant_id: str
+) -> GraphCredentials:
+    """Build an auth.oidc.adapters.entra.GraphCredentials."""
+    return GraphCredentials(client_id=client_id, client_secret=client_secret, tenant_id=tenant_id)
 
 
 def make_local_idp() -> LocalIdp:

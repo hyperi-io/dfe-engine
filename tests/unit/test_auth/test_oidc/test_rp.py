@@ -17,6 +17,7 @@ from dfe_engine.auth.oidc.rp import (
     extract_identity,
     fill_from_userinfo_endpoint,
     merge_userinfo_claims,
+    needs_directory_groups,
 )
 from tests.unit.test_auth.factories import make_oauth_client
 from tests.unit.test_auth.test_oidc.local_idp import LocalIdp
@@ -25,10 +26,12 @@ from tests.unit.test_auth.test_oidc.rp_cases import (
     FILL_FROM_USERINFO_ENDPOINT_CASES,
     MERGE_USERINFO_CLAIMS_CASES,
     MERGE_USERINFO_CLAIMS_SUBJECT_MISMATCH_CASES,
+    NEEDS_DIRECTORY_GROUPS_CASES,
     ExtractIdentityCase,
     FillFromUserinfoEndpointCase,
     MergeUserinfoClaimsCase,
     MergeUserinfoClaimsSubjectMismatchCase,
+    NeedsDirectoryGroupsCase,
 )
 
 
@@ -39,6 +42,17 @@ class TestExtractIdentity:
     def test_matches_expected(self, case: ExtractIdentityCase):
         identity = extract_identity(provider=case["provider"], userinfo_claims=case["claims"])
         assert identity == case["expected_identity"]
+
+
+class TestNeedsDirectoryGroups:
+    @pytest.mark.parametrize(
+        "case",
+        NEEDS_DIRECTORY_GROUPS_CASES,
+        ids=[case["id"] for case in NEEDS_DIRECTORY_GROUPS_CASES],
+    )
+    def test_matches_expected(self, case: NeedsDirectoryGroupsCase):
+        needs = needs_directory_groups(identity=case["identity"], provider=case["provider"])
+        assert needs == case["expected_needs"]
 
 
 class TestMergeUserinfoClaims:

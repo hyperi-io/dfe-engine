@@ -359,6 +359,15 @@ class GroupResolution(NamedTuple):
     """Names of the stored groups the identifiers resolved to, which the roles came from."""
 
 
+def _proxy_provider_is_manual(*, request: Request, settings: DFESettings) -> bool:
+    """Whether the provider the gateway's OIDC headers speak for is registered in ``manual`` group mode."""
+    registry = getattr(request.app.state, "oidc_provider_registry", None)
+    if registry is None:
+        return False
+    provider = registry.get(settings.auth.proxy_provider)
+    return provider is not None and provider.groups.mode == "manual"
+
+
 def _resolve_group_grants(
     groups: list[str],
     group_store: GroupStore,
@@ -576,6 +585,9 @@ async def get_current_user(request: Request) -> AuthContext:
         oidc_email = request.headers.get("X-Oidc-Email") or None
         raw_groups = request.headers.get("X-Oidc-Groups", "")
         asserted = [g.strip() for g in raw_groups.split(",") if g.strip()]
+        if _proxy_provider_is_manual(request=request, settings=settings):
+            # A manual provider's membership is managed in the engine, so the gateway's groups grant nothing.
+            asserted = []
         providers = linked_providers(
             [settings.auth.proxy_provider], settings.auth.source_provider_bindings
         )

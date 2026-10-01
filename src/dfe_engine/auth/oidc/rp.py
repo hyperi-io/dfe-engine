@@ -134,7 +134,7 @@ def extract_identity(
     The display name is ``name``, falling back to ``preferred_username``. Groups
     come from the claim named by ``provider.groups.claim_name`` (default
     ``groups``), matching the token_claim resolution mode used across the DFE
-    auth paths.
+    auth paths. A provider in ``manual`` mode yields no groups at all, because its users' membership is managed in dfe-engine and the token grants nothing.
 
     No network calls, no Authlib state - safe to unit-test with a plain dict.
 
@@ -152,12 +152,24 @@ def extract_identity(
         if email:
             break
     name = _display_name(claims=userinfo_claims)
-    claim_name = provider.groups.claim_name or "groups"
-    groups = _coerce_groups(userinfo_claims.get(claim_name))
-    overflowed = _has_group_overage(userinfo_claims, claim_name)
+    groups = []
+    overflowed = False
+    if provider.groups.mode != "manual":
+        claim_name = provider.groups.claim_name or "groups"
+        groups = _coerce_groups(raw=userinfo_claims.get(claim_name))
+        overflowed = _has_group_overage(claim_name=claim_name, claims=userinfo_claims)
     return NormalizedIdentity(
         email=email, groups=groups, groups_overflowed=overflowed, name=name, subject=subject
     )
+
+
+def needs_directory_groups(*, identity: NormalizedIdentity, provider: OIDCProvider) -> bool:
+    """Whether the login must fetch the user's groups from the provider's directory API.
+
+    True for an Entra >200 group overage and for an api-mode provider that sets ``enrich_on_login`` because its tokens carry no groups (Google Workspace). ``enrich_on_login`` outside api mode is ignored, so a manual provider never reaches the directory.
+    """
+    enrich_requested = provider.groups.enrich_on_login and provider.groups.mode == "api"
+    return (identity.groups_overflowed) or (enrich_requested)
 
 
 def merge_userinfo_claims(
@@ -320,7 +332,7 @@ class OidcRelyingParty:
         # Enrich from the directory API in two cases: an Entra >200 overage (the
         # token dropped the groups array), or a provider that never puts groups
         # in the token at all (google-workspace, enrich_on_login).
-        if identity.groups_overflowed or provider.groups.enrich_on_login:
+        if needs_directory_groups(identity=identity, provider=provider):
             identity = await self._enrich_groups_from_directory(provider, identity, userinfo)
         return identity
 

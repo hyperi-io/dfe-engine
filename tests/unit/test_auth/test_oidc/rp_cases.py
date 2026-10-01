@@ -58,6 +58,13 @@ class MergeUserinfoClaimsSubjectMismatchCase(TypedDict):
     userinfo_claims: dict[str, Any]
 
 
+class NeedsDirectoryGroupsCase(TypedDict):
+    id: str
+    expected_needs: bool
+    identity: NormalizedIdentity
+    provider: OIDCProvider
+
+
 EXTRACT_IDENTITY_CASES: list[ExtractIdentityCase] = [
     {
         "id": "generic_default_groups_claim",
@@ -92,6 +99,26 @@ EXTRACT_IDENTITY_CASES: list[ExtractIdentityCase] = [
         ),
         "provider": make_oidc_provider(
             groups={"claim_name": "roles", "mode": "token_claim"},
+            issuer="https://login.microsoftonline.com/tid/v2.0",
+            type="entra_id",
+        ),
+    },
+    {
+        "id": "manual_mode_ignores_groups_claim",
+        "claims": {"sub": "dave", "email": "dave@acme.com", "groups": ["dfe-admins"]},
+        "expected_identity": make_normalized_identity(email="dave@acme.com", subject="dave"),
+        "provider": make_oidc_provider(groups={"mode": "manual"}, type="okta"),
+    },
+    {
+        "id": "manual_mode_ignores_overage_marker",
+        "claims": {
+            "sub": "pairwise-sub",
+            "_claim_names": {"groups": "src1"},
+            "email": "big@acme.com",
+        },
+        "expected_identity": make_normalized_identity(email="big@acme.com", subject="pairwise-sub"),
+        "provider": make_oidc_provider(
+            groups={"mode": "manual"},
             issuer="https://login.microsoftonline.com/tid/v2.0",
             type="entra_id",
         ),
@@ -331,5 +358,42 @@ MERGE_USERINFO_CLAIMS_SUBJECT_MISMATCH_CASES: list[MergeUserinfoClaimsSubjectMis
         "id": "userinfo_without_subject",
         "id_token_claims": {"sub": OKTA_SUBJECT},
         "userinfo_claims": {"name": "Jane Citizen"},
+    },
+]
+
+NEEDS_DIRECTORY_GROUPS_CASES: list[NeedsDirectoryGroupsCase] = [
+    {
+        "id": "token_groups_present",
+        "expected_needs": False,
+        "identity": make_normalized_identity(groups=["soc"], subject="s"),
+        "provider": make_oidc_provider(type="okta"),
+    },
+    {
+        "id": "entra_overage",
+        "expected_needs": True,
+        "identity": make_normalized_identity(groups_overflowed=True, subject="s"),
+        "provider": make_oidc_provider(type="entra_id"),
+    },
+    {
+        "id": "api_mode_enrich_on_login",
+        "expected_needs": True,
+        "identity": make_normalized_identity(subject="s"),
+        "provider": make_oidc_provider(
+            groups={"enrich_on_login": True, "mode": "api"}, type="google"
+        ),
+    },
+    {
+        "id": "api_mode_without_enrich_on_login",
+        "expected_needs": False,
+        "identity": make_normalized_identity(subject="s"),
+        "provider": make_oidc_provider(groups={"mode": "api"}, type="okta"),
+    },
+    {
+        "id": "enrich_on_login_outside_api_mode_is_ignored",
+        "expected_needs": False,
+        "identity": make_normalized_identity(subject="s"),
+        "provider": make_oidc_provider(
+            groups={"enrich_on_login": True, "mode": "manual"}, type="okta"
+        ),
     },
 ]

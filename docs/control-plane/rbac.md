@@ -549,8 +549,9 @@ issuer: "https://accounts.google.com"
 client_id: "1234.apps.googleusercontent.com"   # not secret
 client_secret_path: "oidc/google-workspace/client_secret"
 groups:
-  mode: "api"            # manual | token_claim | api
+  mode: "api"            # manual | token_claim | api (google: api only)
   sync_interval: 3600
+  enrich_on_login: true  # required for google: its tokens carry no groups
   # Google-specific
   service_account_json_path: "oidc/google-workspace/groups_service_account_json"
   admin_email: "admin@example.com"
@@ -570,7 +571,7 @@ environment, so an ESO-mounted variable keeps working.
 | Generic | Done | None | No (use `token_claim` mode) |
 | Google | Done | Admin SDK `groups().list()` | Yes — full pagination |
 | Entra ID | Done | Graph API `/groups` | Yes — `$top=999` pagination |
-| Okta | Stub | Not implemented | No (Okta natively includes groups in ID token) |
+| Okta | Done | Groups API `/api/v1/groups` | Yes — `Link` header pagination |
 
 All adapters are failsafe — credential or API failures return empty results
 rather than raising exceptions, so auth continues working even if group

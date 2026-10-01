@@ -18,8 +18,8 @@ Supported provider types:
     okta      -- Okta; supports API-based group resolution.
 
 Group resolution modes:
-    manual       -- Group membership managed manually in dfe-engine; no sync.
-    token_claim  -- Groups extracted from a named OIDC token claim at login time.
+    manual       -- Group membership managed manually in dfe-engine; the token's groups are ignored and nothing syncs.
+    token_claim  -- Groups extracted from a named OIDC token claim at login time (the default).
     api          -- Groups fetched from the provider's admin API on a schedule.
 """
 
@@ -45,7 +45,7 @@ class GroupResolutionConfig(BaseModel):
     simplicity -- unused fields default to empty strings.
     """
 
-    mode: _GroupResolutionMode = "manual"
+    mode: _GroupResolutionMode = "token_claim"
     """How groups are resolved: manual, token_claim, or api."""
 
     claim_name: str = "groups"
@@ -97,12 +97,15 @@ class GroupResolutionConfig(BaseModel):
     domain: str = ""
     """Google Workspace primary domain (e.g. 'example.com')."""
 
-    # -- Microsoft Entra ID (api mode) --
+    # -- Microsoft Entra ID (api mode and the >200 group overage lookup) --
+    tenant_id: str = ""
+    """The Entra ID tenant ID itself - it is not secret, so it is held in the clear; ``tenant_id_env`` still resolves it when this is empty."""
+
     tenant_id_env: str = ""
     """Env var name holding the Entra ID tenant ID."""
 
     client_secret_env: str = ""
-    """Env var name holding the Entra ID application client secret."""
+    """Env var name holding the Entra ID application client secret; the login client secret is used when neither this nor ``client_secret_path`` is set."""
 
     client_secret_path: str = ""
     """DfeSecrets path holding the Entra ID application client secret."""

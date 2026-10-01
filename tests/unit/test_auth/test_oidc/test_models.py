@@ -17,7 +17,7 @@ from dfe_engine.auth.oidc.models import GroupInfo, GroupResolutionConfig, OIDCPr
 class TestGroupResolutionConfig:
     def test_defaults(self):
         cfg = GroupResolutionConfig()
-        assert cfg.mode == "manual"
+        assert cfg.mode == "token_claim"
         assert cfg.claim_name == "groups"
         assert cfg.sync_interval == 3600
         assert cfg.service_account_json_env == ""
@@ -91,7 +91,7 @@ class TestOIDCProviderDefaults:
     def test_default_groups_resolution_config(self):
         provider = OIDCProvider()
         assert isinstance(provider.groups, GroupResolutionConfig)
-        assert provider.groups.mode == "manual"
+        assert provider.groups.mode == "token_claim"
 
 
 class TestOIDCProviderTypes:

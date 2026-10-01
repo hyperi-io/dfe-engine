@@ -3164,7 +3164,7 @@
           "OIDC Providers"
         ],
         "summary": "Create Provider",
-        "description": "Create a new OIDC provider configuration (admin only).\n\nSecret values in the body are written to the secret store before the YAML is\nwritten, so nothing is stored against a name that already belongs to someone\nelse's provider.",
+        "description": "Create a new OIDC provider configuration (admin only).\n\nSecret values in the body are written to the secret store before the YAML, and only once the name is free and the provider passes the field rules for its type and mode, so a refused provider leaves nothing behind.",
         "operationId": "create_provider_api_v1_auth_oidc_providers_post",
         "requestBody": {
           "required": true,
@@ -3423,7 +3423,7 @@
           "OIDC Providers"
         ],
         "summary": "Update Provider",
-        "description": "Update an OIDC provider configuration (admin only).\n\nA secret the body omits keeps the path the provider already holds, so an\nupdate that only flips ``enabled`` does not strand a stored credential.",
+        "description": "Update an OIDC provider configuration (admin only).\n\nA secret the body omits keeps the path the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential. Any update that touches more than ``enabled`` or ``display_name`` must leave the provider passing the field rules, checked before a secret is written.",
         "operationId": "update_provider_api_v1_auth_oidc_providers__name__put",
         "parameters": [
           {
@@ -26636,6 +26636,12 @@
             "title": "Type",
             "description": "Provider type: generic, google, entra_id, okta"
           },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Whether the provider serves logins",
+            "default": true
+          },
           "display_name": {
             "type": "string",
             "title": "Display Name",
@@ -28152,7 +28158,7 @@
               "api"
             ],
             "title": "Mode",
-            "default": "manual"
+            "default": "token_claim"
           },
           "claim_name": {
             "type": "string",
@@ -28203,6 +28209,11 @@
             "title": "Domain",
             "default": ""
           },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id",
+            "default": ""
+          },
           "tenant_id_env": {
             "type": "string",
             "title": "Tenant Id Env",
@@ -28249,7 +28260,7 @@
             ],
             "title": "Mode",
             "description": "Group resolution mode: manual, token_claim, api",
-            "default": "manual"
+            "default": "token_claim"
           },
           "claim_name": {
             "type": "string",
@@ -28259,6 +28270,7 @@
           },
           "sync_interval": {
             "type": "integer",
+            "minimum": 60.0,
             "title": "Sync Interval",
             "description": "Seconds between API sync cycles",
             "default": 3600
@@ -28293,16 +28305,22 @@
             "description": "Google Workspace domain",
             "default": ""
           },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id",
+            "description": "Entra ID tenant ID. Not a secret, so it is stored in config.",
+            "default": ""
+          },
           "tenant_id_env": {
             "type": "string",
             "title": "Tenant Id Env",
-            "description": "Env var for Entra ID tenant ID",
+            "description": "Env var for Entra ID tenant ID, read when tenant_id is empty",
             "default": ""
           },
           "client_secret": {
             "type": "string",
             "title": "Client Secret",
-            "description": "Entra ID application client secret. Write-only: it goes to the secret store and only its path is kept in config.",
+            "description": "Entra ID application client secret. Write-only: it goes to the secret store and only its path is kept in config. When neither this nor client_secret_env is set, the login client secret is used.",
             "default": ""
           },
           "client_secret_env": {
@@ -28367,6 +28385,10 @@
             "type": "string",
             "title": "Domain"
           },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
           "tenant_id_env": {
             "type": "string",
             "title": "Tenant Id Env"
@@ -28402,6 +28424,7 @@
           "service_account_json_path",
           "admin_email",
           "domain",
+          "tenant_id",
           "tenant_id_env",
           "client_secret_env",
           "client_secret_path",
