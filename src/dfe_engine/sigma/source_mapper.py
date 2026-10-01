@@ -30,7 +30,7 @@ from dfe_engine.source.type_registry import TypeRegistry
 
 if TYPE_CHECKING:
     from dfe_engine.fieldmap.registry import FieldMapRegistry
-    from dfe_engine.sigma.views import SigmaViewStore
+    from dfe_engine.sigma.views import SigmaViewDefinition, SigmaViewStore
 
 
 class SigmaSourceMapper:
@@ -96,8 +96,45 @@ class SigmaSourceMapper:
 
         Returns an empty dict when the source's schema fails to build.
         """
-        source = self._source_registry.get_source(source_name)
+        return self._schema_metadata_for_source(self._source_registry.get_source(source_name))
 
+    def get_sigma_field_metadata(
+        self, source_name: str
+    ) -> dict[str, dict[str, str | list[str] | None]]:
+        """Get schema column metadata keyed by the Sigma field the source's view exposes.
+
+        A sigma rule's WHERE clause runs over the ``{source}_sigma`` view, whose
+        columns carry Sigma field names, so the backend looks metadata up by those
+        names. Each field the view aliases to a real column takes that column's
+        metadata. A field the view extracts from ``_json``, CASTs, or does not
+        alias at all gets none, and so keeps the ILIKE match.
+
+        Args:
+            source_name: Source name (e.g. 'windows-audit').
+
+        Returns:
+            Dict mapping Sigma field names to their column's metadata. Empty when
+            the view aliases no real column or the source's schema fails to build.
+
+        Raises:
+            SourceNotFoundError: Source not found in registry.
+            FieldMapError: The sigma view pins a field map of another standard.
+        """
+        source = self._source_registry.get_source(source_name)
+        aliases = self._view_column_aliases(source)
+        if not aliases:
+            return {}
+        column_metadata = self._schema_metadata_for_source(source)
+        return {
+            sigma_field: column_metadata[column]
+            for sigma_field, column in aliases.items()
+            if column in column_metadata
+        }
+
+    def _schema_metadata_for_source(
+        self, source: Source
+    ) -> dict[str, dict[str, str | list[str] | None]]:
+        """Column metadata from the source's composed schema; empty if the build fails."""
         builder = SchemaBuilderV2(
             registry=self._type_registry,
         )
@@ -106,7 +143,7 @@ class SigmaSourceMapper:
         try:
             result = builder.build(source)
         except Exception as e:
-            logger.warning(f"Failed to build schema for source '{source_name}': {e}")
+            logger.warning(f"Failed to build schema for source '{source.source}': {e}")
             return {}
 
         metadata: dict[str, dict[str, str | list[str] | None]] = {}
@@ -118,6 +155,31 @@ class SigmaSourceMapper:
             }
 
         return metadata
+
+    def _view_column_aliases(self, source: Source) -> dict[str, str]:
+        """Sigma field -> real column for every plain alias the source's sigma view renders.
+
+        Follows the same resolution as view generation: a stored definition wins,
+        and contributes only its uncast ``source_column`` entries, since a JSON
+        extraction or a CAST is not the expression the column's index covers.
+        """
+        definition = self._stored_definition(source)
+        if definition is None:
+            return self._get_mappings_for_source(source)
+        return {
+            column.sigma_field: column.source_column
+            for column in definition.columns
+            if column.source_column and not column.type
+        }
+
+    def _stored_definition(self, source: Source) -> SigmaViewDefinition | None:
+        """The source's stored sigma view definition, or None when there is none."""
+        if self._view_store is None:
+            return None
+        try:
+            return self._view_store.get(source.source)
+        except ResourceNotFoundError:
+            return None
 
     def generate_sigma_view(
         self,
@@ -166,13 +228,9 @@ class SigmaSourceMapper:
         can declare JSON-derived columns); otherwise fall back to the static field
         maps, returning None when a source has neither.
         """
-        if self._view_store is not None:
-            try:
-                definition = self._view_store.get(source.source)
-            except ResourceNotFoundError:
-                definition = None
-            if definition is not None:
-                return build_sigma_view_ddl(definition, db=db, table_name=source.table_name)
+        definition = self._stored_definition(source)
+        if definition is not None:
+            return build_sigma_view_ddl(definition, db=db, table_name=source.table_name)
 
         mappings = self._get_mappings_for_source(source)
         if not mappings:
