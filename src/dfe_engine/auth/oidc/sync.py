@@ -38,6 +38,10 @@ if TYPE_CHECKING:
     from dfe_engine.secrets import DfeSecrets
 
 SYNC_GROUPS_SKIPPED = "auth_oidc_sync_groups_skipped_total"
+SYNC_SCHEDULED_RUNS = "auth_oidc_sync_scheduled_runs_total"
+
+SyncOutcome = Literal["ok", "partial", "error"]
+"""How one sync run ended: every group synced, some left unsynced, or the run failed."""
 
 SyncSkipReason = Literal["invalid_name", "stored_unloadable", "name_taken"]
 """Why the sync left a provider group unsynced.
@@ -74,6 +78,17 @@ class SyncMetrics:
             "Provider groups an OIDC group sync left unsynced",
             ["reason"],
         )
+        self._scheduled_runs = manager.counter(
+            SYNC_SCHEDULED_RUNS,
+            "OIDC group syncs the background scheduler ran, by provider and outcome",
+            ["outcome", "provider"],
+        )
+
+    def scheduled_run(self, *, outcome: SyncOutcome, provider: str) -> None:
+        """Record one sync the background scheduler ran."""
+        if self._manager is None:
+            return
+        self._scheduled_runs.labels(outcome=outcome, provider=provider).inc()
 
     def skipped(self, reason: SyncSkipReason) -> None:
         """Record a provider group one sync run left unsynced."""
