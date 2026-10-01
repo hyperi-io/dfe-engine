@@ -11,7 +11,7 @@ This module is only WIRING. The moving parts are built and tested elsewhere: the
 runner coordinates every decision through ClickHouse (ChCoordinator - lease,
 watermark, state), the worker runs one windowed query, and the daemon is a thin
 `while: tick(); sleep` loop. Keeping those pure means this CLI is the one place
-that touches the wall clock, real signals, and a live ClickHouse client - so it
+that touches actual time, real signals, and a live ClickHouse client - so it
 stays deliberately small.
 
 Two commands, matching the two ways the runner is driven:
