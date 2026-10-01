@@ -30,6 +30,7 @@ is the single switch:
 | `external` / `prometheus` | collector -> customer OTLP / Prometheus | customer backend |
 
 FACT-CHECKED against the code (2026-06-30):
+
 - **dfe-receiver accepts OTLP** - `otlp-grpc` + `otlp-http` listeners
   (`deployment.rs:80-85`), `otlp` feature + `OtlpConfig` (`config/mod.rs:54`),
   `server/otlp` module. This is the intake for `receiver` mode.
@@ -98,6 +99,7 @@ The watermark still advances and the run still records as `completed`, so the sa
 `packages/dev-logger` today: dev-only (no-ops unless `NODE_ENV=development`),
 unstructured, no masking, no levels config -> the UI logs NOTHING in production.
 Required:
+
 - Replace/upgrade it to emit **structured JSON to stdout in production**, matching
   the scalo log schema (ts/level/service.name/fields, masking, levels). Server-side
   Next.js logs -> stdout -> collector -> HyperDX.
@@ -113,7 +115,8 @@ HyperDX, by `service.name`, within the freshness window - proving every componen
 reaches the single destination.
 
 ## References
-- OpenTelemetry Collector (filelog/OTLP routing): https://opentelemetry.io/docs/collector/
+
+- OpenTelemetry Collector (filelog/OTLP routing): <https://opentelemetry.io/docs/collector/>
 - scalo logger (LOGGING.md in the scalo package) - the log-output contract.
 - DFE telemetry seam: [[project_deployment_tiers]] (selectable self-monitoring,
   hyperdx-direct default).

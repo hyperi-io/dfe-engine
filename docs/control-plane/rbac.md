@@ -128,7 +128,7 @@ flowchart LR
 
 #### Config Directory Layout
 
-```
+```text
 config/auth/
     accounts/           # One YAML per local user account
         admin.yaml
@@ -160,7 +160,7 @@ Constant-time rejection for unknown usernames prevents enumeration attacks.
 
 ### 1.6 API Key Format
 
-```
+```text
 dfe_ak_8a3f2c91_7f3b2c4d8e9a1b5f6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f
 |      |         |
 prefix short     long token (shown once, stored as SHA-384 hash)
@@ -331,6 +331,7 @@ def authorize(
 ```
 
 Decision order:
+
 1. `enabled=False` → allow (dev/test)
 2. `auth=None` → root mode, allow
 3. Check `role_config.check_roles(auth.roles, action)` → first granting role
@@ -430,7 +431,7 @@ created_at: "2026-03-31T02:00:00Z"
 
 ### 3.3 REST API
 
-```
+```text
 POST   /api/v1/auth/login                           # JWT login
 POST   /api/v1/auth/refresh                          # Refresh JWT
 GET    /api/v1/auth/me                               # Current user info + permissions
@@ -445,6 +446,7 @@ CLI. The auth router currently exposes login/refresh/me/permissions.
 On first startup (empty `config/auth/` directory), `bootstrap_auth()` seeds:
 
 **Groups:**
+
 - `dfe-admins` → roles: `[admin]`
 - `dfe-analysts` → roles: `[data_analyst]`
 - `dfe-viewers` → roles: `[data_viewer]`
@@ -852,9 +854,9 @@ changes. Shipped so far:
 
 Remaining:
 
-3. **Metrics manifest caching** from the scalo-rs `/metrics/manifest`
+1. **Metrics manifest caching** from the scalo-rs `/metrics/manifest`
    endpoint
-4. **Removal of the typed plugin system** (`plugins.py`,
+2. **Removal of the typed plugin system** (`plugins.py`,
    `plugins_builtin/` - still present, still the live path)
 
 ---

@@ -68,8 +68,8 @@ Impacts on our implementation:
   helper stores a username+password for SCRAM/PLAIN, and NOTHING for MSK-Serverless
   IAM (role-based).
 
-> AWS compute has its own serverless/server split (EKS-on-Fargate vs RKE2/EKS-on-EC2)
-> - that affects node-affinity, not the Kafka contract, and is tracked in the
+> AWS compute has its own serverless/server split (EKS-on-Fargate vs RKE2/EKS-on-EC2) --
+> that affects node-affinity, not the Kafka contract, and is tracked in the
 > multi-cloud deploy plan, not here.
 
 ## DFE's lifecycle response (WS-C)

@@ -28,7 +28,7 @@ ClickHouse, with idle troughs between. On the right, after the loop drifts each 
 phase (WHEN it fires, never how often), the same total work SPREADS into the troughs and
 the aggregate curve FLATTENS. Same coverage, same freshness - just no synchronised pile-ups.
 
-```
+```text
 Aggregate ClickHouse pressure P(b) across one hyperperiod H   (b = one Delta-second bucket)
 
   BEFORE - all fire on the period boundary          AFTER - phases drifted apart
@@ -84,7 +84,7 @@ not a slope (CPU just slows), so memory is a hard constraint backed by CH's per-
 Visually the two failure modes could not be more different - which is why memory is the
 hard constraint and CPU is only weighted:
 
-```
+```text
   CPU  (soft slope: it just slows)          MEMORY  (hard cliff: sheds many at once)
 
   p95 latency                               query success
@@ -138,28 +138,36 @@ offset φ deposits that pulse across the d_i buckets it covers (wrapping around 
 
 For each bucket b = 0..B-1, summing every fire of every hunt that covers b:
 
-    C(b) = Σ_i Σ_k c_i · 𝟙[fire (i,k) covers b]      (CPU)
-    M(b) = Σ_i Σ_k m_i · 𝟙[fire (i,k) covers b]      (memory)
+```text
+C(b) = Σ_i Σ_k c_i · 𝟙[fire (i,k) covers b]      (CPU)
+M(b) = Σ_i Σ_k m_i · 𝟙[fire (i,k) covers b]      (memory)
+```
 
 Normalise each by cluster capacity: c̃(b) = C(b) / C_cap, m̃(b) = M(b) / M_cap.
 The **composite pressure** in bucket b, with weights w_c + w_m = 1:
 
-    P(b) = w_c · c̃(b) + w_m · m̃(b)
+```text
+P(b) = w_c · c̃(b) + w_m · m̃(b)
+```
 
 ### Objective
 
 Minimise the sum of squares of the composite pressure over the hyperperiod:
 
-    minimise   J(φ) = Σ_{b=0}^{B-1} P(b)²
-    subject to φ_i ∈ [0, T_i)           for all i        (full-period slack)
-               M(b) ≤ M_cap             for all b        (keep concurrent memory under the server limit)
+```text
+minimise   J(φ) = Σ_{b=0}^{B-1} P(b)²
+subject to φ_i ∈ [0, T_i)           for all i        (full-period slack)
+           M(b) ≤ M_cap             for all b        (keep concurrent memory under the server limit)
+```
 
 **Why sum-of-squares is the flattening objective.** The total pressure
 T = Σ_b P(b) is *invariant* under phase changes - moving φ_i only shifts where a
 hunt's pulses land, not their total (H is periodic, so pulses wrap, nothing falls
 off the edge). Since
 
-    Σ_b P(b)² = T²/B + Σ_b (P(b) − P̄)²  = const + B · Var(P),
+```text
+Σ_b P(b)² = T²/B + Σ_b (P(b) − P̄)²  = const + B · Var(P),
+```
 
 minimising J is *exactly* minimising the variance of the load curve - i.e.
 flattening it. And by Cauchy-Schwarz, J ≥ T²/B with equality iff P(b) is constant
@@ -172,15 +180,17 @@ We do NOT globally re-solve (that thrashes and risks the herding "avalanche" the
 demand-response literature warns of, where every load jumps to the same valley and
 makes a new peak). Instead, each control cycle:
 
-    1. Observe C, M from CH; refresh (c_i, m_i, d_i) from query_log p95.
-    2. Compute P(b) for the current φ.
-    3. b*  ← argmax_b P(b)                              (the current peak)
-    4. i*  ← the hunt firing into b* with the largest marginal term in J
-    5. φ*  ← the offset for i* that most reduces J (toward the deepest feasible
-             trough), CLAMPED to a bounded step |φ* − φ_{i*}| ≤ Δφ_max, and
-             rejecting any move with M(b) > M_cap in any bucket
-    6. If ΔJ < −θ (improves by more than the hysteresis margin): commit φ* for i*
-    7. Wait one cycle (let observation catch up); repeat.
+```text
+1. Observe C, M from CH; refresh (c_i, m_i, d_i) from query_log p95.
+2. Compute P(b) for the current φ.
+3. b*  ← argmax_b P(b)                              (the current peak)
+4. i*  ← the hunt firing into b* with the largest marginal term in J
+5. φ*  ← the offset for i* that most reduces J (toward the deepest feasible
+         trough), CLAMPED to a bounded step |φ* − φ_{i*}| ≤ Δφ_max, and
+         rejecting any move with M(b) > M_cap in any bucket
+6. If ΔJ < −θ (improves by more than the hysteresis margin): commit φ* for i*
+7. Wait one cycle (let observation catch up); repeat.
+```
 
 Moving one hunt at a time, by a bounded step, with a hysteresis margin θ and a
 per-hunt cool-down, is what makes it the gentle "drift" - and what prevents
@@ -210,9 +220,11 @@ Attribution needs one cheap enabler: every hunt query carries
 `SETTINGS log_comment = 'hunt:<id>', workload = 'hunts'`. Then per hunt, over a
 trailing window:
 
-    c_i ≈ p95( ProfileEvents CPU µs )      from system.query_log (type = QueryFinish)
-    m_i ≈ p95( peak_memory_usage )         "
-    d_i ≈ p95( query_duration_ms ) / Δ     "
+```text
+c_i ≈ p95( ProfileEvents CPU µs )      from system.query_log (type = QueryFinish)
+m_i ≈ p95( peak_memory_usage )         "
+d_i ≈ p95( query_duration_ms ) / Δ     "
+```
 
 Because it is a trailing p95 refreshed each cycle, the model tracks data-shape drift
 automatically - a table that grows or a join that gets heavier simply raises c_i/m_i
@@ -239,12 +251,14 @@ scalo metric through the standard OTel seam (see
 buckets:
 
 **1. What it is running** (runner/daemon operational state):
+
 - `dfe_hunt_runner_due` - the due-but-unclaimed backlog (also the KEDA signal),
   `dfe_hunt_runner_active_leases`, `..._claimed_total`, `..._executed_total`,
   `..._deferred_total` (overrun), `..._lease_reclaims_total`, `..._tick_seconds`.
 
 **2. What it changes** (the actuations - so every adjustment is auditable in metrics
 as well as in git):
+
 - `dfe_hunt_phase_shift_total{hunt}` + a `dfe_hunt_phase_offset{hunt}` gauge,
 - `dfe_hunt_interval_backoff_total{hunt}` + `dfe_hunt_interval_seconds{hunt}`,
 - `dfe_hunt_schedule_promotions_total{hunt}` (settling promotions),
@@ -253,6 +267,7 @@ as well as in git):
 **3. The combined/derived metrics it decides ON** - the novel bit: the controller's
 own inputs and objective are first-class metrics, so you can watch it work and prove
 it converges:
+
 - per-hunt cost model (trailing p95): `dfe_hunt_cost_cpu_us{hunt}`,
   `dfe_hunt_cost_mem_bytes{hunt}`, `dfe_hunt_cost_duration_ms{hunt}`,
 - the aggregate curves: `dfe_hunt_load_cpu`, `dfe_hunt_load_mem`,
@@ -290,6 +305,7 @@ Auto-disable triggers:
   warn-then-disable). Governed-ops config - set/get via the API, committed to git.
 
 Mechanics (consistent with the rest of the architecture):
+
 - Auto-disable is a **governed-ops action**: write `enabled: false` + reason +
   timestamp to the hunt's state overlay in gitcrud (an auditable "why"), which the
   runners reconcile and KEDA stops counting. It is a **circuit-breaker**, distinct
@@ -323,7 +339,7 @@ phase offset is already materialised into `hunt_schedule`) and the *tagging*
 (`log_comment` + `workload`), so the smoother drops in later once the cost model (v2)
 exists - no rework of the runner or the KEDA path.
 
-## Useful Links and References 
+## Useful Links and References
 
 - **Resource smoothing** (operations research / project scheduling): shift tasks
   within slack to flatten a resource histogram; classic objective Σ_t R_t², via

@@ -18,6 +18,7 @@ Web-researched (2026-06-30), see References.
 ## 1. Foundational principles (non-negotiable)
 
 The OpenGitOps four, plus our survivability rule:
+
 1. **Declarative** - desired state is YAML in git, never imperative cluster calls.
 2. **Versioned + immutable** - git history is the SoT; pin every image/chart by
    tag or SHA. NO `latest`, NO floating refs (immutability principle).
@@ -43,6 +44,7 @@ The OpenGitOps four, plus our survivability rule:
 ## 3. Commit conventions (Conventional-Commits-shaped, gitops-typed)
 
 Subject: `type(scope): summary` - ASCII only, <= 50 chars, imperative.
+
 - **types** (gitops-operational, NOT release types): `cfg` (config/helm-var change),
   `hunt`, `rbac`, `action` (a defined-action invocation), `ops` (restart/scale/
   rollback), `schema`, `seed`.
@@ -54,7 +56,8 @@ Subject: `type(scope): summary` - ASCII only, <= 50 chars, imperative.
   is ONE commit.
 
 Identity + audit trailers (machine-parseable, tie commit <-> SOC2 audit record):
-```
+
+```text
 cfg(receiver-default): set replicaCount=3
 
 Scale receiver for ingest backlog.
@@ -66,6 +69,7 @@ DFE-Request-Id: 4f3c...              # correlation id, also in the audit log
 DFE-Base-Revision: 9c1d...           # optimistic-concurrency base SHA
 DFE-Audit-Id: aud_...                # SOC2 audit record id
 ```
+
 - **author** = the acting human/principal (blame/attribution).
 - **committer** = the `dfe-engine` bot identity (machine provenance). [already split]
 
@@ -73,6 +77,7 @@ DFE-Audit-Id: aud_...                # SOC2 audit record id
 
 Argo best practice = PRs for prod-controlling branches, enforced at the git level.
 We honour it via the RBAC + protected-var policy, not by blocking the engine:
+
 - **Direct-commit mode** (dev / low-risk / non-protected classes): engine commits
   straight to `main` -> Argo auto-syncs. The RBAC check + audit IS the gate.
 - **PR mode** (prod env / protected vars / `governance` (RBAC) class / any class
@@ -123,6 +128,7 @@ We honour it via the RBAC + protected-var policy, not by blocking the engine:
 ## 8. Enforcement in code (this is a code standard, not just prose)
 
 Implemented in the gitcrud engine (see [[governed-ops-api]] Phase 1):
+
 - `CommitPolicy` builds every message + trailers from the request context (actor,
   role, class, action, request-id, base-SHA, audit-id) - callers cannot hand-write
   messages.
@@ -135,9 +141,9 @@ Implemented in the gitcrud engine (see [[governed-ops-api]] Phase 1):
 
 ## References
 
-- OpenGitOps Principles (CNCF): https://github.com/open-gitops/documents/blob/main/PRINCIPLES.md
-- Argo CD Best Practices (env folders not branches; config/source repo split): https://argo-cd.readthedocs.io/en/stable/user-guide/best_practices/
-- Argo CD Auto-Sync (self-heal, prune, roll-forward): https://argo-cd.readthedocs.io/en/latest/user-guide/auto_sync/
-- Argo CD anti-patterns (PRs over direct commits; pin bases): https://codefresh.io/blog/argo-cd-anti-patterns-for-gitops/
-- Argo CD signature verification (GnuPG deprecated -> sourceIntegrity): https://argo-cd.readthedocs.io/en/latest/user-guide/gpg-verification/
+- OpenGitOps Principles (CNCF): <https://github.com/open-gitops/documents/blob/main/PRINCIPLES.md>
+- Argo CD Best Practices (env folders not branches; config/source repo split): <https://argo-cd.readthedocs.io/en/stable/user-guide/best_practices/>
+- Argo CD Auto-Sync (self-heal, prune, roll-forward): <https://argo-cd.readthedocs.io/en/latest/user-guide/auto_sync/>
+- Argo CD anti-patterns (PRs over direct commits; pin bases): <https://codefresh.io/blog/argo-cd-anti-patterns-for-gitops/>
+- Argo CD signature verification (GnuPG deprecated -> sourceIntegrity): <https://argo-cd.readthedocs.io/en/latest/user-guide/gpg-verification/>
 - hyperi-ai CI standard (Conventional Commits shape we align to): internal CORE.md / GIT.md

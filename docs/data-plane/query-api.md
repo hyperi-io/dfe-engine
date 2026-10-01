@@ -148,7 +148,7 @@ All routes live under `/api/v1/queries`:
 
 ### Execute a view
 
-```
+```text
 POST /api/v1/queries/views/analytics/user_activity/execute
 Content-Type: application/json
 Authorization: Bearer <jwt>
@@ -287,6 +287,7 @@ Simple pagination using `limit` and `offset`. Best for small datasets.
 ```
 
 **Response includes:**
+
 - `has_more: true` if more rows available
 - `next_offset: 100` for next page
 
@@ -320,7 +321,7 @@ The rules a keyset page follows:
 
 Queries are referenced by labels in `namespace/name` format:
 
-```
+```text
 analytics/user_activity
 analytics/conversion_funnel
 hunts/active_threats
@@ -452,6 +453,7 @@ storage/s3_list:
 ```
 
 **Usage:**
+
 ```json
 {
   "query": "storage/s3_list",
@@ -485,6 +487,7 @@ storage/file_list:
 ```
 
 **Usage:**
+
 ```json
 {
   "query": "storage/file_list",
@@ -634,11 +637,12 @@ ClickHouse user's GRANTs + row policies bound what any deployment exposes.
 
 All responses are a single native JSON body:
 
-```
+```text
 Content-Type: application/json
 ```
 
 **Benefits:**
+
 - No client-side deserialization library required
 - Human-readable, easy to debug (curl, browser devtools)
 - Universal cross-language support

@@ -64,7 +64,7 @@ One YAML file per source, managed by `SourceRegistry` over two backends:
   SSoT -- the same git-aware, cached, callback-driven store `ServiceConfigRegistry`
   uses.
 
-```
+```text
 # gitcrud backend                   # DirectoryConfigStore backend
 <deploy_repo>/                      <config_directory>/
   config/                             sources/
@@ -111,7 +111,7 @@ them yourself.
 Sources are the primary API entity (see
 [ui-api-guide.md](../control-plane/ui-api-guide.md)):
 
-```
+```text
 GET    /api/v1/sources                  # List sources (paginated)
 POST   /api/v1/sources                  # Create source (flat write body; views/transform/fetcher inline)
 GET    /api/v1/sources/catalogue        # Sources a deployed transform already handles (filter: intake, search)

@@ -115,8 +115,8 @@ class Pipeline:
 
         # Create a FileSystemLoader with all search paths
         logger.info(f"Loading template from: {self.pipeline_template}")
-        # autoescape is disabled for YAML templates - HTML escaping produces invalid YAML
-        # (e.g., & becomes &#38; which breaks YAML anchor/alias syntax)
+        # Not XSS: renders a YAML config written to disk, and HTML autoescaping would corrupt it (& -> &#38;).
+        # nosemgrep: python.flask.security.xss.audit.direct-use-of-jinja2.direct-use-of-jinja2
         env = Environment(
             loader=FileSystemLoader(template_dir),
             undefined=jinja2.StrictUndefined,

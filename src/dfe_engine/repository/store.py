@@ -153,6 +153,8 @@ class RepositoryStore:
     def get(self, scope: str, scope_id: str, namespace: str, key: str) -> dict[str, Any] | None:
         """Return the current record for a key, or None (tombstones hidden)."""
         self.ensure_schema()
+        # Not injectable: only the deployment-config database name is formatted in, and every value is bound.
+        # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
         rows = self._client.execute(
             _GET_SQL.format(db=self._db),
             parameters={
@@ -203,6 +205,8 @@ class RepositoryStore:
                     current_etag=current_etag,
                 )
         updated_at = _now_ms()
+        # Not injectable: only the deployment-config database name is formatted in, and the row is insert data.
+        # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
         self._client.execute(
             _INSERT_SQL.format(db=self._db),
             [
@@ -238,6 +242,8 @@ class RepositoryStore:
         current = self.get(scope, scope_id, namespace, key)
         if current is None:
             return False
+        # Not injectable: only the deployment-config database name is formatted in, and the row is insert data.
+        # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
         self._client.execute(
             _INSERT_SQL.format(db=self._db),
             [(scope, scope_id, namespace, key, "", b"", 0, "", _now_ms(), 1)],
@@ -247,6 +253,8 @@ class RepositoryStore:
     def list(self, scope: str, scope_id: str, namespace: str) -> RecordList:
         """Metadata for all live keys in a (scope, scope_id, namespace)."""
         self.ensure_schema()
+        # Not injectable: only the deployment-config database name is formatted in, and every value is bound.
+        # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
         rows = self._client.execute(
             _LIST_SQL.format(db=self._db),
             parameters={"scope": scope, "scope_id": scope_id, "namespace": namespace},

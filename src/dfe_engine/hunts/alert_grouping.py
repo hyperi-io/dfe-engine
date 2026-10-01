@@ -271,6 +271,8 @@ class AlertStateManager:
             return True
 
         try:
+            # Not injectable: only the deployment-config database name is formatted in, and every value is bound.
+            # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
             rows = ch_client.execute(
                 _CHECK_COOLDOWN_SQL.format(db=self._db),
                 parameters={
@@ -329,6 +331,8 @@ class AlertStateManager:
             # client wrapper routes it through insert(); a kwarg lands in
             # command() and silently inserts nothing. last_fired_at is a real
             # datetime (DateTime column), not a string.
+            # Not injectable: only the deployment-config database name is formatted in, and the row is insert data.
+            # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
             ch_client.execute(
                 _RECORD_FIRE_SQL.format(db=self._db),
                 [[hunt_name, rule_name, customer, group_key, fired_at, 1, suppressed_count]],

@@ -39,7 +39,7 @@ for coordination (`ch_coordinator.py`): `hunt_lease`, `hunt_watermark`,
 `hunt_state`. `hunt_schedule` is the fourth, and the only one written outside the
 worker loop.
 
-```
+```text
 hunt_schedule(hunt_id, interval_seconds, phase_offset, enabled, updated)
   ReplacingMergeTree(updated) ORDER BY hunt_id
 ```
@@ -54,7 +54,7 @@ KEDA runs `schedule.due_query(db)` against ClickHouse (via the fail-safe
 below) - the count of hunts that are due-and-unclaimed. It uses the EXACT
 arithmetic the worker uses (`spread.latest_fire`):
 
-```
+```text
 boundary = intDiv(now(), interval) * interval      -- start of this interval
 current  = boundary + phase_offset                  -- this interval's scheduled fire
 fire     = if(now() >= current, current,            -- the latest fire at or before now

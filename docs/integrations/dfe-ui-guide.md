@@ -28,8 +28,9 @@ engine (the brain + API), and HyperDX (data exploration).
 ## 3. How it talks to the engine (and stays type-safe)
 
 This part is genuinely well done:
-- The engine publishes an **OpenAPI spec** (`dfe-engine/openapi-spec/openapi.json`)
-  - a machine-readable description of every endpoint, its inputs and outputs.
+
+- The engine publishes an **OpenAPI spec** (`dfe-engine/openapi-spec/openapi.json`) --
+  a machine-readable description of every endpoint, its inputs and outputs.
 - dfe-ui runs a tool (`openapi-typescript`) that turns that spec into TypeScript
   **types** (`packages/dfe-engine-types`). So the UI code knows, at compile time,
   the exact shape of every request and response. If the engine changes an endpoint
@@ -48,6 +49,7 @@ signs you out. (In production the intent is OIDC at the edge via Envoy + the
 
 HyperDX is a **sibling app**, embedded rather than linked out to. The integration
 is deliberately light:
+
 1. **Embedded views** - when `HYPERDX_URL` is set on the dfe-ui deployment, the
    sidebar gains `/observe/*` entries (Search, Search list, Hunt Results) that
    iframe the chromeless dfe-hyperdx fork inside dfe-ui. The `(auth)` layout reads
@@ -97,12 +99,14 @@ Detailed tasks live in `docs/superpowers/plans/2026-06-30-governed-ops-api.md`
 (Phase 4).
 
 ### Track A - make it deploy (small, mechanical)
+
 - Add `/livez` + `/readyz` route handlers.
 - Mount `NEXTAUTH_SECRET` from the K8s Secret; add image-pull secret.
 - Publish the image to ghcr.
 - Switch off build-time `NEXT_PUBLIC_*` for the API/HyperDX URLs (next item).
 
 ### Track B - runtime config via a Governed Ops bootstrap endpoint (the keystone)
+
 Add an engine endpoint `GET /api/v1/config/client` that returns, at runtime, what
 the UI needs: the API base (same-origin), the HyperDX URL + whether it is enabled,
 feature flags, and auth settings. The UI fetches this on startup instead of baking
@@ -112,16 +116,20 @@ so it fits Governed Ops exactly. This single change fixes the deploy blocker AND
 the multi-env story.
 
 ### Track B - the UI becomes a Governed Ops window
+
 Every CRUD screen (sources, schemas, rules, hunts, deployment dials) is the same
 "edit YAML in git through the governed API" operation. So the UI gains, uniformly:
+
 - a **current vs pending** view ("these changes are committed but not yet applied"),
 - **conflict handling** (if someone else changed it, show current vs yours vs
   theirs - from the commit-SHA version token),
 - **RBAC-driven visibility** (you only see/do what your class/action/operation
   grants allow).
+
 These come "for free" because the engine exposes them once; the UI renders them.
 
 ### Track B - kill the hand-written boilerplate (developer experience)
+
 Today UI devs hand-write a `useInfiniteQuery` wrapper per endpoint. Best practice
 (2026) is to **generate** the typed hooks from the OpenAPI spec - publish a
 `@dfe-engine/client` package (generated in CI when the spec changes) so the UI gets
@@ -131,6 +139,7 @@ modern `queryOptions()` pattern that composes well with Next.js server rendering
 Either removes the boilerplate and keeps UI and engine in lockstep with the spec.
 
 ### Track B - HyperDX: from "link" to genuinely integrated
+
 - Serve the HyperDX URL + connection from the bootstrap endpoint (not a build-time
   env), so it is runtime + gitops-driven.
 - Put dfe-ui and HyperDX behind the **same Envoy gateway with shared OIDC**, so
@@ -140,12 +149,14 @@ Either removes the boilerplate and keeps UI and engine in lockstep with the spec
   a design choice to weigh against keeping it a separate tab.
 
 ### Track B - live updates
+
 Lists are polled today. The engine already has Server-Sent Events for tasks; extend
 that so long-running things (hunt runs, task progress, deploy reconcile status) push
 to the UI instead of being polled.
 
 ## 8. References
-- Next.js runtime env / single image multi-env: https://nextjs.org/docs/app/getting-started/deploying ; https://nemanjamitic.com/blog/2025-12-13-nextjs-runtime-environment-variables/
-- Typed React Query from OpenAPI (Orval / Hey API / openapi-typescript): https://orval.dev/docs/guides/react-query/ ; https://www.saschb2b.com/blog/typesafe-api-codegen-2026
+
+- Next.js runtime env / single image multi-env: <https://nextjs.org/docs/app/getting-started/deploying> ; <https://nemanjamitic.com/blog/2025-12-13-nextjs-runtime-environment-variables/>
+- Typed React Query from OpenAPI (Orval / Hey API / openapi-typescript): <https://orval.dev/docs/guides/react-query/> ; <https://www.saschb2b.com/blog/typesafe-api-codegen-2026>
 - Engine API contract for the UI: [../control-plane/ui-api-guide.md](../control-plane/ui-api-guide.md)
 - Governed Ops model: [../control-plane/governed-ops-design.md](../control-plane/governed-ops-design.md) and [../architecture.md](../architecture.md)
