@@ -36,7 +36,7 @@ roles:
       - "schema:read"
       - "org:read"
   data_viewer:
-    description: "HyperDX dashboards and query execution"
+    description: "Search dashboards and query execution"
     resource_type: core
     permissions:
       - "query:execute"
