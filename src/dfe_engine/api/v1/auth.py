@@ -11,8 +11,9 @@ POST /api/v1/auth/setup/retire-admin -> Retire the bootstrap admin (admin, or it
 
 import time
 from datetime import timedelta
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from scalo.concurrency import run_blocking
 
@@ -57,6 +58,14 @@ from dfe_engine.auth.setup_status import SetupStatus, evaluate_initial_setup
 from dfe_engine.settings import DFESettings
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
+
+
+def request_time() -> int:
+    """The request's one reading of the clock, in whole epoch seconds."""
+    return int(time.time())
+
+
+RequestTime = Annotated[int, Depends(request_time)]
 
 
 # -- Request / Response models ---------------------------------
@@ -212,7 +221,11 @@ def _mint(
     auth_time: int,
     now: int,
 ) -> tuple[str, int]:
-    """Sign *data* with the session claims, returning the token and its lifetime in seconds."""
+    """Sign *data* with the session claims, returning the token and its lifetime in seconds.
+
+    The token is issued at *now*, the reading its lifetime is capped against, so its
+    ``exp`` is ``min(now + api.jwt_expire_minutes, auth_time + api.max_session_minutes)``.
+    """
     lifetime = token_lifetime(
         auth_time,
         now=now,
@@ -221,7 +234,7 @@ def _mint(
     )
     claims = {**data, **session_claims(account, auth_time=auth_time)}
     token = create_access_token(
-        data=claims, settings=settings, expires_delta=timedelta(seconds=lifetime)
+        data=claims, settings=settings, expires_delta=timedelta(seconds=lifetime), now=now
     )
     return token, lifetime
 
@@ -343,7 +356,7 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
         },
     },
 )
-async def refresh_token(user: CurrentUser, request: Request, settings: Settings):
+async def refresh_token(user: CurrentUser, request: Request, settings: Settings, now: RequestTime):
     """Refresh the current JWT token. Requires a valid existing token.
 
     The new token keeps the session's sign-in time, so a session renews only until
@@ -357,7 +370,6 @@ async def refresh_token(user: CurrentUser, request: Request, settings: Settings)
             detail={"code": "unauthorized", "message": "No account is bound to this session"},
             headers={"WWW-Authenticate": "Bearer"},
         )
-    now = int(time.time())
     auth_time = session_auth_time(getattr(request.state, "token_claims", None), now=now)
     left = remaining_seconds(
         auth_time, now=now, max_session_minutes=settings.api.max_session_minutes

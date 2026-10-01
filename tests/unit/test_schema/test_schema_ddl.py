@@ -581,6 +581,31 @@ class TestIndexNames:
         assert "INDEX" not in ddl
 
 
+class TestProjectionNames:
+    """A projection name follows the index-name rule: bare when safe, quoted otherwise."""
+
+    def test_a_dotted_projection_column_quotes_the_projection_name(self, gen: DDLGenerator):
+        cols = [_col(name="event.created", type="datetime")]
+        ddl = gen.generate_create_table("t", cols, DDLConfig(projection_order_by="event.created"))
+        projection_lines = [line for line in ddl.splitlines() if "PROJECTION" in line]
+        assert projection_lines == [
+            "    PROJECTION `event.created_optimized` (SELECT * ORDER BY `event.created`)"
+        ]
+
+    def test_a_plain_projection_column_keeps_its_line_byte_for_byte(self, gen: DDLGenerator):
+        cols = [_col(name="seen_at", type="datetime")]
+        ddl = gen.generate_create_table("t", cols, DDLConfig(projection_order_by="seen_at"))
+        projection_lines = [line for line in ddl.splitlines() if "PROJECTION" in line]
+        assert projection_lines == [
+            "    PROJECTION seen_at_optimized (SELECT * ORDER BY `seen_at`)"
+        ]
+
+    def test_a_projection_name_that_cannot_be_quoted_safely_is_refused(self, gen: DDLGenerator):
+        cols = [_col(name="a`b", type="datetime")]
+        with pytest.raises(DDLGenerationError, match="unsafe projection name"):
+            gen.generate_create_table("t", cols, DDLConfig(projection_order_by="a`b"))
+
+
 class TestDeclaredIndexes:
     """A column carrying its own index shape, which no use_case template expresses."""
 

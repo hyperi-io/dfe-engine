@@ -946,6 +946,11 @@ def create_access_token(
     data: dict,
     settings: DFESettings,
     expires_delta: timedelta | None = None,
+    *,
+    now: int | None = None,
 ) -> str:
-    """Create a signed ES384 DFE identity token (via the JWT authority)."""
-    return jwt_authority_for(settings).sign(data, expires_delta=expires_delta)
+    """Create a signed ES384 DFE identity token (via the JWT authority).
+
+    *now* is the issue time as epoch seconds, read from the clock when None.
+    """
+    return jwt_authority_for(settings).sign(data, expires_delta=expires_delta, now=now)

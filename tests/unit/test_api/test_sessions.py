@@ -21,6 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.deps import create_access_token
+from dfe_engine.api.v1.auth import request_time
 from dfe_engine.auth.sessions import AUTH_TIME_CLAIM, SESSION_CLAIM
 
 _LOGIN = "/api/v1/auth/login"
@@ -213,51 +214,75 @@ class TestTokensFromBeforeTheClaim:
 
 
 class TestMaximumSessionAge:
-    def _token(self, app, api_settings, *, signed_in_ago: int) -> dict[str, str]:
+    """A refresh reads the clock once; the tests freeze that reading so every expiry is exact."""
+
+    @pytest.fixture
+    def now(self, app) -> int:
+        # Behind the wall clock so a second clock read while signing lands past the cap,
+        # and inside the verify leeway so a one-second token still verifies.
+        frozen = int(time.time()) - 10
+        app.dependency_overrides[request_time] = lambda: frozen
+        return frozen
+
+    def _token(self, app, api_settings, *, auth_time: int) -> dict[str, str]:
         marker = app.state.account_store.get("alice").session_marker()
         token = create_access_token(
-            data={
-                "sub": "alice",
-                SESSION_CLAIM: marker,
-                AUTH_TIME_CLAIM: int(time.time()) - signed_in_ago,
-            },
+            data={"sub": "alice", SESSION_CLAIM: marker, AUTH_TIME_CLAIM: auth_time},
             settings=api_settings,
             expires_delta=timedelta(minutes=5),
         )
         return {"Authorization": f"Bearer {token}"}
 
-    def test_a_refresh_keeps_the_sign_in_time(self, client, app, api_settings, alice):
-        headers = self._token(app, api_settings, signed_in_ago=600)
+    def test_a_refresh_keeps_the_sign_in_time(self, client, app, api_settings, alice, now):
+        headers = self._token(app, api_settings, auth_time=now - 600)
 
         resp = client.post(_REFRESH, headers=headers)
-        claims = app.state.jwt_authority.verify(resp.json()["access_token"])
 
         assert resp.status_code == 200, resp.text
-        original = app.state.jwt_authority.verify(headers["Authorization"][7:])
-        assert claims[AUTH_TIME_CLAIM] == original[AUTH_TIME_CLAIM]
+        claims = app.state.jwt_authority.verify(resp.json()["access_token"])
+        assert claims[AUTH_TIME_CLAIM] == now - 600
 
-    def test_a_refresh_past_the_maximum_age_is_refused(self, client, app, api_settings, alice):
-        too_old = api_settings.api.max_session_minutes * 60 + 1
-        headers = self._token(app, api_settings, signed_in_ago=too_old)
+    @pytest.mark.parametrize("past", [0, 1])
+    def test_a_refresh_at_or_past_the_maximum_age_is_refused(
+        self, client, app, api_settings, alice, now, past
+    ):
+        max_age = api_settings.api.max_session_minutes * 60
+        headers = self._token(app, api_settings, auth_time=now - max_age - past)
 
         resp = client.post(_REFRESH, headers=headers)
 
         assert resp.status_code == 401, resp.text
         assert resp.json()["code"] == "session_expired"
 
+    @pytest.mark.parametrize("left", [1, 90])
     def test_a_refresh_near_the_maximum_age_mints_a_token_that_ends_with_it(
-        self, client, app, api_settings, alice
+        self, client, app, api_settings, alice, now, left
     ):
-        left = 90
-        signed_in_ago = api_settings.api.max_session_minutes * 60 - left
-        headers = self._token(app, api_settings, signed_in_ago=signed_in_ago)
+        max_age = api_settings.api.max_session_minutes * 60
+        auth_time = now - max_age + left
+        headers = self._token(app, api_settings, auth_time=auth_time)
 
         resp = client.post(_REFRESH, headers=headers)
-        claims = app.state.jwt_authority.verify(resp.json()["access_token"])
 
         assert resp.status_code == 200, resp.text
-        assert resp.json()["expires_in"] <= left
-        assert claims["exp"] <= claims[AUTH_TIME_CLAIM] + api_settings.api.max_session_minutes * 60
+        claims = app.state.jwt_authority.verify(resp.json()["access_token"])
+        assert resp.json()["expires_in"] == left
+        assert (claims["iat"], claims["exp"]) == (now, auth_time + max_age)
+
+    @pytest.mark.parametrize("beyond", [0, 1])
+    def test_a_refresh_with_a_full_token_lifetime_left_is_not_cut_short(
+        self, client, app, api_settings, alice, now, beyond
+    ):
+        max_age = api_settings.api.max_session_minutes * 60
+        lifetime = api_settings.api.jwt_expire_minutes * 60
+        headers = self._token(app, api_settings, auth_time=now - max_age + lifetime + beyond)
+
+        resp = client.post(_REFRESH, headers=headers)
+
+        assert resp.status_code == 200, resp.text
+        claims = app.state.jwt_authority.verify(resp.json()["access_token"])
+        assert resp.json()["expires_in"] == lifetime
+        assert claims["exp"] == now + lifetime
 
     def test_a_login_token_never_outlives_the_maximum_age(self, client, app, api_settings, alice):
         api_settings.api.max_session_minutes = 10
@@ -266,7 +291,7 @@ class TestMaximumSessionAge:
         claims = app.state.jwt_authority.verify(body["access_token"])
 
         assert body["expires_in"] == 600
-        assert claims["exp"] - claims[AUTH_TIME_CLAIM] <= 600
+        assert claims["exp"] - claims[AUTH_TIME_CLAIM] == 600
 
     def test_a_legacy_token_refreshes_from_when_it_was_issued(
         self, client, app, api_settings, alice
