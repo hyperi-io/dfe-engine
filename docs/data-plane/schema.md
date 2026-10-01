@@ -716,7 +716,7 @@ FROM {db}.{source}
 - Sigma rules query the view (standard Sigma field names)
 - Field mapping is per-source (different sources map differently)
 - Zero storage overhead (view, not materialised table)
-- Mappings generated from the existing `sigma/field_mapping_service.py`
+- Mappings resolved by `sigma/source_mapper.py` from the source's field map and sigma view
 
 ### Sigma Mapping as Source Metadata
 
@@ -854,7 +854,7 @@ giving it the same schema management, retention, and query capabilities.
 
 ### Sigma Rules (converted)
 
-Sigma rules are converted to DFE Rules via the existing `sigma_converter`.
+Sigma rules are converted to DFE Rules by propagation (`dfe_engine.sigma.propagation`, `convert_detection_to_where`).
 The conversion produces a Rule definition with:
 
 - SQL query generated from the Sigma detection logic

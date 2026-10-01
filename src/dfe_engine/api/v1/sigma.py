@@ -8,8 +8,9 @@
 
 """Sigma router - rule listing, field mappings, and view generation.
 
-Wraps ``SigmaSourceMapper`` for REST access to Sigma field resolution
-and ``SigmaRuleConverter`` for rule listing.
+Wraps ``SigmaSourceMapper`` for REST access to Sigma field resolution,
+``SigmaCatalogStore`` for rule listing, and ``SigmaPropagator`` for turning
+selected rules into DFE rules.
 """
 
 from __future__ import annotations

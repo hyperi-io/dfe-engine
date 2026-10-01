@@ -4,7 +4,7 @@ import pytest
 from sigma.collection import SigmaCollection
 from sigma.rule import SigmaRule
 
-from dfe_engine.sigma.sigma_backend_clickhouse import SqlBackend
+from dfe_engine.sigma.sigma_backend_clickhouse import SqlBackend, sql_field
 
 
 @pytest.fixture
@@ -264,7 +264,8 @@ def test_clickhouse_field_name_with_whitespace(clickhouse_backend: SqlBackend):
             condition: sel
     """
     generated_query = clickhouse_backend.convert(SigmaCollection.from_yaml(sigma_yaml))
-    expected_query = ["'field\\ name' = 'value'"]
+    # Backticks, not single quotes: 'field name' = 'value' compares two constants.
+    expected_query = ["`field name` = 'value'"]
     assert normalize_sql_query(generated_query[0]) == normalize_sql_query(expected_query[0])
 
 
@@ -293,6 +294,32 @@ def test_wildcard_ilike(clickhouse_backend: SqlBackend):
     generated_query = clickhouse_backend.convert(SigmaCollection.from_yaml(sigma_yaml))
     expected_query = ["(Channel ILIKE '%Security%' OR Channel ILIKE '%powercat.ps1%')"]
     assert normalize_sql_query(generated_query[0]) == normalize_sql_query(expected_query[0])
+
+
+def test_full_alert_format_carries_dynamic_metadata(clickhouse_backend: SqlBackend):
+    """Each dynamic metadata entry adds a column and its value to the alert INSERT."""
+    sigma_yaml = """
+        title: Dynamic Metadata Rule
+        logsource:
+            product: windows
+            service: security
+        detection:
+            selection:
+                field1: value1
+            condition: selection
+        level: medium
+    """
+    clickhouse_backend.dynamic_metadata = {
+        "dynamic_field1": "dynamic_value1",
+        "dynamic_field2": "dynamic_value2",
+    }
+
+    converted_query = clickhouse_backend.convert(
+        SigmaCollection.from_yaml(sigma_yaml), output_format="full_alert"
+    )
+
+    assert "dynamic_field1" in converted_query
+    assert "dynamic_field2" in converted_query
 
 
 def test_full_alert_format_with_metadata(clickhouse_backend: SqlBackend):
@@ -519,6 +546,22 @@ def test_an_unknown_column_keeps_ilike():
     assert convert_one("message|contains: 'Error'", {}) == "message ILIKE '%Error%'"
 
 
+def test_a_quoted_column_is_looked_up_by_its_name_not_its_quoting():
+    """The schema metadata is keyed by the column name, never by its backticked form."""
+    metadata = {"log message": TEXT_INDEXED}
+
+    assert (
+        convert_one("'log message|contains': 'Error'", metadata)
+        == "lower(`log message`) LIKE '%error%'"
+    )
+
+
+def test_a_quoted_targetobject_field_is_still_matched_as_a_substring():
+    assert convert_one("'Registry-TargetObject': 'HKLM'", {}) == (
+        "`Registry-TargetObject` ILIKE '%HKLM%'"
+    )
+
+
 def test_an_unmodified_value_on_a_text_indexed_column_stays_an_equality():
     """A Sigma value with no modifier and no wildcard asks for equality, not a substring.
 
@@ -634,3 +677,52 @@ def test_multi_value_field_mappings(clickhouse_backend: SqlBackend):
     assert "client.ip" in generated_query[0]
     assert "1.2.3.4" in generated_query[0]
     assert "OR" in generated_query[0]
+
+
+class TestFieldNameRendering:
+    """A field name reaches the generated SQL as a column reference, never as SQL.
+
+    A hunt writer holds rule:write and can already author a WHERE clause, but
+    sigma:write is admin-only, so a field name must not be a second way in.
+    """
+
+    @pytest.mark.parametrize(
+        ("field", "expected"),
+        [
+            ("EventID", "EventID"),
+            ("event.user.name", "event.user.name"),
+            ("_json.user.id", "_json.user.id"),
+            ("field name", "`field name`"),
+            ("field!@#$%", "`field!@#$%`"),
+            ('field"quotes"', '`field"quotes"`'),
+            ("a`b", "`a``b`"),
+            ("a\\b", "`a\\\\b`"),
+            ("x = 1 OR 1", "`x = 1 OR 1`"),
+            ("ts) OR 1=1 --", "`ts) OR 1=1 --`"),
+        ],
+    )
+    def test_a_field_name_renders_as_a_column_reference(self, field: str, expected: str):
+        assert sql_field(field) == expected
+
+    def test_an_injected_field_name_cannot_close_its_quoting(self):
+        rendered = sql_field("x` OR 1=1 OR `y")
+
+        assert rendered == "`x`` OR 1=1 OR ``y`"
+        assert rendered.count("`") % 2 == 0
+
+    def test_a_mapped_field_name_is_quoted_too(self, clickhouse_backend: SqlBackend):
+        clickhouse_backend.field_mappings = {"User": "user name"}
+        sigma_yaml = """
+            title: Test
+            status: test
+            logsource:
+                category: test_category
+                product: test_product
+            detection:
+                selection:
+                    User: 'admin'
+                condition: selection
+        """
+        generated = clickhouse_backend.convert(SigmaCollection.from_yaml(sigma_yaml))
+
+        assert "`user name` = 'admin'" in generated[0]

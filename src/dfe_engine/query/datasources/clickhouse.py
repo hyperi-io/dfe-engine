@@ -127,22 +127,30 @@ class ClickHouseAdapter(DatasourceAdapter):
         query: str,
         params: dict[str, Any] | None = None,
     ) -> ExplainPlan:
-        """Get EXPLAIN plan from ClickHouse."""
+        """Get EXPLAIN plan from ClickHouse.
+
+        Every EXPLAIN is sent with ``readonly=1``, as ``execute`` is: without it,
+        analysing a query over ``url()`` connects to the remote host to infer the
+        file's structure.
+        """
         client = self.manager.get_clickhouse_client()
+        settings = {"readonly": 1}
 
         explain_query = f"EXPLAIN PLAN {query}"
         try:
-            result = client.query(explain_query, parameters=params or {})
+            result = client.query(explain_query, parameters=params or {}, settings=settings)
             raw_plan = "\n".join(str(row[0]) for row in result.result_rows)
         except Exception:
             explain_query = f"EXPLAIN {query}"
-            result = client.query(explain_query, parameters=params or {})
+            result = client.query(explain_query, parameters=params or {}, settings=settings)
             raw_plan = "\n".join(str(row[0]) for row in result.result_rows)
 
         steps = self._parse_explain_plan(raw_plan)
 
         try:
-            estimate = client.query(f"EXPLAIN ESTIMATE {query}", parameters=params or {})
+            estimate = client.query(
+                f"EXPLAIN ESTIMATE {query}", parameters=params or {}, settings=settings
+            )
             total_rows = _estimated_rows(estimate)
         except Exception:
             total_rows = None

@@ -158,11 +158,6 @@ class QueryClient {
     queryLabel: string,
     options?: QueryOptions,
   ): Promise<QueryResult<T>>;
-
-  queryWithExplain<T = Record<string, unknown>>(
-    queryLabel: string,
-    options?: QueryOptions & { parallel?: boolean },
-  ): Promise<QueryResult<T> & { explain: ExplainPlan }>;
 }
 ```
 
@@ -173,10 +168,11 @@ interface QueryOptions {
   params?: Record<string, unknown>;  // Query parameters
   limit?: number;                     // Max rows (clamped to server max)
   offset?: number;                    // Skip first N rows (offset pagination)
-  cursor?: string;                    // Opaque cursor (cursor pagination)
-  afterKey?: unknown;                 // Last seen key (keyset pagination)
-  orderBy?: string;                   // Column for keyset ordering
+  orderBy?: string;                   // Column to order and page by (keyset pagination)
   orderDir?: 'asc' | 'desc';         // Sort direction (default: 'asc')
+  afterKey?: string | number;         // orderBy value of the previous page's last row
+  tiebreakBy?: string;                // Unique second column when orderBy is not unique
+  afterTiebreak?: string | number;    // tiebreakBy value of that last row
   timeFrom?: string;                  // ISO8601 start time
   timeTo?: string;                    // ISO8601 end time
   timeoutMs?: number;                 // Query timeout
@@ -212,7 +208,6 @@ interface QueryMetadata {
   cached: boolean;
   requestId?: string;
   hasMore: boolean;                   // More pages available
-  nextCursor?: string;                // Cursor for next page
   nextOffset?: number;                // Offset for next page
   totalCount?: number;                // Total rows (if available)
 }
@@ -457,60 +452,9 @@ try {
 
 ---
 
-## EXPLAIN Plans
-
-### Getting EXPLAIN Data
-
-```typescript
-const result = await client.queryWithExplain('analytics/user_activity', {
-  params: { eventTypes: ['login'] },
-  parallel: true,  // Run query and EXPLAIN concurrently
-});
-
-console.log('Query duration:', result.metadata.queryDurationMs, 'ms');
-console.log('EXPLAIN duration:', result.metadata.explainDurationMs, 'ms');
-
-// Analyze the plan
-for (const step of result.explain.steps) {
-  console.log(`${step.stepType}: ${step.description}`);
-  if (step.estimatedRows) {
-    console.log(`  Estimated rows: ${step.estimatedRows}`);
-  }
-}
-
-// Check for warnings
-for (const warning of result.explain.warnings) {
-  console.warn('Performance warning:', warning);
-}
-```
-
-### ExplainPlan Structure
-
-```typescript
-interface ExplainPlan {
-  steps: ExplainStep[];
-  totalEstimatedCost?: number;
-  totalEstimatedRows?: number;
-  warnings: string[];
-  rawPlan?: string;
-}
-
-interface ExplainStep {
-  stepType: 'read' | 'filter' | 'aggregate' | 'sort' | 'join' | 'projection' | 'limit' | 'union' | 'unknown';
-  description: string;
-  estimatedRows?: number;
-  estimatedCost?: number;
-  actualRows?: number;
-  actualTimeMs?: number;
-  details?: Record<string, unknown>;
-}
-```
-
----
-
 ## Pagination
 
-The Query API supports three pagination modes for different use cases.
+The Query API supports two pagination modes, offset and keyset. It returns no EXPLAIN plans.
 
 ### Offset-Based Pagination
 
@@ -532,49 +476,35 @@ if (page1.metadata.hasMore) {
 }
 ```
 
-### Cursor-Based Pagination
-
-Efficient pagination using opaque cursors. Best for APIs and large datasets.
-
-```typescript
-// First page
-let result = await client.query('analytics/user_activity', { limit: 100 });
-const allRows = [...result.rows];
-
-// Fetch all pages using cursor
-while (result.metadata.hasMore) {
-  result = await client.query('analytics/user_activity', {
-    limit: 100,
-    cursor: result.metadata.nextCursor,
-  });
-  allRows.push(...result.rows);
-}
-```
-
 ### Keyset-Based Pagination
 
-High-performance pagination for sorted data. Best for time-series.
+Pagination on a sort key, stable under concurrent inserts. Best for time-series.
 
 ```typescript
-// First page (sorted by timestamp descending)
+// First page (sorted by timestamp descending, event_id breaking ties)
 let result = await client.query('analytics/user_activity', {
   limit: 100,
   orderBy: 'timestamp',
   orderDir: 'desc',
+  tiebreakBy: 'event_id',
 });
 
-// Next page: use last timestamp as afterKey
+// Next page: the last row's values
 while (result.metadata.hasMore && result.rows.length > 0) {
-  const lastTimestamp = result.rows[result.rows.length - 1].timestamp;
+  const last = result.rows[result.rows.length - 1];
 
   result = await client.query('analytics/user_activity', {
     limit: 100,
-    afterKey: lastTimestamp,
     orderBy: 'timestamp',
     orderDir: 'desc',
+    tiebreakBy: 'event_id',
+    afterKey: String(last.timestamp).replace(/Z$|[+-]00:00$/, ''),
+    afterTiebreak: last.event_id,
   });
 }
 ```
+
+`afterKey` is compared as the `orderBy` column's type: send a timestamp as `2024-01-15T12:00:00` (with a fraction if the column has one). The key must be non-NULL, and without `tiebreakBy` it must be unique, or rows tying with the cursor are skipped. A view that declares its own `limit` parameter refuses keyset and offset paging.
 
 ### React Query Infinite Pagination
 
@@ -611,10 +541,9 @@ function InfiniteEventList() {
 
 | Use Case | Mode | Reason |
 |----------|------|--------|
-| REST APIs | Cursor | Stable, no duplicates |
-| Time-series | Keyset | High performance |
+| Time-series | Keyset | Stable under inserts, fast on indexed columns |
 | Admin UIs | Offset | Jump to any page |
-| Infinite scroll | Cursor | Memory efficient |
+| Infinite scroll | Keyset | Constant cost per page at any depth |
 
 ---
 
@@ -682,7 +611,7 @@ All storage adapters return a consistent JSON schema:
 | `storageClass` | `string \| null` | Storage class (S3/MinIO) |
 | `contentType` | `string \| null` | MIME type |
 
-### Storage Pagination with Cursor
+### Storage Pagination
 
 ```typescript
 // Page through large bucket
@@ -696,7 +625,7 @@ const allFiles: StorageItem[] = [...result.rows];
 while (result.metadata.hasMore) {
   result = await client.query('storage/s3_list', {
     params: { bucket: 'my-bucket', prefix: 'logs/' },
-    cursor: result.metadata.nextCursor,
+    offset: result.metadata.nextOffset,
     limit: 1000,
   });
   allFiles.push(...result.rows);

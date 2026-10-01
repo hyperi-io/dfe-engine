@@ -189,6 +189,36 @@ class TestBuildGroupingQuery:
         assert "min(_timestamp) AS first_seen" in sql
         assert "max(_timestamp) AS last_seen" in sql
 
+    @pytest.mark.parametrize(
+        ("field", "select_expr", "group_by"),
+        [
+            # A dotted JSON key is one alias: bare, "AS source.ip" does not parse.
+            ("source.ip", "JSONExtractString(_json, 'source.ip') AS `source.ip`", "`source.ip`"),
+            ("a b", "JSONExtractString(_json, 'a b') AS `a b`", "`a b`"),
+            (
+                "x` AS y, 1 AS z --",
+                "JSONExtractString(_json, 'x` AS y, 1 AS z --') AS `x`` AS y, 1 AS z --`",
+                "`x`` AS y, 1 AS z --`",
+            ),
+        ],
+    )
+    def test_a_group_by_field_name_is_quoted(self, field, select_expr, group_by):
+        """A hunt's group_by names the fields, so a name must not carry SQL into the query."""
+        sql = build_grouping_query(
+            target_db="acme",
+            target_table="logs_alerts",
+            hunt_name="test_hunt",
+            rule_name="test_rule",
+            customer="acme",
+            group_by=[field],
+            time_start="2026-01-01 00:00:00",
+            time_end="2026-01-01 01:00:00",
+            results_table_columns=self.RESULTS_COLS,
+        )
+
+        assert select_expr in sql
+        assert f"GROUP BY {group_by}" in sql
+
     def test_single_json_field(self):
         sql = build_grouping_query(
             target_db="acme",
@@ -201,8 +231,8 @@ class TestBuildGroupingQuery:
             time_end="2026-01-01 01:00:00",
             results_table_columns=self.RESULTS_COLS,
         )
-        assert "JSONExtractString(_json, 'source_ip') AS source_ip" in sql
-        assert "GROUP BY source_ip" in sql
+        assert "JSONExtractString(_json, 'source_ip') AS `source_ip`" in sql
+        assert "GROUP BY `source_ip`" in sql
 
     def test_multiple_group_by_mixed(self):
         """Mix of direct column and JSON field."""
@@ -219,8 +249,8 @@ class TestBuildGroupingQuery:
         )
         # severity is direct, source_ip is JSON
         assert "severity" in sql
-        assert "JSONExtractString(_json, 'source_ip') AS source_ip" in sql
-        assert "GROUP BY severity, source_ip" in sql
+        assert "JSONExtractString(_json, 'source_ip') AS `source_ip`" in sql
+        assert "GROUP BY severity, `source_ip`" in sql
 
     def test_where_clause(self):
         sql = build_grouping_query(

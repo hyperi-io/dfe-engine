@@ -143,6 +143,24 @@ class TestClickHouseAdapter:
         assert len(plan.steps) > 0
         assert plan.raw_plan is not None
 
+    def test_explain_sends_readonly_on_every_query(self, adapter_with_mock, mock_manager):
+        client = mock_manager.get_clickhouse_client()
+        client.query.side_effect = [
+            Exception("EXPLAIN PLAN refused"),
+            MagicMock(result_rows=[("Expression",)]),
+            MagicMock(column_names=["rows"], result_rows=[]),
+        ]
+        adapter_with_mock.explain("SELECT * FROM url('http://example.invalid/x', 'CSV')")
+        sent = [
+            (call.args[0].split()[:2], call.kwargs.get("settings"))
+            for call in client.query.call_args_list
+        ]
+        assert sent == [
+            (["EXPLAIN", "PLAN"], {"readonly": 1}),
+            (["EXPLAIN", "SELECT"], {"readonly": 1}),
+            (["EXPLAIN", "ESTIMATE"], {"readonly": 1}),
+        ]
+
     def test_healthcheck_success(self, mock_manager):
         client = mock_manager.get_clickhouse_client()
         client.query.return_value = MagicMock(result_rows=[(1,)])

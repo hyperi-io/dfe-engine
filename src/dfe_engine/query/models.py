@@ -58,32 +58,44 @@ class QueryOptions(BaseModel):
 
     Pagination modes:
     - Offset-based: Use `limit` and `offset` for simple pagination
-    - Cursor-based: Use `cursor` for efficient pagination on large datasets
-    - Keyset: Use `after_key` with an order column for stable pagination
+    - Keyset: Use `order_by` with `after_key` (and `tiebreak_by` with
+      `after_tiebreak` when the key is not unique) for stable pagination
+
+    A view that declares its own `limit` parameter caps its rows before any outer
+    paging applies, so `order_by`, `after_key` and `offset` are refused on it.
     """
 
     # Pagination - offset-based
     limit: int | None = Field(default=None, ge=1, le=100_000)
-    offset: int | None = Field(default=None, ge=0)
-
-    # Pagination - cursor-based (mutually exclusive with offset)
-    cursor: str | None = Field(
-        default=None,
-        description="Opaque cursor for cursor-based pagination (from previous response)",
-    )
+    offset: int | None = Field(default=None, ge=0, description="Not combinable with after_key")
 
     # Pagination - keyset-based
     after_key: Any | None = Field(
         default=None,
-        description="Value to paginate after (requires order_by in query)",
+        description=(
+            "order_by value of the previous page's last row (a string or a number); "
+            "requires order_by. A timestamp is sent as e.g. '2024-01-15T12:00:00'"
+        ),
     )
     order_by: str | None = Field(
         default=None,
-        description="Column to order by for keyset pagination",
+        description=(
+            "Column to order and page by. Rows whose key is NULL are never returned by "
+            "keyset paging, and without tiebreak_by the key must be unique: rows tying "
+            "with the cursor are skipped"
+        ),
     )
     order_dir: Literal["asc", "desc"] = Field(
         default="asc",
         description="Sort direction for ordering",
+    )
+    tiebreak_by: str | None = Field(
+        default=None,
+        description="Second, unique, non-NULL column that orders rows tying on order_by",
+    )
+    after_tiebreak: Any | None = Field(
+        default=None,
+        description="tiebreak_by value of the previous page's last row; sent with after_key",
     )
 
     # Time bounds (for time-series queries)
@@ -92,10 +104,6 @@ class QueryOptions(BaseModel):
 
     # Execution
     timeout_seconds: int | None = Field(default=None, ge=1, le=300)
-
-    # EXPLAIN
-    include_explain: bool = Field(default=False)
-    explain_parallel: bool = Field(default=True)
 
     # Caching
     cache: bool = Field(default=True, description="Allow cached results")

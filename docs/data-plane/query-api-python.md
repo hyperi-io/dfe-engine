@@ -142,7 +142,7 @@ class QueryClient:
 
 ### Methods
 
-#### `query(query_label, params?, *, limit?, offset?, cursor?, after_key?, order_by?, order_dir?, time_from?, time_to?, timeout_seconds?, store?, cache?) -> QueryResult`
+#### `query(query_label, params?, *, limit?, offset?, order_by?, order_dir?, after_key?, tiebreak_by?, after_tiebreak?, time_from?, time_to?, timeout_seconds?, store?, cache?) -> QueryResult`
 
 Execute a labeled query and return result.
 
@@ -180,11 +180,12 @@ result = client.query(
 | `query_label` | `str` | Query identifier (e.g., `"analytics/user_activity"`) |
 | `params` | `dict` | Query parameters (validated against schema) |
 | `limit` | `int` | Maximum rows (clamped to query/global max) |
-| `offset` | `int` | Skip first N rows (offset-based pagination) |
-| `cursor` | `str` | Opaque cursor from previous response (cursor-based pagination) |
-| `after_key` | `Any` | Last seen key value (keyset-based pagination) |
-| `order_by` | `str` | Column for keyset pagination ordering |
+| `offset` | `int` | Skip first N rows (offset-based pagination); not combinable with `after_key` |
+| `order_by` | `str` | Column to order and page by (keyset pagination) |
 | `order_dir` | `str` | Sort direction: `"asc"` or `"desc"` (default: `"asc"`) |
+| `after_key` | `str \| int \| float` | `order_by` value of the previous page's last row |
+| `tiebreak_by` | `str` | Unique second column for an `order_by` key that is not unique |
+| `after_tiebreak` | `str \| int \| float` | `tiebreak_by` value of the previous page's last row |
 | `time_from` | `str` | Start time (ISO8601) for time-bounded queries |
 | `time_to` | `str` | End time (ISO8601), defaults to now |
 | `timeout_seconds` | `int` | Query timeout (clamped to query/global max) |
@@ -204,35 +205,8 @@ df = result.to_pandas()
 df.groupby("event_type").agg({"count": "sum"})
 ```
 
-#### `query_with_explain(query_label, params?, *, parallel?, **kwargs) -> QueryResult`
-
-Execute query with EXPLAIN plan.
-
-```python
-result = client.query_with_explain(
-    "analytics/user_activity",
-    params={"event_types": ["login"]},
-    parallel=True,  # Run query and EXPLAIN concurrently
-)
-
-# Access results
-print(f"Rows: {result.num_rows}")
-print(f"Duration: {result.metadata.query_duration_ms}ms")
-
-# Access EXPLAIN plan
-for step in result.explain.steps:
-    print(f"{step.step_type}: {step.description}")
-
-# Performance warnings
-for warning in result.explain.warnings:
-    print(f"Warning: {warning}")
-
-# Convert to DataFrame
-df = result.to_pandas()
-```
-
 To process a large result set without loading everything into memory at
-once, page through it with `limit`/`offset` (or cursor/keyset options - see
+once, page through it with `limit`/`offset` (or keyset options - see
 [Pagination](#pagination)) and process each page as it arrives:
 
 ```python
@@ -255,7 +229,7 @@ while True:
 
 ## QueryResult
 
-Returned by `query()` and `query_with_explain()`.
+Returned by `query()`.
 
 ### Properties
 
@@ -266,7 +240,7 @@ Returned by `query()` and `query_with_explain()`.
 | `num_rows` | `int` | Number of rows |
 | `num_columns` | `int` | Number of columns |
 | `metadata` | `QueryMetadata` | Execution metadata |
-| `explain` | `ExplainPlan \| None` | Query execution plan (if requested) |
+| `explain` | `ExplainPlan \| None` | Always `None` from `query()`; the client requests no EXPLAIN |
 
 ### QueryMetadata
 
@@ -281,7 +255,6 @@ Returned by `query()` and `query_with_explain()`.
 | `cached` | `bool` | Result served from cache |
 | `request_id` | `str` | Request tracking ID |
 | `has_more` | `bool` | More pages available |
-| `next_cursor` | `str \| None` | Cursor for next page (cursor-based) |
 | `next_offset` | `int \| None` | Offset for next page (offset-based) |
 | `total_count` | `int \| None` | Total rows (if available) |
 
@@ -378,59 +351,43 @@ if result.metadata.has_more:
     result = client.query("analytics/user_activity", limit=100, offset=next_offset)
 ```
 
-### Cursor-Based Pagination
-
-Efficient pagination using opaque cursors. Best for APIs and large datasets.
-
-```python
-# First page
-result = client.query("analytics/user_activity", limit=100)
-
-# Subsequent pages using cursor
-while result.metadata.has_more:
-    result = client.query(
-        "analytics/user_activity",
-        limit=100,
-        cursor=result.metadata.next_cursor,
-    )
-    process(result.to_pandas())
-```
-
 ### Keyset-Based Pagination
 
-High-performance pagination for sorted data. Best for time-series.
+Pagination on a sort key, stable under concurrent inserts. Best for time-series.
 
 ```python
-# First page (sorted by timestamp descending)
+# First page (sorted by timestamp descending, event_id breaking ties)
 result = client.query(
     "analytics/user_activity",
     limit=100,
     order_by="timestamp",
     order_dir="desc",
+    tiebreak_by="event_id",
 )
 
-# Next page: use last timestamp as after_key
+# Next page: the last row's values, sent as a string or a number
 while result.metadata.has_more:
-    df = result.to_pandas()
-    last_timestamp = df["timestamp"].iloc[-1]
-
+    last = result.rows[-1]
     result = client.query(
         "analytics/user_activity",
         limit=100,
-        after_key=last_timestamp,
         order_by="timestamp",
         order_dir="desc",
+        tiebreak_by="event_id",
+        after_key=last["timestamp"].strftime("%Y-%m-%dT%H:%M:%S.%f"),
+        after_tiebreak=last["event_id"],
     )
 ```
+
+`after_key` is compared as the `order_by` column's type, so a timestamp goes as `"2024-01-15T12:00:00"` (with a fraction if the column has one), never a `datetime` or pandas `Timestamp` object. The key must be non-NULL, and without `tiebreak_by` it must be unique, or rows tying with the cursor are skipped. A view that declares its own `limit` parameter refuses keyset and offset paging.
 
 ### Pagination Recommendations
 
 | Use Case | Mode | Reason |
 |----------|------|--------|
-| API responses | Cursor | Stable, no duplicates |
-| Time-series data | Keyset | High performance with indexed columns |
+| Time-series data | Keyset | Stable under inserts, fast on indexed columns |
 | Admin UIs | Offset | Simple, allows jumping to pages |
-| Export/ETL | Cursor or Keyset | Memory efficient iteration |
+| Export/ETL | Keyset | Constant cost per page at any depth |
 
 ---
 
@@ -504,7 +461,7 @@ All storage adapters return a consistent JSON schema:
 
 ### Storage Pagination
 
-Storage listings support cursor-based pagination:
+Storage listings page with `limit` and `offset`:
 
 ```python
 # Page through large bucket
@@ -522,7 +479,7 @@ while True:
     result = client.query(
         "storage/s3_list",
         params={"bucket": "my-bucket", "prefix": "logs/"},
-        cursor=result.metadata.next_cursor,
+        offset=result.metadata.next_offset,
         limit=1000,
     )
 
@@ -697,19 +654,11 @@ console = Console()
 def query(
     label: str,
     limit: int = 50,
-    explain: bool = False,
 ):
     """Execute a query by label."""
     client = QueryClient(direct=True)
-
-    if explain:
-        result = client.query_with_explain(label, limit=limit, parallel=True)
-        console.print(f"[dim]Duration: {result.metadata.query_duration_ms}ms[/dim]")
-        console.print(f"[dim]Plan:[/dim]")
-        for step in result.explain.steps:
-            console.print(f"  {step.step_type}: {step.description}")
-    else:
-        result = client.query(label, limit=limit)
+    result = client.query(label, limit=limit)
+    console.print(f"[dim]Duration: {result.metadata.query_duration_ms}ms[/dim]")
 
     # Display as rich table
     rich_table = Table()

@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from threading import Lock
-from typing import TYPE_CHECKING, Annotated, Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import clickhouse_connect
 from clickhouse_connect.driver import Client, httputil
@@ -510,14 +510,3 @@ class ClickHouseManager:
                 logger.info("ClickHouse connection pool cleared successfully.")
         except Exception as e:
             logger.error(f"Failed to cleanup ClickHouse client: {e}")
-
-    def teardown_test_databases(self, test_databases: Annotated[list[str], "min_length = 1"]):
-        """Drop test databases."""
-        client = self.get_clickhouse_client()
-        try:
-            for db in test_databases:
-                logger.info(f"Dropping database {db}")
-                client.execute(f"DROP DATABASE IF EXISTS {db}")
-            logger.info("All test databases dropped successfully.")
-        except Exception as e:
-            logger.error(f"Failed to drop test databases: {e}")

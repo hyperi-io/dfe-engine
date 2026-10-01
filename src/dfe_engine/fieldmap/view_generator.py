@@ -126,23 +126,3 @@ class ViewGenerator:
                 standards.add(std)
 
         return sorted(standards)
-
-    def generate_drop_view(
-        self,
-        standard: str,
-        table_name: str,
-        config: DDLConfig | None = None,
-    ) -> str:
-        """Generate DROP VIEW IF EXISTS statement.
-
-        Args:
-            standard: Standard name (used as view suffix).
-            table_name: Base table name.
-            config: DDL configuration.
-
-        Returns:
-            DROP VIEW DDL string.
-        """
-        cfg = config or DDLConfig()
-        view_name = f"{table_name}_{standard}"
-        return f"DROP VIEW IF EXISTS {cfg.db}.{view_name};\n"

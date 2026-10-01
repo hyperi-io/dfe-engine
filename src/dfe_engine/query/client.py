@@ -16,7 +16,7 @@ via ClickHouse parameterized views.
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from dfe_engine.query.models import (
     AuthContext,
@@ -68,45 +68,36 @@ class QueryClient:
         *,
         limit: int | None = None,
         offset: int | None = None,
+        order_by: str | None = None,
+        order_dir: Literal["asc", "desc"] = "asc",
+        after_key: str | int | float | None = None,
+        tiebreak_by: str | None = None,
+        after_tiebreak: str | int | float | None = None,
         time_from: str | None = None,
         time_to: str | None = None,
         timeout_seconds: int | None = None,
         store: str | None = None,
         cache: bool = True,
     ) -> QueryResult:
-        """Execute query and return result."""
+        """Execute query and return result.
+
+        Keyset paging takes ``order_by`` and, from the second page, ``after_key``:
+        the previous page's last ``order_by`` value as a string or a number. A
+        non-unique key also takes ``tiebreak_by`` and ``after_tiebreak``.
+        """
         options = QueryOptions(
             limit=limit,
             offset=offset,
+            order_by=order_by,
+            order_dir=order_dir,
+            after_key=after_key,
+            tiebreak_by=tiebreak_by,
+            after_tiebreak=after_tiebreak,
             time_from=time_from,
             time_to=time_to,
             timeout_seconds=timeout_seconds,
             store=store,
             cache=cache,
-            include_explain=False,
-        )
-
-        return self._execute(query_label, params, options)
-
-    def query_with_explain(
-        self,
-        query_label: str,
-        params: dict[str, Any] | None = None,
-        *,
-        parallel: bool = True,
-        **kwargs: Any,
-    ) -> QueryResult:
-        """Execute query and return results with EXPLAIN plan."""
-        options = QueryOptions(
-            limit=kwargs.get("limit"),
-            offset=kwargs.get("offset"),
-            time_from=kwargs.get("time_from"),
-            time_to=kwargs.get("time_to"),
-            timeout_seconds=kwargs.get("timeout_seconds"),
-            store=kwargs.get("store"),
-            cache=kwargs.get("cache", True),
-            include_explain=True,
-            explain_parallel=parallel,
         )
 
         return self._execute(query_label, params, options)
@@ -191,27 +182,28 @@ class QueryClient:
         params: dict[str, Any] | None,
         options: QueryOptions,
     ) -> QueryResult:
-        """Execute query via HTTP API (JSON response)."""
+        """Execute the labelled view through the view route, never the raw-SQL route."""
         response = self.http_client.post(
-            "/api/v1/queries/raw",
+            f"/api/v1/queries/views/{query_label}/execute",
             json={
-                "datasource": "clickhouse:default",
-                "query": query_label,
-                "params": params,
+                "params": params or {},
                 "options": options.model_dump(exclude_none=True),
             },
         )
         response.raise_for_status()
 
         data = response.json()
+        rows = data.get("rows", [])
         metadata = QueryMetadata(
-            row_count=int(response.headers.get("X-Row-Count", len(data.get("rows", [])))),
-            query_duration_ms=int(response.headers.get("X-Query-Duration-Ms", 0)),
+            row_count=int(data.get("row_count", len(rows))),
+            query_duration_ms=int(data.get("query_duration_ms", 0)),
             query_label=query_label,
-            datasource=response.headers.get("X-Datasource", "clickhouse"),
+            datasource="clickhouse",
+            request_id=data.get("request_id"),
+            has_more=bool(data.get("has_more", False)),
+            next_offset=data.get("next_offset"),
         )
 
-        rows = data.get("rows", [])
         columns = data.get("columns", list(rows[0].keys()) if rows else [])
         return QueryResult(rows=rows, columns=columns, metadata=metadata)
 
