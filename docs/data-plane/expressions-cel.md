@@ -178,7 +178,7 @@ This enables expressions written once in YAML to work both as in-memory evaluati
 
 ## Implementation Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────┐
 │              DFE Expression Profile          │
 │         (subset of CEL, documented here)     │
@@ -205,7 +205,7 @@ Both wrappers enforce the same DFE profile — identical allowed operators, func
 
 ### API Surface (Both Languages)
 
-```
+```text
 compile(expr) → Program          # Parse + validate + compile to AST
 evaluate(expr, data) → Any       # One-shot convenience (compile + execute)
 validate(expr) → list[str]       # Syntax + profile check, returns errors for UI

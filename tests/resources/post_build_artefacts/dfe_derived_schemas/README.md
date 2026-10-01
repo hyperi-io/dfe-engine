@@ -4,7 +4,7 @@ This directory contains the derived schemas used by the DFE Data Engine. Each sc
 
 ## Directory Structure
 
-```
+```text
 dfe_derived_schemas/
 ├── {schema_category}/
 │   └── schema_name/

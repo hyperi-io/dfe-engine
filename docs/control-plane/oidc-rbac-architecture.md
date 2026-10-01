@@ -53,7 +53,7 @@ detailed in rbac.md section 1.
 The whole design confines provider chaos to Layer 2 and reuses the existing
 engine machinery above it:
 
-```
+```text
   [0] Trust / issuer      external IdP authenticates -> engine validates the
                           IdP id_token (JWKS) -> engine RE-MINTS its own ES384
                           token. Downstream sees ONLY the engine token.
@@ -187,6 +187,7 @@ variable NAME; a credential pasted there is a 422 naming the field. Detach
 deletes the provider's stored secrets.
 
 Verification for a thorough onboard/offboard workflow:
+
 - **Login-config check - DONE.** `GET /{name}/verify-login` reports whether the
   client_id and client_secret resolve (value never returned) and whether the
   issuer's discovery document is reachable and well-formed. This is the login
@@ -261,6 +262,7 @@ The RBAC chain (login -> groups -> roles -> org_ids -> ClickHouse tenant filter)
 exists in the engine and is now exercised end to end against a real provider.
 
 Done since this doc landed:
+
 - **id -> role resolution** across name and `source_id`, so GUID-emitting
   providers (Entra) resolve. Verified against the live Entra tenant: 12 fixture
   users deliver exactly their expected group claims.

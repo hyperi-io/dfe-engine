@@ -166,7 +166,7 @@ System design and why it is shaped this way:
 
 ### Commands that prove a change
 
-```
+```bash
 uv sync                       # deps, from the committed uv.lock
 uv run pytest                 # the suite
 uv run ruff check src tests   # lint

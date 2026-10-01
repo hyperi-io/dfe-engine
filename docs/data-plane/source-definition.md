@@ -154,7 +154,7 @@ header schema. Fields are added incrementally later.
 
 Each source owns exactly one ClickHouse table schema, 1:1:
 
-```
+```text
 Source: filebeat
   └── Schema: logs_beats_filebeat
         ├── meta_schema.yaml       (base columns, types, use cases)

@@ -81,11 +81,13 @@ file.
 
 A class storing authored CONTENT declares `BUNDLE`: a directory per resource,
 holding a `manifest.yaml` plus payload files. `library` is the first consumer, and
-its shape is the general one::
+its shape is the general one:
 
-    config/library/<name>/manifest.yaml
-    config/library/<name>/versions/0001.vrl
-    config/library/<name>/current.vrl
+```text
+config/library/<name>/manifest.yaml
+config/library/<name>/versions/0001.vrl
+config/library/<name>/current.vrl
+```
 
 Content in files rather than in the manifest means a reviewer diffs the language
 itself, a validator runs against a real path, reading one version does not parse

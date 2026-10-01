@@ -93,6 +93,8 @@ def _validate_hunt_config(config: dict[str, Any], settings: Any) -> None:
     try:
         HuntValidator.validate_hunt_configuration(
             config,
+            # Not XSS: HuntValidator only calls env.parse() on SQL rule templates and renders nothing.
+            # nosemgrep: python.flask.security.xss.audit.direct-use-of-jinja2.direct-use-of-jinja2
             Environment(),  # noqa: S701 - parses SQL rule templates, not HTML
             settings.hunts.rules_dir,
             checkpoint_field,

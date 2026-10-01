@@ -63,7 +63,7 @@ the original draft of this doc, which had the engine owning it):
 
 The engine owns the DDL generation. dfe-engine consumes dfe-schemas as the version-pinned `dfe-schemas` wheel, resolved through `importlib.resources`, and keeps no copies of its own: with neither the package nor `DFE_SCHEMAS_DIR` resolving, loading fails with an error naming what was searched. dfe-loader still consumes it as a `schemas/` git submodule.
 
-```
+```text
 dfe-schemas (source of truth)
   |
   |  common-header/{timeseries,minimal,passthrough}.yaml
@@ -90,7 +90,7 @@ Source definitions, or any config files at query/ingest time. They read:
 This means there is **never an in-flight mismatch**. The flow is strictly
 one-directional:
 
-```
+```text
 Source YAML → engine generates DDL → deploys to ClickHouse → Rust services read from ClickHouse
                                                                     ↑
                                                           ONLY source of truth at runtime
@@ -134,13 +134,14 @@ This catches drift at PR time, not in production.
 
 Both repos must agree on version numbers:
 
-```
+```text
 @profile: timeseries
 @profile_version: 1
 @schema_version: 2
 ```
 
 When the engine bumps a profile version:
+
 1. Engine generates migration DDL (`ALTER TABLE ADD COLUMN`)
 2. Loader's `ProfileDiff` detects the version mismatch and applies migration
 3. CI validates compatibility before merge
