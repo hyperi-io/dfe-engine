@@ -20,8 +20,6 @@ way a deploy generates it, the server is asked to run it, and the server is then
 asked what it created.
 """
 
-from __future__ import annotations
-
 import re
 import uuid
 
@@ -29,8 +27,10 @@ import pytest
 
 from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
+from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
 from dfe_engine.source.deployment import deploy_statements_for_build
-from dfe_engine.source.models import Source
+from dfe_engine.source.models import SchemaColumn, Source
+from dfe_engine.source.type_registry import TypeRegistry
 
 pytestmark = pytest.mark.integration
 
@@ -157,3 +157,33 @@ def test_re_running_the_same_deploy_ddl_leaves_the_table_as_it_was(ch_client, so
 
     assert _columns(ch_client, source_database, source.table_name) == before
     assert _indexes(ch_client, source_database, source.table_name) == indexes_before
+
+
+def test_an_index_on_a_dotted_column_lands_through_the_create_and_the_alter(
+    ch_client, source_database
+):
+    """An ECS column such as ``event.action`` names its index after itself, dot included.
+
+    The server is asked to run both statements that carry an index name, and then
+    asked which indexes it holds.
+    """
+    gen = DDLGenerator(TypeRegistry.default(), resolver=EngineResolver(client=ch_client))
+    cfg = DDLConfig(db=source_database)
+    table = "dotted_index_probe"
+
+    created = SchemaColumn.model_validate(
+        {"name": "event.action", "type": "string", "use_case": "exact_match"}
+    )
+    ch_client.command(gen.generate_create_table(table, [created], cfg))
+    assert "idx_event.action" in _indexes(ch_client, source_database, table)
+
+    added = SchemaColumn.model_validate(
+        {"name": "event.outcome", "type": "string", "use_case": "dimension"}
+    )
+    ch_client.command(gen.generate_alter_add_column(table, added, cfg))
+    for statement in gen.generate_alter_add_indexes(table, added, cfg):
+        ch_client.command(statement)
+
+    assert {"idx_event.action", "idx_event.outcome"} <= set(
+        _indexes(ch_client, source_database, table)
+    )
