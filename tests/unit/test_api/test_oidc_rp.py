@@ -20,15 +20,18 @@ import base64
 import hashlib
 import shutil
 import time
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
 import jwt as pyjwt
 import pytest
 
+from dfe_engine.api.v1 import oidc_login
 from dfe_engine.auth.jwt_authority import JwtAuthority
 from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.rp import NormalizedIdentity, build_relying_party
+from dfe_engine.auth.sessions import AUTH_TIME_CLAIM
 from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import SecretsSettings
 
@@ -494,6 +497,54 @@ def test_callback_jit_provisions_account_with_oidc_name(client, app):
     resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)
     assert resp.status_code == 200
     assert app.state.account_store.get("stub-user").name == "Stub User"
+
+
+class TestCallbackTokenLifetime:
+    """The callback reads the clock once; the tests freeze that reading so every expiry is exact."""
+
+    @pytest.fixture
+    def now(self, client, app, monkeypatch) -> int:
+        # Behind the wall clock so a second clock read while signing lands past the cap.
+        frozen = int(time.time()) - 10
+        monkeypatch.setattr(oidc_login, "time", SimpleNamespace(time=lambda: frozen))
+        app.state.oidc_rp = _FakeOidcRp()
+        return frozen
+
+    @staticmethod
+    def _claims(client, app) -> dict:
+        resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+        assert resp.status_code == 200, resp.text
+        return app.state.jwt_authority.verify(resp.json()["access_token"])
+
+    def test_an_oidc_token_never_outlives_the_maximum_session_age(
+        self, client, app, api_settings, now
+    ):
+        api_settings.api.max_session_minutes = 10
+
+        claims = self._claims(client, app)
+
+        assert claims["exp"] - claims[AUTH_TIME_CLAIM] <= 600
+        assert (claims["iat"], claims[AUTH_TIME_CLAIM]) == (now, now)
+
+    @pytest.mark.parametrize("shorter_by", [0, 1])
+    def test_a_session_cap_at_or_under_the_token_lifetime_is_the_exact_expiry(
+        self, client, app, api_settings, now, shorter_by
+    ):
+        max_session_minutes = api_settings.api.jwt_expire_minutes - shorter_by
+        api_settings.api.max_session_minutes = max_session_minutes
+
+        claims = self._claims(client, app)
+
+        assert claims["exp"] == now + max_session_minutes * 60
+
+    def test_a_session_cap_past_the_token_lifetime_does_not_cut_it_short(
+        self, client, app, api_settings, now
+    ):
+        api_settings.api.max_session_minutes = api_settings.api.jwt_expire_minutes + 1
+
+        claims = self._claims(client, app)
+
+        assert claims["exp"] == now + api_settings.api.jwt_expire_minutes * 60
 
 
 class _SubjectOidcRp(_FakeOidcRp):
