@@ -297,7 +297,8 @@ class TestDefaultDrift:
         resp = client.get(DRIFT, headers=admin_headers)
 
         assert resp.status_code == 200, resp.text
-        by_name = {item["source"]: item for item in resp.json()["sources"]}
+        by_name = {item["source"]: item for item in resp.json()["items"]}
+        assert "main" not in by_name
         assert "beta" not in by_name
         alpha = by_name["alpha"]
         assert alpha["core"] is False
@@ -324,9 +325,43 @@ class TestDefaultDrift:
         resp = client.get(DRIFT, headers=admin_headers)
 
         assert resp.status_code == 200, resp.text
-        assert "alpha" not in {item["source"] for item in resp.json()["sources"]}
+        assert "alpha" not in {item["source"] for item in resp.json()["items"]}
 
     def test_a_viewer_cannot_read_drift(self, client, viewer_headers):
         resp = client.get(DRIFT, headers=viewer_headers)
 
         assert resp.status_code == 403, resp.text
+
+    def test_search_and_page_the_drifted_sources(self, admin_headers, app, client, tmp_path):
+        _wire(app, tmp_path)
+        _create_source(client, admin_headers, "alpha")
+        _create_source(client, admin_headers, "zeta")
+        pinned = client.post(APPLY, headers=admin_headers, json={"sources": ["alpha", "zeta"]})
+        assert pinned.status_code == 200, pinned.text
+        client.patch(
+            URL,
+            headers=admin_headers,
+            json={"common_header_type": "minimal", "engine": "ReplacingMergeTree"},
+        )
+
+        named = client.get(DRIFT, headers=admin_headers, params={"search": "alpha"})
+        assert named.status_code == 200, named.text
+        assert [item["source"] for item in named.json()["items"]] == ["alpha"]
+        assert named.json()["total"] == 1
+
+        landing = client.get(DRIFT, headers=admin_headers, params={"search": "main"})
+        assert landing.json()["items"] == []
+        assert landing.json()["total"] == 0
+
+        by_engine = client.get(DRIFT, headers=admin_headers, params={"search": "MergeTree"})
+        assert [item["source"] for item in by_engine.json()["items"]] == ["alpha", "zeta"]
+
+        page = client.get(DRIFT, headers=admin_headers, params={"page": 1, "per_page": 1})
+        assert page.status_code == 200, page.text
+        body = page.json()
+        assert len(body["items"]) == 1
+        assert body["total"] == 2
+        assert body["page"] == 1
+        assert body["per_page"] == 1
+        assert body["next_page"] == 2
+        assert body["items"][0]["source"] != "main"

@@ -9933,15 +9933,56 @@
           "System"
         ],
         "summary": "Get Default Drift",
-        "description": "Sources whose current version stores a header, TTL or engine other than the default.\n\nA field the source leaves unset inherits the default on its next deploy, so\nit is not drift. A stored value that already equals the default is not drift\neither. ``core`` is true for an engine-owned source, which the apply endpoint\nwill refuse.",
+        "description": "Sources whose current version stores a header, TTL or engine other than the default.\n\nA field the source leaves unset inherits the default on its next deploy, so\nit is not drift. A stored value that already equals the default is not drift\neither. ``core`` is true for an engine-owned source, which the apply endpoint\nwill refuse. The landing source is never listed. ``search`` matches the source\nname, a drifted field name, or a stored value. ``per_page=-1`` returns every match.",
         "operationId": "get_default_drift_api_v1_system_defaults_drift_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search in source name, drifted field, and stored value",
+              "title": "Search"
+            },
+            "description": "Search in source name, drifted field, and stored value"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DefaultDriftResponse"
+                  "$ref": "#/components/schemas/PaginatedResponse_SourceDefaultDrift_"
                 }
               }
             }
@@ -9962,6 +10003,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -27202,23 +27253,6 @@
         "title": "DefaultComparison",
         "description": "A stored source value beside the default it is measured against."
       },
-      "DefaultDriftResponse": {
-        "properties": {
-          "sources": {
-            "items": {
-              "$ref": "#/components/schemas/SourceDefaultDrift"
-            },
-            "type": "array",
-            "title": "Sources"
-          }
-        },
-        "type": "object",
-        "required": [
-          "sources"
-        ],
-        "title": "DefaultDriftResponse",
-        "description": "Sources that store a header, TTL or engine other than the current defaults."
-      },
       "DegradedCondition": {
         "properties": {
           "kind": {
@@ -32801,6 +32835,72 @@
           "prev_page"
         ],
         "title": "PaginatedResponse[SigmaViewSummary]"
+      },
+      "PaginatedResponse_SourceDefaultDrift_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SourceDefaultDrift"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[SourceDefaultDrift]"
       },
       "PaginatedResponse_TableEngineObject_": {
         "properties": {

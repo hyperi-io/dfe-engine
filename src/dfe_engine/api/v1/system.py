@@ -10,14 +10,14 @@ PUT /api/v1/system/retention   -> Set or clear the admin's override, then apply 
 GET /api/v1/system/defaults    -> TTL, common header and merge engine a source inherits
 PATCH /api/v1/system/defaults  -> Change any of those; only ttl_days is applied live
 POST /api/v1/system/defaults/apply -> Pin those defaults onto the named sources
-GET /api/v1/system/defaults/drift  -> Sources whose stored values differ from those defaults
+GET /api/v1/system/defaults/drift  -> Those sources, searched and paginated
 """
 
 import sys
 from typing import Any, Literal
 
 from dfe_schemas import __version__ as schemas_version
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from scalo.logger import logger
 
@@ -30,6 +30,7 @@ from dfe_engine.api.deps import (
     require_action,
 )
 from dfe_engine.api.errors import ErrorResponse
+from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import DeployTarget, appconfig, routing
 from dfe_engine.auth.audit import audit_resource_change
@@ -959,12 +960,6 @@ class SourceDefaultDrift(BaseModel):
     engine: DefaultComparison
 
 
-class DefaultDriftResponse(BaseModel):
-    """Sources that store a header, TTL or engine other than the current defaults."""
-
-    sources: list[SourceDefaultDrift]
-
-
 def _drift_body(report: SourceDrift) -> SourceDefaultDrift:
     def comparison(name: str) -> DefaultComparison:
         field = getattr(report, name)
@@ -981,9 +976,23 @@ def _drift_body(report: SourceDrift) -> SourceDefaultDrift:
     )
 
 
+def _drift_search_row(item: SourceDefaultDrift) -> dict[str, Any]:
+    stored = [
+        str(getattr(item, name).stored)
+        for name in item.drifted
+        if getattr(item, name).stored is not None
+    ]
+    return {
+        "item": item,
+        "source": item.source,
+        "drifted": " ".join(item.drifted),
+        "stored": " ".join(stored),
+    }
+
+
 @router.get(
     "/defaults/drift",
-    response_model=DefaultDriftResponse,
+    response_model=PaginatedResponse[SourceDefaultDrift],
     dependencies=[Depends(require_action(scopes_dict["system_read"]))],
 )
 def get_default_drift(
@@ -991,19 +1000,28 @@ def get_default_drift(
     request: Request,
     settings: Settings,
     registry: SourceReg,
-) -> DefaultDriftResponse:
+    pagination: PaginationParams = Depends(),
+    search: str | None = Query(
+        None,
+        description="Search in source name, drifted field, and stored value",
+    ),
+) -> PaginatedResponse[SourceDefaultDrift]:
     """Sources whose current version stores a header, TTL or engine other than the default.
 
     A field the source leaves unset inherits the default on its next deploy, so
     it is not drift. A stored value that already equals the default is not drift
     either. ``core`` is true for an engine-owned source, which the apply endpoint
-    will refuse.
+    will refuse. The landing source is never listed. ``search`` matches the source
+    name, a drifted field name, or a stored value. ``per_page=-1`` returns every match.
     """
     gc = _optional_gitcrud(request)
     ttl = resolve_state(gc, settings)
     table = resolve_defaults(gc, settings)
+    landing = settings.clickhouse.landing_table
     found: list[SourceDefaultDrift] = []
     for source in registry.get_all_sources():
+        if source.source == landing:
+            continue
         report = source_default_drift(
             source,
             header_type=table.header_type,
@@ -1014,7 +1032,16 @@ def get_default_drift(
         if report is not None:
             found.append(_drift_body(report))
     found.sort(key=lambda item: item.source)
-    return DefaultDriftResponse(sources=found)
+    rows = apply_search(
+        [_drift_search_row(item) for item in found],
+        search,
+        ["source", "drifted", "stored"],
+    )
+    return PaginatedResponse.from_list(
+        [row["item"] for row in rows],
+        pagination.page,
+        pagination.per_page,
+    )
 
 
 # -- ClickHouse Cloud lifecycle (control plane) ---------------
