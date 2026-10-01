@@ -62,20 +62,3 @@ auth:
     operator_password: "changeme"
     viewer_password: "changeme"
     org_id: "default"
-
-# Logging settings (handled by scalo)
-logging:
-  level: "INFO"
-
-# Metrics -- keep dfe_* names after the scalo migration (scalo defaults to bare).
-# Covers scalo's built-in groups AND dfe-engine's custom metrics. See issue #59.
-metrics:
-  namespace: "dfe"
-
-# Deployment-artefact identity -- scalo's generators ship neutral defaults
-# (localhost:5000, neutral vendor); keep dfe product identity. See issue #60.
-# image_registry = where official DFE product images are published (a deployment
-# overrides this to mirror). argocd.repo_url is intentionally NOT defaulted: it is
-# per-deployment (each environment's own deploy repo instance), set per-env.
-deployment:
-  image_registry: "ghcr.io/hyperi-io"

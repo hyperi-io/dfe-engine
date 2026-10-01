@@ -32,7 +32,6 @@ from freshly loaded specs WITHOUT the daemon loop knowing specs exist - the loop
 stays agnostic (it only calls the tick and the reload callbacks it was handed).
 """
 
-import os
 import signal
 import socket
 import time
@@ -40,8 +39,8 @@ from typing import Any
 
 import clickhouse_connect
 import typer
-from scalo.cli import CommonArgs
 
+from dfe_engine.api import init_scalo_logger
 from dfe_engine.clickhouse.tls import resolve_clickhouse_tls
 from dfe_engine.settings import DFESettings, load_settings
 
@@ -57,32 +56,6 @@ from .worker import HuntWorker
 app = typer.Typer(help="dfe-hunt-runner: CH-coordinated pull-based hunt execution.")
 
 _SERVICE_NAME = "dfe-hunt-runner"
-# The prefix the dfe-engine daemon hands scalo, so every process on the image reads one cascade.
-_ENV_PREFIX = "DFE_API"
-
-
-def _init_logger(*, otel_tracing: bool) -> None:
-    """Install scalo's logger sinks, in the order the ``dfe-engine`` daemon does.
-
-    A plain Typer app gets nothing from scalo's ServiceApp, so without this call
-    every line goes through loguru's bare default handler: no scalo format, no
-    secret scrubbing, no keyword fields. ``LOG_LEVEL`` and ``LOG_FORMAT`` fill
-    the slots the daemon's flags read them into.
-
-    Args:
-        otel_tracing: Compose OTLP span export in. False for ``materialise``,
-            which exits before an export interval elapses.
-
-    Raises:
-        scalo.cli.error.ConfigError: If the config cascade cannot be loaded.
-        scalo.cli.error.LoggerError: If the logger cannot be initialised.
-    """
-    args = CommonArgs(
-        log_level=os.environ.get("LOG_LEVEL"),
-        log_format=os.environ.get("LOG_FORMAT"),
-    )
-    config = args.load_config(_ENV_PREFIX)
-    args.init_logger(config=config, service_name=_SERVICE_NAME, otel_tracing=otel_tracing)
 
 
 def _ch_params(settings: DFESettings) -> dict[str, Any]:
@@ -144,7 +117,7 @@ def materialise() -> None:
     hunt-config change so KEDA can answer "is any hunt due?" with zero workers
     running. Idempotent - re-materialising tombstones removed hunts.
     """
-    _init_logger(otel_tracing=False)
+    init_scalo_logger(_SERVICE_NAME, otel_tracing=False)
     settings = load_settings()
     ch, db = _build_ch(settings)
     specs = load_specs(settings.hunts.hunt_dir, **_spec_sources(settings, db))
@@ -173,7 +146,7 @@ def run(
     The poll interval defaults to the setting rather than a literal, because the API
     quotes that setting back to whoever queues an ad-hoc run as the wait to expect.
     """
-    _init_logger(otel_tracing=True)
+    init_scalo_logger(_SERVICE_NAME, otel_tracing=True)
     settings = load_settings()
     ch, db = _build_ch(settings)
     poll_seconds = settings.hunts.runner_poll_seconds if poll is None else poll
