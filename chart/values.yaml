@@ -8,7 +8,8 @@ replicaCount: 1
 
 image:
   # -- Default registry/repository matches the deployment contract
-  # (deployment.image_registry, default ghcr.io/hyperi-io). Override per
+  # (DFE_DEPLOYMENT_IMAGE_REGISTRY env var, else _DEFAULT_IMAGE_REGISTRY in
+  # deployment_contract.py; default ghcr.io/hyperi-io). Override per
   # environment via Argo CD / Helm values; do not hardcode a deployment-specific
   # registry here (dfe-engine is a generic product, not a HyperI-only tool).
   repository: ghcr.io/hyperi-io/dfe-engine
