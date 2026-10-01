@@ -158,13 +158,30 @@ class JwtAuthority:
         logger.info("JWT authority loaded signing key", alg=self._alg)
         return loaded
 
-    def sign(self, claims: dict[str, Any], *, expires_delta: timedelta | None = None) -> str:
-        """Sign a DFE identity token. ``iss``/``iat``/``exp`` are set if absent."""
+    def sign(
+        self,
+        claims: dict[str, Any],
+        *,
+        expires_delta: timedelta | None = None,
+        now: int | None = None,
+    ) -> str:
+        """Sign a DFE identity token. ``iss`` and ``iat`` are set if absent, ``exp`` always.
+
+        Args:
+            claims: The claims to sign.
+            expires_delta: Lifetime from the issue time; the authority's default when None.
+            now: The issue time as epoch seconds, read from the clock when None. A
+                caller that capped ``expires_delta`` against its own clock reading
+                passes that reading, so ``exp`` cannot land past the cap.
+
+        Returns:
+            The signed token.
+        """
         payload = dict(claims)
-        now = datetime.now(UTC)
+        issued = datetime.now(UTC) if now is None else datetime.fromtimestamp(now, UTC)
         payload.setdefault("iss", self._issuer)
-        payload.setdefault("iat", int(now.timestamp()))
-        expire = now + (expires_delta or timedelta(minutes=self._expire_minutes))
+        payload.setdefault("iat", int(issued.timestamp()))
+        expire = issued + (expires_delta or timedelta(minutes=self._expire_minutes))
         payload["exp"] = int(expire.timestamp())
         return jwt.encode(
             payload,
