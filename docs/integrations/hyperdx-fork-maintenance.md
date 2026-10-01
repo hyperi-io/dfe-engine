@@ -55,6 +55,7 @@ upstream by tag with a rebase + CI guardrail. Authority stays in the engine/gito
   upstream auth - all driven via headers/config from the `dfe/` layer.
 
 ## References
+
 - Git rebase-onto-tag workflow for forks (isolate delta, rebase per release).
 - DFE supply-chain cooldown/LTS: standards/universal/SECURITY.md.
 - Design that this serves: [[project_hyperdx_ch_rbac]] (group->CH connection).

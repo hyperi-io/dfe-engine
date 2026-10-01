@@ -87,8 +87,8 @@ worked example.
 
 The API is **the dfe-engine API**. `dfe-api` was the old server entry-point name
 and is retired: the daemon binary is now `dfe-engine` (`dfe-engine run`), the
-human CLI is `dfe`. Anything talking to the API is talking to the dfe-engine API
-- do not call it "the dfe-api". (The `DFE_API_*` env prefix stays, purely to keep
+human CLI is `dfe`. Anything talking to the API is talking to the dfe-engine API --
+do not call it "the dfe-api". (The `DFE_API_*` env prefix stays, purely to keep
 settings resolution and the Helm chart stable.)
 
 ## openapi.json is the API SSoT

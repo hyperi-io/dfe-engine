@@ -59,7 +59,7 @@ config*, and the deployment layer decides which instance runs it.
 receiver stamps it into the JSON payload at ingest, and from there every other
 name is derived rather than configured:
 
-```
+```text
 _source = "filebeat"
 
 Kafka topics:

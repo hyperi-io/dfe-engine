@@ -46,7 +46,7 @@ Identical deployment on ANY K8s. Cloud-agnostic.
 
 ### Deployment Flow
 
-```
+```text
 Terraform (Layer 1) → bootstrap.sh → ArgoCD takes over
   Wave 2: operators (Envoy, KEDA, metrics-server)
   Wave 3: DNS/TLS addons
@@ -74,7 +74,7 @@ Terraform (Layer 1) → bootstrap.sh → ArgoCD takes over
 
 ## Auth Architecture
 
-```
+```text
 HTTPS → Envoy Gateway OIDC SecurityPolicy
          ├─ Authorization code flow
          ├─ Session cookie
@@ -93,6 +93,7 @@ HTTPS → Envoy Gateway OIDC SecurityPolicy
 ```
 
 **Auth modes:**
+
 - **Production:** Envoy Gateway OIDC SecurityPolicy (any provider: Entra, Google, Cognito, Keycloak)
 - **Standalone/Docker:** JWT Bearer + LocalAuthProvider (still being designed)
 - **Dev/Test:** auth disabled, root AuthContext
@@ -102,6 +103,7 @@ HTTPS → Envoy Gateway OIDC SecurityPolicy
 **Stack:** OTel → ClickHouse → HyperDX (replaces Prometheus + Grafana)
 
 Two-tier OTel Collector:
+
 - **DaemonSet:** per-node kubelet/container metrics + logs
 - **Gateway:** aggregation, batching, export to ClickHouse + HyperDX
 
@@ -119,7 +121,7 @@ KEDA scaling patterns moved to
 
 ## Helm Values Inheritance
 
-```
+```text
 chart/values.yaml          → chart defaults
 argocd/values/common.yaml  → global overrides (all clouds)
 argocd/values/{cloud}.yaml → cloud-specific overrides

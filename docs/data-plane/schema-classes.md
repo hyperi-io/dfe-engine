@@ -3,7 +3,7 @@
 The engine classes that turn schema YAML (from the dfe-schemas repo) into
 ClickHouse DDL. The YAML FORMAT itself (version tree, column fields, types,
 attributes, use cases, @directives) is documented in the dfe-schemas repo
-(https://github.com/hyperi-io/dfe-schemas/blob/main/docs/meta-schema.md); this page is the code-side lookup. Concept
+(<https://github.com/hyperi-io/dfe-schemas/blob/main/docs/meta-schema.md>); this page is the code-side lookup. Concept
 overview: [schema.md](schema.md).
 
 ## File map

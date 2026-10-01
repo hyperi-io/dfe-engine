@@ -74,6 +74,8 @@ LABEL org.opencontainers.image.vendor="HYPERI PTY LIMITED"
 LABEL org.opencontainers.image.licenses="BUSL-1.1"
 LABEL io.hyperi.profile="production"
 
+# Unpinned on purpose: trixie point releases drop superseded versions, so a pin breaks the next rebuild.
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl netcat-openbsd iputils-ping \
     && rm -rf /var/lib/apt/lists/*
@@ -95,19 +97,21 @@ ENV PATH="/app/.venv/bin:$PATH"
 # (e.g. the secrets root) resolves under /, unwritable by the non-root user.
 WORKDIR /app
 
+# DFE_SECRETS_PATH holds a directory path, not a secret value, and the engine and chart read it by name.
+# hadolint ignore=DL3064
 ENV DFE_CONFIG_DIR=/app/config \
     DFE_SCHEMAS_DIR=/app/schemas \
     DFE_SECRETS_PATH=/app/secrets
 
 RUN useradd --create-home --uid 1000 appuser
-USER appuser
+USER 1000
 
 # 9090 = observability (health + /metrics, scalo ServiceApp); 8000 = API traffic.
 EXPOSE 9090 8000
 
 # Probe the observability port (#106): health answers on 9090, not 8000.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -sf http://localhost:9090/livez > /dev/null || exit 1
+    CMD ["curl", "-sf", "-o", "/dev/null", "http://localhost:9090/livez"]
 
 ENTRYPOINT ["dfe-engine"]
 CMD ["run"]

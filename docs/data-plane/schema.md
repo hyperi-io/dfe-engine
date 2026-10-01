@@ -66,7 +66,7 @@ from `system.columns` at runtime. There is nothing in between.
 
 Schema changes flow in one direction:
 
-```
+```text
 Source YAML (intent) → engine generates DDL → ClickHouse (deployed truth)
                                                     ↑
                                         Rust K8s services read at runtime
@@ -111,7 +111,7 @@ operation and can reconcile.
 
 Separate the schema column definition into **four independent axes**:
 
-```
+```text
 type + attribute + use_case + comment (includes loader directives)
 ```
 
@@ -513,7 +513,7 @@ can pick a different one on a later ClickHouse without your schema changing.
 | `substring_search` | I search for fragments inside words: `WHERE message LIKE '%connection refused%'` | syslog_message, windows_event_data |
 | `key_search` | I search the keys and values of a map column | attributes, labels |
 | `similarity_search(<dims>)` | I find records similar to this one | embedding |
-| _(empty)_ | No index | raw payload, metadata |
+| *(empty)* | No index | raw payload, metadata |
 
 `similarity_search` is the one use case that takes an argument: ClickHouse needs
 the vector's dimension count up front and cannot read it off the column. You
@@ -553,7 +553,7 @@ vocabulary.
 | `substring_search` | `text(tokenizer=ngrams(3))` | 1 | Character n-gram text index for substring matching |
 | `key_search` | two indexes, `text(tokenizer=array)` over `mapKeys(col)` and `mapValues(col)` | 1 | A text index refuses a `Map` column itself, so the keys and the values are indexed apart |
 | `similarity_search(<dims>)` | `vector_similarity('hnsw', 'cosineDistance', <dims>)` | 1 | `hnsw` is the only method 26.3 implements |
-| _(empty)_ | No index | -- | |
+| *(empty)* | No index | -- | |
 
 **Note on text indexes:** `word_search` and `substring_search` generate the GA
 text index (inverted index, v26.2+) instead of the older bloom-filter based
@@ -712,6 +712,7 @@ FROM {db}.{source}
 ```
 
 **Benefits:**
+
 - Base schema stays clean (ClickHouse-native names)
 - Sigma rules query the view (standard Sigma field names)
 - Field mapping is per-source (different sources map differently)
@@ -743,7 +744,7 @@ The existing Elastic/OpenSearch index template converter generates a
 source meta schema from a supplied Elastic template JSON. This remains --
 but now outputs YAML in the Source schema format:
 
-```
+```text
 Elastic Template JSON
   │
   ▼
@@ -831,7 +832,7 @@ has access to exactly the columns defined in the source's schema.
 A **Hunt** is a scheduled batch execution of one or more Rules. Hunt
 results (matches/detections) are written to an **alerts table**.
 
-```
+```text
 Rule (SQL query)
   │  Tied to a Source
   │  Parameterised: {db}, {source}, {from}, {to}, {threshold}
@@ -891,7 +892,7 @@ The conversion produces a Rule definition with:
 | `ip_field` | `ip` | | |
 | `geo_point` | `geo_point` | | |
 | `uuid` | `uuid` | | |
-| `tuple` | _(use ch_override)_ | | `ch_override: Tuple(...)` |
+| `tuple` | *(use ch_override)* | | `ch_override: Tuple(...)` |
 | `map` | `map` | | `Map(LowCardinality(String), String)`; `ch_override: Map(K,V)` for another shape |
 
 ### Index Type Mapping
@@ -913,7 +914,7 @@ fails validation on a column nobody touched.
 
 ### Format Change
 
-```
+```text
 # Old: CSV
 # column,type,default,index_order,index_type,comment
 

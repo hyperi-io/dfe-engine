@@ -97,6 +97,8 @@ def available_org_ids(
     sql = f"SELECT org_id FROM ({legs}) WHERE org_id != '' ORDER BY org_id LIMIT {int(limit)}"  # noqa: S608 - legs built from checked names; limit is an int
 
     try:
+        # Not injectable: db and table names pass _safe_identifier and are backtick-quoted, and limit is an int.
+        # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
         rows = client.execute(sql, settings={"max_execution_time": timeout_seconds})
     except Exception as exc:
         raise OrgIdDiscoveryError(f"cannot read the tenant ids in {db}: {exc}") from exc

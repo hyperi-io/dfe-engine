@@ -89,7 +89,7 @@ Transform-vector is Type 2 plus an instance-specific config tree:
 
 Single directory tree for all services:
 
-```
+```text
 <config_directory>/
     receiver-default.yaml
     receiver-production.yaml
@@ -107,7 +107,7 @@ May or may not be git-managed.
 
 ## Monorepo Directory Structure (proposed)
 
-```
+```text
 dfe/
 ├── engine/              # Python — dfe-engine
 │   ├── src/dfe_engine/

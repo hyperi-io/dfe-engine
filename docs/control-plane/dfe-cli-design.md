@@ -62,7 +62,7 @@ For local development the same code is also exposed as a `dfe` console-script in
 Two files under `~/.dfe/` (env override `DFE_CONFIG_DIR`), splitting config from
 secrets exactly as AWS v2 splits `config` and `credentials`:
 
-```
+```text
 ~/.dfe/config
   [default]
   endpoint_url = https://dfe.example.com
