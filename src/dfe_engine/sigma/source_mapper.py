@@ -1,4 +1,4 @@
-"""Source-based Sigma field mapper - replaces PG + CSV field mapping.
+"""Source-based Sigma field mapper.
 
 Bridges the Sigma module to the Source model. Loads field mappings
 from the source's sigma ``SourceView`` entry and generates Sigma views
@@ -15,8 +15,6 @@ Usage:
     mappings = mapper.get_field_mappings("windows_audit")
     view_ddl = mapper.generate_sigma_view("windows_audit")
 """
-
-from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
@@ -96,7 +94,7 @@ class SigmaSourceMapper:
         Returns a dict keyed by column name with type info:
             {"user_name": {"type": "string", "use_case": "dimension", "attribute": [...]}}
 
-        Replaces the old CSV/PG-based _read_schema_metadata().
+        Returns an empty dict when the source's schema fails to build.
         """
         source = self._source_registry.get_source(source_name)
 
@@ -131,7 +129,8 @@ class SigmaSourceMapper:
         Resolution order:
         1. A stored CRUD view definition (SigmaViewStore) - can extract
            JSON-derived columns from ``_json``.
-        2. Static field maps (registry -> legacy fallback).
+        2. Static field maps: the registry base with the sigma view's inline
+           ``custom_mappings`` winning per-key.
 
         Returns None if the source has neither a stored definition nor any
         field mappings.
