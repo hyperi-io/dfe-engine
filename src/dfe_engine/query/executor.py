@@ -22,6 +22,7 @@ import time
 import uuid
 from typing import Any
 
+from dfe_engine.clickhouse.quoting import BARE_REFERENCE, column_reference
 from dfe_engine.query.catalog import RESERVED_PARAMS, ViewCatalog
 from dfe_engine.query.models import (
     AuthContext,
@@ -32,14 +33,31 @@ from dfe_engine.query.models import (
 )
 from dfe_engine.query.result import QueryResult
 
-# order_by is interpolated into ORDER BY / WHERE (ClickHouse cannot bind an
-# identifier as a server-side parameter), so it MUST be a bare column identifier
-# - never attacker-controlled SQL. Everything else is bound (see module docstring).
-_SAFE_ORDER_BY = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
+# ClickHouse's TYPE_MISMATCH, raised when a bound cursor does not parse as its column's type.
+_TYPE_MISMATCH = re.compile(r"\bCode: 53\b|\bTYPE_MISMATCH\b")
 
 
 class ViewExecutionError(Exception):
     """View execution failed."""
+
+
+class ViewRequestError(ViewExecutionError):
+    """The request's options cannot form a valid query; the caller must change them."""
+
+
+def _cursor_text(value: Any, option: str = "after_key") -> str:
+    """Return a keyset cursor value as the text bound to a ``String`` parameter.
+
+    ClickHouse converts a String constant to the type of the column it is compared
+    with, element by element inside a tuple, so one text binding pages a numeric,
+    DateTime, Date, UUID or String column by that column's own ordering.
+
+    Raises:
+        ViewRequestError: If the value is not a string or a number.
+    """
+    if isinstance(value, bool) or not isinstance(value, str | int | float):
+        raise ViewRequestError(f"{option} must be a string or a number, not {type(value).__name__}")
+    return str(value)
 
 
 class ViewExecutor:
@@ -101,6 +119,11 @@ class ViewExecutor:
                 settings=settings,
             )
         except Exception as e:
+            if options.after_key is not None and _TYPE_MISMATCH.search(str(e)):
+                raise ViewRequestError(
+                    "after_key or after_tiebreak does not parse as its column's type "
+                    f"(a timestamp is sent as e.g. '2024-01-15T12:00:00'): {e}"
+                ) from e
             raise ViewExecutionError(f"Failed to execute view '{label}': {e}") from e
 
         duration_ms = int((time.perf_counter() - start) * 1000)
@@ -179,6 +202,10 @@ class ViewExecutor:
             final["time_from"] = options.time_from
         if "time_to" in param_names and options.time_to:
             final["time_to"] = options.time_to
+        if options.after_key is not None:
+            final["_after_key"] = _cursor_text(options.after_key)
+        if options.after_tiebreak is not None:
+            final["_after_tie"] = _cursor_text(options.after_tiebreak, "after_tiebreak")
 
         return final
 
@@ -190,34 +217,70 @@ class ViewExecutor:
         offset: int,
         options: QueryOptions,
     ) -> str:
-        if options.order_by and not _SAFE_ORDER_BY.match(options.order_by):
-            raise ViewExecutionError(f"invalid order_by identifier: {options.order_by!r}")
+        self._check_paging(view_def, offset, options)
         param_parts = []
         for p in view_def.parameters:
             param_parts.append(f"{p.name}={{{p.name}:{p.clickhouse_type}}}")
 
         param_str = ", ".join(param_parts)
         view_call = f"{self._database}.{view_def.name}({param_str})"
+        paging = f"LIMIT {limit} OFFSET {offset}" if offset > 0 else f"LIMIT {limit}"
 
-        view_has_limit = any(p.name == "limit" for p in view_def.parameters)
+        if options.order_by:
+            direction = options.order_dir
+            key = column_reference(options.order_by)
+            columns = [key]
+            cursors = ["{_after_key:String}"]
+            if options.tiebreak_by:
+                columns.append(column_reference(options.tiebreak_by))
+                cursors.append("{_after_tie:String}")
+            order = ", ".join(f"{column} {direction}" for column in columns)
+            # The first keyset page sorts on the key too, or its last row is not the next cursor.
+            where = ""
+            if options.after_key is not None:
+                op = ">" if direction == "asc" else "<"
+                if len(columns) == 1:
+                    where = f"WHERE {key} {op} {cursors[0]} "
+                else:
+                    where = f"WHERE ({', '.join(columns)}) {op} ({', '.join(cursors)}) "
+            return f"SELECT * FROM {view_call} {where}ORDER BY {order} {paging}"
 
-        if view_has_limit and offset == 0 and not options.after_key:
+        if any(p.name == "limit" for p in view_def.parameters):
             return f"SELECT * FROM {view_call}"
 
-        if options.after_key is not None and options.order_by:
-            order_dir = options.order_dir or "asc"
-            op = ">" if order_dir == "asc" else "<"
-            return (
-                f"SELECT * FROM {view_call} "
-                f"WHERE {options.order_by} {op} {{_after_key}} "
-                f"ORDER BY {options.order_by} {order_dir} "
-                f"LIMIT {limit}"
+        return f"SELECT * FROM {view_call} {paging}"
+
+    @staticmethod
+    def _check_paging(view_def: ViewDefinition, offset: int, options: QueryOptions) -> None:
+        """Refuse paging options that cannot form a correct page.
+
+        Raises:
+            ViewRequestError: On a column that is not a plain name, or any combination
+                that would page wrongly.
+        """
+        # Order columns are spliced into the SQL, since ClickHouse cannot bind an identifier.
+        for option in ("order_by", "tiebreak_by"):
+            name = getattr(options, option)
+            if name and not BARE_REFERENCE.fullmatch(name):
+                raise ViewRequestError(f"invalid {option} identifier: {name!r}")
+        if options.tiebreak_by and not options.order_by:
+            raise ViewRequestError("tiebreak_by needs order_by")
+        if options.after_key is not None and not options.order_by:
+            raise ViewRequestError("after_key needs order_by to name the column it pages on")
+        if options.after_tiebreak is not None and options.after_key is None:
+            raise ViewRequestError("after_tiebreak is sent together with after_key")
+        if options.after_tiebreak is not None and not options.tiebreak_by:
+            raise ViewRequestError("after_tiebreak needs tiebreak_by")
+        if options.after_key is not None and options.tiebreak_by and options.after_tiebreak is None:
+            raise ViewRequestError("with tiebreak_by set, after_key needs after_tiebreak")
+        if options.after_key is not None and offset > 0:
+            raise ViewRequestError("after_key and offset cannot be combined")
+        pages = options.order_by or options.after_key is not None or offset > 0
+        if pages and any(p.name == "limit" for p in view_def.parameters):
+            raise ViewRequestError(
+                f"view '{view_def.label}' caps its own rows with a limit parameter, so "
+                "order_by, after_key and offset cannot page past its first rows; use limit"
             )
-
-        if offset > 0:
-            return f"SELECT * FROM {view_call} LIMIT {limit} OFFSET {offset}"
-
-        return f"SELECT * FROM {view_call} LIMIT {limit}"
 
     def _resolve_limit(self, options: QueryOptions) -> int:
         if options.limit is not None:

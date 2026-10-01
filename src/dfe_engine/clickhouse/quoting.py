@@ -16,15 +16,44 @@ DDL/DML text that has no bind slot (row-policy predicates, meta-table projection
 
 from __future__ import annotations
 
+import re
+
+# A name a query may carry bare: one identifier, or a dotted path of them. Use fullmatch.
+BARE_REFERENCE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*")
+
+# Names ClickHouse reads as a literal or a clause word, not a column, when bare in
+# a WHERE, ORDER BY, GROUP BY or SELECT list (measured on ClickHouse 26.9).
+_NOT_A_COLUMN_WHEN_BARE = frozenset(
+    {
+        "all",
+        "cube",
+        "distinct",
+        "false",
+        "inf",
+        "infinity",
+        "nan",
+        "not",
+        "null",
+        "rollup",
+        "top",
+        "true",
+    }
+)
+
 
 def quote_identifier(name: str) -> str:
-    """Backtick-quote a CH identifier, escaping embedded backticks.
+    """Backtick-quote a CH identifier - escape backslashes THEN backticks.
 
     For a SINGLE name (org, role, column). A dotted ``db.table`` reference must
     quote each part separately - do not pass it whole (it would become one
     identifier literally named ``db.table``).
+
+    ClickHouse honours C-style backslash escapes inside a backtick-quoted
+    identifier as it does in a string literal, so ``\\`` is doubled first, for the
+    reason :func:`quote_literal` gives: a lone one is read as an escape, which
+    renders the wrong name or consumes the closing backtick.
     """
-    return "`" + name.replace("`", "``") + "`"
+    return "`" + name.replace("\\", "\\\\").replace("`", "``") + "`"
 
 
 def quote_literal(value: str) -> str:
@@ -37,3 +66,32 @@ def quote_literal(value: str) -> str:
     ``escape_str``. Prefer server-side ``parameters={}`` binding where a slot exists.
     """
     return "'" + value.replace("\\", "\\\\").replace("'", "''") + "'"
+
+
+def column_reference(name: str) -> str:
+    """Render an operator-supplied field name as a column reference.
+
+    A plain identifier or dotted path is returned as written, so a nested JSON
+    path keeps resolving. Any other name, and any segment ClickHouse would read as
+    a literal or clause word (``null``, ``not``, ``true``, ...), is quoted one
+    dotted segment at a time through :func:`quote_identifier`, which ClickHouse
+    resolves the same way, so no field name can carry SQL into the query.
+
+    Args:
+        name: The bare field name, after any mapping the caller applies.
+
+    Returns:
+        The column reference to splice into the query.
+
+    Raises:
+        ValueError: If the name is already wrapped in backticks. Quoting it again
+            would name a different column, one whose name holds the backticks.
+    """
+    if len(name) >= 2 and name.startswith("`") and name.endswith("`"):
+        raise ValueError(f"pass the bare field name, not a quoted one: {name!r}")
+    parts = name.split(".")
+    if BARE_REFERENCE.fullmatch(name) and not any(
+        part.lower() in _NOT_A_COLUMN_WHEN_BARE for part in parts
+    ):
+        return name
+    return ".".join(quote_identifier(part) for part in parts)

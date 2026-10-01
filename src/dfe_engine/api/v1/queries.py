@@ -162,7 +162,7 @@ async def execute_view(
     The ``org_id`` parameter is always injected from the authenticated
     user's context -- it cannot be overridden by the client.
     """
-    from dfe_engine.query.executor import ViewExecutionError
+    from dfe_engine.query.executor import ViewExecutionError, ViewRequestError
 
     try:
         result = executor.execute(
@@ -175,6 +175,11 @@ async def execute_view(
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"View '{label}' not found"},
+        )
+    except ViewRequestError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_options", "message": str(exc)},
         )
     except ViewExecutionError as exc:
         logger.error("View execution failed", label=label, error=str(exc))

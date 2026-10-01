@@ -40,9 +40,8 @@ from datetime import UTC, datetime, timedelta
 from pydantic import BaseModel, Field, field_validator
 from scalo.logger import logger
 
-from dfe_engine.clickhouse.quoting import quote_literal
+from dfe_engine.clickhouse.quoting import column_reference, quote_identifier, quote_literal
 from dfe_engine.schema.require import require_objects
-from dfe_engine.schema.schema_ddl import quote_ident
 from dfe_engine.settings import default_data_database
 
 # The cooldown table, by manifest id. The engine's schema phase creates it.
@@ -134,17 +133,20 @@ def build_group_key(group_by: list[str], group_values: dict[str, str]) -> str:
 def _field_select_expr(field: str, results_table_columns: Collection[str]) -> tuple[str, str]:
     """Return (select_expression, group_by_expression) for a field.
 
-    If the field exists as a direct column on the results table, use it
-    directly. Otherwise extract from _json via JSONExtractString.
+    A direct column on the results table is selected and grouped by its column
+    reference. Any other field is extracted from ``_json`` and aliased as ONE
+    backtick-quoted identifier, so a dotted key such as ``source.ip`` stays a
+    single name rather than parsing as a path, and the query groups by that alias.
 
     Returns:
-        (select_expr, alias) tuple.
+        (select_expr, group_by_expr) tuple.
     """
     if field in results_table_columns:
-        return field, field
+        reference = column_reference(field)
+        return reference, reference
 
-    # Extract from _json
-    return f"JSONExtractString(_json, '{field}') AS {field}", field
+    alias = quote_identifier(field)
+    return f"JSONExtractString(_json, {quote_literal(field)}) AS {alias}", alias
 
 
 def build_grouping_query(
@@ -194,7 +196,7 @@ def build_grouping_query(
     return (
         f"SELECT\n"
         f"    {select_clause}\n"
-        f"FROM {quote_ident(target_db, what='database')}.{quote_ident(target_table, what='table name')}\n"
+        f"FROM {quote_identifier(target_db)}.{quote_identifier(target_table)}\n"
         f"WHERE hunt_name = {quote_literal(hunt_name)}\n"
         f"  AND rule_name = {quote_literal(rule_name)}\n"
         f"  AND _org_id = {quote_literal(customer)}\n"

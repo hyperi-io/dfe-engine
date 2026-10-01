@@ -38,7 +38,6 @@ if TYPE_CHECKING:
 class SigmaSourceMapper:
     """Maps Source definitions to Sigma field mappings.
 
-    Replaces the PostgreSQL/CSV-based field_mapping_service.py.
     Uses SourceRegistry to look up sources and their Sigma config.
 
     When a FieldMapRegistry is provided, field mappings are resolved

@@ -165,7 +165,6 @@ Request:
     "time_from": "2024-01-01T00:00:00Z",
     "time_to": "2024-01-31T23:59:59Z",
     "timeout_seconds": 30,
-    "include_explain": false,
     "cache": true
   }
 }
@@ -203,15 +202,14 @@ interface RawQueryRequest {
 interface QueryOptions {
   // Pagination - offset-based
   limit?: number;      // 1-100000, default from query definition
-  offset?: number;     // >= 0, default 0
-
-  // Pagination - cursor-based (mutually exclusive with offset)
-  cursor?: string;     // Opaque cursor from previous response
+  offset?: number;     // >= 0, default 0; not combinable with after_key
 
   // Pagination - keyset-based
-  after_key?: unknown; // Value to paginate after
-  order_by?: string;   // Column to order by
-  order_dir?: "asc" | "desc";  // Sort direction
+  order_by?: string;            // Column to order and page by
+  order_dir?: "asc" | "desc";   // Sort direction
+  after_key?: string | number;  // order_by value of the previous page's last row
+  tiebreak_by?: string;         // Second column ordering rows that tie on order_by
+  after_tiebreak?: string | number;  // tiebreak_by value of that last row
 
   // Time bounds (for time-series queries)
   time_from?: string;  // ISO8601 datetime
@@ -219,10 +217,6 @@ interface QueryOptions {
 
   // Execution
   timeout_seconds?: number;  // 1-300, default 30
-
-  // EXPLAIN
-  include_explain?: boolean;  // Include query plan
-  explain_parallel?: boolean; // Run query and EXPLAIN concurrently
 
   // Caching
   cache?: boolean;     // Allow cached results, default true
@@ -259,7 +253,7 @@ interface QueryMetadata {
 
 ## Pagination
 
-The API supports three pagination modes:
+The API supports two pagination modes:
 
 ```mermaid
 flowchart LR
@@ -268,13 +262,6 @@ flowchart LR
         O2["Page 2<br/>offset=100"]
         O3["Page 3<br/>offset=200"]
         O1 --> O2 --> O3
-    end
-
-    subgraph Cursor["Cursor-Based"]
-        C1["Page 1<br/>cursor=null"]
-        C2["Page 2<br/>cursor=abc123"]
-        C3["Page 3<br/>cursor=def456"]
-        C1 -->|"next_cursor"| C2 -->|"next_cursor"| C3
     end
 
     subgraph Keyset["Keyset-Based"]
@@ -303,43 +290,29 @@ Simple pagination using `limit` and `offset`. Best for small datasets.
 - `has_more: true` if more rows available
 - `next_offset: 100` for next page
 
-### 2. Cursor-Based Pagination
+### 2. Keyset Pagination
 
-Efficient pagination using opaque cursors. Best for large datasets.
-
-```json
-{
-  "query": "analytics/events",
-  "options": {
-    "limit": 100,
-    "cursor": "eyJsYXN0X2lkIjogMTIzfQ=="
-  }
-}
-```
-
-**Response includes:**
-- `next_cursor` for next page
-- More efficient than offset for deep pagination
-
-### 3. Keyset Pagination
-
-Stable pagination using a sort key. Best for ordered data.
+Stable pagination on a sort key. Send `order_by` from the first page, then `after_key` set to the previous page's last `order_by` value.
 
 ```json
 {
   "query": "analytics/events",
   "options": {
     "limit": 100,
-    "after_key": "2024-01-15T12:00:00Z",
     "order_by": "timestamp",
-    "order_dir": "desc"
+    "order_dir": "desc",
+    "after_key": "2024-01-15T12:00:00"
   }
 }
 ```
 
-**Benefits:**
-- Stable results even with concurrent inserts
-- Efficient for time-series data
+The rules a keyset page follows:
+
+- `after_key` is a string or a number, compared as the `order_by` column's type. Send a timestamp as `2024-01-15T12:00:00`, with a fraction if the column has one. A cursor that does not parse as the column's type is refused with 400 `invalid_options`.
+- The key must be non-NULL: a row whose key is NULL is never returned.
+- Without a tiebreak the key must be unique: a row tying with the cursor is skipped. For a key that is not unique, add `tiebreak_by` (a unique, non-NULL second column) and send `after_tiebreak` with `after_key`.
+- `after_key` and `offset` cannot be combined.
+- A view that declares its own `limit` parameter caps its rows before any outer paging, so `order_by`, `after_key` and `offset` on it are refused with 400. Page it with `limit` only.
 
 ---
 
@@ -542,17 +515,7 @@ All storage adapters return a consistent JSON schema:
 
 ## EXPLAIN Plans
 
-### Requesting EXPLAIN
-
-```json
-{
-  "query": "analytics/events",
-  "options": {
-    "include_explain": true,
-    "explain_parallel": true
-  }
-}
-```
+The API does not return EXPLAIN plans. In Python, the ClickHouse datasource adapter's `explain()` returns this structure, running every EXPLAIN with `readonly=1`.
 
 ### EXPLAIN Response
 
@@ -693,9 +656,6 @@ the JSON response body - not in headers or a separate schema:
 | `has_more` | Whether more rows are available |
 | `next_offset` | Offset for the next page (if `has_more`) |
 | `request_id` | Request correlation ID |
-
-EXPLAIN steps (when requested) are returned as a nested JSON structure - see
-[EXPLAIN Plans](#explain-plans) above.
 
 ---
 

@@ -39,8 +39,6 @@ class TestQueryRequest:
         options = QueryOptions(
             limit=100,
             timeout_seconds=60,
-            include_explain=True,
-            explain_parallel=True,
         )
         request = QueryRequest(
             query="analytics/events",
@@ -49,8 +47,6 @@ class TestQueryRequest:
 
         assert request.options.limit == 100
         assert request.options.timeout_seconds == 60
-        assert request.options.include_explain is True
-        assert request.options.explain_parallel is True
 
     def test_request_serialization(self):
         """Test JSON serialization."""
@@ -100,13 +96,12 @@ class TestQueryOptions:
 
         assert options.limit is None
         assert options.offset is None
-        assert options.cursor is None
         assert options.after_key is None
         assert options.order_by is None
         assert options.order_dir == "asc"
+        assert options.tiebreak_by is None
+        assert options.after_tiebreak is None
         assert options.timeout_seconds is None
-        assert options.include_explain is False
-        assert options.explain_parallel is True
         assert options.cache is True
         assert options.store is None
 
@@ -143,27 +138,29 @@ class TestQueryOptions:
         assert options.limit == 100
         assert options.offset == 50
 
-    def test_pagination_cursor_based(self):
-        """Test cursor-based pagination options."""
-        options = QueryOptions(
-            limit=100,
-            cursor="eyJsYXN0X2lkIjogMTIzfQ==",
-        )
-
-        assert options.cursor == "eyJsYXN0X2lkIjogMTIzfQ=="
-
     def test_pagination_keyset_based(self):
         """Test keyset-based pagination options."""
         options = QueryOptions(
             limit=100,
-            after_key="2024-01-15T12:00:00Z",
+            after_key="2024-01-15T12:00:00",
             order_by="timestamp",
             order_dir="desc",
+            tiebreak_by="event_id",
+            after_tiebreak="e-41",
         )
 
-        assert options.after_key == "2024-01-15T12:00:00Z"
+        assert options.after_key == "2024-01-15T12:00:00"
         assert options.order_by == "timestamp"
         assert options.order_dir == "desc"
+        assert options.tiebreak_by == "event_id"
+        assert options.after_tiebreak == "e-41"
+
+    def test_an_option_the_model_does_not_declare_is_ignored(self):
+        """Clients built against an older spec may still send a removed option."""
+        options = QueryOptions.model_validate({"limit": 5, "include_explain": True, "cursor": "x"})
+
+        assert options.limit == 5
+        assert not hasattr(options, "cursor")
 
     def test_time_bounds(self):
         """Test time bounds options."""

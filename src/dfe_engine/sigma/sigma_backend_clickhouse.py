@@ -1,7 +1,6 @@
 import ipaddress
 import json
 import re
-from re import Pattern
 from typing import Any, ClassVar
 
 from sigma.conditions import (
@@ -16,9 +15,9 @@ from sigma.conversion.deferred import DeferredQueryExpression
 from sigma.conversion.state import ConversionState
 from sigma.processing.pipeline import ProcessingPipeline
 from sigma.rule import SigmaRule, SigmaRuleTag
-from sigma.types import SigmaCIDRExpression, SigmaCompareExpression, SigmaString
+from sigma.types import SigmaCIDRExpression, SigmaCompareExpression, SigmaNull, SigmaString
 
-from ..sigma.field_mapping_service import read_csv_mappings, resolve_schema_path
+from ..clickhouse.quoting import column_reference as sql_field
 from ..source.type_registry import current_use_case
 
 # The use cases dfe-schemas renders as a ClickHouse text index, so a LIKE over
@@ -67,13 +66,6 @@ class SqlBackend(TextQueryBackend):
     and_token: ClassVar[str] = "AND"
     not_token: ClassVar[str] = "NOT"
     eq_token: ClassVar[str] = "="
-
-    field_quote: ClassVar[str] = "'"
-    field_quote_pattern: ClassVar[Pattern] = re.compile(r"^\w+$")
-    field_quote_pattern_negation: ClassVar[bool] = True
-    field_escape: ClassVar[str] = "\\"
-    field_escape_quote: ClassVar[bool] = True
-    field_escape_pattern: ClassVar[Pattern] = re.compile(r"\s")
 
     str_quote: ClassVar[str] = "'"
     escape_char: ClassVar[str] = "\\"
@@ -174,14 +166,6 @@ class SqlBackend(TextQueryBackend):
 
         self.schema_metadata = schema_metadata or {}
         self.field_mappings = field_mappings or {}
-
-    def _get_schema_path(
-        self, schema_name: str, schema_version: str = None, is_meta: bool = True
-    ) -> str:
-        return resolve_schema_path(self.config, schema_name, schema_version, is_meta)
-
-    def _read_csv_mappings(self, schema_path: str) -> dict[str, str]:
-        return read_csv_mappings(schema_path)
 
     def is_valid_cidr(self, cidr_str: str) -> bool:
         """Validate CIDR notation."""
@@ -294,11 +278,26 @@ class SqlBackend(TextQueryBackend):
         return result
 
     def _handle_field_value_expression(
-        self, field: str, value: Any, modifier: str | None = None
+        self, field: str, value: Any, modifier: str | None = None, raw_field: str | None = None
     ) -> str:
-        """Handle different value types and modifiers for field expressions."""
+        """Render one field-value test.
+
+        Args:
+            field: The column reference, already rendered for SQL.
+            value: The Sigma value.
+            modifier: The value modifier (contains, startswith, ...), if any.
+            raw_field: The column name before rendering, which the schema metadata
+                is keyed by; defaults to ``field``.
+
+        Returns:
+            The SQL predicate.
+        """
         if hasattr(value, "regexp"):
             return self._create_match_expression(field, value.regexp)
+
+        # str() of a SigmaNull is its object address: a filter that never matches.
+        if isinstance(value, SigmaNull):
+            return self.field_null_expression.format(field=field)
 
         str_value = str(value)
 
@@ -307,9 +306,10 @@ class SqlBackend(TextQueryBackend):
         elif isinstance(value, SigmaString) and self.is_valid_cidr(str_value):
             return self._create_cidr_expression(field, str_value)
 
-        indexed = self._has_text_index(field)
+        name = field if raw_field is None else raw_field
+        indexed = self._has_text_index(name)
 
-        if field.lower().endswith("targetobject"):
+        if name.lower().endswith("targetobject"):
             return self._create_like_expression(field, str_value, "contains", indexed)
 
         if modifier:
@@ -355,30 +355,19 @@ class SqlBackend(TextQueryBackend):
 
         return f"{field} = '{self._escape_value(str_value)}'"
 
-    def escape_and_quote_field(self, field_name: str) -> str:
-        """Map field name if it exists in field_mappings, then escape and quote it."""
-        has_special_chars = re.search(r"[^a-zA-Z0-9_.]", field_name) is not None
+    def _mapped_name(self, field_name: str) -> str:
+        """The column name a Sigma field maps to, before rendering, for metadata lookups."""
+        mapped = self.field_mappings.get(field_name, field_name)
+        return mapped if isinstance(mapped, str) else field_name
 
+    def escape_and_quote_field(self, field_name: str) -> str:
+        """Map field name if it exists in field_mappings, then render it as a column reference."""
         mapped_field = self.field_mappings.get(field_name, field_name)
 
         if isinstance(mapped_field, list):
-            escaped_fields = []
-            for field in mapped_field:
-                if self.field_escape_pattern.search(field) is not None:
-                    field = field.replace(" ", "\\ ")
-                    escaped_fields.append(f"{self.field_quote}{field}{self.field_quote}")
-                else:
-                    escaped_fields.append(field)
-            return " OR ".join(escaped_fields)
+            return " OR ".join(sql_field(field) for field in mapped_field)
 
-        if self.field_escape_pattern.search(mapped_field) is not None:
-            mapped_field = mapped_field.replace(" ", "\\ ")
-            return f"{self.field_quote}{mapped_field}{self.field_quote}"
-
-        if has_special_chars and field_name in self.field_mappings:
-            return mapped_field
-
-        return mapped_field
+        return sql_field(mapped_field)
 
     def convert_condition_field_eq_val_num(
         self, cond: ConditionFieldEqualsValueExpression, state: ConversionState
@@ -461,14 +450,8 @@ class SqlBackend(TextQueryBackend):
     ) -> str:
         """Handle list of values for a field."""
         base_field, modifier = self._get_base_field_and_modifier(cond.field)
-
-        if (
-            re.search(r"[^a-zA-Z0-9_.]", base_field) is not None
-            and base_field in self.field_mappings
-        ):
-            field = self.field_mappings.get(base_field)
-        else:
-            field = self.escape_and_quote_field(base_field)
+        field = self.escape_and_quote_field(base_field)
+        raw = self._mapped_name(base_field)
 
         values = []
         for v in value_list:
@@ -477,8 +460,8 @@ class SqlBackend(TextQueryBackend):
             ):
                 cidr = v.cidr if isinstance(v, SigmaCIDRExpression) else str(v)
                 values.append(self._create_cidr_expression(field, cidr))
-            elif isinstance(v, SigmaString):
-                values.append(self._handle_field_value_expression(field, v, modifier))
+            elif isinstance(v, SigmaString | SigmaNull):
+                values.append(self._handle_field_value_expression(field, v, modifier, raw))
             else:
                 values.append(f"{field} = '{self._escape_value(str(v))}'")
 
@@ -491,27 +474,22 @@ class SqlBackend(TextQueryBackend):
         try:
             value = cond.value
             base_field, modifier = self._get_base_field_and_modifier(cond.field)
-
-            if (
-                re.search(r"[^a-zA-Z0-9_.]", base_field) is not None
-                and base_field in self.field_mappings
-            ):
-                mapped_field = self.field_mappings.get(base_field)
-                field = mapped_field
-            else:
-                field = self.escape_and_quote_field(base_field)
+            field = self.escape_and_quote_field(base_field)
 
             if isinstance(value, list):
                 return self._handle_list_values(field, value, cond, state)
 
             mapped_field = self.field_mappings.get(cond.field, cond.field)
             if isinstance(mapped_field, list):
-                field_conditions = []
-                for f in mapped_field:
-                    field_conditions.append(self._handle_field_value_expression(f, value, modifier))
+                field_conditions = [
+                    self._handle_field_value_expression(sql_field(f), value, modifier, f)
+                    for f in mapped_field
+                ]
                 return f"({' OR '.join(field_conditions)})"
 
-            return self._handle_field_value_expression(field, value, modifier)
+            return self._handle_field_value_expression(
+                field, value, modifier, self._mapped_name(base_field)
+            )
 
         except Exception as e:
             raise NotImplementedError(f"Field equals string value expressions error: {e}")
@@ -526,7 +504,9 @@ class SqlBackend(TextQueryBackend):
         if isinstance(cond.value, list):
             return self._handle_list_values(field, cond.value, cond, state)
 
-        return self._handle_field_value_expression(field, cond.value, modifier)
+        return self._handle_field_value_expression(
+            field, cond.value, modifier, self._mapped_name(base_field)
+        )
 
     def convert_condition_and(
         self, cond: ConditionAND, state: ConversionState
@@ -559,11 +539,12 @@ class SqlBackend(TextQueryBackend):
                 if len(cond.args) > 0 and all(arg.field == cond.args[0].field for arg in cond.args):
                     base_field, modifier = self._get_base_field_and_modifier(cond.args[0].field)
                     field = self.escape_and_quote_field(base_field)
+                    raw = self._mapped_name(base_field)
                     values = []
 
                     for arg in cond.args:
                         values.append(
-                            self._handle_field_value_expression(field, arg.value, modifier)
+                            self._handle_field_value_expression(field, arg.value, modifier, raw)
                         )
 
                     return f"({' OR '.join(values)})"
