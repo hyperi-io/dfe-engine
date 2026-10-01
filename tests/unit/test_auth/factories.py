@@ -10,14 +10,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from authlib.integrations.starlette_client import OAuth
 
+from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.oidc.adapters.entra import GraphCredentials
 from dfe_engine.auth.oidc.field_rules import FieldProblem
 from dfe_engine.auth.oidc.models import OIDCProvider
+from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.rp import NormalizedIdentity
+from dfe_engine.auth.oidc.scheduler import OidcSyncScheduler
 from tests.unit.test_auth.test_oidc.local_idp import LocalIdp
 
 
@@ -31,6 +36,11 @@ def make_graph_credentials(
 ) -> GraphCredentials:
     """Build an auth.oidc.adapters.entra.GraphCredentials."""
     return GraphCredentials(client_id=client_id, client_secret=client_secret, tenant_id=tenant_id)
+
+
+def make_group_store(*, directory: Path) -> GroupStore:
+    """Build an auth.groups.GroupStore over a directory of group files."""
+    return GroupStore(directory)
 
 
 def make_local_idp() -> LocalIdp:
@@ -57,3 +67,26 @@ def make_oidc_provider(
 ) -> OIDCProvider:
     """Build an auth.oidc.models.OIDCProvider."""
     return OIDCProvider.model_validate({"issuer": issuer, "type": type, **kwargs})
+
+
+def make_oidc_provider_registry(*, directory: Path) -> OIDCProviderRegistry:
+    """Build an auth.oidc.registry.OIDCProviderRegistry over a directory of provider files."""
+    return OIDCProviderRegistry(directory)
+
+
+def make_oidc_sync_scheduler(
+    *,
+    group_store: GroupStore,
+    on_groups_created: Callable[[], None] | None = None,
+    registry: OIDCProviderRegistry,
+    tick_seconds: float = 60,
+) -> OidcSyncScheduler:
+    """Build an auth.oidc.scheduler.OidcSyncScheduler with no metrics backend and no secret store."""
+    return OidcSyncScheduler(
+        group_store=group_store,
+        metrics=None,
+        on_groups_created=on_groups_created,
+        registry=registry,
+        secrets=None,
+        tick_seconds=tick_seconds,
+    )

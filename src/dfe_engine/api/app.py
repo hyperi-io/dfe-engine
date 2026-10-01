@@ -10,6 +10,7 @@ Or via CLI::
     dfe-engine
 """
 
+import functools
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -501,11 +502,33 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     health.register_ready_check("schema", schema_ready)
 
+    # Each api-mode provider's groups resync on its own sync_interval, not only on POST .../sync.
+    if settings.auth.oidc_group_sync_enabled:
+        from dfe_engine.auth.oidc.scheduler import OidcSyncScheduler
+        from dfe_engine.governance.ch import request_ch_rbac_reconcile
+
+        scheduler = OidcSyncScheduler(
+            group_store=app.state.group_store,
+            metrics=app.state.oidc_sync_metrics,
+            on_groups_created=functools.partial(request_ch_rbac_reconcile, state=app.state),
+            registry=app.state.oidc_provider_registry,
+            secrets=app.state.dfe_secrets,
+            tick_seconds=settings.auth.oidc_group_sync_tick_seconds,
+        )
+        app.state.oidc_group_sync = asyncio.create_task(
+            scheduler.run_forever(), name="oidc-group-sync"
+        )
+
     health.set_started()
     health.set_ready()
     logger.info(f"DFE Engine API started (port={settings.api.port})")
     yield
     health.set_ready(False)
+    oidc_group_sync = getattr(app.state, "oidc_group_sync", None)
+    if oidc_group_sync is not None:
+        # A sync writes group files and asks for a reconcile, so it stops before both close.
+        oidc_group_sync.cancel()
+        await asyncio.gather(oidc_group_sync, return_exceptions=True)
     reconcile_trigger = getattr(app.state, "ch_rbac_reconcile", None)
     if reconcile_trigger is not None:
         # A run reads the org and group stores, so it ends before the stores close.

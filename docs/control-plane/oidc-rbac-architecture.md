@@ -112,7 +112,7 @@ serving a provider configured that way.
 - `token_claim` (the default) - groups arrive as strings in the id_token; direct lookup.
 - `api` - the token lacks group names (or carries only ids); an adapter calls
   the provider directory API to resolve names and enumerate membership on a
-  schedule.
+  schedule. Each provider syncs every `groups.sync_interval` seconds (60 at least) from a background loop in every engine replica; `DFE_AUTH_OIDC_GROUP_SYNC_ENABLED=false` leaves only `POST /oidc-providers/{name}/sync`.
 - `manual` - membership mapped by hand in the engine; the token's groups are ignored at login and nothing syncs.
 
 Which fields each provider type accepts and requires in each mode is enforced by the provider admin API, from the rules in `auth/oidc/field_rules.py`. A `generic` provider has no `api` mode and a `google` provider has only `api` mode, with `enrich_on_login` on.
