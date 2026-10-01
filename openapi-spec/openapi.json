@@ -9840,6 +9840,140 @@
         ]
       }
     },
+    "/api/v1/system/defaults/apply": {
+      "post": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Apply Defaults",
+        "description": "Pin the current TTL, common header and merge engine onto the named sources.\n\nSources that are not in the list are left alone. A source that already stores\nthese values is unchanged. Nothing is deployed: the next deploy of a source\nis what brings its table to the pinned values. A missing or engine-owned\nname fails the request before any source is written.",
+        "operationId": "apply_defaults_api_v1_system_defaults_apply_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyDefaultsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyDefaultsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: a named source does not exist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "conflict: a named source is engine-owned and cannot be edited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/system/defaults/drift": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Get Default Drift",
+        "description": "Sources whose current version stores a header, TTL or engine other than the default.\n\nA field the source leaves unset inherits the default on its next deploy, so\nit is not drift. A stored value that already equals the default is not drift\neither. ``core`` is true for an engine-owned source, which the apply endpoint\nwill refuse.",
+        "operationId": "get_default_drift_api_v1_system_defaults_drift_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefaultDriftResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/system/clickhouse-cloud": {
       "get": {
         "tags": [
@@ -24686,6 +24820,50 @@
         ],
         "title": "AppSummary"
       },
+      "ApplyDefaultsRequest": {
+        "properties": {
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Sources",
+            "description": "Source names. Only these are written."
+          }
+        },
+        "type": "object",
+        "required": [
+          "sources"
+        ],
+        "title": "ApplyDefaultsRequest",
+        "description": "The sources to pin to the current table defaults."
+      },
+      "ApplyDefaultsResponse": {
+        "properties": {
+          "updated": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Updated"
+          },
+          "unchanged": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unchanged"
+          }
+        },
+        "type": "object",
+        "required": [
+          "updated",
+          "unchanged"
+        ],
+        "title": "ApplyDefaultsResponse",
+        "description": "Which named sources were pinned, and which already had these defaults."
+      },
       "AppsReconcileResponse": {
         "properties": {
           "changes": {
@@ -26984,6 +27162,62 @@
         "type": "object",
         "title": "DeclaredValue",
         "description": "One value as the deploy repo declares it.\n\n``source`` names the overlay file it came from; a null source means the\ndeployment declared nothing and the chart or profile default applies. Those\ndefaults live in dfe-infra, which the engine does not read, so the API says\n\"not declared\" rather than guessing a number."
+      },
+      "DefaultComparison": {
+        "properties": {
+          "stored": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stored"
+          },
+          "default": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stored",
+          "default"
+        ],
+        "title": "DefaultComparison",
+        "description": "A stored source value beside the default it is measured against."
+      },
+      "DefaultDriftResponse": {
+        "properties": {
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceDefaultDrift"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sources"
+        ],
+        "title": "DefaultDriftResponse",
+        "description": "Sources that store a header, TTL or engine other than the current defaults."
       },
       "DegradedCondition": {
         "properties": {
@@ -37449,6 +37683,49 @@
         ],
         "title": "SourceBundle",
         "description": "One source version: its routing, its schema and its transform.\n\nA section is present only when that source has it -- a source with no\ntransform carries no ``transform`` key rather than an empty one. A\n``resource_type: core`` source carries ``reference`` and nothing else: the\nengine reconciles it from the deployment's own settings, so a copy would be\nrefused on import anyway."
+      },
+      "SourceDefaultDrift": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "core": {
+            "type": "boolean",
+            "title": "Core"
+          },
+          "drifted": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Drifted"
+          },
+          "ttl_days": {
+            "$ref": "#/components/schemas/DefaultComparison"
+          },
+          "common_header_type": {
+            "$ref": "#/components/schemas/DefaultComparison"
+          },
+          "common_header_version": {
+            "$ref": "#/components/schemas/DefaultComparison"
+          },
+          "engine": {
+            "$ref": "#/components/schemas/DefaultComparison"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "core",
+          "drifted",
+          "ttl_days",
+          "common_header_type",
+          "common_header_version",
+          "engine"
+        ],
+        "title": "SourceDefaultDrift",
+        "description": "One source whose current version stores a value other than the default."
       },
       "SourceDetailResponse": {
         "properties": {

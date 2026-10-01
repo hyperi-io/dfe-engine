@@ -13,7 +13,13 @@ import pytest
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud.registry import default_registry
 from dfe_engine.gitcrud.retention import effective_settings, set_stored, stored_days
-from dfe_engine.gitcrud.table_defaults import UNSET, commit_patch, pin_table_defaults, resolve
+from dfe_engine.gitcrud.table_defaults import (
+    UNSET,
+    commit_patch,
+    pin_table_defaults,
+    resolve,
+    source_default_drift,
+)
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.settings import ClickHouseSettings, DFESettings
 from dfe_engine.source.models import Source
@@ -211,3 +217,44 @@ class TestPinTableDefaults:
             )
             is None
         )
+
+
+def _drift(source: Source):
+    return source_default_drift(
+        source,
+        header_type="minimal",
+        header_version="1.0.0",
+        ttl_days=30,
+        engine="ReplacingMergeTree",
+    )
+
+
+class TestSourceDefaultDrift:
+    def test_an_inheriting_source_has_no_drift(self):
+        assert _drift(_source("syslog", schema={"engine": ""})) is None
+
+    def test_a_source_already_storing_the_defaults_has_no_drift(self):
+        source = _source(
+            "syslog",
+            header={"type": "minimal", "version": "1.0.0"},
+            schema={"ttl_days": 30, "engine": "ReplacingMergeTree"},
+        )
+
+        assert _drift(source) is None
+
+    def test_a_stored_value_other_than_the_default_is_drift(self):
+        source = _source(
+            "syslog",
+            header={"type": "timeseries", "version": "1.0.0"},
+            schema={"ttl_days": 7, "engine": "MergeTree"},
+        )
+
+        report = _drift(source)
+
+        assert report is not None
+        assert report.drifted == ("ttl_days", "common_header_type", "engine")
+        assert report.ttl_days.stored == 7
+        assert report.ttl_days.default == 30
+        assert report.common_header_type.stored == "timeseries"
+        assert report.common_header_version.drifted is False
+        assert report.engine.stored == "MergeTree"

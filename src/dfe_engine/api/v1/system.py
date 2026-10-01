@@ -10,6 +10,7 @@ PUT /api/v1/system/retention   -> Set or clear the admin's override, then apply 
 GET /api/v1/system/defaults    -> TTL, common header and merge engine a source inherits
 PATCH /api/v1/system/defaults  -> Change any of those; only ttl_days is applied live
 POST /api/v1/system/defaults/apply -> Pin those defaults onto the named sources
+GET /api/v1/system/defaults/drift  -> Sources whose stored values differ from those defaults
 """
 
 import sys
@@ -41,7 +42,13 @@ from dfe_engine.gitcrud.retention import (
     resolve_state,
     set_stored,
 )
-from dfe_engine.gitcrud.table_defaults import UNSET, commit_patch, pin_table_defaults
+from dfe_engine.gitcrud.table_defaults import (
+    UNSET,
+    SourceDrift,
+    commit_patch,
+    pin_table_defaults,
+    source_default_drift,
+)
 from dfe_engine.gitcrud.table_defaults import resolve as resolve_defaults
 from dfe_engine.gitops.pins import UI_COMPONENT, component_overrides, load_pins, stack_version
 from dfe_engine.schema.retention import reconcile_default_ttl
@@ -931,6 +938,83 @@ def apply_defaults(
         )
         updated.append(source.source)
     return ApplyDefaultsResponse(updated=updated, unchanged=unchanged)
+
+
+class DefaultComparison(BaseModel):
+    """A stored source value beside the default it is measured against."""
+
+    stored: str | int | None
+    default: str | int | None
+
+
+class SourceDefaultDrift(BaseModel):
+    """One source whose current version stores a value other than the default."""
+
+    source: str
+    core: bool
+    drifted: list[str]
+    ttl_days: DefaultComparison
+    common_header_type: DefaultComparison
+    common_header_version: DefaultComparison
+    engine: DefaultComparison
+
+
+class DefaultDriftResponse(BaseModel):
+    """Sources that store a header, TTL or engine other than the current defaults."""
+
+    sources: list[SourceDefaultDrift]
+
+
+def _drift_body(report: SourceDrift) -> SourceDefaultDrift:
+    def comparison(name: str) -> DefaultComparison:
+        field = getattr(report, name)
+        return DefaultComparison(stored=field.stored, default=field.default)
+
+    return SourceDefaultDrift(
+        source=report.source,
+        core=report.core,
+        drifted=list(report.drifted),
+        ttl_days=comparison("ttl_days"),
+        common_header_type=comparison("common_header_type"),
+        common_header_version=comparison("common_header_version"),
+        engine=comparison("engine"),
+    )
+
+
+@router.get(
+    "/defaults/drift",
+    response_model=DefaultDriftResponse,
+    dependencies=[Depends(require_action(scopes_dict["system_read"]))],
+)
+def get_default_drift(
+    user: CurrentUser,
+    request: Request,
+    settings: Settings,
+    registry: SourceReg,
+) -> DefaultDriftResponse:
+    """Sources whose current version stores a header, TTL or engine other than the default.
+
+    A field the source leaves unset inherits the default on its next deploy, so
+    it is not drift. A stored value that already equals the default is not drift
+    either. ``core`` is true for an engine-owned source, which the apply endpoint
+    will refuse.
+    """
+    gc = _optional_gitcrud(request)
+    ttl = resolve_state(gc, settings)
+    table = resolve_defaults(gc, settings)
+    found: list[SourceDefaultDrift] = []
+    for source in registry.get_all_sources():
+        report = source_default_drift(
+            source,
+            header_type=table.header_type,
+            header_version=table.header_version,
+            ttl_days=ttl.effective,
+            engine=table.engine,
+        )
+        if report is not None:
+            found.append(_drift_body(report))
+    found.sort(key=lambda item: item.source)
+    return DefaultDriftResponse(sources=found)
 
 
 # -- ClickHouse Cloud lifecycle (control plane) ---------------

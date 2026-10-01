@@ -348,3 +348,80 @@ def pin_table_defaults(
     versions = dict(source.versions)
     versions[source.current] = snap.model_copy(update={"header": header, "schema_config": schema})
     return source.model_copy(update={"versions": versions})
+
+
+@dataclass(frozen=True)
+class StoredDefault:
+    """One field as the source stores it, beside the default it is compared with.
+
+    ``stored`` is None when the source leaves the field unset and therefore
+    inherits. An inheriting field is not drift: the next deploy follows the
+    default. Drift is a stored value that is not that default.
+    """
+
+    stored: str | int | None
+    default: str | int | None
+
+    @property
+    def drifted(self) -> bool:
+        return self.stored is not None and self.stored != self.default
+
+
+@dataclass(frozen=True)
+class SourceDrift:
+    """How one source's current version compares with the table defaults."""
+
+    source: str
+    core: bool
+    ttl_days: StoredDefault
+    common_header_type: StoredDefault
+    common_header_version: StoredDefault
+    engine: StoredDefault
+
+    @property
+    def drifted(self) -> tuple[str, ...]:
+        return tuple(name for name in _DRIFT_FIELDS if getattr(self, name).drifted)
+
+
+_DRIFT_FIELDS = ("ttl_days", "common_header_type", "common_header_version", "engine")
+
+
+def source_default_drift(
+    source: Source,
+    *,
+    header_type: str,
+    header_version: str,
+    ttl_days: int,
+    engine: str,
+) -> SourceDrift | None:
+    """The current version's drift from these defaults, or None when it has none.
+
+    Unset header, unset TTL and an empty engine inherit, so they are not drift.
+    A stored value that already equals the default is not drift either.
+    """
+    snap = source.versions[source.current]
+    header = snap.header
+    schema = snap.schema_config
+    report = SourceDrift(
+        source=source.source,
+        core=source.resource_type == "core",
+        ttl_days=StoredDefault(
+            stored=None if schema is None else schema.ttl_days,
+            default=ttl_days,
+        ),
+        common_header_type=StoredDefault(
+            stored=None if header is None else header.type,
+            default=header_type,
+        ),
+        common_header_version=StoredDefault(
+            stored=None if header is None else header.version,
+            default=header_version,
+        ),
+        engine=StoredDefault(
+            stored=None if schema is None or not schema.engine else schema.engine,
+            default=engine,
+        ),
+    )
+    if not report.drifted:
+        return None
+    return report

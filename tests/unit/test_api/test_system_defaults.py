@@ -273,3 +273,60 @@ class TestApplyDefaults:
         resp = client.post(APPLY, headers=viewer_headers, json={"sources": ["alpha"]})
 
         assert resp.status_code == 403, resp.text
+
+
+DRIFT = "/api/v1/system/defaults/drift"
+
+
+class TestDefaultDrift:
+    def test_only_sources_storing_a_different_value_are_listed(
+        self, admin_headers, app, client, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _create_source(client, admin_headers, "alpha")
+        pinned = client.post(APPLY, headers=admin_headers, json={"sources": ["alpha"]})
+        assert pinned.status_code == 200, pinned.text
+        patched = client.patch(
+            URL,
+            headers=admin_headers,
+            json={"common_header_type": "minimal", "engine": "ReplacingMergeTree"},
+        )
+        assert patched.status_code == 200, patched.text
+        _create_source(client, admin_headers, "beta")
+
+        resp = client.get(DRIFT, headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        by_name = {item["source"]: item for item in resp.json()["sources"]}
+        assert "beta" not in by_name
+        alpha = by_name["alpha"]
+        assert alpha["core"] is False
+        assert alpha["drifted"] == ["common_header_type", "engine"]
+        assert alpha["common_header_type"] == {"stored": "timeseries", "default": "minimal"}
+        assert alpha["engine"] == {"stored": "MergeTree", "default": "ReplacingMergeTree"}
+        assert alpha["ttl_days"]["stored"] == 90
+        assert alpha["ttl_days"]["default"] == 90
+        assert "ttl_days" not in alpha["drifted"]
+
+    def test_applying_the_defaults_clears_the_drift(self, admin_headers, app, client, tmp_path):
+        _wire(app, tmp_path)
+        _create_source(client, admin_headers, "alpha")
+        client.post(APPLY, headers=admin_headers, json={"sources": ["alpha"]})
+        client.patch(
+            URL,
+            headers=admin_headers,
+            json={"common_header_type": "minimal", "engine": "ReplacingMergeTree"},
+        )
+
+        applied = client.post(APPLY, headers=admin_headers, json={"sources": ["alpha"]})
+        assert applied.status_code == 200, applied.text
+
+        resp = client.get(DRIFT, headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert "alpha" not in {item["source"] for item in resp.json()["sources"]}
+
+    def test_a_viewer_cannot_read_drift(self, client, viewer_headers):
+        resp = client.get(DRIFT, headers=viewer_headers)
+
+        assert resp.status_code == 403, resp.text
