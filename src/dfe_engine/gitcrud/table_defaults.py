@@ -23,7 +23,14 @@ from typing import TYPE_CHECKING, Any, Literal
 from scalo.logger import logger
 
 from dfe_engine.source.engine_registry import InvalidEngineError
-from dfe_engine.source.models import DEFAULT_HEADER_TYPE, DEFAULT_HEADER_VERSION, engine_registry
+from dfe_engine.source.models import (
+    DEFAULT_HEADER_TYPE,
+    DEFAULT_HEADER_VERSION,
+    Source,
+    SourceHeader,
+    SourceSchema,
+    engine_registry,
+)
 
 from .commit_policy import CommitContext, build_message
 from .engine import GitCrud, ResourceNotFoundError
@@ -307,3 +314,37 @@ def commit_patch(
     if retention_changed:
         items.append((CLASS, TTL_NAME, retention))
     return crud.put_many(items, actor, message)
+
+
+def pin_table_defaults(
+    source: Source,
+    *,
+    header_type: str,
+    header_version: str,
+    ttl_days: int,
+    engine: str,
+) -> Source | None:
+    """Pin the current version to these defaults. None when that version already has them.
+
+    Other versions are left alone, and so is every other field on the current
+    version. Header, TTL and engine are written even when the source was only
+    inheriting the same values, so a later change to the deployment default
+    does not move this source again.
+    """
+    snap = source.versions[source.current]
+    header = SourceHeader(type=header_type, version=header_version)
+    schema = (
+        snap.schema_config.model_copy(update={"ttl_days": ttl_days, "engine": engine})
+        if snap.schema_config is not None
+        else SourceSchema(ttl_days=ttl_days, engine=engine)
+    )
+    if (
+        snap.header == header
+        and snap.schema_config is not None
+        and snap.schema_config.ttl_days == ttl_days
+        and snap.schema_config.engine == engine
+    ):
+        return None
+    versions = dict(source.versions)
+    versions[source.current] = snap.model_copy(update={"header": header, "schema_config": schema})
+    return source.model_copy(update={"versions": versions})

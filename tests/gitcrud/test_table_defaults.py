@@ -13,9 +13,10 @@ import pytest
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud.registry import default_registry
 from dfe_engine.gitcrud.retention import effective_settings, set_stored, stored_days
-from dfe_engine.gitcrud.table_defaults import UNSET, commit_patch, resolve
+from dfe_engine.gitcrud.table_defaults import UNSET, commit_patch, pin_table_defaults, resolve
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.settings import ClickHouseSettings, DFESettings
+from dfe_engine.source.models import Source
 
 
 @pytest.fixture
@@ -153,3 +154,60 @@ class TestEffectiveSettings:
         assert effective.clickhouse.default_ttl_days == 7
         assert effective.clickhouse.default_engine == "MergeTree"
         assert effective.clickhouse.default_header_type == "timeseries"
+
+
+def _source(name: str, *, header: dict | None = None, schema: dict | None = None) -> Source:
+    version: dict = {
+        "date_time": "2026-01-01",
+        "match": {"field": "tags.collector.type", "value": name},
+    }
+    if header is not None:
+        version["header"] = header
+    if schema is not None:
+        version["schema"] = schema
+    return Source.model_validate(
+        {"source": name, "current": "1.0.0", "versions": {"1.0.0": version}}
+    )
+
+
+class TestPinTableDefaults:
+    def test_pins_the_current_version_and_leaves_its_other_fields(self):
+        source = _source("syslog", schema={"meta_schema": "meta.yaml", "ttl_days": 7})
+
+        pinned = pin_table_defaults(
+            source,
+            header_type="minimal",
+            header_version="1.0.0",
+            ttl_days=30,
+            engine="ReplacingMergeTree",
+        )
+
+        assert pinned is not None
+        snap = pinned.versions["1.0.0"]
+        assert snap.header is not None
+        assert snap.header.type == "minimal"
+        assert snap.header.version == "1.0.0"
+        assert snap.schema_config is not None
+        assert snap.schema_config.ttl_days == 30
+        assert snap.schema_config.engine == "ReplacingMergeTree"
+        assert snap.schema_config.meta_schema == "meta.yaml"
+        assert snap.match is not None
+        assert snap.match.value == "syslog"
+
+    def test_a_source_already_storing_the_defaults_is_left_alone(self):
+        source = _source(
+            "syslog",
+            header={"type": "minimal", "version": "1.0.0"},
+            schema={"ttl_days": 30, "engine": "ReplacingMergeTree"},
+        )
+
+        assert (
+            pin_table_defaults(
+                source,
+                header_type="minimal",
+                header_version="1.0.0",
+                ttl_days=30,
+                engine="ReplacingMergeTree",
+            )
+            is None
+        )

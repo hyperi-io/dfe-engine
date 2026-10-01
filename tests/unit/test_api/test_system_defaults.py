@@ -195,3 +195,81 @@ class TestPatchDefaults:
 
         assert resp.status_code == 503, resp.text
         assert resp.json()["code"] == "not_configured"
+
+
+APPLY = "/api/v1/system/defaults/apply"
+
+
+def _create_source(client, headers, name: str) -> None:
+    resp = client.post(
+        "/api/v1/sources",
+        headers=headers,
+        json={"source": name, "match": {"field": "tags.collector.type", "value": name}},
+    )
+    assert resp.status_code == 201, resp.text
+
+
+def _version(client, headers, name: str) -> dict:
+    resp = client.get(f"/api/v1/sources/{name}", headers=headers)
+    assert resp.status_code == 200, resp.text
+    return resp.json()["versions"]["1.0.0"]
+
+
+class TestApplyDefaults:
+    def test_only_the_named_sources_are_pinned(self, admin_headers, app, client, tmp_path):
+        _wire(app, tmp_path)
+        patched = client.patch(
+            URL,
+            headers=admin_headers,
+            json={"common_header_type": "minimal", "engine": "ReplacingMergeTree"},
+        )
+        assert patched.status_code == 200, patched.text
+        _create_source(client, admin_headers, "alpha")
+        _create_source(client, admin_headers, "beta")
+
+        resp = client.post(APPLY, headers=admin_headers, json={"sources": ["alpha"]})
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"updated": ["alpha"], "unchanged": []}
+        alpha = _version(client, admin_headers, "alpha")
+        assert alpha["header"] == {"type": "minimal", "version": "1.0.0"}
+        assert alpha["schema"]["ttl_days"] == 90
+        assert alpha["schema"]["engine"] == "ReplacingMergeTree"
+        assert alpha["match"]["value"] == "alpha"
+        beta = _version(client, admin_headers, "beta")
+        assert beta.get("header") is None
+        assert beta["schema"]["ttl_days"] is None
+        assert beta["schema"]["engine"] != "ReplacingMergeTree"
+
+    def test_a_source_already_on_the_defaults_is_unchanged(
+        self, admin_headers, app, client, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _create_source(client, admin_headers, "alpha")
+        first = client.post(APPLY, headers=admin_headers, json={"sources": ["alpha"]})
+        assert first.status_code == 200, first.text
+
+        second = client.post(APPLY, headers=admin_headers, json={"sources": ["alpha", "alpha"]})
+
+        assert second.status_code == 200, second.text
+        assert second.json() == {"updated": [], "unchanged": ["alpha"]}
+
+    def test_a_missing_source_writes_nothing(self, admin_headers, app, client, tmp_path):
+        _wire(app, tmp_path)
+        _create_source(client, admin_headers, "alpha")
+
+        resp = client.post(APPLY, headers=admin_headers, json={"sources": ["alpha", "missing"]})
+
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["code"] == "not_found"
+        assert _version(client, admin_headers, "alpha")["header"] is None
+
+    def test_an_empty_list_is_422(self, admin_headers, client):
+        resp = client.post(APPLY, headers=admin_headers, json={"sources": []})
+
+        assert resp.status_code == 422, resp.text
+
+    def test_a_viewer_cannot_apply_them(self, client, viewer_headers):
+        resp = client.post(APPLY, headers=viewer_headers, json={"sources": ["alpha"]})
+
+        assert resp.status_code == 403, resp.text

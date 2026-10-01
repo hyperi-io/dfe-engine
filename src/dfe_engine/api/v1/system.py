@@ -9,6 +9,7 @@ GET /api/v1/system/retention   -> The effective default TTL and where it comes f
 PUT /api/v1/system/retention   -> Set or clear the admin's override, then apply it
 GET /api/v1/system/defaults    -> TTL, common header and merge engine a source inherits
 PATCH /api/v1/system/defaults  -> Change any of those; only ttl_days is applied live
+POST /api/v1/system/defaults/apply -> Pin those defaults onto the named sources
 """
 
 import sys
@@ -32,6 +33,7 @@ from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import DeployTarget, appconfig, routing
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.git_identity import git_author
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud.retention import (
     MAX_DEFAULT_TTL_DAYS,
@@ -39,10 +41,11 @@ from dfe_engine.gitcrud.retention import (
     resolve_state,
     set_stored,
 )
-from dfe_engine.gitcrud.table_defaults import UNSET, commit_patch
+from dfe_engine.gitcrud.table_defaults import UNSET, commit_patch, pin_table_defaults
 from dfe_engine.gitcrud.table_defaults import resolve as resolve_defaults
 from dfe_engine.gitops.pins import UI_COMPONENT, component_overrides, load_pins, stack_version
 from dfe_engine.schema.retention import reconcile_default_ttl
+from dfe_engine.source.registry import SourceCoreResourceError, SourceNotFoundError
 from dfe_engine.yaml_health import write_health
 
 router = APIRouter(prefix="/system", tags=["System"])
@@ -819,6 +822,115 @@ def patch_defaults(
             )
         reconcile = _reconcile_summary(outcome)
     return SystemDefaultsUpdate(**status.model_dump(), reconcile=reconcile)
+
+
+class ApplyDefaultsRequest(BaseModel):
+    """The sources to pin to the current table defaults."""
+
+    sources: list[str] = Field(min_length=1, description="Source names. Only these are written.")
+
+    @field_validator("sources")
+    @classmethod
+    def _names(cls, value: list[str]) -> list[str]:
+        names: list[str] = []
+        for name in value:
+            stripped = name.strip()
+            if not stripped:
+                raise ValueError("source id must not be blank")
+            if stripped not in names:
+                names.append(stripped)
+        return names
+
+
+class ApplyDefaultsResponse(BaseModel):
+    """Which named sources were pinned, and which already had these defaults."""
+
+    updated: list[str]
+    unchanged: list[str]
+
+
+@router.post(
+    "/defaults/apply",
+    response_model=ApplyDefaultsResponse,
+    dependencies=[Depends(require_action(scopes_dict["source_write"])), WRITE_TURN],
+    responses={
+        404: {"model": ErrorResponse, "description": "not_found: a named source does not exist"},
+        409: {
+            "model": ErrorResponse,
+            "description": "conflict: a named source is engine-owned and cannot be edited",
+        },
+    },
+)
+def apply_defaults(
+    body: ApplyDefaultsRequest,
+    user: CurrentUser,
+    request: Request,
+    settings: Settings,
+    registry: SourceReg,
+) -> ApplyDefaultsResponse:
+    """Pin the current TTL, common header and merge engine onto the named sources.
+
+    Sources that are not in the list are left alone. A source that already stores
+    these values is unchanged. Nothing is deployed: the next deploy of a source
+    is what brings its table to the pinned values. A missing or engine-owned
+    name fails the request before any source is written.
+    """
+    gc = _optional_gitcrud(request)
+    ttl = resolve_state(gc, settings)
+    table = resolve_defaults(gc, settings)
+    loaded: list[Any] = []
+    for name in body.sources:
+        try:
+            source = registry.get_source(name)
+        except SourceNotFoundError:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "not_found", "message": f"Source {name!r} not found"},
+            ) from None
+        if registry.is_core(name):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "conflict",
+                    "message": str(SourceCoreResourceError(action="modify", source=name)),
+                    "source": name,
+                },
+            ) from None
+        loaded.append(source)
+
+    updated: list[str] = []
+    unchanged: list[str] = []
+    author = git_author(user)
+    for source in loaded:
+        pinned = pin_table_defaults(
+            source,
+            header_type=table.header_type,
+            header_version=table.header_version,
+            ttl_days=ttl.effective,
+            engine=table.engine,
+        )
+        if pinned is None:
+            unchanged.append(source.source)
+            continue
+        registry.save_source(
+            pinned,
+            created_by=author,
+            description=f"source: apply table defaults to {source.source}",
+        )
+        audit_resource_change(
+            user.user_id,
+            "source",
+            source.source,
+            "updated",
+            {
+                "ttl_days": ttl.effective,
+                "common_header_type": table.header_type,
+                "common_header_version": table.header_version,
+                "engine": table.engine,
+            },
+        )
+        updated.append(source.source)
+    return ApplyDefaultsResponse(updated=updated, unchanged=unchanged)
 
 
 # -- ClickHouse Cloud lifecycle (control plane) ---------------
