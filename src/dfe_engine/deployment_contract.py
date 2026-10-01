@@ -19,8 +19,6 @@ drift checks (see ``tests/unit/test_deployment/test_contract.py``) keep the
 committed ``Dockerfile`` and ``chart/`` aligned with it.
 """
 
-from __future__ import annotations
-
 import os
 
 from scalo.deployment import (
@@ -42,9 +40,9 @@ def engine_deployment_contract() -> DeploymentContract:
     """Build the deployment contract for dfe-engine.
 
     Defaults match the committed ``Dockerfile`` and ``chart/values.yaml``.
-    ``image_registry`` reads from the config cascade
-    (``deployment.image_registry``) so ops can override per-environment without
-    touching code; the base image is derived by scalo from ``python_version``.
+    ``image_registry`` is ``DFE_DEPLOYMENT_IMAGE_REGISTRY`` when that env var is
+    set, else ``_DEFAULT_IMAGE_REGISTRY``; no config file sets it. The base image
+    is derived by scalo from ``python_version``.
     """
     return DeploymentContract(
         app_name="dfe-engine",
