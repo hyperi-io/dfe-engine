@@ -109,11 +109,13 @@ serving a provider configured that way.
 
 ### Group resolution modes
 
-- `token_claim` - groups arrive as strings in the id_token; direct lookup.
+- `token_claim` (the default) - groups arrive as strings in the id_token; direct lookup.
 - `api` - the token lacks group names (or carries only ids); an adapter calls
   the provider directory API to resolve names and enumerate membership on a
   schedule.
-- `manual` - membership mapped by hand in the engine; no sync.
+- `manual` - membership mapped by hand in the engine; the token's groups are ignored at login and nothing syncs.
+
+Which fields each provider type accepts and requires in each mode is enforced by the provider admin API, from the rules in `auth/oidc/field_rules.py`. A `generic` provider has no `api` mode and a `google` provider has only `api` mode, with `enrich_on_login` on.
 
 ### The normalized shape
 
@@ -132,7 +134,7 @@ ONLY place the remaining quirks live:
 |-------|-----------|---------------|--------|
 | refs are names (dex/okta) vs ids (entra) vs absent (google) | provider design | normalise to {id,name}; resolve GUIDs by source_id, call the directory API when the token lacks the name | id->name resolution DONE (source_id match) |
 | id stable, name mutable | directories rename groups | map roles on `id`, display `name` | source_id is the stable key |
-| overage (entra >200 -> a Graph pointer) | token size limits | detect the marker, fall back to the directory API | not yet built |
+| overage (entra >200 -> a Graph pointer) | token size limits | detect the marker, fall back to the directory API | DONE: `rp.py` detects `_claim_names` and fetches `transitiveMemberOf`; needs the tenant id and a client secret |
 | nested / transitive groups | AD/entra/google nesting | take the closure the provider already emits, or walk it when it does not | MEASURED: entra emits the full closure in-token; honour it (per-provider fact, not a global toggle) |
 | name collisions across tenants | bare names aren't unique | namespace the key (source+domain) | a name held by a group not linked to that IdP group is skipped (`name_taken`); namespacing not yet built |
 | non-role groups (mailing lists) | not all groups grant access | filter by group type | not yet built |
