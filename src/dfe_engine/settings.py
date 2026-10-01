@@ -1517,6 +1517,21 @@ class AuthSettings(BaseModel):
             "decided by api.forwarded_allow_ips, not by this."
         ),
     )
+    oidc_group_sync_enabled: bool = Field(
+        default=True,
+        description=(
+            "Sync each enabled api-mode OIDC provider's groups every sync_interval in the background. "
+            "Off leaves only POST /oidc-providers/{name}/sync. DFE_AUTH_OIDC_GROUP_SYNC_ENABLED."
+        ),
+    )
+    oidc_group_sync_tick_seconds: int = Field(
+        default=60,
+        ge=1,
+        description=(
+            "How often the background group sync checks which providers are due. "
+            "DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS."
+        ),
+    )
     proxy_provider: str = Field(
         default="oidc",
         description=(

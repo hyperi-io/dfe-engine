@@ -369,6 +369,10 @@ class TestSyncProvider:
         assert "admin" not in me.json()["roles"]
         assert "dfe-admins" not in me.json()["groups"]
 
+    def test_the_interval_sync_runs_beside_the_api(self, app, client):
+        # It waits a tick before its first run, so it never races the explicit syncs in these tests.
+        assert app.state.oidc_group_sync.done() is False
+
     def test_sync_nonexistent_returns_404(self, client, admin_headers):
         resp = client.post("/api/v1/auth/oidc-providers/ghost/sync", headers=admin_headers)
         assert resp.status_code == 404
