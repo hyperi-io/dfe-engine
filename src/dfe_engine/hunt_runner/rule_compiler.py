@@ -42,7 +42,7 @@ from dfe_engine.yaml_utils import yaml_load
 
 from .models import HuntStatement
 
-WINDOW_TOKEN = "{window}"
+WINDOW_TOKEN = "{window}"  # noqa: S105, RUF100 - a SQL template placeholder
 
 # The summary row's matched_uuid: no source record, so it can never be taken for a match.
 NIL_UUID = "00000000-0000-0000-0000-000000000000"

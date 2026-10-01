@@ -11,7 +11,12 @@ from __future__ import annotations
 
 import pytest
 
-from dfe_engine.clickhouse.quoting import column_reference, quote_identifier, quote_literal
+from dfe_engine.clickhouse.quoting import (
+    column_reference,
+    quote_identifier,
+    quote_literal,
+    table_reference,
+)
 
 
 def test_quote_identifier_backticks_and_escapes():
@@ -105,3 +110,37 @@ def test_column_reference_quoting_cannot_be_closed_by_the_name(name, expected):
 
     assert rendered == expected
     assert rendered.count("`") % 2 == 0
+
+
+@pytest.mark.parametrize(
+    ("reference", "expected"),
+    [
+        ("events", "`events`"),
+        ("db.events", "`db`.`events`"),
+        ("`db`.`events`", "`db`.`events`"),
+        ("`db`.landing", "`db`.`landing`"),
+        ("`dfe`.`my-source`", "`dfe`.`my-source`"),
+        (" db.events ", "`db`.`events`"),
+    ],
+)
+def test_table_reference_quotes_every_part(reference, expected):
+    assert table_reference(reference) == expected
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        "",
+        "a.b.c",
+        "db.events WHERE 1=1",
+        "(SELECT name FROM system.users)",
+        "db.events; DROP TABLE x",
+        "`db`.`ev`ents`",
+        "`db\\`.events",
+        "db.`events",
+        "1db.events",
+    ],
+)
+def test_table_reference_refuses_anything_but_a_table_name(reference):
+    with pytest.raises(ValueError, match="not a table reference"):
+        table_reference(reference)

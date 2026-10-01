@@ -30,7 +30,7 @@ LOCAL = "local"
 _K8S_METHODS = frozenset({"k8s_serviceaccount", "kubernetes"})
 
 # The env var every deployment fills with the admin password.
-ADMIN_PASSWORD_ENV = "DFE_AUTH_LOCAL_ADMIN_PASSWORD"
+ADMIN_PASSWORD_ENV = "DFE_AUTH_LOCAL_ADMIN_PASSWORD"  # noqa: S105, RUF100 - an env var name
 
 
 def detect_deploy_kind(target: str = "") -> str:

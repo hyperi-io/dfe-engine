@@ -27,6 +27,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from dfe_engine.clickhouse.quoting import quote_identifier
+
 _COLUMNS = (
     "database",
     "object",
@@ -72,11 +74,12 @@ class MigrationLedger:
 
     def checksums(self) -> dict[tuple[str, str], LedgerRow]:
         """The latest row per (database, object), keyed for the compare step."""
+        target = f"{quote_identifier(self._database)}.{quote_identifier(self._table)}"
         sql = (
-            "SELECT database, object, argMax(kind, applied_at), "
+            "SELECT database, object, argMax(kind, applied_at), "  # noqa: S608 - quoted database and manifest table
             "argMax(schemas_version, applied_at), argMax(engine_version, applied_at), "
             "argMax(checksum, applied_at), argMax(action, applied_at), "
-            f"argMax(topology, applied_at) FROM {self._database}.{self._table} "
+            f"argMax(topology, applied_at) FROM {target} "
             "GROUP BY database, object"
         )
         try:

@@ -9,15 +9,17 @@
 
 All reads select ``toString(_json)`` as the first (and only) column so the
 result is a list of raw event strings - the shape both the parsed-row path and
-logreducer want. ``target`` is a TRUSTED, already-qualified identifier (e.g.
+logreducer want. ``target`` arrives already quoted by the service (e.g.
 ``\\`db\\`.\\`events\\```); it is interpolated, not bound, because ClickHouse
-cannot bind table names. ``filter`` is likewise trusted SQL (the caller holds
+cannot bind table names. ``filter`` is trusted SQL (the caller holds
 ``sampler:read`` - same trust boundary as query authoring).
 """
 
 from __future__ import annotations
 
 from typing import Any
+
+from dfe_engine.clickhouse.quoting import column_reference
 
 
 def _raw_client(ch: Any) -> Any:
@@ -45,14 +47,15 @@ def build_where(
     """
     clauses: list[str] = []
     params: dict[str, Any] = {}
+    timestamp = column_reference(timestamp_field)
     if source_label:
         clauses.append("_source = {src:String}")
         params["src"] = source_label
     if since:
-        clauses.append(f"{timestamp_field} >= {{since:DateTime64(3)}}")
+        clauses.append(f"{timestamp} >= {{since:DateTime64(3)}}")
         params["since"] = since
     if until:
-        clauses.append(f"{timestamp_field} <= {{until:DateTime64(3)}}")
+        clauses.append(f"{timestamp} <= {{until:DateTime64(3)}}")
         params["until"] = until
     if filter_sql:
         clauses.append(f"({filter_sql})")
@@ -72,8 +75,8 @@ def read_recent(
 ) -> list[str]:
     """Newest ``limit`` ``_json`` rows, ordered by ``timestamp_field`` DESC."""
     sql = (
-        f"SELECT toString(_json) FROM {target} {where} "
-        f"ORDER BY {timestamp_field} DESC LIMIT {{lim:UInt64}}"
+        f"SELECT toString(_json) FROM {target} {where} "  # noqa: S608 - quoted target; filter is the caller's trusted predicate
+        f"ORDER BY {column_reference(timestamp_field)} DESC LIMIT {{lim:UInt64}}"
     )
     return _run(ch, sql, {**params, "lim": limit}, max_execution_time)
 
@@ -96,7 +99,7 @@ def read_random(
     time window.
     """
     rand = f"rand({seed})" if seed is not None else "rand()"
-    sql = f"SELECT toString(_json) FROM {target} {where} ORDER BY {rand} LIMIT {{lim:UInt64}}"
+    sql = f"SELECT toString(_json) FROM {target} {where} ORDER BY {rand} LIMIT {{lim:UInt64}}"  # noqa: S608 - quoted target; filter is the caller's trusted predicate
     return _run(ch, sql, {**params, "lim": limit}, max_execution_time)
 
 
@@ -114,8 +117,8 @@ def scan_query(
     ``LIMIT`` would return different rows per pass.
     """
     return (
-        f"SELECT toString(_json) FROM {target} {where} "
-        f"ORDER BY cityHash64(toString(_json)) LIMIT {scan_rows}"
+        f"SELECT toString(_json) FROM {target} {where} "  # noqa: S608 - quoted target; filter is the caller's trusted predicate
+        f"ORDER BY cityHash64(toString(_json)) LIMIT {int(scan_rows)}"
     )
 
 
