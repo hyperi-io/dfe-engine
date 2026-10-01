@@ -118,6 +118,19 @@ def test_convert_uses_sigma_field_names_verbatim():
     assert "Image ILIKE '%\\\\certutil.exe'" in where  # backslash escaped for CH literal
 
 
+def test_convert_handles_a_boolean_field_value():
+    """A detection value of true/false is a SigmaBool, not a plain bool -- keying
+    the true/false lookup on the object itself is a TypeError (unhashable)."""
+    rule_dict = {
+        "title": "Bool",
+        "id": _ID,
+        "logsource": {"category": "test", "product": "windows"},
+        "detection": {"sel": {"fieldA": True}, "condition": "sel"},
+    }
+    where = convert_detection_to_where(rule_dict)
+    assert where == "fieldA = true"
+
+
 def test_convert_raises_on_unconvertible_detection():
     # deprecated aggregation-pipe syntax fails to parse -> raises (caller records it)
     bad = {

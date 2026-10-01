@@ -349,7 +349,7 @@ class SqlBackend(TextQueryBackend):
     ) -> str:
         """Handle boolean values in field-equals-value expressions."""
         field = self.escape_and_quote_field(cond.field)
-        value = self.bool_values[cond.value]
+        value = self.bool_values[cond.value.boolean]
         return f"{field} = {value}"
 
     def convert_condition_field_eq_val_re(
