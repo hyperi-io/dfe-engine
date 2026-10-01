@@ -12,10 +12,7 @@ Resolves group GUIDs to display names via the Microsoft Graph API.
 Requires an Entra app registration with the ``Group.Read.All`` application
 permission and admin consent granted.
 
-The client secret resolves from ``GroupResolutionConfig.client_secret_path`` in
-the DfeSecrets seam before ``client_secret_env``; the tenant id comes from
-``tenant_id_env``.  If any credential is missing the adapter fails open -- all
-methods return unfriendly fallbacks rather than raising.
+Credentials resolve through :func:`graph_credentials`. If any credential is missing the adapter fails open: all methods return unfriendly fallbacks rather than raising.
 
 Usage::
 
@@ -26,9 +23,8 @@ Usage::
     display_names = await adapter.resolve_groups(group_ids)
 """
 
-from __future__ import annotations
-
-import os
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import msal
 from scalo.logger import logger
@@ -36,6 +32,46 @@ from scalo.logger import logger
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.credential_env import resolve_credential
 from dfe_engine.auth.oidc.models import GroupInfo
+
+if TYPE_CHECKING:
+    from dfe_engine.auth.oidc.models import OIDCProvider
+    from dfe_engine.secrets import DfeSecrets
+
+
+@dataclass(frozen=True, slots=True)
+class GraphCredentials:
+    """The app-only credentials a Graph API token is requested with; an empty field was not configured."""
+
+    client_id: str
+    client_secret: str
+    tenant_id: str
+
+
+def graph_credentials(*, provider: OIDCProvider, secrets: DfeSecrets | None) -> GraphCredentials:
+    """Resolve the Graph API credentials for an Entra provider.
+
+    The tenant id comes from its value, then its env var. The client id is the login client's. The client secret is the directory one, falling back to the login client secret, because both belong to the same app registration.
+    """
+    groups = provider.groups
+    directory_secret = resolve_credential(
+        env_name=groups.client_secret_env, secret_path=groups.client_secret_path, secrets=secrets
+    )
+    client_secret = (directory_secret) or (
+        resolve_credential(
+            env_name=provider.client_secret_env,
+            secret_path=provider.client_secret_path,
+            secrets=secrets,
+        )
+    )
+    return GraphCredentials(
+        client_id=resolve_credential(
+            env_name=provider.client_id_env, secrets=secrets, value=provider.client_id
+        ),
+        client_secret=client_secret,
+        tenant_id=resolve_credential(
+            env_name=groups.tenant_id_env, secrets=secrets, value=groups.tenant_id
+        ),
+    )
 
 
 class EntraAdapter(OIDCGroupAdapter):
@@ -234,8 +270,8 @@ class EntraAdapter(OIDCGroupAdapter):
         if token is None:
             return (
                 False,
-                "Entra credentials not configured -- set the env vars for "
-                "tenant_id, client_id, and client_secret",
+                "Entra credentials not configured - set groups.tenant_id, the client id "
+                "and a client secret (groups.client_secret, else the login client secret)",
             )
 
         from scalo.http import AsyncHttpClient
@@ -263,41 +299,31 @@ class EntraAdapter(OIDCGroupAdapter):
     def _get_token(self) -> str | None:
         """Acquire an OAuth2 access token via MSAL client credentials flow.
 
-        The client secret resolves through the DfeSecrets seam before the env
-        var named in config; the tenant id is not secret and stays an env read.
-        Returns None if any credential is missing or if MSAL fails.
+        Credentials resolve through :func:`graph_credentials`. Returns None if any credential is missing or if MSAL fails.
 
         Returns:
             Access token string, or None if credentials are unavailable.
         """
-        tenant_id_env = self._provider.groups.tenant_id_env
-        tenant_id = os.environ.get(tenant_id_env) if tenant_id_env else None
-        client_id = resolve_credential(
-            value=self._provider.client_id,
-            env_name=self._provider.client_id_env,
-            secrets=self._secrets,
-        )
-        client_secret = resolve_credential(
-            secret_path=self._provider.groups.client_secret_path,
-            env_name=self._provider.groups.client_secret_env,
-            secrets=self._secrets,
-        )
-
-        if not tenant_id or not client_id or not client_secret:
+        credentials = graph_credentials(provider=self._provider, secrets=self._secrets)
+        if (
+            not (credentials.tenant_id)
+            or not (credentials.client_id)
+            or not (credentials.client_secret)
+        ):
             return None
 
-        authority = f"https://login.microsoftonline.com/{tenant_id}"
+        authority = f"https://login.microsoftonline.com/{credentials.tenant_id}"
         try:
             app = msal.ConfidentialClientApplication(
-                client_id=client_id,
-                client_credential=client_secret,
                 authority=authority,
+                client_credential=credentials.client_secret,
+                client_id=credentials.client_id,
             )
             result = app.acquire_token_for_client(scopes=[self._GRAPH_SCOPE])
         except Exception as exc:
             logger.warning(
                 "Entra _get_token: MSAL token acquisition failed",
-                tenant_id=tenant_id,
+                tenant_id=credentials.tenant_id,
                 error=str(exc),
             )
             return None

@@ -22,8 +22,12 @@ import os
 
 import pytest
 
-from dfe_engine.auth.oidc.adapters.entra import EntraAdapter
+from dfe_engine.auth.oidc.adapters.entra import EntraAdapter, graph_credentials
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+from tests.unit.test_auth.test_oidc.entra_adapter_cases import (
+    GRAPH_CREDENTIALS_CASES,
+    GraphCredentialsCase,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -47,6 +51,17 @@ def _make_provider(
             client_secret_env=client_secret_env,
         ),
     )
+
+
+class TestGraphCredentials:
+    @pytest.mark.parametrize(
+        "case", GRAPH_CREDENTIALS_CASES, ids=[case["id"] for case in GRAPH_CREDENTIALS_CASES]
+    )
+    def test_matches_expected(self, monkeypatch: pytest.MonkeyPatch, case: GraphCredentialsCase):
+        for name, value in case["env"].items():
+            monkeypatch.setenv(name, value)
+        credentials = graph_credentials(provider=case["provider"], secrets=None)
+        assert credentials == case["expected_credentials"]
 
 
 # ---------------------------------------------------------------------------
