@@ -300,6 +300,7 @@ async def oidc_callback(
             **session_claims(account, auth_time=now),
         },
         expires_delta=timedelta(seconds=lifetime),
+        now=now,
     )
 
     logger.info(
