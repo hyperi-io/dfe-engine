@@ -123,3 +123,22 @@ class TestBootstrapMatchesServerTopology:
             f"WHERE database = '{clickhouse_test_database}' AND name = 'main'"
         ).result_rows[0][0]
         assert found == replicas, f"landing table on {found}/{replicas} replicas"
+
+
+class TestTopologySensingBindsTheDatabaseName:
+    """The database name reaches the server as a bound parameter, never inside the SQL.
+
+    Spliced into the probe's literal, a quote made the probe a syntax error, so sensing
+    fell back to config; a crafted name widened the WHERE to every database on the
+    server and took the engine of whichever came back first.
+    """
+
+    @pytest.mark.parametrize("database", ["o'brien", "x' OR name != '", "dfe' OR 1 = 1 --"])
+    def test_a_name_holding_a_quote_is_sensed_like_any_absent_name(self, ch_client, database):
+        resolved = EngineResolver(client=ch_client).resolve(parse_engine("MergeTree"), database)
+        plain = EngineResolver(client=ch_client).resolve(
+            parse_engine("MergeTree"), "dfe_absent_database"
+        )
+
+        assert resolved.origin == "sensed"
+        assert resolved.topology == plain.topology
