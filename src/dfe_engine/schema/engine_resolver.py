@@ -201,7 +201,8 @@ class EngineResolver:
             # A Replicated/Shared target database propagates + replicates on its own;
             # argumentless Replicated<engine> is correct there with NO ON CLUSTER.
             db_engine = self._scalar(
-                f"SELECT engine FROM system.databases WHERE name = '{database}'"
+                "SELECT engine FROM system.databases WHERE name = {db:String}",
+                {"db": database},
             )
             if db_engine in ("Replicated", "Shared"):
                 return self._cache(database, Topology.REPLICATED)
@@ -242,13 +243,16 @@ class EngineResolver:
         self._sensed[database] = topology
         return topology
 
-    def _rows(self, sql: str) -> list:
-        """Run a query, returning result rows (empty list on no rows)."""
-        return self._client.query(sql).result_rows
+    def _rows(self, sql: str, parameters: dict[str, str] | None = None) -> list:
+        """Run a query, returning result rows (empty list on no rows).
 
-    def _scalar(self, sql: str) -> str | None:
+        Values travel as server-side bound parameters, never spliced into the SQL.
+        """
+        return self._client.query(sql, parameters=parameters).result_rows
+
+    def _scalar(self, sql: str, parameters: dict[str, str] | None = None) -> str | None:
         """Run a query, returning the first column of the first row as str, or None."""
-        rows = self._rows(sql)
+        rows = self._rows(sql, parameters)
         if not rows:
             return None
         value = rows[0][0]
