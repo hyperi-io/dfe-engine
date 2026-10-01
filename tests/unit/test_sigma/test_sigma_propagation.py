@@ -12,12 +12,12 @@ SourceRegistry / RuleRegistry / HuntConfigRegistry over tmp dirs, and the real
 SqlBackend conversion. The generated WHERE clause is asserted as a string only.
 """
 
-from __future__ import annotations
-
 from types import SimpleNamespace
 
 import pytest
+from sigma.collection import SigmaCollection
 
+from dfe_engine.fieldmap.registry import FieldMapRegistry
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitcrud.forge import PullRequest
 from dfe_engine.gitops.repo import GitopsRepo
@@ -95,15 +95,68 @@ def _import_and_select(env, yaml_text: str, rule_id: str) -> None:
     env.selection.select(rule_id, actor="tester")
 
 
-def _propagator(env) -> SigmaPropagator:
+def _propagator(env, field_map_registry: FieldMapRegistry | None = None) -> SigmaPropagator:
     return SigmaPropagator(
         catalog=env.catalog,
         selection=env.selection,
-        source_mapper=SigmaSourceMapper(env.sources),
+        source_mapper=SigmaSourceMapper(env.sources, field_map_registry=field_map_registry),
         rule_registry=env.rules,
         hunt_registry=env.hunts,
         actor="tester",
     )
+
+
+_MESSAGE_ID = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+
+
+def _message_rule_yaml(rule_id: str = _MESSAGE_ID) -> str:
+    return f"""
+title: Mimikatz Keyword
+id: {rule_id}
+status: experimental
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection:
+        Message|contains: 'Mimikatz'
+    condition: selection
+level: high
+"""
+
+
+def _add_mapped_source(
+    env, name: str, mappings: dict[str, str], field_map: str | None = None
+) -> None:
+    """A windows source whose sigma view aliases ``mappings`` (Sigma field -> column).
+
+    The source takes the default profile, whose ``_raw`` column declares
+    ``substring_search`` (a text index) and whose ``_org_id`` declares ``dimension``.
+    """
+    view: dict = {"standard": "sigma", "taxonomy": "windows", "custom_mappings": mappings}
+    if field_map is not None:
+        view["field_map"] = field_map
+    env.sources.save_source(
+        {
+            "source": name,
+            "enabled": True,
+            "match": {"field": "tags.collector.type", "value": name},
+            "schema": {"engine": "MergeTree"},
+            "views": [view],
+        }
+    )
+
+
+@pytest.fixture
+def fm_registry(tmp_path):
+    """A real, empty FieldMapRegistry over a tmp dir."""
+    FieldMapRegistry.reset_instance()
+    directory = tmp_path / "field-maps"
+    directory.mkdir()
+    registry = FieldMapRegistry(field_maps_directory=directory, writable=True, refresh_interval=0)
+    yield registry
+    registry.close()
+    FieldMapRegistry.reset_instance()
 
 
 # -- Conversion helpers --------------------------------------
@@ -111,8 +164,6 @@ def _propagator(env) -> SigmaPropagator:
 
 def test_convert_uses_sigma_field_names_verbatim():
     """No field map: the view aliases columns, so field names emit verbatim."""
-    from sigma.collection import SigmaCollection
-
     rule_dict = SigmaCollection.from_yaml(_rule_yaml()).rules[0].to_dict()
     where = convert_detection_to_where(rule_dict)
     assert "Image ILIKE '%\\\\certutil.exe'" in where  # backslash escaped for CH literal
@@ -129,6 +180,14 @@ def test_convert_handles_a_boolean_field_value():
     }
     where = convert_detection_to_where(rule_dict)
     assert where == "fieldA = true"
+
+
+def test_convert_lowers_a_field_whose_metadata_declares_a_text_index():
+    rule_dict = SigmaCollection.from_yaml(_message_rule_yaml()).rules[0].to_dict()
+    metadata = {"Message": {"type": "text", "use_case": "substring_search", "attribute": []}}
+
+    assert convert_detection_to_where(rule_dict, metadata) == "lower(Message) LIKE '%mimikatz%'"
+    assert convert_detection_to_where(rule_dict) == "Message ILIKE '%Mimikatz%'"
 
 
 def test_convert_raises_on_unconvertible_detection():
@@ -262,6 +321,114 @@ def test_propagate_records_failed_for_unconvertible_rule(env):
     assert report.created == []
     assert len(report.failed) == 1
     assert report.failed[0]["sigma_rule_id"] == _ID
+    assert report.failed[0]["source"] == "windows-audit"
+
+
+# -- Task A: text-index metadata per source ------------------
+
+
+def test_propagate_lowers_a_field_aliased_to_a_text_indexed_column(env):
+    _add_mapped_source(env, "windows-audit", {"Message": "_raw"})
+    _import_and_select(env, _message_rule_yaml(), _MESSAGE_ID)
+
+    report = _propagator(env).propagate()
+
+    rid = binding_rule_id(_MESSAGE_ID, "windows-audit")
+    assert report.created == [rid]
+    assert env.rules.get(rid).where_clause == "lower(Message) LIKE '%mimikatz%'"
+
+
+def test_a_source_without_text_index_metadata_keeps_ilike(env):
+    """No alias at all, and an alias to a column with no text index, both keep ILIKE."""
+    _add_mapped_source(env, "windows-audit", {})
+    _add_mapped_source(env, "windows-sysmon", {"Message": "_org_id"})
+    _import_and_select(env, _message_rule_yaml(), _MESSAGE_ID)
+
+    _propagator(env).propagate()
+
+    for source in ("windows-audit", "windows-sysmon"):
+        where = env.rules.get(binding_rule_id(_MESSAGE_ID, source)).where_clause
+        assert where == "Message ILIKE '%Mimikatz%'", source
+
+
+def test_one_rule_converts_against_each_sources_own_metadata(env):
+    """Two sources can back the same Sigma field with differently indexed columns."""
+    _add_mapped_source(env, "windows-audit", {"Message": "_raw"})
+    _add_mapped_source(env, "windows-sysmon", {"Message": "_org_id"})
+    _import_and_select(env, _message_rule_yaml(), _MESSAGE_ID)
+
+    report = _propagator(env).propagate()
+
+    assert report.failed == []
+    indexed = env.rules.get(binding_rule_id(_MESSAGE_ID, "windows-audit"))
+    plain = env.rules.get(binding_rule_id(_MESSAGE_ID, "windows-sysmon"))
+    assert indexed.where_clause == "lower(Message) LIKE '%mimikatz%'"
+    assert plain.where_clause == "Message ILIKE '%Mimikatz%'"
+
+
+def test_a_failing_source_does_not_sink_the_rules_other_sources(env, fm_registry):
+    """A view pinned to another standard's field map fails that binding only."""
+    _add_mapped_source(env, "windows-audit", {"Message": "_raw"})
+    _add_mapped_source(env, "windows-sysmon", {"Message": "_raw"}, field_map="ecs/corp-pin")
+    _import_and_select(env, _message_rule_yaml(), _MESSAGE_ID)
+
+    report = _propagator(env, field_map_registry=fm_registry).propagate()
+
+    assert report.created == [binding_rule_id(_MESSAGE_ID, "windows-audit")]
+    assert len(report.failed) == 1
+    failure = report.failed[0]
+    assert failure["sigma_rule_id"] == _MESSAGE_ID
+    assert failure["source"] == "windows-sysmon"
+    assert "ecs" in failure["error"]
+    assert not env.rules.exists(binding_rule_id(_MESSAGE_ID, "windows-sysmon"))
+    assert report.hunts_touched == [sigma_hunt_name("windows-audit")]
+
+
+def test_an_unconvertible_rule_is_reported_once_per_source(env):
+    _add_mapped_source(env, "windows-audit", {})
+    _add_mapped_source(env, "windows-sysmon", {})
+    raw = GitCrud(env.gc.repo, sigma_registry())
+    raw.put(
+        RULES_CLASS,
+        _ID,
+        {
+            "id": _ID,
+            "title": "Broken",
+            "rule": {
+                "title": "Broken",
+                "id": _ID,
+                "logsource": {"category": "process_creation", "product": "windows"},
+                "detection": {"sel": {"EventID": 1}, "condition": "sel | count() > 5"},
+            },
+            "provenance": {"origin": "file", "upstream_modified": "2023-05-01"},
+        },
+        "tester",
+        message="seed broken",
+    )
+    env.selection.select(_ID, actor="tester")
+
+    report = _propagator(env).propagate()
+
+    assert report.created == []
+    assert sorted(f["source"] for f in report.failed) == ["windows-audit", "windows-sysmon"]
+    assert {f["sigma_rule_id"] for f in report.failed} == {_ID}
+
+
+def test_an_existing_binding_is_updated_once_its_field_is_text_indexed(env):
+    """The regenerated WHERE is the propagator's own, so it is not read as a hand edit."""
+    _add_mapped_source(env, "windows-audit", {})
+    _import_and_select(env, _message_rule_yaml(), _MESSAGE_ID)
+    prop = _propagator(env)
+    prop.propagate()
+    rid = binding_rule_id(_MESSAGE_ID, "windows-audit")
+    assert env.rules.get(rid).where_clause == "Message ILIKE '%Mimikatz%'"
+
+    _add_mapped_source(env, "windows-audit", {"Message": "_raw"})
+    report = prop.propagate()
+
+    assert report.updated == [rid]
+    assert report.skipped_drifted == []
+    assert env.rules.get(rid).where_clause == "lower(Message) LIKE '%mimikatz%'"
 
 
 # -- Task A: drift is honoured -------------------------------

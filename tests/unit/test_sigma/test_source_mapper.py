@@ -1,7 +1,5 @@
 """Tests for SigmaSourceMapper — Source-based Sigma field mapping."""
 
-from __future__ import annotations
-
 import pytest
 
 from dfe_engine.fieldmap.models import FieldMap
@@ -210,6 +208,170 @@ class TestGetSchemaMetadata:
     def test_missing_source_raises(self, mapper):
         with pytest.raises(SourceNotFoundError):
             mapper.get_schema_metadata("nonexistent")
+
+
+# ---------------------------------------------------------------------------
+# Tests: get_sigma_field_metadata
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def view_store(tmp_path):
+    """A real SigmaViewStore over a local (no-remote) deploy repo."""
+    from dfe_engine.gitcrud import GitCrud, default_registry
+    from dfe_engine.gitops.repo import GitopsRepo
+    from dfe_engine.sigma.views import SigmaViewStore
+
+    repo = GitopsRepo(local_path=str(tmp_path / "deploy"), push=False)
+    return SigmaViewStore(GitCrud(repo, default_registry()))
+
+
+def _field_mapper(type_registry, *sources: Source, view_store=None, field_map_registry=None):
+    from dfe_engine.sigma.source_mapper import SigmaSourceMapper
+
+    return SigmaSourceMapper(
+        FakeSourceRegistry(list(sources)),
+        registry=type_registry,
+        field_map_registry=field_map_registry,
+        view_store=view_store,
+    )
+
+
+class TestGetSigmaFieldMetadata:
+    """The view's columns carry Sigma field names, so the metadata is keyed by them.
+
+    ``_raw`` is the default profile's ``substring_search`` column (a text index) and
+    ``_org_id`` its ``dimension`` column, so both are real schema columns here.
+    """
+
+    def test_a_field_aliased_to_a_text_indexed_column_takes_its_metadata(self, type_registry):
+        from dfe_engine.sigma.sigma_backend_clickhouse import declares_text_index
+
+        source = _make_source("win", sigma=_make_sigma(mappings={"Message": "_raw"}))
+        m = _field_mapper(type_registry, source)
+
+        metadata = m.get_sigma_field_metadata("win")
+
+        assert metadata == {"Message": m.get_schema_metadata("win")["_raw"]}
+        assert declares_text_index(metadata["Message"])
+
+    def test_the_metadata_is_keyed_by_the_sigma_field_not_the_column(self, type_registry):
+        source = _make_source("win", sigma=_make_sigma(mappings={"Message": "_raw"}))
+
+        metadata = _field_mapper(type_registry, source).get_sigma_field_metadata("win")
+
+        assert "_raw" not in metadata
+
+    def test_a_field_aliased_to_an_unindexed_column_carries_that_columns_use_case(
+        self, type_registry
+    ):
+        from dfe_engine.sigma.sigma_backend_clickhouse import declares_text_index
+
+        source = _make_source("win", sigma=_make_sigma(mappings={"Org": "_org_id"}))
+
+        metadata = _field_mapper(type_registry, source).get_sigma_field_metadata("win")
+
+        assert metadata["Org"]["use_case"] == "dimension"
+        assert not declares_text_index(metadata["Org"])
+
+    def test_a_field_aliased_to_a_column_the_schema_lacks_gets_none(self, type_registry):
+        source = _make_source(
+            "win", sigma=_make_sigma(mappings={"Image": "process_name", "Message": "_raw"})
+        )
+
+        metadata = _field_mapper(type_registry, source).get_sigma_field_metadata("win")
+
+        assert set(metadata) == {"Message"}
+
+    def test_a_source_with_no_sigma_aliases_gets_none(self, mapper):
+        assert mapper.get_sigma_field_metadata("raw-passthrough") == {}
+        assert mapper.get_sigma_field_metadata("network-flow") == {}
+
+    def test_a_schema_that_fails_to_build_degrades_to_no_metadata(self, type_registry):
+        source = _make_source(
+            "broken",
+            sigma=_make_sigma(mappings={"Message": "_raw"}),
+            meta_schema="does/not/exist.yaml",
+        )
+
+        assert _field_mapper(type_registry, source).get_sigma_field_metadata("broken") == {}
+
+    def test_missing_source_raises(self, mapper):
+        with pytest.raises(SourceNotFoundError):
+            mapper.get_sigma_field_metadata("nonexistent")
+
+    def test_a_field_map_pinned_to_another_standard_raises(self, type_registry, fm_registry):
+        from dfe_engine.fieldmap.registry import FieldMapError
+
+        source = _make_source(
+            "win",
+            sigma=SourceView(
+                standard="sigma",
+                taxonomy="windows",
+                field_map="ecs/corp-pin",
+                custom_mappings={"Message": "_raw"},
+            ),
+        )
+        m = _field_mapper(type_registry, source, field_map_registry=fm_registry)
+
+        with pytest.raises(FieldMapError, match="ecs"):
+            m.get_sigma_field_metadata("win")
+
+    def test_a_stored_definition_maps_its_plain_source_columns_only(
+        self, type_registry, view_store
+    ):
+        """A JSON extraction and a CAST are not the expression the index covers."""
+        from dfe_engine.sigma.views import SigmaViewDefinition
+
+        view_store.save(
+            SigmaViewDefinition.model_validate(
+                {
+                    "source_name": "win",
+                    "columns": [
+                        {"sigma_field": "Message", "source_column": "_raw"},
+                        {"sigma_field": "RawText", "source_column": "_raw", "type": "String"},
+                        {"sigma_field": "CommandLine", "json_path": "process.command_line"},
+                    ],
+                }
+            ),
+            actor="tester",
+        )
+        source = _make_source("win", sigma=_make_sigma(mappings={}))
+        m = _field_mapper(type_registry, source, view_store=view_store)
+
+        metadata = m.get_sigma_field_metadata("win")
+
+        assert metadata == {"Message": m.get_schema_metadata("win")["_raw"]}
+
+    def test_a_stored_definition_wins_over_the_field_maps(self, type_registry, view_store):
+        """The view renders the stored definition, so the field maps no longer apply."""
+        from dfe_engine.sigma.views import SigmaViewDefinition
+
+        view_store.save(
+            SigmaViewDefinition.model_validate(
+                {
+                    "source_name": "win",
+                    "columns": [{"sigma_field": "Message", "json_path": "message"}],
+                }
+            ),
+            actor="tester",
+        )
+        source = _make_source("win", sigma=_make_sigma(mappings={"Message": "_raw"}))
+
+        metadata = _field_mapper(
+            type_registry, source, view_store=view_store
+        ).get_sigma_field_metadata("win")
+
+        assert metadata == {}
+
+    def test_an_empty_view_store_falls_back_to_the_field_maps(self, type_registry, view_store):
+        source = _make_source("win", sigma=_make_sigma(mappings={"Message": "_raw"}))
+
+        metadata = _field_mapper(
+            type_registry, source, view_store=view_store
+        ).get_sigma_field_metadata("win")
+
+        assert set(metadata) == {"Message"}
 
 
 # ---------------------------------------------------------------------------

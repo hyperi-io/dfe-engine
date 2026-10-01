@@ -18,7 +18,10 @@ For each selected rule this GENERATES a DFE detection Rule per matching source:
   sigma rule detection  --SqlBackend-->  ClickHouse WHERE condition
         over the source's ``{source}_sigma`` view (so the condition references
         Sigma field names DIRECTLY - the view aliases them, hence NO field-map is
-        handed to the backend), carried on a Rule with a back-reference to the
+        handed to the backend). The backend IS handed that source's column
+        metadata keyed by Sigma field, so a field aliased to a text-indexed column
+        is matched as ``lower(field) LIKE``. The conversion therefore runs once per
+        (rule, source). The condition is carried on a Rule with a back-reference to the
         sigma ``id`` (``sigma_rule_id``) + a provenance marker, stored via the
         existing RuleRegistry. The generated rule is then bound into a per-source
         hunt (HuntConfigRegistry) so it actually runs.
@@ -40,8 +43,6 @@ Which SOURCE does a sigma rule bind to? Its ``logsource`` (product/category/
 service) is matched to DFE sources via ``SigmaSourceMapper`` - a rule generates
 one binding per matching source.
 """
-
-from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
@@ -102,7 +103,9 @@ def _where_hash(where_clause: str) -> str:
     return hashlib.sha256(where_clause.encode("utf-8")).hexdigest()[:16]
 
 
-def convert_detection_to_where(rule_dict: dict[str, Any]) -> str:
+def convert_detection_to_where(
+    rule_dict: dict[str, Any], schema_metadata: dict[str, dict[str, Any]] | None = None
+) -> str:
     """Convert a sigma rule dict to a ClickHouse WHERE condition over the sigma view.
 
     No field mapping is applied: the ``{source}_sigma`` view already aliases each
@@ -112,9 +115,19 @@ def convert_detection_to_where(rule_dict: dict[str, Any]) -> str:
     yields several queries is OR-combined. Raises on an unconvertible detection
     (unsupported operator, correlation rule, ...); the caller records the failure
     and moves on.
+
+    Args:
+        rule_dict: The sigma rule as a dict.
+        schema_metadata: Column metadata keyed by Sigma field name (see
+            ``SigmaSourceMapper.get_sigma_field_metadata``); a field backed by a
+            text-indexed column is matched as ``lower(field) LIKE``, every other
+            field as ``ILIKE``.
+
+    Returns:
+        The WHERE condition.
     """
     collection = SigmaCollection.from_dicts([rule_dict])
-    backend = SqlBackend()
+    backend = SqlBackend(schema_metadata=schema_metadata or {})
     queries = backend.convert(collection, output_format="default")
     conditions = [str(q).strip() for q in queries if str(q).strip()]
     if not conditions:
@@ -216,7 +229,7 @@ class PropagationReport:
     updated: list[str] = field(default_factory=list)  # binding rule ids regenerated
     skipped_drifted: list[dict[str, Any]] = field(default_factory=list)
     skipped_no_source: list[str] = field(default_factory=list)  # sigma ids, no source
-    failed: list[dict[str, Any]] = field(default_factory=list)  # {sigma_rule_id, error}
+    failed: list[dict[str, Any]] = field(default_factory=list)  # {sigma_rule_id, source, error}
     hunts_touched: list[str] = field(default_factory=list)
     # Bindings whose sigma rule is no longer selected - a deselect left them behind
     # and they keep firing until pruned. Surfaced so the operator sees them.
@@ -396,6 +409,8 @@ class SigmaPropagator:
         routing = ReviewRouting()
         # rule ids to (re)bind into each source's hunt (created/updated/still-present).
         bindings_by_source: dict[str, list[str]] = {}
+        # One metadata read per source per run, since each read composes that source's schema.
+        metadata_by_source: dict[str, dict[str, dict[str, Any]]] = {}
 
         for sigma_id in selected:
             try:
@@ -409,15 +424,25 @@ class SigmaPropagator:
                 report.skipped_no_source.append(sigma_id)
                 continue
 
-            try:
-                where = convert_detection_to_where(doc.get("rule", {}) or {})
-            except Exception as exc:  # one unconvertible rule must not sink the run
-                logger.warning("sigma propagate: convert failed", sigma_id=sigma_id, error=str(exc))
-                report.failed.append({"sigma_rule_id": sigma_id, "error": str(exc)})
-                continue
-
+            rule_dict = doc.get("rule", {}) or {}
             for source in sources:
                 rid = binding_rule_id(sigma_id, source)
+                try:
+                    if source not in metadata_by_source:
+                        metadata_by_source[source] = self._mapper.get_sigma_field_metadata(source)
+                    where = convert_detection_to_where(rule_dict, metadata_by_source[source])
+                except Exception as exc:  # one unconvertible binding must not sink the run
+                    logger.warning(
+                        "sigma propagate: convert failed",
+                        sigma_id=sigma_id,
+                        source=source,
+                        error=str(exc),
+                    )
+                    report.failed.append(
+                        {"sigma_rule_id": sigma_id, "source": source, "error": str(exc)}
+                    )
+                    continue
+
                 status, outcome = self._apply_binding(sigma_id, doc, source, where, force=force)
                 routing.record(outcome)
                 if status == "created":
