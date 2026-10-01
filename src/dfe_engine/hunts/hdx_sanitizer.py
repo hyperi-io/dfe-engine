@@ -652,7 +652,7 @@ class HdxSanitizer:
             reduced = self._reduce(_unwrap_all(toks), result)
         except RecursionError:
             raise HdxSanitizeError("The SQL is nested too deeply to reduce safely.") from None
-        clean = f"SELECT {', '.join(reduced.projection)} FROM {reduced.table}"
+        clean = f"SELECT {', '.join(reduced.projection)} FROM {reduced.table}"  # noqa: S608 - reassembles the caller's own SQL into a rule base; nothing runs it here
         if reduced.where:
             clean = f"{clean} WHERE {reduced.where}"
         else:
@@ -709,7 +709,7 @@ class HdxSanitizer:
                 )
         source = by_name["FROM"].body
         close = _matching_close(source, 0)
-        result.stripped_clauses.append(f"SELECT {_snippet(by_name['SELECT'].body)} FROM (...)")
+        result.stripped_clauses.append(f"SELECT {_snippet(by_name['SELECT'].body)} FROM (...)")  # noqa: S608 - a report line, not SQL
         self._record_tail(clauses, result)
         return self._reduce(_unwrap_all(source[: close + 1]), result)
 

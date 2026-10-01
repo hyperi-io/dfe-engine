@@ -21,6 +21,10 @@ import re
 # A name a query may carry bare: one identifier, or a dotted path of them. Use fullmatch.
 BARE_REFERENCE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*")
 
+# One part of a table reference: bare, or backtick-quoted with no backtick or backslash inside.
+_TABLE_PART = r"(?:[A-Za-z_][A-Za-z0-9_]*|`[^`\\]+`)"
+_TABLE_REFERENCE = re.compile(rf"({_TABLE_PART})(?:\.({_TABLE_PART}))?")
+
 # Names ClickHouse reads as a literal or a clause word, not a column, when bare in
 # a WHERE, ORDER BY, GROUP BY or SELECT list (measured on ClickHouse 26.9).
 _NOT_A_COLUMN_WHEN_BARE = frozenset(
@@ -66,6 +70,28 @@ def quote_literal(value: str) -> str:
     ``escape_str``. Prefer server-side ``parameters={}`` binding where a slot exists.
     """
     return "'" + value.replace("\\", "\\\\").replace("'", "''") + "'"
+
+
+def table_reference(reference: str) -> str:
+    """Render a caller-supplied ``table`` or ``db.table`` as a quoted table reference.
+
+    Each part may arrive bare or backtick-quoted. Both are re-quoted through
+    :func:`quote_identifier`, so the result names a table and nothing else.
+
+    Args:
+        reference: ``table``, ``db.table``, or either with backtick-quoted parts.
+
+    Returns:
+        The reference with every part backtick-quoted.
+
+    Raises:
+        ValueError: If the reference is not one table name, optionally database-qualified.
+    """
+    match = _TABLE_REFERENCE.fullmatch(reference.strip())
+    if match is None:
+        raise ValueError(f"not a table reference: {reference!r}")
+    parts = [part.strip("`") for part in match.groups() if part is not None]
+    return ".".join(quote_identifier(part) for part in parts)
 
 
 def column_reference(name: str) -> str:

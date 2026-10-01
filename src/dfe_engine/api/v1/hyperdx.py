@@ -50,7 +50,7 @@ router = APIRouter(prefix="/hyperdx", tags=["HyperDX"])
 # The minted platform reader (a service role, no tenant role -> reads across orgs,
 # tier-limited). Handed only to a caller that passes _reads_every_org.
 _PLATFORM_USERNAME = "dfe_query_reader"
-_PLATFORM_SECRET = "ch/service/query_reader"
+_PLATFORM_SECRET = "ch/service/query_reader"  # noqa: S105, RUF100 - a secrets-backend path, not the secret
 
 
 class HyperDXConnection(BaseModel):

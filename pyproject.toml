@@ -228,12 +228,9 @@ extend-exclude = [
 select = ["E4", "E7", "E9", "F", "B", "S", "I", "UP", "N", "PT", "RUF", "PIE", "T20"]
 ignore = [
     "S105",  # hardcoded passwords (false positives: sentinel values, masking strings, sigma tokens)
-    "S608",  # SQL (ClickHouse queries, not user input)
-    "S110",  # try-except-pass (intentional)
     "S112",  # try-except-continue (intentional skip of invalid configs)
     "S603",  # subprocess shell (CI scripts)
     "S607",  # subprocess partial exec (CI scripts)
-    "S701",  # jinja2 autoescape (controlled templates, not HTML)
     "B017",  # pytest.raises without match (legacy tests)
     "B904",  # raise from (TEMP: too many to fix now)
     "B008",  # Depends in defaults (idiomatic FastAPI)
@@ -271,6 +268,9 @@ convention = "google"
     "S101",
     "S106",  # test fixtures use hardcoded passwords
     "S108",  # /tmp and fixed paths in tests are intentional
+    "S110",  # fixture teardown swallows errors from objects already gone
+    "S608",  # tests build SQL against throwaway test databases
+    "S701",  # tests render SQL rule templates, not HTML
     "PT011",  # broad pytest.raises in tests (ValueError/Exception)
     "PT012",  # multi-statement raises blocks (patch/setup inside raises)
     "PT017",  # assertions on exception in except (acceptable in tests)

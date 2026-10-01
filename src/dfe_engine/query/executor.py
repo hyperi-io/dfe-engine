@@ -22,7 +22,7 @@ import time
 import uuid
 from typing import Any
 
-from dfe_engine.clickhouse.quoting import BARE_REFERENCE, column_reference
+from dfe_engine.clickhouse.quoting import BARE_REFERENCE, column_reference, quote_identifier
 from dfe_engine.query.catalog import RESERVED_PARAMS, ViewCatalog
 from dfe_engine.query.models import (
     AuthContext,
@@ -223,7 +223,8 @@ class ViewExecutor:
             param_parts.append(f"{p.name}={{{p.name}:{p.clickhouse_type}}}")
 
         param_str = ", ".join(param_parts)
-        view_call = f"{self._database}.{view_def.name}({param_str})"
+        view = f"{quote_identifier(self._database)}.{quote_identifier(view_def.name)}"
+        view_call = f"{view}({param_str})"
         paging = f"LIMIT {limit} OFFSET {offset}" if offset > 0 else f"LIMIT {limit}"
 
         if options.order_by:
@@ -243,12 +244,12 @@ class ViewExecutor:
                     where = f"WHERE {key} {op} {cursors[0]} "
                 else:
                     where = f"WHERE ({', '.join(columns)}) {op} ({', '.join(cursors)}) "
-            return f"SELECT * FROM {view_call} {where}ORDER BY {order} {paging}"
+            return f"SELECT * FROM {view_call} {where}ORDER BY {order} {paging}"  # noqa: S608 - quoted view; order columns pass column_reference; values bound
 
         if any(p.name == "limit" for p in view_def.parameters):
-            return f"SELECT * FROM {view_call}"
+            return f"SELECT * FROM {view_call}"  # noqa: S608 - quoted view; values bound
 
-        return f"SELECT * FROM {view_call} {paging}"
+        return f"SELECT * FROM {view_call} {paging}"  # noqa: S608 - quoted view; paging is two ints
 
     @staticmethod
     def _check_paging(view_def: ViewDefinition, offset: int, options: QueryOptions) -> None:

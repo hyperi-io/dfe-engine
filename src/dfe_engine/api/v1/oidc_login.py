@@ -57,7 +57,7 @@ from dfe_engine.auth.sessions import session_claims, token_lifetime
 router = APIRouter(prefix="/auth/oidc", tags=["OIDC Login"])
 
 # Name of the cookie carrying the re-minted engine token to a browser client.
-TOKEN_COOKIE = "dfe_token"
+TOKEN_COOKIE = "dfe_token"  # noqa: S105, RUF100 - a cookie name
 
 # Session key holding the validated return_to between login and callback.
 _RETURN_TO_SESSION_KEY = "oidc_return_to"
@@ -105,7 +105,7 @@ class OidcCallbackResponse(BaseModel):
     """Engine token minted after a successful IdP callback."""
 
     access_token: str = Field(description="Engine JWT Bearer token")
-    token_type: Literal["bearer"] = "bearer"
+    token_type: Literal["bearer"] = "bearer"  # noqa: S105, RUF100 - the OAuth token type
     subject: str = Field(description="IdP subject (sub)")
     email: str = Field(default="", description="Email from the IdP, if asserted")
     groups: list[str] = Field(default_factory=list, description="Resolved group identifiers")

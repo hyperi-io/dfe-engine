@@ -29,6 +29,8 @@ from typing import Any
 
 from scalo.logger import logger
 
+from dfe_engine.clickhouse.quoting import quote_identifier
+
 LOCK_NAME = "schema_bootstrap"
 
 _POLL_SECONDS = 2.0
@@ -86,9 +88,10 @@ class SchemaLock:
 
     def read(self) -> LockState | None:
         """The latest claim on the lock name, or None when nothing has ever taken it."""
+        target = f"{quote_identifier(self._database)}.{quote_identifier(self._table)}"
         sql = (
-            "SELECT argMax(holder, acquired_at), argMax(expires_at, acquired_at), "
-            f"argMax(released, acquired_at) FROM {self._database}.{self._table} "
+            "SELECT argMax(holder, acquired_at), argMax(expires_at, acquired_at), "  # noqa: S608 - quoted database and manifest table; values bound
+            f"argMax(released, acquired_at) FROM {target} "
             "WHERE lock_name = {lock:String}"
         )
         try:

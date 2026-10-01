@@ -49,6 +49,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from dfe_engine.clickhouse.quoting import quote_identifier
 from dfe_engine.schema.require import require_objects
 
 from .schedule import due_count
@@ -113,6 +114,7 @@ class ChCoordinator:
             raise ValueError("ChCoordinator requires an explicit data database")
         self._ch = ch
         self._db = database
+        self._qdb = quote_identifier(database)
         self._worker_id = worker_id
         self._lease_seconds = lease_seconds
         self._settle = settle_seconds
@@ -156,7 +158,7 @@ class ChCoordinator:
         the table's merge state.
         """
         rows = self._ch.query(
-            f"SELECT owner, fire, lease_until FROM `{self._db}`.hunt_lease "
+            f"SELECT owner, fire, lease_until FROM {self._qdb}.hunt_lease "  # noqa: S608 - quoted configured database; values bound
             "WHERE hunt_id = {h:String} ORDER BY claimed DESC, owner ASC LIMIT 1",
             parameters={"h": hunt_id},
         ).result_rows
@@ -184,10 +186,10 @@ class ChCoordinator:
         moment the claim would land rather than when this worker last looked.
         """
         self._ch.command(
-            f"INSERT INTO `{self._db}`.hunt_lease (hunt_id, owner, fire, lease_until) "
+            f"INSERT INTO {self._qdb}.hunt_lease (hunt_id, owner, fire, lease_until) "  # noqa: S608 - quoted configured database; values bound
             "SELECT {h:String}, {o:String}, {f:Int64}, {u:Int64} "
             "WHERE (SELECT count() FROM ("
-            f"SELECT owner, lease_until FROM `{self._db}`.hunt_lease "
+            f"SELECT owner, lease_until FROM {self._qdb}.hunt_lease "
             "WHERE hunt_id = {h:String} ORDER BY claimed DESC, owner ASC LIMIT 1"
             ") WHERE lease_until > {now:Int64} AND owner != {o:String}) = 0",
             parameters={
@@ -227,9 +229,9 @@ class ChCoordinator:
         """Hunts with an active lease right now - the input to the global cap."""
         now = self.now() if now is None else now
         rows = self._ch.query(
-            "SELECT countIf(lu > {now:Int64}) FROM ("
+            "SELECT countIf(lu > {now:Int64}) FROM ("  # noqa: S608 - quoted configured database; values bound
             f"SELECT hunt_id, argMax(lease_until, claimed) AS lu "
-            f"FROM `{self._db}`.hunt_lease GROUP BY hunt_id)",
+            f"FROM {self._qdb}.hunt_lease GROUP BY hunt_id)",
             parameters={"now": now},
         ).result_rows
         return int(rows[0][0]) if rows else 0
@@ -247,7 +249,7 @@ class ChCoordinator:
     def get_watermark(self, hunt_id: str) -> int | None:
         """Last committed window end for the hunt, or None if never run."""
         rows = self._ch.query(
-            f"SELECT watermark FROM `{self._db}`.hunt_watermark "
+            f"SELECT watermark FROM {self._qdb}.hunt_watermark "  # noqa: S608 - quoted configured database; values bound
             "WHERE hunt_id = {h:String} ORDER BY updated DESC LIMIT 1",
             parameters={"h": hunt_id},
         ).result_rows
@@ -267,7 +269,7 @@ class ChCoordinator:
     def get_state(self, hunt_id: str) -> HuntStateRow | None:
         """The hunt's persisted overrun / too-aggressive signal, if any."""
         rows = self._ch.query(
-            f"SELECT overrun_count, too_aggressive FROM `{self._db}`.hunt_state "
+            f"SELECT overrun_count, too_aggressive FROM {self._qdb}.hunt_state "  # noqa: S608 - quoted configured database; values bound
             "WHERE hunt_id = {h:String} ORDER BY updated DESC LIMIT 1",
             parameters={"h": hunt_id},
         ).result_rows
@@ -312,12 +314,12 @@ class ChCoordinator:
         """
         now = self.now() if now is None else now
         rows = self._ch.query(
-            "SELECT r.hunt_id, r.fire FROM ("
+            "SELECT r.hunt_id, r.fire FROM ("  # noqa: S608 - quoted configured database; values bound
             "SELECT hunt_id, fire FROM ("
             "SELECT hunt_id, fire, argMax(status, updated) AS status "
-            f"FROM `{self._db}`.hunt_run GROUP BY hunt_id, fire) WHERE status = 'requested'"
+            f"FROM {self._qdb}.hunt_run GROUP BY hunt_id, fire) WHERE status = 'requested'"
             ") r LEFT JOIN (SELECT hunt_id, argMax(watermark, updated) AS wm "
-            f"FROM `{self._db}`.hunt_watermark GROUP BY hunt_id) w USING (hunt_id) "
+            f"FROM {self._qdb}.hunt_watermark GROUP BY hunt_id) w USING (hunt_id) "
             "WHERE r.fire <= {now:Int64} AND coalesce(w.wm, 0) < r.fire",
             parameters={"now": now},
         ).result_rows

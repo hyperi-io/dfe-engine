@@ -28,6 +28,7 @@ from typing import Any
 from scalo.logger import logger
 
 from dfe_engine.ai.sampling import discover_json_keys
+from dfe_engine.clickhouse.quoting import quote_identifier, table_reference
 from dfe_engine.source.registry import SourceNotFoundError
 
 from . import clickhouse_reader as ch_reader
@@ -114,11 +115,14 @@ class Sampler:
         """
         if req.backend == SampleBackend.CLICKHOUSE:
             if req.table:
-                return req.table, req.source
+                try:
+                    return table_reference(req.table), req.source
+                except ValueError as exc:
+                    raise SamplerError(str(exc)) from exc
             if req.source:
                 src = self._get_source(source_registry, req.source)
                 db = self._ch.effective_data_database
-                return f"`{db}`.`{src.table_name}`", None
+                return f"{quote_identifier(db)}.{quote_identifier(src.table_name)}", None
             raise SamplerError("ClickHouse sampling needs a 'source' or an explicit 'table'")
         # Kafka
         if req.topic:

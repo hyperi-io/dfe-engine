@@ -157,7 +157,7 @@ def classify(exc: BaseException) -> ErrorCategory:
 
         if isinstance(exc, OperationalError):
             return ErrorCategory.CONNECTION
-    except Exception:  # pragma: no cover - driver always importable in practice
+    except ImportError:  # pragma: no cover - driver always importable in practice
         pass
     code = parse_code(exc)
     if code is not None:
