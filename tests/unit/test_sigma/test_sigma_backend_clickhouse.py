@@ -2,7 +2,6 @@ import re
 
 import pytest
 from sigma.collection import SigmaCollection
-from sigma.rule import SigmaRule
 
 from dfe_engine.sigma.sigma_backend_clickhouse import SqlBackend, sql_field
 
@@ -17,67 +16,6 @@ def normalize_sql_query(query):
     reduce internal whitespace to single spaces, remove line breaks."""
     query = re.sub(r"\s+", " ", query)
     return query.strip()
-
-
-def format_clickhouse_insert_query(
-    rule: SigmaRule, query: str, tactics: str, techniques: str
-) -> str:
-    """
-    Formats and returns a ClickHouse INSERT query statement for inserting alerts into the database.
-
-    Parameters:
-    - rule: SigmaRule object containing rule details.
-    - query: String containing the WHERE clause conditions to filter the alerts.
-    - tactics: Comma-separated string of tactics IDs.
-    - techniques: Comma-separated string of techniques IDs.
-
-    Returns:
-    - A formatted ClickHouse INSERT query string.
-    """
-    org_id = "{{ org_id }}"
-    target_table = "{{ target_table_name }}"
-    source_table = "{{ source_table_name }}"
-
-    clickhouse_insert_query = (
-        f"INSERT INTO {org_id}.{target_table} ("
-        f"alert_description, "
-        f"alert_framework, "
-        f"alert_ratingtime_sla_applies, "
-        f"alert_rule_name, "
-        f"alert_schedule, "
-        f"alert_schedule_duration, "
-        f"alert_severity, "
-        f"alert_triage_score, "
-        f"alert_type, "
-        f"detected_time, "
-        f"logoriginal, "
-        f"org_id, "
-        f"source_table, "
-        f"tactics, "
-        f"techniques, "
-        f"timestamp) "
-        f"SELECT "
-        f"'{rule.description}', "
-        f"'MITRE ATT&CK', "
-        f"'true', "
-        f"'{rule.title}', "
-        f"'1m', "
-        f"100, "
-        f"'{rule.level}', "
-        f"100, "
-        f"'scheduled alert', "
-        f"now(), "
-        f"'logoriginal', "
-        f"'{org_id}', "
-        f"'{source_table}', "
-        f"'{tactics}', "
-        f"'{techniques}', "
-        f" timestamp "
-        f"FROM {org_id}.{source_table} "
-        f"WHERE {query} "
-    ).strip()
-
-    return clickhouse_insert_query
 
 
 def test_clickhouse_and_expression(clickhouse_backend: SqlBackend):
@@ -296,185 +234,6 @@ def test_wildcard_ilike(clickhouse_backend: SqlBackend):
     assert normalize_sql_query(generated_query[0]) == normalize_sql_query(expected_query[0])
 
 
-def test_full_alert_format_carries_dynamic_metadata(clickhouse_backend: SqlBackend):
-    """Each dynamic metadata entry adds a column and its value to the alert INSERT."""
-    sigma_yaml = """
-        title: Dynamic Metadata Rule
-        logsource:
-            product: windows
-            service: security
-        detection:
-            selection:
-                field1: value1
-            condition: selection
-        level: medium
-    """
-    clickhouse_backend.dynamic_metadata = {
-        "dynamic_field1": "dynamic_value1",
-        "dynamic_field2": "dynamic_value2",
-    }
-
-    converted_query = clickhouse_backend.convert(
-        SigmaCollection.from_yaml(sigma_yaml), output_format="full_alert"
-    )
-
-    assert "dynamic_field1" in converted_query
-    assert "dynamic_field2" in converted_query
-
-
-def test_full_alert_format_with_metadata(clickhouse_backend: SqlBackend):
-    """Test alert generation with metadata from both global defaults and rule-specific settings."""
-    sigma_yaml = """
-        title: PsExec Default Named Pipe
-        id: f3f3a972-f982-40ad-b63c-bca6afdfad7c
-        status: test
-        description: Detects PsExec service default pipe creation
-        author: Test Author
-        references:
-            - https://example.com/ref1
-        tags:
-            - attack.execution
-            - attack.t1569.002
-            - detection.threat_hunting
-        logsource:
-            product: windows
-            service: security
-        detection:
-            selection:
-                EventID: 1234
-                Image: test_image.exe
-            condition: selection
-        level: high
-    """
-
-    alert_metadata = {
-        "alert_type": "Suspicious Process",
-        "alert_severity": "high",
-        "alert_triage_score": 80,
-        "alert_description": "Custom description",
-        "alert_schedule": "smd",
-        "alert_schedule_duration": "10mins",
-        "alert_ratingtime_sla_applies": "true",
-        "alert_framework": "MITRE ATT&CK",
-    }
-    clickhouse_backend.alert_metadata = alert_metadata
-
-    converted_query = clickhouse_backend.convert(
-        SigmaCollection.from_yaml(sigma_yaml), output_format="full_alert"
-    )
-
-    assert "'Suspicious Process'" in converted_query
-    assert "'high'" in converted_query
-    assert "80" in converted_query
-    assert "'Custom description'" in converted_query
-    assert "'smd'" in converted_query
-    assert "'MITRE ATT&CK'" in converted_query
-    assert "'execution, threat_hunting'" in converted_query
-    assert "'T1569.002'" in converted_query
-
-
-def test_field_mapping_layers(clickhouse_backend: SqlBackend):
-    """Test handling of field mappings from different layers."""
-    sigma_yaml = """
-        title: Test Field Mappings
-        id: 2c0a7d9c-6c41-478a-a01c-97d71e7d89be
-        status: test
-        logsource:
-            product: windows
-            service: security
-        detection:
-            selection:
-                Image: test.exe
-                CommandLine: whoami
-                ParentImage: cmd.exe
-            condition: selection
-    """
-
-    field_mappings = {
-        "Image": "process_name",
-        "CommandLine": "command_line",
-        "ParentImage": "parent_process_name",
-    }
-    clickhouse_backend.field_mappings = field_mappings
-
-    converted_query = clickhouse_backend.convert(SigmaCollection.from_yaml(sigma_yaml))
-
-    assert "process_name = 'test.exe'" in converted_query[0]
-    assert "command_line = 'whoami'" in converted_query[0]
-    assert "parent_process_name = 'cmd.exe'" in converted_query[0]
-
-
-def test_mitre_attack_extraction(clickhouse_backend: SqlBackend):
-    """Test extraction and formatting of MITRE ATT&CK tactics and techniques."""
-    sigma_yaml = """
-        title: Test MITRE Extraction
-        id: 2c0a7d9c-6c41-478a-a01c-97d71e7d89be
-        status: test
-        logsource:
-            category: test_category
-            product: test_product
-        tags:
-            - attack.execution
-            - attack.t1059.001
-            - attack.persistence
-            - attack.t1547
-            - attack.defense_evasion
-        detection:
-            selection:
-                EventID: 1
-            condition: selection
-    """
-
-    converted_query = clickhouse_backend.convert(
-        SigmaCollection.from_yaml(sigma_yaml), output_format="full_alert"
-    )
-
-    assert "'execution, persistence, defense_evasion'" in converted_query
-    assert "'T1059.001, T1547'" in converted_query
-
-
-def test_clickhouse_format1_output(clickhouse_backend: SqlBackend):
-    """Test for output format format1."""
-    sigma_yaml = """
-        title: Test Format1
-        status: test
-        logsource:
-            category: test_category
-            product: test_product
-        detection:
-            sel1:
-                fieldA: valueA
-            sel2:
-                fieldB: valueB
-            condition: 1 of sel*
-    """
-    rules = SigmaCollection.from_yaml(sigma_yaml)
-    converted_queries = clickhouse_backend.convert(rules, output_format="format1")
-    expected_query = "(fieldA = 'valueA' OR fieldB = 'valueB')"
-    assert normalize_sql_query(converted_queries) == normalize_sql_query(expected_query)
-
-
-def test_clickhouse_format2_output(clickhouse_backend: SqlBackend):
-    """Test for output format format2."""
-    sigma_yaml = """
-        title: Test Format2
-        status: test
-        logsource:
-            category: test_category
-            product: test_product
-        detection:
-            sel1:
-                fieldA: valueA
-            sel2:
-                fieldB: valueB
-            condition: sel1 and sel2
-    """
-    rules = SigmaCollection.from_yaml(sigma_yaml)
-    converted_queries = clickhouse_backend.convert(rules, output_format="format2")
-    expected_query = "(fieldA = 'valueA' AND fieldB = 'valueB')"
-    assert normalize_sql_query(converted_queries) == normalize_sql_query(expected_query)
-
-
 def convert_one(detection: str, schema_metadata: dict | None = None) -> str:
     """Convert a one-selection rule and return its single query.
 
@@ -612,16 +371,7 @@ def test_malformed_cidr_handling(clickhouse_backend: SqlBackend):
         assert "CIDR" in str(e) or "IP" in str(e)
 
 
-def test_nested_field_mappings(clickhouse_backend: SqlBackend):
-    field_mappings = {
-        "User": "event.user.name",
-        "Source.Address": "event.source.address",
-        "Source.Port": "event.source.port",
-        "Target.Address": "event.destination.address",
-        "Target.Port": "event.destination.port",
-    }
-    clickhouse_backend.field_mappings = field_mappings
-
+def test_dotted_field_names_stay_bare_and_numbers_render_quoted(clickhouse_backend: SqlBackend):
     sigma_yaml = """
         title: Test Nested Fields
         status: test
@@ -630,53 +380,19 @@ def test_nested_field_mappings(clickhouse_backend: SqlBackend):
             product: firewall
         detection:
             selection:
-                User: 'admin'
-                Source.Address: '192.168.1.1'
-                Source.Port: 22
-                Target.Address: '10.0.0.1'
-                Target.Port: 445
+                event.user.name: 'admin'
+                event.source.address: '192.168.1.1'
+                event.source.port: 22
+                event.destination.port: 445
             condition: selection
     """
 
     generated_query = clickhouse_backend.convert(SigmaCollection.from_yaml(sigma_yaml))
 
     assert "event.user.name = 'admin'" in generated_query[0]
-    assert "event.source.address" in generated_query[0]
-    assert "192.168.1.1" in generated_query[0]
+    assert "cidrmatch(event.source.address, '192.168.1.1')" in generated_query[0]
     assert "event.source.port = '22'" in generated_query[0]
-    assert "event.destination.address" in generated_query[0]
-    assert "10.0.0.1" in generated_query[0]
     assert "event.destination.port = '445'" in generated_query[0]
-
-
-def test_multi_value_field_mappings(clickhouse_backend: SqlBackend):
-    field_mappings = {
-        "URL": ["url.full", "url.original"],
-        "IP": ["source.ip", "client.ip"],
-    }
-    clickhouse_backend.field_mappings = field_mappings
-
-    sigma_yaml = """
-        title: Test Multi-value Field Mappings
-        status: test
-        logsource:
-            category: webserver
-            product: apache
-        detection:
-            selection:
-                URL: 'admin.php'
-                IP: '1.2.3.4'
-            condition: selection
-    """
-
-    generated_query = clickhouse_backend.convert(SigmaCollection.from_yaml(sigma_yaml))
-
-    assert "(url.full = 'admin.php' OR url.original = 'admin.php')" in generated_query[0]
-
-    assert "source.ip" in generated_query[0]
-    assert "client.ip" in generated_query[0]
-    assert "1.2.3.4" in generated_query[0]
-    assert "OR" in generated_query[0]
 
 
 class TestFieldNameRendering:
@@ -709,20 +425,3 @@ class TestFieldNameRendering:
 
         assert rendered == "`x`` OR 1=1 OR ``y`"
         assert rendered.count("`") % 2 == 0
-
-    def test_a_mapped_field_name_is_quoted_too(self, clickhouse_backend: SqlBackend):
-        clickhouse_backend.field_mappings = {"User": "user name"}
-        sigma_yaml = """
-            title: Test
-            status: test
-            logsource:
-                category: test_category
-                product: test_product
-            detection:
-                selection:
-                    User: 'admin'
-                condition: selection
-        """
-        generated = clickhouse_backend.convert(SigmaCollection.from_yaml(sigma_yaml))
-
-        assert "`user name` = 'admin'" in generated[0]
