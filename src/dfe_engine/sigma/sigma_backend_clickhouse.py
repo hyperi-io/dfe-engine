@@ -1,6 +1,4 @@
 import ipaddress
-import json
-import re
 from typing import Any, ClassVar
 
 from sigma.conditions import (
@@ -14,7 +12,7 @@ from sigma.conversion.base import TextQueryBackend
 from sigma.conversion.deferred import DeferredQueryExpression
 from sigma.conversion.state import ConversionState
 from sigma.processing.pipeline import ProcessingPipeline
-from sigma.rule import SigmaRule, SigmaRuleTag
+from sigma.rule import SigmaRule
 from sigma.types import SigmaCIDRExpression, SigmaCompareExpression, SigmaNull, SigmaString
 
 from ..clickhouse.quoting import column_reference as sql_field
@@ -44,9 +42,6 @@ class SqlBackend(TextQueryBackend):
     name: ClassVar[str] = "clickhouse backend"
     formats: dict[str, str] = {
         "default": "Plain ClickHouse queries",
-        "full_alert": "ClickHouse Query with Insert into Alerting table",
-        "format1": "'format1' output format",
-        "format2": "'format2' output format",
     }
     requires_pipeline: bool = False
     precedence: ClassVar[tuple[ConditionItem, ConditionItem, ConditionItem]] = (
@@ -56,10 +51,6 @@ class SqlBackend(TextQueryBackend):
     )
     parenthesize: bool = True
     group_expression: ClassVar[str] = "({expr})"
-
-    org_id: str = "{{org_id}}"
-    target_table: str = "{{target_table_name}}"
-    source_table: str = "{{source_table_name}}"
 
     token_separator: str = " "
     or_token: ClassVar[str] = "OR"
@@ -136,36 +127,17 @@ class SqlBackend(TextQueryBackend):
     def __init__(
         self,
         processing_pipeline: ProcessingPipeline | None = None,
-        alert_metadata: dict | None = None,
-        dynamic_metadata: dict | None = None,
         schema_metadata: dict | None = None,
-        field_mappings: dict | None = None,
     ):
-        """Initialize the backend with optional alert metadata, dynamic metadata, schema metadata and field mappings."""
+        """Initialize the backend.
+
+        Args:
+            processing_pipeline: A pySigma processing pipeline, if any.
+            schema_metadata: Column metadata keyed by column name; a column whose
+                use case renders a text index is matched through ``lower()``.
+        """
         super().__init__(processing_pipeline)
-
-        if isinstance(alert_metadata, str):
-            try:
-                self.alert_metadata = json.loads(alert_metadata)
-            except json.JSONDecodeError, TypeError:
-                self.alert_metadata = {}
-        elif isinstance(alert_metadata, dict):
-            self.alert_metadata = alert_metadata
-        else:
-            self.alert_metadata = {} if alert_metadata is None else dict(alert_metadata)
-
-        if isinstance(dynamic_metadata, str):
-            try:
-                self.dynamic_metadata = json.loads(dynamic_metadata)
-            except json.JSONDecodeError, TypeError:
-                self.dynamic_metadata = {}
-        elif isinstance(dynamic_metadata, dict):
-            self.dynamic_metadata = dynamic_metadata
-        else:
-            self.dynamic_metadata = {} if dynamic_metadata is None else dict(dynamic_metadata)
-
         self.schema_metadata = schema_metadata or {}
-        self.field_mappings = field_mappings or {}
 
     def is_valid_cidr(self, cidr_str: str) -> bool:
         """Validate CIDR notation."""
@@ -355,19 +327,9 @@ class SqlBackend(TextQueryBackend):
 
         return f"{field} = '{self._escape_value(str_value)}'"
 
-    def _mapped_name(self, field_name: str) -> str:
-        """The column name a Sigma field maps to, before rendering, for metadata lookups."""
-        mapped = self.field_mappings.get(field_name, field_name)
-        return mapped if isinstance(mapped, str) else field_name
-
     def escape_and_quote_field(self, field_name: str) -> str:
-        """Map field name if it exists in field_mappings, then render it as a column reference."""
-        mapped_field = self.field_mappings.get(field_name, field_name)
-
-        if isinstance(mapped_field, list):
-            return " OR ".join(sql_field(field) for field in mapped_field)
-
-        return sql_field(mapped_field)
+        """Render a Sigma field name as a ClickHouse column reference."""
+        return sql_field(field_name)
 
     def convert_condition_field_eq_val_num(
         self, cond: ConditionFieldEqualsValueExpression, state: ConversionState
@@ -451,7 +413,6 @@ class SqlBackend(TextQueryBackend):
         """Handle list of values for a field."""
         base_field, modifier = self._get_base_field_and_modifier(cond.field)
         field = self.escape_and_quote_field(base_field)
-        raw = self._mapped_name(base_field)
 
         values = []
         for v in value_list:
@@ -461,7 +422,7 @@ class SqlBackend(TextQueryBackend):
                 cidr = v.cidr if isinstance(v, SigmaCIDRExpression) else str(v)
                 values.append(self._create_cidr_expression(field, cidr))
             elif isinstance(v, SigmaString | SigmaNull):
-                values.append(self._handle_field_value_expression(field, v, modifier, raw))
+                values.append(self._handle_field_value_expression(field, v, modifier, base_field))
             else:
                 values.append(f"{field} = '{self._escape_value(str(v))}'")
 
@@ -479,34 +440,10 @@ class SqlBackend(TextQueryBackend):
             if isinstance(value, list):
                 return self._handle_list_values(field, value, cond, state)
 
-            mapped_field = self.field_mappings.get(cond.field, cond.field)
-            if isinstance(mapped_field, list):
-                field_conditions = [
-                    self._handle_field_value_expression(sql_field(f), value, modifier, f)
-                    for f in mapped_field
-                ]
-                return f"({' OR '.join(field_conditions)})"
-
-            return self._handle_field_value_expression(
-                field, value, modifier, self._mapped_name(base_field)
-            )
+            return self._handle_field_value_expression(field, value, modifier, base_field)
 
         except Exception as e:
             raise NotImplementedError(f"Field equals string value expressions error: {e}")
-
-    def convert_filter_condition(
-        self, cond: ConditionFieldEqualsValueExpression, state: ConversionState
-    ) -> str:
-        """Convert a filter condition with proper handling of field values."""
-        base_field, modifier = self._get_base_field_and_modifier(cond.field.lower())
-        field = self.escape_and_quote_field(base_field)
-
-        if isinstance(cond.value, list):
-            return self._handle_list_values(field, cond.value, cond, state)
-
-        return self._handle_field_value_expression(
-            field, cond.value, modifier, self._mapped_name(base_field)
-        )
 
     def convert_condition_and(
         self, cond: ConditionAND, state: ConversionState
@@ -539,12 +476,13 @@ class SqlBackend(TextQueryBackend):
                 if len(cond.args) > 0 and all(arg.field == cond.args[0].field for arg in cond.args):
                     base_field, modifier = self._get_base_field_and_modifier(cond.args[0].field)
                     field = self.escape_and_quote_field(base_field)
-                    raw = self._mapped_name(base_field)
                     values = []
 
                     for arg in cond.args:
                         values.append(
-                            self._handle_field_value_expression(field, arg.value, modifier, raw)
+                            self._handle_field_value_expression(
+                                field, arg.value, modifier, base_field
+                            )
                         )
 
                     return f"({' OR '.join(values)})"
@@ -596,123 +534,6 @@ class SqlBackend(TextQueryBackend):
         except TypeError:
             raise NotImplementedError("Operator 'not' not supported by the backend")
 
-    def extract_tactics_techniques(self, tags: list[SigmaRuleTag]) -> tuple[str, str]:
-        """Extract MITRE ATT&CK tactics and techniques from rule tags."""
-        techniques = [tag.name.upper() for tag in tags if re.match(r"[tT]\d{4}", tag.name)]
-        tactics = [tag.name.lower() for tag in tags if not re.match(r"[tT]\d{4}", tag.name)]
-        return (", ".join(tactics), ", ".join(techniques))
-
-    def _get_alert_field_values(self, rule: SigmaRule) -> dict[str, str]:
-        """Get the values for alert fields based on rule and alert metadata."""
-        tactics, techniques = self.extract_tactics_techniques(rule.tags)
-
-        defaults = {
-            "alert_description": rule.description or "",
-            "alert_framework": "MITRE ATT&CK",
-            "alert_ratingtime_sla_applies": "true",
-            "alert_rule_name": self._escape_value(rule.title),
-            "alert_schedule": "smd",
-            "alert_schedule_duration": "10mins",
-            "alert_severity": rule.level or "medium",
-            "alert_triage_score": 40,
-            "alert_type": "scheduled alert",
-            "tactic_name": tactics,
-            "technique_name": techniques,
-        }
-
-        result = {**defaults, **self.alert_metadata}
-
-        return result
-
-    def _build_alert_insert_query(self, rule: SigmaRule, where_condition: str) -> str:
-        """Build the insert query for alert table."""
-        alert_values = self._get_alert_field_values(rule)
-
-        static_columns = [
-            "alert_description",
-            "alert_framework",
-            "alert_ratingtime_sla_applies",
-            "alert_rule_name",
-            "alert_schedule",
-            "alert_schedule_duration",
-            "alert_severity",
-            "alert_triage_score",
-            "alert_type",
-            "detected_time",
-            "logoriginal",
-            "org_id",
-            "source_table",
-            "tactic_name",
-            "technique_name",
-            "timestamp",
-        ]
-
-        dynamic_columns = list(self.dynamic_metadata.values())
-        all_columns = static_columns + dynamic_columns
-
-        techniques = alert_values.get("technique_name", "")
-        if isinstance(techniques, str):
-            techniques = techniques.replace("\n", " ").replace("\r", "").strip()
-
-        severity_value = alert_values.get("alert_severity", "medium")
-        if hasattr(severity_value, "name"):
-            severity = severity_value.name.lower()
-        else:
-            severity = str(severity_value).lower()
-
-        triage_score = 50
-        if severity == "critical":
-            triage_score = 90
-        elif severity == "high":
-            triage_score = 70
-        elif severity == "low":
-            triage_score = 30
-        elif severity == "informational":
-            triage_score = 10
-
-        # Every string literal routes through _escape_value (F-SIGMA-ESCAPING): the
-        # values derive from attacker-craftable rule fields (title, tags -> tactic/
-        # technique, metadata overrides), so an unescaped quote would break out of
-        # the INSERT literal. triage_score is a bare number; now()/timestamp/
-        # 'logoriginal' are constants.
-        static_values = [
-            f"'{self._escape_value(alert_values.get('alert_description', ''))}'",
-            f"'{self._escape_value(alert_values.get('alert_framework', 'MITRE ATT&CK'))}'",
-            f"'{self._escape_value(alert_values.get('alert_ratingtime_sla_applies', 'true'))}'",
-            f"'{self._escape_value(alert_values.get('alert_rule_name', rule.title))}'",
-            f"'{self._escape_value(alert_values.get('alert_schedule', 'smd'))}'",
-            f"'{self._escape_value(alert_values.get('alert_schedule_duration', '10mins'))}'",
-            f"'{self._escape_value(severity)}'",
-            f"{alert_values.get('alert_triage_score', triage_score)}",
-            f"'{self._escape_value(alert_values.get('alert_type', rule.title))}'",
-            "now()",
-            "'logoriginal'",
-            f"'{self._escape_value(self.org_id)}'",
-            f"'{self._escape_value(self.source_table)}'",
-            f"'{self._escape_value(alert_values.get('tactic_name', ''))}'",
-            f"'{self._escape_value(alert_values.get('technique_name', ''))}'",
-            "timestamp",
-        ]
-
-        dynamic_values = list(self.dynamic_metadata.keys())
-        all_values = static_values + dynamic_values
-
-        insert_clause = f"INSERT INTO\n   {self.org_id}.{self.target_table}"
-        columns_clause = f" ({', '.join(all_columns)})"
-
-        select_parts = []
-        for val in all_values:
-            select_parts.append(f"    {val}")
-        select_clause = "\nSELECT\n" + ",\n".join(select_parts)
-        from_clause = f"\nFROM {self.org_id}.{self.source_table}"
-        where_clause = f"\nWHERE\n      {where_condition}"
-
-        clickhouse_insert_query = (
-            f"{insert_clause}{columns_clause}{select_clause}{from_clause}{where_clause}"
-        )
-
-        return clickhouse_insert_query
-
     def finalize_query_default(
         self, rule: SigmaRule, query: str, index: int, state: ConversionState
     ) -> Any:
@@ -722,33 +543,3 @@ class SqlBackend(TextQueryBackend):
     def finalize_output_default(self, queries: list[str]) -> Any:
         """Finalize output for default format."""
         return list(queries)
-
-    def finalize_query_full_alert(
-        self, rule: SigmaRule, query: str, index: int, state: ConversionState
-    ) -> dict:
-        """Finalize query for full alert output format."""
-        return self._build_alert_insert_query(rule, f"{{timestamp_condition}} AND ({query})")
-
-    def finalize_output_full_alert(self, queries: list[str]) -> Any:
-        """Finalize output for full alert format."""
-        return "\n".join(queries)
-
-    def finalize_query_format1(
-        self, rule: SigmaRule, query: str, index: int, state: ConversionState
-    ) -> Any:
-        """Finalize query for format1."""
-        return query
-
-    def finalize_output_format1(self, queries: list[str]) -> Any:
-        """Finalize output for format1."""
-        return "\n".join(queries)
-
-    def finalize_query_format2(
-        self, rule: SigmaRule, query: str, index: int, state: ConversionState
-    ) -> Any:
-        """Finalize query for format2."""
-        return query
-
-    def finalize_output_format2(self, queries: list[str]) -> Any:
-        """Finalize output for format2."""
-        return "\n".join(queries)
