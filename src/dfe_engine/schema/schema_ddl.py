@@ -13,8 +13,7 @@ Usage:
     ddl = gen.generate_create_table("filebeat", columns, DDLConfig(ttl_days=90))
 """
 
-from __future__ import annotations
-
+import re
 from dataclasses import dataclass, field, replace
 
 from scalo.logger import logger
@@ -35,11 +34,11 @@ class DDLGenerationError(Exception):
 
 
 def unsafe_ident_reason(name: str) -> str | None:
-    """Why *name* is unsafe in a DDL identifier position, or None when safe.
+    r"""Why *name* is unsafe in a DDL identifier position, or None when safe.
 
     THE one charset rule for operator-suppliable identifiers, shared by every
     DDL sink (the view mappings here, ``fieldmap.remap_view``): empty, any of
-    the control chars ``\\` ; ( ) ' " \\\\``, or whitespace is rejected - each
+    the control chars ``\` ; ( ) ' " \\``, or whitespace is rejected - each
     would splice raw SQL past backtick quoting or an unquoted position. Each
     sink raises its own exception type from this reason.
     """
@@ -68,6 +67,22 @@ def quote_ident(name: str, *, what: str = "identifier") -> str:
     if reason is not None:
         raise DDLGenerationError(f"unsafe {what}: {name!r} ({reason})")
     return f"`{name}`"
+
+
+# A name ClickHouse reads as one identifier without backticks.
+_BARE_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _index_ident(name: str) -> str:
+    """An index name bare when ClickHouse reads it bare, else through :func:`quote_ident`.
+
+    A safe name stays bare because dfe-schemas diff-checks its committed DDL against
+    a fresh render. A name taken from a dotted column such as ``event.action`` is
+    one identifier only once quoted.
+    """
+    if _BARE_IDENT.fullmatch(name):
+        return name
+    return quote_ident(name, what="index name")
 
 
 def _qualified(db: str, name: str, *, what: str) -> str:
@@ -326,6 +341,8 @@ class DDLGenerator:
             table_name: ClickHouse table name.
             columns: Schema columns (profile header + source-specific).
             config: DDL configuration. Defaults to DDLConfig().
+            generated_time: Value for the header's ``Generated at`` line, which
+                is left out when None.
 
         Returns:
             Complete CREATE TABLE DDL string.
@@ -719,7 +736,7 @@ class DDLGenerator:
         index_name = f"idx_{col.name}"
         quoted = f"`{col.name}`"
         if col.index:
-            return [f"INDEX {index_name} {quoted} TYPE {col.index}"]
+            return [f"INDEX {_index_ident(index_name)} {quoted} TYPE {col.index}"]
 
         use_case, dims = split_use_case(col.use_case)
         if use_case is None:
@@ -727,7 +744,7 @@ class DDLGenerator:
 
         if use_case == "key_search":
             return [
-                template.format(name=f"idx_{col.name}_{suffix}", col=quoted)
+                template.format(name=_index_ident(f"{index_name}_{suffix}"), col=quoted)
                 for suffix, template in self._key_search_templates
             ]
 
@@ -737,7 +754,11 @@ class DDLGenerator:
                     f"column {col.name!r}: similarity_search needs the vector "
                     f"dimension count, as similarity_search(<dims>)"
                 )
-            return [_SIMILARITY_SEARCH_TEMPLATE.format(name=index_name, col=quoted, dims=dims)]
+            return [
+                _SIMILARITY_SEARCH_TEMPLATE.format(
+                    name=_index_ident(index_name), col=quoted, dims=dims
+                )
+            ]
 
         if use_case == "exact_match":
             template = (
@@ -745,12 +766,12 @@ class DDLGenerator:
                 if col.declared_cardinality == LOW_CARDINALITY
                 else _EXACT_MATCH_HIGH_CARDINALITY
             )
-            return [template.format(name=index_name, col=quoted)]
+            return [template.format(name=_index_ident(index_name), col=quoted)]
 
         template = self._index_templates.get(use_case)
         if template is None:
             return []
-        return [template.format(name=index_name, col=quoted)]
+        return [template.format(name=_index_ident(index_name), col=quoted)]
 
     # -- Internal: ORDER BY ------------------------------------------
 

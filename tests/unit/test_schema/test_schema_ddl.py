@@ -528,6 +528,59 @@ class TestUseCaseIndexes:
         assert "INDEX idx_attrs_key mapKeys(`attrs`) TYPE bloom_filter(0.01) GRANULARITY 1" in ddl
 
 
+class TestIndexNames:
+    """An index name is bare when ClickHouse reads it bare, and quoted otherwise."""
+
+    def test_a_dotted_column_quotes_its_index_name(self, gen: DDLGenerator):
+        cols = [_col(name="event.action", type="string", use_case="exact_match")]
+        ddl = gen.generate_create_table("t", cols)
+        index_lines = [line for line in ddl.splitlines() if "INDEX" in line]
+        assert index_lines == [
+            "    INDEX `idx_event.action` `event.action` TYPE bloom_filter GRANULARITY 4"
+        ]
+
+    def test_a_dotted_column_quotes_a_declared_index_name(self, gen: DDLGenerator):
+        cols = [_col(name="log.original", type="text", index="text(tokenizer = 'default')")]
+        ddl = gen.generate_create_table("t", cols)
+        assert "INDEX `idx_log.original` `log.original` TYPE text(tokenizer = 'default')" in ddl
+
+    def test_a_dotted_map_column_quotes_both_key_search_names(self, gen: DDLGenerator):
+        cols = [_col(name="labels.attrs", type="map", use_case="key_search")]
+        ddl = gen.generate_create_table("t", cols)
+        assert "INDEX `idx_labels.attrs_key` mapKeys(`labels.attrs`)" in ddl
+        assert "INDEX `idx_labels.attrs_value` mapValues(`labels.attrs`)" in ddl
+
+    def test_a_plain_column_keeps_its_index_line_byte_for_byte(self, gen: DDLGenerator):
+        """The DDL dfe-schemas commits must not drift, so a safe name stays bare."""
+        cols = [_col(name="req_id", type="string", use_case="exact_match")]
+        ddl = gen.generate_create_table("t", cols)
+        index_lines = [line for line in ddl.splitlines() if "INDEX" in line]
+        assert index_lines == ["    INDEX idx_req_id `req_id` TYPE bloom_filter GRANULARITY 4"]
+
+    def test_the_alter_quotes_a_dotted_index_name(self, gen: DDLGenerator):
+        col = _col(name="event.action", type="string", use_case="exact_match")
+        assert gen.generate_alter_add_indexes("t", col) == [
+            "ALTER TABLE `{db}`.`t` ADD INDEX `idx_event.action` `event.action` "
+            "TYPE bloom_filter GRANULARITY 4;\n"
+        ]
+
+    def test_the_alter_keeps_a_plain_index_name_byte_for_byte(self, gen: DDLGenerator):
+        col = _col(name="req_id", type="string", use_case="exact_match")
+        assert gen.generate_alter_add_indexes("t", col) == [
+            "ALTER TABLE `{db}`.`t` ADD INDEX idx_req_id `req_id` TYPE bloom_filter GRANULARITY 4;\n"
+        ]
+
+    def test_an_index_name_that_cannot_be_quoted_safely_is_refused(self, gen: DDLGenerator):
+        col = _col(name="a`b", type="string", use_case="exact_match")
+        with pytest.raises(DDLGenerationError, match="unsafe index name"):
+            gen.generate_alter_add_indexes("t", col)
+
+    def test_an_unindexed_column_is_never_checked_as_an_index_name(self, gen: DDLGenerator):
+        cols = [_col(name="has space", type="string")]
+        ddl = gen.generate_create_table("t", cols)
+        assert "INDEX" not in ddl
+
+
 class TestDeclaredIndexes:
     """A column carrying its own index shape, which no use_case template expresses."""
 
