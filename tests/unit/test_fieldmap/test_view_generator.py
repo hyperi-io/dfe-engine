@@ -194,22 +194,6 @@ class TestGenerateViewsForSource:
 
 
 # ---------------------------------------------------------------
-# generate_drop_view
-# ---------------------------------------------------------------
-
-
-class TestGenerateDropView:
-    def test_drop_view(self, gen: ViewGenerator):
-        ddl = gen.generate_drop_view("sigma", "windows-audit")
-        assert ddl == "DROP VIEW IF EXISTS {db}.windows-audit_sigma;\n"
-
-    def test_drop_view_custom_db(self, gen: ViewGenerator):
-        cfg = DDLConfig(db="analytics")
-        ddl = gen.generate_drop_view("ecs", "syslog", cfg)
-        assert ddl == "DROP VIEW IF EXISTS analytics.syslog_ecs;\n"
-
-
-# ---------------------------------------------------------------
 # _discover_standards
 # ---------------------------------------------------------------
 

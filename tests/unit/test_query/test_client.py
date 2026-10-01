@@ -47,16 +47,16 @@ class TestQueryClientHttpMode:
                 {"id": 3, "value": "c"},
             ],
             "columns": ["id", "value"],
-        }
-        response.headers = {
-            "X-Row-Count": "3",
-            "X-Query-Duration-Ms": "42",
-            "X-Datasource": "clickhouse:default",
+            "row_count": 3,
+            "query_duration_ms": 42,
+            "has_more": True,
+            "next_offset": 3,
+            "request_id": "req-1",
         }
         response.raise_for_status = MagicMock()
         return response
 
-    def test_query_http(self, mock_response):
+    def test_query_http_runs_the_view_not_raw_sql(self, mock_response):
         client = QueryClient(base_url="http://localhost:8000")
         mock_http = MagicMock()
         mock_http.post.return_value = mock_response
@@ -66,11 +66,36 @@ class TestQueryClientHttpMode:
 
         mock_http.post.assert_called_once()
         call_args = mock_http.post.call_args
-        assert call_args[0][0] == "/api/v1/queries/raw"
-        assert call_args[1]["json"]["query"] == "analytics/user_activity"
+        assert call_args[0][0] == "/api/v1/queries/views/analytics/user_activity/execute"
+        assert "query" not in call_args[1]["json"]
 
         assert result.num_rows == 3
         assert result.metadata.query_duration_ms == 42
+        assert result.metadata.has_more is True
+        assert result.metadata.next_offset == 3
+        assert result.metadata.request_id == "req-1"
+
+    def test_query_http_passes_the_keyset_options(self, mock_response):
+        client = QueryClient(base_url="http://localhost:8000")
+        mock_http = MagicMock()
+        mock_http.post.return_value = mock_response
+        client._http_client = mock_http
+
+        client.query(
+            "analytics/user_activity",
+            order_by="event_ts",
+            order_dir="desc",
+            after_key="2024-01-15T12:00:00",
+            tiebreak_by="event_id",
+            after_tiebreak="e-41",
+        )
+
+        options = mock_http.post.call_args[1]["json"]["options"]
+        assert options["order_by"] == "event_ts"
+        assert options["order_dir"] == "desc"
+        assert options["after_key"] == "2024-01-15T12:00:00"
+        assert options["tiebreak_by"] == "event_id"
+        assert options["after_tiebreak"] == "e-41"
 
     def test_query_http_with_params(self, mock_response):
         client = QueryClient(base_url="http://localhost:8000")

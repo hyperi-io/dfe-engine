@@ -16,6 +16,7 @@ discovered columns (source meta-schema + landed ``_json`` keys, from ai.sampling
 import re
 from typing import Any
 
+from dfe_engine.clickhouse.quoting import quote_literal
 from dfe_engine.hunts.hdx_sanitizer import HdxSanitizeError, split_time_window
 
 # Default time-field names a HyperDX time filter is likely to sit on.
@@ -93,11 +94,13 @@ def build_query_scaffold(
     ``columns`` are field names (source meta-schema + landed ``_json`` keys); ``table``
     is the source's landed table. The scaffold filters to the source (if given) and
     the hunt ``{window}`` - a starting point for the author to refine, not executed.
+    The source name is quoted as a literal, so a name holding a quote still
+    scaffolds SQL the author can run.
     """
     select = ", ".join(columns) if columns else "*"
     predicates = []
     if source:
-        predicates.append(f"_source = '{source}'")
+        predicates.append(f"_source = {quote_literal(source)}")
     predicates.append("{window}")
     where = " AND ".join(predicates)
     return f"SELECT {select}\nFROM {table}\nWHERE {where}\nLIMIT {limit}"

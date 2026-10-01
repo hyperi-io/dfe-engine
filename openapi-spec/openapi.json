@@ -33500,19 +33500,8 @@
                 "type": "null"
               }
             ],
-            "title": "Offset"
-          },
-          "cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cursor",
-            "description": "Opaque cursor for cursor-based pagination (from previous response)"
+            "title": "Offset",
+            "description": "Not combinable with after_key"
           },
           "after_key": {
             "anyOf": [
@@ -33522,7 +33511,7 @@
               }
             ],
             "title": "After Key",
-            "description": "Value to paginate after (requires order_by in query)"
+            "description": "order_by value of the previous page's last row (a string or a number); requires order_by. A timestamp is sent as e.g. '2024-01-15T12:00:00'"
           },
           "order_by": {
             "anyOf": [
@@ -33534,7 +33523,7 @@
               }
             ],
             "title": "Order By",
-            "description": "Column to order by for keyset pagination"
+            "description": "Column to order and page by. Rows whose key is NULL are never returned by keyset paging, and without tiebreak_by the key must be unique: rows tying with the cursor are skipped"
           },
           "order_dir": {
             "type": "string",
@@ -33545,6 +33534,28 @@
             "title": "Order Dir",
             "description": "Sort direction for ordering",
             "default": "asc"
+          },
+          "tiebreak_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tiebreak By",
+            "description": "Second, unique, non-NULL column that orders rows tying on order_by"
+          },
+          "after_tiebreak": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Tiebreak",
+            "description": "tiebreak_by value of the previous page's last row; sent with after_key"
           },
           "time_from": {
             "anyOf": [
@@ -33583,16 +33594,6 @@
             ],
             "title": "Timeout Seconds"
           },
-          "include_explain": {
-            "type": "boolean",
-            "title": "Include Explain",
-            "default": false
-          },
-          "explain_parallel": {
-            "type": "boolean",
-            "title": "Explain Parallel",
-            "default": true
-          },
           "cache": {
             "type": "boolean",
             "title": "Cache",
@@ -33614,7 +33615,7 @@
         },
         "type": "object",
         "title": "QueryOptions",
-        "description": "Query execution options.\n\nThese are standard parameters available for all queries.\nServer enforces maximums from query definition and global config.\n\nPagination modes:\n- Offset-based: Use `limit` and `offset` for simple pagination\n- Cursor-based: Use `cursor` for efficient pagination on large datasets\n- Keyset: Use `after_key` with an order column for stable pagination"
+        "description": "Query execution options.\n\nThese are standard parameters available for all queries.\nServer enforces maximums from query definition and global config.\n\nPagination modes:\n- Offset-based: Use `limit` and `offset` for simple pagination\n- Keyset: Use `order_by` with `after_key` (and `tiebreak_by` with\n  `after_tiebreak` when the key is not unique) for stable pagination\n\nA view that declares its own `limit` parameter caps its rows before any outer\npaging applies, so `order_by`, `after_key` and `offset` are refused on it."
       },
       "QueryResponse": {
         "properties": {

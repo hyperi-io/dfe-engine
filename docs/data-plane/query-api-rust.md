@@ -198,25 +198,25 @@ pub struct QueryOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub offset: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cursor: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub after_key: Option<serde_json::Value>,
+    pub offset: Option<u32>,  // not combinable with after_key
     #[serde(skip_serializing_if = "Option::is_none")]
     pub order_by: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub order_dir: Option<String>,  // "asc" or "desc"
+    /// order_by value of the previous page's last row: a JSON string or number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after_key: Option<serde_json::Value>,
+    /// Unique second column when order_by is not unique.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tiebreak_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after_tiebreak: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub time_from: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub time_to: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub include_explain: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parallel: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub store: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -431,22 +431,6 @@ impl QueryClient {
 
         Ok(QueryResult::new(body.rows, body.columns, metadata, explain))
     }
-
-    /// Execute query with EXPLAIN plan.
-    pub async fn query_with_explain(
-        &self,
-        query_label: &str,
-        params: Option<serde_json::Value>,
-        parallel: bool,
-    ) -> Result<QueryResult> {
-        let options = QueryOptions {
-            include_explain: Some(true),
-            parallel: Some(parallel),
-            ..Default::default()
-        };
-
-        self.query_with_options(query_label, params, Some(options)).await
-    }
 }
 ```
 
@@ -583,54 +567,6 @@ async fn main() -> dfe_query::Result<()> {
         .await?;
 
     println!("Found {} events", result.num_rows());
-
-    Ok(())
-}
-```
-
-### Query with EXPLAIN
-
-```rust
-use dfe_query::{QueryClient, ExplainStepType};
-use serde_json::json;
-
-#[tokio::main]
-async fn main() -> dfe_query::Result<()> {
-    let client = QueryClient::new("http://localhost:8000");
-
-    let result = client
-        .query_with_explain(
-            "analytics/top_orgs",
-            Some(json!({ "days": 7 })),
-            true, // parallel execution
-        )
-        .await?;
-
-    println!("Query: {}ms", result.metadata().query_duration_ms);
-
-    // Analyze execution plan
-    if let Some(explain) = result.explain() {
-        println!("\nExecution Plan:");
-        for step in &explain.steps {
-            let rows = step.estimated_rows
-                .map(|r| format!("~{} rows", r))
-                .unwrap_or_default();
-            println!("  {:?}: {} {}", step.step_type, step.description, rows);
-        }
-
-        // Check warnings
-        if !explain.warnings.is_empty() {
-            println!("\nWarnings:");
-            for warning in &explain.warnings {
-                println!("  - {}", warning);
-            }
-        }
-
-        // Raw plan for debugging
-        if let Some(raw) = &explain.raw_plan {
-            println!("\nRaw Plan:\n{}", raw);
-        }
-    }
 
     Ok(())
 }
@@ -854,43 +790,9 @@ async fn main() -> dfe_query::Result<()> {
 }
 ```
 
-### Cursor-Based Pagination
-
-```rust
-use dfe_query::{QueryClient, QueryOptions};
-
-#[tokio::main]
-async fn main() -> dfe_query::Result<()> {
-    let client = QueryClient::new("http://localhost:8000");
-
-    // First page
-    let mut options = QueryOptions {
-        limit: Some(100),
-        ..Default::default()
-    };
-    let mut result = client
-        .query_with_options("analytics/user_activity", None, Some(options.clone()))
-        .await?;
-
-    let mut all_rows = result.num_rows();
-
-    // Fetch all pages using cursor
-    while result.metadata().has_more {
-        options.cursor = result.metadata().next_cursor.clone();
-
-        result = client
-            .query_with_options("analytics/user_activity", None, Some(options.clone()))
-            .await?;
-
-        all_rows += result.num_rows();
-    }
-
-    println!("Total rows: {}", all_rows);
-    Ok(())
-}
-```
-
 ### Keyset-Based Pagination
+
+`after_key` is compared as the `order_by` column's type: send a timestamp as `"2024-01-15T12:00:00"` (with a fraction if the column has one). The key must be non-NULL, and without `tiebreak_by` it must be unique, or rows tying with the cursor are skipped. A view that declares its own `limit` parameter refuses keyset and offset paging.
 
 ```rust
 use dfe_query::{QueryClient, QueryOptions};
@@ -1069,7 +971,7 @@ async fn main() -> dfe_query::Result<()> {
     let mut total_files = result.num_rows();
 
     while result.metadata().has_more {
-        options.cursor = result.metadata().next_cursor.clone();
+        options.offset = result.metadata().next_offset.map(|n| n as u32);
 
         result = client
             .query_with_options("storage/s3_list", Some(params.clone()), Some(options.clone()))

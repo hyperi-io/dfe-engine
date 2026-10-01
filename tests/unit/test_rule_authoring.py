@@ -187,3 +187,19 @@ def test_build_scaffold_no_columns_selects_star():
     sql = build_query_scaffold([], "`dfe`.`events`")
     assert "SELECT *" in sql
     assert "{window}" in sql
+
+
+@pytest.mark.parametrize(
+    ("source", "predicate"),
+    [
+        ("okta", "_source = 'okta'"),
+        ("o'brien", "_source = 'o''brien'"),
+        ("back\\slash", "_source = 'back\\\\slash'"),
+        ("x' OR 1=1 --", "_source = 'x'' OR 1=1 --'"),
+    ],
+)
+def test_the_scaffold_quotes_the_source_name(source: str, predicate: str):
+    """A name holding a quote must not end the literal, or the scaffold is unusable SQL."""
+    sql = build_query_scaffold(["a"], "`dfe`.`events`", source=source)
+
+    assert predicate in sql

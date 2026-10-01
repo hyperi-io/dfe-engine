@@ -5,13 +5,19 @@ from unittest.mock import MagicMock
 import pytest
 
 from dfe_engine.query.catalog import ViewCatalog
-from dfe_engine.query.executor import ViewExecutionError, ViewExecutor
+from dfe_engine.query.executor import ViewExecutionError, ViewExecutor, ViewRequestError
 from dfe_engine.query.models import (
     AuthContext,
     AuthorizationError,
     QueryOptions,
     ViewDefinition,
     ViewParameter,
+)
+from tests.unit.test_query.view_fakes import (
+    ORG_ONLY,
+    OneViewCatalog,
+    RecordingClient,
+    view_definition,
 )
 
 
@@ -217,7 +223,7 @@ class TestViewExecutorSQL:
         assert "limit={limit:UInt32}" in sql
 
     def test_offset_pagination_sql(self):
-        view_def = _make_view_def()
+        view_def = _make_view_def(params=ORG_ONLY)
         catalog = MagicMock(spec=ViewCatalog)
         catalog.get_view.return_value = view_def
 
@@ -334,5 +340,128 @@ class TestViewExecutorOrderByInjection:
         catalog = MagicMock(spec=ViewCatalog)
         executor = ViewExecutor(restricted_client=MagicMock(), catalog=catalog, database="testdb")
         options = QueryOptions(order_by="event_ts", after_key="k", order_dir="asc")
-        sql = executor._build_sql(_make_view_def(), {"org_id": "t"}, 10, 0, options)
+        sql = executor._build_sql(_make_view_def(params=ORG_ONLY), {"org_id": "t"}, 10, 0, options)
         assert "ORDER BY event_ts asc" in sql
+
+    def test_order_by_injection_is_a_request_error(self):
+        executor = ViewExecutor(
+            restricted_client=MagicMock(), catalog=MagicMock(spec=ViewCatalog), database="testdb"
+        )
+        options = QueryOptions(order_by="ts; DROP TABLE t")
+        with pytest.raises(ViewRequestError, match="invalid order_by"):
+            executor._build_sql(_make_view_def(), {"org_id": "t"}, 10, 0, options)
+
+
+def _run_page(
+    options: QueryOptions,
+    view_params: list[ViewParameter] | None = None,
+    error: Exception | None = None,
+) -> RecordingClient:
+    client = RecordingClient(error)
+    executor = ViewExecutor(
+        restricted_client=client,
+        catalog=OneViewCatalog(view_definition(view_params)),
+        database="testdb",
+    )
+    executor.execute(
+        "analytics/events", params={}, auth=_make_auth(roles=["admin"]), options=options
+    )
+    return client
+
+
+_VIEW = "SELECT * FROM testdb.dfe_v_analytics_events(org_id={org_id:String}) "
+
+
+class TestViewExecutorKeyset:
+    """A keyset page binds its cursor with a ClickHouse type and sorts on the key."""
+
+    def test_the_cursor_is_bound_with_a_type(self):
+        options = QueryOptions(
+            order_by="event_ts", order_dir="desc", after_key="2024-01-15T12:00:00", limit=50
+        )
+        client = _run_page(options)
+        assert client.sql == (
+            f"{_VIEW}WHERE event_ts < {{_after_key:String}} ORDER BY event_ts desc LIMIT 50"
+        )
+        assert client.parameters["_after_key"] == "2024-01-15T12:00:00"
+
+    def test_a_zero_cursor_still_pages(self):
+        client = _run_page(QueryOptions(order_by="n", after_key=0, limit=10))
+        assert "WHERE n > {_after_key:String} ORDER BY n asc LIMIT 10" in client.sql
+        assert client.parameters["_after_key"] == "0"
+
+    def test_the_first_page_sorts_on_the_key(self):
+        client = _run_page(QueryOptions(order_by="event_ts", limit=50))
+        assert client.sql == f"{_VIEW}ORDER BY event_ts asc LIMIT 50"
+        assert "_after_key" not in client.parameters
+
+    def test_a_tiebreak_column_pages_on_the_pair(self):
+        options = QueryOptions(
+            order_by="event_ts",
+            tiebreak_by="event_id",
+            after_key="2024-01-15T12:00:00",
+            after_tiebreak="e-41",
+            limit=20,
+        )
+        client = _run_page(options)
+        assert client.sql == (
+            f"{_VIEW}WHERE (event_ts, event_id) > ({{_after_key:String}}, {{_after_tie:String}}) "
+            "ORDER BY event_ts asc, event_id asc LIMIT 20"
+        )
+        assert client.parameters["_after_tie"] == "e-41"
+
+    def test_a_keyword_named_key_is_quoted(self):
+        client = _run_page(QueryOptions(order_by="null", after_key=1, limit=5))
+        assert "WHERE `null` > {_after_key:String} ORDER BY `null` asc" in client.sql
+
+    def test_a_cursor_that_does_not_parse_as_its_column_is_a_request_error(self):
+        mismatch = Exception("Code: 53. DB::Exception: Cannot convert string 'x' to type UInt64")
+        with pytest.raises(ViewRequestError, match="does not parse as its column's type"):
+            _run_page(QueryOptions(order_by="n", after_key="x"), error=mismatch)
+
+    def test_a_type_mismatch_without_a_cursor_stays_an_execution_error(self):
+        mismatch = Exception("Code: 53. DB::Exception: TYPE_MISMATCH")
+        with pytest.raises(ViewExecutionError) as raised:
+            _run_page(QueryOptions(limit=5), error=mismatch)
+        assert not isinstance(raised.value, ViewRequestError)
+
+    @pytest.mark.parametrize(
+        ("options", "message"),
+        [
+            (QueryOptions(after_key="2024-01-15T12:00:00"), "needs order_by"),
+            (QueryOptions(tiebreak_by="event_id"), "tiebreak_by needs order_by"),
+            (
+                QueryOptions(order_by="ts", tiebreak_by="event_id", after_key="k"),
+                "needs after_tiebreak",
+            ),
+            (QueryOptions(order_by="ts", after_tiebreak="e-1"), "together with after_key"),
+            (
+                QueryOptions(order_by="ts", after_key="k", after_tiebreak="e-1"),
+                "after_tiebreak needs tiebreak_by",
+            ),
+            (QueryOptions(order_by="ts", after_key="k", offset=10), "cannot be combined"),
+            (QueryOptions(order_by="ts", tiebreak_by="id; DROP"), "invalid tiebreak_by"),
+            (QueryOptions(order_by="ts\n"), "invalid order_by"),
+        ],
+    )
+    def test_options_that_cannot_page_correctly_are_refused(self, options, message):
+        with pytest.raises(ViewRequestError, match=message):
+            _run_page(options)
+
+    @pytest.mark.parametrize(
+        "options",
+        [
+            QueryOptions(order_by="ts"),
+            QueryOptions(order_by="ts", after_key="k"),
+            QueryOptions(offset=10),
+        ],
+    )
+    def test_a_view_with_its_own_limit_refuses_paging(self, options):
+        """The view caps its rows first, so an outer page past them is always empty."""
+        with pytest.raises(ViewRequestError, match="caps its own rows"):
+            _run_page(options, _make_view_def().parameters)
+
+    @pytest.mark.parametrize("cursor", [{"ts": 1}, [1, 2], True])
+    def test_a_cursor_that_is_not_a_scalar_is_refused(self, cursor):
+        with pytest.raises(ViewRequestError, match="string or a number"):
+            _run_page(QueryOptions(order_by="n", after_key=cursor))

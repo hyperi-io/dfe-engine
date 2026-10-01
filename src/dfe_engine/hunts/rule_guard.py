@@ -24,6 +24,7 @@ from sqlglot import exp
 from sqlglot.errors import SqlglotError
 from sqlglot.optimizer.simplify import simplify
 
+from ..clickhouse.quoting import quote_identifier
 from ..settings import DetectionGuardSettings
 from .rule_model import Rule
 
@@ -252,10 +253,6 @@ _TOTAL = "dfe_total"
 _MATCHED = "dfe_matched"
 
 
-def _quote(identifier: str) -> str:
-    return "`" + identifier.replace("\\", "\\\\").replace("`", "\\`") + "`"
-
-
 def preview_sql(
     source_db: str, source_table: str, time_column: str, where: str, window_minutes: int
 ) -> str:
@@ -278,8 +275,8 @@ def preview_sql(
         f"SELECT count() AS {_TOTAL}, countIf(\n"
         f"{where}\n"
         f") AS {_MATCHED}\n"
-        f"FROM {_quote(source_db)}.{_quote(source_table)}\n"
-        f"WHERE {_quote(time_column)} >= now() - INTERVAL {int(window_minutes)} MINUTE"
+        f"FROM {quote_identifier(source_db)}.{quote_identifier(source_table)}\n"
+        f"WHERE {quote_identifier(time_column)} >= now() - INTERVAL {int(window_minutes)} MINUTE"
     )
 
 
