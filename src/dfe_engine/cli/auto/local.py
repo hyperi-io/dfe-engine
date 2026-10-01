@@ -788,8 +788,8 @@ def _mount_ch_cloud() -> None:
         from dfe_engine.cli.ch_cloud import ch_cloud_app
 
         local_group.add_command(typer.main.get_command(ch_cloud_app), name="ch-cloud")
-    except Exception:  # ch-cloud is optional; never break the core group
-        pass
+    except Exception as exc:  # ch-cloud is optional; never break the core group
+        click.echo(f"dfe local ch-cloud is unavailable: {exc}", err=True)
 
 
 _mount_ch_cloud()

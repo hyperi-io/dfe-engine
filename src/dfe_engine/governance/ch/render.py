@@ -265,12 +265,12 @@ def render_materialise(orgs: list[Any], tiers: list[Any]) -> list[str]:
         display = getattr(o, "display_name", "") or ""
         enabled = 1 if getattr(o, "enabled", True) else 0
         stmts.append(
-            f"INSERT INTO {orgs_table} (name, org_ids, display_name, enabled) VALUES "
+            f"INSERT INTO {orgs_table} (name, org_ids, display_name, enabled) VALUES "  # noqa: S608 - manifest table; every value escaped by quote_literal
             f"({_sq(o.name)}, [{ids}], {_sq(display)}, {enabled})"
         )
     for t in tiers:
         stmts.append(
-            f"INSERT INTO {tiers_table} (name, kind, is_default) VALUES "
+            f"INSERT INTO {tiers_table} (name, kind, is_default) VALUES "  # noqa: S608 - manifest table; every value escaped by quote_literal
             f"({_sq(t.name)}, {_sq(t.kind)}, {1 if t.default else 0})"
         )
     return stmts

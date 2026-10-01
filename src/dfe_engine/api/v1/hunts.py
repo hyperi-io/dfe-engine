@@ -93,7 +93,7 @@ def _validate_hunt_config(config: dict[str, Any], settings: Any) -> None:
     try:
         HuntValidator.validate_hunt_configuration(
             config,
-            Environment(),  # parses the Jinja2 rule templates (SQL, not HTML)
+            Environment(),  # noqa: S701 - parses SQL rule templates, not HTML
             settings.hunts.rules_dir,
             checkpoint_field,
             source_registry=None,

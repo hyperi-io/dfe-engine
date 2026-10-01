@@ -117,11 +117,10 @@ class Pipeline:
         logger.info(f"Loading template from: {self.pipeline_template}")
         # autoescape is disabled for YAML templates - HTML escaping produces invalid YAML
         # (e.g., & becomes &#38; which breaks YAML anchor/alias syntax)
-        # S701 is about XSS in HTML templates, not applicable for YAML generation
         env = Environment(
             loader=FileSystemLoader(template_dir),
             undefined=jinja2.StrictUndefined,
-            autoescape=False,
+            autoescape=False,  # noqa: S701 - renders YAML, not HTML
         )
         template = env.get_template(os.path.basename(self.pipeline_template))
         return template

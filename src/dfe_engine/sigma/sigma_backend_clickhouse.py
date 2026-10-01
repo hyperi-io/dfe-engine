@@ -52,11 +52,11 @@ class SqlBackend(TextQueryBackend):
     parenthesize: bool = True
     group_expression: ClassVar[str] = "({expr})"
 
-    token_separator: str = " "
-    or_token: ClassVar[str] = "OR"
-    and_token: ClassVar[str] = "AND"
-    not_token: ClassVar[str] = "NOT"
-    eq_token: ClassVar[str] = "="
+    token_separator: str = " "  # noqa: S105, RUF100 - a pySigma grammar token
+    or_token: ClassVar[str] = "OR"  # noqa: S105, RUF100 - a pySigma grammar token
+    and_token: ClassVar[str] = "AND"  # noqa: S105, RUF100 - a pySigma grammar token
+    not_token: ClassVar[str] = "NOT"  # noqa: S105, RUF100 - a pySigma grammar token
+    eq_token: ClassVar[str] = "="  # noqa: S105, RUF100 - a pySigma grammar token
 
     str_quote: ClassVar[str] = "'"
     escape_char: ClassVar[str] = "\\"

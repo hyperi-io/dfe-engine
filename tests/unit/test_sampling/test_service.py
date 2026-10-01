@@ -119,6 +119,21 @@ def test_registered_source_resolves_to_qualified_table():
     assert "`dfe_data`.`events`" in ch.calls[0][0]
 
 
+def test_explicit_table_is_requoted():
+    ch = FakeCH([])
+    _run(SampleRequest(mode=SampleMode.RECENT, table="`db`.landing"), ch, None)
+    assert "FROM `db`.`landing` " in ch.calls[0][0]
+
+
+@pytest.mark.parametrize(
+    "table", ["(SELECT name FROM system.users)", "db.events WHERE 1=1", "`db`.`ev`ents`"]
+)
+def test_explicit_table_that_is_not_a_table_name_is_refused(table):
+    req = SampleRequest(mode=SampleMode.RECENT, table=table)
+    with pytest.raises(SamplerError, match="not a table reference"):
+        _sampler().resolve_or_raise(req, None)
+
+
 def test_clickhouse_without_source_or_table_raises():
     with pytest.raises(SamplerError):
         _sampler().resolve_or_raise(SampleRequest(mode=SampleMode.RECENT), None)

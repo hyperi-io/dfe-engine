@@ -166,7 +166,7 @@ def _confirm_destructive(op: Operation, global_opts: GlobalOptions) -> None:
         return
     if sys.stdin.isatty() and sys.stdout.isatty():
         target = "/".join(op.group_path)
-        if not click.confirm(f"Delete from {target}? This cannot be undone."):
+        if not click.confirm(f"Delete from {target}? This cannot be undone."):  # noqa: S608 - a terminal prompt, not SQL
             raise click.Abort()
     else:
         raise DfeConfigError(

@@ -44,7 +44,7 @@ from .metrics import HuntRunnerMetrics
 from .models import HuntSpec, HuntStatement
 from .rule_compiler import MATCHED, SUMMARY
 
-WINDOW_TOKEN = "{window}"
+WINDOW_TOKEN = "{window}"  # noqa: S105, RUF100 - a SQL template placeholder
 
 
 class EmptyHuntQuery(RuntimeError):

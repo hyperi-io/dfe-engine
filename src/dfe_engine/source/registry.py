@@ -727,6 +727,7 @@ class SourceRegistry:
             try:
                 existing = Source.model_validate(config_data)
             except Exception:
+                logger.warning(f"Failed to parse source {table!r}, skipping its conflict check")
                 continue
 
             # Check match conflicts: same field+value on different sources.

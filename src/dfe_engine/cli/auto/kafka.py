@@ -181,8 +181,8 @@ def _mount_lifecycle() -> None:
         from dfe_engine.cli.kafka_lifecycle import kafka_lifecycle_app
 
         kafka_group.add_command(typer.main.get_command(kafka_lifecycle_app), name="lifecycle")
-    except Exception:  # lifecycle is optional; never break the core group
-        pass
+    except Exception as exc:  # lifecycle is optional; never break the core group
+        click.echo(f"dfe kafka lifecycle is unavailable: {exc}", err=True)
 
 
 _mount_lifecycle()

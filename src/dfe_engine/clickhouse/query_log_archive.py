@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from dfe_engine.clickhouse.quoting import quote_identifier
 from dfe_engine.settings import default_data_database
 
 # The fallback for a caller with no settings; live callers pass
@@ -68,11 +69,12 @@ def cost_leaderboard(
     query count + summed read rows/bytes + duration + peak memory, heaviest first.
     All bind parameters are server-side (``{name:Type}``) - never string-formatted.
     """
+    target = f"{quote_identifier(database)}.{quote_identifier(archive_table(database))}"
     sql = (
-        "SELECT dfe_id AS id, feature, tenant_id, "
+        "SELECT dfe_id AS id, feature, tenant_id, "  # noqa: S608 - quoted database and manifest table; values bound
         "count() AS queries, sum(read_rows) AS read_rows, sum(read_bytes) AS read_bytes, "
         "sum(query_duration_ms) AS duration_ms, max(memory_usage) AS peak_memory "
-        f"FROM {database}.{archive_table(database)} "
+        f"FROM {target} "
         "WHERE event_time >= now() - toIntervalDay({days:UInt32}) "
         "AND feature = {feature:String} AND dfe_id != '' "
         "GROUP BY id, feature, tenant_id "

@@ -78,7 +78,7 @@ def _ignores_case(directory: Path) -> bool:
 # Stored for accounts with NO usable local password (external / IdP-owned /
 # JIT-provisioned). Not a valid bcrypt hash ($2...), so verify_password never
 # matches - an external identity can only authenticate via its IdP, never local login.
-_UNUSABLE_PASSWORD_HASH = "!"
+_UNUSABLE_PASSWORD_HASH = "!"  # noqa: S105, RUF100 - a marker no bcrypt hash can equal
 
 
 class AccountExistsError(ValueError):

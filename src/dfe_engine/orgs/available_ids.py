@@ -91,9 +91,10 @@ def available_org_ids(
     # One DISTINCT per table, unioned: _org_id is a LowCardinality key column, so
     # each leg reads one column rather than the rows behind it.
     legs = " UNION DISTINCT ".join(
-        f"SELECT DISTINCT `{ORG_ID_COLUMN}` AS org_id FROM `{db}`.`{table}`" for table in tables
+        f"SELECT DISTINCT `{ORG_ID_COLUMN}` AS org_id FROM `{db}`.`{table}`"  # noqa: S608 - names pass _safe_identifier
+        for table in tables
     )
-    sql = f"SELECT org_id FROM ({legs}) WHERE org_id != '' ORDER BY org_id LIMIT {int(limit)}"
+    sql = f"SELECT org_id FROM ({legs}) WHERE org_id != '' ORDER BY org_id LIMIT {int(limit)}"  # noqa: S608 - legs built from checked names; limit is an int
 
     try:
         rows = client.execute(sql, settings={"max_execution_time": timeout_seconds})

@@ -26,6 +26,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from dfe_engine.clickhouse.quoting import quote_identifier
 from dfe_engine.schema.models import SchemaColumn as MetaSchemaColumn
 from dfe_engine.source.expression import ExpressionBuilder, ExpressionValidator
 from dfe_engine.source.models import SchemaColumn
@@ -95,7 +96,7 @@ class PromotionOutcome:
 
 def qualified_table(db: str, source: str) -> str:
     """Backtick-quoted ``db.table`` identifier for the discovery queries."""
-    return f"`{db}`.`{source}`"
+    return f"{quote_identifier(db)}.{quote_identifier(source)}"
 
 
 def clickhouse_table_exists(client: Any, db: str, table: str) -> bool:
@@ -256,7 +257,7 @@ def json_subcolumn(path: str) -> str:
     """
     if "`" in path:
         raise JsonPromotionError(f"Illegal JSON path: {path!r}")
-    return f"assumeNotNull({JSON_COLUMN}).`{path}`"
+    return f"assumeNotNull({JSON_COLUMN}).{quote_identifier(path)}"
 
 
 def _match_accessor(match_field: str) -> str:
@@ -278,7 +279,7 @@ def _match_accessor(match_field: str) -> str:
     if "`" in match_field:
         raise JsonPromotionError(f"Illegal match field: {match_field!r}")
     if match_field.startswith("_"):
-        return f"`{match_field}`"
+        return quote_identifier(match_field)
     return json_subcolumn(match_field)
 
 
@@ -360,7 +361,7 @@ def discover_paths(
     )
 
     sql = (
-        f"SELECT tup.1 AS path, tup.2 AS type FROM {table} "
+        f"SELECT tup.1 AS path, tup.2 AS type FROM {table} "  # noqa: S608 - table quoted by qualified_table; values bound
         f"ARRAY JOIN JSONDynamicPathsWithTypes(assumeNotNull({JSON_COLUMN})) AS tup "
     )
     if match_sql:
@@ -426,7 +427,7 @@ def _fetch_samples(
     if match_sql:
         where += f" AND {match_sql}"
     sql = (
-        f"SELECT DISTINCT toString({sub}) AS value FROM {table} "
+        f"SELECT DISTINCT toString({sub}) AS value FROM {table} "  # noqa: S608 - table quoted by qualified_table; path refuses backticks; values bound
         f"WHERE {where} ORDER BY rand() LIMIT {{n:UInt32}}"
     )
     try:
@@ -446,7 +447,7 @@ def _fetch_stats(
     """Coverage percentage and approximate distinct count for a path."""
     sub = json_subcolumn(path)
     sql = (
-        "SELECT "
+        "SELECT "  # noqa: S608 - table quoted by qualified_table; path refuses backticks; values bound
         f"100.0 * countIf({sub} IS NOT NULL) / count() AS coverage_pct, "
         f"uniqHLL12({sub}) AS distinct_count "
         f"FROM {table}"
@@ -499,7 +500,7 @@ def sample_rows(
     match_sql, match_params = match_condition(
         match_field, match_value, match_operator=match_operator
     )
-    sql = f"SELECT * FROM {table} "
+    sql = f"SELECT * FROM {table} "  # noqa: S608 - table quoted by qualified_table; values bound
     if match_sql:
         sql += f"WHERE {match_sql} "
     sql += "ORDER BY rand() LIMIT {limit:UInt32}"

@@ -32,6 +32,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from dfe_engine.clickhouse.quoting import quote_identifier
 from dfe_engine.schema.require import require_objects
 
 from .models import HuntSpec
@@ -57,8 +58,8 @@ def ensure_schedule_schema(ch: Any, database: str) -> None:
 def _enabled_ids(ch: Any, database: str) -> set[str]:
     """hunt_ids currently materialised as enabled (for tombstone diffing)."""
     rows = ch.query(
-        "SELECT hunt_id FROM (SELECT hunt_id, argMax(enabled, updated) AS e "
-        f"FROM `{database}`.hunt_schedule GROUP BY hunt_id) WHERE e = 1"
+        "SELECT hunt_id FROM (SELECT hunt_id, argMax(enabled, updated) AS e "  # noqa: S608 - quoted configured database
+        f"FROM {quote_identifier(database)}.hunt_schedule GROUP BY hunt_id) WHERE e = 1"
     ).result_rows
     return {r[0] for r in rows}
 
@@ -109,16 +110,17 @@ def due_query(database: str) -> str:
     """
     current = "(intDiv(toInt64(now()), s.interval_seconds) * s.interval_seconds + s.phase_offset)"
     fire = f"if(toInt64(now()) >= {current}, {current}, {current} - s.interval_seconds)"
+    db = quote_identifier(database)
     return (
-        "SELECT count() AS due FROM ("
+        "SELECT count() AS due FROM ("  # noqa: S608 - quoted configured database
         "SELECT hunt_id, interval_seconds, phase_offset FROM ("
         "SELECT hunt_id, argMax(interval_seconds, updated) AS interval_seconds, "
         "argMax(phase_offset, updated) AS phase_offset, argMax(enabled, updated) AS enabled "
-        f"FROM `{database}`.hunt_schedule GROUP BY hunt_id) WHERE enabled = 1) s "
+        f"FROM {db}.hunt_schedule GROUP BY hunt_id) WHERE enabled = 1) s "
         "LEFT JOIN (SELECT hunt_id, argMax(watermark, updated) AS wm "
-        f"FROM `{database}`.hunt_watermark GROUP BY hunt_id) w USING (hunt_id) "
+        f"FROM {db}.hunt_watermark GROUP BY hunt_id) w USING (hunt_id) "
         "LEFT JOIN (SELECT hunt_id, argMax(lease_until, claimed) AS lu "
-        f"FROM `{database}`.hunt_lease GROUP BY hunt_id) l USING (hunt_id) "
+        f"FROM {db}.hunt_lease GROUP BY hunt_id) l USING (hunt_id) "
         f"WHERE coalesce(w.wm, 0) < {fire} "
         "AND coalesce(l.lu, 0) <= toInt64(now())"
     )

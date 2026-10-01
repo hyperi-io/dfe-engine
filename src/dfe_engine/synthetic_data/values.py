@@ -67,7 +67,7 @@ class Semantic(StrEnum):
     FLOAT_RANGE = "float_range"
     LABEL = "label"
     TEXT = "text"
-    TOKEN = "token"
+    TOKEN = "token"  # noqa: S105, RUF100 - a value-kind name
 
 
 @dataclass(frozen=True, slots=True)

@@ -218,7 +218,7 @@ class TestViewExecutorSQL:
         executor.execute("analytics/events", params={}, auth=auth)
 
         sql = client.query.call_args[0][0]
-        assert "testdb.dfe_v_analytics_events(" in sql
+        assert "`testdb`.`dfe_v_analytics_events`(" in sql
         assert "org_id={org_id:String}" in sql
         assert "limit={limit:UInt32}" in sql
 
@@ -369,7 +369,7 @@ def _run_page(
     return client
 
 
-_VIEW = "SELECT * FROM testdb.dfe_v_analytics_events(org_id={org_id:String}) "
+_VIEW = "SELECT * FROM `testdb`.`dfe_v_analytics_events`(org_id={org_id:String}) "
 
 
 class TestViewExecutorKeyset:

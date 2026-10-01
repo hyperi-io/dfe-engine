@@ -242,7 +242,7 @@ def measure_shape(
             selected[f"{probe.name}__{alias}"] = expression
 
     inner_columns = ", ".join(quote_ident(name, what="column name") for name in read_columns)
-    inner = f"SELECT {inner_columns} FROM {target}"
+    inner = f"SELECT {inner_columns} FROM {target}"  # noqa: S608 - columns and table pass quote_ident and qualified_table
     if match_sql:
         inner += f" WHERE {match_sql}"
     inner += " LIMIT {sample_rows:UInt64}"
@@ -251,7 +251,7 @@ def measure_shape(
     # The setting takes no query parameter, so the cap is spliced as the int it
     # was coerced to above -- never operator text.
     sql = (
-        f"SELECT {outer_terms}, count() AS rows FROM ({inner}) "
+        f"SELECT {outer_terms}, count() AS rows FROM ({inner}) "  # noqa: S608 - probe terms are code over a quoted accessor; limit is an int
         f"SETTINGS max_rows_to_read = {limit}, read_overflow_mode = 'break'"
     )
 

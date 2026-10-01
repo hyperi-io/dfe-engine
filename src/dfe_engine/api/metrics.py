@@ -19,8 +19,8 @@ record call returns without doing anything, which is the state the unit suite ru
 from typing import Any
 
 WRITES_HELD = "api_writes_held_total"
-PASSWORD_CHANGE_REFUSALS = "api_password_change_refusals_total"
-PASSWORD_FLOOR_REFUSALS = "api_password_floor_refusals_total"
+PASSWORD_CHANGE_REFUSALS = "api_password_change_refusals_total"  # noqa: S105, RUF100 - a metric name
+PASSWORD_FLOOR_REFUSALS = "api_password_floor_refusals_total"  # noqa: S105, RUF100 - a metric name
 SIGN_IN_THROTTLED = "api_sign_in_throttled_total"
 
 

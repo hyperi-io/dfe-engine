@@ -34,7 +34,7 @@ def sample_json_rows(
         where = "WHERE _source = {src:String}"
         params["src"] = source
     rows = ch.query(
-        f"SELECT toString(_json) FROM {table} {where} LIMIT {{lim:UInt32}}",
+        f"SELECT toString(_json) FROM {table} {where} LIMIT {{lim:UInt32}}",  # noqa: S608 - table is the caller's trusted pre-quoted name; values bound
         parameters=params,
     ).result_rows
     return [r[0] for r in rows if r[0]]

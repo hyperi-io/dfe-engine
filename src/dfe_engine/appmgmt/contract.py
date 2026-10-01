@@ -48,7 +48,7 @@ CAPABILITIES_FILE = "capability-catalog.json"
 SOURCE_FILE = "source.json"
 """scalo's own file names - the CLI chooses the directory and nothing else."""
 
-SECRET_MARKER = "x-dfe-secret"
+SECRET_MARKER = "x-dfe-secret"  # noqa: S105, RUF100 - a schema keyword
 """The schema keyword an app uses to mark a field as credential material."""
 
 ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")

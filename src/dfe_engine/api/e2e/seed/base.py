@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from dfe_engine.source.registry import SourceRegistry
 
 _TEST_ENV = "test"
-_SETUP_ADMIN_PASSWORD = "already_reset"
+_SETUP_ADMIN_PASSWORD = "already_reset"  # noqa: S105, RUF100 - e2e fixture password; Seed refuses any DFE_ENV but test
 
 
 class Seed:

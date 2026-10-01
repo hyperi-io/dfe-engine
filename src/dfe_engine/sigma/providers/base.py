@@ -49,7 +49,7 @@ class AuthKind(str, Enum):
 
     NONE = "none"
     API_KEY = "api_key"
-    GIT_TOKEN = "git_token"
+    GIT_TOKEN = "git_token"  # noqa: S105, RUF100 - an auth-method name
 
 
 class ProviderAuth(BaseModel):

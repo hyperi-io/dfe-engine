@@ -118,7 +118,7 @@ class ErrorCode:
     NOT_FOUND = "not_found"
     CONFLICT = "conflict"
     PROTECTED_ACCOUNT = "protected_account"
-    PASSWORD_CHANGE_REQUIRED = "password_change_required"
+    PASSWORD_CHANGE_REQUIRED = "password_change_required"  # noqa: S105, RUF100 - an error code, not a password
     INVALID_SQL = "invalid_sql"
     RULE_MATCHES_EVERYTHING = "rule_matches_everything"
     INTERNAL_ERROR = "internal_error"

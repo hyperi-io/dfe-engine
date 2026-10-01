@@ -14,11 +14,13 @@ import pytest
 
 from dfe_engine.schema.models import SchemaColumn as MetaSchemaColumn
 from dfe_engine.services.schema.json_promotion_service import (
+    JsonPromotionError,
     PromotionRequest,
     build_promotion_columns,
     ch_dynamic_type_to_primitive,
     discover_paths,
     json_column_path,
+    json_subcolumn,
     list_promoted_json_fields,
     promoted_column_expr,
     promoted_paths,
@@ -176,6 +178,8 @@ class QualifiedTableCase(TypedDict):
 QUALIFIED_TABLE_CASES: list[QualifiedTableCase] = [
     {"id": "default", "db": "default", "source": "filebeat", "expected": "`default`.`filebeat`"},
     {"id": "custom_db", "db": "dfe", "source": "aws_ct", "expected": "`dfe`.`aws_ct`"},
+    {"id": "backtick", "db": "dfe", "source": "a`b", "expected": "`dfe`.`a``b`"},
+    {"id": "backslash", "db": "d\\", "source": "t", "expected": "`d\\\\`.`t`"},
 ]
 
 
@@ -185,6 +189,18 @@ class TestQualifiedTable:
     )
     def test_quotes(self, case: QualifiedTableCase):
         assert qualified_table(case["db"], case["source"]) == case["expected"]
+
+
+class TestJsonSubcolumn:
+    def test_a_plain_path_is_one_quoted_identifier(self):
+        assert json_subcolumn("user.email") == "assumeNotNull(_json).`user.email`"
+
+    def test_a_trailing_backslash_cannot_escape_the_closing_backtick(self):
+        assert json_subcolumn("a\\") == "assumeNotNull(_json).`a\\\\`"
+
+    def test_a_backtick_is_refused(self):
+        with pytest.raises(JsonPromotionError, match="Illegal JSON path"):
+            json_subcolumn("a`b")
 
 
 # ── promoted_paths ───────────────────────────────────────────

@@ -30,6 +30,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from dfe_engine.clickhouse.quoting import quote_identifier
+
 
 @dataclass(frozen=True, slots=True)
 class RunStatus:
@@ -50,27 +52,28 @@ class RunStatus:
 
 def _query(database: str) -> str:
     """The per-hunt join over watermark, lease, state and run."""
+    db = quote_identifier(database)
     return (
-        "SELECT h.hunt_id, coalesce(w.wm, 0), coalesce(l.lu, 0), "
+        "SELECT h.hunt_id, coalesce(w.wm, 0), coalesce(l.lu, 0), "  # noqa: S608 - quoted configured database; ids bound
         "coalesce(s.overruns, 0), coalesce(s.aggressive, 0), "
         "coalesce(r.last_fire, 0), coalesce(r.rows_written, 0), coalesce(q.pending, 0) "
         "FROM (SELECT arrayJoin({ids:Array(String)}) AS hunt_id) h "
         "LEFT JOIN (SELECT hunt_id, argMax(watermark, updated) AS wm "
-        f"FROM `{database}`.hunt_watermark GROUP BY hunt_id) w USING (hunt_id) "
+        f"FROM {db}.hunt_watermark GROUP BY hunt_id) w USING (hunt_id) "
         "LEFT JOIN (SELECT hunt_id, argMax(lease_until, claimed) AS lu "
-        f"FROM `{database}`.hunt_lease GROUP BY hunt_id) l USING (hunt_id) "
+        f"FROM {db}.hunt_lease GROUP BY hunt_id) l USING (hunt_id) "
         "LEFT JOIN (SELECT hunt_id, argMax(overrun_count, updated) AS overruns, "
         "argMax(too_aggressive, updated) AS aggressive "
-        f"FROM `{database}`.hunt_state GROUP BY hunt_id) s USING (hunt_id) "
+        f"FROM {db}.hunt_state GROUP BY hunt_id) s USING (hunt_id) "
         "LEFT JOIN (SELECT hunt_id, max(fire) AS last_fire, "
         "argMax(rows_written, fire) AS rows_written FROM ("
         "SELECT hunt_id, fire, argMax(status, updated) AS status, "
         "argMax(rows_written, updated) AS rows_written "
-        f"FROM `{database}`.hunt_run GROUP BY hunt_id, fire"
+        f"FROM {db}.hunt_run GROUP BY hunt_id, fire"
         ") WHERE status = 'completed' GROUP BY hunt_id) r USING (hunt_id) "
         "LEFT JOIN (SELECT hunt_id, 1 AS pending FROM ("
         "SELECT hunt_id, fire, argMax(status, updated) AS status "
-        f"FROM `{database}`.hunt_run GROUP BY hunt_id, fire"
+        f"FROM {db}.hunt_run GROUP BY hunt_id, fire"
         ") WHERE status = 'requested' GROUP BY hunt_id) q USING (hunt_id)"
     )
 
@@ -88,9 +91,9 @@ def live_runner_count(ch: Any, database: str, now: int) -> int:
         now: epoch seconds to judge the beats against.
     """
     rows = ch.query(
-        "SELECT countIf(s > {now:Int64} - 2 * p) FROM ("
+        "SELECT countIf(s > {now:Int64} - 2 * p) FROM ("  # noqa: S608 - quoted configured database; values bound
         "SELECT runner_id, argMax(seen, updated) AS s, argMax(poll_seconds, updated) AS p "
-        f"FROM `{database}`.hunt_runner_heartbeat GROUP BY runner_id)",
+        f"FROM {quote_identifier(database)}.hunt_runner_heartbeat GROUP BY runner_id)",
         parameters={"now": now},
     ).result_rows
     return int(rows[0][0]) if rows else 0
