@@ -73,16 +73,16 @@ def quote_ident(name: str, *, what: str = "identifier") -> str:
 _BARE_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
-def _index_ident(name: str) -> str:
-    """An index name bare when ClickHouse reads it bare, else through :func:`quote_ident`.
+def _index_ident(name: str, *, what: str = "index name") -> str:
+    """An index or projection name bare when ClickHouse reads it bare, else quoted.
 
     A safe name stays bare because dfe-schemas diff-checks its committed DDL against
     a fresh render. A name taken from a dotted column such as ``event.action`` is
-    one identifier only once quoted.
+    one identifier only once quoted, through :func:`quote_ident`.
     """
     if _BARE_IDENT.fullmatch(name):
         return name
-    return quote_ident(name, what="index name")
+    return quote_ident(name, what=what)
 
 
 def _qualified(db: str, name: str, *, what: str) -> str:
@@ -634,9 +634,9 @@ class DDLGenerator:
         if cfg.projection_order_by:
             col_names = {c.name for c in columns}
             if cfg.projection_order_by in col_names:
+                name = _index_ident(f"{cfg.projection_order_by}_optimized", what="projection name")
                 body.append(
-                    f"    PROJECTION {cfg.projection_order_by}_optimized "
-                    f"(SELECT * ORDER BY `{cfg.projection_order_by}`)"
+                    f"    PROJECTION {name} (SELECT * ORDER BY `{cfg.projection_order_by}`)"
                 )
 
         return body
