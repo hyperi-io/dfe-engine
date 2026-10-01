@@ -15,28 +15,56 @@ Or via the daemon entry point (uses scalo ServiceApp framework)::
 only the scalo base subcommands (run / version / config-check). The
 operator-facing offline commands (auth, gitops, governed-ops, sampler,
 ch-cloud) live on the separate ``dfe`` CLI, not here.
+
+The other console scripts on the engine image are plain Typer apps, so they call
+:func:`init_scalo_logger` to get the logger ServiceApp gives the daemon.
 """
 
-from __future__ import annotations
+import os
+
+from scalo.cli import CommonArgs
 
 from dfe_engine.api.app import create_app
+
+# scalo reads its knobs and cascade keys as DFE_API_<KEY>, so every process on the image uses this.
+ENV_PREFIX = "DFE_API"
+
+
+def init_scalo_logger(service_name: str, *, otel_tracing: bool) -> None:
+    """Install scalo's logger sinks for a console script that does not run on ServiceApp.
+
+    The ``dfe-engine`` daemon gets this from ServiceApp's ``run``. A plain Typer app
+    does not, so without this call every line goes through loguru's bare default
+    handler: no scalo format, no secret scrubbing, no keyword fields. ``LOG_LEVEL``
+    and ``LOG_FORMAT`` fill the slots the daemon's flags read them into, and the
+    config cascade loads under the daemon's prefix.
+
+    Args:
+        service_name: ``service.name`` on exported spans.
+        otel_tracing: Compose OTLP span export in. False for a one-shot command,
+            which exits before an export interval elapses.
+
+    Raises:
+        scalo.cli.error.ConfigError: If the config cascade cannot be loaded.
+        scalo.cli.error.LoggerError: If the logger cannot be initialised.
+    """
+    args = CommonArgs(
+        log_level=os.environ.get("LOG_LEVEL"),
+        log_format=os.environ.get("LOG_FORMAT"),
+    )
+    config = args.load_config(ENV_PREFIX)
+    args.init_logger(config=config, service_name=service_name, otel_tracing=otel_tracing)
 
 
 class _DfeEngineApp:
     """Entry point adapter using scalo ServiceApp framework."""
-
-    name = "dfe-engine"
-    # env_prefix stays DFE_API: the API sub-config env vars (DFE_API_HOST,
-    # DFE_API_PORT, DFE_API_JWT_SECRET, ...) and the Helm chart both key off
-    # it. Renaming it would break settings resolution.
-    env_prefix = "DFE_API"
 
     def _make_app(self):
         from scalo.cli import ServiceApp, VersionInfo
 
         class DfeEngineApp(ServiceApp):
             name = "dfe-engine"
-            env_prefix = "DFE_API"
+            env_prefix = ENV_PREFIX
 
             def version_info(self) -> VersionInfo:
                 from dfe_engine import __version__
@@ -102,4 +130,4 @@ def run_dev_server() -> None:
     _DfeEngineApp()._make_app().cli()
 
 
-__all__ = ["create_app", "run_dev_server"]
+__all__ = ["ENV_PREFIX", "create_app", "init_scalo_logger", "run_dev_server"]

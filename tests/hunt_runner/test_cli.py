@@ -27,6 +27,7 @@ import scalo._env_compat
 from scalo.cli.error import LoggerError
 from typer.testing import CliRunner
 
+from dfe_engine.api import _DfeEngineApp
 from dfe_engine.clickhouse.tls import ClickHouseCaCertUnreadable
 from dfe_engine.hunt_runner import cli
 from dfe_engine.settings import DFESettings
@@ -74,6 +75,15 @@ def test_log_level_and_format_env_reach_the_logger(setup_calls, monkeypatch):
 
     assert setup_calls[0]["level"] == "DEBUG"
     assert setup_calls[0]["log_format"] == "json"
+
+
+def test_the_cascade_loads_under_the_daemon_prefix(setup_calls, monkeypatch):
+    monkeypatch.setattr(scalo._env_compat, "_prefix_override", None)
+    monkeypatch.delenv("ENV_PREFIX", raising=False)
+
+    runner.invoke(cli.app, ["materialise"])
+
+    assert scalo._env_compat.env_prefix() == _DfeEngineApp()._make_app().env_prefix
 
 
 def test_a_logger_that_cannot_start_stops_the_command(setup_calls, monkeypatch):
