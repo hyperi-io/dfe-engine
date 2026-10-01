@@ -243,7 +243,7 @@ async def hyperdx_sources(request: Request) -> HyperDXSourcesResponse:
     if client is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"code": "hyperdx_absent", "message": "this deployment has no HyperDX"},
+            detail={"code": "hyperdx_absent", "message": "this deployment does not include Search"},
         )
 
     from dfe_engine.hyperdx.sources import list_sources_by_team
@@ -252,7 +252,7 @@ async def hyperdx_sources(request: Request) -> HyperDXSourcesResponse:
     if listing is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"code": "hyperdx_unreachable", "message": "HyperDX did not answer"},
+            detail={"code": "hyperdx_unreachable", "message": "Search did not answer"},
         )
 
     return HyperDXSourcesResponse(

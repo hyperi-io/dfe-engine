@@ -49,7 +49,7 @@ rather than system-wide.
 | `infra_viewer` | control | Infrastructure read-only |
 | `data_analyst` | control | Hunt, query, source, fieldmap, alert, rule, transform CRUD |
 | `data_analyst_viewer` | control | Analyst scope, read-only |
-| `data_viewer` | data | HyperDX dashboards and query execution |
+| `data_viewer` | data | Search dashboards and query execution |
 | `dfe_operator` | control | Curated operational dials - invoke shipped actions, read governed state |
 | `org_viewer` | data | Org-restricted data viewer (`scoped: true`) |
 

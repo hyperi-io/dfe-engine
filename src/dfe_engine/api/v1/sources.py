@@ -331,7 +331,7 @@ async def _sync_hyperdx_source(
         logger.warning(f"HyperDX not pointed at source '{source.source}': {exc}")
         return None, str(exc)
     if teams is None:
-        return None, "HyperDX did not accept the source; see the engine log"
+        return None, "Search did not accept the source; see the engine log"
     return len(teams), None
 
 
