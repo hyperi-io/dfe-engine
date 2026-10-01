@@ -561,7 +561,7 @@ def generate(seed: int, hazard: tuple[str, str] | None = None) -> tuple[str, str
     ``hazard`` is ``(text, place)``: text spliced in as the table, as one more
     WHERE conjunct, or as a clause after the filter. The oracle ignores it.
     """
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # noqa: S311 - seeded test oracle, not cryptography
     table, column = rng.choice([("dfe.main", "_timestamp"), ("dfe.otel_logs", "Timestamp")])
     chosen = rng.sample(POOL, rng.randint(0, 4))
 

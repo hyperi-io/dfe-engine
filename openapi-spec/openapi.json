@@ -9708,6 +9708,138 @@
         ]
       }
     },
+    "/api/v1/system/defaults": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Get Defaults",
+        "description": "The TTL, common header and merge engine a source inherits when it sets none.",
+        "operationId": "get_defaults_api_v1_system_defaults_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemDefaults"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Patch Defaults",
+        "description": "Store the named defaults. Only ttl_days is applied to live tables.\n\nOmitted fields are left alone. null clears that override. Common-header type,\nversion and engine are what a source inherits the next time it is deployed;\nthis request does not rewrite them onto live tables. A patch that names\nttl_days stores it and then runs the same reconcile as PUT /retention.",
+        "operationId": "patch_defaults_api_v1_system_defaults_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SystemDefaultsPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemDefaultsUpdate"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a named value cannot be stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "reconcile_failed: ttl_days is stored, and applying it to ClickHouse failed; sending the same value again applies it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not_configured: gitops is off, so there is nowhere to store the value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/system/clickhouse-cloud": {
       "get": {
         "tags": [
@@ -29372,6 +29504,47 @@
         "title": "InitialSetupState",
         "description": "The machine's verdict on where first-run setup stands."
       },
+      "IntDefault": {
+        "properties": {
+          "effective": {
+            "type": "integer",
+            "title": "Effective"
+          },
+          "stored": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stored",
+            "description": "The admin's override; null when none is stored."
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "override",
+              "deployment"
+            ],
+            "title": "Origin"
+          },
+          "deployment_default": {
+            "type": "integer",
+            "title": "Deployment Default"
+          }
+        },
+        "type": "object",
+        "required": [
+          "effective",
+          "stored",
+          "origin",
+          "deployment_default"
+        ],
+        "title": "IntDefault",
+        "description": "One integer default: the value in force, and where it came from."
+      },
       "InvokeRequest": {
         "properties": {
           "params": {
@@ -38919,6 +39092,47 @@
         ],
         "title": "StatusResponse"
       },
+      "StrDefault": {
+        "properties": {
+          "effective": {
+            "type": "string",
+            "title": "Effective"
+          },
+          "stored": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stored",
+            "description": "The admin's override; null when none is stored."
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "override",
+              "deployment"
+            ],
+            "title": "Origin"
+          },
+          "deployment_default": {
+            "type": "string",
+            "title": "Deployment Default"
+          }
+        },
+        "type": "object",
+        "required": [
+          "effective",
+          "stored",
+          "origin",
+          "deployment_default"
+        ],
+        "title": "StrDefault",
+        "description": "One string default: the value in force, and where it came from."
+      },
       "StreamRequest": {
         "properties": {
           "schema": {
@@ -39203,6 +39417,137 @@
         ],
         "title": "SyncReportModel",
         "description": "Counts from a provider sync into the catalogue."
+      },
+      "SystemDefaults": {
+        "properties": {
+          "ttl_days": {
+            "$ref": "#/components/schemas/IntDefault"
+          },
+          "common_header_type": {
+            "$ref": "#/components/schemas/StrDefault"
+          },
+          "common_header_version": {
+            "$ref": "#/components/schemas/StrDefault"
+          },
+          "engine": {
+            "$ref": "#/components/schemas/StrDefault",
+            "description": "MergeTree-family variant, without a topology prefix."
+          },
+          "editable": {
+            "type": "boolean",
+            "title": "Editable",
+            "description": "Whether this deployment can store an override. False without gitops."
+          }
+        },
+        "type": "object",
+        "required": [
+          "ttl_days",
+          "common_header_type",
+          "common_header_version",
+          "engine",
+          "editable"
+        ],
+        "title": "SystemDefaults",
+        "description": "What a source inherits when it leaves TTL, header or engine unset."
+      },
+      "SystemDefaultsPatch": {
+        "properties": {
+          "ttl_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 36500.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttl Days",
+            "description": "Retention in days; 0 keeps rows forever. null clears the override."
+          },
+          "common_header_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Common Header Type",
+            "description": "Common-header profile name, such as timeseries or minimal. null clears it."
+          },
+          "common_header_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Common Header Version",
+            "description": "Common-header profile version. null clears it."
+          },
+          "engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine",
+            "description": "MergeTree-family variant. null clears it, so the deployment engine applies."
+          }
+        },
+        "type": "object",
+        "title": "SystemDefaultsPatch",
+        "description": "A partial change. Omitted fields stay as they are; null clears that override."
+      },
+      "SystemDefaultsUpdate": {
+        "properties": {
+          "ttl_days": {
+            "$ref": "#/components/schemas/IntDefault"
+          },
+          "common_header_type": {
+            "$ref": "#/components/schemas/StrDefault"
+          },
+          "common_header_version": {
+            "$ref": "#/components/schemas/StrDefault"
+          },
+          "engine": {
+            "$ref": "#/components/schemas/StrDefault",
+            "description": "MergeTree-family variant, without a topology prefix."
+          },
+          "editable": {
+            "type": "boolean",
+            "title": "Editable",
+            "description": "Whether this deployment can store an override. False without gitops."
+          },
+          "reconcile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RetentionReconcileSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "ttl_days",
+          "common_header_type",
+          "common_header_version",
+          "engine",
+          "editable"
+        ],
+        "title": "SystemDefaultsUpdate",
+        "description": "The defaults after the patch. reconcile is set only when ttl_days was named."
       },
       "SystemStatusResponse": {
         "properties": {

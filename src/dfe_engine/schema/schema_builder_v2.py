@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scalo.logger import logger
 
@@ -31,7 +31,14 @@ from dfe_engine.schema.schema_loader import (
     _profile_file_stem,
     resolve_schema_yaml_path,
 )
-from dfe_engine.source.models import SchemaColumn, Source, SourceVersion, SourceView
+from dfe_engine.source.models import (
+    DEFAULT_HEADER_TYPE,
+    DEFAULT_HEADER_VERSION,
+    SchemaColumn,
+    Source,
+    SourceVersion,
+    SourceView,
+)
 from dfe_engine.source.type_registry import TypeRegistry
 
 if TYPE_CHECKING:
@@ -42,20 +49,42 @@ class SchemaBuildError(Exception):
     """Error during schema build."""
 
 
-def _authored_header_profile(snap: SourceVersion) -> tuple[str, str] | None:
+def _authored_header_profile(
+    snap: SourceVersion,
+    *,
+    default_type: str = DEFAULT_HEADER_TYPE,
+    default_version: str = DEFAULT_HEADER_VERSION,
+) -> tuple[str, str] | None:
     """Return ``(type, version)`` when the snapshot names a real profile file.
 
-    An omitted header is unauthored: runtime still uses
-    :meth:`SourceVersion.effective_header` (timeseries). An authored empty
-    type names no file and must not become ``.yaml``.
+    An omitted header is unauthored and inherits *default_type* / *default_version*,
+    which are the compiled-in header unless the caller passes the admin's override.
+    An authored empty type names no file and must not become ``.yaml``.
     """
     if snap.header is None:
-        header = snap.effective_header()
-        return header.type, header.version
+        if _profile_file_stem(default_type) is None:
+            return None
+        return default_type, default_version
     raw = snap.header.type or ""
     if _profile_file_stem(raw) is None:
         return None
     return raw, snap.header.version
+
+
+def inherited_builder_kwargs(settings: Any) -> dict[str, Any]:
+    """Engine, TTL and header defaults a schema build should inherit from *settings*.
+
+    Callers that build a source for deploy or preview pass this through. Retention
+    reconcile does not: it would add the new header's columns to live tables.
+    """
+    ch = settings.clickhouse
+    return {
+        "default_engine": getattr(ch, "default_engine", "") or "MergeTree",
+        "default_ttl_days": getattr(ch, "default_ttl_days", None),
+        "default_header_type": getattr(ch, "default_header_type", "") or DEFAULT_HEADER_TYPE,
+        "default_header_version": getattr(ch, "default_header_version", "")
+        or DEFAULT_HEADER_VERSION,
+    }
 
 
 @dataclass
@@ -97,6 +126,8 @@ class SchemaBuilderV2:
         field_map_registry: FieldMapRegistry | None = None,
         default_engine: str = "MergeTree",
         default_ttl_days: int | None = None,
+        default_header_type: str = DEFAULT_HEADER_TYPE,
+        default_header_version: str = DEFAULT_HEADER_VERSION,
         resolver: EngineResolver | None = None,
     ) -> None:
         """Initialize the schema builder.
@@ -128,6 +159,8 @@ class SchemaBuilderV2:
                                 unset. Pass the deployment value
                                 (``settings.clickhouse.default_ttl_days``); 0 declares
                                 no TTL, which removes a live one, and None leaves it alone.
+            default_header_type: Common-header profile an unauthored source inherits.
+            default_header_version: Version of that profile.
             resolver: Engine resolver for the table engine and ``ON CLUSTER``. A
                                 path that applies DDL to a live server passes one
                                 built with that server's client, so a multi-node
@@ -144,6 +177,8 @@ class SchemaBuilderV2:
         self._field_map_registry = field_map_registry
         self._default_engine = default_engine or "MergeTree"
         self._default_ttl_days = default_ttl_days
+        self._default_header_type = default_header_type or DEFAULT_HEADER_TYPE
+        self._default_header_version = default_header_version or DEFAULT_HEADER_VERSION
 
     # -- Main entry points -------------------------------------------
 
@@ -342,7 +377,11 @@ class SchemaBuilderV2:
         """Load the common header profile from a source version snapshot."""
         # The same derivation _build_ddl_config_for_snapshot uses, so the columns
         # loaded are the ones the DDL config declares a profile and a TTL over.
-        profile_ref = _authored_header_profile(snap)
+        profile_ref = _authored_header_profile(
+            snap,
+            default_type=self._default_header_type,
+            default_version=self._default_header_version,
+        )
         if profile_ref is None:
             return []
         profile_name, profile_version = profile_ref
@@ -414,7 +453,11 @@ class SchemaBuilderV2:
     def _build_ddl_config_for_snapshot(self, snap: SourceVersion) -> DDLConfig:
         """Build DDLConfig from a source version snapshot."""
         schema_cfg = snap.effective_schema()
-        authored = _authored_header_profile(snap)
+        authored = _authored_header_profile(
+            snap,
+            default_type=self._default_header_type,
+            default_version=self._default_header_version,
+        )
         # Empty engine or unset ttl_days = inherit the deployment default; a per-source pin wins.
         return DDLConfig(
             engine=schema_cfg.engine or self._default_engine,

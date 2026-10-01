@@ -1000,6 +1000,7 @@ def get_source_schema_columns(
     name: str,
     user: CurrentUser,
     registry: SourceReg,
+    request: Request,
     version: str | None = Query(
         None,
         description="Source version id (defaults to deployed_version)",
@@ -1010,7 +1011,11 @@ def get_source_schema_columns(
 
     Use ``per_page=-1`` to return all columns in one page.
     """
-    from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
+    from dfe_engine.schema.schema_builder_v2 import (
+        SchemaBuildError,
+        SchemaBuilderV2,
+        inherited_builder_kwargs,
+    )
     from dfe_engine.schema.schema_loader import SchemaLoadError
     from dfe_engine.source.type_registry import TypeRegistry
 
@@ -1042,13 +1047,12 @@ def get_source_schema_columns(
             },
         )
 
-    settings = get_settings()
+    settings = ttl_settings(request, get_settings())
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
         derived_base_dir=derived_reference_root(settings),
-        default_engine=settings.clickhouse.default_engine,
-        default_ttl_days=settings.clickhouse.default_ttl_days,
+        **inherited_builder_kwargs(settings),
     )
     try:
         columns = builder.load_columns_for_source_version(source, source_version=version_id)
@@ -1175,7 +1179,11 @@ def plan_source_deploy(
 ) -> SourcePlanResponse:
     """Dry-run ClickHouse deploy: DDL statements and validation errors (not persisted)."""
     from dfe_engine.schema.engine_resolver import EngineResolver
-    from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
+    from dfe_engine.schema.schema_builder_v2 import (
+        SchemaBuildError,
+        SchemaBuilderV2,
+        inherited_builder_kwargs,
+    )
     from dfe_engine.schema.schema_loader import SchemaLoadError
     from dfe_engine.source.type_registry import TypeRegistry
 
@@ -1215,9 +1223,8 @@ def plan_source_deploy(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
         derived_base_dir=derived_reference_root(settings),
-        default_engine=settings.clickhouse.default_engine,
-        default_ttl_days=settings.clickhouse.default_ttl_days,
         resolver=resolver,
+        **inherited_builder_kwargs(settings),
     )
     db = settings.clickhouse.effective_data_database
     statements, table_exists = deploy_statements_for_build(
@@ -1471,7 +1478,11 @@ def _apply_source_schema(
     A dry run returns its finished result; a deploy returns what the caller needs to
     ensure the topics and record the deploy.
     """
-    from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
+    from dfe_engine.schema.schema_builder_v2 import (
+        SchemaBuildError,
+        SchemaBuilderV2,
+        inherited_builder_kwargs,
+    )
     from dfe_engine.schema.schema_loader import SchemaLoadError
     from dfe_engine.source.type_registry import TypeRegistry
 
@@ -1514,9 +1525,8 @@ def _apply_source_schema(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
         derived_base_dir=derived_reference_root(settings),
-        default_engine=settings.clickhouse.default_engine,
-        default_ttl_days=settings.clickhouse.default_ttl_days,
         resolver=resolver,
+        **inherited_builder_kwargs(settings),
     )
     try:
         result = builder.build_for_source_version(source, source_version=version_id)

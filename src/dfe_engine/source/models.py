@@ -307,19 +307,26 @@ class SchemaColumn(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+# Compiled-in header an unauthored source inherits, until a deploy-repo override
+# replaces it. SourceHeader, the table-defaults resolver and ClickHouseSettings
+# all read these so the three cannot drift.
+DEFAULT_HEADER_TYPE = "timeseries"
+DEFAULT_HEADER_VERSION = "1.0.0"
+
+
 class SourceHeader(BaseModel):
     """Common schema header configuration."""
 
     # Must name a file in dfe-schemas common-header/; nothing normalises it.
     type: str = Field(
-        default="timeseries",
+        default=DEFAULT_HEADER_TYPE,
         description="Profile name (timeseries, minimal, passthrough)",
     )
     # Held behind the profile's current 1.0.1, which makes _json and _tags
     # not_null: moving unpinned sources onto it retypes live ClickHouse columns.
     # Settled together with dfe-schemas#33 -- dfe-engine#440.
     version: str = Field(
-        default="1.0.0",
+        default=DEFAULT_HEADER_VERSION,
         description="Common header version (semver)",
     )
 

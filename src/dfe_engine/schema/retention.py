@@ -117,6 +117,9 @@ def reconcile_source_ttls(
     outcome = RetentionReconcile(report=applier.report)
     store = SourceDeploymentStore.from_settings(settings)
     schemas_dir = settings.schemas.schemas_dir or None
+    # Header defaults are not passed. ensure_table adds any column this build says
+    # is missing, and the admin's common-header override is inherited on the next
+    # deploy rather than written onto live tables from a retention reconcile.
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=schemas_dir,
