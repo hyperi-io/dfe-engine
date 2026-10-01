@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from .hdx_sanitizer import HdxSanitizeError, split_time_window
 
 TIME_PLACEHOLDER = "{timestamp_condition}"
-"""The time-bound placeholder Sigma's full-alert output writes; the hunt window replaces it."""
+"""Time-bound placeholder a rule stored before #683 may still carry; the hunt window replaces it."""
 
 _TIME_PLACEHOLDER_CONJUNCT = re.compile(
     r"\{timestamp_condition\}\s+AND\s+|\s+AND\s+\{timestamp_condition\}", re.IGNORECASE
