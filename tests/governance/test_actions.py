@@ -7,8 +7,6 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Defined actions over a real local gitops repo (no mocks)."""
 
-from __future__ import annotations
-
 import pytest
 
 from dfe_engine.gitcrud import GitCrud, ResourceClass, ResourceClassRegistry
@@ -191,6 +189,35 @@ def test_invoke_multi_file_protected_aborts_both(store, crud):
 
     with pytest.raises(ResourceNotFoundError):
         crud.get("helmvars", "receiver-default")
+
+
+def test_a_parent_map_change_cannot_carry_a_locked_leaf_past_the_policy(store, crud):
+    """The map lands at keda and replaces keda.minReplicas without naming it."""
+    crud.put(
+        _POLICY_CLASS,
+        "lockdown",
+        ProtectedPolicy(name="lockdown", protected=["helmvars:*:keda.minReplicas"]).model_dump(),
+        actor="admin",
+    )
+    crud.put("helmvars", "receiver-default", {"keda": {"minReplicas": 2}}, actor="admin")
+    action = ActionDef(
+        name="reshape-keda",
+        description="x",
+        required_action="action:invoke:reshape-keda",
+        changes=[
+            VarChange(
+                cls="helmvars",
+                name="receiver-default",
+                path="keda",
+                value={"minReplicas": 0, "maxReplicas": 4},
+            )
+        ],
+    )
+    store.save(action, actor="admin")
+    with pytest.raises(ProtectedVarError) as exc:
+        store.invoke("reshape-keda", actor="bob", policy=PolicyStore(crud))
+    assert exc.value.path == "keda"
+    assert crud.get("helmvars", "receiver-default") == {"keda": {"minReplicas": 2}}
 
 
 def test_invoke_protected_allowed_with_override(store, crud):

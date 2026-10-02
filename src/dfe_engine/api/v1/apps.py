@@ -757,16 +757,17 @@ def _overlay(gc: GitCrud, app: AppInstance) -> dict:
 
 
 def _enforce(request: Request, user: Any, name: str, doc: dict) -> bool:
-    """Gate every leaf the finished document carries, and report whether any is protected.
+    """Gate every leaf the finished document carries or drops, and say if any is protected.
 
     This layer writes whole documents rather than one dot-path at a time, so the
     per-path commit policy that ``api/v1/helm.py`` applies on the way in has to be
     applied explicitly here. It runs over the FLATTENED result, not over the request
     keys: a caller supplying ``{"image": {"tag": "latest"}}`` nests the leaf out of
-    sight of a check that only inspects what was sent.
+    sight of a check that only inspects what was sent. The protected-var gate also
+    reads the stored overlay, because a parent written as a smaller map drops the
+    locked leaves it no longer carries.
     """
-    changes = flatten(doc)
-    for path, value in changes.items():
+    for path, value in flatten(doc).items():
         try:
             validate_change(path, value, doc)
         except CommitPolicyError as exc:
@@ -780,15 +781,14 @@ def _enforce(request: Request, user: Any, name: str, doc: dict) -> bool:
     override = authorize(
         user, "helmvars:override", role_config=request.app.state.role_config
     ).allowed
-    protected = False
-    for path in changes:
-        if policy.is_protected(_CLASS, name, path):
-            protected = True
-        try:
-            policy.enforce(_CLASS, name, path, override=override)
-        except ProtectedVarError as exc:
-            raise HTTPException(403, detail={"code": "protected_var", "message": str(exc)}) from exc
-    return protected
+    try:
+        stored = _gitcrud(request).get(_CLASS, name)
+    except ResourceNotFoundError:
+        stored = {}
+    try:
+        return policy.enforce_document(_CLASS, name, stored, doc, override=override)
+    except ProtectedVarError as exc:
+        raise HTTPException(403, detail={"code": "protected_var", "message": str(exc)}) from exc
 
 
 def commit_overlay(

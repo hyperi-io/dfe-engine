@@ -15,8 +15,6 @@ opposite: a seed that keeps re-asserting itself and overwrites the detents an
 operator deliberately changed.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 
 import pytest
@@ -45,7 +43,7 @@ class TestEmptyRepo:
         """Every deployment gets the storage lock, not just a hand-seeded one."""
         artifacts = pending_seed(repo_root=tmp_path)
         names = {Path(k).stem for k in artifacts if k.startswith(POLICIES_SUBDIR)}
-        assert names == {"baseline", "storage-layout"}
+        assert names == {"baseline", "sizing-locks", "storage-layout"}
 
         doc = yaml_load_string(artifacts[f"{POLICIES_SUBDIR}/storage-layout.yaml"])
         assert "infravars:*:kafka.storage.size" in doc["protected"]
@@ -75,6 +73,17 @@ class TestEmptyRepo:
         assert "storage-layout" in names
         assert "storage-model" not in names
         assert stale.read_text(encoding="utf-8").startswith("name: storage-model")
+
+    def test_ships_the_sizing_lock(self, tmp_path: Path):
+        """A deploy repo not made from the template still gets the sizing locks."""
+        artifacts = pending_seed(repo_root=tmp_path)
+        doc = yaml_load_string(artifacts[f"{POLICIES_SUBDIR}/sizing-locks.yaml"])
+        assert doc["name"] == "sizing-locks"
+        assert doc["protected"] == [
+            "infravars:*:kafka.sizing.*",
+            "infravars:*:kafka.controllerPool.enabled",
+            "infravars:*:cloud",
+        ]
 
     def test_the_lock_carries_the_pre_vocabulary_spellings(self, tmp_path: Path):
         """A deploy repo pinned to an older chart still writes these paths."""
@@ -174,4 +183,4 @@ class TestDeletionTombstone:
         ignore.parent.mkdir(parents=True, exist_ok=True)
         ignore.write_text(f"{line}\n", encoding="utf-8")
 
-        assert len(pending_seed(repo_root=tmp_path)) == 7
+        assert len(pending_seed(repo_root=tmp_path)) == 8

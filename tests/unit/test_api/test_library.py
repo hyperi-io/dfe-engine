@@ -635,6 +635,35 @@ class TestGovernedWrite:
         assert resp.status_code == 403
         assert resp.json()["code"] == "protected_var"
 
+    def test_dropping_a_protected_key_is_refused_without_the_override(
+        self, client, app, api_settings, admin_headers, tmp_path
+    ):
+        """Removing a tag deletes its key, which changes it as surely as setting it."""
+        from tests.unit.test_api.test_governed_ops import _scoped_headers
+
+        gc = _wire(app, tmp_path)
+        _create(client, admin_headers, content=V1)
+        client.put(f"{LIB}/parse-syslog/tags/stable", json={"version": 1}, headers=admin_headers)
+        client.post(
+            "/api/v1/governance/admin/policies",
+            json={"name": "lock", "protected": ["library:*:tags.stable"]},
+            headers=admin_headers,
+        )
+        writer = _scoped_headers(
+            app,
+            api_settings,
+            username="libtags",
+            role="lib-tagger",
+            permissions=["library:read", "library:write"],
+        )
+        resp = client.delete(f"{LIB}/parse-syslog/tags/stable", headers=writer)
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["code"] == "protected_var"
+        assert gc.get("library", "parse-syslog")["tags"] == {"stable": 1}
+        # admin holds '*' -> library:override, the deliberate exception.
+        allowed = client.delete(f"{LIB}/parse-syslog/tags/stable", headers=admin_headers)
+        assert allowed.status_code == 200, allowed.text
+
     def test_a_stale_if_match_conflicts(self, client, app, admin_headers, tmp_path):
         gc = _wire(app, tmp_path)
         _create(client, admin_headers, content=V1)

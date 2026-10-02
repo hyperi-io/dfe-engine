@@ -443,6 +443,36 @@ class TestWritingConfig:
         assert resp.status_code == 412, resp.text
         assert resp.json()["code"] == "stale_etag"
 
+    def test_a_parent_map_cannot_drop_a_protected_option(
+        self, client, app, api_settings, admin_headers, tmp_path
+    ):
+        """The overlay is written whole, so the gate reads what the write leaves out."""
+        from tests.unit.test_api.test_governed_ops import _scoped_headers
+
+        gc = _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        _write(client, admin_headers, {"config.batch_processing.max_chunk_size": 5000})
+        client.post(
+            "/api/v1/governance/admin/policies",
+            json={
+                "name": "lock",
+                "protected": ["helmvars:*:config.batch_processing.max_chunk_size"],
+            },
+            headers=admin_headers,
+        )
+        writer = _scoped_headers(
+            app,
+            api_settings,
+            username="cfgwriter",
+            role="cfg-writer",
+            permissions=["helmvars:read", "helmvars:write"],
+        )
+        before = gc.head_revision()
+        resp = _write(client, writer, {"config.batch_processing": {}})
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["code"] == "protected_var"
+        assert gc.head_revision() == before
+
     def test_writing_config_needs_the_helmvars_write(
         self, client, app, viewer_headers, admin_headers, tmp_path
     ):

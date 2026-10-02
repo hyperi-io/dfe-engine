@@ -264,6 +264,36 @@ class TestRouterProtected:
         assert resp.status_code == 403
         assert resp.json()["code"] == "protected_var"
 
+    def test_the_parent_of_a_locked_var_is_refused_for_set_and_revert(
+        self, client, app, api_settings, admin_headers, tmp_path
+    ):
+        """A map at keda replaces keda.maxReplicas, and a revert of keda removes it."""
+        gc = _wire_gitcrud(app, tmp_path)
+        stored = {"keda": {"maxReplicas": 4, "minReplicas": 1}}
+        gc.put("helmvars", "receiver-default", stored, "tester")
+        client.post(
+            "/api/v1/governance/admin/policies",
+            json={"name": "lock", "protected": ["helmvars:*:keda.maxReplicas"]},
+            headers=admin_headers,
+        )
+        writer = _scoped_headers(
+            app,
+            api_settings,
+            username="mapwriter",
+            role="helm-map-writer",
+            permissions=["helmvars:read", "helmvars:write"],  # NO helmvars:override
+        )
+        url = "/api/v1/helm/files/receiver-default/vars/keda"
+        put = client.put(url, json={"value": {"minReplicas": 1}}, headers=writer)
+        assert put.status_code == 403, put.text
+        assert put.json()["code"] == "protected_var"
+        deleted = client.delete(url, headers=writer)
+        assert deleted.status_code == 403, deleted.text
+        assert gc.get("helmvars", "receiver-default") == stored
+
+        sibling = client.put(f"{url}.minReplicas", json={"value": 2}, headers=writer)
+        assert sibling.status_code == 200, sibling.text
+
     def test_admin_override_bypasses_policy(self, client, app, admin_headers, tmp_path):
         _wire_gitcrud(app, tmp_path)
         client.post(
