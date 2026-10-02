@@ -18,8 +18,6 @@ to ``sampler.max_memory_gb``. logreducer is imported lazily inside those paths
 so the engine runs (and the fast modes work) even before it is installed.
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 import uuid
@@ -251,7 +249,7 @@ class Sampler:
             ch_reader._raw_client(ch),
             sql,
             parameters=params or None,
-            settings={"max_execution_time": self._cfg.max_execution_time},
+            settings=ch_reader.read_settings(self._cfg.max_execution_time),
         )
 
     # -- formatting ---------------------------------------------
