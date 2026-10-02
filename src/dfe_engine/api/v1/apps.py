@@ -101,9 +101,9 @@ from dfe_engine.gitcrud.commit_policy import (
     CommitContext,
     CommitPolicyError,
     build_message,
-    validate_change,
+    validate_document,
 )
-from dfe_engine.gitcrud.engine import ResourceNotFoundError, del_path, flatten, set_path
+from dfe_engine.gitcrud.engine import ResourceNotFoundError, del_path, set_path
 from dfe_engine.gitcrud.routing import ReviewRequiredError, route_write
 from dfe_engine.governance import PolicyStore, ProtectedVarError
 from dfe_engine.sampling import SampleRequest, SamplerError
@@ -760,20 +760,18 @@ def _enforce(request: Request, user: Any, name: str, doc: dict) -> bool:
     """Gate every leaf the finished document carries or drops, and say if any is protected.
 
     This layer writes whole documents rather than one dot-path at a time, so the
-    per-path commit policy that ``api/v1/helm.py`` applies on the way in has to be
-    applied explicitly here. It runs over the FLATTENED result, not over the request
-    keys: a caller supplying ``{"image": {"tag": "latest"}}`` nests the leaf out of
-    sight of a check that only inspects what was sent. The protected-var gate also
-    reads the stored overlay, because a parent written as a smaller map drops the
-    locked leaves it no longer carries.
+    commit-policy value rules run over the finished document here, as
+    ``api/v1/helm.py`` runs them over the document a var write leaves behind. They
+    read every leaf of the result, not the request keys: a caller supplying
+    ``{"image": {"tag": "latest"}}`` nests the leaf out of sight of a check that
+    only inspects what was sent. The protected-var gate also reads the stored
+    overlay, because a parent written as a smaller map drops the locked leaves it
+    no longer carries.
     """
-    for path, value in flatten(doc).items():
-        try:
-            validate_change(path, value, doc)
-        except CommitPolicyError as exc:
-            raise HTTPException(
-                403, detail={"code": "policy_violation", "message": str(exc)}
-            ) from exc
+    try:
+        validate_document(doc)
+    except CommitPolicyError as exc:
+        raise HTTPException(403, detail={"code": "policy_violation", "message": str(exc)}) from exc
 
     policy = _policy(request)
     if policy is None:

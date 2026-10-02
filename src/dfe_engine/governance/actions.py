@@ -23,7 +23,7 @@ from scalo.logger import logger
 
 from dfe_engine.appmgmt import contract
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError, get_path, set_path
-from dfe_engine.gitcrud.commit_policy import CommitPolicyError, validate_change
+from dfe_engine.gitcrud.commit_policy import document_violations
 from dfe_engine.gitcrud.registry import UnknownResourceClassError
 from dfe_engine.gitops.repo import PublishResult
 
@@ -272,6 +272,11 @@ class ActionStore:
         ``resolved`` carries the checked param values; substitution happens
         BEFORE commit-policy validation so the resolved literal is what gets
         validated.
+
+        The commit-policy value rules run over each document once every change has
+        landed in it, as the direct path does: an action that disables KEDA may set
+        replicaCount in the same invoke, and one that re-enables KEDA over a stored
+        replicaCount is refused.
         """
         docs: dict[tuple[str, str], dict] = {}
         diff: list[dict[str, Any]] = []
@@ -288,16 +293,12 @@ class ActionStore:
                     raise ActionForbiddenError(
                         f"action '{action.name}' may not change the governance class ({ch.cls})"
                     )
-                # Same commit-policy validators as the direct path (no
-                # latest/replicaCount sneaking in via an action).
-                validate_change(ch.path, value)
                 if policy is not None:
                     # Atomic: a protected-var violation aborts the WHOLE action.
                     policy.enforce(ch.cls, ch.name, ch.path, override=override)
             except (
                 UnknownResourceClassError,
                 ActionForbiddenError,
-                CommitPolicyError,
                 ProtectedVarError,
             ) as exc:
                 if not collect:
@@ -331,6 +332,11 @@ class ActionStore:
                 }
             )
             set_path(doc, ch.path, value)
+        for (cls, name), doc in docs.items():
+            for violation in document_violations(doc):
+                if not collect:
+                    raise violation
+                errors.append(f"{cls}/{name}: {violation}")
         return docs, diff, errors
 
     def preview(
@@ -347,22 +353,31 @@ class ActionStore:
         ban, protected var without override, a credential. Params resolve to their default or
         representative value (closed constraints make one always available), so
         a definition validates without a caller-supplied invocation - and every
-        enum map BRANCH is commit-policy checked, not just the representative,
-        so no detent can hide a banned value until invoke time.
+        enum map BRANCH is commit-policy checked in the document it lands in, not
+        just the representative, so no detent can hide a banned value until invoke
+        time.
         """
         representatives = {n: s.representative() for n, s in action.params.items()}
-        _, diff, errors = self._walk(
+        docs, diff, errors = self._walk(
             action, policy=policy, override=override, collect=True, resolved=representatives
         )
         for ch in action.changes:
             ref = param_ref(ch.value)
             if ref is None or ref[1] is None:
                 continue
+            landed = docs.get((ch.cls, ch.name))
+            if landed is None:
+                landed = self._target(ch)
+            # A branch reports only the violations it adds to the landed document.
+            reported = {str(violation) for violation in document_violations(landed)}
             for enum_value, mapped in ref[1].items():
-                try:
-                    validate_change(ch.path, mapped)
-                except CommitPolicyError as exc:
-                    errors.append(f"{ch.cls}/{ch.name}:{ch.path}: map branch {enum_value!r}: {exc}")
+                branch = copy.deepcopy(landed)
+                set_path(branch, ch.path, mapped)
+                for violation in document_violations(branch):
+                    if str(violation) not in reported:
+                        errors.append(
+                            f"{ch.cls}/{ch.name}:{ch.path}: map branch {enum_value!r}: {violation}"
+                        )
         errors.extend(f"{found}: {CREDENTIAL_REFUSAL}" for found in self.credential_changes(action))
         return diff, errors
 

@@ -214,7 +214,7 @@ def test_guard_confirm_abort_no_write(repo: Path):
 
 def test_safety_guard_steers_but_can_override(repo: Path):
     # replicaCount is KEDA-owned - the SAME validate_change the API runs flags it.
-    # Break-glass shows the steer (use keda.min/maxReplicas) but --yes overrides.
+    # Break-glass shows the steer (use keda.minReplicaCount/maxReplicaCount) but --yes overrides.
     result = _run(
         repo,
         [
@@ -231,7 +231,7 @@ def test_safety_guard_steers_but_can_override(repo: Path):
     )
     assert result.exit_code == 0, result.output
     assert "safety:" in result.output
-    assert "keda.min/maxReplicas" in result.output  # the persona steer
+    assert "keda.minReplicaCount/maxReplicaCount" in result.output  # the persona steer
     # Overridden -> the value was written despite the warning.
     assert _head_message(repo).startswith("[BREAK-GLASS]")
 

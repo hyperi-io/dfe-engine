@@ -33,8 +33,9 @@ from dfe_engine.gitcrud.commit_policy import (
     CommitContext,
     CommitPolicyError,
     build_message,
-    validate_change,
     validate_name,
+    validate_revert,
+    validate_write,
 )
 from dfe_engine.gitcrud.engine import ResourceNotFoundError, flatten
 from dfe_engine.gitcrud.routing import ReviewRequiredError, route_write
@@ -131,6 +132,14 @@ def shown_vars(gc: GitCrud, cls: str, name: str) -> dict[str, Any]:
     return flatten(shown)
 
 
+def _stored_doc(gc: GitCrud, cls: str, name: str) -> dict:
+    """The document a var write lands in; empty when the resource does not exist yet."""
+    try:
+        return gc.get(cls, name)
+    except ResourceNotFoundError:
+        return {}
+
+
 def enforce_protected(request: Request, user: Any, cls: str, name: str, path: str) -> bool:
     """403 unless the caller may write this var. Returns whether it is protected."""
     policy = policy_of(request)
@@ -162,12 +171,7 @@ def set_var_governed(
     gc = gitcrud_of(request)
     settings = request.app.state.settings
 
-    # The stored document is the context the controller-ownership rule needs: a
-    # resource that has already disabled KEDA owns its own replica count.
-    try:
-        stored = gc.get(cls, name)
-    except ResourceNotFoundError:
-        stored = {}
+    stored = _stored_doc(gc, cls, name)
     # The vars routes read credentials masked, so one written back as read keeps its value.
     try:
         value = contract.restore_masked_at(stored, path, value)
@@ -176,7 +180,7 @@ def set_var_governed(
             status_code=400, detail={"code": exc.code, "message": str(exc)}
         ) from exc
     try:
-        validate_change(path, value, stored)
+        validate_write(stored, path, value)
     except CommitPolicyError as exc:
         raise HTTPException(403, detail={"code": "policy_violation", "message": str(exc)}) from exc
 
@@ -240,10 +244,15 @@ def set_var_governed(
 
 def delete_var_governed(cls: str, name: str, path: str, user: Any, request: Request) -> WriteResult:
     """Revert one var to its chart default. Reverting a protected var IS changing
-    it, so the same override grant applies as on a set."""
+    it, so the same override grant applies as on a set, and the document the revert
+    leaves behind meets the same value rules."""
     check_name(name)
     gc = gitcrud_of(request)
     settings = request.app.state.settings
+    try:
+        validate_revert(_stored_doc(gc, cls, name), path)
+    except CommitPolicyError as exc:
+        raise HTTPException(403, detail={"code": "policy_violation", "message": str(exc)}) from exc
     protected = enforce_protected(request, user, cls, name, path)
 
     def _write(branch: str):

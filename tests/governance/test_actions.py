@@ -181,6 +181,84 @@ def test_a_map_change_cannot_carry_a_refused_leaf_even_with_the_override(store, 
         crud.get("helmvars", "receiver-default")
 
 
+def test_an_action_cannot_hand_a_pinned_replica_count_back_to_keda(store, crud):
+    """The change names keda.enabled only; the document it lands in pins replicaCount."""
+    from dfe_engine.gitcrud.commit_policy import CommitPolicyError
+
+    stored = {"keda": {"enabled": False}, "replicaCount": 3}
+    crud.put("helmvars", "receiver-default", stored, actor="admin")
+    action = ActionDef(
+        name="keda-on",
+        description="x",
+        required_action="action:invoke:keda-on",
+        changes=[
+            VarChange(cls="helmvars", name="receiver-default", path="keda.enabled", value=True)
+        ],
+    )
+    store.save(action, actor="admin")
+    with pytest.raises(CommitPolicyError, match="replicaCount"):
+        store.invoke("keda-on", actor="bob")
+    assert crud.get("helmvars", "receiver-default") == stored
+
+    _, errors = store.preview(action)
+    assert len(errors) == 1, errors
+    assert errors[0].startswith("helmvars/receiver-default")
+    assert "replicaCount" in errors[0]
+
+
+def test_a_preview_checks_each_map_branch_against_the_document_it_lands_in(store, crud):
+    crud.put(
+        "helmvars", "receiver-default", {"keda": {"enabled": False}, "replicaCount": 3}, "admin"
+    )
+    action = ActionDef.model_validate(
+        {
+            "name": "keda-mode",
+            "required_action": "action:invoke:keda-mode",
+            "params": {"mode": {"type": "enum", "values": ["off", "on"], "default": "off"}},
+            "changes": [
+                {
+                    "cls": "helmvars",
+                    "name": "receiver-default",
+                    "path": "keda.enabled",
+                    "value": {"$param": "mode", "map": {"off": False, "on": True}},
+                }
+            ],
+        }
+    )
+    _, errors = store.preview(action)
+    assert len(errors) == 1, errors
+    assert "map branch 'on'" in errors[0]
+    assert "replicaCount" in errors[0]
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        [("replicaCount", 3), ("keda.enabled", False)],
+        [("keda.enabled", False), ("replicaCount", 3)],
+    ],
+)
+def test_an_action_that_disables_keda_may_set_the_replica_count(store, crud, changes):
+    # The refusal's own advice, taken in one action whichever order it lists the two.
+    action = ActionDef(
+        name="pin-replicas",
+        description="x",
+        required_action="action:invoke:pin-replicas",
+        changes=[
+            VarChange(cls="helmvars", name="receiver-default", path=path, value=value)
+            for path, value in changes
+        ],
+    )
+    assert store.preview(action)[1] == []
+    store.save(action, actor="admin")
+    res = store.invoke("pin-replicas", actor="bob")
+    assert res.changed is True
+    assert crud.get("helmvars", "receiver-default") == {
+        "replicaCount": 3,
+        "keda": {"enabled": False},
+    }
+
+
 def test_invoke_multi_file_is_atomic_one_commit(store, crud):
     # action touches TWO different files -> single commit, both applied
     action = ActionDef(

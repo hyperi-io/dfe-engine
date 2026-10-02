@@ -12,6 +12,7 @@ produces a conforming message (type(scope): summary <=50, ASCII, [skip ci], audi
 trailers). See docs/control-plane/gitops-commit-standard.md.
 """
 
+import copy
 import re
 from dataclasses import dataclass, field
 
@@ -39,6 +40,9 @@ SUBJECT_MAX = 50
 # ``DFE-Role:``/``DFE-Action:`` trailer line into the commit body.
 # Not store_names.VALID_NAME: a deploy-repo name has no length cap or leading-character rule.
 _NAME_RE = re.compile(r"[A-Za-z0-9._-]+")
+
+# A digest-pinned image reference ends in ``@sha256:`` and the full 64-hex digest.
+_DIGEST_RE = re.compile(r"@sha256:[0-9a-f]{64}$")
 
 
 class CommitPolicyError(ValueError):
@@ -157,9 +161,10 @@ def validate_subject(subject: str) -> None:
 def validate_change(path: str, value: object, doc: dict | None = None) -> None:
     """Reject immutability/self-heal hazards in a var write (the standard).
 
-    - image/chart refs must be pinned: no ``latest``, no untagged ref.
+    - image/chart refs must be pinned: no ``latest``, no untagged ref. An ``image``
+      string carries a tag or an ``@sha256`` digest.
     - controller-owned fields must not be tracked under self-heal (KEDA owns
-      replicas -> set keda.min/maxReplicas, not replicaCount).
+      replicas -> set keda.minReplicaCount/maxReplicaCount, not replicaCount).
 
     A map or list value is checked leaf by leaf under each leaf's full dot-path, so
     ``image: {tag: latest}`` is refused exactly as ``image.tag: latest`` is.
@@ -169,6 +174,10 @@ def validate_change(path: str, value: object, doc: dict | None = None) -> None:
     ``replicaCount`` is then the only way to set it, so it is allowed there. With
     no document the field stays refused: an unset flag means the chart default,
     which is not readable from here.
+
+    This checks only the leaves written. A route that writes into a stored
+    document uses :func:`validate_write` or :func:`validate_revert`, which also
+    catch a write elsewhere in the document that breaks the KEDA rule.
     """
     if isinstance(value, (dict, list)):
         # engine imports this module, so the shared flattener is imported at call time.
@@ -180,6 +189,60 @@ def validate_change(path: str, value: object, doc: dict | None = None) -> None:
     _validate_leaf(path, value, doc)
 
 
+def document_violations(doc: dict) -> list[CommitPolicyError]:
+    """Every value-rule violation in a finished document, one per offending leaf."""
+    from .engine import flatten
+
+    found: list[CommitPolicyError] = []
+    for leaf_path, leaf_value in flatten(doc).items():
+        try:
+            _validate_leaf(leaf_path, leaf_value, doc)
+        except CommitPolicyError as exc:
+            found.append(exc)
+    return found
+
+
+def validate_document(doc: dict) -> None:
+    """Apply the value rules to every leaf of the document a write leaves behind.
+
+    The KEDA rule reads two fields, so only the finished document can say whether
+    a write breaks it: setting ``keda.enabled`` over a stored ``replicaCount``
+    names no refused path, and setting both in one write is allowed.
+
+    Raises:
+        CommitPolicyError: The first leaf that breaks a rule.
+    """
+    found = document_violations(doc)
+    if found:
+        raise found[0]
+
+
+def validate_write(stored: dict, path: str, value: object) -> None:
+    """Apply the value rules to ``stored`` as it reads once ``value`` is set at ``path``.
+
+    Raises:
+        CommitPolicyError: The resulting document breaks a rule.
+    """
+    from .engine import set_path
+
+    result = copy.deepcopy(stored)
+    set_path(result, path, value)
+    validate_document(result)
+
+
+def validate_revert(stored: dict, path: str) -> None:
+    """Apply the value rules to ``stored`` as it reads once ``path`` is removed.
+
+    Raises:
+        CommitPolicyError: The resulting document breaks a rule.
+    """
+    from .engine import del_path
+
+    result = copy.deepcopy(stored)
+    del_path(result, path)
+    validate_document(result)
+
+
 def _validate_leaf(path: str, value: object, doc: dict | None) -> None:
     """Apply the value rules to one scalar written at ``path``."""
     leaf = path.rsplit(".", 1)[-1]
@@ -187,11 +250,25 @@ def _validate_leaf(path: str, value: object, doc: dict | None) -> None:
         v = value.strip()
         if v == "" or v.endswith(":latest") or v == "latest":
             raise CommitPolicyError(f"unpinned/floating image ref at {path}: {value!r}")
+        if leaf == "image" and _untagged(v):
+            raise CommitPolicyError(
+                f"unpinned image ref at {path}: {value!r} carries no tag and no @sha256 digest"
+            )
     if (path == "replicaCount" or path.endswith(".replicaCount")) and not _keda_disabled(doc):
         raise CommitPolicyError(
-            f"{path} is controller-owned (KEDA); set keda.min/maxReplicas instead, "
-            "or disable KEDA in the same write"
+            f"{path} is owned by KEDA unless the document sets keda.enabled to false. "
+            "Scale with keda.minReplicaCount/maxReplicaCount instead, or keep "
+            f"keda.enabled false in any document that sets {path}"
         )
+
+
+def _untagged(ref: str) -> bool:
+    """Whether an image reference pins neither a tag nor a sha256 digest."""
+    if _DIGEST_RE.search(ref):
+        return False
+    # A registry port also carries a colon, so the tag is read off the last segment.
+    last = ref.split("@", 1)[0].rsplit("/", 1)[-1]
+    return not last.partition(":")[2]
 
 
 def _keda_disabled(doc: dict | None) -> bool:
