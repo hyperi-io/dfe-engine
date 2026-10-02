@@ -17,6 +17,7 @@ from dfe_engine.appmgmt import catalogue
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import PolicyStore
+from dfe_engine.sampling.models import SampleResult
 
 VRL = "dfe-transform-vrl"
 BASE = f"/api/v1/apps/{VRL}/edge"
@@ -1115,18 +1116,21 @@ class TestDryRun:
 
     @staticmethod
     def _sampler(app, lines: list[str] | None = None):
-        """A stand-in sampler returning fixed lines, so no backing service is needed."""
-
-        class _Result:
-            def __init__(self, lines):
-                self.lines = lines
+        """A stand-in sampler returning what Sampler.run really returns: a dict."""
 
         class _Sampler:
             def resolve_or_raise(self, req, registry):
                 return None
 
             async def run(self, req, ch, registry):
-                return _Result(lines if lines is not None else ['{"message": "hi"}'])
+                sample_lines = lines if lines is not None else ['{"message": "hi"}']
+                return SampleResult(
+                    mode=req.mode,
+                    backend=req.backend,
+                    source=req.source,
+                    count=len(sample_lines),
+                    lines=sample_lines,
+                ).model_dump()
 
         app.state.sampler = _Sampler()
 
