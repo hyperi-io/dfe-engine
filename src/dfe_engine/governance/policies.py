@@ -112,6 +112,20 @@ def _reaching_pattern(patterns: Iterable[str], cls: str, name: str, path: str) -
     return next((pat for pat in patterns if _reaches(pat, cls, name, path)), None)
 
 
+def _changed_leaves(before: dict, after: dict) -> list[str]:
+    """Every leaf a write from ``before`` to ``after`` adds, removes or gives a new value, sorted.
+
+    ``True`` and ``1`` compare equal and write differently, so a new type is a new value.
+    """
+    old = flatten(before)
+    new = flatten(after)
+    changed = old.keys() ^ new.keys()
+    for path in old.keys() & new.keys():
+        if type(old[path]) is not type(new[path]) or old[path] != new[path]:
+            changed.add(path)
+    return sorted(changed)
+
+
 class PolicyStore:
     """Loads protected-var policies from the gitops governance class via GitCrud."""
 
@@ -158,10 +172,11 @@ class PolicyStore:
         *,
         override: bool = False,
     ) -> bool:
-        """Gate a whole-document write and report whether it touches a protected var.
+        """Gate a whole-document write and report whether it changes a protected var.
 
-        Every leaf of the document as written is checked, and so is every leaf the
-        write drops: removing a locked key changes it as surely as setting it does.
+        Only the leaves the write adds, removes or gives a new value are checked, so a
+        locked leaf the document keeps as stored needs no override. Removing a locked
+        key changes it as surely as setting it does.
 
         Args:
             cls: Resource class the document belongs to.
@@ -171,14 +186,14 @@ class PolicyStore:
             override: The caller holds the override grant.
 
         Returns:
-            Whether any leaf kept, added or dropped is protected.
+            Whether any leaf added, removed or changed is protected.
 
         Raises:
-            ProtectedVarError: A leaf is protected and no override is held.
+            ProtectedVarError: A changed leaf is protected and no override is held.
         """
         patterns = self.all_patterns()
         protected = False
-        for path in flatten(after) | flatten(before):
+        for path in _changed_leaves(before, after):
             pat = _reaching_pattern(patterns, cls, name, path)
             if pat is None:
                 continue

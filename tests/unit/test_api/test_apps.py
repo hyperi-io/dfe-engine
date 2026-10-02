@@ -7,8 +7,6 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """End-to-end router behaviour against a real local deploy repo."""
 
-from __future__ import annotations
-
 from dataclasses import replace
 
 import pytest
@@ -497,6 +495,36 @@ class TestScaling:
         resp = client.put(f"{BASE}/scaling", json={"cpu_request": "500m"}, headers=admin_headers)
         assert resp.status_code == 200, resp.text
         assert gc.get("helmvars", name)["resources"]["requests"]["cpu"] == "500m"
+
+    def test_a_dial_write_passes_over_a_locked_image_tag_it_keeps(
+        self, client, app, api_settings, admin_headers, tmp_path
+    ):
+        # The overlay is written whole, and the image lock binds only a write that changes the tag.
+        from tests.unit.test_api.test_governed_ops import _scoped_headers
+
+        gc = _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        name = f"{VRL}-edge-values"
+        stored = gc.get("helmvars", name)
+        stored["image"] = {"tag": "1.2.3"}
+        gc.put("helmvars", name, stored, "tester")
+        client.post(
+            "/api/v1/governance/admin/policies",
+            json={"name": "lock", "protected": ["helmvars:*:image.*"]},
+            headers=admin_headers,
+        )
+        writer = _scoped_headers(
+            app,
+            api_settings,
+            username="dialwriter",
+            role="dial-writer",
+            permissions=["helmvars:read", "helmvars:write"],
+        )
+        resp = client.put(f"{BASE}/scaling", json={"cpu_request": "500m"}, headers=writer)
+        assert resp.status_code == 200, resp.text
+        written = gc.get("helmvars", name)
+        assert written["resources"]["requests"]["cpu"] == "500m"
+        assert written["image"] == {"tag": "1.2.3"}
 
     def test_a_negative_replica_count_is_400(self, client, app, admin_headers, tmp_path):
         _wire(app, tmp_path)
