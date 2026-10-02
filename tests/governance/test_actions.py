@@ -137,7 +137,7 @@ def test_action_change_rejected_by_commit_validators(store, crud):
         name="bad-scale",
         description="x",
         required_action="action:invoke:bad-scale",
-        # replicaCount is controller-owned (KEDA) -> must be rejected by validate_change
+        # replicaCount is controller-owned (KEDA), so the commit policy refuses it
         changes=[VarChange(cls="helmvars", name="receiver-default", path="replicaCount", value=3)],
     )
     store.save(bad, actor="admin")
@@ -257,6 +257,36 @@ def test_an_action_that_disables_keda_may_set_the_replica_count(store, crud, cha
         "replicaCount": 3,
         "keda": {"enabled": False},
     }
+
+
+def test_an_action_over_a_stored_violation_is_refused_only_what_it_adds(store, crud):
+    stored = {"replicaCount": 2, "keda": {"maxReplicas": 4}}
+    crud.put("helmvars", "receiver-default", stored, actor="admin")
+    raise_ceiling = ActionDef(
+        name="raise-ceiling",
+        description="x",
+        required_action="action:invoke:raise-ceiling",
+        changes=[
+            VarChange(cls="helmvars", name="receiver-default", path="keda.maxReplicas", value=8)
+        ],
+    )
+    assert store.preview(raise_ceiling)[1] == []
+    store.save(raise_ceiling, actor="admin")
+    assert store.invoke("raise-ceiling", actor="bob").changed is True
+    assert crud.get("helmvars", "receiver-default") == {
+        "replicaCount": 2,
+        "keda": {"maxReplicas": 8},
+    }
+
+    recount = ActionDef(
+        name="recount",
+        description="x",
+        required_action="action:invoke:recount",
+        changes=[VarChange(cls="helmvars", name="receiver-default", path="replicaCount", value=5)],
+    )
+    _, errors = store.preview(recount)
+    assert len(errors) == 1, errors
+    assert "replicaCount" in errors[0]
 
 
 def test_invoke_multi_file_is_atomic_one_commit(store, crud):

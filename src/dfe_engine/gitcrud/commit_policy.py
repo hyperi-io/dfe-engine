@@ -16,6 +16,8 @@ import copy
 import re
 from dataclasses import dataclass, field
 
+from scalo.logger import logger
+
 from dfe_engine.settings import is_dev_posture
 
 # Gitops-operational commit types (NOT release fix/feat - deploy repo has no
@@ -44,9 +46,25 @@ _NAME_RE = re.compile(r"[A-Za-z0-9._-]+")
 # A digest-pinned image reference ends in ``@sha256:`` and the full 64-hex digest.
 _DIGEST_RE = re.compile(r"@sha256:[0-9a-f]{64}$")
 
+# The value rules, named so a violation can be matched against the stored document's.
+RULE_UNPINNED_IMAGE = "unpinned_image"
+RULE_KEDA_REPLICAS = "keda_replicas"
+
+_ABSENT = object()
+
 
 class CommitPolicyError(ValueError):
-    """Raised when a commit message or change violates the standard."""
+    """Raised when a commit message or change violates the standard.
+
+    Attributes:
+        path: The dot-path of the leaf a value rule refused; empty for any other refusal.
+        rule: The value rule that refused it; empty for any other refusal.
+    """
+
+    def __init__(self, message: str, *, path: str = "", rule: str = "") -> None:
+        super().__init__(message)
+        self.path = path
+        self.rule = rule
 
 
 def validate_name(name: str) -> None:
@@ -158,108 +176,172 @@ def validate_subject(subject: str) -> None:
         raise CommitPolicyError(f"type {ctype!r} not in {sorted(ALLOWED_TYPES)}")
 
 
-def validate_change(path: str, value: object, doc: dict | None = None) -> None:
-    """Reject immutability/self-heal hazards in a var write (the standard).
+def keda_owns_replicas(enabled: object, *, keda_by_default: bool) -> bool:
+    """Whether KEDA owns the replica count, given what the document sets ``keda.enabled`` to.
 
-    - image/chart refs must be pinned: no ``latest``, no untagged ref. An ``image``
-      string carries a tag or an ``@sha256`` digest.
-    - controller-owned fields must not be tracked under self-heal (KEDA owns
-      replicas -> set keda.minReplicaCount/maxReplicaCount, not replicaCount).
+    An explicit boolean decides. Anything else leaves the chart's own default, which
+    the caller resolves from what the document configures
+    (``appmgmt.scaling.keda_by_default``).
 
-    A map or list value is checked leaf by leaf under each leaf's full dot-path, so
-    ``image: {tag: latest}`` is refused exactly as ``image.tag: latest`` is.
-
-    ``doc`` is the document the write lands in. A document that explicitly sets
-    ``keda.enabled: false`` has no controller owning the replica count, and
-    ``replicaCount`` is then the only way to set it, so it is allowed there. With
-    no document the field stays refused: an unset flag means the chart default,
-    which is not readable from here.
-
-    This checks only the leaves written. A route that writes into a stored
-    document uses :func:`validate_write` or :func:`validate_revert`, which also
-    catch a write elsewhere in the document that breaks the KEDA rule.
+    Args:
+        enabled: The document's ``keda.enabled``, or None where it sets none.
+        keda_by_default: Whether the chart runs KEDA when the document does not say.
     """
-    if isinstance(value, (dict, list)):
-        # engine imports this module, so the shared flattener is imported at call time.
-        from .engine import flatten
-
-        for leaf_path, leaf_value in flatten(value, path).items():
-            _validate_leaf(leaf_path, leaf_value, doc)
-        return
-    _validate_leaf(path, value, doc)
+    if isinstance(enabled, bool):
+        return enabled
+    return keda_by_default
 
 
-def document_violations(doc: dict) -> list[CommitPolicyError]:
-    """Every value-rule violation in a finished document, one per offending leaf."""
+def document_violations(doc: dict, *, keda_by_default: bool) -> list[CommitPolicyError]:
+    """Every value-rule violation in a finished document, one per offending leaf.
+
+    - An image ref is pinned: no ``latest``, no untagged ref. An ``image`` string
+      carries a tag or an ``@sha256`` digest.
+    - A ``replicaCount`` is refused wherever KEDA owns the count: the chart omits
+      ``replicas`` and the ScaledObject sets it, so Argo self-heal and KEDA would
+      fight over it.
+
+    Args:
+        doc: The document as a write would leave it.
+        keda_by_default: Whether the chart this document configures runs KEDA when
+            the document does not set ``keda.enabled``.
+    """
     from .engine import flatten
 
+    keda = doc.get("keda")
+    enabled = keda.get("enabled") if isinstance(keda, dict) else None
+    owned = keda_owns_replicas(enabled, keda_by_default=keda_by_default)
     found: list[CommitPolicyError] = []
     for leaf_path, leaf_value in flatten(doc).items():
         try:
-            _validate_leaf(leaf_path, leaf_value, doc)
+            _validate_leaf(leaf_path, leaf_value, keda_owns=owned)
         except CommitPolicyError as exc:
             found.append(exc)
     return found
 
 
-def validate_document(doc: dict) -> None:
-    """Apply the value rules to every leaf of the document a write leaves behind.
+def added_violations(
+    stored: dict, result: dict, *, keda_by_default: bool
+) -> list[CommitPolicyError]:
+    """The violations ``result`` carries that ``stored`` did not.
 
-    The KEDA rule reads two fields, so only the finished document can say whether
-    a write breaks it: setting ``keda.enabled`` over a stored ``replicaCount``
-    names no refused path, and setting both in one write is allowed.
+    One the stored document already had, at the same leaf under the same rule and
+    with the same value, is not the write's doing. A new value written at a refused
+    leaf is, so a stored violation never licenses the next value written over it.
 
-    Raises:
-        CommitPolicyError: The first leaf that breaks a rule.
+    Args:
+        stored: The document as stored, empty when the resource is new.
+        result: The document as the write would leave it.
+        keda_by_default: As for :func:`document_violations`.
     """
-    found = document_violations(doc)
-    if found:
-        raise found[0]
+    from .engine import flatten
+
+    before = flatten(stored)
+    after = flatten(result)
+    held = {(v.path, v.rule) for v in document_violations(stored, keda_by_default=keda_by_default)}
+    added: list[CommitPolicyError] = []
+    for violation in document_violations(result, keda_by_default=keda_by_default):
+        unchanged = _same(before.get(violation.path, _ABSENT), after[violation.path])
+        if (violation.path, violation.rule) not in held or not unchanged:
+            added.append(violation)
+    return added
 
 
-def validate_write(stored: dict, path: str, value: object) -> None:
-    """Apply the value rules to ``stored`` as it reads once ``value`` is set at ``path``.
+def validate_result(
+    stored: dict, result: dict, *, keda_by_default: bool
+) -> list[CommitPolicyError]:
+    """Refuse a write that adds a value-rule violation to the document it lands in.
+
+    The KEDA rule reads two fields, so only the finished document can say whether a
+    write breaks it: setting ``keda.enabled`` over a stored ``replicaCount`` names no
+    refused path, and setting both in one write is allowed. A document that already
+    breaks a rule stays writable, because refusing every write to it would refuse
+    the writes that repair it too; what it already carries is logged and returned.
+
+    Args:
+        stored: The document as stored, empty when the resource is new.
+        result: The document as the write would leave it.
+        keda_by_default: As for :func:`document_violations`.
+
+    Returns:
+        The violations the stored document already carried and the write leaves.
 
     Raises:
-        CommitPolicyError: The resulting document breaks a rule.
+        CommitPolicyError: The first violation the write adds.
+    """
+    added = added_violations(stored, result, keda_by_default=keda_by_default)
+    if added:
+        raise added[0]
+    kept = document_violations(result, keda_by_default=keda_by_default)
+    if kept:
+        logger.warning(
+            "Write leaves value-rule violations the document already carried",
+            violations=[str(v) for v in kept],
+        )
+    return kept
+
+
+def validate_write(
+    stored: dict, path: str, value: object, *, keda_by_default: bool
+) -> list[CommitPolicyError]:
+    """:func:`validate_result` for ``stored`` once ``value`` is set at ``path``.
+
+    A map or list value is checked leaf by leaf under each leaf's full dot-path, so
+    ``image: {tag: latest}`` is refused exactly as ``image.tag: latest`` is.
+
+    Raises:
+        CommitPolicyError: The write adds a violation.
     """
     from .engine import set_path
 
     result = copy.deepcopy(stored)
     set_path(result, path, value)
-    validate_document(result)
+    return validate_result(stored, result, keda_by_default=keda_by_default)
 
 
-def validate_revert(stored: dict, path: str) -> None:
-    """Apply the value rules to ``stored`` as it reads once ``path`` is removed.
+def validate_revert(stored: dict, path: str, *, keda_by_default: bool) -> list[CommitPolicyError]:
+    """:func:`validate_result` for ``stored`` once ``path`` is removed.
 
     Raises:
-        CommitPolicyError: The resulting document breaks a rule.
+        CommitPolicyError: The revert adds a violation.
     """
     from .engine import del_path
 
     result = copy.deepcopy(stored)
     del_path(result, path)
-    validate_document(result)
+    return validate_result(stored, result, keda_by_default=keda_by_default)
 
 
-def _validate_leaf(path: str, value: object, doc: dict | None) -> None:
-    """Apply the value rules to one scalar written at ``path``."""
+def _validate_leaf(path: str, value: object, *, keda_owns: bool) -> None:
+    """Apply the value rules to one scalar at ``path``."""
     leaf = path.rsplit(".", 1)[-1]
     if leaf in {"tag", "image"} and isinstance(value, str):
         v = value.strip()
         if v == "" or v.endswith(":latest") or v == "latest":
-            raise CommitPolicyError(f"unpinned/floating image ref at {path}: {value!r}")
+            raise CommitPolicyError(
+                f"unpinned/floating image ref at {path}: {value!r}",
+                path=path,
+                rule=RULE_UNPINNED_IMAGE,
+            )
         if leaf == "image" and _untagged(v):
             raise CommitPolicyError(
-                f"unpinned image ref at {path}: {value!r} carries no tag and no @sha256 digest"
+                f"unpinned image ref at {path}: {value!r} carries no tag and no @sha256 digest",
+                path=path,
+                rule=RULE_UNPINNED_IMAGE,
             )
-    if (path == "replicaCount" or path.endswith(".replicaCount")) and not _keda_disabled(doc):
+    if (path == "replicaCount" or path.endswith(".replicaCount")) and keda_owns:
         raise CommitPolicyError(
             f"{path} is owned by KEDA unless the document sets keda.enabled to false. "
             "Scale with keda.minReplicaCount/maxReplicaCount instead, or keep "
-            f"keda.enabled false in any document that sets {path}"
+            f"keda.enabled false in any document that sets {path}",
+            path=path,
+            rule=RULE_KEDA_REPLICAS,
         )
+
+
+def _same(before: object, after: object) -> bool:
+    """Whether a leaf holds the same value, ``True`` and ``1`` counting as different."""
+    return type(before) is type(after) and before == after
 
 
 def _untagged(ref: str) -> bool:
@@ -269,14 +351,6 @@ def _untagged(ref: str) -> bool:
     # A registry port also carries a colon, so the tag is read off the last segment.
     last = ref.split("@", 1)[0].rsplit("/", 1)[-1]
     return not last.partition(":")[2]
-
-
-def _keda_disabled(doc: dict | None) -> bool:
-    """Whether the document hands the replica count back to the deployment."""
-    if not isinstance(doc, dict):
-        return False
-    keda = doc.get("keda")
-    return isinstance(keda, dict) and keda.get("enabled") is False
 
 
 def resolve_mode(

@@ -164,9 +164,14 @@ class TestReplicaCount:
         doc = {"keda": {"enabled": False}}
         assert scaling.changes(doc, replica_count=3) == {"replicaCount": 3}
 
-    def test_an_unset_keda_flag_accepts_a_count(self):
-        # The chart default is not readable from here, so an unset key cannot refuse.
-        assert scaling.changes({}, replica_count=2) == {"replicaCount": 2}
+    def test_an_unset_keda_flag_refuses_a_count(self):
+        # A scale-deployed app's chart runs KEDA unless the overlay turns it off, and
+        # the commit policy refuses the stored count on the same reading.
+        with pytest.raises(InvalidDialError, match="KEDA is enabled by the chart default"):
+            scaling.changes({}, replica_count=2)
+
+    def test_an_unset_keda_flag_accepts_a_count_where_the_chart_runs_no_keda(self):
+        assert scaling.changes({}, replica_count=2, keda_by_default=False) == {"replicaCount": 2}
 
     def test_turning_keda_off_in_the_same_request_accepts_a_count(self):
         doc = {"keda": {"enabled": True}}
@@ -192,7 +197,7 @@ class TestReplicaCount:
             scaling.changes({}, replica_count=scaling.MAX_REPLICAS_CEILING + 1)
 
     def test_the_written_path_is_the_one_read_reports(self):
-        changed = scaling.changes({}, replica_count=6)
+        changed = scaling.changes({"keda": {"enabled": False}}, replica_count=6)
         doc: dict = {}
         for path, value in changed.items():
             doc.setdefault(path, value)
@@ -220,6 +225,31 @@ def test_an_app_that_does_not_scale_reports_the_dials_unsupported():
     supported, reason = scaling.support(fetcher, DeployTarget.KUBERNETES)
     assert supported is False
     assert "dfe-fetcher" in reason
+
+
+class TestKedaByDefault:
+    """Which deploy-repo documents the commit policy's KEDA rule reads as KEDA-driven."""
+
+    def test_an_overlay_of_a_scale_deployed_app_runs_keda(self):
+        assert scaling.keda_by_default("helmvars", "dfe-receiver-default-values") is True
+
+    def test_an_overlay_of_an_app_that_does_not_scale_runs_none(self):
+        # dfe-fetcher's manifest entry is scale_deployed: false, and its chart ships KEDA off.
+        assert catalogue.descriptor("dfe-fetcher").scale_deployed is False
+        assert scaling.keda_by_default("helmvars", "dfe-fetcher-poller-values") is False
+
+    @pytest.mark.parametrize("name", ["receiver-default", "not-an-app-values", "dfe-receiver"])
+    def test_an_overlay_the_catalogue_cannot_place_keeps_the_strict_reading(self, name):
+        assert scaling.keda_by_default("helmvars", name) is True
+
+    @pytest.mark.parametrize("name", ["hyperdx", "ferretdb", "clickhouse-cluster", "common"])
+    def test_a_platform_chart_runs_none(self, name):
+        assert scaling.keda_by_default("infravars", name) is False
+
+    def test_every_scale_deployed_app_reads_as_keda_driven(self):
+        for service, app in catalogue.APP_CATALOGUE.items():
+            name = f"{service}-default-values"
+            assert scaling.keda_by_default("helmvars", name) is app.scale_deployed, service
 
 
 def test_multiplicity_is_independent_of_scaling():

@@ -18176,7 +18176,7 @@
           "Governed Ops: Backing Services"
         ],
         "summary": "Set Overlay Var",
-        "description": "Set a substrate/platform value.\n\n403 with the policy that blocked it when the var is protected - the storage\nmodel, the data-layer modes and the disk size are decided at deploy, and moving\none on a live deployment is a data migration. 400 when the value would lower a\ndeclared node or broker count, which loses data rather than capacity.",
+        "description": "Set a substrate/platform value.\n\n403 with the policy that blocked it when the var is protected - the storage\nmodel, the data-layer modes and the disk size are decided at deploy, and moving\none on a live deployment is a data migration. 400 when the value would lower a\ndeclared node or broker count, or leave it undeclared (a parent map that omits\nit), which loses data rather than capacity.",
         "operationId": "set_overlay_var_api_v1_backing_services_overlays__name__vars__path__put",
         "parameters": [
           {
@@ -33817,7 +33817,7 @@
           "name"
         ],
         "title": "ProtectedPolicy",
-        "description": "Vars locked to default. Patterns match ``cls:name:path`` via fnmatch.\n\ne.g. ``helmvars:*:replicaCount`` or ``helmvars:receiver-default:config.kafka.*``.\nA protected var can only be changed by a caller holding the override grant, and\na write at its parent or below it counts as changing it."
+        "description": "Vars locked to default. Patterns match ``cls:name:path`` via fnmatch.\n\ne.g. ``helmvars:*:replicaCount`` or ``helmvars:receiver-default:config.kafka.*``.\nA protected var can only be changed by a caller holding the override grant, and\na write at its parent or below it counts as changing it.\n\nPatterns bind the API's var and document writes in the ``helmvars``,\n``infravars`` and ``library`` classes, and every defined action. They do not\nbind the governance classes (``gov_settings`` included), a whole-resource\ndelete, an overlay the engine derives from the sources, or the break-glass CLI."
       },
       "ProviderAuth": {
         "properties": {
@@ -35794,7 +35794,7 @@
               }
             ],
             "title": "Replica Count",
-            "description": "Fixed pod count, for a deployment with KEDA off. Refused while KEDA is explicitly enabled, because the chart omits `replicas` and the ScaledObject owns the count."
+            "description": "Fixed pod count, for a deployment with KEDA off. Refused unless `keda_enabled` is false in this request or already in the overlay: the chart omits `replicas` while KEDA is on, which it is by default, and the ScaledObject owns the count."
           },
           "min_replicas": {
             "anyOf": [
