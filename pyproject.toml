@@ -40,14 +40,15 @@ dependencies = [
     # /metrics 404s, and self-monitoring (one of the two default E2E acceptance tests)
     # goes green while reporting nothing. [opentelemetry] is no longer a separate
     # extra: [metrics] carries the SDK.
-    "scalo[expression,http,metrics]>=2.30.7",
+    "scalo[expression,http,metrics]>=2.30.7,<3",
     # The DFE schema trees as package data under dfe_schemas/data/, replacing
     # the `schemas` git submodule. schema_loader resolves them through
     # importlib.resources; the Dockerfile bakes its seed from the installed
     # wheel. Floor is the release that added the apply manifest, the renderer
     # and the views, roles and topic set the bootstrap iterates; uv.lock pins
     # the hash.
-    "dfe-schemas>=0.2.8",
+    # Upper bound: <1 is the API-stability boundary while dfe-schemas is 0.x.
+    "dfe-schemas>=0.2.8,<1",
     # Data processing
     "pandas>=3.0.3",
     "numpy>=2.5.0",
@@ -166,6 +167,9 @@ minversion = "6.0"
 log_cli = true
 log_cli_level = "INFO"
 python_files = "test_*.py"
+# /tmp is a shared tmpfs with a fixed inode cap: keep only failed-test dirs, one per name.
+tmp_path_retention_policy = "failed"
+tmp_path_retention_count = 1
 # No worker count here on purpose: hyperi-ci derives it from the host it runs
 # on, and a number pinned here is correct on exactly one machine (hyperi-ci#152).
 addopts = "-vv --cov=src/dfe_engine --cov-report=term-missing --cov-report=xml:cov.xml -m 'not integration and not live and not upstream'"

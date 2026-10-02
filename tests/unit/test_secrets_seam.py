@@ -1,5 +1,5 @@
 #  Project:      dfe-engine
-#  File:         tests/secrets/test_secrets_seam.py
+#  File:         tests/unit/test_secrets_seam.py
 #  Purpose:      The scalo.secrets seam - real file backend, no mocks
 #  Language:     Python
 #
@@ -8,8 +8,6 @@
 """The minted-secret seam against a real scalo.secrets file backend (no mocks)."""
 
 from __future__ import annotations
-
-import tempfile
 
 import pytest
 
@@ -31,9 +29,9 @@ def test_file_provider_put_get_delete(tmp_path):
     sec.delete("ch/groups/soc-ro")
 
 
-def test_missing_secret_raises():
+def test_missing_secret_raises(tmp_path):
     from scalo.secrets.exceptions import SecretNotFoundError
 
-    sec = build_secrets(SecretsSettings(provider="file", path=tempfile.mkdtemp()))
+    sec = build_secrets(SecretsSettings(provider="file", path=str(tmp_path)))
     with pytest.raises(SecretNotFoundError):
         sec.get("does/not/exist")

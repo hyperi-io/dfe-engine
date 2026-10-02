@@ -74,7 +74,11 @@ HOSTILE_BODIES = {
 @pytest.fixture(scope="module")
 def charts(tmp_path_factory) -> Path:
     """dfe-infra's chart directory, from a checkout or the pinned release."""
-    return producer_tree(DFE_INFRA, "helm/charts", tmp_path_factory.mktemp("dfe-infra"))
+    dest = tmp_path_factory.mktemp("dfe-infra")
+    tree = producer_tree(DFE_INFRA, "helm/charts", dest)
+    yield tree
+    # Module-scoped tmp_path_factory dirs are NOT covered by tmp_path_retention_policy.
+    shutil.rmtree(dest, ignore_errors=True)
 
 
 # ── helpers ───────────────────────────────────────────────────
