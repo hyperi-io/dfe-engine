@@ -369,12 +369,41 @@ class TestUnauthoredHeader:
         names = [c.name for c in result.columns]
 
         assert cfg.profile_name == "timeseries"
+        assert cfg.profile_version == "1.0.0"
         # The retention the config declares rides a column the table now carries.
         assert cfg.ttl_columns == ["_timestamp_load"]
         assert "_timestamp_load" in names
         assert "_org_id" in names
         assert "user_name" in names
         assert "INTERVAL 90 DAY" in result.create_table_ddl
+
+    def test_an_unauthored_header_inherits_the_builder_default(self, registry, schemas_dir):
+        builder = SchemaBuilderV2(
+            registry=registry,
+            schemas_base_dir=schemas_dir,
+            default_header_type="minimal",
+            default_header_version="1.0.0",
+        )
+        source = _make_source(meta_schema="meta.yaml", header_type=None, ttl_days=0)
+
+        cfg = builder.build_ddl_config_for_version(source, source.runtime_version_id())
+
+        assert cfg.profile_name == "minimal"
+        assert cfg.profile_version == "1.0.0"
+
+    def test_an_authored_header_ignores_the_builder_default(self, registry, schemas_dir):
+        builder = SchemaBuilderV2(
+            registry=registry,
+            schemas_base_dir=schemas_dir,
+            default_header_type="minimal",
+            default_header_version="1.0.1",
+        )
+        source = _make_source(meta_schema="meta.yaml", header_type="timeseries", ttl_days=0)
+
+        cfg = builder.build_ddl_config_for_version(source, source.runtime_version_id())
+
+        assert cfg.profile_name == "timeseries"
+        assert cfg.profile_version == "1.0.0"
 
     def test_a_source_with_no_header_renders_as_one_that_writes_the_default(
         self, registry, schemas_dir

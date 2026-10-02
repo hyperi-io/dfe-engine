@@ -215,7 +215,7 @@ class TestTrustListParsing:
     @pytest.mark.parametrize("value", ["10.42.0.0/16, gateway", "*, 10.42.0.0/16", "10.42.0.0/33"])
     def test_bad_entry_stops_startup(self, api_settings: DFESettings, value: str):
         api = api_settings.api.model_copy(update={"forwarded_allow_ips": value})
-        with pytest.raises(ValueError, match="api.forwarded_allow_ips"):
+        with pytest.raises(ValueError, match=r"api\.forwarded_allow_ips"):
             create_app(settings=api_settings.model_copy(update={"api": api}))
 
     def test_bare_address_trusts_that_address_only(self):

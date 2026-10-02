@@ -156,6 +156,11 @@ class SetupContext:
             default_ttl_days = retention.resolve_state(
                 getattr(state, "gitcrud", None), state.settings
             ).effective
+            from dfe_engine.gitcrud.table_defaults import resolve as resolve_table_defaults
+
+            default_engine = resolve_table_defaults(
+                getattr(state, "gitcrud", None), state.settings
+            ).engine
         return cls(
             account_store=account_store,
             group_store=getattr(state, "group_store", None),

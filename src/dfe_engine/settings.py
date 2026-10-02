@@ -316,6 +316,10 @@ class ClickHouseSettings(BaseModel):
     # Retention every time-series table gets unless dfe-schemas or a source
     # declares its own; 0 disables the default.
     default_ttl_days: int = Field(default=90, ge=0)
+    # What an unauthored source header inherits. A deploy-repo override replaces
+    # these; the strings are SourceHeader's compiled-in default.
+    default_header_type: str = Field(default="timeseries")
+    default_header_version: str = Field(default="1.0.0")
     cloud: ClickHouseCloudSettings = Field(default_factory=ClickHouseCloudSettings)
     resilience: ClickHouseResilienceSettings = Field(default_factory=ClickHouseResilienceSettings)
 

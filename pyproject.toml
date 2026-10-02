@@ -267,6 +267,7 @@ convention = "google"
 "tests/**/*.py" = [
     "S101",
     "S106",  # test fixtures use hardcoded passwords
+    "S311",  # seeded RNGs in tests are not cryptographic
     "S108",  # /tmp and fixed paths in tests are intentional
     "S110",  # fixture teardown swallows errors from objects already gone
     "S608",  # tests build SQL against throwaway test databases

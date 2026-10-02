@@ -1203,7 +1203,11 @@ async def get_schema_columns(
 
     Use ``per_page=-1`` to return all columns in one page.
     """
-    from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
+    from dfe_engine.schema.schema_builder_v2 import (
+        SchemaBuildError,
+        SchemaBuilderV2,
+        inherited_builder_kwargs,
+    )
     from dfe_engine.schema.schema_loader import SchemaLoadError
     from dfe_engine.source.type_registry import TypeRegistry
 
@@ -1235,13 +1239,12 @@ async def get_schema_columns(
             },
         )
 
-    settings = get_settings()
+    settings = ttl_settings(request, get_settings())
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
         derived_base_dir=derived_reference_root(settings),
-        default_engine=settings.clickhouse.default_engine,
-        default_ttl_days=settings.clickhouse.default_ttl_days,
+        **inherited_builder_kwargs(settings),
     )
     try:
         columns = builder.load_columns_for_source_version(source, source_version=version_id)
@@ -1283,7 +1286,11 @@ def build_schema(
     Runs the v2 YAML -> DDL pipeline and returns the generated DDL
     without executing it against ClickHouse.
     """
-    from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
+    from dfe_engine.schema.schema_builder_v2 import (
+        SchemaBuildError,
+        SchemaBuilderV2,
+        inherited_builder_kwargs,
+    )
     from dfe_engine.schema.schema_loader import SchemaLoadError
     from dfe_engine.source.type_registry import TypeRegistry
 
@@ -1320,8 +1327,7 @@ def build_schema(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
         derived_base_dir=derived_reference_root(settings),
-        default_engine=settings.clickhouse.default_engine,
-        default_ttl_days=settings.clickhouse.default_ttl_days,
+        **inherited_builder_kwargs(settings),
     )
     try:
         result = builder.build_for_source_version(source, source_version=version_id)

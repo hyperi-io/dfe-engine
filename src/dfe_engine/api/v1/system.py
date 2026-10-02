@@ -7,14 +7,18 @@ GET /api/v1/system/status      -> Conditions that leave the engine degraded whil
 GET /api/v1/system/settings    -> Redacted settings summary
 GET /api/v1/system/retention   -> The effective default TTL and where it comes from
 PUT /api/v1/system/retention   -> Set or clear the admin's override, then apply it
+GET /api/v1/system/defaults    -> TTL, common header and merge engine a source inherits
+PATCH /api/v1/system/defaults  -> Change any of those; only ttl_days is applied live
+POST /api/v1/system/defaults/apply -> Pin those defaults onto the named sources
+GET /api/v1/system/defaults/drift  -> Those sources, searched and paginated
 """
 
 import sys
 from typing import Any, Literal
 
 from dfe_schemas import __version__ as schemas_version
-from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from scalo.logger import logger
 
 from dfe_engine import __version__
@@ -26,10 +30,12 @@ from dfe_engine.api.deps import (
     require_action,
 )
 from dfe_engine.api.errors import ErrorResponse
+from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import DeployTarget, appconfig, routing
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.git_identity import git_author
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud.retention import (
     MAX_DEFAULT_TTL_DAYS,
@@ -37,8 +43,17 @@ from dfe_engine.gitcrud.retention import (
     resolve_state,
     set_stored,
 )
+from dfe_engine.gitcrud.table_defaults import (
+    UNSET,
+    SourceDrift,
+    commit_patch,
+    pin_table_defaults,
+    source_default_drift,
+)
+from dfe_engine.gitcrud.table_defaults import resolve as resolve_defaults
 from dfe_engine.gitops.pins import UI_COMPONENT, component_overrides, load_pins, stack_version
 from dfe_engine.schema.retention import reconcile_default_ttl
+from dfe_engine.source.registry import SourceCoreResourceError, SourceNotFoundError
 from dfe_engine.yaml_health import write_health
 
 router = APIRouter(prefix="/system", tags=["System"])
@@ -589,6 +604,443 @@ def put_retention(
             sources_reconciled=outcome.sources_reconciled,
             sources_skipped=outcome.sources_skipped,
         ),
+    )
+
+
+# -- Table defaults -------------------------------------------
+
+
+class IntDefault(BaseModel):
+    """One integer default: the value in force, and where it came from."""
+
+    effective: int
+    stored: int | None = Field(description="The admin's override; null when none is stored.")
+    origin: Literal["override", "deployment"]
+    deployment_default: int
+
+
+class StrDefault(BaseModel):
+    """One string default: the value in force, and where it came from."""
+
+    effective: str
+    stored: str | None = Field(description="The admin's override; null when none is stored.")
+    origin: Literal["override", "deployment"]
+    deployment_default: str
+
+
+class SystemDefaults(BaseModel):
+    """What a source inherits when it leaves TTL, header or engine unset."""
+
+    ttl_days: IntDefault
+    common_header_type: StrDefault
+    common_header_version: StrDefault
+    engine: StrDefault = Field(description="MergeTree-family variant, without a topology prefix.")
+    editable: bool = Field(
+        description="Whether this deployment can store an override. False without gitops."
+    )
+
+
+class SystemDefaultsPatch(BaseModel):
+    """A partial change. Omitted fields stay as they are; null clears that override."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    ttl_days: int | None = Field(
+        default=None,
+        strict=True,
+        ge=0,
+        le=MAX_DEFAULT_TTL_DAYS,
+        description="Retention in days; 0 keeps rows forever. null clears the override.",
+    )
+    common_header_type: str | None = Field(
+        default=None,
+        description="Common-header profile name, such as timeseries or minimal. null clears it.",
+    )
+    common_header_version: str | None = Field(
+        default=None,
+        description="Common-header profile version. null clears it.",
+    )
+    engine: str | None = Field(
+        default=None,
+        description="MergeTree-family variant. null clears it, so the deployment engine applies.",
+    )
+
+    @field_validator("common_header_type", "common_header_version", "engine")
+    @classmethod
+    def _not_blank(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("must not be blank")
+        return stripped
+
+
+class SystemDefaultsUpdate(SystemDefaults):
+    """The defaults after the patch. reconcile is set only when ttl_days was named."""
+
+    reconcile: RetentionReconcileSummary | None = None
+
+
+def _system_defaults(request: Request, settings: Any) -> SystemDefaults:
+    gc = _optional_gitcrud(request)
+    ttl = resolve_state(gc, settings)
+    table = resolve_defaults(gc, settings)
+    return SystemDefaults(
+        ttl_days=IntDefault(
+            effective=ttl.effective,
+            stored=ttl.stored,
+            origin=ttl.origin,
+            deployment_default=ttl.deployment_default,
+        ),
+        common_header_type=StrDefault(
+            effective=table.header_type,
+            stored=table.header_type_stored,
+            origin=table.header_type_origin,
+            deployment_default=table.header_type_fallback,
+        ),
+        common_header_version=StrDefault(
+            effective=table.header_version,
+            stored=table.header_version_stored,
+            origin=table.header_version_origin,
+            deployment_default=table.header_version_fallback,
+        ),
+        engine=StrDefault(
+            effective=table.engine,
+            stored=table.engine_stored,
+            origin=table.engine_origin,
+            deployment_default=table.engine_fallback,
+        ),
+        editable=gc is not None,
+    )
+
+
+def _reconcile_summary(outcome: Any) -> RetentionReconcileSummary:
+    return RetentionReconcileSummary(
+        core_tables_altered=outcome.core_altered,
+        source_tables_altered=[
+            f"{t.database}.{t.table}" for t in outcome.report.tables if t.action == "altered"
+        ],
+        sources_reconciled=outcome.sources_reconciled,
+        sources_skipped=outcome.sources_skipped,
+    )
+
+
+@router.get(
+    "/defaults",
+    response_model=SystemDefaults,
+    dependencies=[Depends(require_action(scopes_dict["system_read"]))],
+)
+def get_defaults(user: CurrentUser, request: Request, settings: Settings) -> SystemDefaults:
+    """The TTL, common header and merge engine a source inherits when it sets none."""
+    return _system_defaults(request, settings)
+
+
+@router.patch(
+    "/defaults",
+    response_model=SystemDefaultsUpdate,
+    dependencies=[Depends(require_action(scopes_dict["system_write"])), WRITE_TURN],
+    responses={
+        422: {
+            "model": ErrorResponse,
+            "description": "validation_error: a named value cannot be stored",
+        },
+        502: {
+            "model": ErrorResponse,
+            "description": (
+                "reconcile_failed: ttl_days is stored, and applying it to ClickHouse failed; "
+                "sending the same value again applies it"
+            ),
+        },
+        503: {
+            "model": ErrorResponse,
+            "description": "not_configured: gitops is off, so there is nowhere to store the value",
+        },
+    },
+)
+def patch_defaults(
+    body: SystemDefaultsPatch,
+    user: CurrentUser,
+    request: Request,
+    settings: Settings,
+    sources: SourceReg,
+) -> SystemDefaultsUpdate:
+    """Store the named defaults. Only ttl_days is applied to live tables.
+
+    Omitted fields are left alone. null clears that override. Common-header type,
+    version and engine are what a source inherits the next time it is deployed;
+    this request does not rewrite them onto live tables. A patch that names
+    ttl_days stores it and then runs the same reconcile as PUT /retention.
+    """
+    gc = _gitcrud(request)
+    named = body.model_fields_set
+    try:
+        commit_patch(
+            gc,
+            actor=user.user_id,
+            settings=settings,
+            ttl_days=body.ttl_days if "ttl_days" in named else UNSET,
+            common_header_type=body.common_header_type if "common_header_type" in named else UNSET,
+            common_header_version=(
+                body.common_header_version if "common_header_version" in named else UNSET
+            ),
+            engine=body.engine if "engine" in named else UNSET,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+    if named:
+        audit_resource_change(
+            user.user_id,
+            "system",
+            "defaults",
+            "updated",
+            {key: getattr(body, key) for key in sorted(named)},
+        )
+    status = _system_defaults(request, settings)
+    logger.info(
+        "table defaults set via API",
+        actor=user.user_id,
+        fields=sorted(named),
+        ttl_days=status.ttl_days.effective,
+        common_header_type=status.common_header_type.effective,
+        engine=status.engine.effective,
+    )
+    reconcile = None
+    if "ttl_days" in named:
+        try:
+            outcome = reconcile_default_ttl(
+                get_clickhouse_client(settings),
+                settings=effective_settings(settings, gc),
+                sources=sources.get_all_sources(),
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "code": "reconcile_failed",
+                    "message": f"override stored; applying it to ClickHouse failed: {exc}",
+                },
+            ) from exc
+        if outcome.sources_skipped:
+            logger.warning(
+                "default TTL: sources left to their next deploy", count=outcome.sources_skipped
+            )
+        reconcile = _reconcile_summary(outcome)
+    return SystemDefaultsUpdate(**status.model_dump(), reconcile=reconcile)
+
+
+class ApplyDefaultsRequest(BaseModel):
+    """The sources to pin to the current table defaults."""
+
+    sources: list[str] = Field(min_length=1, description="Source names. Only these are written.")
+
+    @field_validator("sources")
+    @classmethod
+    def _names(cls, value: list[str]) -> list[str]:
+        names: list[str] = []
+        for name in value:
+            stripped = name.strip()
+            if not stripped:
+                raise ValueError("source id must not be blank")
+            if stripped not in names:
+                names.append(stripped)
+        return names
+
+
+class ApplyDefaultsResponse(BaseModel):
+    """Which named sources were pinned, and which already had these defaults."""
+
+    updated: list[str]
+    unchanged: list[str]
+
+
+@router.post(
+    "/defaults/apply",
+    response_model=ApplyDefaultsResponse,
+    dependencies=[Depends(require_action(scopes_dict["source_write"])), WRITE_TURN],
+    responses={
+        404: {"model": ErrorResponse, "description": "not_found: a named source does not exist"},
+        409: {
+            "model": ErrorResponse,
+            "description": "conflict: a named source is engine-owned and cannot be edited",
+        },
+    },
+)
+def apply_defaults(
+    body: ApplyDefaultsRequest,
+    user: CurrentUser,
+    request: Request,
+    settings: Settings,
+    registry: SourceReg,
+) -> ApplyDefaultsResponse:
+    """Pin the current TTL, common header and merge engine onto the named sources.
+
+    Sources that are not in the list are left alone. A source that already stores
+    these values is unchanged. Nothing is deployed: the next deploy of a source
+    is what brings its table to the pinned values. A missing or engine-owned
+    name fails the request before any source is written.
+    """
+    gc = _optional_gitcrud(request)
+    ttl = resolve_state(gc, settings)
+    table = resolve_defaults(gc, settings)
+    loaded: list[Any] = []
+    for name in body.sources:
+        try:
+            source = registry.get_source(name)
+        except SourceNotFoundError:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "not_found", "message": f"Source {name!r} not found"},
+            ) from None
+        if registry.is_core(name):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "conflict",
+                    "message": str(SourceCoreResourceError(action="modify", source=name)),
+                    "source": name,
+                },
+            ) from None
+        loaded.append(source)
+
+    updated: list[str] = []
+    unchanged: list[str] = []
+    author = git_author(user)
+    for source in loaded:
+        pinned = pin_table_defaults(
+            source,
+            header_type=table.header_type,
+            header_version=table.header_version,
+            ttl_days=ttl.effective,
+            engine=table.engine,
+        )
+        if pinned is None:
+            unchanged.append(source.source)
+            continue
+        registry.save_source(
+            pinned,
+            created_by=author,
+            description=f"source: apply table defaults to {source.source}",
+        )
+        audit_resource_change(
+            user.user_id,
+            "source",
+            source.source,
+            "updated",
+            {
+                "ttl_days": ttl.effective,
+                "common_header_type": table.header_type,
+                "common_header_version": table.header_version,
+                "engine": table.engine,
+            },
+        )
+        updated.append(source.source)
+    return ApplyDefaultsResponse(updated=updated, unchanged=unchanged)
+
+
+class DefaultComparison(BaseModel):
+    """A stored source value beside the default it is measured against."""
+
+    stored: str | int | None
+    default: str | int | None
+
+
+class SourceDefaultDrift(BaseModel):
+    """One source whose current version stores a value other than the default."""
+
+    source: str
+    core: bool
+    drifted: list[str]
+    ttl_days: DefaultComparison
+    common_header_type: DefaultComparison
+    common_header_version: DefaultComparison
+    engine: DefaultComparison
+
+
+def _drift_body(report: SourceDrift) -> SourceDefaultDrift:
+    def comparison(name: str) -> DefaultComparison:
+        field = getattr(report, name)
+        return DefaultComparison(stored=field.stored, default=field.default)
+
+    return SourceDefaultDrift(
+        source=report.source,
+        core=report.core,
+        drifted=list(report.drifted),
+        ttl_days=comparison("ttl_days"),
+        common_header_type=comparison("common_header_type"),
+        common_header_version=comparison("common_header_version"),
+        engine=comparison("engine"),
+    )
+
+
+def _drift_search_row(item: SourceDefaultDrift) -> dict[str, Any]:
+    stored = [
+        str(getattr(item, name).stored)
+        for name in item.drifted
+        if getattr(item, name).stored is not None
+    ]
+    return {
+        "item": item,
+        "source": item.source,
+        "drifted": " ".join(item.drifted),
+        "stored": " ".join(stored),
+    }
+
+
+@router.get(
+    "/defaults/drift",
+    response_model=PaginatedResponse[SourceDefaultDrift],
+    dependencies=[Depends(require_action(scopes_dict["system_read"]))],
+)
+def get_default_drift(
+    user: CurrentUser,
+    request: Request,
+    settings: Settings,
+    registry: SourceReg,
+    pagination: PaginationParams = Depends(),
+    search: str | None = Query(
+        None,
+        description="Search in source name, drifted field, and stored value",
+    ),
+) -> PaginatedResponse[SourceDefaultDrift]:
+    """Sources whose current version stores a header, TTL or engine other than the default.
+
+    A field the source leaves unset inherits the default on its next deploy, so
+    it is not drift. A stored value that already equals the default is not drift
+    either. ``core`` is true for an engine-owned source, which the apply endpoint
+    will refuse. The landing source is never listed. ``search`` matches the source
+    name, a drifted field name, or a stored value. ``per_page=-1`` returns every match.
+    """
+    gc = _optional_gitcrud(request)
+    ttl = resolve_state(gc, settings)
+    table = resolve_defaults(gc, settings)
+    landing = settings.clickhouse.landing_table
+    found: list[SourceDefaultDrift] = []
+    for source in registry.get_all_sources():
+        if source.source == landing:
+            continue
+        report = source_default_drift(
+            source,
+            header_type=table.header_type,
+            header_version=table.header_version,
+            ttl_days=ttl.effective,
+            engine=table.engine,
+        )
+        if report is not None:
+            found.append(_drift_body(report))
+    found.sort(key=lambda item: item.source)
+    rows = apply_search(
+        [_drift_search_row(item) for item in found],
+        search,
+        ["source", "drifted", "stored"],
+    )
+    return PaginatedResponse.from_list(
+        [row["item"] for row in rows],
+        pagination.page,
+        pagination.per_page,
     )
 
 

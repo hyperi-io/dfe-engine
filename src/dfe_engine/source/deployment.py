@@ -649,21 +649,20 @@ def run_source_build(
 ) -> SchemaBuildResult:
     """Build *source* at *version_id* under *settings*, or the process settings when None.
 
-    A caller that has resolved the effective default TTL passes its settings, so the
-    build carries the retention the deploy will apply.
+    A caller that has resolved the effective defaults passes its settings, so the
+    build carries the retention, header and engine the deploy will apply.
     """
     from dfe_engine.schema.derived_registry import derived_reference_root
+    from dfe_engine.schema.schema_builder_v2 import inherited_builder_kwargs
     from dfe_engine.settings import get_settings
 
     settings = get_settings() if settings is None else settings
-    ch = settings.clickhouse
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=schemas_base_dir or None,
         derived_base_dir=derived_reference_root(settings),
-        default_engine=ch.default_engine,
-        default_ttl_days=ch.default_ttl_days,
         resolver=resolver,
+        **inherited_builder_kwargs(settings),
     )
     return builder.build_for_source_version(source, source_version=version_id)
 

@@ -9708,6 +9708,323 @@
         ]
       }
     },
+    "/api/v1/system/defaults": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Get Defaults",
+        "description": "The TTL, common header and merge engine a source inherits when it sets none.",
+        "operationId": "get_defaults_api_v1_system_defaults_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemDefaults"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Patch Defaults",
+        "description": "Store the named defaults. Only ttl_days is applied to live tables.\n\nOmitted fields are left alone. null clears that override. Common-header type,\nversion and engine are what a source inherits the next time it is deployed;\nthis request does not rewrite them onto live tables. A patch that names\nttl_days stores it and then runs the same reconcile as PUT /retention.",
+        "operationId": "patch_defaults_api_v1_system_defaults_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SystemDefaultsPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemDefaultsUpdate"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a named value cannot be stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "reconcile_failed: ttl_days is stored, and applying it to ClickHouse failed; sending the same value again applies it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not_configured: gitops is off, so there is nowhere to store the value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/system/defaults/apply": {
+      "post": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Apply Defaults",
+        "description": "Pin the current TTL, common header and merge engine onto the named sources.\n\nSources that are not in the list are left alone. A source that already stores\nthese values is unchanged. Nothing is deployed: the next deploy of a source\nis what brings its table to the pinned values. A missing or engine-owned\nname fails the request before any source is written.",
+        "operationId": "apply_defaults_api_v1_system_defaults_apply_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyDefaultsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyDefaultsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: a named source does not exist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "conflict: a named source is engine-owned and cannot be edited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/system/defaults/drift": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Get Default Drift",
+        "description": "Sources whose current version stores a header, TTL or engine other than the default.\n\nA field the source leaves unset inherits the default on its next deploy, so\nit is not drift. A stored value that already equals the default is not drift\neither. ``core`` is true for an engine-owned source, which the apply endpoint\nwill refuse. The landing source is never listed. ``search`` matches the source\nname, a drifted field name, or a stored value. ``per_page=-1`` returns every match.",
+        "operationId": "get_default_drift_api_v1_system_defaults_drift_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search in source name, drifted field, and stored value",
+              "title": "Search"
+            },
+            "description": "Search in source name, drifted field, and stored value"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_SourceDefaultDrift_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/system/clickhouse-cloud": {
       "get": {
         "tags": [
@@ -24554,6 +24871,50 @@
         ],
         "title": "AppSummary"
       },
+      "ApplyDefaultsRequest": {
+        "properties": {
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Sources",
+            "description": "Source names. Only these are written."
+          }
+        },
+        "type": "object",
+        "required": [
+          "sources"
+        ],
+        "title": "ApplyDefaultsRequest",
+        "description": "The sources to pin to the current table defaults."
+      },
+      "ApplyDefaultsResponse": {
+        "properties": {
+          "updated": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Updated"
+          },
+          "unchanged": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unchanged"
+          }
+        },
+        "type": "object",
+        "required": [
+          "updated",
+          "unchanged"
+        ],
+        "title": "ApplyDefaultsResponse",
+        "description": "Which named sources were pinned, and which already had these defaults."
+      },
       "AppsReconcileResponse": {
         "properties": {
           "changes": {
@@ -26852,6 +27213,45 @@
         "type": "object",
         "title": "DeclaredValue",
         "description": "One value as the deploy repo declares it.\n\n``source`` names the overlay file it came from; a null source means the\ndeployment declared nothing and the chart or profile default applies. Those\ndefaults live in dfe-infra, which the engine does not read, so the API says\n\"not declared\" rather than guessing a number."
+      },
+      "DefaultComparison": {
+        "properties": {
+          "stored": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stored"
+          },
+          "default": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stored",
+          "default"
+        ],
+        "title": "DefaultComparison",
+        "description": "A stored source value beside the default it is measured against."
       },
       "DegradedCondition": {
         "properties": {
@@ -29371,6 +29771,47 @@
         ],
         "title": "InitialSetupState",
         "description": "The machine's verdict on where first-run setup stands."
+      },
+      "IntDefault": {
+        "properties": {
+          "effective": {
+            "type": "integer",
+            "title": "Effective"
+          },
+          "stored": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stored",
+            "description": "The admin's override; null when none is stored."
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "override",
+              "deployment"
+            ],
+            "title": "Origin"
+          },
+          "deployment_default": {
+            "type": "integer",
+            "title": "Deployment Default"
+          }
+        },
+        "type": "object",
+        "required": [
+          "effective",
+          "stored",
+          "origin",
+          "deployment_default"
+        ],
+        "title": "IntDefault",
+        "description": "One integer default: the value in force, and where it came from."
       },
       "InvokeRequest": {
         "properties": {
@@ -32394,6 +32835,72 @@
           "prev_page"
         ],
         "title": "PaginatedResponse[SigmaViewSummary]"
+      },
+      "PaginatedResponse_SourceDefaultDrift_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SourceDefaultDrift"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[SourceDefaultDrift]"
       },
       "PaginatedResponse_TableEngineObject_": {
         "properties": {
@@ -37277,6 +37784,49 @@
         "title": "SourceBundle",
         "description": "One source version: its routing, its schema and its transform.\n\nA section is present only when that source has it -- a source with no\ntransform carries no ``transform`` key rather than an empty one. A\n``resource_type: core`` source carries ``reference`` and nothing else: the\nengine reconciles it from the deployment's own settings, so a copy would be\nrefused on import anyway."
       },
+      "SourceDefaultDrift": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "core": {
+            "type": "boolean",
+            "title": "Core"
+          },
+          "drifted": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Drifted"
+          },
+          "ttl_days": {
+            "$ref": "#/components/schemas/DefaultComparison"
+          },
+          "common_header_type": {
+            "$ref": "#/components/schemas/DefaultComparison"
+          },
+          "common_header_version": {
+            "$ref": "#/components/schemas/DefaultComparison"
+          },
+          "engine": {
+            "$ref": "#/components/schemas/DefaultComparison"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "core",
+          "drifted",
+          "ttl_days",
+          "common_header_type",
+          "common_header_version",
+          "engine"
+        ],
+        "title": "SourceDefaultDrift",
+        "description": "One source whose current version stores a value other than the default."
+      },
       "SourceDetailResponse": {
         "properties": {
           "source": {
@@ -38919,6 +39469,47 @@
         ],
         "title": "StatusResponse"
       },
+      "StrDefault": {
+        "properties": {
+          "effective": {
+            "type": "string",
+            "title": "Effective"
+          },
+          "stored": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stored",
+            "description": "The admin's override; null when none is stored."
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "override",
+              "deployment"
+            ],
+            "title": "Origin"
+          },
+          "deployment_default": {
+            "type": "string",
+            "title": "Deployment Default"
+          }
+        },
+        "type": "object",
+        "required": [
+          "effective",
+          "stored",
+          "origin",
+          "deployment_default"
+        ],
+        "title": "StrDefault",
+        "description": "One string default: the value in force, and where it came from."
+      },
       "StreamRequest": {
         "properties": {
           "schema": {
@@ -39203,6 +39794,137 @@
         ],
         "title": "SyncReportModel",
         "description": "Counts from a provider sync into the catalogue."
+      },
+      "SystemDefaults": {
+        "properties": {
+          "ttl_days": {
+            "$ref": "#/components/schemas/IntDefault"
+          },
+          "common_header_type": {
+            "$ref": "#/components/schemas/StrDefault"
+          },
+          "common_header_version": {
+            "$ref": "#/components/schemas/StrDefault"
+          },
+          "engine": {
+            "$ref": "#/components/schemas/StrDefault",
+            "description": "MergeTree-family variant, without a topology prefix."
+          },
+          "editable": {
+            "type": "boolean",
+            "title": "Editable",
+            "description": "Whether this deployment can store an override. False without gitops."
+          }
+        },
+        "type": "object",
+        "required": [
+          "ttl_days",
+          "common_header_type",
+          "common_header_version",
+          "engine",
+          "editable"
+        ],
+        "title": "SystemDefaults",
+        "description": "What a source inherits when it leaves TTL, header or engine unset."
+      },
+      "SystemDefaultsPatch": {
+        "properties": {
+          "ttl_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 36500.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttl Days",
+            "description": "Retention in days; 0 keeps rows forever. null clears the override."
+          },
+          "common_header_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Common Header Type",
+            "description": "Common-header profile name, such as timeseries or minimal. null clears it."
+          },
+          "common_header_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Common Header Version",
+            "description": "Common-header profile version. null clears it."
+          },
+          "engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine",
+            "description": "MergeTree-family variant. null clears it, so the deployment engine applies."
+          }
+        },
+        "type": "object",
+        "title": "SystemDefaultsPatch",
+        "description": "A partial change. Omitted fields stay as they are; null clears that override."
+      },
+      "SystemDefaultsUpdate": {
+        "properties": {
+          "ttl_days": {
+            "$ref": "#/components/schemas/IntDefault"
+          },
+          "common_header_type": {
+            "$ref": "#/components/schemas/StrDefault"
+          },
+          "common_header_version": {
+            "$ref": "#/components/schemas/StrDefault"
+          },
+          "engine": {
+            "$ref": "#/components/schemas/StrDefault",
+            "description": "MergeTree-family variant, without a topology prefix."
+          },
+          "editable": {
+            "type": "boolean",
+            "title": "Editable",
+            "description": "Whether this deployment can store an override. False without gitops."
+          },
+          "reconcile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RetentionReconcileSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "ttl_days",
+          "common_header_type",
+          "common_header_version",
+          "engine",
+          "editable"
+        ],
+        "title": "SystemDefaultsUpdate",
+        "description": "The defaults after the patch. reconcile is set only when ttl_days was named."
       },
       "SystemStatusResponse": {
         "properties": {
