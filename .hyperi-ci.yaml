@@ -45,6 +45,8 @@ test:
         - "^Requires running HyperDX instance$"
         # The replica fan-out check needs an ON CLUSTER target; the harness is one node.
         - "^not an ON CLUSTER deployment"
+        # The sampler filter's function lists are checked against clickhouse-local, which the runner image does not carry.
+        - "^clickhouse-local is not on PATH$"
 
 quality:
   python:

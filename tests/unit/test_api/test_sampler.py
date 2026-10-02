@@ -95,6 +95,13 @@ def test_smart_mode_returns_pending_task(client, fake_ch, admin_headers):
         pytest.param("level = 'error'; DROP TABLE events", id="separator"),
         pytest.param("level = 'error' SETTINGS readonly = 0", id="settings"),
         pytest.param("('acme' AS _source) = 'acme'", id="alias"),
+        pytest.param("globalIn(_source, system.users)", id="globalIn"),
+        pytest.param("notIn(_source, system.users)", id="notIn"),
+        pytest.param("nullIn(_source, system.users)", id="nullIn"),
+        pytest.param("globalNotIn(_source, system.users)", id="globalNotIn"),
+        pytest.param("globalNullIn(_source, system.users)", id="globalNullIn"),
+        pytest.param("_source IN (system.users)", id="in-list-names-a-table"),
+        pytest.param("gcs('https://203.0.113.9/bucket/key') = 1", id="gcs"),
     ],
 )
 def test_a_filter_that_is_not_one_condition_is_refused_before_any_query(
