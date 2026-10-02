@@ -1,0 +1,11 @@
+name: sizing-locks
+description: >-
+  The sizing fields dfe-infra's resolver refuses to move without --migrate (the locked: section of its sizing/sizing.yaml), held here as protected vars wherever a chart key carries one. Holders of helmvars:override can still make a deliberate exception.
+protected:
+  # The partition count derives from these, and a keyed topic cannot be repartitioned without breaking hash(key) % partitions.
+  - "infravars:*:kafka.sizing.*"
+  # Combined to separate KRaft controllers re-forms the metadata quorum.
+  - "infravars:*:kafka.controllerPool.enabled"
+  # A deployment moved to another cloud is a new deployment.
+  - "infravars:*:cloud"
+  # storageModel is held by storage-layout.yaml, and the MSK broker type and AZ count are OpenTofu inputs with no chart key.

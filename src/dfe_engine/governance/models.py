@@ -196,7 +196,8 @@ class ProtectedPolicy(BaseModel):
     """Vars locked to default. Patterns match ``cls:name:path`` via fnmatch.
 
     e.g. ``helmvars:*:replicaCount`` or ``helmvars:receiver-default:config.kafka.*``.
-    A protected var can only be changed by a caller holding the override grant.
+    A protected var can only be changed by a caller holding the override grant, and
+    a write at its parent or below it counts as changing it.
     """
 
     name: str

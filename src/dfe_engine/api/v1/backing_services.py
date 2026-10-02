@@ -337,30 +337,36 @@ def _guard_member_count(request: Request, name: str, path: str, value: Any) -> N
     Compares the value the overlay stack declares BEFORE the write with what it
     would declare after, so writing into the shared file cannot be refused for a
     drop the per-chart file goes on to override anyway. Nothing declared means
-    nothing to compare against, and the write is accepted.
+    nothing to compare against, and the write is accepted. A write to a parent of
+    a count is compared on every count below it, since the map it writes replaces
+    them.
     """
     spec = _owner(path)
-    if spec is None:
+    if spec is None or name not in (_COMMON, spec.chart):
         return
     counts = {f"{spec.prefix}.{leaf}" for leaf in (spec.replicas, *spec.extra_member_counts)}
-    if path not in counts or name not in (_COMMON, spec.chart):
+    reached = sorted(c for c in counts if c == path or c.startswith(f"{path}."))
+    if not reached:
         return
 
-    before = _resolved(_docs(request, spec.chart), path)
-    if not _is_count(before):
-        return
-    after = _resolved(_stack_with(request, spec, name, path, value), path)
-    if _is_count(after) and after < before:
-        raise HTTPException(
-            400,
-            detail={
-                "code": "scale_down_refused",
-                "message": (
-                    f"{path} is up-only: {before} -> {after} would remove a member. "
-                    f"{spec.scale_down_reason}."
-                ),
-            },
-        )
+    current = _docs(request, spec.chart)
+    written = _stack_with(request, spec, name, path, value)
+    for count in reached:
+        before = _resolved(current, count)
+        if not _is_count(before):
+            continue
+        after = _resolved(written, count)
+        if _is_count(after) and after < before:
+            raise HTTPException(
+                400,
+                detail={
+                    "code": "scale_down_refused",
+                    "message": (
+                        f"{count} is up-only: {before} -> {after} would remove a member. "
+                        f"{spec.scale_down_reason}."
+                    ),
+                },
+            )
 
 
 @router.get("", dependencies=[Depends(require_action(scopes_dict["helmvars_read"]))])
