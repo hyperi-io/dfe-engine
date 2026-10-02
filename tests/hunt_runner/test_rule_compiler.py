@@ -203,6 +203,26 @@ def test_a_missing_rule_file_is_dropped_not_guessed(tmp_path: Path):
     assert "'present' AS rule_id" in sql[0]
 
 
+@pytest.mark.parametrize("escape", ["../outside", "ABSOLUTE"])
+def test_a_rule_name_that_leaves_the_rules_dir_compiles_nothing(tmp_path: Path, escape: str):
+    # A real rule file sits one level above the rules dir, so the old join would compile it.
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    _save_rule(tmp_path, rule_id="outside", name="Outside", where_clause="leaked = 1")
+    _save_rule(rules_dir, rule_id="present", name="Present", where_clause="a = 1")
+    name = str(tmp_path / "outside") if escape == "ABSOLUTE" else escape
+
+    statements = compile_hunt_queries(
+        {"rules": [name, "present"], "global_source_table_name": "dfe.main"},
+        "h",
+        rules_dir=rules_dir,
+        default_target="dfe.detection",
+    )
+
+    assert [statement.rule_id for statement in statements] == ["present"]
+    assert not any("leaked = 1" in statement.sql for statement in statements)
+
+
 def test_a_rule_with_no_detection_logic_is_dropped(tmp_path: Path):
     _save_rule(tmp_path, rule_id="empty", name="Empty", where_clause="")
     assert (
