@@ -10,7 +10,7 @@
 A policy lists `cls:name:path` glob patterns that are LOCKED. The generic engine's
 Tier-1 writes and Tier-2 actions consult ``is_protected`` before mutating; a
 protected var changes only when the caller holds the override grant (the router
-gates ``helmvars:override`` / ``governance:override``). This is the one thing that
+gates ``helmvars:override`` / ``library:override``). This is the one thing that
 reaches below a class - a policy object, not a per-var ACL.
 
 A write reaches every var on its own line of the tree. Setting or deleting a parent
@@ -20,8 +20,10 @@ path below it.
 """
 
 import builtins
+import fnmatch
+import functools
+import re
 from collections.abc import Iterable
-from fnmatch import fnmatchcase
 
 from dfe_engine.gitcrud import GitCrud, flatten
 
@@ -65,16 +67,23 @@ def _glob_units(glob: str) -> list[str]:
     return units
 
 
-def _matches_below(glob: str, path: str) -> bool:
-    """Whether ``glob`` matches some path strictly below ``path``.
+@functools.lru_cache(maxsize=1024)
+def _prefix_matcher(glob: str) -> re.Pattern[str]:
+    """One regex matching every prefix of a string ``glob`` matches.
 
     A string starting with a given prefix can match the glob exactly when that prefix
     matches the glob cut at some unit boundary: a ``*`` absorbs whatever follows it,
     and every other unit matches one character.
     """
     units = _glob_units(glob)
-    cuts = ["".join(units[:k]) for k in range(len(units) + 1)]
-    return any(fnmatchcase(path + sep, cut) for sep in _CHILD_SEPARATORS for cut in cuts)
+    cuts = ("".join(units[:k]) for k in range(len(units) + 1))
+    return re.compile("|".join(fnmatch.translate(cut) for cut in cuts))
+
+
+def _matches_below(glob: str, path: str) -> bool:
+    """Whether ``glob`` matches some path strictly below ``path``."""
+    matcher = _prefix_matcher(glob)
+    return any(matcher.match(path + sep) for sep in _CHILD_SEPARATORS)
 
 
 def _ancestors(path: str) -> list[str]:
@@ -84,7 +93,7 @@ def _ancestors(path: str) -> list[str]:
 
 def _reaches(pattern: str, cls: str, name: str, path: str) -> bool:
     """Whether a set or delete at ``cls:name:path`` changes a var ``pattern`` locks."""
-    if any(fnmatchcase(f"{cls}:{name}:{p}", pattern) for p in (path, *_ancestors(path))):
+    if any(fnmatch.fnmatchcase(f"{cls}:{name}:{p}", pattern) for p in (path, *_ancestors(path))):
         return True
     scope = pattern.split(":", 2)
     if len(scope) != 3:
@@ -92,8 +101,8 @@ def _reaches(pattern: str, cls: str, name: str, path: str) -> bool:
     # Matched per part, so a `*` in the name cannot run on into the path.
     cls_glob, name_glob, path_glob = scope
     return (
-        fnmatchcase(cls, cls_glob)
-        and fnmatchcase(name, name_glob)
+        fnmatch.fnmatchcase(cls, cls_glob)
+        and fnmatch.fnmatchcase(name, name_glob)
         and _matches_below(path_glob, path)
     )
 
