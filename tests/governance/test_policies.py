@@ -205,3 +205,59 @@ class TestWholeDocumentWrites:
     def test_override_reports_the_protected_write(self, shipped):
         before = {"kafka": {"sizing": {"peakMbS": 50}}}
         assert shipped.enforce_document("infravars", "kafka", before, {}, override=True) is True
+
+
+def _overlay(tag: object = "1.2.3", cpu: str = "1") -> dict:
+    """An app overlay carrying a baseline-locked image tag beside an unlocked dial."""
+    return {"image": {"tag": tag}, "resources": {"requests": {"cpu": cpu}}}
+
+
+class TestOnlyWhatTheWriteChanges:
+    """A whole-document write is gated on the leaves it adds, changes or removes, so a
+    locked leaf the document keeps as stored is not the write's doing."""
+
+    def test_a_kept_locked_leaf_needs_no_override(self, shipped):
+        assert shipped.enforce_document("helmvars", "r", _overlay(), _overlay(cpu="2")) is False
+
+    def test_changing_the_locked_leaf_is_refused(self, shipped):
+        with pytest.raises(ProtectedVarError) as exc:
+            shipped.enforce_document("helmvars", "r", _overlay(), _overlay(tag="1.2.4", cpu="2"))
+        assert (exc.value.path, exc.value.pattern) == ("image.tag", "helmvars:*:image.*")
+
+    def test_removing_the_locked_leaf_is_refused(self, shipped):
+        after = {"resources": {"requests": {"cpu": "1"}}}
+        with pytest.raises(ProtectedVarError) as exc:
+            shipped.enforce_document("helmvars", "r", _overlay(), after)
+        assert exc.value.path == "image.tag"
+
+    def test_an_equal_value_of_another_type_is_a_change(self, shipped):
+        """1 and True compare equal in Python and write differently to YAML."""
+        with pytest.raises(ProtectedVarError) as exc:
+            shipped.enforce_document("helmvars", "r", _overlay(tag=1), _overlay(tag=True))
+        assert exc.value.path == "image.tag"
+
+    def test_a_kept_document_needs_no_override(self, shipped):
+        assert shipped.enforce_document("helmvars", "r", _overlay(), _overlay()) is False
+
+    def test_a_kept_locked_parent_leaves_its_siblings_writable(self, shipped):
+        before = {"kafka": {"sizing": {"peakMbS": 50}, "replicas": 3}}
+        after = {"kafka": {"sizing": {"peakMbS": 50}, "replicas": 5}}
+        assert shipped.enforce_document("infravars", "kafka", before, after) is False
+
+    def test_a_changed_leaf_below_a_locked_scalar_is_refused(self, shipped):
+        """Setting below a scalar turns it into a map, which changes the scalar."""
+        before = {"cloud": "aws", "kafka": {"replicas": 3}}
+        after = {"cloud": {"provider": "aws"}, "kafka": {"replicas": 3}}
+        with pytest.raises(ProtectedVarError) as exc:
+            shipped.enforce_document("infravars", "kafka", before, after)
+        assert exc.value.pattern == "infravars:*:cloud"
+
+    def test_override_reports_only_a_locked_leaf_the_write_changes(self, shipped):
+        """The flag routes the write to review, so a kept lock must not raise it."""
+        kept = shipped.enforce_document(
+            "helmvars", "r", _overlay(), _overlay(cpu="2"), override=True
+        )
+        changed = shipped.enforce_document(
+            "helmvars", "r", _overlay(), _overlay(tag="1.2.4"), override=True
+        )
+        assert (kept, changed) == (False, True)
