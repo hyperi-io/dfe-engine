@@ -5,6 +5,7 @@ locked it, and that the lock is narrow enough to leave the rest of the same file
 writable. Everything runs against a real dulwich repo, no mocks.
 """
 
+import copy
 from importlib import resources
 
 import pytest
@@ -23,6 +24,11 @@ SHIPPED_POLICY = yaml_load_string(
     .read_text(encoding="utf-8")
 )
 STORAGE_LOCK: list[str] = SHIPPED_POLICY["protected"]
+SIZING_LOCK: list[str] = yaml_load_string(
+    resources.files("dfe_engine.governance.resources.policies")
+    .joinpath("sizing-locks.yaml")
+    .read_text(encoding="utf-8")
+)["protected"]
 
 
 def _wire_gitcrud(app, tmp_path):
@@ -444,6 +450,31 @@ class TestMemberCountsGoUpOnly:
         gc.put("infravars", "kafka", {"kafka": {"replicas": 5}}, "tester")
         assert self._set(client, admin_headers, "kafka", "kafka.replicas", 2).status_code == 400
 
+    @pytest.mark.parametrize(
+        ("name", "stored", "path", "value", "count"),
+        [
+            (
+                "clickhouse-cluster",
+                {"clickhouse": {"keeper": {"replicas": 3}}},
+                "clickhouse.keeper",
+                {"replicas": 1},
+                "clickhouse.keeper.replicas",
+            ),
+            ("kafka", {"kafka": {"replicas": 5}}, "kafka", {"replicas": 2}, "kafka.replicas"),
+        ],
+    )
+    def test_a_parent_map_cannot_lower_a_count_below_it(
+        self, client, app, admin_headers, tmp_path, name, stored, path, value, count
+    ):
+        """The map replaces the count it carries, so the guard compares that count."""
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", name, stored, "tester")
+        resp = self._set(client, admin_headers, name, path, value)
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "scale_down_refused"
+        assert count in resp.json()["message"]
+        assert gc.get("infravars", name) == stored
+
 
 class TestStorageModelIsDecidedAtDeploy:
     def test_storage_model_write_is_refused_with_the_policy(
@@ -609,3 +640,132 @@ class TestStorageModelIsDecidedAtDeploy:
         assert resp.status_code == 403
         assert resp.json()["code"] == "protected_var"
         assert gc.get("infravars", "kafka")["kafka"]["storageModel"] == "tiered-object"
+
+
+class TestALockHoldsAboveAndBelowTheLeaf:
+    """A set or revert at a parent replaces every leaf below it, and a set below a
+    scalar turns it into a map, so both are refused like the leaf itself."""
+
+    STORED = {"kafka": {"replicas": 3, "sizing": {"peakMbS": 50, "retentionHours": 24}}}
+
+    def _setup(self, client, app, admin_headers, tmp_path):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", "kafka", copy.deepcopy(self.STORED), "tester")
+        client.post(
+            "/api/v1/governance/admin/policies",
+            json={"name": "sizing-locks", "protected": SIZING_LOCK},
+            headers=admin_headers,
+        )
+        return gc
+
+    def test_the_locked_leaf_is_refused(self, client, app, api_settings, admin_headers, tmp_path):
+        gc = self._setup(client, app, admin_headers, tmp_path)
+        resp = client.put(
+            "/api/v1/backing-services/overlays/kafka/vars/kafka.sizing.peakMbS",
+            json={"value": 999},
+            headers=_writer(app, api_settings),
+        )
+        assert resp.status_code == 403, resp.text
+        assert gc.get("infravars", "kafka") == self.STORED
+
+    @pytest.mark.parametrize(
+        ("path", "value"),
+        [
+            ("kafka.sizing", {"peakMbS": 999, "retentionHours": 24}),
+            ("kafka.sizing", {}),
+            ("kafka", {"replicas": 3, "sizing": {"peakMbS": 999}}),
+            ("kafka", {"replicas": 3}),
+        ],
+    )
+    def test_a_map_written_at_a_parent_is_refused(
+        self, client, app, api_settings, admin_headers, tmp_path, path, value
+    ):
+        gc = self._setup(client, app, admin_headers, tmp_path)
+        resp = client.put(
+            f"/api/v1/backing-services/overlays/kafka/vars/{path}",
+            json={"value": value},
+            headers=_writer(app, api_settings),
+        )
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["code"] == "protected_var"
+        assert "infravars:*:kafka.sizing.*" in resp.json()["message"]
+        assert gc.get("infravars", "kafka") == self.STORED
+
+    @pytest.mark.parametrize("path", ["kafka.sizing", "kafka"])
+    def test_reverting_a_parent_is_refused(
+        self, client, app, api_settings, admin_headers, tmp_path, path
+    ):
+        gc = self._setup(client, app, admin_headers, tmp_path)
+        resp = client.delete(
+            f"/api/v1/backing-services/overlays/kafka/vars/{path}",
+            headers=_writer(app, api_settings),
+        )
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["code"] == "protected_var"
+        assert gc.get("infravars", "kafka") == self.STORED
+
+    def test_a_set_below_a_locked_scalar_is_refused(
+        self, client, app, api_settings, admin_headers, tmp_path
+    ):
+        gc = self._setup(client, app, admin_headers, tmp_path)
+        gc.put("infravars", "common", {"cloud": "aws"}, "tester")
+        resp = client.put(
+            "/api/v1/backing-services/overlays/common/vars/cloud.provider",
+            json={"value": "gcp"},
+            headers=_writer(app, api_settings),
+        )
+        assert resp.status_code == 403, resp.text
+        assert "infravars:*:cloud" in resp.json()["message"]
+        assert gc.get("infravars", "common") == {"cloud": "aws"}
+
+    def test_a_sibling_under_the_same_parent_still_writes(
+        self, client, app, api_settings, admin_headers, tmp_path
+    ):
+        gc = self._setup(client, app, admin_headers, tmp_path)
+        resp = client.put(
+            "/api/v1/backing-services/overlays/kafka/vars/kafka.replicas",
+            json={"value": 5},
+            headers=_writer(app, api_settings),
+        )
+        assert resp.status_code == 200, resp.text
+        doc = gc.get("infravars", "kafka")
+        assert doc["kafka"]["replicas"] == 5
+        assert doc["kafka"]["sizing"] == self.STORED["kafka"]["sizing"]
+
+    def test_the_override_grant_still_writes_the_parent(self, client, app, admin_headers, tmp_path):
+        gc = self._setup(client, app, admin_headers, tmp_path)
+        # admin holds '*' -> helmvars:override
+        resp = client.put(
+            "/api/v1/backing-services/overlays/kafka/vars/kafka.sizing",
+            json={"value": {"peakMbS": 999}},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert gc.get("infravars", "kafka")["kafka"]["sizing"] == {"peakMbS": 999}
+
+    def test_the_override_grant_still_reverts_the_parent(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = self._setup(client, app, admin_headers, tmp_path)
+        resp = client.delete(
+            "/api/v1/backing-services/overlays/kafka/vars/kafka.sizing",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert "sizing" not in gc.get("infravars", "kafka")["kafka"]
+
+    def test_the_vars_listing_marks_a_leaf_under_a_locked_scalar(
+        self, client, app, admin_headers, tmp_path
+    ):
+        """The read flag and the write refusal come from one matcher, so they agree."""
+        gc = self._setup(client, app, admin_headers, tmp_path)
+        gc.put(
+            "infravars", "common", {"cloud": {"provider": "aws"}, "networkModel": "open"}, "tester"
+        )
+        listed = client.get(
+            "/api/v1/backing-services/overlays/common/vars", headers=admin_headers
+        ).json()
+        assert {v["path"]: v["protected"] for v in listed} == {
+            "cloud.provider": True,
+            "networkModel": False,
+        }

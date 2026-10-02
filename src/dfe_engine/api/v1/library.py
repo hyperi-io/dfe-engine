@@ -52,7 +52,7 @@ from dfe_engine.gitcrud.commit_policy import (
     build_message,
     validate_name,
 )
-from dfe_engine.gitcrud.engine import ResourceNotFoundError, flatten
+from dfe_engine.gitcrud.engine import ResourceNotFoundError
 from dfe_engine.gitcrud.routing import ReviewRequiredError, route_write
 from dfe_engine.gitcrud.versioned import VersionConflictError
 from dfe_engine.governance import PolicyStore, ProtectedVarError
@@ -320,11 +320,13 @@ def _validate(request: Request, language: str, content: str) -> ValidationModel:
 
 
 def _enforce(request: Request, user: Any, name: str, doc: dict) -> bool:
-    """Gate every leaf of the finished document, and report whether any is protected.
+    """Gate every leaf the finished document carries or drops, and say if any is protected.
 
     The per-path helm-var checks are deliberately not applied here: they police
     image pinning and controller-owned replica counts, which are properties of a
-    deployment overlay and have no meaning in an artefact document.
+    deployment overlay and have no meaning in an artefact document. The stored
+    artefact is read too, because removing a locked key changes it as surely as
+    setting it.
     """
     policy = _policy(request)
     if policy is None:
@@ -332,15 +334,14 @@ def _enforce(request: Request, user: Any, name: str, doc: dict) -> bool:
     override = authorize(
         user, f"{_CLASS}:override", role_config=request.app.state.role_config
     ).allowed
-    protected = False
-    for path in flatten(doc):
-        if policy.is_protected(_CLASS, name, path):
-            protected = True
-        try:
-            policy.enforce(_CLASS, name, path, override=override)
-        except ProtectedVarError as exc:
-            raise HTTPException(403, detail={"code": "protected_var", "message": str(exc)}) from exc
-    return protected
+    try:
+        stored = _gitcrud(request).get(_CLASS, name)
+    except ResourceNotFoundError:
+        stored = {}
+    try:
+        return policy.enforce_document(_CLASS, name, stored, doc, override=override)
+    except ProtectedVarError as exc:
+        raise HTTPException(403, detail={"code": "protected_var", "message": str(exc)}) from exc
 
 
 def _fit_subject(name: str, summary: str) -> tuple[str, str]:
