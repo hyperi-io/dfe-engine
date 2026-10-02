@@ -145,6 +145,42 @@ def test_action_change_rejected_by_commit_validators(store, crud):
         store.invoke("bad-scale", actor="bob")
 
 
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        ("image", {"repository": "ghcr.io/x/y", "tag": "latest"}),
+        ("deploy", {"replicaCount": 3}),
+        ("app", {"containers": [{"image": "ghcr.io/x/y:latest"}]}),
+    ],
+)
+def test_a_map_change_cannot_carry_a_refused_leaf_even_with_the_override(store, crud, path, value):
+    """The override lifts protected paths; the value rules still read every leaf of the map."""
+    from dfe_engine.gitcrud.commit_policy import CommitPolicyError
+
+    crud.put(
+        _POLICY_CLASS,
+        "lockdown",
+        ProtectedPolicy(name="lockdown", protected=[f"helmvars:*:{path}"]).model_dump(),
+        actor="admin",
+    )
+    action = ActionDef(
+        name="reshape",
+        description="x",
+        required_action="action:invoke:reshape",
+        changes=[
+            VarChange(cls="helmvars", name="receiver-default", path="keda.maxReplicas", value=4),
+            VarChange(cls="helmvars", name="receiver-default", path=path, value=value),
+        ],
+    )
+    store.save(action, actor="admin")
+    with pytest.raises(CommitPolicyError):
+        store.invoke("reshape", actor="bob", policy=PolicyStore(crud), override=True)
+    from dfe_engine.gitcrud import ResourceNotFoundError
+
+    with pytest.raises(ResourceNotFoundError):
+        crud.get("helmvars", "receiver-default")
+
+
 def test_invoke_multi_file_is_atomic_one_commit(store, crud):
     # action touches TWO different files -> single commit, both applied
     action = ActionDef(

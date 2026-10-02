@@ -236,6 +236,26 @@ def test_safety_guard_steers_but_can_override(repo: Path):
     assert _head_message(repo).startswith("[BREAK-GLASS]")
 
 
+def test_safety_guard_reads_every_leaf_of_a_map_value(repo: Path):
+    result = _run(
+        repo,
+        [
+            "set",
+            "helmvars",
+            "receiver-default",
+            "image",
+            '{"tag": "latest"}',
+            "--reason",
+            "x",
+            "--no-push",
+        ],
+        input="n\n",  # decline "Override this safety guard?"
+    )
+    assert result.exit_code != 0
+    assert "safety: unpinned/floating image ref at image.tag" in result.output
+    assert _head_message(repo).startswith("seed:")  # nothing committed
+
+
 def test_safety_guard_decline_aborts(repo: Path):
     # No --yes: declining the safety override aborts before anything is committed.
     result = _run(

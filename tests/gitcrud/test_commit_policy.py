@@ -7,10 +7,11 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Commit-policy: message build, validation, change validation, mode resolution."""
 
-from __future__ import annotations
+import re
 
 import pytest
 
+from dfe_engine.gitcrud import flatten
 from dfe_engine.gitcrud.commit_policy import (
     CommitContext,
     CommitPolicyError,
@@ -171,6 +172,61 @@ def test_replicacount_stays_refused_without_an_explicit_keda_off(doc):
     # An unset flag is the chart default, which is not readable from here.
     with pytest.raises(CommitPolicyError):
         validate_change("replicaCount", 3, doc)
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "refused_at"),
+    [
+        ("image", {"tag": "latest"}, "image.tag"),
+        ("image", {"repository": "ghcr.io/x/y", "tag": ""}, "image.tag"),
+        ("sub", {"replicaCount": 3}, "sub.replicaCount"),
+        ("app", {"sidecar": {"image": {"tag": "latest"}}}, "app.sidecar.image.tag"),
+        ("app", {"sidecar": {"image": "ghcr.io/x/y:latest"}}, "app.sidecar.image"),
+        ("app", {"containers": [{"image": {"tag": "latest"}}]}, "app.containers[0].image.tag"),
+        ("app", [{"replicaCount": 2}], "app[0].replicaCount"),
+    ],
+)
+def test_a_map_value_is_refused_at_the_leaf_that_breaks_a_rule(path, value, refused_at):
+    # A map write replaces every leaf below it, so each leaf meets the rule it would alone.
+    with pytest.raises(CommitPolicyError, match=re.escape(refused_at)):
+        validate_change(path, value)
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        ("image", {"repository": "ghcr.io/x/y", "tag": "v1.2.3"}),
+        ("keda", {"minReplicas": 1, "maxReplicas": 4}),
+        ("resources", {"limits": {"cpu": "2"}, "requests": {"memory": "1Gi"}}),
+        ("image", {}),
+        ("args", []),
+    ],
+)
+def test_a_map_value_with_only_permitted_leaves_passes(path, value):
+    validate_change(path, value)  # no raise
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "doc"),
+    [
+        ("image", {"tag": "latest", "pullPolicy": "Always"}, None),
+        ("image", {"tag": "v2"}, None),
+        ("sub", {"replicaCount": 3, "other": 1}, None),
+        ("sub", {"replicaCount": 3}, {"keda": {"enabled": False}}),
+        ("sub", {"replicaCount": 3}, {"keda": {"enabled": True}}),
+        ("app", {"a": {"b": {"image": ""}}, "c": [1, {"tag": "x"}]}, None),
+    ],
+)
+def test_a_map_write_matches_its_leaves_written_one_at_a_time(path, value, doc):
+    def refused(p, v):
+        try:
+            validate_change(p, v, doc)
+        except CommitPolicyError:
+            return True
+        return False
+
+    one_at_a_time = any(refused(p, v) for p, v in flatten(value, path).items())
+    assert refused(path, value) is one_at_a_time
 
 
 def test_resolve_mode():
