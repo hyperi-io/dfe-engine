@@ -11,15 +11,271 @@ All reads select ``toString(_json)`` as the first (and only) column so the
 result is a list of raw event strings - the shape both the parsed-row path and
 logreducer want. ``target`` arrives already quoted by the service (e.g.
 ``\\`db\\`.\\`events\\```); it is interpolated, not bound, because ClickHouse
-cannot bind table names. ``filter`` is trusted SQL (the caller holds
-``sampler:read`` - same trust boundary as query authoring).
+cannot bind table names. ``filter`` must pass :func:`filter_predicate`, and what
+is interpolated is the predicate rendered from its parse tree, not the caller's
+text. Every read runs with :func:`read_settings`, so ClickHouse itself refuses
+writes, DDL and settings changes.
 """
 
-from __future__ import annotations
-
+import itertools
+import re
 from typing import Any
 
+from sqlglot import exp
+from sqlglot.dialects.dialect import Dialect
+from sqlglot.errors import SqlglotError
+from sqlglot.tokens import Token, TokenType
+
 from dfe_engine.clickhouse.quoting import column_reference
+
+_CLICKHOUSE = Dialect.get_or_raise("clickhouse")
+
+# ClickHouse 26.9.4 table functions, bar format and fuzzQuery, whose scalars read only their args.
+_TABLE_FUNCTIONS = frozenset(
+    {
+        "arrowflight",
+        "azureblobstorage",
+        "azureblobstoragecluster",
+        "bigquery",
+        "cluster",
+        "clusterallreplicas",
+        "cosn",
+        "deltalake",
+        "deltalakeazure",
+        "deltalakeazurecluster",
+        "deltalakecluster",
+        "deltalakelocal",
+        "deltalakes3",
+        "deltalakes3cluster",
+        "dictionary",
+        "eval",
+        "executable",
+        "file",
+        "filecluster",
+        "filesystem",
+        "fuzzjson",
+        "generate_series",
+        "generaterandom",
+        "generateseries",
+        "hdfs",
+        "hdfscluster",
+        "hive",
+        "hudi",
+        "hudicluster",
+        "iceberg",
+        "icebergazure",
+        "icebergazurecluster",
+        "icebergcluster",
+        "iceberghdfs",
+        "iceberghdfscluster",
+        "iceberglocal",
+        "iceberglocalcluster",
+        "icebergs3",
+        "icebergs3cluster",
+        "input",
+        "jdbc",
+        "loop",
+        "merge",
+        "mergetreeanalyzeindexes",
+        "mergetreeanalyzeindexesuuid",
+        "mergetreecodecblockcounts",
+        "mergetreeindex",
+        "mergetreeprojection",
+        "mergetreetextindex",
+        "mongodb",
+        "mysql",
+        "null",
+        "numbers",
+        "numbers_mt",
+        "odbc",
+        "oss",
+        "paimon",
+        "paimonazure",
+        "paimonazurecluster",
+        "paimoncluster",
+        "paimonhdfs",
+        "paimonhdfscluster",
+        "paimonlocal",
+        "paimons3",
+        "paimons3cluster",
+        "postgresql",
+        "primes",
+        "prometheusquery",
+        "prometheusqueryrange",
+        "redis",
+        "remote",
+        "remotesecure",
+        "s3",
+        "s3cluster",
+        "sqlite",
+        "sqlstandardvalues",
+        "timeseriesdata",
+        "timeseriesmetricfamilies",
+        "timeseriesmetrics",
+        "timeseriessamples",
+        "timeseriesselector",
+        "timeseriestags",
+        "url",
+        "urlcluster",
+        "values",
+        "view",
+        "viewexplain",
+        "viewifpermitted",
+        "ytsaurus",
+        "zeros",
+        "zeros_mt",
+    }
+)
+
+# Scalars that read a Join table or another table's schema; dictionary readers match by prefix.
+_OUTSIDE_READERS = frozenset({"hascolumnintable", "joinget", "joingetornull"})
+_DICTIONARY_READER_PREFIX = "dict"
+
+# Node types a predicate is built from: Conditions, and the parts sqlglot does not class as one.
+_PREDICATE_PARTS = (
+    exp.Condition,
+    exp.DataType,
+    exp.DataTypeParam,
+    exp.Identifier,
+    exp.Interval,
+    exp.JSONPath,
+    exp.JSONPathPart,
+    exp.Lambda,
+    exp.Tuple,
+    exp.Var,
+)
+
+# No real column name holds these, and sqlglot renders a backslash in a quoted name unescaped.
+_UNSAFE_NAME_CHARACTERS = frozenset('\\"`') | {chr(code) for code in range(0x20)} | {"\x7f"}
+
+# sqlglot renders a JSON path key inside single quotes without escaping either of these.
+_UNSAFE_PATH_CHARACTERS = frozenset("'\\")
+
+# Escapes ClickHouse 26.9.4 decodes in a string that sqlglot keeps as written, changing the value.
+_DIVERGENT_ESCAPES = frozenset({"e", "x", "N", '"', "/", "=", "`"})
+_ESCAPE = re.compile(r"\\(.)", re.DOTALL)
+
+
+def filter_predicate(filter_sql: str) -> str | None:
+    """Check a sampler filter is one condition over the sampled row, and render it.
+
+    The filter must parse in the ClickHouse dialect as a single expression that
+    reads only the sampled table's columns: no subquery or set operation, no
+    statement separator or ``SETTINGS``/``FORMAT`` clause, no alias, no query
+    parameter, no ``IN`` over a table or function, no table function, and no
+    function that reads a dictionary, a Join table or a file. The checks run on
+    the caller's text and again on the parse of the rendered text, and the
+    rendered text is what is returned, so the SQL that runs is the SQL that was
+    checked.
+
+    Args:
+        filter_sql: The caller's filter.
+
+    Returns:
+        The condition rendered from its parse tree, or None for a blank filter.
+
+    Raises:
+        ValueError: If the filter is not one such condition. The message says why.
+    """
+    if not filter_sql.strip():
+        return None
+    tokens, statements = _parse(filter_sql)
+    if any(token.token_type is TokenType.SEMICOLON for token in tokens):
+        raise ValueError("filter must be one condition; ';' separates statements")
+    if len(statements) != 1 or statements[0] is None:
+        raise ValueError("filter must be one condition")
+    _refuse_divergent_escapes(filter_sql, tokens)
+    _refuse_nodes(statements[0])
+
+    rendered = statements[0].sql(dialect=_CLICKHOUSE, comments=False)
+    tokens, reread = _parse(rendered)
+    tree = reread[0] if len(reread) == 1 else None
+    if tree is None or tree.sql(dialect=_CLICKHOUSE, comments=False) != rendered:
+        raise ValueError("filter does not read back as the same condition once rendered")
+    _refuse_nodes(tree)
+    for name, following in itertools.pairwise(tokens):
+        if following.token_type is TokenType.L_PAREN and _reads_outside_the_row(name.text):
+            raise ValueError(f"filter may not call {name.text}(), which reads outside the table")
+    return rendered
+
+
+def _parse(sql: str) -> tuple[list[Token], list[exp.Expr | None]]:
+    """Tokenize and parse ``sql`` as ClickHouse, turning a parse failure into ValueError."""
+    try:
+        tokens = _CLICKHOUSE.tokenize(sql)
+        statements = _CLICKHOUSE.parser().parse(tokens, sql)
+    except SqlglotError as exc:
+        detail = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+        raise ValueError(f"filter is not a ClickHouse condition: {detail}") from exc
+    # sqlglot raises AttributeError and RecursionError on some input it cannot parse.
+    except Exception as exc:
+        raise ValueError("filter is not a ClickHouse condition sqlglot can parse") from exc
+    return tokens, statements
+
+
+def _refuse_divergent_escapes(sql: str, tokens: list[Token]) -> None:
+    """Raise ValueError for a string escape whose rendering would change its value."""
+    for token in tokens:
+        if token.token_type is not TokenType.STRING:
+            continue
+        for match in _ESCAPE.finditer(sql, token.start, token.end + 1):
+            if match.group(1) in _DIVERGENT_ESCAPES:
+                raise ValueError(
+                    f"filter may not use the escape \\{match.group(1)} in a string; "
+                    "write the character itself"
+                )
+
+
+def _refuse_nodes(tree: exp.Expr) -> None:
+    """Raise ValueError naming the first node in ``tree`` a sampler filter may not hold."""
+    for node in tree.walk():
+        refusal = _refusal(node)
+        if refusal is not None:
+            raise ValueError(refusal)
+
+
+def _refusal(node: exp.Expr) -> str | None:
+    """Why ``node`` may not appear in a sampler filter, or None when it may."""
+    if isinstance(node, exp.Query):
+        return "filter may not contain a subquery or set operation"
+    if isinstance(node, exp.Alias):
+        return (
+            "filter may not contain an alias (AS), which can rename a column the read is bound on"
+        )
+    if isinstance(node, exp.In) and any(node.args.get(arg) for arg in ("query", "field", "unnest")):
+        return "IN in a filter must list its values, not name a table or function"
+    if isinstance(node, (exp.Placeholder, exp.Parameter)):
+        return "filter may not contain query parameters"
+    if isinstance(node, exp.Identifier) and _UNSAFE_NAME_CHARACTERS.intersection(node.name):
+        return f"column name {node.name!r} may not contain a backslash, quote or control character"
+    if isinstance(node, exp.JSONPathPart) and any(
+        isinstance(value, str) and _UNSAFE_PATH_CHARACTERS.intersection(value)
+        for value in node.args.values()
+    ):
+        return "a JSON path in a filter may not contain a quote or backslash"
+    if not isinstance(node, _PREDICATE_PARTS):
+        return f"filter may not contain {node.key.upper()}"
+    return None
+
+
+def _reads_outside_the_row(function_name: str) -> bool:
+    """Whether a call by this name reads a table, file, dictionary or Join table."""
+    name = function_name.lower()
+    return (
+        name in _TABLE_FUNCTIONS
+        or name in _OUTSIDE_READERS
+        or name.startswith(_DICTIONARY_READER_PREFIX)
+    )
+
+
+def read_settings(max_execution_time: int) -> dict[str, int]:
+    """Settings for every sampler read: bounded in time, and read-only.
+
+    The engine's ClickHouse user may write, so ``readonly=1`` makes ClickHouse
+    refuse writes, DDL, reads through ``url()`` and any ``SETTINGS`` clause, as
+    the raw-query adapter does.
+    """
+    return {"max_execution_time": max_execution_time, "readonly": 1}
 
 
 def _raw_client(ch: Any) -> Any:
@@ -43,7 +299,11 @@ def build_where(
 
     ``source_label`` filters the shared landing table by ``_source``; leave it
     None when sampling a per-source table (already scoped). Time bounds bind
-    server-side; ``filter_sql`` is trusted and interpolated verbatim.
+    server-side. ``filter_sql`` goes through :func:`filter_predicate`, and only
+    the condition it renders is interpolated.
+
+    Raises:
+        ValueError: If ``filter_sql`` is not one condition over the sampled row.
     """
     clauses: list[str] = []
     params: dict[str, Any] = {}
@@ -57,8 +317,9 @@ def build_where(
     if until:
         clauses.append(f"{timestamp} <= {{until:DateTime64(3)}}")
         params["until"] = until
-    if filter_sql:
-        clauses.append(f"({filter_sql})")
+    predicate = filter_predicate(filter_sql) if filter_sql else None
+    if predicate:
+        clauses.append(f"({predicate})")
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     return where, params
 
@@ -75,7 +336,7 @@ def read_recent(
 ) -> list[str]:
     """Newest ``limit`` ``_json`` rows, ordered by ``timestamp_field`` DESC."""
     sql = (
-        f"SELECT toString(_json) FROM {target} {where} "  # noqa: S608 - quoted target; filter is the caller's trusted predicate
+        f"SELECT toString(_json) FROM {target} {where} "  # noqa: S608 - quoted target; filter rendered by filter_predicate
         f"ORDER BY {column_reference(timestamp_field)} DESC LIMIT {{lim:UInt64}}"
     )
     return _run(ch, sql, {**params, "lim": limit}, max_execution_time)
@@ -99,7 +360,7 @@ def read_random(
     time window.
     """
     rand = f"rand({seed})" if seed is not None else "rand()"
-    sql = f"SELECT toString(_json) FROM {target} {where} ORDER BY {rand} LIMIT {{lim:UInt64}}"  # noqa: S608 - quoted target; filter is the caller's trusted predicate
+    sql = f"SELECT toString(_json) FROM {target} {where} ORDER BY {rand} LIMIT {{lim:UInt64}}"  # noqa: S608 - quoted target; filter rendered by filter_predicate
     return _run(ch, sql, {**params, "lim": limit}, max_execution_time)
 
 
@@ -117,7 +378,7 @@ def scan_query(
     ``LIMIT`` would return different rows per pass.
     """
     return (
-        f"SELECT toString(_json) FROM {target} {where} "  # noqa: S608 - quoted target; filter is the caller's trusted predicate
+        f"SELECT toString(_json) FROM {target} {where} "  # noqa: S608 - quoted target; filter rendered by filter_predicate
         f"ORDER BY cityHash64(toString(_json)) LIMIT {int(scan_rows)}"
     )
 
@@ -126,6 +387,6 @@ def _run(ch: Any, sql: str, params: dict[str, Any], max_execution_time: int) -> 
     result = ch.query(
         sql,
         parameters=params,
-        settings={"max_execution_time": max_execution_time},
+        settings=read_settings(max_execution_time),
     )
     return [r[0] for r in result.result_rows if r[0]]

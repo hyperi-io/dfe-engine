@@ -14,12 +14,12 @@ plug-in / logreducer eat) and parsed ``rows`` + discovered ``keys`` (what the
 UI charts and downstream APIs want).
 """
 
-from __future__ import annotations
-
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from .clickhouse_reader import filter_predicate
 
 
 class SampleMode(str, Enum):
@@ -55,9 +55,10 @@ class SampleRequest(BaseModel):
 
     Provide EITHER a registered ``source`` (its CH table / land topic are
     resolved for you) OR an explicit ``table``/``topic`` (ad-hoc - for a source
-    that is not registered yet, e.g. AI onboarding). ``filter`` is a trusted SQL
-    predicate (ClickHouse backend only), consistent with the query-authoring
-    surface - callers already hold the sampler scope.
+    that is not registered yet, e.g. AI onboarding). ``filter`` (ClickHouse
+    backend only) must be one condition over the sampled table's columns; it is
+    replaced by the condition rendered from its parse tree, and anything else is
+    refused when the request is built.
     """
 
     mode: SampleMode = SampleMode.SMART
@@ -73,7 +74,12 @@ class SampleRequest(BaseModel):
         default=None, description="Explicit Kafka topic (overrides source's land topic)"
     )
     filter: str | None = Field(
-        default=None, description="Trusted SQL WHERE predicate (ClickHouse backend only)"
+        default=None,
+        description=(
+            "One ClickHouse condition over the sampled table's columns (ClickHouse backend "
+            "only). No subquery, alias, query parameter, table function, or dictionary, "
+            "Join table or file read."
+        ),
     )
     since: str | None = Field(
         default=None, description="Lower time bound (ISO 8601) on the timestamp column"
@@ -90,6 +96,12 @@ class SampleRequest(BaseModel):
         ge=0,
         description="Seconds to block for inline completion before returning pending",
     )
+
+    @field_validator("filter")
+    @classmethod
+    def _one_condition(cls, value: str | None) -> str | None:
+        """Refuse a filter that is not one condition over the row, and keep its rendering."""
+        return None if value is None else filter_predicate(value)
 
 
 class SampleResult(BaseModel):

@@ -12,11 +12,10 @@ Fast modes (recent/random) run against a fake ClickHouse client. Gated modes
 installed in this env, which is exactly the pre-PyPI state we ship for.
 """
 
-from __future__ import annotations
-
 import asyncio
 
 import pytest
+from pydantic import ValidationError
 
 from dfe_engine.sampling import (
     SampleBackend,
@@ -25,6 +24,7 @@ from dfe_engine.sampling import (
     SampleRequest,
     SamplerError,
 )
+from dfe_engine.sampling.clickhouse_reader import build_where
 from dfe_engine.sampling.service import _reservoir
 from dfe_engine.settings import ClickHouseSettings, KafkaSettings, SamplerSettings
 from dfe_engine.source.registry import SourceNotFoundError
@@ -107,6 +107,109 @@ def test_filter_and_source_label_go_into_where():
     assert "_source = {src:String}" in sql
     assert params["src"] == "filebeat"
     assert "(status = 500)" in sql
+
+
+@pytest.mark.parametrize("mode", [SampleMode.RECENT, SampleMode.RANDOM])
+def test_every_clickhouse_read_is_read_only(mode):
+    ch = FakeCH([])
+    _run(SampleRequest(mode=mode, table="`db`.`events`"), ch, None)
+    [(_, _, settings)] = ch.calls
+    assert settings == {"max_execution_time": SamplerSettings().max_execution_time, "readonly": 1}
+
+
+# ── filter: one condition over the sampled row ─────────────────
+
+REFUSED_FILTERS = {
+    "unbalanced paren escapes the _source fence": "1) OR (1",
+    "union reaches another table": "1) UNION ALL SELECT name FROM system.users WHERE (1",
+    "union inside IN": "_source IN (SELECT 'a' UNION ALL SELECT 'b')",
+    "scalar subquery": "(SELECT count() FROM dfe.engine_state) > 0",
+    "subquery after IN": "_org_id IN (SELECT _org_id FROM dfe.events)",
+    "exists": "EXISTS (SELECT 1)",
+    "table after IN": "_source IN dfe.engine_state",
+    "table function after IN": "x IN url('http://203.0.113.9/', 'LineAsString')",
+    "url table function": "url('http://203.0.113.9/', 'LineAsString') = 1",
+    "file table function": "file('secrets.txt') LIKE '%a%'",
+    "remote table function": "remote('203.0.113.9', system.users) = 1",
+    "dictionary read": "dictGet('tenants', 'name', toUInt64(1)) = 'acme'",
+    "join table read": "joinGet('j', 'v', 1) = 'x'",
+    "statement separator": "level = 'error'; DROP TABLE events",
+    "trailing statement separator": "level = 'error';",
+    "settings clause": "level = 'error' SETTINGS readonly = 0",
+    "format clause": "level = 'error' FORMAT JSON",
+    "alias renames the fenced column": "('acme' AS _source) = 'acme'",
+    "query parameter": "_source = {src:String}",
+    "set statement": "SET readonly = 0",
+    "backslash in a column name": "`x\\\\` = 1 OR `) OR 1=1 OR (` = 1",
+    "quote in a json path": (
+        "JSONExtractString(toString(_json), 'a'') OR (1 = 1) OR JSONExtractString("
+        "toString(_json), ''b') = 'q'"
+    ),
+    "escape the renderer would change": "msg = '\\x41'",
+}
+
+
+@pytest.mark.parametrize("filter_sql", list(REFUSED_FILTERS.values()), ids=list(REFUSED_FILTERS))
+def test_a_filter_that_is_not_one_condition_is_refused(filter_sql):
+    with pytest.raises(ValidationError) as caught:
+        SampleRequest(mode=SampleMode.RECENT, table="`db`.`events`", filter=filter_sql)
+    assert [error["loc"] for error in caught.value.errors()] == [("filter",)]
+
+
+@pytest.mark.parametrize("filter_sql", list(REFUSED_FILTERS.values()), ids=list(REFUSED_FILTERS))
+def test_the_where_builder_refuses_it_too(filter_sql):
+    with pytest.raises(ValueError, match=r"filter|column name"):
+        build_where(
+            source_label="acme",
+            filter_sql=filter_sql,
+            since=None,
+            until=None,
+            timestamp_field="timestamp_load",
+        )
+
+
+def test_a_filter_that_skipped_request_validation_runs_no_query():
+    ch = FakeCH(['{"a": 1}'])
+    req = SampleRequest.model_construct(
+        mode=SampleMode.RECENT, table="`db`.landing", source="acme", filter="1) OR (1"
+    )
+    with pytest.raises(ValueError, match="not a ClickHouse condition"):
+        _run(req, ch, None)
+    assert ch.calls == []
+
+
+@pytest.mark.parametrize(
+    ("filter_sql", "rendered"),
+    [
+        ("level = 'error' AND host LIKE 'web%'", "level = 'error' AND host LIKE 'web%'"),
+        ("status != 500", "status <> 500"),
+        ("level = 'error' /* why */", "level = 'error'"),
+        ("level = 'error' -- why", "level = 'error'"),
+        ("_json.level = 'error'", "_json.level = 'error'"),
+        ("status IN (500, 503)", "status IN (500, 503)"),
+        ("arrayExists(t -> t = 'a', tags)", "arrayExists(t -> t = 'a', tags)"),
+        ("match(msg, '\\\\d+')", "match(msg, '\\\\d+')"),
+        ("msg = 'a\\'b'", "msg = 'a''b'"),
+        ("   ", None),
+    ],
+)
+def test_a_condition_is_kept_as_rendered_from_its_parse(filter_sql, rendered):
+    req = SampleRequest(mode=SampleMode.RECENT, table="`db`.`events`", filter=filter_sql)
+    assert req.filter == rendered
+
+
+def test_the_rendered_condition_is_what_reaches_the_query():
+    ch = FakeCH([])
+    req = SampleRequest(
+        mode=SampleMode.RECENT,
+        table="`db`.landing",
+        source="filebeat",
+        filter="level = 'error' AND host != 'db1' -- the LIMIT must survive this",
+    )
+    _run(req, ch, None)
+    sql, _, _ = ch.calls[0]
+    assert "WHERE _source = {src:String} AND (level = 'error' AND host <> 'db1') ORDER BY" in sql
+    assert sql.endswith("LIMIT {lim:UInt64}")
 
 
 # ── target resolution ──────────────────────────────────────────
