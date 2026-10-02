@@ -113,10 +113,7 @@ We honour it via the RBAC + protected-var policy, not by blocking the engine:
 
 ## 7. Self-heal safety (avoid reconciliation loops)
 
-- Do NOT write fields owned by in-cluster controllers under self-heal. KEDA owns
-  `replicas` -> "scale" sets `keda.min/maxReplicas`, NOT `replicaCount`; declare
-  `ignoreDifferences` for any genuinely-dynamic field. Build the exclusion list
-  BEFORE enabling self-heal, not after.
+- Do NOT write fields owned by in-cluster controllers under self-heal. KEDA owns `replicas` -> "scale" sets `keda.minReplicaCount`/`keda.maxReplicaCount`, NOT `replicaCount`; declare `ignoreDifferences` for any genuinely-dynamic field. Build the exclusion list BEFORE enabling self-heal, not after.
 - The exception is a document that explicitly sets `keda.enabled: false`. Nothing
   owns the count there, and `replicaCount` is the only way to set it, so
   `validate_change` accepts it in that document alone. An unset flag is the chart

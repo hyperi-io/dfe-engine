@@ -28,6 +28,7 @@ from dfe_engine.cli.auto.local import local_group
 from dfe_engine.settings import reset_settings
 
 _HELM = "keda:\n  minReplicas: 1\n  maxReplicas: 5\nother: keep\n"
+_HELM_KEDA_DISABLED = "keda:\n  enabled: false\n  minReplicaCount: 1\n  maxReplicaCount: 5\nreplicaCount: 3\nother: keep\n"
 _TIER = (
     "current: 2\n"
     "deployed: null\n"
@@ -78,6 +79,28 @@ def repo(tmp_path: Path) -> Path:
         str(tmp_path),
         paths=[str(values / "receiver-default.yaml"), str(tiers / "gold.yaml")],
     )
+    porcelain.commit(
+        str(tmp_path),
+        message=b"seed: fixtures",
+        author=b"seed <seed@example.com>",
+        committer=b"seed <seed@example.com>",
+    )
+    return tmp_path
+
+
+@pytest.fixture
+def repo_keda_disabled(tmp_path: Path) -> Path:
+    """A gitops clone whose stored doc already disables KEDA with replicaCount set.
+
+    This document is valid under the KEDA rule (keda.enabled: false hands the
+    replica count back to the deployment), so it is the shape needed to prove a
+    write to an unrelated path is checked against the document it leaves behind.
+    """
+    porcelain.init(str(tmp_path))
+    values = tmp_path / "values"
+    values.mkdir()
+    (values / "receiver-default.yaml").write_text(_HELM_KEDA_DISABLED)
+    porcelain.add(str(tmp_path), paths=[str(values / "receiver-default.yaml")])
     porcelain.commit(
         str(tmp_path),
         message=b"seed: fixtures",
@@ -265,6 +288,28 @@ def test_safety_guard_decline_aborts(repo: Path):
     )
     assert result.exit_code != 0
     assert _head_message(repo).startswith("seed:")  # nothing committed
+
+
+def test_safety_guard_checks_the_resulting_document(repo_keda_disabled: Path):
+    # Stored doc already disables KEDA with replicaCount set (valid). Re-enabling
+    # keda.enabled names no refused leaf on its own path -- only the resulting doc does.
+    result = _run(
+        repo_keda_disabled,
+        [
+            "set",
+            "helmvars",
+            "receiver-default",
+            "keda.enabled",
+            "true",
+            "--reason",
+            "re-enable autoscaling",
+            "--yes",
+            "--no-push",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "safety:" in result.output
+    assert "replicaCount" in result.output
 
 
 def test_log_flags_break_glass(repo: Path):
