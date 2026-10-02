@@ -35457,7 +35457,7 @@
               }
             ],
             "title": "Filter",
-            "description": "Trusted SQL WHERE predicate (ClickHouse backend only)"
+            "description": "One ClickHouse condition over the sampled table's columns (ClickHouse backend only). No subquery, alias, query parameter, table function, or dictionary, Join table or file read."
           },
           "since": {
             "anyOf": [
@@ -35523,7 +35523,7 @@
         },
         "type": "object",
         "title": "SampleRequest",
-        "description": "A request to sample a source.\n\nProvide EITHER a registered ``source`` (its CH table / land topic are\nresolved for you) OR an explicit ``table``/``topic`` (ad-hoc - for a source\nthat is not registered yet, e.g. AI onboarding). ``filter`` is a trusted SQL\npredicate (ClickHouse backend only), consistent with the query-authoring\nsurface - callers already hold the sampler scope."
+        "description": "A request to sample a source.\n\nProvide EITHER a registered ``source`` (its CH table / land topic are\nresolved for you) OR an explicit ``table``/``topic`` (ad-hoc - for a source\nthat is not registered yet, e.g. AI onboarding). ``filter`` (ClickHouse\nbackend only) must be one condition over the sampled table's columns; it is\nreplaced by the condition rendered from its parse tree, and anything else is\nrefused when the request is built."
       },
       "SampleResult": {
         "properties": {
