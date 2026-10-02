@@ -58,7 +58,7 @@ from dfe_engine.gitcrud.commit_policy import (
     CommitPolicyError,
     build_message,
     type_for_class,
-    validate_change,
+    validate_write,
 )
 from dfe_engine.gitcrud.log import read_log
 from dfe_engine.gitops.dulwich_auth import authed_https_url
@@ -190,22 +190,23 @@ def _guard(*, repo_path: Path, diff_text: str, yes: bool) -> None:
         raise click.Abort()
 
 
-def _safety_warn(path: str, value: object, *, yes: bool) -> None:
-    """Reuse the API's value-safety validator (``validate_change``) as an
+def _safety_warn(stored: dict, path: str, value: object, *, yes: bool) -> None:
+    """Reuse the API's value-safety validator (``validate_write``) as an
     OVERRIDABLE warning, NOT a block.
 
     Break-glass can override anything - RBAC is dead and git access is the
-    authority - so this is not the API's hard 403. But it runs the SAME
-    value-safety check the daemon's helm endpoint runs, so a stressed operator
-    who does not know the helm complexity gets the steer the API would give
-    (e.g. an unpinned/floating image ref, or a KEDA-managed key) BEFORE they
-    commit a change that would not work or would re-break the daemon. This is
-    the safety half of the API guard; the RBAC half (protected-var needs the
-    ``helmvars:override`` grant) is deliberately dropped. ``--yes`` proceeds
-    without asking.
+    authority - so this is not the API's hard 403. But it checks the SAME
+    resulting document the daemon's helm endpoint checks
+    (``api/v1/helm.py set_var_governed``), so a stressed operator who does not
+    know the helm complexity gets the steer the API would give (e.g. an
+    unpinned/floating image ref, or re-enabling KEDA over a stored
+    replicaCount) BEFORE they commit a change that would not work or would
+    re-break the daemon. This is the safety half of the API guard; the RBAC
+    half (protected-var needs the ``helmvars:override`` grant) is deliberately
+    dropped. ``--yes`` proceeds without asking.
     """
     try:
-        validate_change(path, value)
+        validate_write(stored, path, value)
     except CommitPolicyError as exc:
         click.echo(f"safety: {exc}", err=True)
         click.echo("  (the daemon's API would reject this; break-glass can override it)", err=True)
@@ -356,7 +357,7 @@ def local_group() -> None:
     API uses; every write is marked [BREAK-GLASS] and needs a --reason. Headline
     case - a rogue pod:
 
-        dfe local set helmvars receiver-default keda.maxReplicas 0 --reason "rogue pod"
+        dfe local set helmvars receiver-default keda.maxReplicaCount 0 --reason "rogue pod"
 
     Read first (classes/ls/get/log/versions/status), fix (set/unset/rm/revert/
     restore), then publish (push). Authority here is git access to the clone, not
@@ -394,7 +395,7 @@ def ls_cmd(cls: str, repo: str | None) -> None:
 @_repo_option
 @_friendly
 def grep_cmd(term: str, repo: str | None) -> None:
-    """Search the gitops repo's YAML for TERM, e.g. find every keda.maxReplicas dial."""
+    """Search the gitops repo's YAML for TERM, e.g. find every keda.maxReplicaCount dial."""
     root = Path(_resolve_repo_path(repo))
     hits = 0
     for pattern in ("*.yaml", "*.yml"):
@@ -412,11 +413,11 @@ def grep_cmd(term: str, repo: str | None) -> None:
 @local_group.command("get")
 @click.argument("cls")
 @click.argument("name")
-@click.option("--path", default=None, help="Dot-path of a single key, e.g. keda.maxReplicas.")
+@click.option("--path", default=None, help="Dot-path of a single key, e.g. keda.maxReplicaCount.")
 @_repo_option
 @_friendly
 def get_cmd(cls: str, name: str, path: str | None, repo: str | None) -> None:
-    """Show a resource doc, or one key with --path (e.g. keda.maxReplicas)."""
+    """Show a resource doc, or one key with --path (e.g. keda.maxReplicaCount)."""
     doc = _build_crud(repo).get(cls, name)
     if path is None:
         click.echo(yaml_dump_string(doc), nl=False)
@@ -543,16 +544,16 @@ def set_cmd(
 ) -> None:
     """Set a dot-path via GitCrud.set_key, e.g. scale a rogue pod's keda dial to 0:
 
-    dfe local set helmvars receiver-default keda.maxReplicas 0 --reason "rogue pod"
+    dfe local set helmvars receiver-default keda.maxReplicaCount 0 --reason "rogue pod"
     """
     crud = _build_crud(repo)
     actor = _resolve_actor(actor)
     val = _parse_value(value)
-    _safety_warn(path, val, yes=yes)
     try:
         before = crud.get(cls, name)
     except ResourceNotFoundError:
         before = {}
+    _safety_warn(before, path, val, yes=yes)
     after = copy.deepcopy(before)
     set_path(after, path, val)
     reason = _resolve_reason(reason, allow_prompt=not yes)
