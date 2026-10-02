@@ -198,6 +198,11 @@ class ProtectedPolicy(BaseModel):
     e.g. ``helmvars:*:replicaCount`` or ``helmvars:receiver-default:config.kafka.*``.
     A protected var can only be changed by a caller holding the override grant, and
     a write at its parent or below it counts as changing it.
+
+    Patterns bind the API's var and document writes in the ``helmvars``,
+    ``infravars`` and ``library`` classes, and every defined action. They do not
+    bind the governance classes (``gov_settings`` included), a whole-resource
+    delete, an overlay the engine derives from the sources, or the break-glass CLI.
     """
 
     name: str

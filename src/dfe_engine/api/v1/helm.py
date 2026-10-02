@@ -24,7 +24,7 @@ from pydantic import BaseModel
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.write_turn import WRITE_TURN
-from dfe_engine.appmgmt import contract
+from dfe_engine.appmgmt import contract, scaling
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -180,7 +180,7 @@ def set_var_governed(
             status_code=400, detail={"code": exc.code, "message": str(exc)}
         ) from exc
     try:
-        validate_write(stored, path, value)
+        validate_write(stored, path, value, keda_by_default=scaling.keda_by_default(cls, name))
     except CommitPolicyError as exc:
         raise HTTPException(403, detail={"code": "policy_violation", "message": str(exc)}) from exc
 
@@ -244,13 +244,15 @@ def set_var_governed(
 
 def delete_var_governed(cls: str, name: str, path: str, user: Any, request: Request) -> WriteResult:
     """Revert one var to its chart default. Reverting a protected var IS changing
-    it, so the same override grant applies as on a set, and the document the revert
-    leaves behind meets the same value rules."""
+    it, so the same override grant applies as on a set, and a revert may not add a
+    value-rule violation to the document any more than a set may."""
     check_name(name)
     gc = gitcrud_of(request)
     settings = request.app.state.settings
     try:
-        validate_revert(_stored_doc(gc, cls, name), path)
+        validate_revert(
+            _stored_doc(gc, cls, name), path, keda_by_default=scaling.keda_by_default(cls, name)
+        )
     except CommitPolicyError as exc:
         raise HTTPException(403, detail={"code": "policy_violation", "message": str(exc)}) from exc
     protected = enforce_protected(request, user, cls, name, path)

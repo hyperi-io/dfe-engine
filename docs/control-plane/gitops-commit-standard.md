@@ -114,10 +114,8 @@ We honour it via the RBAC + protected-var policy, not by blocking the engine:
 ## 7. Self-heal safety (avoid reconciliation loops)
 
 - Do NOT write fields owned by in-cluster controllers under self-heal. KEDA owns `replicas` -> "scale" sets `keda.minReplicaCount`/`keda.maxReplicaCount`, NOT `replicaCount`; declare `ignoreDifferences` for any genuinely-dynamic field. Build the exclusion list BEFORE enabling self-heal, not after.
-- The exception is a document that explicitly sets `keda.enabled: false`. Nothing
-  owns the count there, and `replicaCount` is the only way to set it, so
-  `validate_change` accepts it in that document alone. An unset flag is the chart
-  default, which the engine cannot read, and stays refused.
+- The exception is a document that explicitly sets `keda.enabled: false`. Nothing owns the count there, and `replicaCount` is the only way to set it. An unset flag is the chart default, which the engine reads off the app manifest (`appmgmt.scaling.keda_by_default`): an overlay in `values/` of a `scale_deployed` app, or one the catalogue cannot place, is read as KEDA-driven, while a platform chart in `infra/` is not unless the document enables KEDA.
+- `validate_write` and `validate_revert` (`gitcrud/commit_policy.py`) check the document a write leaves behind and refuse only the violations the write adds, so a document already breaking a rule still takes the write that repairs it.
 - auto-sync + self-heal + prune are ON (prune added gradually). Webhooks configured
   so commits reconcile in seconds, not on the 3-min poll (tightens the
   committed-vs-applied window the API reports).

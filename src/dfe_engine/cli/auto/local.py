@@ -58,11 +58,13 @@ from dfe_engine.gitcrud.commit_policy import (
     CommitPolicyError,
     build_message,
     type_for_class,
-    validate_write,
+    validate_result,
 )
+from dfe_engine.gitcrud.engine import del_path
 from dfe_engine.gitcrud.log import read_log
 from dfe_engine.gitops.dulwich_auth import authed_https_url
 from dfe_engine.gitops.repo import GitopsDivergedError, GitopsRemoteError, GitopsRepo
+from dfe_engine.manifest import ManifestError
 from dfe_engine.settings import get_settings
 from dfe_engine.yaml_utils import yaml_dump_string
 
@@ -190,28 +192,47 @@ def _guard(*, repo_path: Path, diff_text: str, yes: bool) -> None:
         raise click.Abort()
 
 
-def _safety_warn(stored: dict, path: str, value: object, *, yes: bool) -> None:
-    """Reuse the API's value-safety validator (``validate_write``) as an
+def _keda_by_default(cls: str, name: str) -> bool:
+    """Whether KEDA drives this document as the API reads it; on, if the manifest is broken.
+
+    A broken app manifest can be what killed the daemon, so it must not stop the
+    write that repairs it; the strict reading only adds a warning here.
+    """
+    try:
+        from dfe_engine.appmgmt.scaling import keda_by_default
+    except ManifestError as exc:
+        click.echo(f"safety: app manifest unreadable ({exc}); KEDA assumed on", err=True)
+        return True
+    return keda_by_default(cls, name)
+
+
+def _safety_warn(cls: str, name: str, before: dict, after: dict, *, yes: bool) -> None:
+    """Reuse the API's value-safety validator (``validate_result``) as an
     OVERRIDABLE warning, NOT a block.
 
     Break-glass can override anything - RBAC is dead and git access is the
     authority - so this is not the API's hard 403. But it checks the SAME
-    resulting document the daemon's helm endpoint checks
-    (``api/v1/helm.py set_var_governed``), so a stressed operator who does not
-    know the helm complexity gets the steer the API would give (e.g. an
-    unpinned/floating image ref, or re-enabling KEDA over a stored
-    replicaCount) BEFORE they commit a change that would not work or would
-    re-break the daemon. This is the safety half of the API guard; the RBAC
-    half (protected-var needs the ``helmvars:override`` grant) is deliberately
+    resulting document the daemon's routes check (``api/v1/helm.py``
+    ``set_var_governed`` and ``delete_var_governed``), so a stressed operator
+    who does not know the helm complexity gets the steer the API would give
+    (e.g. an unpinned/floating image ref, or handing a stored replicaCount back
+    to KEDA) BEFORE they commit a change that would not work or would re-break
+    the daemon. This is the safety half of the API guard; the RBAC half
+    (protected-var needs the ``helmvars:override`` grant) is deliberately
     dropped. ``--yes`` proceeds without asking.
     """
     try:
-        validate_write(stored, path, value)
+        kept = validate_result(before, after, keda_by_default=_keda_by_default(cls, name))
     except CommitPolicyError as exc:
         click.echo(f"safety: {exc}", err=True)
         click.echo("  (the daemon's API would reject this; break-glass can override it)", err=True)
         if not yes and not click.confirm("Override this safety guard?", default=False):
             raise click.Abort() from exc
+        return
+    for violation in kept:
+        click.echo(
+            f"safety: {cls}/{name} already breaks a rule, left as it is: {violation}", err=True
+        )
 
 
 def _yaml_diff(before: dict | None, after: dict | None) -> str:
@@ -553,9 +574,9 @@ def set_cmd(
         before = crud.get(cls, name)
     except ResourceNotFoundError:
         before = {}
-    _safety_warn(before, path, val, yes=yes)
     after = copy.deepcopy(before)
     set_path(after, path, val)
+    _safety_warn(cls, name, before, after, yes=yes)
     reason = _resolve_reason(reason, allow_prompt=not yes)
     _guard(repo_path=crud.repo_path, diff_text=_yaml_diff(before, after), yes=yes)
     msg = _bg_message_for_class(crud, cls, name, f"set {path}", actor, reason)
@@ -581,13 +602,12 @@ def unset_cmd(
     push: bool | None,
 ) -> None:
     """Remove a dot-path via GitCrud.delete_key (revert a helm var to its default)."""
-    from dfe_engine.gitcrud.engine import _del_path
-
     crud = _build_crud(repo)
     actor = _resolve_actor(actor)
     before = crud.get(cls, name)
     after = copy.deepcopy(before)
-    _del_path(after, path)
+    del_path(after, path)
+    _safety_warn(cls, name, before, after, yes=yes)
     reason = _resolve_reason(reason, allow_prompt=not yes)
     _guard(repo_path=crud.repo_path, diff_text=_yaml_diff(before, after), yes=yes)
     msg = _bg_message_for_class(crud, cls, name, f"unset {path}", actor, reason)
@@ -756,6 +776,7 @@ def restore_cmd(
     after = copy.deepcopy(before)
     after["current"] = int(version)
     after["status"] = "published"
+    _safety_warn(cls, name, before, after, yes=yes)
     reason = _resolve_reason(reason, allow_prompt=not yes)
     _guard(repo_path=crud.repo_path, diff_text=_yaml_diff(before, after), yes=yes)
     msg = _bg_message_for_class(crud, cls, name, f"restore v{version}", actor, reason)
