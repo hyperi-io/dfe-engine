@@ -13,6 +13,8 @@ installed in this env, which is exactly the pre-PyPI state we ship for.
 """
 
 import asyncio
+import shutil
+import subprocess
 
 import pytest
 from pydantic import ValidationError
@@ -23,8 +25,9 @@ from dfe_engine.sampling import (
     Sampler,
     SampleRequest,
     SamplerError,
+    clickhouse_reader,
 )
-from dfe_engine.sampling.clickhouse_reader import build_where
+from dfe_engine.sampling.clickhouse_reader import build_where, filter_predicate
 from dfe_engine.sampling.service import _reservoir
 from dfe_engine.settings import ClickHouseSettings, KafkaSettings, SamplerSettings
 from dfe_engine.source.registry import SourceNotFoundError
@@ -146,7 +149,41 @@ REFUSED_FILTERS = {
         "toString(_json), ''b') = 'q'"
     ),
     "escape the renderer would change": "msg = '\\x41'",
+    "table named alone in an IN list": "_source IN (system.users)",
+    "bare table named alone in an IN list": "_source IN (users)",
+    "table named in a doubly bracketed IN list": "_source IN ((system.users))",
+    "array the renderer turns into an IN list": "_source IN [system.users]",
+    "table after GLOBAL IN": "_source GLOBAL IN (system.users)",
+    "table after NOT IN": "_source NOT IN (system.users)",
+    "table after IN inside a lambda": "arrayExists(z -> z IN (system.users), [_source])",
+    "column in an IN list": "status IN (a, 500)",
+    "gcs table function": "gcs('https://203.0.113.9/bucket/key') = 1",
+    "dictionary read through a classifier model": "naiveBayesClassifier('spam', msg) = 'spam'",
+    "embedded dictionary read": "regionToName(toUInt32(1)) = 'x'",
 }
+
+# Every function form of IN in ClickHouse 26.9.4, each resolving its second argument as a table.
+IN_FUNCTIONS = [
+    "globalIn",
+    "globalInIgnoreSet",
+    "globalNotIn",
+    "globalNotInIgnoreSet",
+    "globalNotNullIn",
+    "globalNotNullInIgnoreSet",
+    "globalNullIn",
+    "globalNullInIgnoreSet",
+    "in",
+    "inIgnoreSet",
+    "notIn",
+    "notInIgnoreSet",
+    "notNullIn",
+    "notNullInIgnoreSet",
+    "nullIn",
+    "nullInIgnoreSet",
+]
+REFUSED_FILTERS.update(
+    {f"{name} names a table": f"{name}(_source, system.users)" for name in IN_FUNCTIONS}
+)
 
 
 @pytest.mark.parametrize("filter_sql", list(REFUSED_FILTERS.values()), ids=list(REFUSED_FILTERS))
@@ -168,14 +205,64 @@ def test_the_where_builder_refuses_it_too(filter_sql):
         )
 
 
-def test_a_filter_that_skipped_request_validation_runs_no_query():
+@pytest.mark.parametrize("filter_sql", list(REFUSED_FILTERS.values()), ids=list(REFUSED_FILTERS))
+def test_a_filter_that_skipped_request_validation_runs_no_query(filter_sql):
     ch = FakeCH(['{"a": 1}'])
     req = SampleRequest.model_construct(
-        mode=SampleMode.RECENT, table="`db`.landing", source="acme", filter="1) OR (1"
+        mode=SampleMode.RECENT, table="`db`.landing", source="acme", filter=filter_sql
     )
-    with pytest.raises(ValueError, match="not a ClickHouse condition"):
+    with pytest.raises(ValueError, match=r"filter|column name"):
         _run(req, ch, None)
     assert ch.calls == []
+
+
+CLICKHOUSE_LOCAL = shutil.which("clickhouse-local")
+# The reason is matched by test.full.python.allow_skip in .hyperi-ci.yaml.
+needs_clickhouse_local = pytest.mark.skipif(
+    CLICKHOUSE_LOCAL is None, reason="clickhouse-local is not on PATH"
+)
+
+
+def _clickhouse_names(query: str) -> list[str]:
+    """Run ``query`` in clickhouse-local and return the names it prints, one per line."""
+    result = subprocess.run(
+        [CLICKHOUSE_LOCAL, "--query", query],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
+    )
+    return result.stdout.split()
+
+
+@needs_clickhouse_local
+def test_every_clickhouse_table_function_is_refused_bar_the_two_that_read_only_their_args():
+    names = {name.lower() for name in _clickhouse_names("SELECT name FROM system.table_functions")}
+    assert names - {"format", "fuzzquery"} == clickhouse_reader._TABLE_FUNCTIONS
+
+
+@needs_clickhouse_local
+def test_every_clickhouse_function_named_like_in_is_refused():
+    names = _clickhouse_names(
+        "SELECT name FROM system.functions WHERE match(name, '(^i|I)n(IgnoreSet)?$')"
+    )
+    assert set(IN_FUNCTIONS) <= set(names)
+    for name in names:
+        with pytest.raises(ValueError):
+            filter_predicate(f"{name}(_source, ('a', 'b')) = 1")
+
+
+@needs_clickhouse_local
+def test_every_clickhouse_dictionary_function_is_refused():
+    names = _clickhouse_names(
+        "SELECT name FROM system.functions "
+        "WHERE categories IN ('Dictionary', 'Embedded Dictionary')"
+    )
+    assert names
+    for name in names:
+        with pytest.raises(ValueError, match="reads outside the table"):
+            filter_predicate(f"{name}('d', 'v', toUInt64(1)) = 'x'")
 
 
 @pytest.mark.parametrize(
@@ -186,7 +273,12 @@ def test_a_filter_that_skipped_request_validation_runs_no_query():
         ("level = 'error' /* why */", "level = 'error'"),
         ("level = 'error' -- why", "level = 'error'"),
         ("_json.level = 'error'", "_json.level = 'error'"),
+        ("_json.a.b = 'c'", "_json.a.b = 'c'"),
+        ("t.1 = 'a'", "t.1 = 'a'"),
         ("status IN (500, 503)", "status IN (500, 503)"),
+        ("status NOT IN (500)", "NOT (status IN (500))"),
+        ("tuple(a, b) IN ((1, 2))", "tuple(a, b) IN ((1, 2))"),
+        ("level IN (lower('ERROR'), 'warn')", "level IN (lower('ERROR'), 'warn')"),
         ("arrayExists(t -> t = 'a', tags)", "arrayExists(t -> t = 'a', tags)"),
         ("match(msg, '\\\\d+')", "match(msg, '\\\\d+')"),
         ("msg = 'a\\'b'", "msg = 'a''b'"),
