@@ -102,6 +102,9 @@ def test_smart_mode_returns_pending_task(client, fake_ch, admin_headers):
         pytest.param("globalNullIn(_source, system.users)", id="globalNullIn"),
         pytest.param("_source IN (system.users)", id="in-list-names-a-table"),
         pytest.param("gcs('https://203.0.113.9/bucket/key') = 1", id="gcs"),
+        pytest.param("aiFilter(msg, 'is it bad', map('credentials', 'provider'))", id="aiFilter"),
+        pytest.param("length(aiEmbed(msg)) > 0", id="aiEmbed"),
+        pytest.param("generateSerialID(msg) > 0", id="generateSerialID"),
     ],
 )
 def test_a_filter_that_is_not_one_condition_is_refused_before_any_query(

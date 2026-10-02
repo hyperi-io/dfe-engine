@@ -185,6 +185,38 @@ REFUSED_FILTERS.update(
     {f"{name} names a table": f"{name}(_source, system.users)" for name in IN_FUNCTIONS}
 )
 
+# Every AI function in ClickHouse 26.9.4 and its alias; each posts its arguments to an LLM provider.
+AI_FUNCTIONS = [
+    "aiClassify",
+    "aiEmbed",
+    "aiExtract",
+    "aiFilter",
+    "aiGenerate",
+    "aiRedact",
+    "aiSimilarity",
+    "aiTranslate",
+    "AIClassify",
+    "AIEmbed",
+    "AIExtract",
+    "AIFilter",
+    "AIGenerate",
+    "AIRedact",
+    "AISimilarity",
+    "AITranslate",
+]
+REFUSED_FILTERS.update(
+    {f"{name} sends the row to a model": f"{name}(msg, 'x') = 'y'" for name in AI_FUNCTIONS}
+)
+REFUSED_FILTERS.update(
+    {
+        "AI filter naming its own credentials": (
+            "aiFilter(msg, 'is it bad', map('credentials', 'provider'))"
+        ),
+        "AI call nested in another function": "length(aiEmbed(msg)) > 0",
+        "serial counter written to Keeper": "generateSerialID(msg) > 0",
+    }
+)
+
 
 @pytest.mark.parametrize("filter_sql", list(REFUSED_FILTERS.values()), ids=list(REFUSED_FILTERS))
 def test_a_filter_that_is_not_one_condition_is_refused(filter_sql):
@@ -263,6 +295,18 @@ def test_every_clickhouse_dictionary_function_is_refused():
     for name in names:
         with pytest.raises(ValueError, match="reads outside the table"):
             filter_predicate(f"{name}('d', 'v', toUInt64(1)) = 'x'")
+
+
+@needs_clickhouse_local
+def test_every_clickhouse_ai_function_and_alias_is_refused():
+    names = _clickhouse_names(
+        "SELECT name FROM system.functions WHERE categories = 'AI' "
+        "OR alias_to IN (SELECT name FROM system.functions WHERE categories = 'AI')"
+    )
+    assert set(AI_FUNCTIONS) <= set(names)
+    for name in names:
+        with pytest.raises(ValueError, match="sends data to another service"):
+            filter_predicate(f"{name}(msg, 'x') = 'y'")
 
 
 @pytest.mark.parametrize(

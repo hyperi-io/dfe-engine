@@ -142,6 +142,11 @@ _OUTSIDE_READERS = frozenset(
 # dict* read external dictionaries and region* the embedded ones.
 _DICTIONARY_READER_PREFIXES = ("dict", "region")
 
+# generateSerialID writes a counter named by its argument to Keeper.
+_REMOTE_CALLERS = frozenset({"generateserialid"})
+# ai* post their arguments to an LLM provider, and readonly=1 does not stop them.
+_REMOTE_CALLER_PREFIXES = ("ai",)
+
 # The function forms of IN, each of which resolves a name in its second argument as a table.
 _IN_FUNCTION = re.compile(r"(global)?(not)?(null)?in(ignoreset)?", re.IGNORECASE)
 
@@ -181,10 +186,11 @@ def filter_predicate(filter_sql: str) -> str | None:
     statement separator or ``SETTINGS``/``FORMAT`` clause, no alias, no query
     parameter, no ``IN`` whose list holds a name or that names a table or
     function, no function form of ``IN`` (``globalIn``, ``notIn`` and the rest),
-    no table function, and no function that reads a dictionary, a Join table or
-    a file. The checks run on the caller's text and again on the parse of the
-    rendered text, and the rendered text is what is returned, so the SQL that
-    runs is the SQL that was checked.
+    no table function, no function that reads a dictionary, a Join table or a
+    file, and no function that sends its arguments to another service (the
+    ``ai*`` functions, ``generateSerialID``). The checks run on the caller's
+    text and again on the parse of the rendered text, and the rendered text is
+    what is returned, so the SQL that runs is the SQL that was checked.
 
     Args:
         filter_sql: The caller's filter.
@@ -222,6 +228,10 @@ def filter_predicate(filter_sql: str) -> str | None:
             )
         if _reads_outside_the_row(name.text):
             raise ValueError(f"filter may not call {name.text}(), which reads outside the table")
+        if _calls_another_service(name.text):
+            raise ValueError(
+                f"filter may not call {name.text}(), which sends data to another service"
+            )
     return rendered
 
 
@@ -302,6 +312,12 @@ def _reads_outside_the_row(function_name: str) -> bool:
         or name in _OUTSIDE_READERS
         or name.startswith(_DICTIONARY_READER_PREFIXES)
     )
+
+
+def _calls_another_service(function_name: str) -> bool:
+    """Whether a call by this name sends its arguments to an AI provider or Keeper."""
+    name = function_name.lower()
+    return name in _REMOTE_CALLERS or name.startswith(_REMOTE_CALLER_PREFIXES)
 
 
 def read_settings(max_execution_time: int) -> dict[str, int]:
