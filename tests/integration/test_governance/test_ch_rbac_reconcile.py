@@ -32,7 +32,7 @@ _META_IDS = ("db.meta", "meta.orgs", "meta.ch_tiers")
 
 
 @pytest.fixture
-def reconciled_world(ch_client, ch_params, tmp_path_factory):
+def reconciled_world(ch_client, ch_params, tmp_path):
     """Reconcile a uid-scoped world through the real entry point.
 
     Every object is uid-suffixed and dropped in teardown. The reconcile also
@@ -151,7 +151,8 @@ def reconciled_world(ch_client, ch_params, tmp_path_factory):
         ch_client.command(f"CREATE TABLE {otel_table} (x UInt8) ENGINE = MergeTree() ORDER BY x")
         ch_client.command(f"INSERT INTO {otel_table} VALUES (1)")
 
-        secrets_dir = tmp_path_factory.mktemp("ch-secrets")
+        secrets_dir = tmp_path / "ch-secrets"
+        secrets_dir.mkdir()
         store = build_secrets(SecretsSettings(provider="file", path=str(secrets_dir)))
         bindings = derive_group_bindings(groups, orgs)
         otel_role = [r for r in DEFAULT_SERVICE_ROLES if r.name == "otel_reader"]
