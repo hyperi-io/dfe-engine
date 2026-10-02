@@ -54,6 +54,7 @@ _TABLE_FUNCTIONS = frozenset(
         "filecluster",
         "filesystem",
         "fuzzjson",
+        "gcs",
         "generate_series",
         "generaterandom",
         "generateseries",
@@ -127,9 +128,25 @@ _TABLE_FUNCTIONS = frozenset(
     }
 )
 
-# Scalars that read a Join table or another table's schema; dictionary readers match by prefix.
-_OUTSIDE_READERS = frozenset({"hascolumnintable", "joinget", "joingetornull"})
-_DICTIONARY_READER_PREFIX = "dict"
+# Scalars that read a Join table, another table's schema, or a dictionary by a model name.
+_OUTSIDE_READERS = frozenset(
+    {
+        "hascolumnintable",
+        "joinget",
+        "joingetornull",
+        "naivebayesclassifier",
+        "naivebayesclassifierwithallprobs",
+        "naivebayesclassifierwithprob",
+    }
+)
+# dict* read external dictionaries and region* the embedded ones.
+_DICTIONARY_READER_PREFIXES = ("dict", "region")
+
+# The function forms of IN, each of which resolves a name in its second argument as a table.
+_IN_FUNCTION = re.compile(r"(global)?(not)?(null)?in(ignoreset)?", re.IGNORECASE)
+
+# ClickHouse reads a name standing alone in an IN list as a table, so the list may hold none.
+_NAMES = (exp.Column, exp.Dot, exp.Identifier, exp.Var)
 
 # Node types a predicate is built from: Conditions, and the parts sqlglot does not class as one.
 _PREDICATE_PARTS = (
@@ -162,11 +179,12 @@ def filter_predicate(filter_sql: str) -> str | None:
     The filter must parse in the ClickHouse dialect as a single expression that
     reads only the sampled table's columns: no subquery or set operation, no
     statement separator or ``SETTINGS``/``FORMAT`` clause, no alias, no query
-    parameter, no ``IN`` over a table or function, no table function, and no
-    function that reads a dictionary, a Join table or a file. The checks run on
-    the caller's text and again on the parse of the rendered text, and the
-    rendered text is what is returned, so the SQL that runs is the SQL that was
-    checked.
+    parameter, no ``IN`` whose list holds a name or that names a table or
+    function, no function form of ``IN`` (``globalIn``, ``notIn`` and the rest),
+    no table function, and no function that reads a dictionary, a Join table or
+    a file. The checks run on the caller's text and again on the parse of the
+    rendered text, and the rendered text is what is returned, so the SQL that
+    runs is the SQL that was checked.
 
     Args:
         filter_sql: The caller's filter.
@@ -194,7 +212,15 @@ def filter_predicate(filter_sql: str) -> str | None:
         raise ValueError("filter does not read back as the same condition once rendered")
     _refuse_nodes(tree)
     for name, following in itertools.pairwise(tokens):
-        if following.token_type is TokenType.L_PAREN and _reads_outside_the_row(name.text):
+        # The IN operator's own keyword is followed by its list, not a call.
+        if following.token_type is not TokenType.L_PAREN or name.token_type is TokenType.IN:
+            continue
+        if _IN_FUNCTION.fullmatch(name.text):
+            raise ValueError(
+                f"filter may not call {name.text}(), which can read a table: "
+                "use the IN operator with a list of values"
+            )
+        if _reads_outside_the_row(name.text):
             raise ValueError(f"filter may not call {name.text}(), which reads outside the table")
     return rendered
 
@@ -242,8 +268,10 @@ def _refusal(node: exp.Expr) -> str | None:
         return (
             "filter may not contain an alias (AS), which can rename a column the read is bound on"
         )
-    if isinstance(node, exp.In) and any(node.args.get(arg) for arg in ("query", "field", "unnest")):
-        return "IN in a filter must list its values, not name a table or function"
+    if isinstance(node, exp.In) and (
+        any(node.args.get(arg) for arg in ("query", "field", "unnest")) or _lists_a_name(node)
+    ):
+        return "IN in a filter must list its values, not name a column, table or function"
     if isinstance(node, (exp.Placeholder, exp.Parameter)):
         return "filter may not contain query parameters"
     if isinstance(node, exp.Identifier) and _UNSAFE_NAME_CHARACTERS.intersection(node.name):
@@ -258,13 +286,21 @@ def _refusal(node: exp.Expr) -> str | None:
     return None
 
 
+def _lists_a_name(node: exp.In) -> bool:
+    """Whether any value in an IN list is, or holds, a name rather than only values."""
+    for value in node.expressions:
+        if any(isinstance(part, _NAMES) for part in value.walk()):
+            return True
+    return False
+
+
 def _reads_outside_the_row(function_name: str) -> bool:
     """Whether a call by this name reads a table, file, dictionary or Join table."""
     name = function_name.lower()
     return (
         name in _TABLE_FUNCTIONS
         or name in _OUTSIDE_READERS
-        or name.startswith(_DICTIONARY_READER_PREFIX)
+        or name.startswith(_DICTIONARY_READER_PREFIXES)
     )
 
 
