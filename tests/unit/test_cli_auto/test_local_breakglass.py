@@ -348,9 +348,11 @@ def test_push_no_remote_is_noop(repo: Path):
 
 
 @pytest.fixture
-def remote(repo: Path, tmp_path_factory, monkeypatch) -> tuple[Path, str]:
+def remote(repo: Path, tmp_path: Path, monkeypatch) -> tuple[Path, str]:
     """A bare deploy repo holding the clone's seed commit, configured as the remote."""
-    bare = tmp_path_factory.mktemp("deploy") / "remote.git"
+    deploy_dir = tmp_path / "deploy"
+    deploy_dir.mkdir()
+    bare = deploy_dir / "remote.git"
     porcelain.init(str(bare), bare=True)
     branch = porcelain.active_branch(str(repo)).decode()
     porcelain.push(str(repo), str(bare), f"refs/heads/{branch}".encode(), errstream=io.BytesIO())
@@ -391,14 +393,14 @@ def test_push_lands_break_glass_commits_on_the_remote(repo: Path, remote: tuple[
 
 
 def test_push_refuses_a_moved_remote_and_keeps_the_commits(
-    repo: Path, remote: tuple[Path, str], tmp_path_factory
+    repo: Path, remote: tuple[Path, str], tmp_path: Path
 ):
     """Another writer moved the remote: nothing is pushed and the local commit stays."""
     bare, branch = remote
     _break_glass_set(repo, "0")
     with Repo(str(repo)) as r:
         break_glass = r.head()
-    other = tmp_path_factory.mktemp("other") / "clone"
+    other = tmp_path / "other-clone"
     porcelain.clone(str(bare), str(other), branch=branch.encode(), errstream=io.BytesIO())
     (other / "elsewhere.yaml").write_text("x: 1\n")
     porcelain.add(str(other), paths=[str(other / "elsewhere.yaml")])
