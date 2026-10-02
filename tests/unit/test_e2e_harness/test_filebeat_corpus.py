@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
 import tarfile
 
 import pytest
@@ -128,9 +129,12 @@ class TestWrapping:
 @pytest.fixture(scope="module")
 def shipped(tmp_path_factory):
     """The archive dfe-transform-vrl ships, from a checkout or its pinned release."""
-    path = tmp_path_factory.mktemp("corpus") / "filebeat-testdata.tar.gz"
+    corpus_dir = tmp_path_factory.mktemp("corpus")
+    path = corpus_dir / "filebeat-testdata.tar.gz"
     path.write_bytes(producer_file(DFE_TRANSFORM_VRL, corpus.CORPUS_FILE).data)
-    return path
+    yield path
+    # Module-scoped tmp_path_factory dirs are NOT covered by tmp_path_retention_policy.
+    shutil.rmtree(corpus_dir, ignore_errors=True)
 
 
 class TestTheRealCorpus:
