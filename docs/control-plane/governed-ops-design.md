@@ -128,7 +128,7 @@ sequenceDiagram
     participant Repo as GitopsRepo
     participant Argo
 
-    User->>Helm: PUT /helm/files/receiver-default/vars/keda.maxReplicas (If-Match SHA)
+    User->>Helm: PUT /helm/files/receiver-default/vars/keda.maxReplicaCount (If-Match SHA)
     Helm->>Helm: require_action helmvars:write
     Helm->>Helm: validate_change (no latest, no replicaCount)
     Helm->>Policy: protected? (override held?)
