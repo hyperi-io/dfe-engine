@@ -5,6 +5,7 @@ from jinja2 import Environment, TemplateSyntaxError
 from scalo.logger import logger
 
 from ..yaml_utils import YAMLError, yaml_dump_string, yaml_load_string
+from .rule_names import rule_file
 
 
 class HuntValidator:
@@ -104,7 +105,7 @@ class HuntValidator:
         rules = hunt_data.get("rules", [])
         for rule_info in rules:
             rule_name = rule_info.get("rule_name")
-            rule_path = os.path.join(rule_repo_dir, f"{rule_name}.jinja2")
+            rule_path = str(rule_file(rule_repo_dir, str(rule_name or ""), ".jinja2"))
             if os.path.isfile(rule_path):
                 HuntValidator.validate_rule_syntax(rule_path, env)
             else:

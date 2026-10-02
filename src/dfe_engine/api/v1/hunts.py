@@ -52,6 +52,7 @@ from dfe_engine.hunts.hunt_config_registry import (
     default_display_name,
     resolve_display_name,
 )
+from dfe_engine.hunts.rule_names import validate_rule_name
 from dfe_engine.hunts.validator import HuntValidator
 
 _HUNT_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -217,6 +218,8 @@ class HuntWriteRequest(_HuntConfigFields):
         cleaned = [name.strip() for name in v]
         if any(not name for name in cleaned):
             raise ValueError("rule names must be non-empty strings")
+        for name in cleaned:
+            validate_rule_name(name)
         return cleaned
 
     def to_config_dict(self, *, hunt_name: str) -> dict[str, Any]:

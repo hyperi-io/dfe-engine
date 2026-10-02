@@ -36,6 +36,7 @@ from typing import Any
 from scalo.logger import logger
 
 from dfe_engine.hunts.hunt_output import HuntResultSchema
+from dfe_engine.hunts.rule_names import RuleNameError, rule_file
 from dfe_engine.hunts.rule_rewriter import RuleRewriter, strip_time_placeholder
 from dfe_engine.settings import MAX_DETECTIONS_PER_RUN
 from dfe_engine.yaml_utils import yaml_load
@@ -193,7 +194,11 @@ def compile_hunt_queries(
     statements: list[HuntStatement] = []
     for entry in entries:
         rule_name = str(entry["rule_name"])
-        path = directory / f"{rule_name}.yaml"
+        try:
+            path = rule_file(directory, rule_name, ".yaml")
+        except RuleNameError as exc:
+            logger.error(f"hunt {hunt_id}: rule '{rule_name}' refused: {exc}")
+            continue
         try:
             payload = yaml_load(path)
         except Exception as exc:

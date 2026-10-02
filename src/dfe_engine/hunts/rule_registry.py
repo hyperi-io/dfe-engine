@@ -24,6 +24,7 @@ from dfe_engine.hunts.hunt_config_registry import (
     strip_identity_fields_from_yaml,
 )
 from dfe_engine.hunts.rule_model import Rule
+from dfe_engine.hunts.rule_names import RuleNameError, rule_file
 from dfe_engine.yaml_utils import yaml_dump
 
 if TYPE_CHECKING:
@@ -140,7 +141,7 @@ class RuleRegistry:
             return outcome
 
         store = self._require_store()
-        yaml_path = self._rules_directory / f"{name}.yaml"
+        yaml_path = rule_file(self._rules_directory, name, ".yaml")
         yaml_dump(doc, yaml_path)
         if store.is_git:
             commit_file(store, yaml_path, message, author=created_by)
@@ -157,7 +158,10 @@ class RuleRegistry:
             return outcome is not None, outcome
 
         store = self._require_store()
-        yaml_path = self._rules_directory / f"{name}.yaml"
+        try:
+            yaml_path = rule_file(self._rules_directory, name, ".yaml")
+        except RuleNameError:
+            return False, None
         if not yaml_path.exists():
             return False, None
 
