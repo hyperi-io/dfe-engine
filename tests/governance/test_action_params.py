@@ -12,8 +12,6 @@ free-string params must be impossible to declare. References substitute the
 WHOLE VarChange.value, never inside strings, and never into cls/name/path.
 """
 
-from __future__ import annotations
-
 import pytest
 from pydantic import ValidationError
 
@@ -309,3 +307,23 @@ class TestPreviewWithParams:
         diff, errors = store.preview(action)
         assert any("map branch 'bad'" in e for e in errors)
         assert any("latest" in e for e in errors)
+
+    def test_preview_checks_every_leaf_of_a_map_valued_branch(self, store):
+        action = _surge_action(
+            params={"ver": {"type": "enum", "values": ["ok", "bad"], "default": "ok"}},
+            changes=[
+                {
+                    "cls": "helmvars",
+                    "name": "receiver-default",
+                    "path": "image",
+                    "value": {
+                        "$param": "ver",
+                        "map": {"ok": {"tag": "1.2.3"}, "bad": {"tag": "latest"}},
+                    },
+                }
+            ],
+        )
+        _, errors = store.preview(action)
+        assert len(errors) == 1, errors
+        assert "map branch 'bad'" in errors[0]
+        assert "image.tag" in errors[0]

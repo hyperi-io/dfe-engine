@@ -161,12 +161,27 @@ def validate_change(path: str, value: object, doc: dict | None = None) -> None:
     - controller-owned fields must not be tracked under self-heal (KEDA owns
       replicas -> set keda.min/maxReplicas, not replicaCount).
 
+    A map or list value is checked leaf by leaf under each leaf's full dot-path, so
+    ``image: {tag: latest}`` is refused exactly as ``image.tag: latest`` is.
+
     ``doc`` is the document the write lands in. A document that explicitly sets
     ``keda.enabled: false`` has no controller owning the replica count, and
     ``replicaCount`` is then the only way to set it, so it is allowed there. With
     no document the field stays refused: an unset flag means the chart default,
     which is not readable from here.
     """
+    if isinstance(value, (dict, list)):
+        # engine imports this module, so the shared flattener is imported at call time.
+        from .engine import flatten
+
+        for leaf_path, leaf_value in flatten(value, path).items():
+            _validate_leaf(leaf_path, leaf_value, doc)
+        return
+    _validate_leaf(path, value, doc)
+
+
+def _validate_leaf(path: str, value: object, doc: dict | None) -> None:
+    """Apply the value rules to one scalar written at ``path``."""
     leaf = path.rsplit(".", 1)[-1]
     if leaf in {"tag", "image"} and isinstance(value, str):
         v = value.strip()
