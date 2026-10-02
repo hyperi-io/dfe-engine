@@ -11,7 +11,8 @@ import re
 
 import pytest
 
-from dfe_engine.gitcrud import flatten
+from dfe_engine.appmgmt.catalogue import KEDA_ENABLED_PATH, KEDA_MAX_PATH, KEDA_MIN_PATH
+from dfe_engine.gitcrud import commit_policy, flatten
 from dfe_engine.gitcrud.commit_policy import (
     CommitContext,
     CommitPolicyError,
@@ -227,6 +228,88 @@ def test_a_map_write_matches_its_leaves_written_one_at_a_time(path, value, doc):
 
     one_at_a_time = any(refused(p, v) for p, v in flatten(value, path).items())
     assert refused(path, value) is one_at_a_time
+
+
+_DIGEST = "sha256:" + "a" * 64
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "ghcr.io/x/y",
+        "y",
+        "localhost:5000/x/y",
+        "ghcr.io/x/y:",
+        "ghcr.io/x/y@sha256:abc",
+        "ghcr.io/x/y@" + _DIGEST.replace("sha256", "md5"),
+    ],
+)
+def test_an_image_ref_with_no_tag_and_no_digest_is_refused(ref):
+    # An untagged ref pulls whatever the registry calls latest today.
+    with pytest.raises(CommitPolicyError, match="image"):
+        validate_change("image", ref)
+    with pytest.raises(CommitPolicyError, match=re.escape("app.sidecar.image")):
+        validate_change("app", {"sidecar": {"image": ref}})
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "ghcr.io/x/y:v1.2.3",
+        "y:1",
+        "localhost:5000/x/y:v1",
+        f"ghcr.io/x/y@{_DIGEST}",
+        f"localhost:5000/x/y@{_DIGEST}",
+        f"ghcr.io/x/y:v1.2.3@{_DIGEST}",
+    ],
+)
+def test_an_image_ref_pinned_by_tag_or_digest_passes(ref):
+    validate_change("image", ref)  # no raise
+
+
+_PINNED = {"keda": {"enabled": False}, "replicaCount": 3}
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [("keda.enabled", True), ("keda", {"enabled": True}), ("keda", {}), ("keda.enabled", None)],
+)
+def test_a_write_that_hands_a_pinned_replica_count_back_to_keda_is_refused(path, value):
+    with pytest.raises(CommitPolicyError, match="replicaCount"):
+        commit_policy.validate_write(_PINNED, path, value)
+    assert _PINNED == {"keda": {"enabled": False}, "replicaCount": 3}
+
+
+@pytest.mark.parametrize("path", ["keda.enabled", "keda"])
+def test_a_revert_that_hands_a_pinned_replica_count_back_to_keda_is_refused(path):
+    with pytest.raises(CommitPolicyError, match="replicaCount"):
+        commit_policy.validate_revert(_PINNED, path)
+    assert _PINNED == {"keda": {"enabled": False}, "replicaCount": 3}
+
+
+def test_a_document_carrying_keda_off_and_a_replica_count_together_passes():
+    commit_policy.validate_document({"replicaCount": 3, "keda": {"enabled": False}})
+    commit_policy.validate_write({}, "keda", {"enabled": False})
+    commit_policy.validate_write({"keda": {"enabled": False}}, "replicaCount", 3)
+    commit_policy.validate_revert(_PINNED, "replicaCount")
+
+
+def test_document_violations_names_every_offending_leaf():
+    doc = {"replicaCount": 3, "image": "ghcr.io/x/y", "sub": {"image": {"tag": "latest"}}}
+    found = [str(exc) for exc in commit_policy.document_violations(doc)]
+    assert len(found) == 3
+    for leaf in ("replicaCount", "image", "sub.image.tag"):
+        assert any(msg.startswith(leaf) or f" {leaf}:" in msg for msg in found), (leaf, found)
+
+
+def test_the_keda_refusal_names_the_chart_keys_it_tells_the_caller_to_use():
+    # The advice has to be followable: the keys are the KEDA library template's own.
+    with pytest.raises(CommitPolicyError) as exc:
+        validate_change("replicaCount", 3)
+    message = str(exc.value)
+    for key in (KEDA_ENABLED_PATH, KEDA_MIN_PATH, KEDA_MAX_PATH.rsplit(".", 1)[-1]):
+        assert key in message, (key, message)
+    assert "same write" not in message
 
 
 def test_resolve_mode():

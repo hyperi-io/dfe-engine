@@ -2,9 +2,16 @@
 
 import pytest
 
+from dfe_engine.appmgmt.catalogue import KEDA_ENABLED_PATH, KEDA_MAX_PATH, KEDA_MIN_PATH
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import PolicyStore
+
+# Every route that writes one var through set_var_governed / delete_var_governed.
+_VAR_ROUTES = [
+    ("helmvars", "/api/v1/helm/files/receiver-default/vars"),
+    ("infravars", "/api/v1/backing-services/overlays/receiver-default/vars"),
+]
 
 
 def _wire_gitcrud(app, tmp_path):
@@ -68,6 +75,53 @@ class TestTier1HelmVars:
             headers=viewer_headers,
         )
         assert resp.status_code == 403
+
+    @pytest.mark.parametrize(("cls", "url"), _VAR_ROUTES)
+    def test_keda_cannot_be_handed_a_pinned_replica_count(
+        self, client, app, admin_headers, tmp_path, cls, url
+    ):
+        """Re-enabling KEDA, by set or by revert, over a document that pins replicaCount."""
+        gc = _wire_gitcrud(app, tmp_path)
+        stored = {"keda": {"enabled": False}, "replicaCount": 3}
+        gc.put(cls, "receiver-default", stored, "tester")
+        writes = [
+            client.put(f"{url}/keda.enabled", json={"value": True}, headers=admin_headers),
+            client.put(f"{url}/keda", json={"value": {"enabled": True}}, headers=admin_headers),
+            client.delete(f"{url}/keda.enabled", headers=admin_headers),
+            client.delete(f"{url}/keda", headers=admin_headers),
+        ]
+        for resp in writes:
+            assert resp.status_code == 403, resp.text
+            assert resp.json()["code"] == "policy_violation"
+            assert "replicaCount" in resp.json()["message"]
+        assert gc.get(cls, "receiver-default") == stored
+
+    @pytest.mark.parametrize(("cls", "url"), _VAR_ROUTES)
+    def test_the_keda_refusal_advice_can_be_followed_on_the_vars_route(
+        self, client, app, admin_headers, tmp_path, cls, url
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put(cls, "receiver-default", {"deploy": {"service": "dfe-receiver"}}, "tester")
+        refused = client.put(f"{url}/replicaCount", json={"value": 3}, headers=admin_headers)
+        assert refused.status_code == 403, refused.text
+        message = refused.json()["message"]
+        for key in (KEDA_ENABLED_PATH, KEDA_MIN_PATH, KEDA_MAX_PATH.rsplit(".", 1)[-1]):
+            assert key in message, (key, message)
+
+        # The advice: keda.enabled false in the document, then the count is the caller's.
+        steps = [
+            client.put(f"{url}/keda.enabled", json={"value": False}, headers=admin_headers),
+            client.put(f"{url}/replicaCount", json={"value": 3}, headers=admin_headers),
+            # And back: revert the count, then KEDA may own the replicas again.
+            client.delete(f"{url}/replicaCount", headers=admin_headers),
+            client.put(f"{url}/keda.enabled", json={"value": True}, headers=admin_headers),
+        ]
+        for resp in steps:
+            assert resp.status_code == 200, resp.text
+        assert gc.get(cls, "receiver-default") == {
+            "deploy": {"service": "dfe-receiver"},
+            "keda": {"enabled": True},
+        }
 
 
 class TestTier2Actions:
