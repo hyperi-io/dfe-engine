@@ -1,7 +1,5 @@
 """Tests for the Governed Ops routers (Tier-1 helm vars + Tier-2 actions)."""
 
-from __future__ import annotations
-
 import pytest
 
 from dfe_engine.gitcrud import GitCrud, default_registry
@@ -293,6 +291,53 @@ class TestRouterProtected:
 
         sibling = client.put(f"{url}.minReplicas", json={"value": 2}, headers=writer)
         assert sibling.status_code == 200, sibling.text
+
+    def test_the_override_lifts_the_lock_but_not_a_value_rule_inside_a_map(
+        self, client, app, admin_headers, tmp_path
+    ):
+        """The grant unlocks image.tag; a floating tag nested in the image map stays refused."""
+        gc = _wire_gitcrud(app, tmp_path)
+        stored = {"image": {"repository": "ghcr.io/x/y", "tag": "v1.0.0"}}
+        gc.put("helmvars", "receiver-default", stored, "tester")
+        client.post(
+            "/api/v1/governance/admin/policies",
+            json={"name": "lock", "protected": ["helmvars:*:image.tag"]},
+            headers=admin_headers,
+        )
+        url = "/api/v1/helm/files/receiver-default/vars/image"
+        # admin holds '*', so helmvars:override
+        floating = {"repository": "ghcr.io/x/y", "tag": "latest"}
+        refused = client.put(url, json={"value": floating}, headers=admin_headers)
+        assert refused.status_code == 403, refused.text
+        assert refused.json()["code"] == "policy_violation"
+        assert "image.tag" in refused.json()["message"]
+        assert gc.get("helmvars", "receiver-default") == stored
+
+        pinned = {"repository": "ghcr.io/x/y", "tag": "v1.1.0"}
+        allowed = client.put(url, json={"value": pinned}, headers=admin_headers)
+        assert allowed.status_code == 200, allowed.text
+        assert gc.get("helmvars", "receiver-default") == {"image": pinned}
+
+    @pytest.mark.parametrize(
+        ("path", "value"),
+        [
+            ("image", {"tag": "latest"}),
+            ("deploy", {"replicaCount": 3}),
+            ("app", {"sidecar": {"image": {"tag": "latest"}}}),
+        ],
+    )
+    def test_a_map_cannot_carry_a_refused_leaf_past_the_value_rules(
+        self, client, app, admin_headers, tmp_path, path, value
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        resp = client.put(
+            f"/api/v1/helm/files/receiver-default/vars/{path}",
+            json={"value": value},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["code"] == "policy_violation"
+        assert gc.list("helmvars") == []
 
     def test_admin_override_bypasses_policy(self, client, app, admin_headers, tmp_path):
         _wire_gitcrud(app, tmp_path)
