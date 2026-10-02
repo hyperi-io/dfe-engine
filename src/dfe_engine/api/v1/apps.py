@@ -2008,12 +2008,13 @@ async def _sample_events(
     req = SampleRequest(source=source, limit=limit)
     try:
         await run_blocking(functools.partial(sampler.resolve_or_raise, req, source_registry))
-        result = await sampler.run(req, ch, source_registry)
+        result: dict[str, Any] = await sampler.run(req, ch, source_registry)
     except SamplerError as exc:
         raise HTTPException(
             400, detail={"code": "bad_sample_request", "message": str(exc)}
         ) from exc
-    lines = getattr(result, "lines", None) or []
+    # Sampler.run returns SampleResult.model_dump(), a dict -- not an object.
+    lines = result.get("lines") or []
     return [str(line) for line in lines]
 
 
