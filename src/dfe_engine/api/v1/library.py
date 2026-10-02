@@ -320,13 +320,13 @@ def _validate(request: Request, language: str, content: str) -> ValidationModel:
 
 
 def _enforce(request: Request, user: Any, name: str, doc: dict) -> bool:
-    """Gate every leaf the finished document carries or drops, and say if any is protected.
+    """Gate every leaf the write adds, changes or drops, and say if any is protected.
 
     The per-path helm-var checks are deliberately not applied here: they police
     image pinning and controller-owned replica counts, which are properties of a
     deployment overlay and have no meaning in an artefact document. The stored
     artefact is read too, because removing a locked key changes it as surely as
-    setting it.
+    setting it, and a locked key the write keeps needs no override.
     """
     policy = _policy(request)
     if policy is None:

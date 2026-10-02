@@ -169,7 +169,7 @@ sequenceDiagram
     Crud-->>Op: diff + commit SHA
 ```
 
-A `ProtectedPolicy` is the one thing that reaches below a class -- a list of locked `cls:name:path` globs that even Tier-1 must respect unless the caller holds the override grant. It is a policy object, not a per-var ACL. A set or revert at a parent, or a set below a locked scalar, is refused like a write to the var itself, because either one changes it.
+A `ProtectedPolicy` is the one thing that reaches below a class -- a list of locked `cls:name:path` globs that even Tier-1 must respect unless the caller holds the override grant. It is a policy object, not a per-var ACL. A set or revert at a parent, or a set below a locked scalar, is refused like a write to the var itself, because either one changes it. A whole-document write is gated only on the leaves it adds, changes or removes.
 
 Three policies ship and seed into every deploy repo. `baseline` locks image references. `storage-layout` locks the data-layer modes, the storage model, the `objectStore` / `tieredBlock` / `tieredObject` dial blocks, and the disk size and class. `sizing-locks` locks the Kafka sizing inputs, the KRaft controller layout and the cloud. Seeding never rewrites an existing file, so a repo carrying the earlier `storage-model` policy keeps it and gains `storage-layout` beside it -- hence the pre-vocabulary key spellings in the shipped lock.
 

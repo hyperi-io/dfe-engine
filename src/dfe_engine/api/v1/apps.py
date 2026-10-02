@@ -758,7 +758,7 @@ def _overlay(gc: GitCrud, app: AppInstance) -> dict:
 
 
 def _enforce(request: Request, user: Any, name: str, doc: dict) -> bool:
-    """Gate every leaf the finished document carries or drops, and say if any is protected.
+    """Gate every leaf the write adds, changes or drops, and say if any is protected.
 
     This layer writes whole documents rather than one dot-path at a time, so the
     commit-policy value rules run over the finished document here, as
@@ -767,8 +767,8 @@ def _enforce(request: Request, user: Any, name: str, doc: dict) -> bool:
     ``{"image": {"tag": "latest"}}`` nests the leaf out of sight of a check that
     only inspects what was sent. Only a violation the write adds is refused, so an
     overlay already carrying one still takes the write that repairs it. The
-    protected-var gate also reads the stored overlay, because a parent written as a
-    smaller map drops the locked leaves it no longer carries.
+    protected-var gate compares against the stored overlay the same way: a locked
+    leaf the write keeps needs no override, and one a smaller parent map drops does.
     """
     try:
         stored = _gitcrud(request).get(_CLASS, name)
