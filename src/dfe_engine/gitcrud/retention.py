@@ -115,15 +115,32 @@ def with_default_ttl_days(settings: DFESettings, days: int) -> DFESettings:
 
 
 def effective_settings(settings: DFESettings, crud: GitCrud | None) -> DFESettings:
-    """*settings* with ``clickhouse.default_ttl_days`` set to the effective default.
+    """*settings* with the stored table defaults applied.
 
-    A copy when an override is stored, so the deployment's own value stays readable
-    on the original; *settings* itself when there is none.
+    TTL, and the common-header and engine overrides from
+    :func:`dfe_engine.gitcrud.table_defaults.resolve`, ride on a copy so the
+    deployment's own values stay readable on the original. *settings* itself
+    when nothing is stored. A deploy builds from this copy; retention reconcile
+    reads the TTL off it and does not apply the header.
     """
+    # Local import: table_defaults imports this module's constants.
+    from dfe_engine.gitcrud.table_defaults import resolve as resolve_table_defaults
+
+    updates: dict[str, Any] = {}
     state = resolve_state(crud, settings)
-    if state.origin == "deployment":
+    if state.origin == "override":
+        updates["default_ttl_days"] = state.effective
+    table = resolve_table_defaults(crud, settings)
+    if table.engine_origin == "override":
+        updates["default_engine"] = table.engine
+    if table.header_type_origin == "override":
+        updates["default_header_type"] = table.header_type
+    if table.header_version_origin == "override":
+        updates["default_header_version"] = table.header_version
+    if not updates:
         return settings
-    return with_default_ttl_days(settings, state.effective)
+    clickhouse = settings.clickhouse.model_copy(update=updates)
+    return settings.model_copy(update={"clickhouse": clickhouse})
 
 
 def set_stored(crud: GitCrud, days: int | None, actor: str) -> PublishResult | None:
