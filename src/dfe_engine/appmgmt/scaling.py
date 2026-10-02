@@ -16,12 +16,11 @@ deployment has no KEDA and only stack-wide CPU and memory limits, so the caller
 needs to render them disabled with a reason rather than have them vanish.
 """
 
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass
 from enum import StrEnum
 
+from dfe_engine.gitcrud.commit_policy import keda_owns_replicas
 from dfe_engine.gitcrud.engine import get_path
 
 from .catalogue import (
@@ -36,6 +35,7 @@ from .catalogue import (
     AppDescriptor,
     Multiplicity,
 )
+from .instances import HELMVARS_CLASS, parse_overlay_name
 
 # Kubernetes quantity forms we accept. CPU is either a plain number of cores or
 # milli-cores; memory is a byte count with an optional binary or decimal suffix.
@@ -118,6 +118,25 @@ def support(app: AppDescriptor, target: DeployTarget) -> tuple[bool, str]:
     return False, "deploy target is unknown, so scaling dials cannot be applied safely"
 
 
+def keda_by_default(cls: str, name: str) -> bool:
+    """Whether the chart a deploy-repo document configures runs KEDA when it does not say.
+
+    An app overlay follows the app manifest, whose ``scale_deployed`` declares that
+    KEDA drives the app. An overlay the catalogue cannot place keeps the strict
+    reading, because nothing here says which chart renders it. Any other class -
+    the platform and backing-service charts in ``infravars`` - runs no KEDA unless
+    the document enables it.
+
+    Args:
+        cls: The document's gitcrud class.
+        name: The document's resource name, ``{service}-{instance}-values`` for an app.
+    """
+    if cls != HELMVARS_CLASS:
+        return False
+    app = parse_overlay_name(name)
+    return app is None or app.descriptor.scale_deployed
+
+
 def read(doc: dict, app: AppDescriptor, target: DeployTarget) -> ScalingDials:
     """The instance's dials as the overlay currently sets them.
 
@@ -144,6 +163,7 @@ def read(doc: dict, app: AppDescriptor, target: DeployTarget) -> ScalingDials:
 def changes(
     doc: dict,
     *,
+    keda_by_default: bool = True,
     replica_count: int | None = None,
     min_replicas: int | None = None,
     max_replicas: int | None = None,
@@ -159,6 +179,10 @@ def changes(
     every other dial alone. ``doc`` supplies the current values the new range is
     checked against, so raising only the ceiling still validates against the
     existing floor.
+
+    ``keda_by_default`` is :func:`keda_by_default` for the overlay. It defaults to
+    true because :func:`support` admits only apps the manifest declares
+    scale-deployed, which that function reads as KEDA-driven.
     """
     out: dict[str, object] = {}
 
@@ -176,12 +200,11 @@ def changes(
             raise InvalidDialError(
                 f"replica_count {replica_count} exceeds the {MAX_REPLICAS_CEILING} ceiling"
             )
-        # The charts omit `replicas:` while KEDA owns the count. Only an explicit
-        # `true` refuses -- an unset key is the chart default, which is not readable
-        # from here.
-        if effective_keda is True:
+        # The same reading the commit policy refuses a stored replicaCount by.
+        if keda_owns_replicas(effective_keda, keda_by_default=keda_by_default):
+            state = "enabled" if effective_keda is True else "enabled by the chart default"
             raise InvalidDialError(
-                "replica_count does not apply while KEDA is enabled: the chart omits "
+                f"replica_count does not apply while KEDA is {state}: the chart omits "
                 "replicas and the ScaledObject owns the count. Set keda_enabled false "
                 "in the same request, or move min_replicas instead"
             )

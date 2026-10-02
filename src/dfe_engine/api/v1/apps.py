@@ -101,7 +101,7 @@ from dfe_engine.gitcrud.commit_policy import (
     CommitContext,
     CommitPolicyError,
     build_message,
-    validate_document,
+    validate_result,
 )
 from dfe_engine.gitcrud.engine import ResourceNotFoundError, del_path, set_path
 from dfe_engine.gitcrud.routing import ReviewRequiredError, route_write
@@ -443,8 +443,9 @@ class ScalingRequest(BaseModel):
     replica_count: int | None = Field(
         default=None,
         description=(
-            "Fixed pod count, for a deployment with KEDA off. Refused while KEDA is "
-            "explicitly enabled, because the chart omits `replicas` and the "
+            "Fixed pod count, for a deployment with KEDA off. Refused unless "
+            "`keda_enabled` is false in this request or already in the overlay: the "
+            "chart omits `replicas` while KEDA is on, which it is by default, and the "
             "ScaledObject owns the count."
         ),
     )
@@ -764,12 +765,17 @@ def _enforce(request: Request, user: Any, name: str, doc: dict) -> bool:
     ``api/v1/helm.py`` runs them over the document a var write leaves behind. They
     read every leaf of the result, not the request keys: a caller supplying
     ``{"image": {"tag": "latest"}}`` nests the leaf out of sight of a check that
-    only inspects what was sent. The protected-var gate also reads the stored
-    overlay, because a parent written as a smaller map drops the locked leaves it
-    no longer carries.
+    only inspects what was sent. Only a violation the write adds is refused, so an
+    overlay already carrying one still takes the write that repairs it. The
+    protected-var gate also reads the stored overlay, because a parent written as a
+    smaller map drops the locked leaves it no longer carries.
     """
     try:
-        validate_document(doc)
+        stored = _gitcrud(request).get(_CLASS, name)
+    except ResourceNotFoundError:
+        stored = {}
+    try:
+        validate_result(stored, doc, keda_by_default=scaling.keda_by_default(_CLASS, name))
     except CommitPolicyError as exc:
         raise HTTPException(403, detail={"code": "policy_violation", "message": str(exc)}) from exc
 
@@ -779,10 +785,6 @@ def _enforce(request: Request, user: Any, name: str, doc: dict) -> bool:
     override = authorize(
         user, "helmvars:override", role_config=request.app.state.role_config
     ).allowed
-    try:
-        stored = _gitcrud(request).get(_CLASS, name)
-    except ResourceNotFoundError:
-        stored = {}
     try:
         return policy.enforce_document(_CLASS, name, stored, doc, override=override)
     except ProtectedVarError as exc:
@@ -1393,7 +1395,11 @@ def set_scaling(
 
     doc = _overlay(_gitcrud(request), app)
     try:
-        changes = scaling.changes(doc, **body.model_dump(exclude_none=True))
+        changes = scaling.changes(
+            doc,
+            keda_by_default=scaling.keda_by_default(_CLASS, app.overlay_name),
+            **body.model_dump(exclude_none=True),
+        )
     except InvalidDialError as exc:
         raise HTTPException(400, detail={"code": "invalid_dial", "message": str(exc)}) from exc
     if not changes:

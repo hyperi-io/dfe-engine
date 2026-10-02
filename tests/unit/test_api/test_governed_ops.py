@@ -76,11 +76,11 @@ class TestTier1HelmVars:
         )
         assert resp.status_code == 403
 
-    @pytest.mark.parametrize(("cls", "url"), _VAR_ROUTES)
     def test_keda_cannot_be_handed_a_pinned_replica_count(
-        self, client, app, admin_headers, tmp_path, cls, url
+        self, client, app, admin_headers, tmp_path
     ):
         """Re-enabling KEDA, by set or by revert, over a document that pins replicaCount."""
+        cls, url = _VAR_ROUTES[0]
         gc = _wire_gitcrud(app, tmp_path)
         stored = {"keda": {"enabled": False}, "replicaCount": 3}
         gc.put(cls, "receiver-default", stored, "tester")
@@ -96,10 +96,29 @@ class TestTier1HelmVars:
             assert "replicaCount" in resp.json()["message"]
         assert gc.get(cls, "receiver-default") == stored
 
-    @pytest.mark.parametrize(("cls", "url"), _VAR_ROUTES)
-    def test_the_keda_refusal_advice_can_be_followed_on_the_vars_route(
-        self, client, app, admin_headers, tmp_path, cls, url
+    def test_a_platform_chart_refuses_only_an_explicit_keda_over_a_pinned_count(
+        self, client, app, admin_headers, tmp_path
     ):
+        """A platform chart runs no KEDA of its own, so only enabling it brings the rule."""
+        cls, url = _VAR_ROUTES[1]
+        gc = _wire_gitcrud(app, tmp_path)
+        stored = {"keda": {"enabled": False}, "replicaCount": 3}
+        gc.put(cls, "receiver-default", stored, "tester")
+        for resp in (
+            client.put(f"{url}/keda.enabled", json={"value": True}, headers=admin_headers),
+            client.put(f"{url}/keda", json={"value": {"enabled": True}}, headers=admin_headers),
+        ):
+            assert resp.status_code == 403, resp.text
+            assert "replicaCount" in resp.json()["message"]
+        assert gc.get(cls, "receiver-default") == stored
+        reverted = client.delete(f"{url}/keda.enabled", headers=admin_headers)
+        assert reverted.status_code == 200, reverted.text
+        assert gc.get(cls, "receiver-default") == {"keda": {}, "replicaCount": 3}
+
+    def test_the_keda_refusal_advice_can_be_followed_on_the_vars_route(
+        self, client, app, admin_headers, tmp_path
+    ):
+        cls, url = _VAR_ROUTES[0]
         gc = _wire_gitcrud(app, tmp_path)
         gc.put(cls, "receiver-default", {"deploy": {"service": "dfe-receiver"}}, "tester")
         refused = client.put(f"{url}/replicaCount", json={"value": 3}, headers=admin_headers)
@@ -122,6 +141,100 @@ class TestTier1HelmVars:
             "deploy": {"service": "dfe-receiver"},
             "keda": {"enabled": True},
         }
+
+
+class TestTheKedaRuleReadsWhatDrivesTheChart:
+    """The replicaCount rule binds where KEDA runs, and refuses only what a write adds."""
+
+    _HELM = "/api/v1/helm/files/{name}/vars"
+    _INFRA = "/api/v1/backing-services/overlays/{name}/vars"
+
+    def test_a_platform_overlay_with_a_count_takes_other_writes_and_reverts(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # hyperdx, ferretdb, kafbat and links declare replicaCount and carry no keda key.
+        gc = _wire_gitcrud(app, tmp_path)
+        stored = {"replicaCount": 2, "resources": {"limits": {"cpu": "1", "memory": "1Gi"}}}
+        gc.put("infravars", "hyperdx", stored, "tester")
+        url = self._INFRA.format(name="hyperdx")
+        steps = [
+            client.put(f"{url}/resources.limits.cpu", json={"value": "2"}, headers=admin_headers),
+            client.delete(f"{url}/resources.limits.memory", headers=admin_headers),
+            client.put(f"{url}/replicaCount", json={"value": 3}, headers=admin_headers),
+        ]
+        for resp in steps:
+            assert resp.status_code == 200, resp.text
+        assert gc.get("infravars", "hyperdx") == {
+            "replicaCount": 3,
+            "resources": {"limits": {"cpu": "2"}},
+        }
+
+    def test_a_platform_overlay_that_enables_keda_keeps_the_rule(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", "hyperdx", {"keda": {"enabled": True}}, "tester")
+        url = self._INFRA.format(name="hyperdx")
+        resp = client.put(f"{url}/replicaCount", json={"value": 3}, headers=admin_headers)
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["code"] == "policy_violation"
+
+    def test_an_app_keda_drives_still_refuses_a_count_without_keda_off(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        name = "dfe-receiver-default-values"
+        gc.put("helmvars", name, {"deploy": {"service": "dfe-receiver"}}, "tester")
+        url = self._HELM.format(name=name)
+        refused = client.put(f"{url}/replicaCount", json={"value": 3}, headers=admin_headers)
+        assert refused.status_code == 403, refused.text
+        assert refused.json()["code"] == "policy_violation"
+        assert (
+            client.put(
+                f"{url}/keda", json={"value": {"enabled": False}}, headers=admin_headers
+            ).status_code
+            == 200
+        )
+        allowed = client.put(f"{url}/replicaCount", json={"value": 3}, headers=admin_headers)
+        assert allowed.status_code == 200, allowed.text
+
+    def test_an_app_keda_does_not_drive_takes_a_count(self, client, app, admin_headers, tmp_path):
+        gc = _wire_gitcrud(app, tmp_path)
+        name = "dfe-fetcher-poller-values"
+        gc.put("helmvars", name, {"deploy": {"service": "dfe-fetcher"}}, "tester")
+        resp = client.put(
+            f"{self._HELM.format(name=name)}/replicaCount", json={"value": 1}, headers=admin_headers
+        )
+        assert resp.status_code == 200, resp.text
+
+    def test_a_write_that_adds_no_violation_passes_over_a_stored_one(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        name = "dfe-receiver-default-values"
+        stored = {"replicaCount": 2, "resources": {"limits": {"cpu": "1"}}}
+        gc.put("helmvars", name, stored, "tester")
+        url = self._HELM.format(name=name)
+        cpu = client.put(f"{url}/resources.limits.cpu", json={"value": "2"}, headers=admin_headers)
+        assert cpu.status_code == 200, cpu.text
+        reverted = client.delete(f"{url}/resources.limits.cpu", headers=admin_headers)
+        assert reverted.status_code == 200, reverted.text
+        # The stored count licenses nothing: a new value written over it is still refused.
+        recount = client.put(f"{url}/replicaCount", json={"value": 4}, headers=admin_headers)
+        assert recount.status_code == 403, recount.text
+        assert gc.get("helmvars", name) == {"replicaCount": 2, "resources": {"limits": {}}}
+
+    def test_a_document_with_two_violations_can_be_repaired(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        name = "dfe-receiver-default-values"
+        gc.put("helmvars", name, {"replicaCount": 2, "image": {"tag": "latest"}}, "tester")
+        url = self._HELM.format(name=name)
+        assert client.delete(f"{url}/replicaCount", headers=admin_headers).status_code == 200
+        pinned = client.put(f"{url}/image.tag", json={"value": "v1.0.0"}, headers=admin_headers)
+        assert pinned.status_code == 200, pinned.text
+        assert gc.get("helmvars", name) == {"image": {"tag": "v1.0.0"}}
 
 
 class TestTier2Actions:

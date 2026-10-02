@@ -475,6 +475,65 @@ class TestMemberCountsGoUpOnly:
         assert count in resp.json()["message"]
         assert gc.get("infravars", name) == stored
 
+    def test_a_writer_cannot_shrink_the_keeper_with_a_map_that_omits_it(
+        self, client, app, api_settings, admin_headers, tmp_path
+    ):
+        """No shipped policy locks the keeper, so this guard is all a helmvars:write holder meets."""
+        gc = _wire_gitcrud(app, tmp_path)
+        client.post(
+            "/api/v1/governance/admin/policies",
+            json={"name": "shipped", "protected": [*STORAGE_LOCK, *SIZING_LOCK]},
+            headers=admin_headers,
+        )
+        stored = {"clickhouse": {"keeper": {"replicas": 5, "resources": {"limits": {"cpu": "1"}}}}}
+        gc.put("infravars", "clickhouse-cluster", stored, "tester")
+        resp = self._set(
+            client,
+            _writer(app, api_settings),
+            "clickhouse-cluster",
+            "clickhouse.keeper",
+            {"resources": {"limits": {"cpu": "2"}}},
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "scale_down_refused"
+        assert "clickhouse.keeper.replicas" in resp.json()["message"]
+        assert "chart default" in resp.json()["message"]
+        assert gc.get("infravars", "clickhouse-cluster") == stored
+
+    @pytest.mark.parametrize(
+        ("name", "stored", "path", "value", "said"),
+        [
+            ("kafka", {"kafka": {"replicas": 5}}, "kafka", {"x": 1}, "chart default"),
+            ("kafka", {"kafka": {"replicas": 5}}, "kafka.replicas", None, "chart default"),
+            ("kafka", {"kafka": {"replicas": 5}}, "kafka.replicas", "7", "something else"),
+            (
+                "clickhouse-cluster",
+                {"clickhouse": {"replicas": 3, "keeper": {"replicas": 3}}},
+                "clickhouse.keeper",
+                {},
+                "chart default",
+            ),
+        ],
+    )
+    def test_a_declared_count_cannot_be_written_away(
+        self, client, app, admin_headers, tmp_path, name, stored, path, value, said
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", name, stored, "tester")
+        resp = self._set(client, admin_headers, name, path, value)
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "scale_down_refused"
+        assert said in resp.json()["message"]
+        assert gc.get("infravars", name) == stored
+
+    def test_a_parent_map_that_keeps_the_count_still_writes(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", "kafka", {"kafka": {"replicas": 5}}, "tester")
+        resp = self._set(client, admin_headers, "kafka", "kafka", {"replicas": 5, "x": 1})
+        assert resp.status_code == 200, resp.text
+
 
 class TestStorageModelIsDecidedAtDeploy:
     def test_storage_model_write_is_refused_with_the_policy(

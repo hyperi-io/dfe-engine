@@ -332,14 +332,15 @@ def _stack_with(
 
 
 def _guard_member_count(request: Request, name: str, path: str, value: Any) -> None:
-    """Refuse a write that lowers a declared node or broker count.
+    """Refuse a write that lowers a declared node or broker count, or drops it.
 
     Compares the value the overlay stack declares BEFORE the write with what it
     would declare after, so writing into the shared file cannot be refused for a
     drop the per-chart file goes on to override anyway. Nothing declared means
     nothing to compare against, and the write is accepted. A write to a parent of
     a count is compared on every count below it, since the map it writes replaces
-    them.
+    them; a declared count the write leaves undeclared, or as anything but a
+    count, hands the members to the chart default, which can be fewer.
     """
     spec = _owner(path)
     if spec is None or name not in (_COMMON, spec.chart):
@@ -356,17 +357,24 @@ def _guard_member_count(request: Request, name: str, path: str, value: Any) -> N
         if not _is_count(before):
             continue
         after = _resolved(written, count)
-        if _is_count(after) and after < before:
-            raise HTTPException(
-                400,
-                detail={
-                    "code": "scale_down_refused",
-                    "message": (
-                        f"{count} is up-only: {before} -> {after} would remove a member. "
-                        f"{spec.scale_down_reason}."
-                    ),
-                },
+        if _is_count(after) and after >= before:
+            continue
+        if _is_count(after):
+            change = f"{before} -> {after} would remove a member"
+        elif after is None:
+            change = (
+                f"this write leaves it undeclared where {before} is declared, which hands "
+                "it to the chart default and can remove members"
             )
+        else:
+            change = f"{before} -> {after!r} replaces a member count with something else"
+        raise HTTPException(
+            400,
+            detail={
+                "code": "scale_down_refused",
+                "message": f"{count} is up-only: {change}. {spec.scale_down_reason}.",
+            },
+        )
 
 
 @router.get("", dependencies=[Depends(require_action(scopes_dict["helmvars_read"]))])
@@ -440,7 +448,8 @@ def set_overlay_var(
     403 with the policy that blocked it when the var is protected - the storage
     model, the data-layer modes and the disk size are decided at deploy, and moving
     one on a live deployment is a data migration. 400 when the value would lower a
-    declared node or broker count, which loses data rather than capacity.
+    declared node or broker count, or leave it undeclared (a parent map that omits
+    it), which loses data rather than capacity.
     """
     check_name(name)
     _guard_member_count(request, name, path, body.value)

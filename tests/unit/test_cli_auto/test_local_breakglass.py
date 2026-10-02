@@ -236,7 +236,7 @@ def test_guard_confirm_abort_no_write(repo: Path):
 
 
 def test_safety_guard_steers_but_can_override(repo: Path):
-    # replicaCount is KEDA-owned - the SAME validate_change the API runs flags it.
+    # replicaCount is KEDA-owned - the SAME validate_result the API runs flags it.
     # Break-glass shows the steer (use keda.minReplicaCount/maxReplicaCount) but --yes overrides.
     result = _run(
         repo,
@@ -310,6 +310,55 @@ def test_safety_guard_checks_the_resulting_document(repo_keda_disabled: Path):
     assert result.exit_code == 0, result.output
     assert "safety:" in result.output
     assert "replicaCount" in result.output
+
+
+def test_unset_warns_when_the_revert_hands_the_count_back_to_keda(repo_keda_disabled: Path):
+    # The API's DELETE refuses this revert; break-glass names it and lets --yes through.
+    result = _run(
+        repo_keda_disabled,
+        [
+            "unset",
+            "helmvars",
+            "receiver-default",
+            "keda.enabled",
+            "--reason",
+            "re-enable autoscaling",
+            "--yes",
+            "--no-push",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "safety: replicaCount is owned by KEDA" in result.output
+    assert _head_message(repo_keda_disabled).startswith("[BREAK-GLASS] ")
+
+
+def test_unset_declined_at_the_safety_guard_commits_nothing(repo_keda_disabled: Path):
+    result = _run(
+        repo_keda_disabled,
+        ["unset", "helmvars", "receiver-default", "keda.enabled", "--reason", "x", "--no-push"],
+        input="n\n",  # decline "Override this safety guard?"
+    )
+    assert result.exit_code != 0
+    assert _head_message(repo_keda_disabled).startswith("seed:")
+
+
+def test_an_unrelated_set_over_a_stored_violation_only_notes_it(repo: Path):
+    # The seeded overlay already carries a count KEDA owns; a dial write elsewhere is
+    # not the write that broke it, so there is nothing to override.
+    _run(
+        repo,
+        ["set", "helmvars", "receiver-default", "replicaCount", "2"]
+        + ["--reason", "seed a violation", "--yes", "--no-push"],
+    )
+    result = _run(
+        repo,
+        ["set", "helmvars", "receiver-default", "keda.maxReplicas", "4", "--reason", "x"]
+        + ["--no-push"],
+        input="y\n",  # the write confirm; no safety prompt precedes it
+    )
+    assert result.exit_code == 0, result.output
+    assert "Override this safety guard?" not in result.output
+    assert "already breaks a rule, left as it is" in result.output
 
 
 def test_log_flags_break_glass(repo: Path):

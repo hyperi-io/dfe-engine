@@ -475,6 +475,29 @@ class TestScaling:
         assert resp.json()["code"] == "invalid_dial"
         assert "KEDA is enabled" in resp.json()["message"]
 
+    def test_a_count_with_the_keda_flag_unset_is_400(self, client, app, admin_headers, tmp_path):
+        # The transform's chart runs KEDA unless the overlay turns it off, which is the
+        # same reading the commit policy applies to the overlay the dial writes.
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        resp = client.put(f"{BASE}/scaling", json={"replica_count": 3}, headers=admin_headers)
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "invalid_dial"
+
+    def test_a_dial_write_passes_over_a_count_the_overlay_already_carries(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # The overlay breaks the KEDA rule already; a CPU dial is not the write that did.
+        gc = _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        name = f"{VRL}-edge-values"
+        stored = gc.get("helmvars", name)
+        stored["replicaCount"] = 2
+        gc.put("helmvars", name, stored, "tester")
+        resp = client.put(f"{BASE}/scaling", json={"cpu_request": "500m"}, headers=admin_headers)
+        assert resp.status_code == 200, resp.text
+        assert gc.get("helmvars", name)["resources"]["requests"]["cpu"] == "500m"
+
     def test_a_negative_replica_count_is_400(self, client, app, admin_headers, tmp_path):
         _wire(app, tmp_path)
         _deploy(client, admin_headers)

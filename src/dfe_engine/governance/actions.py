@@ -22,8 +22,9 @@ from pydantic import ValidationError
 from scalo.logger import logger
 
 from dfe_engine.appmgmt import contract
+from dfe_engine.appmgmt.scaling import keda_by_default
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError, get_path, set_path
-from dfe_engine.gitcrud.commit_policy import document_violations
+from dfe_engine.gitcrud.commit_policy import added_violations
 from dfe_engine.gitcrud.registry import UnknownResourceClassError
 from dfe_engine.gitops.repo import PublishResult
 
@@ -276,9 +277,11 @@ class ActionStore:
         The commit-policy value rules run over each document once every change has
         landed in it, as the direct path does: an action that disables KEDA may set
         replicaCount in the same invoke, and one that re-enables KEDA over a stored
-        replicaCount is refused.
+        replicaCount is refused. Only a violation the action adds is refused, again
+        as on the direct path.
         """
         docs: dict[tuple[str, str], dict] = {}
+        stored: dict[tuple[str, str], dict] = {}
         diff: list[dict[str, Any]] = []
         errors: list[str] = []
 
@@ -312,6 +315,7 @@ class ActionStore:
                     docs[key] = self._crud.get(ch.cls, ch.name)
                 except ResourceNotFoundError:
                     docs[key] = {}
+                stored[key] = copy.deepcopy(docs[key])
             doc = docs[key]
             # A value copied from a masked listing keeps the credential stored there.
             try:
@@ -333,7 +337,10 @@ class ActionStore:
             )
             set_path(doc, ch.path, value)
         for (cls, name), doc in docs.items():
-            for violation in document_violations(doc):
+            added = added_violations(
+                stored[(cls, name)], doc, keda_by_default=keda_by_default(cls, name)
+            )
+            for violation in added:
                 if not collect:
                     raise violation
                 errors.append(f"{cls}/{name}: {violation}")
@@ -369,15 +376,14 @@ class ActionStore:
             if landed is None:
                 landed = self._target(ch)
             # A branch reports only the violations it adds to the landed document.
-            reported = {str(violation) for violation in document_violations(landed)}
+            default = keda_by_default(ch.cls, ch.name)
             for enum_value, mapped in ref[1].items():
                 branch = copy.deepcopy(landed)
                 set_path(branch, ch.path, mapped)
-                for violation in document_violations(branch):
-                    if str(violation) not in reported:
-                        errors.append(
-                            f"{ch.cls}/{ch.name}:{ch.path}: map branch {enum_value!r}: {violation}"
-                        )
+                for violation in added_violations(landed, branch, keda_by_default=default):
+                    errors.append(
+                        f"{ch.cls}/{ch.name}:{ch.path}: map branch {enum_value!r}: {violation}"
+                    )
         errors.extend(f"{found}: {CREDENTIAL_REFUSAL}" for found in self.credential_changes(action))
         return diff, errors
 

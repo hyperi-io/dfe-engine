@@ -285,6 +285,7 @@ def _reconcile_apps(request: Request, user: Any, registry: Any) -> AppsSync:
             if change.action == "remove":
                 written = remove_overlay(request, user, change.app)
             else:
+                # No _enforce: compiled from the sources, and resolve_mode PRs it in production.
                 written = commit_overlay(
                     request, user, change.app, change.doc or {}, summary=change.summary
                 )
