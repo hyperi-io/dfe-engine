@@ -17,7 +17,6 @@ text. Every read runs with :func:`read_settings`, so ClickHouse itself refuses
 writes, DDL and settings changes.
 """
 
-import itertools
 import re
 from typing import Any
 
@@ -26,129 +25,10 @@ from sqlglot.dialects.dialect import Dialect
 from sqlglot.errors import SqlglotError
 from sqlglot.tokens import Token, TokenType
 
+from dfe_engine.clickhouse.function_guard import refuse_calls_outside_the_row
 from dfe_engine.clickhouse.quoting import column_reference
 
 _CLICKHOUSE = Dialect.get_or_raise("clickhouse")
-
-# ClickHouse 26.9.4 table functions, bar format and fuzzQuery, whose scalars read only their args.
-_TABLE_FUNCTIONS = frozenset(
-    {
-        "arrowflight",
-        "azureblobstorage",
-        "azureblobstoragecluster",
-        "bigquery",
-        "cluster",
-        "clusterallreplicas",
-        "cosn",
-        "deltalake",
-        "deltalakeazure",
-        "deltalakeazurecluster",
-        "deltalakecluster",
-        "deltalakelocal",
-        "deltalakes3",
-        "deltalakes3cluster",
-        "dictionary",
-        "eval",
-        "executable",
-        "file",
-        "filecluster",
-        "filesystem",
-        "fuzzjson",
-        "gcs",
-        "generate_series",
-        "generaterandom",
-        "generateseries",
-        "hdfs",
-        "hdfscluster",
-        "hive",
-        "hudi",
-        "hudicluster",
-        "iceberg",
-        "icebergazure",
-        "icebergazurecluster",
-        "icebergcluster",
-        "iceberghdfs",
-        "iceberghdfscluster",
-        "iceberglocal",
-        "iceberglocalcluster",
-        "icebergs3",
-        "icebergs3cluster",
-        "input",
-        "jdbc",
-        "loop",
-        "merge",
-        "mergetreeanalyzeindexes",
-        "mergetreeanalyzeindexesuuid",
-        "mergetreecodecblockcounts",
-        "mergetreeindex",
-        "mergetreeprojection",
-        "mergetreetextindex",
-        "mongodb",
-        "mysql",
-        "null",
-        "numbers",
-        "numbers_mt",
-        "odbc",
-        "oss",
-        "paimon",
-        "paimonazure",
-        "paimonazurecluster",
-        "paimoncluster",
-        "paimonhdfs",
-        "paimonhdfscluster",
-        "paimonlocal",
-        "paimons3",
-        "paimons3cluster",
-        "postgresql",
-        "primes",
-        "prometheusquery",
-        "prometheusqueryrange",
-        "redis",
-        "remote",
-        "remotesecure",
-        "s3",
-        "s3cluster",
-        "sqlite",
-        "sqlstandardvalues",
-        "timeseriesdata",
-        "timeseriesmetricfamilies",
-        "timeseriesmetrics",
-        "timeseriessamples",
-        "timeseriesselector",
-        "timeseriestags",
-        "url",
-        "urlcluster",
-        "values",
-        "view",
-        "viewexplain",
-        "viewifpermitted",
-        "ytsaurus",
-        "zeros",
-        "zeros_mt",
-    }
-)
-
-# Scalars that read a Join table, another table's schema, or a dictionary by a model name.
-_OUTSIDE_READERS = frozenset(
-    {
-        "hascolumnintable",
-        "joinget",
-        "joingetornull",
-        "naivebayesclassifier",
-        "naivebayesclassifierwithallprobs",
-        "naivebayesclassifierwithprob",
-    }
-)
-# dict* read external dictionaries and region* the embedded ones.
-_DICTIONARY_READER_PREFIXES = ("dict", "region")
-
-# generateSerialID writes a counter named by its argument to Keeper.
-_REMOTE_CALLERS = frozenset({"generateserialid"})
-# ai* post their arguments to an LLM provider, and readonly=1 does not stop them.
-_REMOTE_CALLER_PREFIXES = ("ai",)
-
-# The function forms of IN, each of which resolves a name in its second argument as a table.
-_IN_FUNCTION = re.compile(r"(global)?(not)?(null)?in(ignoreset)?", re.IGNORECASE)
 
 # ClickHouse reads a name standing alone in an IN list as a table, so the list may hold none.
 _NAMES = (exp.Column, exp.Dot, exp.Identifier, exp.Var)
@@ -217,21 +97,7 @@ def filter_predicate(filter_sql: str) -> str | None:
     if tree is None or tree.sql(dialect=_CLICKHOUSE, comments=False) != rendered:
         raise ValueError("filter does not read back as the same condition once rendered")
     _refuse_nodes(tree)
-    for name, following in itertools.pairwise(tokens):
-        # The IN operator's own keyword is followed by its list, not a call.
-        if following.token_type is not TokenType.L_PAREN or name.token_type is TokenType.IN:
-            continue
-        if _IN_FUNCTION.fullmatch(name.text):
-            raise ValueError(
-                f"filter may not call {name.text}(), which can read a table: "
-                "use the IN operator with a list of values"
-            )
-        if _reads_outside_the_row(name.text):
-            raise ValueError(f"filter may not call {name.text}(), which reads outside the table")
-        if _calls_another_service(name.text):
-            raise ValueError(
-                f"filter may not call {name.text}(), which sends data to another service"
-            )
+    refuse_calls_outside_the_row(rendered, subject="filter", tokens=tokens)
     return rendered
 
 
@@ -302,22 +168,6 @@ def _lists_a_name(node: exp.In) -> bool:
         if any(isinstance(part, _NAMES) for part in value.walk()):
             return True
     return False
-
-
-def _reads_outside_the_row(function_name: str) -> bool:
-    """Whether a call by this name reads a table, file, dictionary or Join table."""
-    name = function_name.lower()
-    return (
-        name in _TABLE_FUNCTIONS
-        or name in _OUTSIDE_READERS
-        or name.startswith(_DICTIONARY_READER_PREFIXES)
-    )
-
-
-def _calls_another_service(function_name: str) -> bool:
-    """Whether a call by this name sends its arguments to an AI provider or Keeper."""
-    name = function_name.lower()
-    return name in _REMOTE_CALLERS or name.startswith(_REMOTE_CALLER_PREFIXES)
 
 
 def read_settings(max_execution_time: int) -> dict[str, int]:

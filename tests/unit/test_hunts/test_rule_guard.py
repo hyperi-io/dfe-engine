@@ -12,6 +12,7 @@ from dfe_engine.hunts.rule_guard import (
     match_everything,
     preview_settings,
     preview_sql,
+    refuse_offbox_calls,
     volume_verdict,
 )
 from dfe_engine.hunts.rule_rewriter import RuleRewriter
@@ -78,6 +79,39 @@ def test_a_condition_that_is_true_for_every_event_is_named(where):
 @pytest.mark.parametrize("where", NARROWS)
 def test_a_condition_that_narrows_is_left_alone(where):
     assert match_everything(where, "dfe.main") is None
+
+
+# -- a condition that reads outside the row -------------------------------------
+
+# One per family, as the rule author would write it into the detection WHERE.
+OFFBOX_CONDITIONS = {
+    "url": "url('http://203.0.113.9/leak', 'LineAsString') = 1",
+    "s3": "s3('https://203.0.113.9/bucket/key', 'CSV') = 1",
+    "file": "file('hostname') LIKE '%a%'",
+    "remote": "remote('203.0.113.9', system.users) = 1",
+    "dictionary": "dictGet('tenants', 'name', toUInt64(1)) = 'acme'",
+    "ai": "aiFilter(toString(_json), 'is it bad') = 1",
+    "globalIn": "globalIn(_source, dfe.main)",
+    "nested in a permitted call": "length(aiEmbed(toString(_json))) > 0",
+    "beside a real condition": "severity = 'high' AND url('http://203.0.113.9/') = 1",
+}
+
+
+@pytest.mark.parametrize("where", OFFBOX_CONDITIONS.values(), ids=list(OFFBOX_CONDITIONS))
+def test_a_condition_that_reads_outside_the_row_is_refused(where):
+    message = refuse_offbox_calls(where)
+
+    assert message is not None
+    assert message.startswith("A rule's detection condition may not call ")
+
+
+@pytest.mark.parametrize("where", NARROWS)
+def test_a_condition_over_the_row_is_not_refused(where):
+    assert refuse_offbox_calls(where) is None
+
+
+def test_an_empty_condition_has_nothing_to_refuse():
+    assert refuse_offbox_calls("  ") is None
 
 
 def test_a_presence_check_names_the_column_every_event_has():
@@ -233,7 +267,12 @@ def test_the_preview_throws_at_its_bounds_rather_than_breaking_off():
         "timeout_overflow_mode": "throw",
         "max_rows_to_read": 50_000_000,
         "read_overflow_mode": "throw",
+        "readonly": 1,
     }
+
+
+def test_the_preview_runs_read_only_so_clickhouse_refuses_a_read_through_url():
+    assert preview_settings(DetectionGuardSettings())["readonly"] == 1
 
 
 # -- settings -------------------------------------------------------------------

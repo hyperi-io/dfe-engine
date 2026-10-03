@@ -26,8 +26,11 @@ every match in the window, and the INSERT of one summary row carrying that count
 so a truncated run says how much it left out.
 
 A rule that cannot be compiled (file missing, no detection logic, no source or no
-target to resolve) is logged and dropped. A hunt left with NOTHING to run is a
-hard failure in the worker rather than a silent clean run.
+target to resolve) is logged and dropped, as is one whose condition calls a
+ClickHouse function reading outside the row or sending it to another service --
+the statement runs as a user that may write, so ClickHouse cannot be asked to
+refuse that call. A hunt left with NOTHING to run is a hard failure in the worker
+rather than a silent clean run.
 """
 
 from pathlib import Path
@@ -36,6 +39,7 @@ from typing import Any
 from scalo.logger import logger
 
 from dfe_engine.hunts.hunt_output import HuntResultSchema
+from dfe_engine.hunts.rule_guard import refuse_offbox_calls
 from dfe_engine.hunts.rule_names import RuleNameError, rule_file
 from dfe_engine.hunts.rule_rewriter import RuleRewriter, strip_time_placeholder
 from dfe_engine.settings import MAX_DETECTIONS_PER_RUN
@@ -211,6 +215,13 @@ def compile_hunt_queries(
         where, rule_db, rule_table = _detection_clause(payload, rewriter)
         if not where:
             logger.error(f"hunt {hunt_id}: rule '{rule_name}' has no detection logic")
+            continue
+
+        # A rule YAML can also be committed straight into the deploy repo, so the
+        # API's refusal is not the only gate the condition passes.
+        offbox = refuse_offbox_calls(where)
+        if offbox is not None:
+            logger.error(f"hunt {hunt_id}: rule '{rule_name}' refused: {offbox}")
             continue
 
         source_db, source_table = _split_table(

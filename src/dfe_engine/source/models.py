@@ -31,6 +31,10 @@ from pydantic import (
 )
 
 from dfe_engine.api.pagination import PaginatedResponseWithObjects, PathTree
+from dfe_engine.clickhouse.function_guard import (
+    CallNotPermittedError,
+    refuse_calls_outside_the_row,
+)
 from dfe_engine.core_resources.yaml_resource_type import ResourceType
 from dfe_engine.source.engine_registry import EngineRegistry, InvalidEngineError
 from dfe_engine.source.type_registry import (
@@ -299,7 +303,26 @@ class SchemaColumn(BaseModel):
             except Exception as e:
                 errors.append(f"Column {self.name!r}: {e}")
 
+        errors.extend(self.offbox_default_errors())
+
         return errors
+
+    def offbox_default_errors(self) -> list[str]:
+        """Why this column's default expression may not be rendered into DDL.
+
+        A DEFAULT, MATERIALIZED or ALIAS expression is evaluated by ClickHouse on
+        every insert or read of the column, so a call reading outside the row or
+        posting it to another service fires on the data path, not on one query.
+        """
+        if not self.default:
+            return []
+        try:
+            refuse_calls_outside_the_row(
+                self.default, subject=f"The default for column {self.name!r}"
+            )
+        except CallNotPermittedError as exc:
+            return [str(exc)]
+        return []
 
 
 # ---------------------------------------------------------------------------
