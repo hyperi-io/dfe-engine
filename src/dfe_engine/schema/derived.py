@@ -36,7 +36,7 @@ the schemas list hands back.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -178,6 +178,13 @@ class DerivedSchema(BaseModel):
     path: str | None = Field(
         default=None,
         description="Registry path (derived/<group>/<name>); not stored in the YAML file",
+    )
+    origin: Literal["deploy", "shipped"] = Field(
+        default="deploy",
+        description=(
+            "Which root this document was read from, when the deploy repo and the "
+            "shipped schemas tree both carry derived schemas; not stored in the YAML file."
+        ),
     )
 
     @field_validator("base")
