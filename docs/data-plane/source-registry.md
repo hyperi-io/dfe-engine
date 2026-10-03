@@ -78,7 +78,7 @@ One YAML file per source, managed by `SourceRegistry` over two backends:
 | Operation | Effect |
 |-----------|--------|
 | **Create** | Validates the definition and updates receiver match rules. No topics, no DDL -- those land on deploy |
-| **Create from catalogue** | Compiles one entry of a transform's shipped catalogue into that same write body -- the match rule or fetcher family for the intake chosen, the transform variant, and the shipped meta schema when one exists -- then takes the ordinary create path |
+| **Create from catalogue** | Compiles one entry of a transform's shipped catalogue into that same write body -- the match rule or fetcher family for the intake chosen, the transform variant, and the schema layers its table is built from -- the ECS meta schema `meta/elastic/ecs`, plus `derived/<package>/<stream>` and `additional/<package>/<stream>` where each resolves -- then takes the ordinary create path. Until the schemas tree ships the ECS meta schema, no schema is bound |
 | **Deploy** | Runs the schema DDL, then creates that source's Kafka topics for the version being deployed |
 | **Read** | Definition plus status overlay (topic exists, table exists, transform running) |
 | **Update** | Validates, migrates the schema if fields changed, recompiles receiver and transform config |

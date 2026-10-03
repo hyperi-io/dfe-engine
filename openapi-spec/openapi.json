@@ -4668,7 +4668,7 @@
           "Sources"
         ],
         "summary": "Create Source From Catalogue",
-        "description": "Create a source from a catalogue entry, on the intake it arrives by.\n\nThe entry supplies the match rule or the fetcher family, the transform\nvariant and the shipped meta schema; everything after that is the ordinary\ncreate, so the source is indistinguishable from a hand-written one.",
+        "description": "Create a source from a catalogue entry, on the intake it arrives by.\n\nThe entry supplies the match rule or the fetcher family, the transform\nvariant and the shipped schema layers its table is built from; everything\nafter that is the ordinary create, so the source is indistinguishable from a\nhand-written one.",
         "operationId": "create_source_from_catalogue_api_v1_sources_from_catalogue__entry__post",
         "parameters": [
           {

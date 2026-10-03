@@ -7,16 +7,31 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """The catalogue routes, over the vendored copy of the shipped catalogue."""
 
-from __future__ import annotations
-
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from dfe_engine.source import catalogue as sc
+from dfe_engine.yaml_utils import yaml_dump
 
 SHIPPED = Path(__file__).parents[2] / "fixtures" / "catalogue" / "sources.yaml"
+
+_ECS_SELECTION = {
+    "base": "meta/elastic/ecs",
+    "base_version": "1.0.0",
+    "current": "1.0.0",
+    "versions": {"1.0.0": {"date": "2026-09-21", "select": [{"name": "event_action"}]}},
+}
+
+
+def _columns(*names: str) -> dict:
+    """A one-version meta or additional document declaring string columns."""
+    columns = [{"name": name, "type": "string", "use_case": "exact_match"} for name in names]
+    return {
+        "current": "1.0.0",
+        "versions": {"1.0.0": {"date": "2026-09-21", "type": "model", "columns": columns}},
+    }
 
 
 @pytest.fixture
@@ -142,6 +157,32 @@ class TestCreateFromCatalogue:
         assert stored["match"] is None
         version = stored["versions"][stored["current"]]
         assert version["fetcher"]["source_type"] == "aws"
+
+    def test_an_entry_is_built_on_ecs_and_the_layers_shipped_for_its_stream(
+        self, client: TestClient, admin_headers: dict, api_settings, mounted
+    ):
+        schemas = Path(api_settings.schemas.schemas_dir)
+        for reference, doc in (
+            ("meta/elastic/ecs", _columns("event_action", "host_name")),
+            ("derived/cisco_ios/log", _ECS_SELECTION),
+            ("additional/cisco_ios/log", _columns("cisco_ios_facility")),
+        ):
+            path = schemas / f"{reference}.yaml"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            yaml_dump(doc, path)
+
+        resp = client.post(
+            "/api/v1/sources/from-catalogue/cisco_ios",
+            json={"intake": "receiver"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 201, resp.text
+        stored = client.get("/api/v1/sources/cisco-ios", headers=admin_headers).json()
+        schema = stored["versions"][stored["current"]]["schema"]
+        assert schema["meta_schema"] == "meta/elastic/ecs"
+        assert schema["derived_schema"] == "derived/cisco_ios/log"
+        assert schema["additional_fields"] == "additional/cisco_ios/log"
 
     def test_an_entry_whose_name_is_not_a_legal_source_name_takes_one(
         self, client: TestClient, admin_headers: dict, mounted

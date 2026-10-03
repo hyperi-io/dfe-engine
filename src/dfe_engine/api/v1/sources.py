@@ -903,8 +903,9 @@ def create_source_from_catalogue(
     """Create a source from a catalogue entry, on the intake it arrives by.
 
     The entry supplies the match rule or the fetcher family, the transform
-    variant and the shipped meta schema; everything after that is the ordinary
-    create, so the source is indistinguishable from a hand-written one.
+    variant and the shipped schema layers its table is built from; everything
+    after that is the ordinary create, so the source is indistinguishable from a
+    hand-written one.
     """
     catalogue = _source_catalogue()
     if catalogue is None:
