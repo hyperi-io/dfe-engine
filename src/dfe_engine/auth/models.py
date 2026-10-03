@@ -9,6 +9,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from dfe_engine.auth.roles import RoleConfig
+
 
 class AuthenticationError(Exception):
     """Authentication failed (bad credentials, disabled account, etc.)."""
@@ -80,34 +82,47 @@ class ScopedGrant(BaseModel):
 ORG_VIEWER_ROLE = "org_viewer"
 
 
-def platform_grants(grants: Iterable[ScopedGrant]) -> list[ScopedGrant]:
-    """Return the grants that may read across orgs: SYSTEM scope, and not ``org_viewer``.
+def is_platform_role(role: str, role_config: RoleConfig) -> bool:
+    """Whether a system-scope grant of ``role`` may read across orgs.
 
-    A role bound at an org's scope covers that org alone, and ``org_viewer`` is the
-    tenant role. The ClickHouse group bindings and their otel reader, the HyperDX
-    connection read, the fork's role claim and JIT team assignment all decide
-    "every org" through this one filter.
-    """
-    return [g for g in grants if g.scope.type == "system" and g.role != ORG_VIEWER_ROLE]
-
-
-def platform_caller(user: AuthContext) -> AuthContext | None:
-    """Return ``user`` holding only the grants ``platform_grants`` keeps, or None if none.
-
-    Authorising an action against the result asks whether the caller may take it
-    across every org. Bare roles count as system-scope grants, as ``authorize()``
-    reads a context without grants.
+    Only a role the definitions declare and do not mark ``scoped`` may. ``org_viewer``
+    never may, whatever a deployment's definitions say, and an undefined role grants
+    nothing, so it unfences nothing either.
 
     Args:
-        user: The caller's auth context.
+        role: The role name.
+        role_config: The role definitions ``authorize()`` reads.
 
     Returns:
-        A copy of ``user`` with those grants and their roles, or None when it holds none.
+        True for a declared, unscoped role other than ``org_viewer``.
     """
-    platform = platform_grants(user.grants or [ScopedGrant(role=name) for name in user.roles])
-    if not platform:
-        return None
-    return user.model_copy(update={"roles": [grant.role for grant in platform], "grants": platform})
+    if role == ORG_VIEWER_ROLE:
+        return False
+    definition = role_config.roles.get(role)
+    return definition is not None and not definition.scoped
+
+
+def platform_grants(
+    grants: Iterable[ScopedGrant], *, role_config: RoleConfig | None = None
+) -> list[ScopedGrant]:
+    """Return the grants that may read across orgs: SYSTEM scope, of a platform role.
+
+    A role bound at an org's scope covers that org alone, and a ``scoped`` role is
+    held to its holder's orgs wherever it is bound (:func:`is_platform_role`). The
+    ClickHouse group bindings and their otel reader, the sampler, the HyperDX
+    connection read, the fork's role claim and JIT team assignment all decide
+    "every org" through this one filter.
+
+    Args:
+        grants: The grants to filter.
+        role_config: The role definitions ``authorize()`` reads; None reads the
+            shipped ones, as ``authorize()`` does.
+
+    Returns:
+        The grants that may read across orgs, in their given order.
+    """
+    config = role_config or RoleConfig.load_builtin()
+    return [g for g in grants if g.scope.type == "system" and is_platform_role(g.role, config)]
 
 
 class AuthContext(BaseModel):
@@ -141,6 +156,30 @@ class AuthContext(BaseModel):
     request_id: str | None = None
     client_ip: str | None = None
     user_agent: str | None = None
+
+
+def platform_caller(
+    user: AuthContext, *, role_config: RoleConfig | None = None
+) -> AuthContext | None:
+    """Return ``user`` holding only the grants ``platform_grants`` keeps, or None if none.
+
+    Authorising an action against the result asks whether the caller may take it
+    across every org. Bare roles count as system-scope grants, as ``authorize()``
+    reads a context without grants.
+
+    Args:
+        user: The caller's auth context.
+        role_config: The role definitions ``authorize()`` reads; None reads the
+            shipped ones.
+
+    Returns:
+        A copy of ``user`` with those grants and their roles, or None when it holds none.
+    """
+    grants = user.grants or [ScopedGrant(role=name) for name in user.roles]
+    platform = platform_grants(grants, role_config=role_config)
+    if not platform:
+        return None
+    return user.model_copy(update={"roles": [grant.role for grant in platform], "grants": platform})
 
 
 class AuthzRequest(BaseModel):

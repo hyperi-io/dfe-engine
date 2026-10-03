@@ -36,9 +36,11 @@ from dfe_engine.auth.jit import (
     JitSubjectUnusableError,
 )
 from dfe_engine.auth.membership import groups_held, linked_groups, linked_providers
+from dfe_engine.auth.models import platform_caller
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.auth.sessions import session_ended
 from dfe_engine.gitcrud.retention import effective_settings
+from dfe_engine.orgs.tenant_scope import tenant_ids_for
 from dfe_engine.settings import DFESettings, is_dev_posture
 
 if TYPE_CHECKING:
@@ -826,6 +828,11 @@ def guarded_operations(
 # -- Authorization ---------------------------------------------
 
 
+def live_role_config(request: Request) -> RoleConfig | None:
+    """The role definitions ``authorize()`` reads, which the roles API refreshes on every write."""
+    return getattr(request.app.state, "role_config", None)
+
+
 def is_action_allowed(
     request: Request,
     user: AuthContext,
@@ -835,14 +842,51 @@ def is_action_allowed(
 ) -> bool:
     """Non-raising authorize() for visibility filtering in handlers."""
     settings: DFESettings = request.app.state.settings
-    role_config = getattr(request.app.state, "role_config", None)
     return authorize(
         user,
         action,
         scope=scope,
         enabled=settings.auth.enabled,
-        role_config=role_config,
+        role_config=live_role_config(request),
     ).allowed
+
+
+def reads_every_org(request: Request, user: AuthContext, action: str) -> bool:
+    """Whether a grant that may read across orgs (``platform_grants``) allows ``action``.
+
+    Args:
+        request: The request, for the role definitions.
+        user: The caller's auth context.
+        action: The action the read is gated on.
+
+    Returns:
+        True when the caller may take ``action`` across every org.
+    """
+    reader = platform_caller(user, role_config=live_role_config(request))
+    return reader is not None and is_action_allowed(request, reader, action)
+
+
+def held_tenant_ids(request: Request, user: AuthContext, action: str) -> list[str] | None:
+    """The tenant ids a caller's reads are held to, or None when it may read every org.
+
+    A caller is held unless :func:`reads_every_org` passes for ``action``. A held
+    caller's org names map to the tenant ids the ClickHouse row policy binds
+    (:func:`~dfe_engine.orgs.tenant_scope.tenant_ids_for`); a name that is not a
+    registered org maps to none, and an empty list is refused, never read.
+
+    Args:
+        request: The request, for the role definitions and the org registry.
+        user: The caller's auth context.
+        action: The action the read is gated on.
+
+    Returns:
+        The caller's tenant ids, sorted, or None for a platform caller.
+    """
+    if reads_every_org(request, user, action):
+        return None
+    org_registry = getattr(request.app.state, "org_registry", None)
+    orgs = org_registry.list() if org_registry is not None else []
+    return tenant_ids_for(user.org_ids, orgs)
 
 
 def check_action(
@@ -860,13 +904,12 @@ def check_action(
     exactly like require_action.
     """
     settings: DFESettings = request.app.state.settings
-    role_config = getattr(request.app.state, "role_config", None)
     result = authorize(
         user,
         action,
         scope=scope,
         enabled=settings.auth.enabled,
-        role_config=role_config,
+        role_config=live_role_config(request),
     )
     if not result.allowed:
         audit_permission_denied(user.user_id, action, user.roles, result.reason)
@@ -894,13 +937,12 @@ def require_action(action: str, *, scope: Scope | None = None):
         user: AuthContext = Depends(get_current_user),
         settings: DFESettings = Depends(get_app_settings),
     ) -> None:
-        role_config = getattr(request.app.state, "role_config", None)
         result = authorize(
             user,
             action,
             scope=scope,
             enabled=settings.auth.enabled,
-            role_config=role_config,
+            role_config=live_role_config(request),
         )
         if not result.allowed:
             audit_permission_denied(user.user_id, action, user.roles, result.reason)

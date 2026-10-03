@@ -10,9 +10,11 @@
 
 Tasks are created by other routers (hunts, pipeline) via the TaskManager.
 This router only provides read access + cancel.
-"""
 
-from __future__ import annotations
+A caller without a platform grant holding the route's action is held to its own
+orgs, as ``GET /samples`` holds it: it sees only the tasks held to them, and gets
+404 for any other task, as for one that does not exist.
+"""
 
 import asyncio
 import json
@@ -20,8 +22,9 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sse_starlette.sse import EventSourceResponse
 
-from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.deps import CurrentUser, held_tenant_ids, require_action
 from dfe_engine.api.task_manager import TaskInfo, TaskManager
+from dfe_engine.auth.models import AuthContext
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -29,6 +32,22 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 def _get_task_manager(request: Request) -> TaskManager:
     return request.app.state.task_manager
+
+
+def _visible_task(request: Request, user: AuthContext, task_id: str, action: str) -> TaskInfo:
+    """The task, if the caller may see it under ``action``.
+
+    Raises:
+        HTTPException: 404 when the task does not exist or is not held to the caller's orgs.
+    """
+    reader_orgs = held_tenant_ids(request, user, action)
+    info = _get_task_manager(request).get(task_id, reader_orgs=reader_orgs)
+    if info is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Task '{task_id}' not found"},
+        )
+    return info
 
 
 @router.get(
@@ -41,9 +60,9 @@ async def list_tasks(
     user: CurrentUser,
     kind: str | None = Query(None, description="Filter by task kind"),
 ) -> list[TaskInfo]:
-    """List all tasks, optionally filtered by kind."""
-    manager = _get_task_manager(request)
-    return manager.list(kind=kind)
+    """List the tasks the caller may see, optionally filtered by kind."""
+    reader_orgs = held_tenant_ids(request, user, scopes_dict["task_read"])
+    return _get_task_manager(request).list(kind=kind, reader_orgs=reader_orgs)
 
 
 @router.get(
@@ -57,14 +76,7 @@ async def get_task(
     user: CurrentUser,
 ) -> TaskInfo:
     """Get current status of a task."""
-    manager = _get_task_manager(request)
-    info = manager.get(task_id)
-    if info is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Task '{task_id}' not found"},
-        )
-    return info
+    return _visible_task(request, user, task_id, scopes_dict["task_read"])
 
 
 @router.post(
@@ -78,13 +90,8 @@ async def cancel_task(
     user: CurrentUser,
 ) -> TaskInfo:
     """Cancel a running task."""
+    info = _visible_task(request, user, task_id, scopes_dict["task_write"])
     manager = _get_task_manager(request)
-    info = manager.get(task_id)
-    if info is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Task '{task_id}' not found"},
-        )
     manager.cancel(task_id)
     # Re-fetch after cancel request (status may not have changed yet); fall back
     # to the pre-cancel info if the task vanished between cancel and re-fetch.
@@ -100,6 +107,7 @@ async def cancel_task(
 async def stream_task(
     request: Request,
     task_id: str,
+    user: CurrentUser,
 ):
     """SSE stream of task progress updates.
 
@@ -107,13 +115,9 @@ async def stream_task(
     - ``progress``: ``{status, progress, message}``
     - ``complete``: ``{status, result, error}`` (terminal -- stream ends)
     """
+    # A task's hold is fixed at submit, so the check here covers every event after it.
+    _visible_task(request, user, task_id, scopes_dict["task_read"])
     manager = _get_task_manager(request)
-    info = manager.get(task_id)
-    if info is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Task '{task_id}' not found"},
-        )
 
     async def _event_generator():
         while True:

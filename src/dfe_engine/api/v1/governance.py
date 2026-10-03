@@ -25,7 +25,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
-from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.deps import CurrentUser, live_role_config, require_action
 from dfe_engine.api.review import apply_review_headers
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import contract
@@ -444,6 +444,7 @@ def reconcile_ch_rbac_endpoint(user: CurrentUser, request: Request) -> dict[str,
         settings=settings,
         org_registry=getattr(request.app.state, "org_registry", None),
         group_store=getattr(request.app.state, "group_store", None),
+        role_config=live_role_config(request),
     )
     return {
         "statements": len(result.statements),

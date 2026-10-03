@@ -39,8 +39,7 @@ a junior `admin`; it is a different axis.
 
 ## Canonical roles
 
-Defined in `roles.yaml`. `scoped: true` means the role binds within an org
-rather than system-wide.
+Defined in `roles.yaml`. `scoped: true` means the role never reads across orgs: its holders are held to their own orgs wherever it is bound, system-wide included.
 
 | Role | Plane | For |
 |---|---|---|

@@ -46,7 +46,10 @@ class OrgTable:
 
 
 @pytest.fixture
-def table(app):
+def table(app, client):
+    """The sampled table, with the fixture orgs registered under tenant ids equal to their names."""
+    for org in MULTI_ORGS:
+        app.state.org_registry.create(org, org_ids=[org])
     ch = OrgTable(["_org_id", "_json", "timestamp_load"])
     app.dependency_overrides[get_clickhouse_client] = lambda: ch
     yield ch
@@ -108,7 +111,7 @@ def test_a_caller_in_no_org_is_refused_before_any_read(viewer_of, table):
     resp = _sample(viewer_of("orgless-viewer", []))
 
     assert resp.status_code == 403, resp.text
-    assert "no org" in resp.json()["message"]
+    assert "no registered org" in resp.json()["message"]
     assert table.reads == []
 
 

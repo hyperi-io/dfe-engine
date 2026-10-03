@@ -297,6 +297,36 @@ class Sampler:
             )
         from logreducer.clickhouse import ClickHouseSource
 
+        sql, params = self.reduce_query(req, target, source_label, org_ids)
+        return ClickHouseSource(
+            ch_reader._raw_client(ch),
+            sql,
+            parameters=params or None,
+            settings=ch_reader.read_settings(self._cfg.max_execution_time),
+        )
+
+    def reduce_query(
+        self,
+        req: SampleRequest,
+        target: str,
+        source_label: str | None,
+        org_ids: list[str] | None,
+    ) -> tuple[str, dict[str, Any]]:
+        """The ClickHouse scan a gated mode hands logreducer, and its bound parameters.
+
+        Args:
+            req: The sample request.
+            target: The already-quoted table reference.
+            source_label: The ``_source`` filter for the shared landing table, if any.
+            org_ids: The tenant ids the scan is held to; None reads every org.
+
+        Returns:
+            The SELECT, and the parameters it binds.
+
+        Raises:
+            ValueError: If the filter is not one condition over the row, or
+                ``org_ids`` is empty.
+        """
         where, params = ch_reader.build_where(
             source_label=source_label,
             org_ids=org_ids,
@@ -305,13 +335,7 @@ class Sampler:
             until=req.until,
             timestamp_field=self._cfg.timestamp_field,
         )
-        sql = ch_reader.scan_query(target, where=where, scan_rows=self._cfg.max_scan_rows)
-        return ClickHouseSource(
-            ch_reader._raw_client(ch),
-            sql,
-            parameters=params or None,
-            settings=ch_reader.read_settings(self._cfg.max_execution_time),
-        )
+        return ch_reader.scan_query(target, where=where, scan_rows=self._cfg.max_scan_rows), params
 
     # -- formatting ---------------------------------------------
 
@@ -353,7 +377,9 @@ def _refuse_unscoped_backend(req: SampleRequest, org_ids: list[str] | None) -> N
     if org_ids is None:
         return
     if not org_ids:
-        raise SampleScopeError("you belong to no org, so there are no rows you may sample")
+        raise SampleScopeError(
+            "you belong to no registered org, so there are no rows you may sample"
+        )
     if req.backend == SampleBackend.KAFKA:
         raise SampleScopeError(
             f"a Kafka topic has no {ORG_ID_COLUMN} column to limit a sample to your orgs; "

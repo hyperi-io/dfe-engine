@@ -18,8 +18,6 @@ DELETE /api/v1/auth/roles/{name}       -> Delete role
 All endpoints require admin role (org:write).
 """
 
-from __future__ import annotations
-
 from typing import Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -29,6 +27,7 @@ from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search
 from dfe_engine.auth.rbac_scopes import casbin_scope_catalog, scopes_dict
 from dfe_engine.auth.role_store import Role, RoleStore
+from dfe_engine.governance.ch import request_ch_rbac_reconcile
 
 RoleResourceTypeQuery = Literal["core", "custom"]
 
@@ -112,6 +111,8 @@ def _role_response(role: Role) -> RoleResponse:
 def _refresh_role_config(request: Request) -> None:
     store: RoleStore = request.app.state.role_store
     request.app.state.role_config = store.load_config()
+    # A role's scoped flag decides whether its groups' ClickHouse users are pinned to an org.
+    request_ch_rbac_reconcile(request.app.state)
 
 
 def _role_in_use(request: Request, role_name: str) -> bool:
