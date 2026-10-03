@@ -131,7 +131,7 @@ class TestHuntsLandWhereTheRunnerLooks:
             dict(HUNT_CONFIG), "windows_hunt", rules_dir=crud.repo_path / "config" / "rules"
         )
         assert len(sql) == 1
-        assert sql[0].sql.startswith("INSERT INTO dfe.detection")
+        assert sql[0].sql.startswith("INSERT INTO `dfe`.`detection`")
 
 
 class TestTheBytesAreUnchanged:

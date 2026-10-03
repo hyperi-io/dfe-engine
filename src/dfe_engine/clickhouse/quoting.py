@@ -94,6 +94,33 @@ def table_reference(reference: str) -> str:
     return ".".join(quote_identifier(part) for part in parts)
 
 
+def plain_table_name(reference: str) -> tuple[str, str]:
+    """Split a caller-supplied ``table`` or ``database.table`` written in identifier characters.
+
+    For a name that is configuration text rather than a ClickHouse reference, so
+    nothing but letters, digits and ``_`` may reach the statement. Quote both
+    parts through :func:`quote_identifier` wherever the name is spliced.
+
+    Args:
+        reference: The name as written, surrounding whitespace ignored.
+
+    Returns:
+        ``(database, table)``, with ``database`` empty for an unqualified name.
+
+    Raises:
+        ValueError: If the name is anything but one identifier, or two joined by
+            a single dot.
+    """
+    name = reference.strip()
+    if not BARE_REFERENCE.fullmatch(name) or name.count(".") > 1:
+        raise ValueError(
+            f"{reference!r} is not a table name: use table or database.table, "
+            "each made of letters, digits and '_'"
+        )
+    database, _, table = name.rpartition(".")
+    return database, table
+
+
 def column_reference(name: str) -> str:
     """Render an operator-supplied field name as a column reference.
 

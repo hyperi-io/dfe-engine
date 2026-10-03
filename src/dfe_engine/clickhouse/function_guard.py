@@ -26,11 +26,19 @@ Three families, each its own refusal:
   counter to Keeper (``generateSerialID``).
 
 The check reads the text that will run: every name directly followed by ``(``
-is looked up, so a quoted call name is caught as well as a bare one. The ``IN``
-operator's keyword is also followed by ``(``; it is told apart from an ``in()``
-call by standing after an operand, and is left alone. After ``CASE``, ``DIV``,
-``INTERVAL``, ``LIKE``, ``LIMIT`` or ``OFFSET`` the two cannot be told apart, so a
-column with one of those names must be backtick-quoted before ``IN``.
+is looked up, so a quoted call name is caught as well as a bare one.
+
+The ``IN`` operator's keyword is also followed by ``(``. It is left alone when
+the token before it, past ``NOT`` and ``GLOBAL``, can end an operand: a name, a
+literal, a closing bracket, or a keyword sqlglot also accepts as a name. Any
+other token puts the ``in(`` where an operand starts, and it is refused as the
+call. ``CASE``, ``DIV``, ``INTERVAL``, ``LIKE``, ``LIMIT``, ``MOD`` and ``OFFSET``
+are words sqlglot accepts as a name that ClickHouse 26.9.4 reads an operand
+after, as in ``a MOD in(b, t)``, so they count as starting one, and a column
+with one of those names must be backtick-quoted before ``IN``. Any other keyword
+sqlglot accepts as a name, such as ``END`` or ``SETTINGS``, is read as ending an
+operand, and ClickHouse 26.9.4 refuses ``x END in(...)`` and its like as a
+syntax error.
 """
 
 import itertools
@@ -179,6 +187,9 @@ _EXPRESSION_LEADS = frozenset(
     }
 )
 
+# Infix operator words sqlglot tokenises as a plain name, as in a MOD in(b, t).
+_EXPRESSION_LEAD_WORDS = frozenset({"mod"})
+
 # Tokens an operand ends with, so an IN keyword after one is the operator, not an in() call.
 _OPERAND_ENDS = (
     frozenset(_CLICKHOUSE.parser_class.ID_VAR_TOKENS)
@@ -200,6 +211,13 @@ _OPERAND_ENDS = (
 
 # Words between an operand and the IN operator: x NOT IN (...), x GLOBAL IN (...).
 _IN_MODIFIERS = frozenset({TokenType.GLOBAL, TokenType.NOT})
+
+
+def _leads_an_expression(token: Token) -> bool:
+    """Whether ClickHouse reads an operand after this token, so a following in( is a call."""
+    if token.token_type in _EXPRESSION_LEADS:
+        return True
+    return token.token_type is TokenType.VAR and token.text.lower() in _EXPRESSION_LEAD_WORDS
 
 
 def reads_outside_the_row(function_name: str) -> bool:
@@ -262,7 +280,11 @@ def refuse_calls_outside_the_row(
         if following.token_type is not TokenType.L_PAREN:
             continue
         before = _before_in(tokens, index) if name.token_type is TokenType.IN else None
-        if before is not None and before.token_type in _OPERAND_ENDS:
+        if (
+            before is not None
+            and before.token_type in _OPERAND_ENDS
+            and not _leads_an_expression(before)
+        ):
             continue
         if IN_FUNCTION.fullmatch(name.text):
             raise CallNotPermittedError(_in_call_refusal(subject, name.text, before))
@@ -293,7 +315,7 @@ def _before_in(tokens: list[Token], index: int) -> Token | None:
 def _in_call_refusal(subject: str, call: str, before: Token | None) -> str:
     """The refusal of an ``in()`` call, telling a column named as a keyword how to pass."""
     refusal = f"{subject} may not call {call}(), which can read a table"
-    if before is not None and before.token_type in _EXPRESSION_LEADS:
+    if before is not None and _leads_an_expression(before):
         word = before.text
         return (
             f"{refusal}: IN straight after {word} reads as that call, "

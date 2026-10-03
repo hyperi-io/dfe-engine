@@ -29,7 +29,9 @@ A rule that cannot be compiled (file missing, no detection logic, no source or n
 target to resolve) is logged and dropped, as is one whose condition calls a
 ClickHouse function reading outside the row or sending it to another service --
 the statement runs as a user that may write, so ClickHouse cannot be asked to
-refuse that call. A hunt left with NOTHING to run is a hard failure in the worker
+refuse that call. So is one whose target is not a plain ``table`` or
+``database.table``: ``INSERT INTO FUNCTION url(...)`` would send every detection
+row off the box. A hunt left with NOTHING to run is a hard failure in the worker
 rather than a silent clean run.
 """
 
@@ -38,6 +40,7 @@ from typing import Any
 
 from scalo.logger import logger
 
+from dfe_engine.clickhouse.quoting import plain_table_name, quote_identifier
 from dfe_engine.hunts.hunt_output import HuntResultSchema
 from dfe_engine.hunts.rule_guard import refuse_offbox_calls
 from dfe_engine.hunts.rule_names import RuleNameError, rule_file
@@ -154,9 +157,8 @@ def _summary_sql(schema: HuntResultSchema, target_db: str, target_table: str) ->
     """The one summary row's INSERT. Every value is a bound parameter, never a literal."""
     columns = schema.insert_columns()
     values = ",\n    ".join(_SUMMARY_VALUES[column] for column in columns)
-    return (
-        f"INSERT INTO {target_db}.{target_table}\n    ({', '.join(columns)})\nSELECT\n    {values}"
-    )
+    target = f"{quote_identifier(target_db)}.{quote_identifier(target_table)}"
+    return f"INSERT INTO {target}\n    ({', '.join(columns)})\nSELECT\n    {values}"
 
 
 def compile_hunt_queries(
@@ -233,14 +235,19 @@ def compile_hunt_queries(
             logger.error(f"hunt {hunt_id}: rule '{rule_name}' resolves to no db.table source")
             continue
 
-        target_db, target_table = _split_table(
-            str(entry.get("target_table_name") or "") or hunt_target or default_target
-        )
-        # An unqualified target lands beside its source, never in a guessed database.
-        target_db = target_db or source_db
-        if not target_table:
+        target = str(entry.get("target_table_name") or "") or hunt_target or default_target
+        if not target.strip():
             logger.error(f"hunt {hunt_id}: rule '{rule_name}' resolves to no target table")
             continue
+        # A hunt YAML can also be committed straight into the deploy repo, so the
+        # API's check of the target is not the only gate it passes.
+        try:
+            target_db, target_table = plain_table_name(target)
+        except ValueError as exc:
+            logger.error(f"hunt {hunt_id}: rule '{rule_name}' target refused: {exc}")
+            continue
+        # An unqualified target lands beside its source, never in a guessed database.
+        target_db = target_db or source_db
 
         display_name = str(payload.get("display_name") or payload.get("name") or rule_name)
         severity = str(payload.get("severity") or "medium")

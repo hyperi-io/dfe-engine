@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from dfe_engine.api.deps import CurrentUser, HuntConfigReg, RuleReg, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams
@@ -29,7 +29,9 @@ from dfe_engine.api.review import set_review_headers
 from dfe_engine.api.task_manager import TaskInfo, TaskManager, TaskStatus
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.clickhouse.quoting import plain_table_name
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError
+from dfe_engine.schema.derived_registry import derived_reference_root
 from dfe_engine.sigma.catalog import (
     SigmaCatalogStore,
     SigmaProviderStore,
@@ -144,11 +146,14 @@ def _get_source_mapper(request: Request):
         )
 
     fieldmap_registry = _registries.get("fieldmap")
+    settings = getattr(request.app.state, "settings", None)
     return SigmaSourceMapper(
         source_registry=source_registry,
         registry=None,
         field_map_registry=fieldmap_registry,
         view_store=_view_store_or_none(request),
+        schemas_base_dir=(settings.schemas.schemas_dir or None) if settings else None,
+        derived_base_dir=derived_reference_root(settings) if settings else None,
     )
 
 
@@ -903,6 +908,13 @@ class PropagateRequest(BaseModel):
         default_factory=lambda: ["default"],
         description="customers for a new hunt (operator adjusts later via PUT /hunts)",
     )
+
+    @field_validator("hunt_target_table")
+    @classmethod
+    def _target_is_a_table_name(cls, value: str) -> str:
+        # The hunt runner splices this into INSERT INTO, so it may only name a table.
+        plain_table_name(value)
+        return value
 
 
 class PropagationReportModel(BaseModel):

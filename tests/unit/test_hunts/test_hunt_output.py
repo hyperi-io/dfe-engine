@@ -198,7 +198,7 @@ class TestBuildInsertSelect:
             hunt_name="windows_detection",
             severity="high",
         )
-        assert "INSERT INTO acme.detection" in sql
+        assert "INSERT INTO `acme`.`detection`" in sql
         assert "FROM acme.windows_audit" in sql
         assert "{timestamp_condition}" in sql
         assert "process_executable IN ('certutil.exe')" in sql
