@@ -13,6 +13,7 @@ action that renders DDL from it, including the JSON-derived column extraction.
 
 from __future__ import annotations
 
+from dfe_engine.api.deps import _registries
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 
@@ -22,6 +23,18 @@ def _wire_gitcrud(app, tmp_path):
     gc = GitCrud(repo, default_registry())
     app.state.gitcrud = gc
     return gc
+
+
+def _add_source(name: str) -> None:
+    _registries["source"].save_source(
+        {
+            "source": name,
+            "enabled": True,
+            "match": {"field": "tags.collector.type", "value": name},
+            "schema": {"engine": "MergeTree"},
+            "views": [{"standard": "sigma", "taxonomy": "windows"}],
+        }
+    )
 
 
 def _view_body(**overrides) -> dict:
@@ -136,6 +149,31 @@ def test_generate_ddl_respects_an_explicit_database(client, app, admin_headers, 
     assert gen.status_code == 200, gen.text
     ddl = gen.json()["ddl"]
     assert "CREATE OR REPLACE VIEW `custom_db`.`windows-audit_sigma` AS" in ddl
+
+
+def test_generate_all_views_default_database(client, app, admin_headers, api_settings, tmp_path):
+    _wire_gitcrud(app, tmp_path)
+    _add_source("windows-audit")
+    client.put("/api/v1/sigma/views/windows-audit", json=_view_body(), headers=admin_headers)
+
+    gen = client.post("/api/v1/sigma/views", headers=admin_headers)
+    assert gen.status_code == 200, gen.text
+    ddls = {row["source_name"]: row["ddl"] for row in gen.json()}
+    # No explicit database: lands in the data database, same as the single-view route.
+    database = api_settings.clickhouse.effective_data_database
+    assert f"CREATE OR REPLACE VIEW `{database}`.`windows-audit_sigma` AS" in ddls["windows-audit"]
+
+
+def test_generate_all_views_respects_an_explicit_database(client, app, admin_headers, tmp_path):
+    _wire_gitcrud(app, tmp_path)
+    _add_source("windows-audit")
+    client.put("/api/v1/sigma/views/windows-audit", json=_view_body(), headers=admin_headers)
+
+    gen = client.post("/api/v1/sigma/views?database=custom_db", headers=admin_headers)
+
+    assert gen.status_code == 200, gen.text
+    ddls = {row["source_name"]: row["ddl"] for row in gen.json()}
+    assert "CREATE OR REPLACE VIEW `custom_db`.`windows-audit_sigma` AS" in ddls["windows-audit"]
 
 
 def test_generate_invalid_stored_type_returns_422(client, app, admin_headers, tmp_path):

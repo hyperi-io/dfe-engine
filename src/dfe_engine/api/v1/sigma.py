@@ -307,12 +307,19 @@ async def generate_sigma_view(
 async def generate_all_sigma_views(
     request: Request,
     user: CurrentUser,
-    database: str = Query("default", description="Target database"),
+    database: str | None = Query(
+        None, description="Target database; defaults to the data database"
+    ),
     enabled_only: bool = Query(True, description="Only generate for enabled sources"),
 ) -> list[SigmaViewResult]:
-    """Generate Sigma view DDL for all sources (stored definitions win over field maps)."""
+    """Generate Sigma view DDL for all sources (stored definitions win over field maps).
+
+    Defaults to the data database, since that is where a propagated hunt reads
+    the view from (``{source}_sigma``); an explicit ``database`` still overrides it.
+    """
+    target_db = database or request.app.state.settings.clickhouse.effective_data_database
     mapper = _get_source_mapper(request)
-    views = mapper.generate_all_sigma_views(database, enabled_only=enabled_only)
+    views = mapper.generate_all_sigma_views(target_db, enabled_only=enabled_only)
     return [SigmaViewResult(source_name=src, ddl=ddl) for src, ddl in views.items()]
 
 
