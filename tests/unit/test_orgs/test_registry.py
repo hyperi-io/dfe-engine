@@ -94,6 +94,31 @@ class TestCreate:
         reg.create("acme")
         assert (nested / "acme.yaml").exists()
 
+    def test_create_refuses_a_tenant_id_another_org_already_declares(self, registry):
+        registry.create("acme", org_ids=["t-acme-1", "t-acme-2"])
+
+        with pytest.raises(ValueError, match="acme"):
+            registry.create("beta", org_ids=["t-acme-1"])
+        assert registry.get("beta") is None
+
+    def test_create_refuses_a_tenant_id_equal_to_another_orgs_name(self, registry):
+        registry.create("acme")
+
+        with pytest.raises(ValueError, match="acme"):
+            registry.create("beta", org_ids=["acme"])
+        assert registry.get("beta") is None
+
+    def test_create_refuses_a_name_equal_to_another_orgs_tenant_id(self, registry):
+        registry.create("acme", org_ids=["t-acme-1"])
+
+        with pytest.raises(ValueError, match="acme"):
+            registry.create("t-acme-1")
+        assert registry.get("t-acme-1") is None
+
+    def test_create_allows_an_org_to_keep_its_own_name_among_its_tenant_ids(self, registry):
+        org = registry.create("acme", org_ids=["acme", "acme-sub"])
+        assert org.org_ids == ["acme", "acme-sub"]
+
 
 # ---------------------------------------------------------------------------
 # OrgRegistry.get
@@ -213,6 +238,26 @@ class TestUpdate:
         time.sleep(0.01)
         updated = registry.update("acme", enabled=True)
         assert updated.updated_at != ""
+
+    def test_update_refuses_a_tenant_id_another_org_already_declares(self, registry):
+        registry.create("acme", org_ids=["t-acme-1"])
+        registry.create("beta", org_ids=["t-beta-1"])
+
+        with pytest.raises(ValueError, match="acme"):
+            registry.update("beta", org_ids=["t-acme-1"])
+        assert registry.get("beta").org_ids == ["t-beta-1"]
+
+    def test_update_refuses_a_tenant_id_equal_to_another_orgs_name(self, registry):
+        registry.create("acme")
+        registry.create("beta")
+
+        with pytest.raises(ValueError, match="acme"):
+            registry.update("beta", org_ids=["acme"])
+
+    def test_update_allows_an_org_to_keep_its_own_name_among_its_tenant_ids(self, registry):
+        registry.create("acme")
+        org = registry.update("acme", org_ids=["acme", "acme-new"])
+        assert org.org_ids == ["acme", "acme-new"]
 
 
 # ---------------------------------------------------------------------------
