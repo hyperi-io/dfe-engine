@@ -68,6 +68,7 @@ from dfe_engine.api.deps import (
 from dfe_engine.api.errors import ErrorResponse
 from dfe_engine.api.v1.app_contracts import read_contract
 from dfe_engine.api.v1.helm import conflict_error
+from dfe_engine.api.v1.sampler import check_sample_scope, sample_org_scope
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import (
     AppInstance,
@@ -2003,18 +2004,28 @@ def _require_sampler_read(request: Request, user: Any) -> None:
 
 
 async def _sample_events(
-    request: Request, source: str, limit: int, ch: Any, source_registry: Any
+    request: Request, user: Any, source: str, limit: int, ch: Any, source_registry: Any
 ) -> list[str]:
-    """Pull raw event strings from the source this instance is bound to."""
+    """Pull raw event strings from the source this instance is bound to.
+
+    The sample is held to the caller's orgs exactly as ``POST /sample`` holds it.
+    """
     sampler = getattr(request.app.state, "sampler", None)
     if sampler is None:
         raise HTTPException(
             503, detail={"code": "not_configured", "message": "Sampler not initialised"}
         )
     req = SampleRequest(source=source, limit=limit)
+    org_ids = sample_org_scope(request, user)
     try:
         await run_blocking(functools.partial(sampler.resolve_or_raise, req, source_registry))
-        result: dict[str, Any] = await sampler.run(req, ch, source_registry)
+    except SamplerError as exc:
+        raise HTTPException(
+            400, detail={"code": "bad_sample_request", "message": str(exc)}
+        ) from exc
+    await check_sample_scope(sampler, req, ch, source_registry, org_ids)
+    try:
+        result: dict[str, Any] = await sampler.run(req, ch, source_registry, org_ids=org_ids)
     except SamplerError as exc:
         raise HTTPException(
             400, detail={"code": "bad_sample_request", "message": str(exc)}
@@ -2057,7 +2068,7 @@ async def dry_run_app_file(
             ) from None
 
     source = body.source or app.instance
-    events = await _sample_events(request, source, body.limit, ch, source_registry)
+    events = await _sample_events(request, user, source, body.limit, ch, source_registry)
     result = await run_blocking(
         functools.partial(
             dryrun.run_language,

@@ -69,8 +69,8 @@ def _sampler() -> Sampler:
     return Sampler(SamplerSettings(), KafkaSettings(), ClickHouseSettings(data_database="dfe_data"))
 
 
-def _run(req, ch, reg):
-    return asyncio.run(_sampler().run(req, ch, reg))
+def _run(req, ch, reg, org_ids=None):
+    return asyncio.run(_sampler().run(req, ch, reg, org_ids=org_ids))
 
 
 # ── fast modes ─────────────────────────────────────────────────
@@ -230,6 +230,7 @@ def test_the_where_builder_refuses_it_too(filter_sql):
     with pytest.raises(ValueError, match=r"filter|column name"):
         build_where(
             source_label="acme",
+            org_ids=None,
             filter_sql=filter_sql,
             since=None,
             until=None,

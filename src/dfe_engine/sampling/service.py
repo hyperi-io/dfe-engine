@@ -23,10 +23,12 @@ import json
 import uuid
 from typing import Any
 
+from clickhouse_connect.driver.exceptions import DatabaseError
 from scalo.logger import logger
 
 from dfe_engine.ai.sampling import discover_json_keys
 from dfe_engine.clickhouse.quoting import quote_identifier, table_reference
+from dfe_engine.orgs.available_ids import ORG_ID_COLUMN
 from dfe_engine.source.registry import SourceNotFoundError
 
 from . import clickhouse_reader as ch_reader
@@ -38,6 +40,7 @@ from .models import (
     SampleRequest,
     SamplerError,
     SampleResult,
+    SampleScopeError,
 )
 
 
@@ -64,13 +67,25 @@ class Sampler:
     # -- public entry point -------------------------------------
 
     async def run(
-        self, req: SampleRequest, ch: Any, source_registry: Any, *, task: Any = None
+        self,
+        req: SampleRequest,
+        ch: Any,
+        source_registry: Any,
+        *,
+        org_ids: list[str] | None,
+        task: Any = None,
     ) -> dict:
         """Execute a sample request. Returns ``SampleResult`` as a dict.
 
-        ``task`` is the TaskManager handle (for progress); optional so the CLI
-        can call this directly without a task.
+        ``org_ids`` holds every read to rows whose ``_org_id`` is one of them; None
+        reads every org, which only a platform caller may do. ``task`` is the
+        TaskManager handle (for progress); optional so the CLI can call this
+        directly without a task.
+
+        Raises:
+            SampleScopeError: If ``org_ids`` is empty or the request names a Kafka topic.
         """
+        _refuse_unscoped_backend(req, org_ids)
         limit = min(req.limit or self._cfg.default_limit, self._cfg.max_limit)
         _progress(task, 10, "Resolving target")
         target, source_label = self._resolve_target(req, source_registry)
@@ -81,11 +96,11 @@ class Sampler:
             async with self._semaphore():
                 _progress(task, 40, "Running logreducer")
                 lines, stats, note = await asyncio.to_thread(
-                    self._reduce_sample, req, ch, target, source_label, limit
+                    self._reduce_sample, req, ch, target, source_label, org_ids, limit
                 )
         else:
             lines, stats, note = await asyncio.to_thread(
-                self._fast_sample, req, ch, target, source_label, limit
+                self._fast_sample, req, ch, target, source_label, org_ids, limit
             )
 
         _progress(task, 85, "Formatting result")
@@ -102,6 +117,33 @@ class Sampler:
         """
         target, _ = self._resolve_target(req, source_registry)
         return target
+
+    def check_org_scope(
+        self, req: SampleRequest, ch: Any, source_registry: Any, org_ids: list[str] | None
+    ) -> None:
+        """Refuse up front a sample that cannot be held to ``org_ids``.
+
+        None reads every org and passes. Otherwise the caller must belong to an
+        org, and the target must be a ClickHouse table with an ``_org_id`` column.
+
+        Raises:
+            SampleScopeError: If the sample cannot be held to ``org_ids``.
+            SamplerError: If the target cannot be resolved or ClickHouse cannot
+                describe it.
+        """
+        if org_ids is None:
+            return
+        _refuse_unscoped_backend(req, org_ids)
+        target, _ = self._resolve_target(req, source_registry)
+        try:
+            columns = ch_reader.column_names(ch, target, self._cfg.max_execution_time)
+        except DatabaseError as exc:
+            raise SamplerError(f"cannot read the columns of {target}: {exc}") from exc
+        if ORG_ID_COLUMN not in columns:
+            raise SampleScopeError(
+                f"{target} has no {ORG_ID_COLUMN} column, so a sample of it cannot be "
+                "limited to your orgs"
+            )
 
     # -- target resolution --------------------------------------
 
@@ -142,12 +184,19 @@ class Sampler:
     # -- fast modes (recent / random), run in a worker thread ---
 
     def _fast_sample(
-        self, req: SampleRequest, ch: Any, target: str, source_label: str | None, limit: int
+        self,
+        req: SampleRequest,
+        ch: Any,
+        target: str,
+        source_label: str | None,
+        org_ids: list[str] | None,
+        limit: int,
     ) -> tuple[list[str], dict[str, Any], str | None]:
         if req.backend == SampleBackend.KAFKA:
             return self._kafka_fast(req, target, limit)
         where, params = ch_reader.build_where(
             source_label=source_label,
+            org_ids=org_ids,
             filter_sql=req.filter,
             since=req.since,
             until=req.until,
@@ -196,7 +245,13 @@ class Sampler:
     # -- gated modes (smart / anomaly) via logreducer -----------
 
     def _reduce_sample(
-        self, req: SampleRequest, ch: Any, target: str, source_label: str | None, limit: int
+        self,
+        req: SampleRequest,
+        ch: Any,
+        target: str,
+        source_label: str | None,
+        org_ids: list[str] | None,
+        limit: int,
     ) -> tuple[list[str], dict[str, Any], str | None]:
         try:
             from logreducer import LogReducer
@@ -209,7 +264,7 @@ class Sampler:
         level = req.level or self._cfg.level
         lr_mode = "anomaly" if req.mode == SampleMode.ANOMALY else "hybrid"
         reducer = LogReducer(level=level, mode=lr_mode, max_memory_gb=self._cfg.max_memory_gb)
-        source = self._build_reduce_source(req, ch, target, source_label)
+        source = self._build_reduce_source(req, ch, target, source_label, org_ids)
         reduced = reducer.reduce(source)
 
         truncated = len(reduced) > limit
@@ -227,7 +282,12 @@ class Sampler:
         return lines, stats, note
 
     def _build_reduce_source(
-        self, req: SampleRequest, ch: Any, target: str, source_label: str | None
+        self,
+        req: SampleRequest,
+        ch: Any,
+        target: str,
+        source_label: str | None,
+        org_ids: list[str] | None,
     ) -> Any:
         suffix = uuid.uuid4().hex[:8]
         if req.backend == SampleBackend.KAFKA:
@@ -239,6 +299,7 @@ class Sampler:
 
         where, params = ch_reader.build_where(
             source_label=source_label,
+            org_ids=org_ids,
             filter_sql=req.filter,
             since=req.since,
             until=req.until,
@@ -284,6 +345,19 @@ class Sampler:
             truncated=bool(stats.get("truncated", False)),
             stats=stats,
             note=note,
+        )
+
+
+def _refuse_unscoped_backend(req: SampleRequest, org_ids: list[str] | None) -> None:
+    """Refuse a sample held to ``org_ids`` that names no org, or reads a Kafka topic."""
+    if org_ids is None:
+        return
+    if not org_ids:
+        raise SampleScopeError("you belong to no org, so there are no rows you may sample")
+    if req.backend == SampleBackend.KAFKA:
+        raise SampleScopeError(
+            f"a Kafka topic has no {ORG_ID_COLUMN} column to limit a sample to your orgs; "
+            "sample the source's ClickHouse table instead"
         )
 
 

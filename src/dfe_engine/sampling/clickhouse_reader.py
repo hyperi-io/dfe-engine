@@ -27,6 +27,7 @@ from sqlglot.tokens import Token, TokenType
 
 from dfe_engine.clickhouse.function_guard import refuse_calls_outside_the_row
 from dfe_engine.clickhouse.quoting import column_reference
+from dfe_engine.orgs.available_ids import ORG_ID_COLUMN
 
 _CLICKHOUSE = Dialect.get_or_raise("clickhouse")
 
@@ -189,9 +190,21 @@ def _raw_client(ch: Any) -> Any:
     return getattr(ch, "_client", ch)
 
 
+def column_names(ch: Any, target: str, max_execution_time: int) -> set[str]:
+    """The column names of ``target``, an already-quoted table reference.
+
+    Raises:
+        clickhouse_connect.driver.exceptions.DatabaseError: If ClickHouse cannot
+            describe the table, for one that does not exist among others.
+    """
+    result = ch.query(f"DESCRIBE TABLE {target}", settings=read_settings(max_execution_time))
+    return {str(row[0]) for row in result.result_rows}
+
+
 def build_where(
     *,
     source_label: str | None,
+    org_ids: list[str] | None,
     filter_sql: str | None,
     since: str | None,
     until: str | None,
@@ -200,16 +213,23 @@ def build_where(
     """Assemble a WHERE clause + bound parameters.
 
     ``source_label`` filters the shared landing table by ``_source``; leave it
-    None when sampling a per-source table (already scoped). Time bounds bind
-    server-side. ``filter_sql`` goes through :func:`filter_predicate`, and only
-    the condition it renders is interpolated.
+    None when sampling a per-source table (already scoped). ``org_ids`` holds the
+    read to rows whose ``_org_id`` is one of them, bound server-side; None reads
+    every org. Time bounds bind server-side. ``filter_sql`` goes through
+    :func:`filter_predicate`, and only the condition it renders is interpolated.
 
     Raises:
-        ValueError: If ``filter_sql`` is not one condition over the sampled row.
+        ValueError: If ``filter_sql`` is not one condition over the sampled row, or
+            ``org_ids`` is empty.
     """
     clauses: list[str] = []
     params: dict[str, Any] = {}
     timestamp = column_reference(timestamp_field)
+    if org_ids is not None:
+        if not org_ids:
+            raise ValueError("a sample held to no org would read nothing")
+        clauses.append(f"{ORG_ID_COLUMN} IN {{orgs:Array(String)}}")
+        params["orgs"] = list(org_ids)
     if source_label:
         clauses.append("_source = {src:String}")
         params["src"] = source_label

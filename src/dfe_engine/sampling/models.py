@@ -134,3 +134,7 @@ class SampleResult(BaseModel):
 
 class SamplerError(Exception):
     """A sampling request that cannot be served (bad target, missing dep, ...)."""
+
+
+class SampleScopeError(Exception):
+    """A sample that cannot be held to the caller's orgs, so it is refused rather than read."""
