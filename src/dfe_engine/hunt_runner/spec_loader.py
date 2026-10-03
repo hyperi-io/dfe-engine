@@ -25,8 +25,9 @@ the load says so.
 
 A direct `query` is put through the same refusal as a rule's condition: one that
 calls a ClickHouse function reading outside the row or sending it to another
-service drops its hunt, logged. It runs as a user that may write, so ClickHouse
-cannot be asked to refuse the call.
+service drops its hunt, logged. So does one that is not a single SELECT, or a
+single INSERT INTO a table from a SELECT. It runs as a user that may write, so
+ClickHouse cannot be asked to refuse either.
 """
 
 from pathlib import Path
@@ -34,7 +35,7 @@ from typing import Any
 
 from scalo.logger import logger
 
-from dfe_engine.hunts.rule_guard import refuse_offbox_calls
+from dfe_engine.hunts.rule_guard import refuse_direct_query
 from dfe_engine.settings import MAX_DETECTIONS_PER_RUN
 from dfe_engine.yaml_utils import yaml_load
 
@@ -102,13 +103,15 @@ def _build_spec(
     stem: str,
     rules_dir: str | Path,
     default_target: str,
+    default_database: str,
     max_detections: int,
 ) -> HuntSpec | None:
     """Build one HuntSpec from a parsed hunt def, or None if it must be skipped.
 
     Skips (returns None) for anchored schedules and non-positive intervals; a
     non-positive interval would divide-by-zero in the phase-offset spread maths.
-    Skips a direct ``query`` that calls a function reading outside the row.
+    Skips a direct ``query`` that calls a function reading outside the row, or
+    that is not one SELECT or one INSERT INTO a table from a SELECT.
     """
     value = _resolve_schedule_value(definition, stem)
     if value is None:
@@ -122,7 +125,7 @@ def _build_spec(
     query = str(definition.get("query", "")).strip()
     if query:
         # A hunt YAML committed straight into the deploy repo never passes the API.
-        refusal = refuse_offbox_calls(query, subject="A hunt's query")
+        refusal = refuse_direct_query(query)
         if refusal is not None:
             logger.error(f"skipping hunt {stem}: query refused: {refusal}")
             return None
@@ -137,6 +140,7 @@ def _build_spec(
             stem,
             rules_dir=rules_dir,
             default_target=default_target,
+            default_database=default_database,
             max_detections=max_detections,
         )
 
@@ -154,6 +158,7 @@ def load_specs(
     *,
     rules_dir: str | Path = "",
     default_target: str = "",
+    default_database: str = "",
     max_detections: int = MAX_DETECTIONS_PER_RUN,
 ) -> dict[str, HuntSpec]:
     """Load every *.yaml hunt def in hunt_dir into HuntSpec objects keyed by hunt_id.
@@ -169,6 +174,8 @@ def load_specs(
             hunt names `rules` instead of carrying a `query`.
         default_target: ``db.table`` a compiled rule writes to when neither the rule
             entry nor the hunt names one.
+        default_database: Database a compiled rule's unqualified source table is
+            read from (the data database).
         max_detections: Detection rows each compiled rule may write in one run.
     """
     directory = Path(hunt_dir)
@@ -184,7 +191,9 @@ def load_specs(
             if not isinstance(definition, dict):
                 logger.warning(f"skipping hunt {stem}: not a YAML mapping")
                 continue
-            spec = _build_spec(definition, stem, rules_dir, default_target, max_detections)
+            spec = _build_spec(
+                definition, stem, rules_dir, default_target, default_database, max_detections
+            )
             if spec is not None:
                 specs[stem] = spec
         except Exception as exc:  # one bad file must never break the whole load

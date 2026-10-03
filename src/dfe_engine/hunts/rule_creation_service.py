@@ -45,6 +45,7 @@ from scalo.resilience import ServiceUnavailable
 from sqlglot.errors import ParseError
 
 from ..clickhouse.errors import ErrorCategory, wrap_ch_error
+from ..clickhouse.quoting import plain_source_name
 from ..settings import DetectionGuardSettings, HuntsSettings
 from .hdx_sanitizer import REFUSED_CLAUSES, HdxSanitizeError, HdxSanitizer, HdxSanitizeResult
 from .rule_guard import (
@@ -60,6 +61,7 @@ from .rule_guard import (
 )
 from .rule_model import Rule, RuleCreate
 from .rule_rewriter import RuleRewriter, strip_time_placeholder
+from .validator import rule_source
 
 # -- Request / Response models ------------------------------
 
@@ -212,6 +214,19 @@ def _syntax_error(message: str) -> SqlValidationError:
         position=position,
         suggestion="Fix the syntax at the position ClickHouse reports.",
     )
+
+
+def _source_error(source_db: str, source_table: str) -> SqlValidationError | None:
+    """The FROM's database and table refused as the hunt runner refuses them, or None."""
+    # The runner splices the stored pair into FROM, and drops a rule whose pair is not a table name.
+    try:
+        plain_source_name(rule_source(source_db, source_table))
+    except ValueError as exc:
+        return SqlValidationError(
+            message=f"SQL's FROM names no table the hunt runner can scan: {exc}.",
+            suggestion="Read from a table named in letters, digits, '_' and '-'.",
+        )
+    return None
 
 
 # ClickHouse error codes the preview names in its own words.
@@ -393,7 +408,8 @@ class RuleCreationService:
         4. Balanced parentheses
         5. Parses as one ClickHouse SELECT (EXPLAIN AST when ClickHouse is
            configured, else sqlglot's ClickHouse dialect)
-        6. Its FROM names a ``<db>.<table>``, read the way the rule model reads it
+        6. Its FROM names a ``<db>.<table>``, read the way the rule model reads it,
+           in the characters a source table name may carry
         7. No clause a row filter cannot carry (HAVING, a join, a union, ...),
            refused as the HyperDX sanitiser refuses it
         8. No call that reads outside the row (``url``, ``s3``, a dictionary) or
@@ -477,6 +493,10 @@ class RuleCreationService:
                         suggestion="Qualify the FROM table with its database, e.g. FROM dfe.main.",
                     )
                 )
+            else:
+                source_error = _source_error(parsed.source_db, parsed.source_table)
+                if source_error is not None:
+                    errors.append(source_error)
             # A rule stores only the row filter, so a clause beyond it would be dropped at save.
             errors.extend(
                 SqlValidationError(

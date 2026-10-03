@@ -41,7 +41,7 @@ REFUSED_SOURCES = {
     "leading dot": ".main",
     "trailing dot": "dfe.",
     "leading digit": "dfe.1main",
-    "hyphen": "dfe.main-copy",
+    "leading hyphen": "dfe.-main",
 }
 
 # One part of a rule YAML's source_db or source_table that makes the pair no table name.

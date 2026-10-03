@@ -992,6 +992,7 @@ def _propagator(
         rule_registry=rules,
         hunt_registry=hunts,
         actor=actor,
+        database=request.app.state.settings.clickhouse.effective_data_database,
     )
 
 

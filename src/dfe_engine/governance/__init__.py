@@ -17,6 +17,7 @@ from .actions import (
     ActionForbiddenError,
     ActionStore,
     CredentialInActionError,
+    InvalidDocumentError,
     InvalidParamsError,
     resolve_params,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "ActionForbiddenError",
     "ActionStore",
     "CredentialInActionError",
+    "InvalidDocumentError",
     "InvalidParamsError",
     "ParamSpec",
     "PolicyStore",

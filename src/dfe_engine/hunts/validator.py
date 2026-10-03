@@ -1,10 +1,12 @@
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from scalo.logger import logger
 
-from ..clickhouse.quoting import plain_table_name
+from ..clickhouse.quoting import plain_source_name, plain_table_name
 from ..yaml_utils import YAMLError, yaml_dump_string, yaml_load, yaml_load_string
+from .rule_guard import refuse_direct_query
 from .rule_names import rule_file
 
 
@@ -104,7 +106,7 @@ class HuntValidator:
         # A blank one defers to the per-rule 'source'; anything else must name a table.
         if global_source_table_name is not None and str(global_source_table_name).strip():
             HuntValidator._validate_table_name(
-                "'global_source_table_name'", global_source_table_name
+                "'global_source_table_name'", global_source_table_name, split=plain_source_name
             )
 
         if (
@@ -115,18 +117,43 @@ class HuntValidator:
                 "Invalid 'checkpoint_timestamp_field'. It should be a non-empty string."
             )
 
+        HuntValidator._validate_query(hunt_data.get("query"))
+
     @staticmethod
-    def _validate_table_name(label: str, value: Any) -> None:
+    def _validate_query(query: Any) -> None:
+        """Refuse a direct ``query`` the hunt runner would drop.
+
+        The hunts API never writes one, but a governance action can, and the
+        runner sends it to ClickHouse as written.
+        """
+        if query is None:
+            return
+        if not isinstance(query, str):
+            raise ValueError(f"Invalid 'query'. It should be SQL text, not {query!r}.")
+        if not query.strip():
+            return
+        refusal = refuse_direct_query(query)
+        if refusal is not None:
+            raise ValueError(f"Invalid 'query': {refusal}")
+
+    @staticmethod
+    def _validate_table_name(
+        label: str,
+        value: Any,
+        *,
+        split: Callable[[str], tuple[str, str]] = plain_table_name,
+    ) -> None:
         """Refuse a source or results table that is not a plain ``table`` or ``database.table``.
 
         The runner splices the source into ``FROM`` and the target into
         ``INSERT INTO``, so anything else could name a table function that reads
-        from, or writes every detection to, another host.
+        from, or writes every detection to, another host. ``split`` is
+        :func:`plain_source_name` for a source, whose name may carry ``-``.
         """
         if not isinstance(value, str):
             raise ValueError(f"Invalid {label}. It should be a table name, not {value!r}.")
         try:
-            plain_table_name(value)
+            split(value)
         except ValueError as exc:
             raise ValueError(f"Invalid {label}: {exc}") from exc
 
@@ -146,10 +173,16 @@ class HuntValidator:
         rules = hunt_data.get("rules", [])
         for rule_info in rules:
             rule_name = rule_info.get("rule_name")
-            for field in ("source_table_name", "target_table_name"):
+            fields = (
+                ("source_table_name", plain_source_name),
+                ("target_table_name", plain_table_name),
+            )
+            for field, split in fields:
                 table = rule_info.get(field)
                 if table is not None:
-                    HuntValidator._validate_table_name(f"'{field}' of rule '{rule_name}'", table)
+                    HuntValidator._validate_table_name(
+                        f"'{field}' of rule '{rule_name}'", table, split=split
+                    )
             rule_path = rule_file(rules_dir, str(rule_name or ""), ".yaml")
             if rule_path.is_file():
                 HuntValidator.validate_rule_file(rule_path)
@@ -238,8 +271,21 @@ class HuntValidator:
             raise ValueError(f"Rule file {rule_path} cannot be read as YAML: {e}") from e
         if not isinstance(payload, dict):
             raise ValueError(f"Rule file {rule_path} is not a YAML mapping")
+        HuntValidator.validate_rule_source(payload, f"rule file {rule_path.name}")
+
+    @staticmethod
+    def validate_rule_source(payload: dict, label: str) -> None:
+        """Check a rule document's ``source_db`` and ``source_table`` name a source table.
+
+        :param payload: The rule document, as the hunt runner reads it.
+        :param label: What the message names the rule as, such as ``rule file x.yaml``.
+        :raises ValueError: If the pair is not a plain source table name; the runner
+            drops such a rule.
+        """
         source = rule_source(
             str(payload.get("source_db") or ""), str(payload.get("source_table") or "")
         )
         if source:
-            HuntValidator._validate_table_name(f"source of rule file {rule_path.name}", source)
+            HuntValidator._validate_table_name(
+                f"source of {label}", source, split=plain_source_name
+            )
