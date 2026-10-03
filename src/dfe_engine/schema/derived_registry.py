@@ -22,9 +22,8 @@ carries adds the ``derived/`` segment in front, and both backends resolve that
 reference under :meth:`DerivedSchemaRegistry.reference_root`.
 """
 
-from __future__ import annotations
-
 import builtins
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -76,6 +75,12 @@ def canonical_derived_path(path: str) -> str:
 def derived_reference(path: str) -> str:
     """The reference a source stores for a derived schema: ``derived/<group>/<name>``."""
     return f"{DERIVED_PREFIX}/{canonical_derived_path(path)}"
+
+
+def _parse(raw: dict[str, Any], origin: str) -> DerivedSchema:
+    """Validate a stored document, its ``origin`` taken from the root it was read from."""
+    # A stored origin key would let a deploy-repo file report itself as shipped.
+    return DerivedSchema.model_validate({**raw, "origin": origin})
 
 
 def _class_directory() -> str:
@@ -340,18 +345,17 @@ class DerivedSchemaRegistry:
         """
         key = canonical_derived_path(path)
         raw = self._get_raw(key)
-        shipped = raw is None
-        if shipped:
+        origin = "deploy"
+        if raw is None:
             raw = self._get_shipped_raw(key)
+            origin = "shipped"
         if raw is None:
             raise DerivedSchemaNotFoundError(f"Derived schema not found: {key!r}")
         try:
-            schema = DerivedSchema.model_validate(raw)
+            schema = _parse(raw, origin)
         except Exception as exc:
             raise DerivedSchemaValidationError(f"Invalid derived schema {key!r}: {exc}") from exc
         schema.path = derived_reference(key)
-        if shipped:
-            schema.origin = "shipped"
         return schema
 
     def save(
@@ -396,13 +400,14 @@ class DerivedSchemaRegistry:
 
         A name in both roots is listed once, from the deploy repo -- the same
         precedence :func:`resolve_derived_reference` gives the build. A document
-        that no longer parses is left out rather than failing the listing, the
-        way the meta-schema and source listings do.
+        that no longer parses, or whose path resolves outside its root, is left
+        out rather than failing the listing, the way the meta-schema and source
+        listings do.
         """
         rows: builtins.list[dict[str, Any]] = []
         seen: set[str] = set()
         for key in self._names():
-            row = self._row(key, raw=self._get_raw(key), root=self._directory, origin="deploy")
+            row = self._listed(key, self._get_raw, root=self._directory, origin="deploy")
             if row is not None:
                 rows.append(row)
                 seen.add(key)
@@ -411,12 +416,25 @@ class DerivedSchemaRegistry:
             for key in self._shipped_names():
                 if key in seen:
                     continue
-                row = self._row(
-                    key, raw=self._get_shipped_raw(key), root=shipped_root, origin="shipped"
-                )
+                row = self._listed(key, self._get_shipped_raw, root=shipped_root, origin="shipped")
                 if row is not None:
                     rows.append(row)
         return rows
+
+    def _listed(
+        self,
+        key: str,
+        read: Callable[[str], dict[str, Any] | None],
+        *,
+        root: Path,
+        origin: str,
+    ) -> dict[str, Any] | None:
+        """One list row, or None when the document will not parse or escapes its root."""
+        try:
+            return self._row(key, raw=read(key), root=root, origin=origin)
+        except DerivedSchemaValidationError as exc:
+            logger.warning(f"Derived schema {key!r} excluded from list: {exc}")
+            return None
 
     def _row(
         self, key: str, *, raw: dict[str, Any] | None, root: Path, origin: str
@@ -425,7 +443,7 @@ class DerivedSchemaRegistry:
         if raw is None:
             return None
         try:
-            schema = DerivedSchema.model_validate(raw)
+            schema = _parse(raw, origin)
         except Exception as exc:
             logger.warning(f"Failed to parse derived schema {key!r}, excluded from list: {exc}")
             return None

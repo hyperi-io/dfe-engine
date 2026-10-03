@@ -197,7 +197,7 @@ def test_a_hunt_the_api_writes_loads_with_a_query_to_run(tmp_path: Path):
     assert spec.interval_seconds == 60  # the schedule survives
     assert len(spec.queries) == 1
     sql = spec.queries[0].sql
-    assert sql.startswith("INSERT INTO dfe.detection")
+    assert sql.startswith("INSERT INTO `dfe`.`detection`")
     assert "FROM dfe.main" in sql
     assert "process_name = 'certutil.exe'" in sql
     assert "{window}" in sql  # the worker substitutes the incremental predicate

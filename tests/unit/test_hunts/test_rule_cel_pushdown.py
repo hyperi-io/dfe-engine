@@ -687,7 +687,7 @@ class TestBuildInsertSelect:
             hunt_name="payment_hunt",
             severity=rule.severity,
         )
-        assert "INSERT INTO acme.detection" in sql
+        assert "INSERT INTO `acme`.`detection`" in sql
         assert "FROM acme.payment_events" in sql
         assert "severity = 'critical'" in sql
         assert "amount > 10000" in sql

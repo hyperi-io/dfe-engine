@@ -3,6 +3,7 @@ from typing import Any
 
 from scalo.logger import logger
 
+from ..clickhouse.quoting import plain_table_name
 from ..yaml_utils import YAMLError, yaml_dump_string, yaml_load, yaml_load_string
 from .rule_names import rule_file
 
@@ -61,10 +62,17 @@ class HuntValidator:
 
         # Optional: the rule's query carries its own target. Present means non-empty.
         global_target_table_name = hunt_data.get("global_target_table_name")
-        if global_target_table_name is not None and (
-            not isinstance(global_target_table_name, str) or not global_target_table_name.strip()
-        ):
-            raise ValueError("Invalid 'global_target_table_name'. It should be a non-empty string.")
+        if global_target_table_name is not None:
+            if (
+                not isinstance(global_target_table_name, str)
+                or not global_target_table_name.strip()
+            ):
+                raise ValueError(
+                    "Invalid 'global_target_table_name'. It should be a non-empty string."
+                )
+            HuntValidator._validate_target_table(
+                "'global_target_table_name'", global_target_table_name
+            )
 
         # Source model: hunts can use 'source' (resolved via SourceRegistry) OR
         # 'global_source_table_name' (direct table reference). At least one required.
@@ -88,6 +96,20 @@ class HuntValidator:
             )
 
     @staticmethod
+    def _validate_target_table(label: str, value: Any) -> None:
+        """Refuse a results table that is not a plain ``table`` or ``database.table``.
+
+        The runner splices the target into ``INSERT INTO``, so anything else
+        could name a table function that writes every detection off the box.
+        """
+        if not isinstance(value, str):
+            raise ValueError(f"Invalid {label}. It should be a table name, not {value!r}.")
+        try:
+            plain_table_name(value)
+        except ValueError as exc:
+            raise ValueError(f"Invalid {label}: {exc}") from exc
+
+    @staticmethod
     def _validate_customers(hunt_data: dict) -> list:
         """Validate customers list and return it."""
         customers = hunt_data.get("customers")
@@ -103,6 +125,11 @@ class HuntValidator:
         rules = hunt_data.get("rules", [])
         for rule_info in rules:
             rule_name = rule_info.get("rule_name")
+            target = rule_info.get("target_table_name")
+            if target is not None:
+                HuntValidator._validate_target_table(
+                    f"'target_table_name' of rule '{rule_name}'", target
+                )
             rule_path = rule_file(rules_dir, str(rule_name or ""), ".yaml")
             if rule_path.is_file():
                 HuntValidator.validate_rule_file(rule_path)

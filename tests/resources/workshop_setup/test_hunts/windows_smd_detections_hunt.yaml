@@ -15,5 +15,5 @@ rules:
 customer_filters:
   detectionlab:
     rules:
-      - name: win_account_a_common_activities.jinja2
+      - name: win_account_a_common_activities
         filter_clause: ""
