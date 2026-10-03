@@ -32,6 +32,7 @@ from pathlib import Path
 from scalo.logger import logger
 
 from dfe_engine.orgs.models import ORG_NAME_PATTERN, Org
+from dfe_engine.orgs.tenant_scope import colliding_org
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 
@@ -86,14 +87,18 @@ class OrgRegistry:
             The newly created Org.
 
         Raises:
-            ValueError: If the name is not a valid org name, or an org with this
-                name already exists.
+            ValueError: If the name is not a valid org name, an org with this name
+                already exists, or the name or any tenant id collides with another
+                org's name or tenant ids.
         """
         if re.fullmatch(ORG_NAME_PATTERN, name) is None:
             raise ValueError(f"Invalid org name: {name!r}")
         path = self._path(name)
         if path.exists():
             raise ValueError(f"Org already exists: {name}")
+        other = colliding_org(name, org_ids or [], self.list())
+        if other is not None:
+            raise ValueError(f"Org '{name}' collides with tenant-fenced org '{other.name}'")
 
         now = _now()
         org = Org(
@@ -148,12 +153,20 @@ class OrgRegistry:
 
         Raises:
             KeyError: If no org with *name* exists.
+            ValueError: If the update's tenant ids collide with another org's
+                name or tenant ids.
         """
         path = self._path(name)
         if not path.exists():
             raise KeyError(name)
 
         org = self._read(path)
+
+        new_org_ids = fields.get("org_ids")
+        if isinstance(new_org_ids, list):
+            other = colliding_org(name, new_org_ids, self.list())
+            if other is not None:
+                raise ValueError(f"Org '{name}' collides with tenant-fenced org '{other.name}'")
 
         update_dict: dict[str, object] = {}
         if "display_name" in fields:

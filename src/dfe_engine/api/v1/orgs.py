@@ -45,6 +45,7 @@ from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.orgs.available_ids import DEFAULT_LIMIT, OrgIdDiscoveryError
 from dfe_engine.orgs.available_ids import available_org_ids as discover_available_org_ids
 from dfe_engine.orgs.models import ORG_NAME_PATTERN
+from dfe_engine.orgs.tenant_scope import colliding_org
 
 if TYPE_CHECKING:
     from dfe_engine.orgs.models import Org
@@ -113,6 +114,15 @@ async def create_org(
         raise HTTPException(
             status_code=409,
             detail={"code": "conflict", "message": f"Org '{body.name}' already exists"},
+        )
+    other = colliding_org(body.name, body.org_ids, registry.list())
+    if other is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "conflict",
+                "message": f"Org '{body.name}' collides with tenant-fenced org '{other.name}'",
+            },
         )
 
     from dfe_engine.orgs.lifecycle import OrgLifecycleManager
@@ -242,6 +252,16 @@ async def update_org(
             status_code=404,
             detail={"code": "not_found", "message": f"Org '{name}' not found"},
         )
+    if body.org_ids is not None:
+        other = colliding_org(name, body.org_ids, registry.list())
+        if other is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "conflict",
+                    "message": f"Org '{name}' collides with tenant-fenced org '{other.name}'",
+                },
+            )
 
     # Apply field updates
     update_fields: dict[str, object] = {}

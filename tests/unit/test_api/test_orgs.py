@@ -54,6 +54,58 @@ class TestCreateOrg:
         assert resp.status_code == 409
         assert resp.json()["code"] == "conflict"
 
+    def test_create_org_tenant_id_already_declared_returns_409(self, client, admin_headers):
+        client.post(
+            "/api/v1/orgs",
+            json={"name": "acme", "org_ids": ["t-acme-1"]},
+            headers=admin_headers,
+        )
+        resp = client.post(
+            "/api/v1/orgs",
+            json={"name": "beta", "org_ids": ["t-acme-1"]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "conflict"
+        assert "acme" in resp.json()["message"]
+
+    def test_create_org_tenant_id_equal_to_another_orgs_name_returns_409(
+        self, client, admin_headers
+    ):
+        client.post("/api/v1/orgs", json={"name": "acme"}, headers=admin_headers)
+        resp = client.post(
+            "/api/v1/orgs",
+            json={"name": "beta", "org_ids": ["acme"]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "conflict"
+
+    def test_create_org_name_equal_to_another_orgs_tenant_id_returns_409(
+        self, client, admin_headers
+    ):
+        client.post(
+            "/api/v1/orgs",
+            json={"name": "acme", "org_ids": ["t-acme-1"]},
+            headers=admin_headers,
+        )
+        resp = client.post(
+            "/api/v1/orgs",
+            json={"name": "t-acme-1"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "conflict"
+
+    def test_create_org_may_keep_its_own_name_among_its_tenant_ids(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/orgs",
+            json={"name": "acme", "org_ids": ["acme", "acme-sub"]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+        assert resp.json()["org_ids"] == ["acme", "acme-sub"]
+
     def test_create_org_path_traversal_name_rejected(self, client, admin_headers):
         resp = client.post(
             "/api/v1/orgs",
@@ -209,6 +261,43 @@ class TestUpdateOrg:
         )
         assert resp.status_code == 200
         assert resp.json()["enabled"] is False
+
+    def test_update_tenant_id_already_declared_returns_409(self, client, admin_headers):
+        client.post(
+            "/api/v1/orgs",
+            json={"name": "acme", "org_ids": ["t-acme-1"]},
+            headers=admin_headers,
+        )
+        client.post(
+            "/api/v1/orgs",
+            json={"name": "beta", "org_ids": ["t-beta-1"]},
+            headers=admin_headers,
+        )
+        resp = client.put(
+            "/api/v1/orgs/beta",
+            json={"org_ids": ["t-acme-1"]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "conflict"
+        assert "acme" in resp.json()["message"]
+        assert client.get("/api/v1/orgs/beta", headers=admin_headers).json()["org_ids"] == [
+            "t-beta-1"
+        ]
+
+    def test_update_may_keep_its_own_name_among_its_tenant_ids(self, client, admin_headers):
+        client.post(
+            "/api/v1/orgs",
+            json={"name": "acme", "org_ids": ["acme"]},
+            headers=admin_headers,
+        )
+        resp = client.put(
+            "/api/v1/orgs/acme",
+            json={"org_ids": ["acme", "acme-new"]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["org_ids"] == ["acme", "acme-new"]
 
     def test_update_nonexistent_returns_404(self, client, admin_headers):
         resp = client.put(
