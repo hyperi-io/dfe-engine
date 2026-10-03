@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 from scalo.logger import logger
 
 from dfe_engine.schema.derived import DERIVED_PREFIX, DerivedSchema
+from dfe_engine.schema.schema_loader import resolve_schema_yaml_path
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 if TYPE_CHECKING:
@@ -95,6 +96,22 @@ def derived_reference_root(settings: Any) -> Path | None:
     if gitops is not None and gitops.enabled and gitops.local_path:
         return Path(gitops.local_path) / Path(_class_directory()).parent
     return Path(settings.schemas.schemas_dir) if settings.schemas.schemas_dir else None
+
+
+def resolve_derived_reference(reference: str, *roots: Path | None) -> Path:
+    """The file a ``derived/...`` reference names, from the first root that has one.
+
+    Callers pass this deployment's store first and the shipped schemas tree
+    after it. With gitops on the store is the deploy repo, and nothing copies a
+    release's derived schemas into it, so a reference only the release carries
+    resolves in the shipped tree. A miss returns the first root's candidate, so
+    the error names where the deployment's own copy belongs.
+    """
+    candidates = [resolve_schema_yaml_path(root, reference) for root in roots if root is not None]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return candidates[0] if candidates else Path(reference)
 
 
 def derived_directory(settings: Any) -> Path:

@@ -37,9 +37,9 @@ from ruamel.yaml import YAMLError
 from scalo.logger import logger
 
 from dfe_engine.appmgmt import catalogue as apps
-from dfe_engine.appmgmt.catalogue import AppDescriptor
+from dfe_engine.appmgmt.catalogue import AppDescriptor, CatalogueSchemaLayers
 from dfe_engine.manifest import ManifestError, manifest_path, read_manifest
-from dfe_engine.schema.derived import DERIVED_PREFIX, DerivedSchema
+from dfe_engine.schema.derived import DerivedSchema
 from dfe_engine.source.models import (
     SOURCE_LABEL_FIELD,
     SourceFetcher,
@@ -73,12 +73,6 @@ The receiver's router reads a dotted path straight out of the payload, so this i
 the field it tests - and it is the one field a Beats event carries that says
 which integration produced it.
 """
-
-ECS_META_SCHEMA = "meta/elastic/ecs"
-"""The meta schema every entry's table is built on: the transform emits ECS for every vendor."""
-
-ADDITIONAL_PREFIX = "additional"
-"""dfe-schemas directory holding each stream's vendor fields, appended after the meta schema."""
 
 DEFAULT_TRANSFORM = "default"
 """The transform every catalogue entry has; the others are per-entry extras."""
@@ -206,6 +200,11 @@ def load_source_catalogue(path: Path | str | None = None) -> SourceCatalogue | N
             f"source catalogue {source} carries no {binding.entries_key!r} mapping; "
             f"{app.service} declares its entries under that key"
         )
+    if binding.schema_layers is None:
+        logger.warning(
+            f"The app manifest names no schema layers for {app.service}'s catalogue, so a "
+            "source created from it binds no table schema"
+        )
     return SourceCatalogue(
         app=app,
         path=source,
@@ -238,48 +237,59 @@ def reload_source_catalogue() -> SourceCatalogue | None:
     return _HELD
 
 
-def schema_layers(entry: CatalogueEntry, settings: DFESettings) -> SourceSchema | None:
-    """The shipped schema layers this entry's table composes from, or None before ECS ships.
+def schema_layers(
+    entry: CatalogueEntry, layers: CatalogueSchemaLayers | None, settings: DFESettings
+) -> SourceSchema | None:
+    """The schema files this entry's table composes from, or None when they do not resolve.
 
-    The transform rewrites every vendor's events into ECS, so the meta schema is
-    ECS for every entry. The vendor-shaped ``meta/<package>/<stream>`` describes
-    the record a fetcher writes with no transform in between; a table built on it
-    here has columns the transform never fills.
+    The app manifest names them, because the transform decides the shape of its
+    own output: one meta schema for every entry, and per stream a derived
+    schema that narrows it and the vendor fields appended after. Only the
+    derived schema makes the table fit - the meta schema alone, or with the
+    vendor fields on top, composes a CREATE wider than ClickHouse accepts for
+    the widest vendors - so the layers are bound over a derived schema that
+    selects from the manifest's meta schema, or not at all. The vendor fields
+    join when they resolve too.
 
-    Over that base, ``derived/<package>/<stream>`` narrows ECS to the fields the
-    integration fills and ``additional/<package>/<stream>`` appends the vendor's
-    own. Each is bound only where the build resolves it - the derived schema
-    under the deploy repo when gitops is on, the rest under the schemas tree -
-    because a reference to a file the build cannot read fails the first deploy
-    instead of the create.
+    The derived schema resolves under the deployment's own store first and the
+    schemas tree after it, the order the table build reads it in; the meta
+    schema and the vendor fields resolve under the schemas tree. A reference to
+    a file the build cannot read fails the first deploy instead of the create,
+    so nothing unresolved is bound.
     """
-    from dfe_engine.schema.derived_registry import derived_reference_root
+    if layers is None:
+        return None
+    from dfe_engine.schema.derived_registry import (
+        derived_reference_root,
+        resolve_derived_reference,
+    )
     from dfe_engine.schema.schema_loader import _resolve_schemas_root, resolve_schema_yaml_path
 
     configured = settings.schemas.schemas_dir
     root = Path(configured) if configured else _resolve_schemas_root()
-    if root is None or not resolve_schema_yaml_path(root, ECS_META_SCHEMA).is_file():
+    if root is None or not resolve_schema_yaml_path(root, layers.meta_schema).is_file():
         return None
 
-    stream = f"{entry.package}/{entry.data_stream}"
-    derived = f"{DERIVED_PREFIX}/{stream}"
-    additional = f"{ADDITIONAL_PREFIX}/{stream}"
-    derived_path = resolve_schema_yaml_path(derived_reference_root(settings) or root, derived)
+    derived = layers.derived(entry.package, entry.data_stream)
+    derived_path = resolve_derived_reference(derived, derived_reference_root(settings), root)
+    if not _selects_from(derived_path, layers.meta_schema):
+        return None
+    additional = layers.additional(entry.package, entry.data_stream)
     return SourceSchema(
-        meta_schema=ECS_META_SCHEMA,
-        derived_schema=derived if _narrows_ecs(derived_path) else None,
+        meta_schema=layers.meta_schema,
+        derived_schema=derived,
         additional_fields=(
             additional if resolve_schema_yaml_path(root, additional).is_file() else None
         ),
     )
 
 
-def _narrows_ecs(path: Path) -> bool:
-    """Whether a derived schema is at *path* and selects from the ECS meta schema.
+def _selects_from(path: Path, meta_schema: str) -> bool:
+    """Whether a derived schema is at *path* and selects from *meta_schema*.
 
     A derived schema at the same stream path over another base belongs to a
-    source that binds that base, and composed onto ECS it selects names ECS does
-    not define.
+    source that binds that base, and composed onto this one it selects names
+    the meta schema does not define.
     """
     if not path.is_file():
         return False
@@ -288,7 +298,7 @@ def _narrows_ecs(path: Path) -> bool:
     except (ValidationError, YAMLError) as exc:
         logger.warning(f"Derived schema {path} does not read, so it is not bound: {exc}")
         return False
-    return schema.base == ECS_META_SCHEMA
+    return schema.base == meta_schema
 
 
 def _origin_for(
@@ -358,7 +368,7 @@ def write_request_for(
     return SourceWriteRequest(
         source=source_name,
         description=f"{entry.dataset} ({intake} intake), from the {catalogue.engine} catalogue",
-        schema_config=schema_layers(entry, settings),
+        schema_config=schema_layers(entry, binding.schema_layers, settings),
         transform=SourceTransform(
             engine=catalogue.engine,
             variant=binding.variant(entry.name, transform),

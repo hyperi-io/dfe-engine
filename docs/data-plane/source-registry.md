@@ -78,7 +78,7 @@ One YAML file per source, managed by `SourceRegistry` over two backends:
 | Operation | Effect |
 |-----------|--------|
 | **Create** | Validates the definition and updates receiver match rules. No topics, no DDL -- those land on deploy |
-| **Create from catalogue** | Compiles one entry of a transform's shipped catalogue into that same write body -- the match rule or fetcher family for the intake chosen, the transform variant, and the schema layers its table is built from -- the ECS meta schema `meta/elastic/ecs`, plus `derived/<package>/<stream>` and `additional/<package>/<stream>` where each resolves -- then takes the ordinary create path. Until the schemas tree ships the ECS meta schema, no schema is bound |
+| **Create from catalogue** | Compiles one entry of a transform's shipped catalogue into that same write body -- the match rule or fetcher family for the intake chosen, the transform variant, and the schema layers its table is built from -- then takes the ordinary create path. The app manifest's `catalogue` block names the layers: `meta_schema`, plus `derived_pattern` and `additional_pattern` filled with the entry's `package` and `data_stream`. They bind only over a derived schema that resolves and selects from that meta schema, because without it the CREATE can exceed ClickHouse's `max_query_size`; the vendor fields join when they resolve. The derived schema resolves in the deploy repo first, then the shipped schemas tree |
 | **Deploy** | Runs the schema DDL, then creates that source's Kafka topics for the version being deployed |
 | **Read** | Definition plus status overlay (topic exists, table exists, transform running) |
 | **Update** | Validates, migrates the schema if fields changed, recompiles receiver and transform config |

@@ -334,6 +334,7 @@ def compile_loader_capture(
     *,
     db: str,
     derived_base_dir: Any = None,
+    schemas_base_dir: Any = None,
 ) -> dict[str, str]:
     """Compile each active source's derived-schema capture switches into loader modes.
 
@@ -350,12 +351,15 @@ def compile_loader_capture(
         db: Default database the loader writes to.
         derived_base_dir: Root a ``derived/...`` reference resolves under
             (``DerivedSchemaRegistry.reference_root``).
+        schemas_base_dir: The schemas tree, where a derived schema the release
+            ships resolves when the deployment's own store has no copy - the
+            same fallback the table build takes.
     """
     from dfe_engine.schema.derived import CAPTURE_MODE_FULL, capture_mode
     from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
     from dfe_engine.schema.schema_loader import SchemaLoader, SchemaLoadError
 
-    builder = SchemaBuilderV2(derived_base_dir=derived_base_dir)
+    builder = SchemaBuilderV2(schemas_base_dir=schemas_base_dir, derived_base_dir=derived_base_dir)
     modes: dict[str, str] = {}
     for source in registry.get_all_sources(states=("active",)):
         schema_cfg = source.version().effective_schema()

@@ -220,7 +220,10 @@ def _loader(
     compiled = compile_loader_routing(registry, db=db)
     blocks: dict[str, Any] = {"routing": compiled.model_dump(mode="json", exclude_unset=True)}
     capture = compile_loader_capture(
-        registry, db=db, derived_base_dir=derived_reference_root(settings)
+        registry,
+        db=db,
+        derived_base_dir=derived_reference_root(settings),
+        schemas_base_dir=settings.schemas.schemas_dir or None,
     )
     if capture and CAPTURE_BLOCK not in app.routing_paths:
         logger.warning(

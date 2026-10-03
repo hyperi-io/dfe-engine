@@ -733,6 +733,46 @@ class TestLoaderCapture:
         assert "capture" not in compiled
         assert "keep populating _json and _raw" in warnings[0]
 
+    def test_a_derived_schema_only_the_release_ships_still_reaches_the_loader(self, tmp_path):
+        # Gitops on puts the store in the deploy repo, which holds no copy of the
+        # derived schemas a release ships; the switches resolve where the build does.
+        from dfe_engine.settings import DFESettings
+        from dfe_engine.yaml_utils import yaml_dump
+
+        schemas = tmp_path / "schemas"
+        shipped = schemas / "derived" / "beats" / "filebeat_auth.yaml"
+        shipped.parent.mkdir(parents=True)
+        yaml_dump(
+            {
+                "base": "meta/beats/filebeat",
+                "base_version": "1.0.0",
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date": "2026-09-21",
+                        "capture_json": False,
+                        "capture_raw": False,
+                        "select": [{"name": "timestamp"}],
+                    }
+                },
+            },
+            shipped,
+        )
+        settings = DFESettings(
+            env="dev",
+            transport={"default": "bus"},
+            schemas={"schemas_dir": str(schemas)},
+            gitops={"enabled": True, "local_path": str(tmp_path / "deploy")},
+        )
+        registry = FakeRegistry(
+            [_matched("filebeat", schema_config={"derived_schema": "derived/beats/filebeat_auth"})]
+        )
+
+        compiled = routing.compile_for(catalogue.descriptor(LOADER), registry, settings)
+
+        db = settings.clickhouse.effective_data_database
+        assert compiled["capture"] == {f"{db}.filebeat": "extracted_only"}
+
     def test_turning_it_back_on_clears_the_overlay_entry(self, tmp_path):
         app = catalogue.descriptor(LOADER)
         doc = instances.initial_overlay(instances.instance_of(LOADER, "default"))
