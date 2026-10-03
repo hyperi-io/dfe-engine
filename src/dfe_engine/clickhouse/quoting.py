@@ -14,12 +14,14 @@ the read path; use :func:`quote_literal` only where a value must be spliced into
 DDL/DML text that has no bind slot (row-policy predicates, meta-table projections).
 """
 
-from __future__ import annotations
-
 import re
 
 # A name a query may carry bare: one identifier, or a dotted path of them. Use fullmatch.
 BARE_REFERENCE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*")
+
+# A source table takes its source's label as its name, and a label joins its words with '-'.
+_SOURCE_PART = r"[A-Za-z_][A-Za-z0-9_-]*"
+_SOURCE_NAME = re.compile(rf"{_SOURCE_PART}(?:\.{_SOURCE_PART})?")
 
 # One part of a table reference: bare, or backtick-quoted with no backtick or backslash inside.
 _TABLE_PART = r"(?:[A-Za-z_][A-Za-z0-9_]*|`[^`\\]+`)"
@@ -116,6 +118,34 @@ def plain_table_name(reference: str) -> tuple[str, str]:
         raise ValueError(
             f"{reference!r} is not a table name: use table or database.table, "
             "each made of letters, digits and '_'"
+        )
+    database, _, table = name.rpartition(".")
+    return database, table
+
+
+def plain_source_name(reference: str) -> tuple[str, str]:
+    """Split a caller-supplied source ``table`` or ``database.table``, ``-`` allowed in each part.
+
+    A source table is named for its source label, a DNS-1123 label such as
+    ``cisco-ios``. The ``-`` is safe only because both parts reach the statement
+    through :func:`quote_identifier`. A results table is still held to
+    :func:`plain_table_name`.
+
+    Args:
+        reference: The name as written, surrounding whitespace ignored.
+
+    Returns:
+        ``(database, table)``, with ``database`` empty for an unqualified name.
+
+    Raises:
+        ValueError: If the name is anything but one name, or two joined by a
+            single dot, each starting with a letter or ``_``.
+    """
+    name = reference.strip()
+    if not _SOURCE_NAME.fullmatch(name):
+        raise ValueError(
+            f"{reference!r} is not a table name: use table or database.table, "
+            "each made of letters, digits, '_' and '-'"
         )
     database, _, table = name.rpartition(".")
     return database, table

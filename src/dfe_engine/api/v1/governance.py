@@ -40,6 +40,7 @@ from dfe_engine.governance import (
     ActionForbiddenError,
     ActionStore,
     CredentialInActionError,
+    InvalidDocumentError,
     InvalidParamsError,
     PolicyStore,
     ProtectedPolicy,
@@ -173,9 +174,10 @@ def invoke_action(
     """Invoke a defined action - gated on the action's OWN required_action.
 
     ``body.params`` supplies values for the action's declared params (422 on a
-    constraint violation; omitted params take their defaults). Direct commit in
-    dev/solo; a production+team invoke is routed to a review PR (or 409
-    ``review_required`` when no forge is configured).
+    constraint violation; omitted params take their defaults). A hunt or rule
+    document the action would leave invalid is 422 ``invalid_document``, with the
+    hunts API's own message. Direct commit in dev/solo; a production+team invoke is
+    routed to a review PR (or 409 ``review_required`` when no forge is configured).
     """
     _check_name(name)
     store = _actions(request)
@@ -205,6 +207,8 @@ def invoke_action(
         )
     except InvalidParamsError as exc:
         raise HTTPException(422, detail={"code": "invalid_params", "message": str(exc)}) from exc
+    except InvalidDocumentError as exc:
+        raise HTTPException(422, detail={"code": "invalid_document", "message": str(exc)}) from exc
     except ProtectedVarError as exc:
         raise HTTPException(403, detail={"code": "protected_var", "message": str(exc)}) from exc
     except ActionForbiddenError as exc:
