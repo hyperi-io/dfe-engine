@@ -117,6 +117,8 @@ When Kay runs dfe-engine + dfe-hyperdx + dfe-ui + a local dfe-deploy clone toget
   from that). Set `DFE_ENGINE_ISSUER=https://dfe.local/api` to match the engine's
   advertised issuer (`/.well-known/openid-configuration`), enforced as the token
   `iss`. The fork's `/dfe/*` routes forward the caller's `dfe_token` to the engine.
+  Under a dev `DFE_ENV` that cookie is set without `Secure`, so a plain-http stack
+  keeps it; production sets `Secure`, like the session cookie.
 - **dfe-ui** talks to the engine API at `http://localhost:8003/api` and embeds the
   fork; the fork's create-rule button opens `${DFE_UI_BASE_URL}/rules/{id}`.
 - **The deploy repo (dfe-deploy)** is the gitops target. Either disable gitops
