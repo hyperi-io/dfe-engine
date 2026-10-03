@@ -308,6 +308,9 @@ def _fetcher(
     A source is one connector type, so the composed block carries one; a stored
     source that spans two is refused here rather than deployed, which is the
     second place the rule holds (the first is the save path).
+
+    A family the manifest declares keyed is a map of instances, so the stanza
+    sits under the source's name there rather than on the family itself.
     """
     source = _bound_source(registry, instance)
     fetcher = source.fetcher
@@ -321,8 +324,12 @@ def _fetcher(
         "topic": fetcher.landing_label(source.source),
     }
     stanza.update(fetcher.config)
-    polls = {fetcher.source_type: stanza}
-    require_one_type(source.source, polls, settings)
+    # Checked on the flat stanza, the same shape the save path checks.
+    require_one_type(source.source, {fetcher.source_type: stanza}, settings)
+    polls: dict[str, Any] = {fetcher.source_type: stanza}
+    if fetcher.source_type in app.keyed_source_types:
+        # The instance id keys the fetcher's cursor store, so it is the source's stable name.
+        polls = {fetcher.source_type: {source.source: stanza}}
 
     output: dict[str, Any] = {"type": BUS_TRANSPORT}
     if flow.transport == "direct":
