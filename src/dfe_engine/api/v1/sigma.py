@@ -31,7 +31,6 @@ from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.clickhouse.quoting import plain_table_name
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError
-from dfe_engine.schema.derived_registry import derived_reference_root
 from dfe_engine.sigma.catalog import (
     SigmaCatalogStore,
     SigmaProviderStore,
@@ -146,14 +145,11 @@ def _get_source_mapper(request: Request):
         )
 
     fieldmap_registry = _registries.get("fieldmap")
-    settings = getattr(request.app.state, "settings", None)
     return SigmaSourceMapper(
         source_registry=source_registry,
         registry=None,
         field_map_registry=fieldmap_registry,
         view_store=_view_store_or_none(request),
-        schemas_base_dir=(settings.schemas.schemas_dir or None) if settings else None,
-        derived_base_dir=derived_reference_root(settings) if settings else None,
     )
 
 

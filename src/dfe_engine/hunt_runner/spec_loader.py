@@ -22,6 +22,11 @@ hand-editing its YAML.
 Only a compiled rule carries the per-run detection cap. A direct `query` is SQL the
 author wrote whole, so no LIMIT can be put into it safely; it runs uncapped, and
 the load says so.
+
+A direct `query` is put through the same refusal as a rule's condition: one that
+calls a ClickHouse function reading outside the row or sending it to another
+service drops its hunt, logged. It runs as a user that may write, so ClickHouse
+cannot be asked to refuse the call.
 """
 
 from pathlib import Path
@@ -29,6 +34,7 @@ from typing import Any
 
 from scalo.logger import logger
 
+from dfe_engine.hunts.rule_guard import refuse_offbox_calls
 from dfe_engine.settings import MAX_DETECTIONS_PER_RUN
 from dfe_engine.yaml_utils import yaml_load
 
@@ -102,6 +108,7 @@ def _build_spec(
 
     Skips (returns None) for anchored schedules and non-positive intervals; a
     non-positive interval would divide-by-zero in the phase-offset spread maths.
+    Skips a direct ``query`` that calls a function reading outside the row.
     """
     value = _resolve_schedule_value(definition, stem)
     if value is None:
@@ -114,6 +121,11 @@ def _build_spec(
 
     query = str(definition.get("query", "")).strip()
     if query:
+        # A hunt YAML committed straight into the deploy repo never passes the API.
+        refusal = refuse_offbox_calls(query, subject="A hunt's query")
+        if refusal is not None:
+            logger.error(f"skipping hunt {stem}: query refused: {refusal}")
+            return None
         logger.info(
             "hunt runs a direct query, so the per-run detection cap does not apply",
             hunt_id=stem,
