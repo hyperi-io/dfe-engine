@@ -18,6 +18,7 @@ import inspect
 import textwrap
 import threading
 from contextlib import contextmanager
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -29,7 +30,7 @@ from scalo.health import serve_observability
 from scalo.metrics import create_metrics
 
 from dfe_engine.api.app import create_app
-from dfe_engine.api.deps import _registries
+from dfe_engine.api.deps import _registries, get_clickhouse_client
 from dfe_engine.api.metrics import WRITES_HELD, ApiMetrics
 from dfe_engine.api.v1 import (
     apps,
@@ -207,7 +208,6 @@ _DEPLOY_REPO_CASES: list[tuple[str, str, dict | None]] = [
     ("POST", f"{_RECEIVER}/routing/sync", None),
     ("PUT", f"{_VRL}/files/transforms/probe.vrl", {"content": ".probe = true\n"}),
     ("DELETE", f"{_VRL}/files/transforms/seedsource.vrl", None),
-    ("POST", f"{_VRL}/files/transforms/dry-run", {"name": "seedsource.vrl"}),
     ("PATCH", "/api/v1/sources/seedsource", {"state": "dormant"}),
     ("POST", "/api/v1/sources/bulk", {"action": "disable", "sources": ["seedsource"]}),
     ("POST", "/api/v1/sources/seedsource/deploy?dry_run=true", None),
@@ -252,6 +252,29 @@ def test_the_loop_answers_while_a_handler_waits_on_the_deploy_repo(
     status = _assert_the_loop_answers(client, park, method, path, body, headers)
 
     assert status < 500, f"{method} {path} answered {status}"
+
+
+class _SampledTable:
+    """A ClickHouse table carrying ``_org_id``, whose every row read returns one event."""
+
+    def query(self, sql, parameters=None, settings=None):
+        if sql.startswith("DESCRIBE TABLE"):
+            return SimpleNamespace(result_rows=[["_org_id", "String"], ["_json", "String"]])
+        return SimpleNamespace(result_rows=[['{"message": "loop probe"}']])
+
+
+def test_the_loop_answers_while_a_dry_run_waits_on_the_deploy_repo(seeded, monkeypatch):
+    # The dry run samples ClickHouse once the deploy repo answers, and this harness runs none.
+    client, headers = seeded
+    monkeypatch.setitem(client.app.dependency_overrides, get_clickhouse_client, _SampledTable)
+    park = _Park.on_deploy_repo(client.app.state.gitcrud.repo, monkeypatch)
+    path = f"{_VRL}/files/transforms/dry-run"
+
+    status = _assert_the_loop_answers(
+        client, park, "POST", path, {"name": "seedsource.vrl"}, headers
+    )
+
+    assert status == 200, f"POST {path} answered {status}"
 
 
 _PASSWORD_CHECK_CASES: list[tuple[str, str, dict]] = [

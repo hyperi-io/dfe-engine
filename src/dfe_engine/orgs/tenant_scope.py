@@ -7,9 +7,11 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Which ``_org_id`` values an org's rows carry, and how a read is held to them.
 
-The ClickHouse row policy pins each org's user to the org's tenant ids, and an
-engine-side read that holds a caller to its orgs binds the same ids, resolved by
-:func:`tenant_ids_for` from the org names the caller's groups list.
+The ClickHouse row policy pins each org's user to the org's tenant ids. A group's
+``org_ids`` list org markers, each an org's name or one of its tenant ids, and
+:func:`resolve_orgs` is the one rule that turns them into registered orgs: the
+HyperDX connection read, the ClickHouse group bindings and every engine-side read
+held to a caller's orgs (:func:`tenant_ids_for`) all go through it.
 """
 
 from collections.abc import Iterable
@@ -30,25 +32,50 @@ def org_tenant_ids(org: Any) -> list[str]:
     return list(org.org_ids) or [org.name]
 
 
-def tenant_ids_for(org_names: Iterable[str], orgs: Iterable[Any]) -> list[str]:
-    """The tenant ids of the registered orgs named in ``org_names``.
+def resolve_orgs(markers: Iterable[str], orgs: Iterable[Any]) -> list[Any]:
+    """The registered orgs that ``markers`` name, by org name or by tenant id.
 
-    A name that is not a registered org resolves to nothing, as the ClickHouse
-    group bindings skip it, so a held read never binds a value no org declares.
+    A marker names the org of that name. Failing that, it names the one org whose
+    tenant ids (:func:`org_tenant_ids`) include it. A marker no org declares, or a
+    tenant id several orgs declare, names nothing, so it never widens a read.
 
     Args:
-        org_names: The org names a caller's groups list.
+        markers: The org markers a caller's or a group's ``org_ids`` list.
         orgs: The org registry's entries.
 
     Returns:
-        The tenant ids, sorted and each once; empty when no name resolves.
+        The orgs named, each once, in registry order; empty when no marker resolves.
     """
-    by_name = {org.name: org for org in orgs}
-    ids: set[str] = set()
-    for name in org_names:
-        org = by_name.get(name)
+    registered = list(orgs)
+    by_name = {org.name: org for org in registered}
+    by_tenant: dict[str, list[Any]] = {}
+    for org in registered:
+        for tenant in org_tenant_ids(org):
+            by_tenant.setdefault(tenant, []).append(org)
+    named: set[str] = set()
+    for marker in markers:
+        org = by_name.get(marker)
+        if org is None:
+            declaring = by_tenant.get(marker, [])
+            org = declaring[0] if len(declaring) == 1 else None
         if org is not None:
-            ids.update(org_tenant_ids(org))
+            named.add(org.name)
+    return [org for org in registered if org.name in named]
+
+
+def tenant_ids_for(markers: Iterable[str], orgs: Iterable[Any]) -> list[str]:
+    """The tenant ids of the registered orgs that ``markers`` name (:func:`resolve_orgs`).
+
+    Args:
+        markers: The org markers a caller's groups list.
+        orgs: The org registry's entries.
+
+    Returns:
+        The tenant ids, sorted and each once; empty when no marker resolves.
+    """
+    ids: set[str] = set()
+    for org in resolve_orgs(markers, orgs):
+        ids.update(org_tenant_ids(org))
     return sorted(ids)
 
 
