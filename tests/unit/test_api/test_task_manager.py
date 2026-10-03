@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Tests for TaskManager — in-memory async task lifecycle."""
+"""Tests for TaskManager -- in-memory async task lifecycle."""
 
 import asyncio
 import json
@@ -156,7 +156,7 @@ class TestEviction:
 
         await asyncio.sleep(0.3)
 
-        # Eviction runs on completion — should have at most max_completed finished tasks
+        # Eviction runs on completion -- should have at most max_completed finished tasks
         tasks = manager.list()
         assert len(tasks) <= 5
 

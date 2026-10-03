@@ -2,7 +2,7 @@
 # XDR Deployment Types: AWS, SaaS
 # Based on Vector Helm Chart deployment
 #
-# READ THIS FOR PARAMETERS 
+# READ THIS FOR PARAMETERS
 # https://github.com/vectordotdev/helm-charts/blob/develop/charts/vector/README.md
 #
 # v1.1    2024-06-25    Update for new caching and storage classes
@@ -44,7 +44,7 @@ args:
 # Various tweakables for the `Pod`s managed by `DaemonSet`.
 resources:
   requests:
-    cpu: {{CPU_REQUESTS | default(1, true) * VA_MULTIPLIER | default(1, true)}} 
+    cpu: {{CPU_REQUESTS | default(1, true) * VA_MULTIPLIER | default(1, true)}}
     memory: {{MEMORY_REQUESTS | default(2, true) * VA_MULTIPLIER | default(1, true)}}Gi
   limits:
     cpu: {{CPU_LIMITS | default(2, true) * VA_MULTIPLIER | default(1, true)}}
@@ -58,7 +58,7 @@ persistence:
   accessModes: [ "ReadWriteOnce" ]
   storageClassName: "vector-data"
   size: {{PVC_SIZE | default("20Gi", true)}}
-  retentionPolicy: 
+  retentionPolicy:
     whenDeleted: Retain
     whenScaled: Delete
 {% endif %}

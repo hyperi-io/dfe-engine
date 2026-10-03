@@ -115,7 +115,7 @@ All configuration is environment variables with the `DFE_` prefix
 
 | Variable | Image default | Local-dev default | Description |
 |----------|---------------|-------------------|-------------|
-| `DFE_CONFIG_DIR` | `/app/config` | `./config` | Config directory - the deployment supplies it (a mounted volume/ConfigMap in k8s; a checkout of the deployment's own config repo for local dev). Auto-resolves registry subdirs (`sources/`, `fieldmaps/`, `services/`, `deployment/`, `hunts/`, `hunt-rules/`, `rules/`, `alert-destinations/`, `queries/`). |
+| `DFE_CONFIG_DIR` | `/app/config` | `./config` | Config directory - the deployment supplies it (a mounted volume/ConfigMap in k8s; a checkout of the deployment's own config repo for local dev). Auto-resolves registry subdirs (`sources/`, `fieldmaps/`, `services/`, `deployment/`, `hunts/`, `rules/`, `alert-destinations/`, `queries/`). |
 | `DFE_SCHEMAS_DIR` | `/app/schemas` | unset | Schema tree root. Unset, the engine reads the trees out of the installed `dfe-schemas` package. |
 
 - The Docker image bakes the `dfe-schemas` package's trees in as a seed at

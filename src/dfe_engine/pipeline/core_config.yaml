@@ -56,7 +56,7 @@ default_env_vars:
   MEMORY_UTILIZATION_THRESHOLD: '130'
 
 ingestion_pipelines:
-  
+
   vector-all-prep-ch-load:
     env:
       KAFKA_SOURCE_TOPIC_LIST:
@@ -84,12 +84,12 @@ ingestion_pipelines:
     - id: 142-transform-coerce-types.yml
     - id: 159-transform-dlq-event-category.yml
     - id: 202-sink-kafka-sasl-scram.yml
-      input: 
+      input:
         - 159_transform_dlq_event_category.route_clickhouse_sink
     - id: 202-sink-dlq-kafka-sasl-scram.yml
-      input: 
+      input:
         - 159_transform_dlq_event_category.route_kafka_sink
-  
+
   vector-load-ch:
     env:
       KAFKA_SOURCE_TOPIC_LIST:
@@ -104,7 +104,7 @@ ingestion_pipelines:
     - id: 003-source-kafka-sasl-scram.yml
     - id: 101-transform-flatten-message.yml
     - id: 201-sink-clickhouse-saas.yml
-  
+
   vector-all-load-s3:
     env:
       KAFKA_SOURCE_TOPIC_LIST:
@@ -120,7 +120,7 @@ ingestion_pipelines:
     - id: 138-transform-filter.yml
     - id: 115-transform-timestamp-load-field.yml
     - id: 207-sink-aws-s3.yml
-  
+
   vector-logs-hypercol-metric-finalise:
     env:
       KAFKA_SOURCE_TOPIC_LIST:
@@ -138,7 +138,7 @@ ingestion_pipelines:
     - id: 152-transform-timestamp-progress-checkpoint.yml
     - id: 157-transform-epoch-timestamp-conversion.yml
     - id: 202-sink-kafka-sasl-scram.yml
-  
+
   vector-receiver:
     env:
       VECTOR_THREADS: '8'
