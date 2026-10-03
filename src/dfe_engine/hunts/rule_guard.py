@@ -13,6 +13,8 @@ when the condition narrows anything at all, or cannot be read.
 
 ``refuse_offbox_calls`` reads the same WHERE and refuses a condition that calls
 a ClickHouse function reading outside the row or sending it to another service.
+``refuse_direct_query`` holds a hunt's hand-written ``query`` to that refusal and
+to one statement that reads, or inserts what it reads.
 
 ``preview_sql`` counts what the rule matches over a lookback window on its own
 source table, and ``volume_verdict`` turns that count into a band and the
@@ -327,6 +329,53 @@ def refuse_offbox_calls(where: str, *, subject: str = "A rule's detection condit
     except CallNotPermittedError as exc:
         return str(exc)
     return None
+
+
+_QUERY_SUBJECT = "A hunt's query"
+
+
+def refuse_direct_query(query: str) -> str | None:
+    """Say why a hunt's direct ``query`` may not run, or None when it may.
+
+    The hunt runner sends the query to ClickHouse as written, as a user that may
+    write, so nothing but the statement's shape stops a ``DROP`` or an ``ALTER ...
+    DELETE``. It must be one SELECT (``WITH`` and ``UNION`` included), or one
+    ``INSERT INTO`` a table from a SELECT, which is how a hunt writes its
+    detections, and it may call nothing :func:`refuse_offbox_calls` refuses.
+
+    Args:
+        query: The hunt's ``query``, as the runner will send it.
+
+    Returns:
+        The refusal message, starting ``A hunt's query``, or None.
+    """
+    offbox = refuse_offbox_calls(query, subject=_QUERY_SUBJECT)
+    if offbox is not None:
+        return offbox
+    try:
+        statements = [s for s in sqlglot.parse(query, read="clickhouse") if s is not None]
+    except (SqlglotError, RecursionError) as exc:
+        detail = str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
+        return f"{_QUERY_SUBJECT} does not parse as ClickHouse SQL: {detail}"
+    if len(statements) != 1:
+        return f"{_QUERY_SUBJECT} must be one statement, not {len(statements)}"
+    statement = statements[0]
+    if isinstance(statement, exp.Query) or _inserts_a_select(statement):
+        return None
+    keyword = statement.sql(dialect="clickhouse").split(None, 1)[0].upper()
+    return (
+        f"{_QUERY_SUBJECT} must be a SELECT, or an INSERT INTO a table from a SELECT, not {keyword}"
+    )
+
+
+def _inserts_a_select(statement: exp.Expr) -> bool:
+    """Whether a statement is ``INSERT INTO <table> [(columns)] <SELECT>``."""
+    if not isinstance(statement, exp.Insert) or not isinstance(statement.expression, exp.Query):
+        return False
+    target = statement.this
+    if isinstance(target, exp.Schema):
+        target = target.this
+    return isinstance(target, exp.Table)
 
 
 def volume_verdict(

@@ -33,8 +33,11 @@ refuse that call. So is one whose target is not a plain ``table`` or
 ``database.table``: ``INSERT INTO FUNCTION url(...)`` would send every detection
 row off the box. Its source is held to the same rule, since ``FROM url(...)``
 reads another host and a name carrying a bracket or a comment rewrites the
-statement. A hunt left with NOTHING to run is a hard failure in the worker
-rather than a silent clean run.
+statement, except that a source may carry ``-``: a source table takes its
+source's label as its name, and both parts are backtick-quoted. A source named
+without a database is read from the data database the caller passes. A hunt
+left with NOTHING to run is a hard failure in the worker rather than a silent
+clean run.
 """
 
 from pathlib import Path
@@ -42,7 +45,7 @@ from typing import Any
 
 from scalo.logger import logger
 
-from dfe_engine.clickhouse.quoting import plain_table_name, quote_identifier
+from dfe_engine.clickhouse.quoting import plain_source_name, plain_table_name, quote_identifier
 from dfe_engine.hunts.hunt_output import HuntResultSchema
 from dfe_engine.hunts.rule_guard import refuse_offbox_calls
 from dfe_engine.hunts.rule_names import RuleNameError, rule_file
@@ -161,6 +164,7 @@ def compile_hunt_queries(
     *,
     rules_dir: str | Path = "",
     default_target: str = "",
+    default_database: str = "",
     max_detections: int = MAX_DETECTIONS_PER_RUN,
 ) -> list[HuntStatement]:
     """Compile every rule the hunt names into one capped INSERT ... SELECT each.
@@ -171,6 +175,8 @@ def compile_hunt_queries(
         rules_dir: Directory of rule YAML files (``hunts.rules_dir``).
         default_target: ``db.table`` used when neither the rule entry nor the hunt
             names a target. The caller resolves it from the data database.
+        default_database: Database an unqualified source table is read from, the
+            data database. Empty leaves such a rule with no source.
         max_detections: Detection rows each rule may write in one run, already cut
             to the ceiling by :func:`detection_cap`.
 
@@ -227,10 +233,11 @@ def compile_hunt_queries(
         )
         # The source reaches FROM as text and can arrive straight from the deploy repo.
         try:
-            source_db, source_table = plain_table_name(source) if source.strip() else ("", "")
+            source_db, source_table = plain_source_name(source) if source.strip() else ("", "")
         except ValueError as exc:
             logger.error(f"hunt {hunt_id}: rule '{rule_name}' source refused: {exc}")
             continue
+        source_db = source_db or default_database
         if not source_db or not source_table:
             logger.error(f"hunt {hunt_id}: rule '{rule_name}' resolves to no db.table source")
             continue

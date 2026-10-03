@@ -169,6 +169,7 @@ def test_spec_sources_carry_the_configured_detection_cap():
     assert cli._spec_sources(settings, "tenant_a") == {
         "rules_dir": "/rules",
         "default_target": "tenant_a.detection",
+        "default_database": "tenant_a",
         "max_detections": 250,
     }
 

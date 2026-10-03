@@ -103,6 +103,7 @@ def _propagator(env) -> SigmaPropagator:
         rule_registry=env.rules,
         hunt_registry=env.hunts,
         actor="tester",
+        database="dfe",
     )
 
 
@@ -170,6 +171,7 @@ def test_propagate_creates_binding_over_sigma_view(env):
 
     rule = env.rules.get(rid)
     # targets the sigma VIEW, references Sigma field names, carries the back-ref
+    assert rule.source_db == "dfe"
     assert rule.source_table == "windows-audit_sigma"
     assert rule.source == "windows-audit"
     assert "Image ILIKE" in rule.where_clause
@@ -347,7 +349,7 @@ def test_propagate_creates_per_source_hunt_including_binding(env):
     assert [r["rule_name"] for r in hunt["rules"]] == [rid]
     assert hunt["cron"] == "*/5 * * * *"
     assert hunt["customers"] == ["acme"]
-    assert hunt["global_source_table_name"] == "windows-audit_sigma"
+    assert hunt["global_source_table_name"] == "dfe.windows-audit_sigma"
 
 
 def test_propagate_preserves_existing_hunt_rules_and_overrides(env):

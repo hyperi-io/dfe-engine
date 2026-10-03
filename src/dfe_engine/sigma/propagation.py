@@ -39,9 +39,10 @@ clobber) is always generated.
 Which SOURCE does a sigma rule bind to? Its ``logsource`` (product/category/
 service) is matched to DFE sources via ``SigmaSourceMapper`` - a rule generates
 one binding per matching source.
-"""
 
-from __future__ import annotations
+The hunt runner reads a source as ``database.table``, so every generated rule and
+hunt names the view in the data database the propagator is given.
+"""
 
 import hashlib
 from dataclasses import dataclass, field
@@ -150,13 +151,16 @@ def binding_hand_edited(rule: Rule) -> bool:
     return _where_hash(rule.where_clause) != stored
 
 
-def build_binding_rule(sigma_id: str, doc: dict[str, Any], source: str, where_clause: str) -> Rule:
+def build_binding_rule(
+    sigma_id: str, doc: dict[str, Any], source: str, where_clause: str, *, database: str
+) -> Rule:
     """Build the sigma-bound DFE Rule (targets the ``{source}_sigma`` view).
 
-    The rule references the view (``source_table = {source}_sigma``) so the WHERE
-    clause's Sigma field names resolve to the view's aliased columns. It carries
-    the ``sigma_rule_id`` back-reference and a ``sigma_provenance`` marker snapshot
-    of the catalogue state + a WHERE-clause hash for later hand-edit detection.
+    The rule references the view (``source_db = database``, ``source_table =
+    {source}_sigma``) so the WHERE clause's Sigma field names resolve to the view's
+    aliased columns. It carries the ``sigma_rule_id`` back-reference and a
+    ``sigma_provenance`` marker snapshot of the catalogue state + a WHERE-clause
+    hash for later hand-edit detection.
     """
     rule_dict = doc.get("rule", {}) or {}
     prov = doc.get("provenance", {}) or {}
@@ -166,6 +170,7 @@ def build_binding_rule(sigma_id: str, doc: dict[str, Any], source: str, where_cl
         name=f"[sigma] {title}",
         severity=sigma_level(rule_dict),
         source=source,
+        source_db=database,
         source_table=sigma_view_name(source),
         where_clause=where_clause,
         original_sql="",
@@ -261,7 +266,8 @@ class SigmaPropagator:
     Bridges the sigma catalogue (gitcrud) to the existing rule + hunt registries
     (DirectoryConfigStore). It reads the selection + catalogue + source mappings
     and WRITES through the existing ``RuleRegistry`` / ``HuntConfigRegistry`` - it
-    is a generator, not a second CRUD implementation.
+    is a generator, not a second CRUD implementation. ``database`` is the data
+    database the ``{source}_sigma`` views live in (``effective_data_database``).
     """
 
     def __init__(
@@ -273,6 +279,7 @@ class SigmaPropagator:
         rule_registry: RuleRegistry,
         hunt_registry: HuntConfigRegistry,
         actor: str,
+        database: str,
     ) -> None:
         self._catalog = catalog
         self._selection = selection
@@ -280,6 +287,7 @@ class SigmaPropagator:
         self._rules = rule_registry
         self._hunts = hunt_registry
         self._actor = actor
+        self._database = database
 
     # -- source binding --
 
@@ -318,7 +326,7 @@ class SigmaPropagator:
             if _catalogue_drifted(doc) or binding_hand_edited(existing):
                 return "skipped_drifted", None
 
-        rule = build_binding_rule(sigma_id, doc, source, where)
+        rule = build_binding_rule(sigma_id, doc, source, where, database=self._database)
         if existing is not None:
             # Preserve the original creation time so a re-propagate of an
             # unchanged rule is a true content no-op (no churn commit).
@@ -359,7 +367,7 @@ class SigmaPropagator:
                 "cron": cron,
                 "log_buffer": 60,
                 "global_target_table_name": target_table,
-                "global_source_table_name": sigma_view_name(source),
+                "global_source_table_name": f"{self._database}.{sigma_view_name(source)}",
                 "customers": list(customers),
                 "rules": [{"rule_name": rid} for rid in rule_ids],
             }

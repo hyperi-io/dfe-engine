@@ -10,12 +10,16 @@
 An action bundles var changes behind one RBAC handle. Invoking applies ALL changes
 in ONE commit (atomic - a protected-var violation fails the whole action), honours
 the protected-var policy, and supports dry-run (returns the diff without writing).
+
+A hunt or rule document an action leaves behind is validated as the hunts API
+validates one, since the hunt runner compiles it straight off the deploy repo.
 """
 
 import builtins
 import copy
 import functools
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
@@ -27,12 +31,20 @@ from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError, get_path, set_pat
 from dfe_engine.gitcrud.commit_policy import added_violations
 from dfe_engine.gitcrud.registry import UnknownResourceClassError
 from dfe_engine.gitops.repo import PublishResult
+from dfe_engine.hunt_runner.checkpoint import TIMESTAMP_FIELD
+from dfe_engine.hunts.validator import HuntValidator
 
 from .models import ActionDef, VarChange, param_ref
 from .policies import PolicyStore, ProtectedVarError
 
 ACTION_CLASS = "actions"
 """The gitops class action definitions are stored in."""
+
+HUNT_CLASS = "hunts"
+"""The gitops class the hunt runner reads hunt definitions from."""
+
+RULE_CLASS = "rules"
+"""The gitops class the hunt runner reads detection rules from."""
 
 CREDENTIAL_REFUSAL = (
     "an action definition is stored in the deploy repo's history, so it may not carry "
@@ -66,6 +78,10 @@ class CredentialInActionError(ValueError):
 
 class InvalidParamsError(ValueError):
     """Raised when supplied invoke params violate the action's declared constraints."""
+
+
+class InvalidDocumentError(ValueError):
+    """Raised when an action would leave a hunt or rule document the hunts API refuses."""
 
 
 def resolve_params(action: ActionDef, params: dict[str, Any] | None) -> dict[str, Any]:
@@ -105,6 +121,15 @@ def _substitute(value: Any, resolved: dict[str, Any]) -> Any:
     pname, mapping = ref
     pvalue = resolved[pname]
     return mapping[pvalue] if mapping is not None else pvalue
+
+
+def _hunt_as_written(doc: dict) -> dict:
+    """A hunt document with each bare rule name as the mapping the hunts API writes."""
+    rules = doc.get("rules")
+    if not isinstance(rules, list):
+        return doc
+    entries = [{"rule_name": entry} if isinstance(entry, str) else entry for entry in rules]
+    return {**doc, "rules": entries}
 
 
 def _masked(target: dict, path: str, value: Any) -> Any:
@@ -279,6 +304,10 @@ class ActionStore:
         replicaCount in the same invoke, and one that re-enables KEDA over a stored
         replicaCount is refused. Only a violation the action adds is refused, again
         as on the direct path.
+
+        A hunt or rule document is then validated whole, as the hunts API
+        validates one it writes; a document that fails is refused with the
+        validator's message.
         """
         docs: dict[tuple[str, str], dict] = {}
         stored: dict[tuple[str, str], dict] = {}
@@ -344,7 +373,33 @@ class ActionStore:
                 if not collect:
                     raise violation
                 errors.append(f"{cls}/{name}: {violation}")
+            refusal = self._document_refusal(cls, doc)
+            if refusal is not None:
+                if not collect:
+                    raise InvalidDocumentError(f"{cls}/{name}: {refusal}")
+                errors.append(f"{cls}/{name}: {refusal}")
         return docs, diff, errors
+
+    def _document_refusal(self, cls: str, doc: dict) -> str | None:
+        """Why the hunts API would refuse ``doc``, or None; a class it does not write is None."""
+        try:
+            if cls == HUNT_CLASS:
+                checkpoint = doc.get("checkpoint_timestamp_field") or TIMESTAMP_FIELD
+                HuntValidator.validate_hunt_configuration(
+                    _hunt_as_written(doc), self._rules_dir(), checkpoint
+                )
+            elif cls == RULE_CLASS:
+                HuntValidator.validate_rule_source(doc, "the rule")
+        except ValueError as exc:
+            return str(exc)
+        except (AttributeError, TypeError) as exc:
+            # The validator reads the shape the API writes; any other shape is refused, not a 500.
+            return f"it is not a {cls} document the hunts API writes ({type(exc).__name__}: {exc})"
+        return None
+
+    def _rules_dir(self) -> Path:
+        """The deploy-repo directory the hunt runner reads rule files from."""
+        return self._crud.repo_path / self._crud.resource_class(RULE_CLASS).directory
 
     def preview(
         self,
@@ -357,7 +412,8 @@ class ActionStore:
 
         Returns (diff, errors): the diff the action would apply, plus every
         violation found - unknown class, governance-class target, commit-policy
-        ban, protected var without override, a credential. Params resolve to their default or
+        ban, protected var without override, a credential, a hunt or rule document
+        the hunts API would refuse. Params resolve to their default or
         representative value (closed constraints make one always available), so
         a definition validates without a caller-supplied invocation - and every
         enum map BRANCH is commit-policy checked in the document it lands in, not
