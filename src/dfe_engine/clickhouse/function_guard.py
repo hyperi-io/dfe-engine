@@ -28,7 +28,9 @@ Three families, each its own refusal:
 The check reads the text that will run: every name directly followed by ``(``
 is looked up, so a quoted call name is caught as well as a bare one. The ``IN``
 operator's keyword is also followed by ``(``; it is told apart from an ``in()``
-call by standing after an operand, and is left alone.
+call by standing after an operand, and is left alone. After ``CASE``, ``DIV``,
+``INTERVAL``, ``LIKE``, ``LIMIT`` or ``OFFSET`` the two cannot be told apart, so a
+column with one of those names must be backtick-quoted before ``IN``.
 """
 
 import itertools
@@ -259,13 +261,11 @@ def refuse_calls_outside_the_row(
     for index, (name, following) in enumerate(itertools.pairwise(tokens)):
         if following.token_type is not TokenType.L_PAREN:
             continue
-        if name.token_type is TokenType.IN and _follows_an_operand(tokens, index):
+        before = _before_in(tokens, index) if name.token_type is TokenType.IN else None
+        if before is not None and before.token_type in _OPERAND_ENDS:
             continue
         if IN_FUNCTION.fullmatch(name.text):
-            raise CallNotPermittedError(
-                f"{subject} may not call {name.text}(), which can read a table: "
-                "use the IN operator with a list of values"
-            )
+            raise CallNotPermittedError(_in_call_refusal(subject, name.text, before))
         if reads_outside_the_row(name.text):
             raise CallNotPermittedError(
                 f"{subject} may not call {name.text}(), which reads outside the table"
@@ -276,14 +276,27 @@ def refuse_calls_outside_the_row(
             )
 
 
-def _follows_an_operand(tokens: list[Token], index: int) -> bool:
-    """Whether the IN keyword at ``index`` is the operator: an operand ends just before it.
+def _before_in(tokens: list[Token], index: int) -> Token | None:
+    """The token before the IN keyword at ``index``, past NOT and GLOBAL; None when it is first.
 
-    ``x IN (...)``, ``x NOT IN (...)`` and ``x GLOBAL IN (...)`` follow an operand.
-    ``in(x, t)`` stands where an operand starts -- first, or after ``(``, ``,``,
-    an operator or a keyword such as ``WHERE`` or ``AND`` -- and is the call.
+    The keyword is the operator when an operand ends there: ``x IN (...)``,
+    ``x NOT IN (...)``, ``x GLOBAL IN (...)``. ``in(x, t)`` stands where an operand
+    starts -- first, or after ``(``, ``,``, an operator or a keyword such as
+    ``WHERE`` or ``AND`` -- and is the call.
     """
     before = index - 1
     while before >= 0 and tokens[before].token_type in _IN_MODIFIERS:
         before -= 1
-    return before >= 0 and tokens[before].token_type in _OPERAND_ENDS
+    return tokens[before] if before >= 0 else None
+
+
+def _in_call_refusal(subject: str, call: str, before: Token | None) -> str:
+    """The refusal of an ``in()`` call, telling a column named as a keyword how to pass."""
+    refusal = f"{subject} may not call {call}(), which can read a table"
+    if before is not None and before.token_type in _EXPRESSION_LEADS:
+        word = before.text
+        return (
+            f"{refusal}: IN straight after {word} reads as that call, "
+            f"so a column named {word} must be backtick-quoted, as `{word}` IN (...)"
+        )
+    return f"{refusal}: use the IN operator with a list of values"

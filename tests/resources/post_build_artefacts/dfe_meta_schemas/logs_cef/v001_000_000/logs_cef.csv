@@ -19,7 +19,7 @@ c6a4_label,string,,,Corresponding label field
 cat,string_fast_lowcardinality,,15,Represents the category assigned by the originating device
 cfp1,float64,,16,One of four floating point fields available to map field
 cfp2,float64,,17,One of four floating point fields available to map field
-cfp3,float64,,18,One of four floating point fields available to map field 
+cfp3,float64,,18,One of four floating point fields available to map field
 cfp4,float64,,19,One of four floating point fields available to map field
 cfp1_label,string,,,Corresponding label field
 cfp2_label,string,,,Corresponding label field
@@ -84,7 +84,7 @@ file_id,string,,61,An ID associated with a file could be the inode
 file_modification_time,datetime,,62,Time when the file was last modified
 file_path,string_fast,,63,Full path to the file including file name itself
 file_permission,string,,64,Permissions of the file
-file_type,string_fast,,65,Type of file 
+file_type,string_fast,,65,Type of file
 flex_date1,datetime,,66,A timestamp field available to map a timestamp
 flex_date1_label,string,,,Corresponding label field
 flex_string1,string_fast,,67,One of two string fields available to map
@@ -117,7 +117,7 @@ rt,datetime,,91,The time at which the event related to the activity was received
 shost,string_fast,,92,Identifies the source that an event refers to in an IP network
 smac,string,,93,Six colon seperated hexadecimal numbers
 sntdom,string_fast,,94,The Windows domain name for the source address
-source_dns_domain,string_fast,,95,The DNS domain part of the complete fully qualified domain name 
+source_dns_domain,string_fast,,95,The DNS domain part of the complete fully qualified domain name
 source_service_name,string_fast,,96,The service that is responsible for generating this event
 source_translated_address,ipv4,,97,Identifies the translated source that the event refers to in an IP network
 source_translated_port,int32,,98,A port number after being translated
