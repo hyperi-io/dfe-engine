@@ -64,7 +64,7 @@ def test_one_rule_becomes_one_windowed_insert(tmp_path: Path):
     )
     assert len(sql) == 1
     statement = sql[0]
-    assert statement.startswith("INSERT INTO dfe.detection")
+    assert statement.startswith("INSERT INTO `dfe`.`detection`")
     assert "FROM dfe.main" in statement
     assert "WHERE {window} AND (process_name = 'certutil.exe')" in statement
     assert "'certutil' AS rule_id" in statement
@@ -126,11 +126,11 @@ def test_the_default_target_applies_only_when_nothing_names_one(tmp_path: Path):
     _save_rule(tmp_path, rule_id="r", name="R", where_clause="a = 1")
     definition = {"rules": ["r"], "global_source_table_name": "dfe.main"}
     assert (
-        "INSERT INTO dfe.detection"
+        "INSERT INTO `dfe`.`detection`"
         in _compiled_sql(definition, "h", rules_dir=tmp_path, default_target="dfe.detection")[0]
     )
     assert (
-        "INSERT INTO other.results"
+        "INSERT INTO `other`.`results`"
         in _compiled_sql(
             {**definition, "global_target_table_name": "other.results"},
             "h",
@@ -323,7 +323,7 @@ def test_an_unqualified_target_lands_beside_its_source(tmp_path: Path):
         "h",
         rules_dir=tmp_path,
     )
-    assert sql[0].startswith("INSERT INTO tenant_a.detection")
+    assert sql[0].startswith("INSERT INTO `tenant_a`.`detection`")
 
 
 def _flood_hunt(tmp_path: Path, **kwargs):
@@ -380,7 +380,7 @@ def test_the_count_reads_the_same_window_and_rule_without_a_limit(tmp_path: Path
 def test_the_summary_binds_every_value_rather_than_quoting_it(tmp_path: Path):
     statement = _flood_hunt(tmp_path)
 
-    assert statement.summary_sql.startswith("INSERT INTO acme.detection")
+    assert statement.summary_sql.startswith("INSERT INTO `acme`.`detection`")
     assert f"toUUID('{NIL_UUID}')" in statement.summary_sql
     assert "CAST({dfe_summary:String}, 'JSON')" in statement.summary_sql
     # The apostrophe in the rule name travels as a bound value, so nothing escapes it.

@@ -160,7 +160,7 @@ def setup_paths(tmp_path) -> dict:
                 "rules": [{"rule_name": "rule1", "initial_checkpoint_lookback_minutes": 60}],
                 "customers": ["customer1"],
                 "customer_filters": {
-                    "customer1": {"rules": [{"name": "rule1.jinja2", "filter_clause": ""}]}
+                    "customer1": {"rules": [{"name": "rule1", "filter_clause": ""}]}
                 },
                 "name": "test_hunt",
             },
@@ -176,7 +176,7 @@ def setup_paths(tmp_path) -> dict:
                 "rules": [{"rule_name": "rule1", "initial_checkpoint_lookback_minutes": 60}],
                 "customers": ["customer1"],
                 "customer_filters": {
-                    "customer1": {"rules": [{"name": "rule1.jinja2", "filter_clause": ""}]}
+                    "customer1": {"rules": [{"name": "rule1", "filter_clause": ""}]}
                 },
                 "name": "test_hunt",
             },

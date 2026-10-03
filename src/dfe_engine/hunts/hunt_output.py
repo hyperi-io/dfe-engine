@@ -22,13 +22,11 @@ Usage:
     )
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 from scalo.logger import logger
 
-from ..clickhouse.quoting import quote_literal
+from ..clickhouse.quoting import quote_identifier, quote_literal
 from ..schema.schema_loader import SchemaLoader
 
 # Common header columns to copy from source -> hunt results.
@@ -230,8 +228,8 @@ class HuntResultSchema:
         time bounds are injected via the timestamp placeholder.
 
         Args:
-            target_db: Target database (usually org_id).
-            target_table: Hunt results table name.
+            target_db: Target database (usually org_id), backtick-quoted here.
+            target_table: Hunt results table name, backtick-quoted here.
             source_db: Source database (usually org_id).
             source_table: Source table to scan.
             where_clause: Detection logic (without time bounds).
@@ -259,8 +257,10 @@ class HuntResultSchema:
             where_parts.append(f"({where_clause.strip()})")
         full_where = " AND ".join(where_parts)
 
+        # The target is hunt configuration text, so it can only ever name a table.
+        target = f"{quote_identifier(target_db)}.{quote_identifier(target_table)}"
         return (
-            f"INSERT INTO {target_db}.{target_table}\n"
+            f"INSERT INTO {target}\n"
             f"    ({insert_cols})\n"
             f"SELECT\n"
             f"    {select_expr}\n"
