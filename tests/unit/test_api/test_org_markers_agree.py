@@ -21,6 +21,7 @@ import pytest
 from dfe_engine.api.deps import get_clickhouse_client
 from dfe_engine.governance.ch.bootstrap import reconcile_from_stores
 from dfe_engine.governance.ch.models import TENANT_SETTING, group_user_name, org_user_name
+from dfe_engine.orgs.models import Org
 from tests.support.held_callers import caller_in_group
 
 EVENTS = "`db`.`events`"
@@ -105,6 +106,16 @@ def _sample(caller):
     return caller.post("/api/v1/sample", json={"mode": "recent", "table": EVENTS})
 
 
+def _plant_org(registry, name: str, org_ids: list[str]) -> None:
+    """Write an org straight to disk, bypassing ``create``'s collision guard.
+
+    Simulates data that predates the guard, which ``resolve_orgs`` still has to
+    resolve without widening a read.
+    """
+    org = Org(name=name, org_ids=org_ids, enabled=True)
+    registry._write(registry._path(name), org)
+
+
 def test_hyperdx_hands_a_name_and_a_tenant_id_the_same_org_user(app, api_settings, acme):
     by_name = _member(app, api_settings, "by-name", "acme")
     by_tenant = _member(app, api_settings, "by-tenant", "t-acme-2")
@@ -152,8 +163,9 @@ def test_an_unknown_marker_gets_nothing_on_every_path(app, api_settings, acme, t
 
 
 def test_a_marker_naming_one_org_is_that_org_on_every_path(app, client, api_settings, acme, table):
-    # A second org is NAMED by acme's first tenant id; the name decides, on every path.
-    app.state.org_registry.create("t-acme-1", org_ids=["t-other"])
+    # A second org, NAMED by acme's first tenant id, predates the collision guard
+    # (planted straight to disk -- create() now refuses this); the name still decides.
+    _plant_org(app.state.org_registry, "t-acme-1", org_ids=["t-other"])
     member = _member(app, api_settings, "named", "t-acme-1")
 
     assert _identity(member) == org_user_name("t-acme-1")
