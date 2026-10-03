@@ -9,7 +9,9 @@
 """
 DFE Engine Settings Module
 
-Provides centralized configuration management using the scalo settings cascade.
+Provides centralized configuration management through the engine's own cascade in
+``load_settings``: defaults.yaml, then an optional config file, then the environment
+variables mapped below. It is not scalo's settings cascade; moving onto it is #600.
 Configuration priority: Environment Variables > Config Files > Defaults
 
 Environment variable mapping (DFE_ prefixed, with legacy fallbacks):

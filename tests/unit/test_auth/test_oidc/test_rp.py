@@ -18,6 +18,7 @@ from dfe_engine.auth.oidc.rp import (
     fill_from_userinfo_endpoint,
     merge_userinfo_claims,
     needs_directory_groups,
+    needs_userinfo,
 )
 from tests.unit.test_auth.factories import make_oauth_client
 from tests.unit.test_auth.test_oidc.local_idp import LocalIdp
@@ -53,6 +54,24 @@ class TestNeedsDirectoryGroups:
     def test_matches_expected(self, case: NeedsDirectoryGroupsCase):
         needs = needs_directory_groups(identity=case["identity"], provider=case["provider"])
         assert needs == case["expected_needs"]
+
+
+class TestNeedsUserinfo:
+    @pytest.mark.parametrize(
+        ("claims", "expected"),
+        [
+            ({"sub": "u1", "name": "Ada", "email": "ada@example.com"}, False),
+            ({"sub": "u1", "preferred_username": "ada", "email": "ada@example.com"}, False),
+            # The case the name-only trigger missed: the email fell back to the username.
+            ({"sub": "u1", "name": "Ada", "preferred_username": "ada"}, True),
+            ({"sub": "u1", "name": "Ada", "email": "  "}, True),
+            ({"sub": "u1", "email": "ada@example.com"}, True),
+            ({"sub": "u1"}, True),
+        ],
+        ids=["name-and-email", "username-and-email", "no-email", "blank-email", "no-name", "bare"],
+    )
+    def test_matches_expected(self, claims: dict, expected: bool):
+        assert needs_userinfo(claims=claims) is expected
 
 
 class TestMergeUserinfoClaims:

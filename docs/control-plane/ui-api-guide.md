@@ -166,7 +166,7 @@ accepts repeated `schema_type` (top-level path segment, e.g. `meta`).
 
 The landing source is engine-owned: it reads as `resource_type: core`, and POST,
 PUT, PATCH and DELETE all answer `409 conflict`. Bulk reports it under `failed`
-with that same code and carries on with the other sources in the call.
+with that same code and carries on with the other sources in the call. A deploy of it applies no DDL: the shipped definition has no schema and answers `404 no_schema`, and one given a schema answers `409 conflict` before ClickHouse is touched. A `dry_run` still plans.
 
 Artifact files: `source-builds/{name}.yaml` and `source-deploys/{name}.yaml` (per-version maps like `sources/{name}.yaml`). Plans are not persisted.
 

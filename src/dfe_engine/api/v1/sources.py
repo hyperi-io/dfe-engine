@@ -1504,6 +1504,11 @@ def _apply_source_schema(
             },
         )
 
+    # A deploy ends by recording the version, which a core source refuses, so refuse
+    # it before any DDL or topic lands for a deploy that could never be recorded.
+    if not dry_run and registry.is_core(name):
+        _raise_save_validation_http(SourceCoreResourceError(action="deploy", source=name))
+
     # A deploy reaches ClickHouse before the build: the table engine and ON CLUSTER
     # are sensed from the live server, so the DDL lands on every replica of a
     # cluster. A dry run stays CH-free and renders the deployment's topology.
