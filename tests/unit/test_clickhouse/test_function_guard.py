@@ -14,12 +14,14 @@ here opens a socket.
 """
 
 import pytest
+from sigma.collection import SigmaCollection
 
 from dfe_engine.clickhouse.function_guard import (
     CallNotPermittedError,
     refuse_calls_outside_the_row,
 )
 from dfe_engine.sampling import clickhouse_reader
+from dfe_engine.sigma.sigma_backend_clickhouse import SqlBackend
 
 # One call per family that leaves the row, and what the refusal has to say about it.
 REFUSED_CALLS = {
@@ -34,7 +36,47 @@ REFUSED_CALLS = {
     "keeper counter": ("generateSerialID(message) > 0", "sends data to another service"),
     "globalIn": ("globalIn(severity, dfe.main)", "can read a table"),
     "notIn": ("notIn(severity, dfe.main)", "can read a table"),
+    "in": ("in(severity, dfe.main)", "can read a table"),
 }
+
+# Where an operand starts, so ClickHouse reads in(...) as the call, not the IN operator.
+IN_CALL_POSITIONS = {
+    "first": "in(severity, dfe.main)",
+    "upper case": "IN(severity, dfe.main)",
+    "after AND": "severity = 'high' AND in(severity, dfe.main)",
+    "after NOT": "NOT in(severity, dfe.main)",
+    "after AND NOT": "severity = 'high' AND NOT in(severity, dfe.main)",
+    "in brackets": "(in(severity, dfe.main))",
+    "as an argument": "toUInt8(in(severity, dfe.main)) = 1",
+    "after a comma": "if(1, in(severity, dfe.main), 0)",
+    "in a CASE": "CASE WHEN in(severity, dfe.main) THEN 1 ELSE 0 END = 1",
+    "as the CASE operand": "CASE in(severity, dfe.main) WHEN 1 THEN 1 END = 1",
+    "as an INTERVAL amount": "_timestamp > now() - INTERVAL in(1, dfe.main) DAY",
+    "after LIKE": "severity LIKE in(severity, dfe.main)",
+    "after DIV": "1 DIV in(1, dfe.main) = 0",
+    "after a comparison": "1 = in(severity, dfe.main)",
+    "in a lambda": "arrayExists(z -> in(z, dfe.main), [severity])",
+    "as the IN operator's list": "severity IN in(severity, dfe.main)",
+    "in a whole rule": "SELECT * FROM dfe.main WHERE in(severity, dfe.main)",
+}
+
+# The IN operator: a lookup against a table or subquery is a rule's to make.
+IN_OPERATOR_CONDITIONS = [
+    "severity IN (SELECT ioc FROM threat.iocs)",
+    "severity NOT IN (SELECT ioc FROM threat.iocs)",
+    "severity GLOBAL IN (SELECT ioc FROM threat.iocs)",
+    "severity GLOBAL NOT IN (SELECT ioc FROM threat.iocs)",
+    "severity IN threat.iocs",
+    "severity IN ('high', 'critical')",
+    "severity IN('high')",
+    "lower(severity) IN ('high')",
+    "tuple(a, b) IN ((1, 2))",
+    "CASE WHEN a = 1 THEN 'x' ELSE 'y' END IN ('x')",
+    "`field name` IN ('a')",
+    "date IN ('2026-10-03')",
+    "DestinationIp in ('10.0.0.0/8')",
+    "SELECT * FROM dfe.main WHERE severity IN (SELECT ioc FROM threat.iocs)",
+]
 
 # Conditions the shipped paths produce: the docker stack's seeded rule, a sigma
 # backend condition, and the shapes a hand-written rule uses.
@@ -63,6 +105,43 @@ def test_a_call_that_leaves_the_row_is_refused_and_says_why(sql, reason):
 @pytest.mark.parametrize("sql", PERMITTED_CONDITIONS)
 def test_a_condition_over_the_row_passes(sql):
     refuse_calls_outside_the_row(sql, subject="A rule's detection condition")
+
+
+@pytest.mark.parametrize("sql", IN_CALL_POSITIONS.values(), ids=list(IN_CALL_POSITIONS))
+def test_the_in_call_is_refused_wherever_an_operand_starts(sql):
+    with pytest.raises(CallNotPermittedError) as caught:
+        refuse_calls_outside_the_row(sql, subject="A rule's SQL")
+
+    assert "may not call in(), which can read a table" in str(caught.value).lower()
+
+
+@pytest.mark.parametrize("sql", IN_OPERATOR_CONDITIONS)
+def test_the_in_operator_is_left_alone(sql):
+    refuse_calls_outside_the_row(sql, subject="A rule's SQL")
+
+
+def test_sigma_backend_output_passes():
+    rule = SigmaCollection.from_yaml(
+        """
+        title: Certutil decode
+        status: test
+        logsource:
+            category: process_creation
+            product: windows
+        detection:
+            selection:
+                EventID:
+                    - 4688
+                    - 1
+                Image|endswith: '\\\\certutil.exe'
+                DestinationIp|cidr:
+                    - '10.0.0.0/8'
+            condition: selection
+        """
+    )
+    [condition] = SqlBackend().convert(rule)
+
+    refuse_calls_outside_the_row(condition, subject="A rule's detection condition")
 
 
 def test_the_subject_names_what_the_caller_supplied():
