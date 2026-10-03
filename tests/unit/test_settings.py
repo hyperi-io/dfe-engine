@@ -55,7 +55,7 @@ def _hermetic_env(monkeypatch, tmp_path):
 @pytest.fixture
 def config_dir(tmp_path):
     """Create a temporary config directory with expected subdirs."""
-    for subdir in ("services", "sources", "deployment", "hunts", "hunt-rules", "rules", "queries"):
+    for subdir in ("services", "sources", "deployment", "hunts", "rules", "queries"):
         (tmp_path / subdir).mkdir()
     return str(tmp_path)
 
@@ -67,7 +67,6 @@ def _clear_registry_path_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "DFE_DEPLOYMENT_CONFIG_DIR",
         "DFE_SERVICES_CONFIG_YAML_DIR",
         "DFE_HUNTS_DIR",
-        "DFE_HUNTS_RULE_REPO_DIR",
         "DFE_QUERY_YAML_DIR",
         "DFE_FIELDMAPS_DIR",
     ):
@@ -98,12 +97,6 @@ class TestConfigDir:
         monkeypatch.setenv("DFE_CONFIG_DIR", config_dir)
         settings = load_settings()
         assert settings.hunts.hunt_dir == os.path.join(config_dir, "hunts")
-
-    def test_config_dir_resolves_hunt_rules_dir(self, config_dir, monkeypatch):
-        _clear_registry_path_env(monkeypatch)
-        monkeypatch.setenv("DFE_CONFIG_DIR", config_dir)
-        settings = load_settings()
-        assert settings.hunts.rule_repo_dir == os.path.join(config_dir, "hunt-rules")
 
     def test_config_dir_resolves_api_rules_dir(self, config_dir, monkeypatch):
         _clear_registry_path_env(monkeypatch)
@@ -567,11 +560,6 @@ class TestEnvOverrides:
         monkeypatch.setenv("DFE_HUNTS_DIR", "/custom/hunts")
         settings = load_settings()
         assert settings.hunts.hunt_dir == "/custom/hunts"
-
-    def test_hunt_rules_dir_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_HUNTS_RULE_REPO_DIR", "/custom/rules")
-        settings = load_settings()
-        assert settings.hunts.rule_repo_dir == "/custom/rules"
 
     def test_query_yaml_dir_override(self, monkeypatch):
         monkeypatch.setenv("DFE_QUERY_YAML_DIR", "/custom/queries")

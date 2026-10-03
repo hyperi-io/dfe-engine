@@ -4,8 +4,6 @@ AuthContext is the canonical identity model for DFE -- extracted from JWT
 claims by dfe-control-plane and passed into engine for Cedar evaluation.
 """
 
-from __future__ import annotations
-
 from collections.abc import Iterable
 from typing import Any, Literal
 
@@ -91,6 +89,25 @@ def platform_grants(grants: Iterable[ScopedGrant]) -> list[ScopedGrant]:
     "every org" through this one filter.
     """
     return [g for g in grants if g.scope.type == "system" and g.role != ORG_VIEWER_ROLE]
+
+
+def platform_caller(user: AuthContext) -> AuthContext | None:
+    """Return ``user`` holding only the grants ``platform_grants`` keeps, or None if none.
+
+    Authorising an action against the result asks whether the caller may take it
+    across every org. Bare roles count as system-scope grants, as ``authorize()``
+    reads a context without grants.
+
+    Args:
+        user: The caller's auth context.
+
+    Returns:
+        A copy of ``user`` with those grants and their roles, or None when it holds none.
+    """
+    platform = platform_grants(user.grants or [ScopedGrant(role=name) for name in user.roles])
+    if not platform:
+        return None
+    return user.model_copy(update={"roles": [grant.role for grant in platform], "grants": platform})
 
 
 class AuthContext(BaseModel):

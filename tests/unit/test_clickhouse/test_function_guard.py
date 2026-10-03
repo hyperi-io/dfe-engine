@@ -120,6 +120,35 @@ def test_the_in_operator_is_left_alone(sql):
     refuse_calls_outside_the_row(sql, subject="A rule's SQL")
 
 
+# ClickHouse 26.9.4 reads each as a column before IN (...), which the token check cannot tell from in().
+KEYWORD_COLUMNS = ["interval", "limit", "offset", "case", "div", "like"]
+
+
+@pytest.mark.parametrize("column", KEYWORD_COLUMNS)
+@pytest.mark.parametrize("operator", ["IN", "NOT IN"])
+def test_a_column_named_as_a_keyword_is_told_to_backtick_quote_it(column, operator):
+    with pytest.raises(CallNotPermittedError) as caught:
+        refuse_calls_outside_the_row(f"{column} {operator} (1, 2)", subject="filter")
+
+    assert str(caught.value) == (
+        "filter may not call IN(), which can read a table: "
+        f"IN straight after {column} reads as that call, "
+        f"so a column named {column} must be backtick-quoted, as `{column}` IN (...)"
+    )
+    refuse_calls_outside_the_row(f"`{column}` {operator} (1, 2)", subject="filter")
+
+
+def test_the_in_call_refusal_without_a_keyword_before_it_is_unchanged():
+    with pytest.raises(CallNotPermittedError) as caught:
+        refuse_calls_outside_the_row(
+            "severity = 'high' AND in(severity, dfe.main)", subject="filter"
+        )
+
+    assert str(caught.value) == (
+        "filter may not call in(), which can read a table: use the IN operator with a list of values"
+    )
+
+
 def test_sigma_backend_output_passes():
     rule = SigmaCollection.from_yaml(
         """

@@ -4,11 +4,19 @@
 
 """Tests for auth models."""
 
-from __future__ import annotations
-
 import pytest
 
-from dfe_engine.auth.models import AuthContext, AuthorizationError, AuthzRequest, AuthzResult
+from dfe_engine.auth.models import (
+    AuthContext,
+    AuthorizationError,
+    AuthzRequest,
+    AuthzResult,
+    Scope,
+    ScopedGrant,
+    platform_caller,
+)
+
+ORG_SCOPE = Scope(type="org", id="acme")
 
 
 class TestAuthContext:
@@ -60,6 +68,52 @@ class TestAuthContext:
         data = ctx.model_dump()
         restored = AuthContext.model_validate(data)
         assert restored == ctx
+
+
+class TestPlatformCaller:
+    def test_keeps_only_the_system_grants_beyond_org_viewer(self):
+        user = AuthContext(
+            user_id="alice",
+            roles=["data_viewer", "org_viewer", "admin"],
+            grants=[
+                ScopedGrant(role="data_viewer"),
+                ScopedGrant(role="org_viewer"),
+                ScopedGrant(role="admin", scope=ORG_SCOPE),
+            ],
+            org_ids=["acme"],
+        )
+
+        caller = platform_caller(user)
+
+        assert caller is not None
+        assert caller.grants == [ScopedGrant(role="data_viewer")]
+        assert caller.roles == ["data_viewer"]
+        assert caller.user_id == "alice"
+        assert caller.org_ids == ["acme"]
+        assert user.roles == ["data_viewer", "org_viewer", "admin"]
+
+    def test_reads_bare_roles_as_system_grants(self):
+        caller = platform_caller(AuthContext(user_id="bob", roles=["org_viewer", "data_analyst"]))
+
+        assert caller is not None
+        assert caller.grants == [ScopedGrant(role="data_analyst")]
+        assert caller.roles == ["data_analyst"]
+
+    @pytest.mark.parametrize(
+        "user",
+        [
+            AuthContext(user_id="carol"),
+            AuthContext(user_id="carol", roles=["org_viewer"]),
+            AuthContext(
+                user_id="carol",
+                roles=["admin"],
+                grants=[ScopedGrant(role="admin", scope=ORG_SCOPE)],
+            ),
+        ],
+        ids=["no roles", "org_viewer only", "bound at one org"],
+    )
+    def test_is_none_for_a_caller_without_a_platform_grant(self, user):
+        assert platform_caller(user) is None
 
 
 class TestAuthzResult:

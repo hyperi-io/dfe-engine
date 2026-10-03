@@ -2,7 +2,7 @@ name: "Windows SMD Detections"
 cron:
   - "* * * * *"
   - "*/2 * * * *"
-log_buffer: 60 
+log_buffer: 60
 global_target_table_name: logs_alerts
 global_source_table_name: logs_nxlog_windows
 customers:

@@ -8,8 +8,6 @@
 
 """Tests for TaskManager — in-memory async task lifecycle."""
 
-from __future__ import annotations
-
 import asyncio
 import json
 
@@ -161,6 +159,54 @@ class TestEviction:
         # Eviction runs on completion — should have at most max_completed finished tasks
         tasks = manager.list()
         assert len(tasks) <= 5
+
+
+async def _settled(manager: TaskManager, held_to: list[str] | None) -> str:
+    """Submit a task held to ``held_to``, wait for it to settle, and return its id."""
+
+    async def noop(*, task):
+        return "ok"
+
+    info = manager.submit("test:held", noop, held_to=held_to)
+    settled = await manager.await_terminal(info.id, 2.0)
+    assert settled is not None
+    assert settled.status == TaskStatus.COMPLETED
+    return info.id
+
+
+class TestHeldTasks:
+    @pytest.mark.asyncio
+    async def test_a_held_reader_sees_only_tasks_held_to_its_orgs(self, manager: TaskManager):
+        own = await _settled(manager, ["org-a"])
+        wider = await _settled(manager, ["org-a", "org-b"])
+        every_org = await _settled(manager, None)
+
+        assert manager.get(own, reader_orgs=["org-a", "org-c"]) is not None
+        assert manager.get(wider, reader_orgs=["org-a"]) is None
+        assert manager.get(every_org, reader_orgs=["org-a", "org-b"]) is None
+        assert [t.id for t in manager.list(reader_orgs=["org-a", "org-b"])] == [wider, own]
+        assert {t.id for t in manager.list()} == {own, wider, every_org}
+        assert manager.get(every_org) is not None
+
+    @pytest.mark.asyncio
+    async def test_a_reader_held_to_no_org_sees_no_task(self, manager: TaskManager):
+        held = await _settled(manager, ["org-a"])
+        await _settled(manager, None)
+
+        assert manager.get(held, reader_orgs=[]) is None
+        assert manager.list(reader_orgs=[]) == []
+
+    @pytest.mark.asyncio
+    async def test_eviction_takes_the_scope_with_the_task(self):
+        manager = TaskManager(max_completed=2)
+        first = await _settled(manager, ["org-a"])
+        kept = [await _settled(manager, ["org-a"]) for _ in range(2)]
+
+        assert manager.get(first) is None
+        assert manager.get(first, reader_orgs=["org-a"]) is None
+        assert manager.list(reader_orgs=["org-a"]) == manager.list()
+        assert {t.id for t in manager.list(reader_orgs=["org-a"])} == set(kept)
+        assert [t.held_to for t in manager._tasks.values()] == [frozenset({"org-a"})] * 2
 
 
 class TestWaitForProgress:

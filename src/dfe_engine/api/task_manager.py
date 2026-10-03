@@ -13,6 +13,9 @@ Tasks are ephemeral -- lost on restart. This is intentional: dfe-engine is a
 control plane, not a job scheduler. If it restarts, pending tasks simply need
 to be re-submitted.
 
+A task can be held to a set of orgs at submit. A reader held to its own orgs then
+sees only the tasks held to a subset of them, and the hold is evicted with the task.
+
 Usage::
 
     manager = TaskManager()
@@ -21,12 +24,11 @@ Usage::
     manager.cancel(task.id)
 """
 
-from __future__ import annotations
-
 import asyncio
 import builtins
 import json
 import uuid
+from collections.abc import Iterable
 from datetime import UTC, date, datetime
 from enum import Enum
 from typing import Any
@@ -59,6 +61,11 @@ def _json_safe(value: Any) -> Any:
         return value
     except TypeError:
         return str(value)
+
+
+def _held(org_ids: Iterable[str] | None) -> frozenset[str] | None:
+    """The orgs as a set, keeping None, which means every org."""
+    return None if org_ids is None else frozenset(org_ids)
 
 
 class TaskStatus(str, Enum):
@@ -94,9 +101,10 @@ class TaskInfo(BaseModel):
 class _Task:
     """Internal mutable task state."""
 
-    def __init__(self, task_id: str, kind: str) -> None:
+    def __init__(self, task_id: str, kind: str, held_to: frozenset[str] | None = None) -> None:
         self.id = task_id
         self.kind = kind
+        self.held_to = held_to
         self.status = TaskStatus.PENDING
         self.created_at = datetime.now(UTC).isoformat()
         self.started_at: str | None = None
@@ -107,6 +115,12 @@ class _Task:
         self.error: str | None = None
         self.asyncio_task: asyncio.Task | None = None
         self._progress_event = asyncio.Event()
+
+    def visible_to(self, reader_orgs: frozenset[str] | None) -> bool:
+        """Whether a reader held to ``reader_orgs`` may see this task; None sees every task."""
+        if reader_orgs is None:
+            return True
+        return self.held_to is not None and self.held_to <= reader_orgs
 
     def to_info(self) -> TaskInfo:
         payload = {
@@ -144,18 +158,28 @@ class TaskManager:
         self._tasks: dict[str, _Task] = {}
         self._max_completed = max_completed
 
-    def submit(self, kind: str, coro_fn, *args, **kwargs) -> TaskInfo:
+    def submit(
+        self, kind: str, coro_fn, *args, held_to: Iterable[str] | None = None, **kwargs
+    ) -> TaskInfo:
         """Submit an async callable for background execution.
 
         The coroutine function receives a ``task`` keyword argument -- a
         ``_Task`` instance whose ``set_progress()`` method can be called
         to report progress.
 
+        Args:
+            kind: The task kind, for ``list(kind=...)``.
+            coro_fn: The coroutine function to run, called with ``*args`` and ``**kwargs``.
+            *args: Positional arguments for ``coro_fn``.
+            held_to: The orgs the task's result is held to. None means it may hold
+                any org's data, so only a reader of every org sees it.
+            **kwargs: Keyword arguments for ``coro_fn``.
+
         Returns:
             TaskInfo snapshot at submission time.
         """
         task_id = str(uuid.uuid4())
-        task = _Task(task_id, kind)
+        task = _Task(task_id, kind, _held(held_to))
         self._tasks[task_id] = task
 
         async def _run() -> None:
@@ -183,16 +207,38 @@ class TaskManager:
         task.asyncio_task = asyncio.get_running_loop().create_task(_run())
         return task.to_info()
 
-    def get(self, task_id: str) -> TaskInfo | None:
-        """Get current task state, or None if not found."""
-        task = self._tasks.get(task_id)
-        return task.to_info() if task else None
+    def get(self, task_id: str, *, reader_orgs: Iterable[str] | None = None) -> TaskInfo | None:
+        """Get current task state, or None if not found or not visible to the reader.
 
-    def list(self, kind: str | None = None) -> builtins.list[TaskInfo]:
-        """List all tasks, optionally filtered by kind."""
-        tasks = self._tasks.values()
-        if kind:
-            tasks = [t for t in tasks if t.kind == kind]
+        Args:
+            task_id: The task's id.
+            reader_orgs: The orgs the reader is held to, None for a reader of every
+                org. A held reader sees only a task held to a subset of its orgs.
+
+        Returns:
+            The task's TaskInfo, or None.
+        """
+        task = self._tasks.get(task_id)
+        if task is None or not task.visible_to(_held(reader_orgs)):
+            return None
+        return task.to_info()
+
+    def list(
+        self, kind: str | None = None, *, reader_orgs: Iterable[str] | None = None
+    ) -> builtins.list[TaskInfo]:
+        """List the tasks visible to the reader, most recent first, optionally filtered by kind.
+
+        Args:
+            kind: Only tasks of this kind; None or empty for every kind.
+            reader_orgs: As for :meth:`get`.
+
+        Returns:
+            The visible tasks' TaskInfo.
+        """
+        held = _held(reader_orgs)
+        tasks = [
+            t for t in self._tasks.values() if (not kind or t.kind == kind) and t.visible_to(held)
+        ]
         return [t.to_info() for t in sorted(tasks, key=lambda t: t.created_at, reverse=True)]
 
     def cancel(self, task_id: str) -> bool:
