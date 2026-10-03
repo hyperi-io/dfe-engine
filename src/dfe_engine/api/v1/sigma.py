@@ -270,7 +270,9 @@ async def generate_sigma_view(
     source_name: str,
     request: Request,
     user: CurrentUser,
-    database: str = Query("default", description="Target database"),
+    database: str | None = Query(
+        None, description="Target database; defaults to the data database"
+    ),
 ) -> SigmaViewResult:
     """Generate (preview) Sigma view DDL for a source.
 
@@ -278,18 +280,22 @@ async def generate_sigma_view(
     columns - when one exists; otherwise falls back to the static field maps via
     the source mapper. Returns the DDL string; does NOT execute it against
     ClickHouse.
+
+    Defaults to the data database, since that is where a propagated hunt reads
+    the view from (``{source}_sigma``); an explicit ``database`` still overrides it.
     """
+    target_db = database or request.app.state.settings.clickhouse.effective_data_database
     store = _view_store_or_none(request)
     if store is not None and store.exists(source_name):
         try:
-            ddl = store.generate_ddl(source_name, db=database)
+            ddl = store.generate_ddl(source_name, db=target_db)
         except SigmaViewError as exc:
             raise HTTPException(422, detail={"code": "invalid_view", "message": str(exc)}) from exc
         return SigmaViewResult(source_name=source_name, ddl=ddl)
 
     mapper = _get_source_mapper(request)
     try:
-        ddl = mapper.generate_sigma_view(source_name, database)
+        ddl = mapper.generate_sigma_view(source_name, target_db)
     except KeyError, FileNotFoundError, SourceNotFoundError:
         raise _source_not_found(source_name)
     except SigmaViewError as exc:

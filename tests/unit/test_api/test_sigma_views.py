@@ -110,19 +110,32 @@ def test_put_rejects_invalid_column_422(client, app, admin_headers, tmp_path):
 # -- Generate DDL from the stored definition (Task B end-to-end) --
 
 
-def test_generate_ddl_from_stored_definition(client, app, admin_headers, tmp_path):
+def test_generate_ddl_from_stored_definition(client, app, admin_headers, api_settings, tmp_path):
     _wire_gitcrud(app, tmp_path)
     client.put("/api/v1/sigma/views/windows-audit", json=_view_body(), headers=admin_headers)
 
     gen = client.post("/api/v1/sigma/views/windows-audit", headers=admin_headers)
     assert gen.status_code == 200, gen.text
     ddl = gen.json()["ddl"]
-    assert "CREATE OR REPLACE VIEW `default`.`windows-audit_sigma` AS" in ddl
+    # No explicit database: lands in the data database, where a propagated hunt reads it.
+    database = api_settings.clickhouse.effective_data_database
+    assert f"CREATE OR REPLACE VIEW `{database}`.`windows-audit_sigma` AS" in ddl
     # JSON-derived columns extracted from _json with the dynamic-subcolumn idiom
     assert "CAST(assumeNotNull(_json).`EventID` AS UInt32) AS `EventID`" in ddl
     assert "assumeNotNull(_json).`process.command_line` AS `CommandLine`" in ddl
     # a real source column is a plain alias
     assert "`process_name` AS `Image`" in ddl
+
+
+def test_generate_ddl_respects_an_explicit_database(client, app, admin_headers, tmp_path):
+    _wire_gitcrud(app, tmp_path)
+    client.put("/api/v1/sigma/views/windows-audit", json=_view_body(), headers=admin_headers)
+
+    gen = client.post("/api/v1/sigma/views/windows-audit?database=custom_db", headers=admin_headers)
+
+    assert gen.status_code == 200, gen.text
+    ddl = gen.json()["ddl"]
+    assert "CREATE OR REPLACE VIEW `custom_db`.`windows-audit_sigma` AS" in ddl
 
 
 def test_generate_invalid_stored_type_returns_422(client, app, admin_headers, tmp_path):
