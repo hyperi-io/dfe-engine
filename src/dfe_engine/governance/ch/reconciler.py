@@ -23,6 +23,8 @@ from typing import Any
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
+from dfe_engine.orgs.tenant_scope import org_tenant_ids
+
 from .models import (
     DB,
     DEFAULT_SERVICE_ROLES,
@@ -297,14 +299,14 @@ class ChRbacReconciler:
                 org_user_name(o.name),
                 org_hashes[o.name],
                 tier_role=default_tier_role,
-                org_ids=list(o.org_ids) or [o.name],
+                org_ids=org_tenant_ids(o),
             )
         for b in bindings:
             if b.group not in group_hashes:
                 continue
             tier_role = f"dfe_{b.tier or default_analyst}_role"
             org = orgs_by_name.get(b.org) if b.org else None
-            org_ids = (list(org.org_ids) or [org.name]) if org is not None else []
+            org_ids = org_tenant_ids(org) if org is not None else []
             stmts += render_pinned_user(
                 b.user(),
                 group_hashes[b.group],

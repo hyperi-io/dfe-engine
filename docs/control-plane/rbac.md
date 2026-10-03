@@ -639,20 +639,22 @@ Adding an org adds one pinned user. The policy set does not change.
 
 ```mermaid
 flowchart TD
-    CALLER["Caller's scoped grants"] --> PLAT{"platform_grants:<br/>a SYSTEM-scope role<br/>other than org_viewer?"}
+    CALLER["Caller's scoped grants"] --> PLAT{"platform_grants:<br/>a SYSTEM-scope role,<br/>declared, not scoped,<br/>not org_viewer?"}
     PLAT -->|"yes, with query:execute"| READER["Platform reader<br/>no tenant role, reads every org"]
     PLAT -->|no| ORG{"Resolves to exactly<br/>one registered org?"}
     ORG -->|yes| PINNED["That org's pinned user<br/>tenant role + pinned setting"]
     ORG -->|no| DENY["403 no_single_org<br/>fails closed"]
 ```
 
-`platform_grants` (`auth/models.py`) is the one filter for "every org". The ClickHouse group bindings, the HyperDX connection read, the fork's role claim and JIT team assignment all go through it. A role bound at an org's scope covers that org alone, and `org_viewer` never unfences anyone.
+`platform_grants` (`auth/models.py`) is the one filter for "every org". The ClickHouse group bindings, the sampler, the HyperDX connection read, the fork's role claim and JIT team assignment all go through it. A role bound at an org's scope covers that org alone, a role marked `scoped` in `roles.yaml` is held to its holder's orgs wherever it is bound, a role `roles.yaml` does not declare unfences nothing, and `org_viewer` never unfences anyone.
 
 Group bindings (`governance/ch/bindings.py`) follow the same rule. An org-scoped group binds to its org's pinned user whatever roles it holds. A system group holding a platform role reads unrestricted, and an `admin` or `infra_admin` group also reads the otel database. A group that claims an unregistered org gets no ClickHouse user at all, because the alternative is an unrestricted one.
 
 ### 5.3 The Engine's Own Reads
 
 `connections.yaml` names the engine's own ClickHouse connections, and the engine asks for them by name. Only `default` is asked for, by schema discovery. The query API does not lean on a ClickHouse user for tenancy: the executor injects the caller's `org_id` as a reserved bind parameter that a client cannot override (`query/executor.py`, `RESERVED_PARAMS`).
+
+The row reads the engine makes for a caller with no platform grant -- the sampler, the transform dry run, and the schema routes `sample-rows`, `json-paths` and `promote-field` -- bind `_org_id` to the tenant ids of the caller's registered orgs, the same ids each org's pinned user carries (`orgs/tenant_scope.py`). An org name no registered org declares binds nothing, and a caller left with no tenant id, or a table with no `_org_id`, is refused before any row is read. `/tasks` shows such a caller only the tasks held to its orgs.
 
 ---
 

@@ -32,7 +32,9 @@ from dfe_engine.settings import (
     DFESettings,
     KafkaSettings,
     LocalAuthSettings,
+    OrgsSettings,
     SecretsSettings,
+    SeedOrg,
     SourceSettings,
 )
 
@@ -59,6 +61,8 @@ def _settings(tmp_path: Path, ch_params: dict) -> DFESettings:
             resilience=ClickHouseResilienceSettings(budget_seconds=5.0),
         ),
         kafka=KafkaSettings(ensure_topics=False),
+        # The sampler binds a registered org's tenant ids, here equal to its name.
+        orgs=OrgsSettings(seed_orgs=[SeedOrg(name=org, org_ids=[org]) for org in EVERY_ORG]),
         auth=AuthSettings(
             enabled=True,
             auth_dir=str(tmp_path / "auth"),
