@@ -902,9 +902,11 @@ def create_source_from_catalogue(
 ):
     """Create a source from a catalogue entry, on the intake it arrives by.
 
-    The entry supplies the match rule or the fetcher family, the transform
-    variant and the shipped schema layers its table is built from; everything
-    after that is the ordinary create, so the source is indistinguishable from a
+    The entry supplies the match rule or the fetcher family and the transform
+    variant. Its table's schema layers are the ones the app manifest names,
+    bound only when the entry's derived schema resolves over the manifest's
+    meta schema; otherwise the source carries no schema. Everything after that
+    is the ordinary create, so the source is indistinguishable from a
     hand-written one.
     """
     catalogue = _source_catalogue()

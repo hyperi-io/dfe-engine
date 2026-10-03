@@ -433,16 +433,15 @@ class SchemaBuilderV2:
         return Path(path_str)
 
     def resolve_derived_path(self, path_str: str) -> Path:
-        """Resolve a ``derived/...`` reference under its own root.
+        """Resolve a ``derived/...`` reference under its own root, then the schemas tree.
 
         The derived-schema store is the deploy repo when gitops is on, so the
-        reference cannot be resolved against the schemas tree the way the meta
-        schema is.
+        reference is looked for there first; a derived schema the release ships
+        and the store does not hold resolves under the schemas tree.
         """
-        base = self._derived_base_dir or self._schemas_base_dir
-        if base:
-            return resolve_schema_yaml_path(base, path_str)
-        return Path(path_str)
+        from dfe_engine.schema.derived_registry import resolve_derived_reference
+
+        return resolve_derived_reference(path_str, self._derived_base_dir, self._schemas_base_dir)
 
     # -- Internal: DDL config ----------------------------------------
 

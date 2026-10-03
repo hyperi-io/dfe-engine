@@ -170,14 +170,42 @@ class AppEndpoint:
 
 
 @dataclass(frozen=True, slots=True)
+class CatalogueSchemaLayers:
+    """The schema files a catalogue entry's table composes from, named by the app.
+
+    The transform decides what shape its output has, so which meta schema it
+    fills and where each stream's selection and vendor fields are filed are the
+    app's facts. The engine substitutes an entry into the two patterns and
+    knows no reference of its own.
+    """
+
+    meta_schema: str
+    """Registry path of the meta schema every entry's table is built on, extensionless."""
+
+    derived_pattern: str
+    """An entry's derived-schema reference; ``{package}`` and ``{data_stream}``."""
+
+    additional_pattern: str
+    """An entry's vendor-fields reference; ``{package}`` and ``{data_stream}``."""
+
+    def derived(self, package: str, data_stream: str) -> str:
+        """The derived schema that narrows the meta schema to one stream's fields."""
+        return self.derived_pattern.format(package=package, data_stream=data_stream)
+
+    def additional(self, package: str, data_stream: str) -> str:
+        """The vendor fields appended after that stream's selection."""
+        return self.additional_pattern.format(package=package, data_stream=data_stream)
+
+
+@dataclass(frozen=True, slots=True)
 class CatalogueBinding:
     """An app that ships a catalogue of sources it already knows how to handle.
 
     The app owns the catalogue; this says which file carries it, where the
-    entries sit inside that file, and how one entry names the compiled-in
-    program it selects. All three are the app's own conventions, so an app with
-    a differently shaped catalogue joins by being declared here rather than by a
-    branch in the engine.
+    entries sit inside that file, how one entry names the compiled-in program it
+    selects, and which schema files an entry's table is built from. All of them
+    are the app's own conventions, so an app with a differently shaped catalogue
+    joins by being declared here rather than by a branch in the engine.
     """
 
     file: str
@@ -188,6 +216,9 @@ class CatalogueBinding:
 
     variant_pattern: str
     """How an entry becomes ``transform.variant``; ``{entry}`` and ``{transform}``."""
+
+    schema_layers: CatalogueSchemaLayers | None = None
+    """The schema files an entry's table is built from; None binds no schema at all."""
 
     def variant(self, entry: str, transform: str) -> str:
         """The compiled-in program an entry's named transform selects."""
@@ -666,6 +697,7 @@ def _catalogue_from(service: str, raw: object) -> CatalogueBinding | None:
             file=str(raw["file"]),
             entries_key=str(raw["entries_key"]),
             variant_pattern=str(raw["variant_pattern"]),
+            schema_layers=_schema_layers_from(service, raw),
         )
     except KeyError as exc:
         raise CatalogueError(
@@ -682,6 +714,55 @@ def _catalogue_from(service: str, raw: object) -> CatalogueBinding | None:
             f"{{entry}} and {{transform}}: {exc}"
         ) from exc
     return binding
+
+
+SCHEMA_LAYER_KEYS = ("meta_schema", "derived_pattern", "additional_pattern")
+"""The catalogue keys that name an entry's schema files, declared all together or not at all."""
+
+
+def _schema_layers_from(service: str, raw: dict) -> CatalogueSchemaLayers | None:
+    """The schema files a catalogue's entries are built from, or None when it names none.
+
+    None is a manifest that predates the keys: its catalogue still lists and
+    creates sources, with no table schema, rather than refusing to load. Some
+    of the keys without the rest is refused, because the table is bound from
+    all three or not at all.
+    """
+    declared = [key for key in SCHEMA_LAYER_KEYS if raw.get(key) is not None]
+    if not declared:
+        return None
+    missing = [key for key in SCHEMA_LAYER_KEYS if key not in declared]
+    if missing:
+        raise CatalogueError(
+            f"{service}: catalogue declares {', '.join(declared)} without "
+            f"{', '.join(missing)}; the schema layers are declared together or not at all"
+        )
+    meta = str(raw["meta_schema"]).replace("\\", "/").strip("/")
+    # A derived schema names its base extensionless, and the two are compared verbatim.
+    if meta.lower().endswith((".yaml", ".yml")) or any(
+        part in ("", ".", "..") for part in meta.split("/")
+    ):
+        raise CatalogueError(
+            f"{service}: catalogue.meta_schema {raw['meta_schema']!r} must be a schema "
+            "registry path without a file extension, e.g. meta/elastic/ecs"
+        )
+    layers = CatalogueSchemaLayers(
+        meta_schema=meta,
+        derived_pattern=str(raw["derived_pattern"]),
+        additional_pattern=str(raw["additional_pattern"]),
+    )
+    for key, render in (
+        ("derived_pattern", layers.derived),
+        ("additional_pattern", layers.additional),
+    ):
+        try:
+            render("package", "data_stream")
+        except (KeyError, IndexError) as exc:
+            raise CatalogueError(
+                f"{service}: catalogue.{key} {raw[key]!r} takes only "
+                f"{{package}} and {{data_stream}}: {exc}"
+            ) from exc
+    return layers
 
 
 def _transports_from(service: str, raw: object) -> frozenset[str]:
