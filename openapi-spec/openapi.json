@@ -27525,6 +27525,15 @@
             "type": "object",
             "title": "Versions",
             "description": "Version id -> selection"
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "deploy",
+              "shipped"
+            ],
+            "title": "Origin",
+            "description": "deploy when the deploy repo holds it, shipped when only the release does"
           }
         },
         "type": "object",
@@ -27533,7 +27542,8 @@
           "base",
           "base_version",
           "current",
-          "versions"
+          "versions",
+          "origin"
         ],
         "title": "DerivedSchemaResponse",
         "description": "A stored derived schema, as the API hands it back."
@@ -27577,6 +27587,15 @@
             "type": "string",
             "title": "Updated At",
             "description": "Last write to the stored document"
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "deploy",
+              "shipped"
+            ],
+            "title": "Origin",
+            "description": "deploy when the deploy repo holds it, shipped when only the release does"
           }
         },
         "type": "object",
@@ -27587,7 +27606,8 @@
           "current",
           "versions",
           "column_count",
-          "updated_at"
+          "updated_at",
+          "origin"
         ],
         "title": "DerivedSchemaSummary",
         "description": "One row of the derived-schema list."

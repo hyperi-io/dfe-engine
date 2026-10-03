@@ -19,7 +19,7 @@ cannot take are three different 422s.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -85,6 +85,9 @@ class DerivedSchemaResponse(BaseModel):
     base_version: str = Field(..., description="Version of the base meta schema")
     current: str = Field(..., description="Current version of this derived schema")
     versions: dict[str, DerivedSchemaVersion] = Field(..., description="Version id -> selection")
+    origin: Literal["deploy", "shipped"] = Field(
+        ..., description="deploy when the deploy repo holds it, shipped when only the release does"
+    )
 
 
 class DerivedSchemaSummary(BaseModel):
@@ -97,6 +100,9 @@ class DerivedSchemaSummary(BaseModel):
     versions: list[str] = Field(..., description="All version ids")
     column_count: int = Field(..., description="Columns the current version selects")
     updated_at: str = Field(..., description="Last write to the stored document")
+    origin: Literal["deploy", "shipped"] = Field(
+        ..., description="deploy when the deploy repo holds it, shipped when only the release does"
+    )
 
 
 def _response(schema: DerivedSchema, *, path: str) -> DerivedSchemaResponse:
@@ -106,6 +112,7 @@ def _response(schema: DerivedSchema, *, path: str) -> DerivedSchemaResponse:
         base_version=schema.base_version,
         current=schema.current,
         versions=schema.versions,
+        origin=schema.origin,
     )
 
 
