@@ -1,10 +1,9 @@
-import os
+from pathlib import Path
 from typing import Any
 
-from jinja2 import Environment, TemplateSyntaxError
 from scalo.logger import logger
 
-from ..yaml_utils import YAMLError, yaml_dump_string, yaml_load_string
+from ..yaml_utils import YAMLError, yaml_dump_string, yaml_load, yaml_load_string
 from .rule_names import rule_file
 
 
@@ -15,8 +14,7 @@ class HuntValidator:
 
     def validate_hunt_configuration(
         hunt_data: dict,
-        env: Environment,
-        rule_repo_dir: str,
+        rules_dir: str | Path,
         checkpoint_timestamp_field: str,
         source_registry: Any = None,
     ):
@@ -24,8 +22,8 @@ class HuntValidator:
         Validates the hunt configuration for correctness.
 
         :param hunt_data: A dictionary containing hunt configuration.
-        :param env: A Jinja2 Environment instance for SQL template rendering.
-        :param rule_repo_dir: The directory where rule templates are stored.
+        :param rules_dir: The directory holding each rule as ``{name}.yaml``, the
+            file the hunt runner reads.
         :param checkpoint_timestamp_field: The timestamp field for checkpointing.
         :param source_registry: Optional SourceRegistry for validating source references.
         """
@@ -35,7 +33,7 @@ class HuntValidator:
         HuntValidator._validate_yaml_structure(hunt_data)
         HuntValidator._validate_required_fields(hunt_data, checkpoint_timestamp_field)
         customers = HuntValidator._validate_customers(hunt_data)
-        HuntValidator._validate_rules(hunt_data, env, rule_repo_dir, source_registry)
+        HuntValidator._validate_rules(hunt_data, rules_dir, source_registry)
         HuntValidator._validate_customer_filters(hunt_data, customers)
         HuntValidator._validate_scheduling_fields(hunt_data)
 
@@ -99,18 +97,18 @@ class HuntValidator:
 
     @staticmethod
     def _validate_rules(
-        hunt_data: dict, env: Environment, rule_repo_dir: str, source_registry: Any = None
+        hunt_data: dict, rules_dir: str | Path, source_registry: Any = None
     ) -> None:
-        """Validate rules configuration and syntax."""
+        """Validate rules configuration and the rule files the hunt runner reads."""
         rules = hunt_data.get("rules", [])
         for rule_info in rules:
             rule_name = rule_info.get("rule_name")
-            rule_path = str(rule_file(rule_repo_dir, str(rule_name or ""), ".jinja2"))
-            if os.path.isfile(rule_path):
-                HuntValidator.validate_rule_syntax(rule_path, env)
+            rule_path = rule_file(rules_dir, str(rule_name or ""), ".yaml")
+            if rule_path.is_file():
+                HuntValidator.validate_rule_file(rule_path)
             else:
                 # Rule file may be uploaded AFTER the hunt is drafted (create-then-add);
-                # warn instead of blocking. Syntax is validated once the file exists.
+                # warn instead of blocking. The file is checked once it exists.
                 logger.warning(
                     f"Rule file not found for hunt rule '{rule_name}' at {rule_path}; "
                     "create-time existence check skipped (rule may be added later)."
@@ -179,16 +177,16 @@ class HuntValidator:
                 raise ValueError(f"Invalid 'min_interval_seconds': {min_interval}. Must be >= 0.")
 
     @staticmethod
-    def validate_rule_syntax(rule_path: str, env: Environment):
-        """
-        Validates the syntax of a Jinja2 SQL template.
+    def validate_rule_file(rule_path: Path) -> None:
+        """Check a rule file reads as the YAML mapping the hunt runner compiles.
 
-        :param rule_path: The path to the Jinja2 SQL template file.
-        :param env: A Jinja2 Environment instance for template rendering.
+        :param rule_path: The rule's ``{name}.yaml``.
+        :raises ValueError: If the file cannot be read as YAML, or is not a mapping;
+            the runner drops such a rule.
         """
         try:
-            with open(rule_path) as file:
-                template_content = file.read()
-                env.parse(template_content)
-        except TemplateSyntaxError as e:
-            raise ValueError(f"Syntax error in rule file {rule_path}: {e}") from e
+            payload = yaml_load(rule_path)
+        except (YAMLError, UnicodeDecodeError, OSError) as e:
+            raise ValueError(f"Rule file {rule_path} cannot be read as YAML: {e}") from e
+        if not isinstance(payload, dict):
+            raise ValueError(f"Rule file {rule_path} is not a YAML mapping")

@@ -77,12 +77,9 @@ def deploy_repo(client, api_settings, tmp_path):
     """A real local deploy repo behind the running app's hunt and rule registries.
 
     ``client`` first: the app lifespan builds the directory-backed registries, and
-    these replace them. The rule template lives where HuntValidator looks for it, so
-    a hunt create passes validation rather than 422-ing before it reaches git.
+    these replace them. No ``certutil`` rule is stored, which a hunt write only warns
+    about, so a hunt create reaches git.
     """
-    (tmp_path / "rules" / "certutil.jinja2").write_text(
-        "SELECT * FROM {{ source_table }} WHERE {{ window }}", encoding="utf-8"
-    )
     repo = GitopsRepo(local_path=str(tmp_path / "deploy"), push=False)
     crud = GitCrud(repo, default_registry())
     # An empty repo has no base to branch from, so main carries a first commit.
