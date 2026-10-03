@@ -24,6 +24,10 @@ OFFBOX_SQL = {
     "dictionary": "SELECT * FROM dfe.main WHERE dictGet('t', 'name', toUInt64(1)) = 'acme'",
     "ai": "SELECT * FROM dfe.main WHERE aiFilter(toString(_json), 'is it bad') = 1",
     "globalIn": "SELECT * FROM dfe.main WHERE globalIn(_source, dfe.main)",
+    "in": "SELECT * FROM dfe.main WHERE in(_source, dfe.main)",
+    "in beside a real condition": (
+        "SELECT * FROM dfe.main WHERE severity = 'high' AND in(_source, dfe.main)"
+    ),
     "beside a real condition": (
         "SELECT * FROM dfe.main WHERE severity = 'high' AND url('http://203.0.113.9/') = 1"
     ),
@@ -96,3 +100,24 @@ def test_a_rule_over_its_own_rows_is_still_accepted(client, admin_headers):
 
     assert resp.status_code == 201, resp.text
     assert resp.json()["sql_errors"] == []
+
+
+@pytest.mark.parametrize(
+    ("name", "condition"),
+    [
+        ("lookup", "_source IN (SELECT ioc FROM threat.iocs)"),
+        ("excluded_lookup", "_source NOT IN (SELECT ioc FROM threat.iocs)"),
+        ("listed", "severity IN ('high', 'critical')"),
+    ],
+)
+def test_a_rule_using_the_in_operator_is_accepted(client, admin_headers, name, condition):
+    resp = client.post(
+        "/api/v1/rules",
+        json=_payload(name, f"SELECT * FROM dfe.main WHERE {condition}"),
+        headers=admin_headers,
+    )
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["sql_errors"] == []
+    stored = client.get(f"/api/v1/rules/{name}", headers=admin_headers).json()
+    assert stored["where_clause"] == condition

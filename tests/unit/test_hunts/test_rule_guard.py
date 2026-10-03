@@ -92,6 +92,8 @@ OFFBOX_CONDITIONS = {
     "dictionary": "dictGet('tenants', 'name', toUInt64(1)) = 'acme'",
     "ai": "aiFilter(toString(_json), 'is it bad') = 1",
     "globalIn": "globalIn(_source, dfe.main)",
+    "in": "in(_source, dfe.main)",
+    "in after NOT": "severity = 'high' AND NOT in(_source, dfe.main)",
     "nested in a permitted call": "length(aiEmbed(toString(_json))) > 0",
     "beside a real condition": "severity = 'high' AND url('http://203.0.113.9/') = 1",
 }
@@ -112,6 +114,18 @@ def test_a_condition_over_the_row_is_not_refused(where):
 
 def test_an_empty_condition_has_nothing_to_refuse():
     assert refuse_offbox_calls("  ") is None
+
+
+@pytest.mark.parametrize(
+    "where",
+    [
+        "_source IN (SELECT ioc FROM threat.iocs)",
+        "_source GLOBAL NOT IN (SELECT ioc FROM threat.iocs)",
+        "severity IN ('high', 'critical')",
+    ],
+)
+def test_a_condition_using_the_in_operator_is_not_refused(where):
+    assert refuse_offbox_calls(where) is None
 
 
 def test_a_presence_check_names_the_column_every_event_has():

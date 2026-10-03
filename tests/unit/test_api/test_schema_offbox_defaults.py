@@ -23,6 +23,7 @@ OFFBOX_DEFAULTS = {
     "s3": "s3('https://203.0.113.9/bucket/key', 'CSV')",
     "dictionary": "dictGetString('tenants', 'name', toUInt64(1))",
     "ai": "aiGenerate(toString(_json))",
+    "in": "if(in(host_name, dfe.main), 'listed', 'unlisted')",
 }
 
 
@@ -68,7 +69,8 @@ def test_the_materialized_and_alias_forms_are_refused_as_well(client, admin_head
     assert "may not call url()" in response.json()["message"]
 
 
-def test_a_default_over_the_row_is_still_accepted(client, admin_headers):
-    response = client.post(URL, headers=admin_headers, json=_body("now64(3)"))
+@pytest.mark.parametrize("default", ["now64(3)", "if(host_name IN ('a', 'b'), 'listed', 'x')"])
+def test_a_default_over_the_row_is_still_accepted(client, admin_headers, default):
+    response = client.post(URL, headers=admin_headers, json=_body(default))
 
     assert response.status_code == 201, response.text

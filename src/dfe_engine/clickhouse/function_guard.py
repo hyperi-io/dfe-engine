@@ -20,13 +20,15 @@ Three families, each its own refusal:
 
 * a table function, a dictionary reader, or a scalar that reads a Join table or
   another table's schema -- it reads outside the row;
-* the function forms of ``IN`` (``globalIn``, ``notIn`` and the rest), each of
-  which resolves a name in its second argument as a table;
+* the function forms of ``IN`` (``in``, ``globalIn``, ``notIn`` and the rest),
+  each of which resolves a name in its second argument as a table;
 * a call that posts its arguments to another service (``ai*``) or writes a
   counter to Keeper (``generateSerialID``).
 
 The check reads the text that will run: every name directly followed by ``(``
-is looked up, so a quoted call name is caught as well as a bare one.
+is looked up, so a quoted call name is caught as well as a bare one. The ``IN``
+operator's keyword is also followed by ``(``; it is told apart from an ``in()``
+call by standing after an operand, and is left alone.
 """
 
 import itertools
@@ -163,6 +165,40 @@ REMOTE_CALLER_PREFIXES = ("ai",)
 # The function forms of IN, each of which resolves a name in its second argument as a table.
 IN_FUNCTION = re.compile(r"(global)?(not)?(null)?in(ignoreset)?", re.IGNORECASE)
 
+# Keywords sqlglot accepts as a name that ClickHouse 26.9.4 reads an in() call after, as in CASE in(a, t).
+_EXPRESSION_LEADS = frozenset(
+    {
+        TokenType.CASE,
+        TokenType.DIV,
+        TokenType.INTERVAL,
+        TokenType.LIKE,
+        TokenType.LIMIT,
+        TokenType.OFFSET,
+    }
+)
+
+# Tokens an operand ends with, so an IN keyword after one is the operator, not an in() call.
+_OPERAND_ENDS = (
+    frozenset(_CLICKHOUSE.parser_class.ID_VAR_TOKENS)
+    | {
+        TokenType.BIT_STRING,
+        TokenType.BYTE_STRING,
+        TokenType.HEREDOC_STRING,
+        TokenType.HEX_STRING,
+        TokenType.NATIONAL_STRING,
+        TokenType.NUMBER,
+        TokenType.RAW_STRING,
+        TokenType.R_BRACE,
+        TokenType.R_BRACKET,
+        TokenType.R_PAREN,
+        TokenType.STRING,
+        TokenType.UNICODE_STRING,
+    }
+) - _EXPRESSION_LEADS
+
+# Words between an operand and the IN operator: x NOT IN (...), x GLOBAL IN (...).
+_IN_MODIFIERS = frozenset({TokenType.GLOBAL, TokenType.NOT})
+
 
 def reads_outside_the_row(function_name: str) -> bool:
     """Whether a call by this name reads a table, file, dictionary or Join table."""
@@ -218,11 +254,12 @@ def refuse_calls_outside_the_row(
     Raises:
         CallNotPermittedError: Naming the call and which refusal it fell to.
     """
-    for name, following in itertools.pairwise(
-        tokens if tokens is not None else tokenize(sql, subject=subject)
-    ):
-        # The IN operator's own keyword is followed by its list, not a call.
-        if following.token_type is not TokenType.L_PAREN or name.token_type is TokenType.IN:
+    if tokens is None:
+        tokens = tokenize(sql, subject=subject)
+    for index, (name, following) in enumerate(itertools.pairwise(tokens)):
+        if following.token_type is not TokenType.L_PAREN:
+            continue
+        if name.token_type is TokenType.IN and _follows_an_operand(tokens, index):
             continue
         if IN_FUNCTION.fullmatch(name.text):
             raise CallNotPermittedError(
@@ -237,3 +274,16 @@ def refuse_calls_outside_the_row(
             raise CallNotPermittedError(
                 f"{subject} may not call {name.text}(), which sends data to another service"
             )
+
+
+def _follows_an_operand(tokens: list[Token], index: int) -> bool:
+    """Whether the IN keyword at ``index`` is the operator: an operand ends just before it.
+
+    ``x IN (...)``, ``x NOT IN (...)`` and ``x GLOBAL IN (...)`` follow an operand.
+    ``in(x, t)`` stands where an operand starts -- first, or after ``(``, ``,``,
+    an operator or a keyword such as ``WHERE`` or ``AND`` -- and is the call.
+    """
+    before = index - 1
+    while before >= 0 and tokens[before].token_type in _IN_MODIFIERS:
+        before -= 1
+    return before >= 0 and tokens[before].token_type in _OPERAND_ENDS
