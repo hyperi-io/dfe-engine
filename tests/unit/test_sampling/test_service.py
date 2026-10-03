@@ -19,13 +19,13 @@ import subprocess
 import pytest
 from pydantic import ValidationError
 
+from dfe_engine.clickhouse import function_guard
 from dfe_engine.sampling import (
     SampleBackend,
     SampleMode,
     Sampler,
     SampleRequest,
     SamplerError,
-    clickhouse_reader,
 )
 from dfe_engine.sampling.clickhouse_reader import build_where, filter_predicate
 from dfe_engine.sampling.service import _reservoir
@@ -271,7 +271,7 @@ def _clickhouse_names(query: str) -> list[str]:
 @needs_clickhouse_local
 def test_every_clickhouse_table_function_is_refused_bar_the_two_that_read_only_their_args():
     names = {name.lower() for name in _clickhouse_names("SELECT name FROM system.table_functions")}
-    assert names - {"format", "fuzzquery"} == clickhouse_reader._TABLE_FUNCTIONS
+    assert names - {"format", "fuzzquery"} == function_guard.TABLE_FUNCTIONS
 
 
 @needs_clickhouse_local

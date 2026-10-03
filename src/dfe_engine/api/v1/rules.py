@@ -39,7 +39,9 @@ _REFUSED_RULE_RESPONSES: dict[int | str, dict] = {
         "description": (
             "Refused, nothing written. The body failed validation (code validation_error). "
             "Or the hunt runner could not compile the rule -- its SQL does not parse as "
-            "one SELECT, names no <db>.<table> source, or has no WHERE to detect with "
+            "one SELECT, names no <db>.<table> source, has no WHERE to detect with, or "
+            "calls a function that reads outside the row (url, s3, a dictionary) or sends "
+            "it to another service (the ai* functions) "
             "(code invalid_sql, the errors in context.sql_errors). Or the rule matches "
             "every event in its source (code rule_matches_everything, the source and "
             "detection WHERE in context)."

