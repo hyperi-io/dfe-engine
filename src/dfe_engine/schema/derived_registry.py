@@ -24,6 +24,7 @@ reference under :meth:`DerivedSchemaRegistry.reference_root`.
 
 from __future__ import annotations
 
+import builtins
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -128,6 +129,17 @@ def derived_directory(settings: Any) -> Path:
     return root / DERIVED_PREFIX
 
 
+def shipped_derived_directory(settings: Any) -> Path | None:
+    """Where the release's own derived-schema documents sit, gitops aside.
+
+    Always ``<schemas_dir>/derived`` -- the second root ``resolve_derived_reference``
+    falls back to for the build. ``list`` and ``get`` read it too, so a name the
+    deploy repo does not carry is never missing from the API.
+    """
+    schemas_dir = getattr(settings.schemas, "schemas_dir", None)
+    return Path(schemas_dir) / DERIVED_PREFIX if schemas_dir else None
+
+
 class DerivedSchemaRegistry:
     """CRUD over derived-schema documents."""
 
@@ -136,6 +148,7 @@ class DerivedSchemaRegistry:
         derived_directory: str | Path | None = None,
         *,
         crud: GitCrud | None = None,
+        shipped_directory: str | Path | None = None,
     ) -> None:
         """Bind the store to a backend.
 
@@ -145,8 +158,16 @@ class DerivedSchemaRegistry:
             crud: Governed Ops engine over the deploy repo. When provided,
                 ``config/schemas/derived/`` is the SSoT and every mutation is
                 one git commit.
+            shipped_directory: The release's own ``<schemas_dir>/derived``,
+                read as a second root for ``list`` and ``get``. ``None`` when
+                the deployment configures no schemas tree.
         """
         self._crud = crud
+        self._shipped_directory = (
+            Path(shipped_directory).expanduser().resolve(strict=False)
+            if shipped_directory is not None
+            else None
+        )
         if crud is not None:
             cls = crud.resource_class(DERIVED_CLASS)
             self._directory = crud.repo_path / cls.directory
@@ -159,9 +180,10 @@ class DerivedSchemaRegistry:
     @classmethod
     def from_settings(cls, settings: Any, *, crud: GitCrud | None = None) -> DerivedSchemaRegistry:
         """Bind to the deploy repo when gitops is on, else to the schemas tree."""
+        shipped = shipped_derived_directory(settings)
         if crud is not None:
-            return cls(crud=crud)
-        return cls(derived_directory(settings))
+            return cls(crud=crud, shipped_directory=shipped)
+        return cls(derived_directory(settings), shipped_directory=shipped)
 
     @property
     def directory(self) -> Path:
@@ -182,20 +204,54 @@ class DerivedSchemaRegistry:
         """Whether writes land as git commits."""
         return self._crud is not None
 
-    def _yaml_path(self, key: str) -> Path:
+    def _path_under(self, root: Path, key: str) -> Path:
         # Append rather than with_suffix: a name carrying a dot keeps it.
         segments = key.split("/")
-        candidate = self._directory.joinpath(*segments[:-1]) / f"{segments[-1]}.yaml"
-        base = self._directory.resolve(strict=False)
+        candidate = root.joinpath(*segments[:-1]) / f"{segments[-1]}.yaml"
+        base = root.resolve(strict=False)
         if not candidate.resolve(strict=False).is_relative_to(base):
             raise DerivedSchemaValidationError("Derived schema path escapes its directory")
         return candidate
+
+    def _yaml_path(self, key: str) -> Path:
+        return self._path_under(self._directory, key)
+
+    def _effective_shipped_root(self) -> Path | None:
+        """The shipped root, or None when absent or identical to this store's own.
+
+        Gitops off resolves both to the same directory, so a second pass would
+        only relist every row under the wrong origin.
+        """
+        if self._shipped_directory is None:
+            return None
+        if self._shipped_directory == self._directory.resolve(strict=False):
+            return None
+        return self._shipped_directory
+
+    def _shipped_names(self) -> builtins.list[str]:
+        root = self._effective_shipped_root()
+        if root is None or not root.is_dir():
+            return []
+        return sorted(
+            p.relative_to(root).as_posix()[: -len(".yaml")]
+            for p in root.glob("**/*.yaml")
+            if p.is_file()
+        )
+
+    def _get_shipped_raw(self, key: str) -> dict[str, Any] | None:
+        root = self._effective_shipped_root()
+        if root is None:
+            return None
+        path = self._path_under(root, key)
+        if not path.is_file():
+            return None
+        return yaml_load(path) or {}
 
     # -----------------------------------------------------------------
     # Backend primitives
     # -----------------------------------------------------------------
 
-    def _names(self) -> list[str]:
+    def _names(self) -> builtins.list[str]:
         if self._crud is not None:
             return self._crud.list(DERIVED_CLASS)
         return sorted(
@@ -273,14 +329,20 @@ class DerivedSchemaRegistry:
         return self._get_raw(canonical_derived_path(path)) is not None
 
     def get(self, path: str) -> DerivedSchema:
-        """Read one derived schema.
+        """Read one derived schema, the deploy repo first then the shipped tree.
+
+        The same precedence :func:`resolve_derived_reference` gives the build,
+        so a source can never bind a derived schema this read reports missing.
 
         Raises:
-            DerivedSchemaNotFoundError: Nothing stored at that path.
+            DerivedSchemaNotFoundError: Nothing stored at that path in either root.
             DerivedSchemaValidationError: The stored document no longer parses.
         """
         key = canonical_derived_path(path)
         raw = self._get_raw(key)
+        shipped = raw is None
+        if shipped:
+            raw = self._get_shipped_raw(key)
         if raw is None:
             raise DerivedSchemaNotFoundError(f"Derived schema not found: {key!r}")
         try:
@@ -288,6 +350,8 @@ class DerivedSchemaRegistry:
         except Exception as exc:
             raise DerivedSchemaValidationError(f"Invalid derived schema {key!r}: {exc}") from exc
         schema.path = derived_reference(key)
+        if shipped:
+            schema.origin = "shipped"
         return schema
 
     def save(
@@ -327,37 +391,57 @@ class DerivedSchemaRegistry:
             raise DerivedSchemaNotFoundError(f"Derived schema not found: {key!r}")
         logger.info(f"Deleted derived schema {key!r}")
 
-    def list(self) -> list[dict[str, Any]]:
-        """Every stored derived schema, as list rows.
+    def list(self) -> builtins.list[dict[str, Any]]:
+        """Every stored derived schema, the deploy repo first then the shipped tree.
 
-        A document that no longer parses is left out rather than failing the
-        listing, the way the meta-schema and source listings do.
+        A name in both roots is listed once, from the deploy repo -- the same
+        precedence :func:`resolve_derived_reference` gives the build. A document
+        that no longer parses is left out rather than failing the listing, the
+        way the meta-schema and source listings do.
         """
-        rows: list[dict[str, Any]] = []
+        rows: builtins.list[dict[str, Any]] = []
+        seen: set[str] = set()
         for key in self._names():
-            raw = self._get_raw(key)
-            if raw is None:
-                continue
-            try:
-                schema = DerivedSchema.model_validate(raw)
-            except Exception as exc:
-                logger.warning(f"Failed to parse derived schema {key!r}, excluded from list: {exc}")
-                continue
-            try:
-                updated_at = datetime.fromtimestamp(
-                    self._yaml_path(key).stat().st_mtime, tz=UTC
-                ).isoformat()
-            except OSError:
-                updated_at = ""
-            rows.append(
-                {
-                    "path": derived_reference(key),
-                    "base": schema.base,
-                    "base_version": schema.base_version,
-                    "current": schema.current,
-                    "versions": sorted(schema.versions),
-                    "column_count": len(schema.version().select),
-                    "updated_at": updated_at,
-                }
-            )
+            row = self._row(key, raw=self._get_raw(key), root=self._directory, origin="deploy")
+            if row is not None:
+                rows.append(row)
+                seen.add(key)
+        shipped_root = self._effective_shipped_root()
+        if shipped_root is not None:
+            for key in self._shipped_names():
+                if key in seen:
+                    continue
+                row = self._row(
+                    key, raw=self._get_shipped_raw(key), root=shipped_root, origin="shipped"
+                )
+                if row is not None:
+                    rows.append(row)
         return rows
+
+    def _row(
+        self, key: str, *, raw: dict[str, Any] | None, root: Path, origin: str
+    ) -> dict[str, Any] | None:
+        """One list row from one root, or None when the document no longer parses."""
+        if raw is None:
+            return None
+        try:
+            schema = DerivedSchema.model_validate(raw)
+        except Exception as exc:
+            logger.warning(f"Failed to parse derived schema {key!r}, excluded from list: {exc}")
+            return None
+        try:
+            updated_at = datetime.fromtimestamp(
+                self._path_under(root, key).stat().st_mtime, tz=UTC
+            ).isoformat()
+        except OSError:
+            updated_at = ""
+        return {
+            "path": derived_reference(key),
+            "base": schema.base,
+            "base_version": schema.base_version,
+            "current": schema.current,
+            "versions": sorted(schema.versions),
+            "column_count": len(schema.version().select),
+            "updated_at": updated_at,
+            "origin": origin,
+        }
