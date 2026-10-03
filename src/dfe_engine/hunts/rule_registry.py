@@ -107,6 +107,11 @@ class RuleRegistry:
         if self._store is not None:
             self._store.stop()
 
+    @property
+    def directory(self) -> Path:
+        """Where each rule is written as ``{name}.yaml``, the directory the hunt runner reads."""
+        return self._rules_directory
+
     def _require_store(self) -> DirectoryConfigStore:
         """Narrow the Optional store once: the directory backend always builds one."""
         if self._store is None:

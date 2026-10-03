@@ -2,7 +2,6 @@ import pathlib
 
 import pytest
 import yaml
-from jinja2 import Environment
 
 from dfe_engine.hunts.validator import HuntValidator
 
@@ -188,13 +187,12 @@ def setup_paths(tmp_path) -> dict:
 def test_validate_hunt_configuration(hunt_config, expected_message, setup_paths):
     config_path = setup_paths["config_path"] / "test_hunt_config.yaml"
     rule_repo_path = setup_paths["rule_repo_path"]
-    rule_file_path = rule_repo_path / "rule1.jinja2"
-    rule_file_path.write_text("SELECT * FROM {{ table_name }} WHERE event_id={{ event_id }}")
+    rule_file_path = rule_repo_path / "rule1.yaml"
+    rule_file_path.write_text("display_name: Rule One\nwhere_clause: event_id = 4624\n")
 
     with open(config_path, "w") as f:
         yaml.dump(hunt_config, f)
 
-    env = Environment()
     loaded_config = load_config(config_path)
 
     if "Invalid" in expected_message or "Comma-separated" in expected_message:
@@ -233,14 +231,12 @@ def test_validate_hunt_configuration(hunt_config, expected_message, setup_paths)
             else:
                 HuntValidator.validate_hunt_configuration(
                     loaded_config,
-                    env,
                     rule_repo_path,
                     loaded_config.get("checkpoint_timestamp_field"),
                 )
     else:
         HuntValidator.validate_hunt_configuration(
             loaded_config,
-            env,
             rule_repo_path,
             loaded_config.get("checkpoint_timestamp_field"),
         )
