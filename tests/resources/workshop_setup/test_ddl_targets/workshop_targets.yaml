@@ -2,6 +2,6 @@ org_id: workshop
 database_name: workshop
 cluster_name: default
 ttl_timestamp: timestamp
-  
+
 # Hide Cluster definition is needed when using the Saas Offerings
 hide_cluster: True

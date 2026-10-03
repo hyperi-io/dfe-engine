@@ -1,11 +1,11 @@
-# 
+#
 # HyperI DFE Vector Component Template
 # Purpose: Transform file that parses message field as JSON
 # Deployment Types: AWS, SaaS
 # Version: v001.000.000
 # Release Date: 2024-03-27
 # CT Build: © HyperI 2024
-# 
+#
 # Required environment variables:
 # - _101_TRANSFORM_FLATTEN_MESSAGE_INPUT: Dynamic input set in the container as an env variable;
 

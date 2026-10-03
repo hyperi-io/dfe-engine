@@ -93,6 +93,10 @@ class ClickHouseAdapter(DatasourceAdapter):
         ...), any read through ``url()``, and any ``SETTINGS`` clause in the query.
         ``readonly=2`` would allow those table-function writes and reads. The
         ``max_execution_time`` sent with the query still applies.
+
+        Only a user free to change ``readonly`` can be sent it. For one whose profile
+        sets ``readonly=2``, such as ``dfe_query_reader``, clickhouse-connect refuses
+        the setting before sending and ClickHouse refuses it as READONLY.
         """
         client = self.manager.get_clickhouse_client()
 
@@ -131,7 +135,7 @@ class ClickHouseAdapter(DatasourceAdapter):
 
         Every EXPLAIN is sent with ``readonly=1``, as ``execute`` is: without it,
         analysing a query over ``url()`` connects to the remote host to infer the
-        file's structure.
+        file's structure. As there, a user held at ``readonly=2`` has it refused.
         """
         client = self.manager.get_clickhouse_client()
         settings = {"readonly": 1}

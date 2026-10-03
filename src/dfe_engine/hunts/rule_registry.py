@@ -1,6 +1,5 @@
 """Rule Registry -- CRUD for hunt detection rules (API-persisted YAML).
 
-Separate from ``hunts.rule_repo_dir`` (Jinja2 templates for scheduled hunts).
 Each rule is stored as ``{name}.yaml``, in one of two interchangeable backends:
 
 - **deploy repo** (when gitops is on): the deploy repo's ``config/rules`` is the

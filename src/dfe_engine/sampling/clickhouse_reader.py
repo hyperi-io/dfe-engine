@@ -176,7 +176,8 @@ def read_settings(max_execution_time: int) -> dict[str, int]:
 
     The engine's ClickHouse user may write, so ``readonly=1`` makes ClickHouse
     refuse writes, DDL, reads through ``url()`` and any ``SETTINGS`` clause, as
-    the raw-query adapter does.
+    the raw-query adapter does. That needs a user free to change ``readonly``: one
+    whose profile sets ``readonly=2``, such as ``dfe_query_reader``, has it refused.
     """
     return {"max_execution_time": max_execution_time, "readonly": 1}
 
