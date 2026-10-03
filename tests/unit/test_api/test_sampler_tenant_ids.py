@@ -7,9 +7,9 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """What a held caller's sample binds, and which callers are held.
 
-A group lists org NAMES; the ClickHouse row policy pins each org's user to that
+A group lists org markers; the ClickHouse row policy pins each org's user to that
 org's tenant ids. The sampler binds the same tenant ids, so a sample and a
-HyperDX query of one org read the same rows, and a name no org declares binds
+HyperDX query of one org read the same rows, and a marker no org declares binds
 nothing. A role marked ``scoped`` is held wherever it is bound, including one an
 admin creates through the roles API.
 """
@@ -91,9 +91,8 @@ def test_an_org_declaring_no_tenant_ids_binds_its_name(app, client, api_settings
 def test_a_group_naming_no_registered_org_is_refused_before_any_read(
     app, api_settings, table, acme
 ):
-    # A tenant id is not an org name: the ClickHouse group bindings skip it too.
     viewer = caller_in_group(
-        app, api_settings, "stray-viewer", roles=["org_viewer"], org_ids=["t-acme-1"]
+        app, api_settings, "stray-viewer", roles=["org_viewer"], org_ids=["t-nobody"]
     )
 
     resp = _sample(viewer)
