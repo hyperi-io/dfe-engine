@@ -91,6 +91,10 @@ REFUSED = {
         ("rules", "certutil", "source_db", EXFIL),
         "is not a table name",
     ),
+    "rule where_clause calls out": (
+        ("rules", "certutil", "where_clause", EXFIL),
+        "may not call url()",
+    ),
 }
 
 
@@ -137,8 +141,16 @@ def test_a_preview_lists_every_refused_document(store):
         ("hunts", "windows_hunt", "query", "INSERT INTO dfe.detection SELECT * FROM dfe.main"),
         ("rules", "certutil", "source_table", "cisco-ios"),
         ("rules", "certutil", "severity", "critical"),
+        ("rules", "certutil", "where_clause", "process_name = 'notepad.exe'"),
     ],
-    ids=["cron", "hyphenated source", "insert select query", "rule source", "rule severity"],
+    ids=[
+        "cron",
+        "hyphenated source",
+        "insert select query",
+        "rule source",
+        "rule severity",
+        "rule where_clause",
+    ],
 )
 def test_an_action_that_leaves_a_valid_document_still_writes(store, crud, change):
     cls, name, path, value = change
