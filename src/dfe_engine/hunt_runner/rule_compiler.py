@@ -31,7 +31,9 @@ ClickHouse function reading outside the row or sending it to another service --
 the statement runs as a user that may write, so ClickHouse cannot be asked to
 refuse that call. So is one whose target is not a plain ``table`` or
 ``database.table``: ``INSERT INTO FUNCTION url(...)`` would send every detection
-row off the box. A hunt left with NOTHING to run is a hard failure in the worker
+row off the box. Its source is held to the same rule, since ``FROM url(...)``
+reads another host and a name carrying a bracket or a comment rewrites the
+statement. A hunt left with NOTHING to run is a hard failure in the worker
 rather than a silent clean run.
 """
 
@@ -45,6 +47,7 @@ from dfe_engine.hunts.hunt_output import HuntResultSchema
 from dfe_engine.hunts.rule_guard import refuse_offbox_calls
 from dfe_engine.hunts.rule_names import RuleNameError, rule_file
 from dfe_engine.hunts.rule_rewriter import RuleRewriter, strip_time_placeholder
+from dfe_engine.hunts.validator import rule_source
 from dfe_engine.settings import MAX_DETECTIONS_PER_RUN
 from dfe_engine.yaml_utils import yaml_load
 
@@ -97,15 +100,6 @@ def detection_cap(configured: int, ceiling: int) -> int:
     return configured
 
 
-def _split_table(reference: str) -> tuple[str, str]:
-    """Split a ``db.table`` reference into its parts; unqualified gives no database."""
-    cleaned = (reference or "").strip().replace("`", "")
-    if not cleaned:
-        return "", ""
-    database, _, table = cleaned.rpartition(".")
-    return database, table
-
-
 def _rule_entries(definition: dict[str, Any]) -> list[dict[str, Any]]:
     """The hunt's ``rules`` as dicts, accepting the bare-string form as well."""
     entries: list[dict[str, Any]] = []
@@ -148,7 +142,7 @@ def _count_sql(source_db: str, source_table: str, where: str) -> str:
         f"    toUnixTimestamp64Milli(toDateTime64(max(_timestamp), 3)) AS dfe_last_ts,\n"
         f"    toUnixTimestamp64Milli(toDateTime64(max(_timestamp_load), 3)) AS dfe_last_load,\n"
         f"    if(min(_org_id) = max(_org_id), min(_org_id), '') AS dfe_org\n"
-        f"FROM {source_db}.{source_table}\n"
+        f"FROM {quote_identifier(source_db)}.{quote_identifier(source_table)}\n"
         f"WHERE {WINDOW_TOKEN} AND ({where})"
     )
 
@@ -226,11 +220,17 @@ def compile_hunt_queries(
             logger.error(f"hunt {hunt_id}: rule '{rule_name}' refused: {offbox}")
             continue
 
-        source_db, source_table = _split_table(
+        source = (
             str(entry.get("source_table_name") or "")
-            or (f"{rule_db}.{rule_table}" if rule_table else "")
+            or rule_source(rule_db, rule_table)
             or hunt_source
         )
+        # The source reaches FROM as text and can arrive straight from the deploy repo.
+        try:
+            source_db, source_table = plain_table_name(source) if source.strip() else ("", "")
+        except ValueError as exc:
+            logger.error(f"hunt {hunt_id}: rule '{rule_name}' source refused: {exc}")
+            continue
         if not source_db or not source_table:
             logger.error(f"hunt {hunt_id}: rule '{rule_name}' resolves to no db.table source")
             continue

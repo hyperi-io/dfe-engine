@@ -8,6 +8,21 @@ from ..yaml_utils import YAMLError, yaml_dump_string, yaml_load, yaml_load_strin
 from .rule_names import rule_file
 
 
+def rule_source(source_db: str, source_table: str) -> str:
+    """A rule's ``source_db`` and ``source_table`` as one reference, or "" when it names no table.
+
+    Args:
+        source_db: The rule's database, empty when it names none.
+        source_table: The rule's table.
+
+    Returns:
+        ``database.table``, the bare table when there is no database, or "".
+    """
+    if not source_table:
+        return ""
+    return f"{source_db}.{source_table}" if source_db else source_table
+
+
 class HuntValidator:
     """
     A class that provides static methods for validating hunt configurations and related syntax.
@@ -70,7 +85,7 @@ class HuntValidator:
                 raise ValueError(
                     "Invalid 'global_target_table_name'. It should be a non-empty string."
                 )
-            HuntValidator._validate_target_table(
+            HuntValidator._validate_table_name(
                 "'global_target_table_name'", global_target_table_name
             )
 
@@ -86,6 +101,11 @@ class HuntValidator:
                 raise ValueError(
                     "Either 'global_source_table_name' or per-rule 'source' field is required."
                 )
+        # A blank one defers to the per-rule 'source'; anything else must name a table.
+        if global_source_table_name is not None and str(global_source_table_name).strip():
+            HuntValidator._validate_table_name(
+                "'global_source_table_name'", global_source_table_name
+            )
 
         if (
             not isinstance(checkpoint_timestamp_field, str)
@@ -96,11 +116,12 @@ class HuntValidator:
             )
 
     @staticmethod
-    def _validate_target_table(label: str, value: Any) -> None:
-        """Refuse a results table that is not a plain ``table`` or ``database.table``.
+    def _validate_table_name(label: str, value: Any) -> None:
+        """Refuse a source or results table that is not a plain ``table`` or ``database.table``.
 
-        The runner splices the target into ``INSERT INTO``, so anything else
-        could name a table function that writes every detection off the box.
+        The runner splices the source into ``FROM`` and the target into
+        ``INSERT INTO``, so anything else could name a table function that reads
+        from, or writes every detection to, another host.
         """
         if not isinstance(value, str):
             raise ValueError(f"Invalid {label}. It should be a table name, not {value!r}.")
@@ -125,11 +146,10 @@ class HuntValidator:
         rules = hunt_data.get("rules", [])
         for rule_info in rules:
             rule_name = rule_info.get("rule_name")
-            target = rule_info.get("target_table_name")
-            if target is not None:
-                HuntValidator._validate_target_table(
-                    f"'target_table_name' of rule '{rule_name}'", target
-                )
+            for field in ("source_table_name", "target_table_name"):
+                table = rule_info.get(field)
+                if table is not None:
+                    HuntValidator._validate_table_name(f"'{field}' of rule '{rule_name}'", table)
             rule_path = rule_file(rules_dir, str(rule_name or ""), ".yaml")
             if rule_path.is_file():
                 HuntValidator.validate_rule_file(rule_path)
@@ -208,8 +228,9 @@ class HuntValidator:
         """Check a rule file reads as the YAML mapping the hunt runner compiles.
 
         :param rule_path: The rule's ``{name}.yaml``.
-        :raises ValueError: If the file cannot be read as YAML, or is not a mapping;
-            the runner drops such a rule.
+        :raises ValueError: If the file cannot be read as YAML, is not a mapping,
+            or names a source that is not a plain table name; the runner drops
+            such a rule.
         """
         try:
             payload = yaml_load(rule_path)
@@ -217,3 +238,8 @@ class HuntValidator:
             raise ValueError(f"Rule file {rule_path} cannot be read as YAML: {e}") from e
         if not isinstance(payload, dict):
             raise ValueError(f"Rule file {rule_path} is not a YAML mapping")
+        source = rule_source(
+            str(payload.get("source_db") or ""), str(payload.get("source_table") or "")
+        )
+        if source:
+            HuntValidator._validate_table_name(f"source of rule file {rule_path.name}", source)

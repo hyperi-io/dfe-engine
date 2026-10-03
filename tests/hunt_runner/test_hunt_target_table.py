@@ -75,7 +75,7 @@ def test_a_plain_target_compiles_quoted_into_both_inserts(tmp_path: Path, target
 
     assert statement.sql.startswith(f"INSERT INTO {quoted}\n")
     assert statement.summary_sql.startswith(f"INSERT INTO {quoted}\n")
-    assert "FROM dfe.main" in statement.sql
+    assert "FROM `dfe`.`main`" in statement.sql
 
 
 @pytest.mark.parametrize("where", ["hunt", "entry", "default"])

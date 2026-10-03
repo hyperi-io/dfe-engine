@@ -16,15 +16,10 @@ Usage:
     view_ddl = mapper.generate_sigma_view("windows_audit")
 """
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-from scalo.logger import logger
-
 from dfe_engine.gitcrud import ResourceNotFoundError
-from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
-from dfe_engine.schema.schema_loader import SchemaLoadError
 from dfe_engine.sigma.views import build_sigma_view_ddl
 from dfe_engine.source.models import Source
 from dfe_engine.source.registry import SourceRegistry
@@ -58,29 +53,20 @@ class SigmaSourceMapper:
         registry: TypeRegistry | None = None,
         field_map_registry: FieldMapRegistry | None = None,
         view_store: SigmaViewStore | None = None,
-        *,
-        schemas_base_dir: str | Path | None = None,
-        derived_base_dir: str | Path | None = None,
     ) -> None:
-        """Bind the mapper to its registries and the roots a source's schema files resolve under.
+        """Bind the mapper to the registries its mappings and views come from.
 
         Args:
             source_registry: Where sources are looked up.
             registry: Type registry, the default one when omitted.
             field_map_registry: Registry field maps, the base of every mapping.
             view_store: Stored sigma view definitions, which win over the field maps.
-            schemas_base_dir: The schemas tree a source's meta and additional
-                schemas resolve under (``schemas.schemas_dir``).
-            derived_base_dir: The root a ``derived/...`` reference resolves under
-                first (``derived_reference_root``).
         """
         self._source_registry = source_registry
         self._type_registry = registry or TypeRegistry.default()
         self._ddl_gen = DDLGenerator(self._type_registry)
         self._field_map_registry = field_map_registry
         self._view_store = view_store
-        self._schemas_base_dir = schemas_base_dir
-        self._derived_base_dir = derived_base_dir
 
     def get_source(self, source_name: str) -> Source:
         """Get a Source by name from the registry."""
@@ -106,44 +92,6 @@ class SigmaSourceMapper:
         # Validate source exists (raises SourceNotFoundError if missing)
         source = self._source_registry.get_source(source_name)
         return self._get_mappings_for_source(source)
-
-    def get_schema_metadata(self, source_name: str) -> dict[str, dict[str, str | list[str] | None]]:
-        """Get schema column metadata for a source.
-
-        Returns a dict keyed by column name with type info:
-            {"user_name": {"type": "string", "use_case": "dimension", "attribute": [...]}}
-
-        Returns an empty dict, and logs why, when a schema file the source names
-        cannot be resolved or read.
-        """
-        source = self._source_registry.get_source(source_name)
-
-        builder = SchemaBuilderV2(
-            registry=self._type_registry,
-            schemas_base_dir=self._schemas_base_dir,
-            derived_base_dir=self._derived_base_dir,
-        )
-
-        # Build to get composed columns (profile + meta + derived + additional)
-        try:
-            result = builder.build(source)
-        except (SchemaBuildError, SchemaLoadError) as exc:
-            logger.warning(
-                "sigma schema metadata unavailable: the source's schema did not build",
-                source=source_name,
-                error=str(exc),
-            )
-            return {}
-
-        metadata: dict[str, dict[str, str | list[str] | None]] = {}
-        for col in result.columns:
-            metadata[col.name] = {
-                "type": col.type,
-                "use_case": col.use_case,
-                "attribute": col.attribute,
-            }
-
-        return metadata
 
     def generate_sigma_view(
         self,

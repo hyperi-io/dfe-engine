@@ -688,7 +688,7 @@ class TestBuildInsertSelect:
             severity=rule.severity,
         )
         assert "INSERT INTO `acme`.`detection`" in sql
-        assert "FROM acme.payment_events" in sql
+        assert "FROM `acme`.`payment_events`" in sql
         assert "severity = 'critical'" in sql
         assert "amount > 10000" in sql
         assert "{timestamp_condition}" in sql
