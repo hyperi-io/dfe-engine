@@ -36,6 +36,30 @@ def test_valid_sql_is_parsed_by_clickhouse(request, client_fixture, no_sqlglot):
     assert errors == []
 
 
+def test_clickhouse_parses_the_in_call_and_the_rule_is_still_refused(ch_client, no_sqlglot):
+    sql = "SELECT * FROM dfe.main WHERE in(_source, dfe.main)"
+    ch_client.command(f"EXPLAIN AST {sql}")
+
+    errors = RuleCreationService(ch_client=ch_client).validate_sql(sql)
+
+    assert [error.message for error in errors] == [
+        "A rule's SQL may not call in(), which can read a table: "
+        "use the IN operator with a list of values"
+    ]
+
+
+@pytest.mark.parametrize(
+    "condition",
+    ["_source IN (SELECT ioc FROM threat.iocs)", "severity IN ('high', 'critical')"],
+)
+def test_a_rule_using_the_in_operator_is_parsed_and_accepted(ch_client, no_sqlglot, condition):
+    errors = RuleCreationService(ch_client=ch_client).validate_sql(
+        f"SELECT * FROM dfe.main WHERE {condition}"
+    )
+
+    assert errors == []
+
+
 @pytest.mark.parametrize("client_fixture", ["ch_client", "manager_client"])
 def test_syntax_error_comes_from_clickhouse(request, client_fixture, no_sqlglot):
     service = RuleCreationService(ch_client=request.getfixturevalue(client_fixture))

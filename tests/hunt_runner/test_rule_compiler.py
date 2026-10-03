@@ -246,6 +246,7 @@ OFFBOX_CONDITIONS = {
     "dictionary": "dictGet('tenants', 'name', toUInt64(1)) = 'acme'",
     "ai": "aiFilter(toString(_json), 'is it bad') = 1",
     "globalIn": "globalIn(_source, dfe.main)",
+    "in": "in(_source, dfe.main)",
     "beside a real condition": "a = 1 AND url('http://203.0.113.9/') = 1",
 }
 
@@ -265,6 +266,21 @@ def test_a_hand_edited_rule_that_reads_outside_the_row_compiles_nothing(tmp_path
     assert [statement.rule_id for statement in statements] == ["present"]
     assert not any(where in statement.sql for statement in statements)
     assert not any(where in statement.count_sql for statement in statements)
+
+
+def test_a_lookup_rule_using_the_in_operator_compiles(tmp_path: Path):
+    lookup = "_source IN (SELECT ioc FROM threat.iocs)"
+    _save_rule(tmp_path, rule_id="lookup", name="Lookup", where_clause=lookup)
+
+    statements = compile_hunt_queries(
+        {"rules": ["lookup"], "global_source_table_name": "dfe.main"},
+        "h",
+        rules_dir=tmp_path,
+        default_target="dfe.detection",
+    )
+
+    assert [statement.rule_id for statement in statements] == ["lookup"]
+    assert f"AND ({lookup})" in statements[0].sql
 
 
 def test_the_dropped_rule_is_logged_with_the_call_it_made(tmp_path: Path):
