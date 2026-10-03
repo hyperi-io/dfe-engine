@@ -65,7 +65,7 @@ def test_one_rule_becomes_one_windowed_insert(tmp_path: Path):
     assert len(sql) == 1
     statement = sql[0]
     assert statement.startswith("INSERT INTO `dfe`.`detection`")
-    assert "FROM dfe.main" in statement
+    assert "FROM `dfe`.`main`" in statement
     assert "WHERE {window} AND (process_name = 'certutil.exe')" in statement
     assert "'certutil' AS rule_id" in statement
     assert "'Certutil Abuse' AS rule_name" in statement
@@ -118,7 +118,7 @@ def test_the_rules_own_source_table_wins_over_the_hunts(tmp_path: Path):
         rules_dir=tmp_path,
         default_target="dfe.detection",
     )
-    assert "FROM acme.windows_audit" in sql[0]
+    assert "FROM `acme`.`windows_audit`" in sql[0]
     assert "'windows_audit' AS source_table" in sql[0]
 
 
@@ -154,7 +154,7 @@ def test_a_rule_with_only_sql_is_put_through_the_rewriter(tmp_path: Path):
         ),
     )
     sql = _compiled_sql({"rules": ["raw"]}, "h", rules_dir=tmp_path, default_target="dfe.detection")
-    assert "FROM acme.events" in sql[0]
+    assert "FROM `acme`.`events`" in sql[0]
     assert "action = 'delete'" in sql[0]
     assert "2026-01-01" not in sql[0]
 
@@ -369,7 +369,7 @@ def test_the_count_reads_the_same_window_and_rule_without_a_limit(tmp_path: Path
     count = _flood_hunt(tmp_path).count_sql
 
     assert "count() AS dfe_matched" in count
-    assert "FROM acme.main" in count
+    assert "FROM `acme`.`main`" in count
     assert count.endswith("WHERE {window} AND (_json.kind = 'flood')")
     assert "LIMIT" not in count
     # No alias may shadow a column the rule's WHERE reads.

@@ -230,8 +230,8 @@ class HuntResultSchema:
         Args:
             target_db: Target database (usually org_id), backtick-quoted here.
             target_table: Hunt results table name, backtick-quoted here.
-            source_db: Source database (usually org_id).
-            source_table: Source table to scan.
+            source_db: Source database (usually org_id), backtick-quoted here.
+            source_table: Source table to scan, backtick-quoted here.
             where_clause: Detection logic (without time bounds).
             rule_id: Rule identifier.
             rule_name: Human-readable rule name.
@@ -257,14 +257,15 @@ class HuntResultSchema:
             where_parts.append(f"({where_clause.strip()})")
         full_where = " AND ".join(where_parts)
 
-        # The target is hunt configuration text, so it can only ever name a table.
+        # Source and target are hunt configuration text, so each can only ever name a table.
         target = f"{quote_identifier(target_db)}.{quote_identifier(target_table)}"
+        source = f"{quote_identifier(source_db)}.{quote_identifier(source_table)}"
         return (
             f"INSERT INTO {target}\n"
             f"    ({insert_cols})\n"
             f"SELECT\n"
             f"    {select_expr}\n"
-            f"FROM {source_db}.{source_table}\n"
+            f"FROM {source}\n"
             f"WHERE {full_where}"
         )
 
