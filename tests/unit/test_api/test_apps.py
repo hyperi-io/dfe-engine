@@ -1320,6 +1320,7 @@ class TestDryRun:
         app.state.role_config.roles["dry-runner"] = RoleDefinition(
             description="runs authored code only", permissions=["dryrun:execute"]
         )
+        app.state.org_registry.create("test_org", org_ids=["test_org"])
         app.state.group_store.create("dry-runners", roles=["dry-runner", "org_viewer"])
         app.state.group_store.update("dry-runners", org_ids=["test_org"])
         app.state.account_store.create("runner", "runner-password", groups=["dry-runners"])

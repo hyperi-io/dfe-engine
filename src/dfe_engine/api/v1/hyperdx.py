@@ -17,11 +17,12 @@ only ever receive credentials for their own org and a cross-org ask is a 403.
 This retires the global ``DEFAULT_CONNECTIONS`` blob that handed every team every
 org's connection (dfe-engine#124).
 
-A caller reads UNRESTRICTED (the platform reader) only when a role other than
-``org_viewer`` grants it ``query:execute`` at SYSTEM scope. Every other caller is
-fenced to its single org, whatever else it holds: a role bound at one org's scope
-never reaches every org's rows. A caller that resolves to no single org fails
-closed. The ``query:execute`` gate keeps callers with no data-plane access out.
+A caller reads UNRESTRICTED (the platform reader) only when a declared, unscoped
+role other than ``org_viewer`` grants it ``query:execute`` at SYSTEM scope. Every
+other caller is fenced to its single org, whatever else it holds: a role bound at
+one org's scope, or marked ``scoped``, never reaches every org's rows. A caller
+that resolves to no single org fails closed. The ``query:execute`` gate keeps
+callers with no data-plane access out.
 
 The fork names a caller's team after the username this read hands it, so
 ``GET /api/v1/auth/me`` reports the same username as ``hyperdx_identity``, decided
@@ -39,9 +40,14 @@ from typing import NamedTuple
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from dfe_engine.api.deps import CurrentUser, Settings, is_action_allowed, require_action
+from dfe_engine.api.deps import (
+    CurrentUser,
+    Settings,
+    is_action_allowed,
+    reads_every_org,
+    require_action,
+)
 from dfe_engine.auth import Scope
-from dfe_engine.auth.models import platform_caller
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.governance.ch.models import org_user_name
 
@@ -87,13 +93,12 @@ def _can_execute_queries(request: Request, user) -> bool:
 
 
 def _reads_every_org(request: Request, user) -> bool:
-    """Whether a role other than ``org_viewer`` grants ``query:execute`` at SYSTEM scope.
+    """Whether a platform role grants ``query:execute`` at SYSTEM scope.
 
     ``platform_grants`` decides which grants may read across orgs, the same filter
     the CH group bindings use; this adds the ``query:execute`` check on top.
     """
-    reader = platform_caller(user)
-    return reader is not None and is_action_allowed(request, reader, scopes_dict["query_execute"])
+    return reads_every_org(request, user, scopes_dict["query_execute"])
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,8 +161,8 @@ async def hyperdx_connection(
 ) -> HyperDXConnection:
     """Return the caller's OWN org connection - never another org's.
 
-    A caller granted ``query:execute`` at system scope by a role other than
-    ``org_viewer`` gets the platform reader. Any other caller gets its org's pinned
+    A caller granted ``query:execute`` at system scope by a declared, unscoped role
+    other than ``org_viewer`` gets the platform reader. Any other caller gets its org's pinned
     ``dfe_org_<org>`` user, whatever roles it holds at that org's scope. A caller
     that resolves to zero or several separate orgs is refused (403) so isolation
     fails closed rather than guessing.

@@ -78,12 +78,15 @@ def reconcile_from_stores(
     settings: Any,
     org_registry: Any = None,
     group_store: Any = None,
+    role_config: Any = None,
 ) -> ReconcileResult:
     """Reconcile CH RBAC from the org registry and the RBAC group store.
 
     A missing store contributes nothing rather than failing: an org registry with
-    no groups still reconciles tiers, roles and row policies. One run at a time in
-    this process; a caller arriving mid-run waits for it.
+    no groups still reconciles tiers, roles and row policies. ``role_config`` is
+    the role definitions the group bindings read a role's ``scoped`` flag from;
+    None reads the shipped ones. One run at a time in this process; a caller
+    arriving mid-run waits for it.
     """
     from dfe_engine.secrets import build_secrets
 
@@ -94,5 +97,5 @@ def reconcile_from_stores(
             admin_client,
             secrets_store=build_secrets(settings.secrets),
             orgs=orgs,
-            bindings=derive_group_bindings(groups, orgs),
+            bindings=derive_group_bindings(groups, orgs, role_config=role_config),
         )

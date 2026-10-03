@@ -21,9 +21,9 @@ the result inline (sync feel for the CLI / downstream APIs). Gated modes
 poll here or subscribe to ``GET /tasks/{task_id}/stream`` (SSE) for the UI.
 
 A caller without a platform grant holding ``sampler:read`` is held to its own
-orgs: every read binds ``_org_id`` to its ``org_ids``, a target that cannot be
-held to them is refused with a 403, and the poll and list routes show it only
-the tasks held to its orgs.
+orgs: every read binds ``_org_id`` to the tenant ids of its orgs, a target that
+cannot be held to them is refused with a 403, and the poll and list routes show
+it only the tasks held to its orgs.
 """
 
 import functools
@@ -36,12 +36,12 @@ from dfe_engine.api.deps import (
     ClickHouseClient,
     CurrentUser,
     SourceReg,
-    is_action_allowed,
+    held_tenant_ids,
     require_action,
 )
 from dfe_engine.api.task_manager import TaskInfo, TaskManager, TaskStatus
 from dfe_engine.auth.audit import audit_resource_change
-from dfe_engine.auth.models import AuthContext, platform_caller
+from dfe_engine.auth.models import AuthContext
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.sampling import (
     GATED_MODES,
@@ -82,23 +82,20 @@ def _task_manager(request: Request) -> TaskManager:
 
 
 def sample_org_scope(request: Request, user: AuthContext) -> list[str] | None:
-    """The orgs a caller's samples are held to, or None when it may read every org.
+    """The tenant ids a caller's samples are held to, or None when it may read every org.
 
     A caller reads every org when a grant ``platform_grants`` keeps holds
-    ``sampler:read``. Any other caller is held to its own ``org_ids``, and an empty
-    list is refused by the sampler rather than read.
+    ``sampler:read``. Any other caller is held to the tenant ids of its registered
+    orgs, and an empty list is refused by the sampler rather than read.
 
     Args:
-        request: The request, for the role config.
+        request: The request, for the role config and the org registry.
         user: The caller's auth context.
 
     Returns:
-        The caller's org ids, sorted, or None for a platform caller.
+        The caller's tenant ids, sorted, or None for a platform caller.
     """
-    reader = platform_caller(user)
-    if reader is not None and is_action_allowed(request, reader, scopes_dict["sampler_read"]):
-        return None
-    return sorted(set(user.org_ids))
+    return held_tenant_ids(request, user, scopes_dict["sampler_read"])
 
 
 async def check_sample_scope(

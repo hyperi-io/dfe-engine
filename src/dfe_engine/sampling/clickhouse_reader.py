@@ -27,7 +27,7 @@ from sqlglot.tokens import Token, TokenType
 
 from dfe_engine.clickhouse.function_guard import refuse_calls_outside_the_row
 from dfe_engine.clickhouse.quoting import column_reference
-from dfe_engine.orgs.available_ids import ORG_ID_COLUMN
+from dfe_engine.orgs.tenant_scope import org_condition
 
 _CLICKHOUSE = Dialect.get_or_raise("clickhouse")
 
@@ -227,10 +227,9 @@ def build_where(
     params: dict[str, Any] = {}
     timestamp = column_reference(timestamp_field)
     if org_ids is not None:
-        if not org_ids:
-            raise ValueError("a sample held to no org would read nothing")
-        clauses.append(f"{ORG_ID_COLUMN} IN {{orgs:Array(String)}}")
-        params["orgs"] = list(org_ids)
+        held, held_params = org_condition(org_ids)
+        clauses.append(held)
+        params.update(held_params)
     if source_label:
         clauses.append("_source = {src:String}")
         params["src"] = source_label

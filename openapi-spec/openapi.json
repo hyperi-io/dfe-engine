@@ -12084,7 +12084,7 @@
           "tasks"
         ],
         "summary": "List Tasks",
-        "description": "List all tasks, optionally filtered by kind.",
+        "description": "List the tasks the caller may see, optionally filtered by kind.",
         "operationId": "list_tasks_api_v1_tasks_get",
         "parameters": [
           {
@@ -14148,7 +14148,7 @@
           "schemas"
         ],
         "summary": "Discover Json Paths",
-        "description": "Discover JSON paths inside a source's ``_json`` column.\n\nResolves the requested ``version`` (or the source's current version). If that\nversion defines a ``meta_schema`` it uses ``db.<source>`` only after deploy;\nuntil then discovery runs on ``db.<landing>`` filtered by the version's\nmatch rule. Versions without ``meta_schema`` always use the landing table.\n\nReturns one record per path with observed types, a suggested column name,\nand whether the path is already promoted. ``?samples=N`` adds random\ndistinct example values; ``?stats=true`` adds coverage + distinct counts.",
+        "description": "Discover JSON paths inside a source's ``_json`` column.\n\nResolves the requested ``version`` (or the source's current version). If that\nversion defines a ``meta_schema`` it uses ``db.<source>`` only after deploy;\nuntil then discovery runs on ``db.<landing>`` filtered by the version's\nmatch rule. Versions without ``meta_schema`` always use the landing table.\n\nReturns one record per path with observed types, a suggested column name,\nand whether the path is already promoted. ``?samples=N`` adds random\ndistinct example values; ``?stats=true`` adds coverage + distinct counts.\n\nA caller without a platform grant holding ``schema:read`` reads only its own\norgs' rows, as the sampler holds it, and a table it cannot be held on is 403.",
         "operationId": "discover_json_paths_api_v1_schemas__source_name__json_paths_get",
         "parameters": [
           {
@@ -14284,7 +14284,7 @@
           "schemas"
         ],
         "summary": "Sample Source Rows",
-        "description": "Return random sample rows for a source, scoped to its match rule.\n\nResolves the requested ``version`` (or the source's current version). A\nversion with a ``meta_schema`` uses ``db.<source>`` only after that version\nis deployed and the table exists; otherwise rows are read from\n``db.<landing>`` filtered by the version's match rule.\n\nIntended for inspecting real data while authoring a match condition or CEL\nbefore promoting any JSON path -- a row-level companion to the per-path\n``?samples=N`` on ``/json-paths``.",
+        "description": "Return random sample rows for a source, scoped to its match rule.\n\nResolves the requested ``version`` (or the source's current version). A\nversion with a ``meta_schema`` uses ``db.<source>`` only after that version\nis deployed and the table exists; otherwise rows are read from\n``db.<landing>`` filtered by the version's match rule.\n\nIntended for inspecting real data while authoring a match condition or CEL\nbefore promoting any JSON path -- a row-level companion to the per-path\n``?samples=N`` on ``/json-paths``.\n\nA caller without a platform grant holding ``schema:read`` reads only its own\norgs' rows, as the sampler holds it, and a table it cannot be held on is 403.",
         "operationId": "sample_source_rows_api_v1_schemas__source_name__sample_rows_get",
         "parameters": [
           {
@@ -23483,7 +23483,7 @@
           "HyperDX"
         ],
         "summary": "Hyperdx Connection",
-        "description": "Return the caller's OWN org connection - never another org's.\n\nA caller granted ``query:execute`` at system scope by a role other than\n``org_viewer`` gets the platform reader. Any other caller gets its org's pinned\n``dfe_org_<org>`` user, whatever roles it holds at that org's scope. A caller\nthat resolves to zero or several separate orgs is refused (403) so isolation\nfails closed rather than guessing.",
+        "description": "Return the caller's OWN org connection - never another org's.\n\nA caller granted ``query:execute`` at system scope by a declared, unscoped role\nother than ``org_viewer`` gets the platform reader. Any other caller gets its org's pinned\n``dfe_org_<org>`` user, whatever roles it holds at that org's scope. A caller\nthat resolves to zero or several separate orgs is refused (403) so isolation\nfails closed rather than guessing.",
         "operationId": "hyperdx_connection_api_v1_hyperdx_connection_get",
         "responses": {
           "200": {

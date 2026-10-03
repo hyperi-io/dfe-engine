@@ -24,6 +24,7 @@ from dfe_engine.api.deps import (
     CurrentUser,
     SchemaReg,
     SourceReg,
+    held_tenant_ids,
     require_action,
     ttl_settings,
 )
@@ -1651,6 +1652,14 @@ def _discovery_target(source, ver, schema_registry, *, version_id: str, ch=None,
     return landing, match_rule, []
 
 
+def _held_read_refused(exc: Exception) -> HTTPException:
+    """The 403 for a row read that cannot be held to the caller's orgs."""
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={"code": "forbidden", "message": str(exc)},
+    )
+
+
 def _match_query_kwargs(match_rule) -> dict[str, Any]:
     """ClickHouse filter kwargs from a ``SourceMatch`` (or none for whole-table)."""
     if match_rule is None:
@@ -1692,6 +1701,7 @@ def _resolve_source_version(source, version, source_name):
 )
 async def discover_json_paths(
     source_name: str,
+    request: Request,
     user: CurrentUser,
     source_registry: SourceReg,
     schema_registry: SchemaReg,
@@ -1719,10 +1729,14 @@ async def discover_json_paths(
     Returns one record per path with observed types, a suggested column name,
     and whether the path is already promoted. ``?samples=N`` adds random
     distinct example values; ``?stats=true`` adds coverage + distinct counts.
+
+    A caller without a platform grant holding ``schema:read`` reads only its own
+    orgs' rows, as the sampler holds it, and a table it cannot be held on is 403.
     """
     from dfe_engine.services.schema.json_promotion_service import (
         JSON_COLUMN,
         JsonPromotionError,
+        JsonPromotionScopeError,
         discover_paths,
         json_column_path,
     )
@@ -1753,8 +1767,11 @@ async def discover_json_paths(
             paths=path_filter,
             samples=samples,
             stats=stats,
+            org_ids=held_tenant_ids(request, user, scopes_dict["schema_read"]),
             **match_kw,
         )
+    except JsonPromotionScopeError as exc:
+        raise _held_read_refused(exc) from exc
     except JsonPromotionError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -1796,6 +1813,7 @@ async def discover_json_paths(
 )
 async def sample_source_rows(
     source_name: str,
+    request: Request,
     user: CurrentUser,
     source_registry: SourceReg,
     schema_registry: SchemaReg,
@@ -1815,9 +1833,13 @@ async def sample_source_rows(
     Intended for inspecting real data while authoring a match condition or CEL
     before promoting any JSON path -- a row-level companion to the per-path
     ``?samples=N`` on ``/json-paths``.
+
+    A caller without a platform grant holding ``schema:read`` reads only its own
+    orgs' rows, as the sampler holds it, and a table it cannot be held on is 403.
     """
     from dfe_engine.services.schema.json_promotion_service import (
         JsonPromotionError,
+        JsonPromotionScopeError,
         list_promoted_json_fields,
         sample_rows,
     )
@@ -1843,8 +1865,11 @@ async def sample_source_rows(
             db=db,
             source=target_table,
             limit=limit,
+            org_ids=held_tenant_ids(request, user, scopes_dict["schema_read"]),
             **match_kw,
         )
+    except JsonPromotionScopeError as exc:
+        raise _held_read_refused(exc) from exc
     except JsonPromotionError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -1885,6 +1910,7 @@ async def sample_source_rows(
 async def promote_field(
     source_name: str,
     body: PromoteFieldRequest,
+    request: Request,
     user: CurrentUser,
     source_registry: SourceReg,
     schema_registry: SchemaReg,
@@ -1910,6 +1936,7 @@ async def promote_field(
     )
     from dfe_engine.services.schema.json_promotion_service import (
         JsonPromotionError,
+        JsonPromotionScopeError,
         PromotionRequest,
         build_promotion_columns,
         discover_paths,
@@ -1974,8 +2001,11 @@ async def promote_field(
                 source=target_table,
                 existing_columns=columns,
                 paths=[r.json_path for r in requests],
+                org_ids=held_tenant_ids(request, user, scopes_dict["schema_write"]),
                 **match_kw,
             )
+        except JsonPromotionScopeError as exc:
+            raise _held_read_refused(exc) from exc
         except JsonPromotionError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

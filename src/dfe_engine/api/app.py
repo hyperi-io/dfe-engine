@@ -416,6 +416,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 settings=settings,
                 org_registry=app.state.org_registry,
                 group_store=app.state.group_store,
+                role_config=app.state.role_config,
             )
 
         try:

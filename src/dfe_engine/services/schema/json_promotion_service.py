@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from dfe_engine.clickhouse.quoting import quote_identifier
+from dfe_engine.orgs.available_ids import ORG_ID_COLUMN
+from dfe_engine.orgs.tenant_scope import org_condition
 from dfe_engine.schema.models import SchemaColumn as MetaSchemaColumn
 from dfe_engine.source.expression import ExpressionBuilder, ExpressionValidator
 from dfe_engine.source.models import SchemaColumn
@@ -43,6 +45,10 @@ _NON_IDENT_RE = re.compile(r"[^0-9a-zA-Z]+")
 
 class JsonPromotionError(Exception):
     """Raised when path discovery or promotion fails at the service layer."""
+
+
+class JsonPromotionScopeError(JsonPromotionError):
+    """Raised when a read cannot be held to the caller's orgs."""
 
 
 @dataclass
@@ -326,6 +332,63 @@ def match_condition(
     raise JsonPromotionError(f"Unsupported match operator: {op!r}")
 
 
+def _has_org_id_column(client: Any, db: str, table: str) -> bool:
+    """Whether ``db.table`` carries an ``_org_id`` column.
+
+    Raises:
+        JsonPromotionError: when ClickHouse cannot answer.
+    """
+    try:
+        rows = client.execute(
+            "SELECT 1 FROM system.columns "
+            "WHERE database = {db:String} AND table = {tbl:String} AND name = {col:String} "
+            "LIMIT 1",
+            parameters={"db": db, "tbl": table, "col": ORG_ID_COLUMN},
+        )
+    except Exception as exc:
+        raise JsonPromotionError(f"cannot read the columns of {db}.{table}: {exc}") from exc
+    return bool(rows)
+
+
+def row_filter(
+    client: Any,
+    *,
+    db: str,
+    source: str,
+    match_field: str | None = None,
+    match_value: str | None = None,
+    match_operator: str = "equals",
+    org_ids: list[str] | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """SQL condition + params restricting a read of ``db.source`` to one source's rows.
+
+    ``org_ids`` None reads every org's rows. Otherwise the condition also binds
+    ``_org_id`` to those tenant ids, as the sampler does, and a read that cannot be
+    held to them is refused before any row is read.
+
+    Raises:
+        JsonPromotionScopeError: if ``org_ids`` is empty, or ``db.source`` carries
+            no ``_org_id`` column.
+        JsonPromotionError: if the match cannot be expressed, or ClickHouse cannot
+            describe the table.
+    """
+    match_sql, params = match_condition(match_field, match_value, match_operator=match_operator)
+    if org_ids is None:
+        return match_sql, params
+    if not org_ids:
+        raise JsonPromotionScopeError(
+            "you belong to no registered org, so there are no rows you may read"
+        )
+    if not _has_org_id_column(client, db, source):
+        raise JsonPromotionScopeError(
+            f"{db}.{source} has no {ORG_ID_COLUMN} column, so a read of it cannot be "
+            "limited to your orgs"
+        )
+    held_sql, held_params = org_condition(org_ids)
+    where = f"{held_sql} AND ({match_sql})" if match_sql else held_sql
+    return where, {**params, **held_params}
+
+
 # -- Discovery (I/O) --------------------------------------------------
 
 
@@ -341,23 +404,32 @@ def discover_paths(
     paths: list[str] | None = None,
     samples: int | None = None,
     stats: bool = False,
+    org_ids: list[str] | None = None,
 ) -> list[DiscoveredPath]:
     """Discover JSON paths in ``db.source._json`` with optional samples/stats.
 
     When ``match_field``/``match_value`` are supplied, rows are restricted to a
     single source's match rule -- used to discover against the shared catch-all
     landing table before the source has its own table. Without them, the whole
-    table is scanned.
+    table is scanned. ``org_ids`` holds every query to those tenant ids
+    (:func:`row_filter`); None reads every org.
 
     Raises:
+        JsonPromotionScopeError: when the read cannot be held to ``org_ids``.
         JsonPromotionError: when the underlying ClickHouse query fails (e.g. the
             source table does not exist yet).
     """
     table = qualified_table(db, source)
     promoted = promoted_paths(existing_columns)
     existing_names = {col.name for col in existing_columns}
-    match_sql, match_params = match_condition(
-        match_field, match_value, match_operator=match_operator
+    match_sql, match_params = row_filter(
+        client,
+        db=db,
+        source=source,
+        match_field=match_field,
+        match_value=match_value,
+        match_operator=match_operator,
+        org_ids=org_ids,
     )
 
     sql = (
@@ -479,6 +551,7 @@ def sample_rows(
     match_value: str | None = None,
     match_operator: str = "equals",
     limit: int = 10,
+    org_ids: list[str] | None = None,
 ) -> tuple[list[str], list[dict[str, Any]]]:
     """Random sample rows from ``db.source``, scoped to a source's match rule.
 
@@ -486,19 +559,27 @@ def sample_rows(
     single source's match rule -- used to sample the shared catch-all landing
     table where a source's rows are identified by its match. Without them, the
     whole table is sampled. Intended for inspecting real data while authoring a
-    match condition or CEL before any path is promoted.
+    match condition or CEL before any path is promoted. ``org_ids`` holds the read
+    to those tenant ids (:func:`row_filter`); None reads every org.
 
     Returns ``(column_names, rows)`` where each row is a ``column -> value``
     mapping. ``column_names`` is returned even when no rows match, so callers
     still learn the table shape.
 
     Raises:
+        JsonPromotionScopeError: when the read cannot be held to ``org_ids``.
         JsonPromotionError: when the underlying ClickHouse query fails (e.g. the
             source table does not exist yet).
     """
     table = qualified_table(db, source)
-    match_sql, match_params = match_condition(
-        match_field, match_value, match_operator=match_operator
+    match_sql, match_params = row_filter(
+        client,
+        db=db,
+        source=source,
+        match_field=match_field,
+        match_value=match_value,
+        match_operator=match_operator,
+        org_ids=org_ids,
     )
     sql = f"SELECT * FROM {table} "  # noqa: S608 - table quoted by qualified_table; values bound
     if match_sql:
