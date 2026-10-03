@@ -22,6 +22,7 @@ from .models import (
     SampleRequest,
     SamplerError,
     SampleResult,
+    SampleScopeError,
 )
 from .service import Sampler
 
@@ -32,5 +33,6 @@ __all__ = [
     "SampleMode",
     "SampleRequest",
     "SampleResult",
+    "SampleScopeError",
     "SamplerError",
 ]
