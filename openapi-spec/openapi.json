@@ -18176,7 +18176,7 @@
           "Governed Ops: Backing Services"
         ],
         "summary": "Set Overlay Var",
-        "description": "Set a substrate/platform value.\n\n403 with the policy that blocked it when the var is protected - the storage\nmodel, the data-layer modes and the disk size are decided at deploy, and moving\none on a live deployment is a data migration. 400 when the value would lower a\ndeclared node or broker count, or leave it undeclared (a parent map that omits\nit), which loses data rather than capacity.",
+        "description": "Set a substrate/platform value.\n\n403 with the policy that blocked it when the var is protected - the storage\nmodel, the data-layer modes and the disk size are decided at deploy, and moving\none on a live deployment is a data migration. 400 when the value would lower a\ndeclared node or broker count, or leave it undeclared (a parent map that omits\nit), which loses data rather than capacity; helmvars:override does not lift it.",
         "operationId": "set_overlay_var_api_v1_backing_services_overlays__name__vars__path__put",
         "parameters": [
           {
@@ -18277,7 +18277,7 @@
           "Governed Ops: Backing Services"
         ],
         "summary": "Delete Overlay Var",
-        "description": "Revert a substrate/platform value to its chart default. Protected vars refuse.\n\nNot guarded up-only: reverting a count hands it back to the chart or profile\ndefault, which the engine cannot read, so there is no after-value to compare.",
+        "description": "Revert a substrate/platform value to its chart default. Protected vars refuse.\n\n400 when the revert would lower a declared node or broker count, or leave it\nundeclared, unless the caller holds helmvars:override. An undeclared count falls\nto the chart or profile default, which the engine cannot read, so a revert that\nleaves one undeclared is refused whatever that default is.",
         "operationId": "delete_overlay_var_api_v1_backing_services_overlays__name__vars__path__delete",
         "parameters": [
           {
