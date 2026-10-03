@@ -312,7 +312,7 @@ class SchemaColumn(BaseModel):
 
         A DEFAULT, MATERIALIZED or ALIAS expression is evaluated by ClickHouse on
         every insert or read of the column, so a call reading outside the row or
-        posting it to another service turns the table itself into the reach.
+        posting it to another service fires on the data path, not on one query.
         """
         if not self.default:
             return []
