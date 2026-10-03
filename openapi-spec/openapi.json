@@ -15418,7 +15418,7 @@
           "sigma"
         ],
         "summary": "Generate All Sigma Views",
-        "description": "Generate Sigma view DDL for all sources (stored definitions win over field maps).",
+        "description": "Generate Sigma view DDL for all sources (stored definitions win over field maps).\n\nDefaults to the data database, since that is where a propagated hunt reads\nthe view from (``{source}_sigma``); an explicit ``database`` still overrides it.",
         "operationId": "generate_all_sigma_views_api_v1_sigma_views_post",
         "parameters": [
           {
@@ -15426,12 +15426,18 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "string",
-              "description": "Target database",
-              "default": "default",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Target database; defaults to the data database",
               "title": "Database"
             },
-            "description": "Target database"
+            "description": "Target database; defaults to the data database"
           },
           {
             "name": "enabled_only",
