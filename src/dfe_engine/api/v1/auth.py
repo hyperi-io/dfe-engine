@@ -33,7 +33,7 @@ from dfe_engine.api.errors import ErrorResponse
 from dfe_engine.api.metrics import ApiMetrics
 from dfe_engine.api.password_change import PASSWORD_CHANGE_CLAIM
 from dfe_engine.api.v1.hyperdx import hyperdx_identity
-from dfe_engine.api.v1.oidc_login import TOKEN_COOKIE
+from dfe_engine.api.v1.oidc_login import TOKEN_COOKIE, token_cookie_secure
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth import account_durability, admin_retirement, breakglass, hyperdx_role
 from dfe_engine.auth.accounts import Account
@@ -408,7 +408,7 @@ async def refresh_token(user: CurrentUser, request: Request, settings: Settings,
 
 
 @router.post("/logout", status_code=204)
-async def logout(user: CurrentUser, request: Request) -> Response:
+async def logout(user: CurrentUser, request: Request, settings: Settings) -> Response:
     """End every session of the caller's account, on every device.
 
     Each token minted for the account before this call is refused from now on,
@@ -420,7 +420,9 @@ async def logout(user: CurrentUser, request: Request) -> Response:
         request.app.state.account_store.end_sessions(account.username)
         audit_account_change(user.user_id, account.username, "sessions_ended")
     response = Response(status_code=204)
-    response.delete_cookie(TOKEN_COOKIE, secure=True, httponly=True, samesite="lax")
+    response.delete_cookie(
+        TOKEN_COOKIE, secure=token_cookie_secure(settings), httponly=True, samesite="lax"
+    )
     return response
 
 

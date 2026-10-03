@@ -53,11 +53,22 @@ from dfe_engine.auth.jit import (
     JitSubjectUnusableError,
 )
 from dfe_engine.auth.sessions import session_claims, token_lifetime
+from dfe_engine.settings import DFESettings, is_dev_posture
 
 router = APIRouter(prefix="/auth/oidc", tags=["OIDC Login"])
 
 # Name of the cookie carrying the re-minted engine token to a browser client.
 TOKEN_COOKIE = "dfe_token"  # noqa: S105, RUF100 - a cookie name
+
+
+def token_cookie_secure(settings: DFESettings) -> bool:
+    """Whether the token cookie carries ``Secure``, on the posture the session cookie follows.
+
+    A browser drops a ``Secure`` cookie set over plain http, so a dev stack served
+    without TLS would complete the login and keep no token.
+    """
+    return not is_dev_posture(settings.env)
+
 
 # Session key holding the validated return_to between login and callback.
 _RETURN_TO_SESSION_KEY = "oidc_return_to"
@@ -331,7 +342,7 @@ async def oidc_callback(
         TOKEN_COOKIE,
         token,
         httponly=True,
-        secure=True,
+        secure=token_cookie_secure(settings),
         samesite="lax",
         max_age=lifetime,
     )
