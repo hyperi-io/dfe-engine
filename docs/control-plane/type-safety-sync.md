@@ -47,7 +47,8 @@ The generator parses `scope_constants.py` with the AST (no import side effects),
 
 ## CI sync to dfe-ui
 
-Workflow: [`.github/workflows/sync-dfe-engine-types.yml`](../../.github/workflows/sync-dfe-engine-types.yml)  
+Workflow: [`.github/workflows/sync-dfe-engine-types.yml`](../../.github/workflows/sync-dfe-engine-types.yml)
+
 **Name:** `Sync dfe-engine-types`
 
 ### Triggers
