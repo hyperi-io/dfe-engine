@@ -639,9 +639,11 @@ class SourceFetcher(BaseModel):
     """Fetcher-based origin: one dfe-fetcher deployment, named for the source.
 
     ``config`` is the fetcher's own per-type stanza, carried verbatim into the
-    deployed instance under ``config.sources.<source_type>``. The engine owns
-    ``enabled`` and ``topic`` on that stanza: ``topic`` selects whether records
-    land on the source's own topic (and table) or on the shared ``main`` landing.
+    deployed instance under ``config.sources.<source_type>``, one level deeper
+    under the source's name for a family the app manifest declares keyed. The
+    engine owns ``enabled`` and ``topic`` on that stanza: ``topic`` selects
+    whether records land on the source's own topic (and table) or on the shared
+    ``main`` landing.
     """
 
     source_type: str = Field(
