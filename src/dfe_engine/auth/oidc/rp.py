@@ -121,6 +121,15 @@ def _display_name(*, claims: dict[str, Any]) -> str:
     )
 
 
+def needs_userinfo(*, claims: dict[str, Any]) -> bool:
+    """Whether the ID token is too thin to name the user: no display name, or no email.
+
+    A token with a name and no email would otherwise skip userinfo, and the email
+    would fall back to ``preferred_username`` even where the IdP holds the address.
+    """
+    return not (_display_name(claims=claims)) or not (_claim_text(claims=claims, name="email"))
+
+
 def extract_identity(
     provider: OIDCProvider,
     userinfo_claims: dict[str, Any],
@@ -324,7 +333,7 @@ class OidcRelyingParty:
         token = await client.authorize_access_token(request)
         # Authlib parses + validates the id_token and exposes its claims here.
         userinfo = dict(token.get("userinfo") or {})
-        if not (_display_name(claims=userinfo)):
+        if needs_userinfo(claims=userinfo):
             userinfo = await fill_from_userinfo_endpoint(
                 claims=userinfo, client=client, issuer=provider.issuer, token=token
             )
