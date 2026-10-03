@@ -535,6 +535,133 @@ class TestMemberCountsGoUpOnly:
         assert resp.status_code == 200, resp.text
 
 
+class TestARevertCannotShrinkAMemberCount:
+    """A revert hands a count to the chart default, which the engine cannot read, so
+    one that would lower or un-declare a declared count needs helmvars:override."""
+
+    def _revert(self, client, headers, name, path):
+        return client.delete(
+            f"/api/v1/backing-services/overlays/{name}/vars/{path}", headers=headers
+        )
+
+    @pytest.mark.parametrize(
+        ("name", "stored", "path", "count"),
+        [
+            (
+                "clickhouse-cluster",
+                {"clickhouse": {"keeper": {"replicas": 5}}},
+                "clickhouse.keeper.replicas",
+                "clickhouse.keeper.replicas",
+            ),
+            (
+                "clickhouse-cluster",
+                {"clickhouse": {"keeper": {"replicas": 5, "resources": {"limits": {"cpu": "1"}}}}},
+                "clickhouse.keeper",
+                "clickhouse.keeper.replicas",
+            ),
+            (
+                "clickhouse-cluster",
+                {"clickhouse": {"replicas": 3, "keeper": {"replicas": 5}}},
+                "clickhouse",
+                "clickhouse.keeper.replicas",
+            ),
+            ("kafka", {"kafka": {"replicas": 5}}, "kafka.replicas", "kafka.replicas"),
+        ],
+    )
+    def test_reverting_a_declared_count_is_refused_without_override(
+        self, client, app, api_settings, tmp_path, name, stored, path, count
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", name, stored, "tester")
+        resp = self._revert(client, _writer(app, api_settings), name, path)
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "scale_down_refused"
+        assert count in resp.json()["message"]
+        assert "helmvars:override" in resp.json()["message"]
+        assert gc.get("infravars", name) == stored
+
+    def test_the_override_grant_reverts_the_keeper(self, client, app, admin_headers, tmp_path):
+        # admin holds '*' -> helmvars:override
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put(
+            "infravars", "clickhouse-cluster", {"clickhouse": {"keeper": {"replicas": 5}}}, "tester"
+        )
+        resp = self._revert(
+            client, admin_headers, "clickhouse-cluster", "clickhouse.keeper.replicas"
+        )
+        assert resp.status_code == 200, resp.text
+        assert "replicas" not in gc.get("infravars", "clickhouse-cluster")["clickhouse"]["keeper"]
+
+    def test_a_revert_onto_a_lower_shared_count_names_the_drop(
+        self, client, app, api_settings, tmp_path
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", "common", {"clickhouse": {"keeper": {"replicas": 3}}}, "tester")
+        gc.put(
+            "infravars", "clickhouse-cluster", {"clickhouse": {"keeper": {"replicas": 5}}}, "tester"
+        )
+        resp = self._revert(
+            client, _writer(app, api_settings), "clickhouse-cluster", "clickhouse.keeper.replicas"
+        )
+        assert resp.status_code == 400, resp.text
+        assert "5 -> 3" in resp.json()["message"]
+
+    def test_a_revert_onto_an_equal_or_higher_count_is_allowed(
+        self, client, app, api_settings, tmp_path
+    ):
+        """The shared file still declares the count after the revert, so the
+        resolved value is known and no member goes."""
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", "common", {"clickhouse": {"keeper": {"replicas": 5}}}, "tester")
+        gc.put(
+            "infravars", "clickhouse-cluster", {"clickhouse": {"keeper": {"replicas": 3}}}, "tester"
+        )
+        resp = self._revert(
+            client, _writer(app, api_settings), "clickhouse-cluster", "clickhouse.keeper.replicas"
+        )
+        assert resp.status_code == 200, resp.text
+
+    def test_a_revert_the_winning_file_overrides_is_allowed(
+        self, client, app, api_settings, tmp_path
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", "common", {"kafka": {"replicas": 5}}, "tester")
+        gc.put("infravars", "kafka", {"kafka": {"replicas": 9}}, "tester")
+        resp = self._revert(client, _writer(app, api_settings), "common", "kafka.replicas")
+        assert resp.status_code == 200, resp.text
+        assert "replicas" not in gc.get("infravars", "common")["kafka"]
+
+    def test_reverting_a_parent_with_no_declared_count_is_allowed(
+        self, client, app, api_settings, tmp_path
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put(
+            "infravars",
+            "clickhouse-cluster",
+            {"clickhouse": {"keeper": {"resources": {"limits": {"cpu": "1"}}}}},
+            "tester",
+        )
+        resp = self._revert(
+            client, _writer(app, api_settings), "clickhouse-cluster", "clickhouse.keeper"
+        )
+        assert resp.status_code == 200, resp.text
+
+    def test_a_count_at_the_chart_default_still_needs_override(
+        self, client, app, api_settings, tmp_path
+    ):
+        """3 is the shipped keeper default, but the engine cannot see that, so it
+        refuses rather than guess; the override grant is the way through."""
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put(
+            "infravars", "clickhouse-cluster", {"clickhouse": {"keeper": {"replicas": 3}}}, "tester"
+        )
+        resp = self._revert(
+            client, _writer(app, api_settings), "clickhouse-cluster", "clickhouse.keeper.replicas"
+        )
+        assert resp.status_code == 400, resp.text
+        assert "chart default" in resp.json()["message"]
+
+
 class TestStorageModelIsDecidedAtDeploy:
     def test_storage_model_write_is_refused_with_the_policy(
         self, client, app, api_settings, admin_headers, tmp_path
