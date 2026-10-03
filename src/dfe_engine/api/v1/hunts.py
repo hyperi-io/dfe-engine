@@ -27,7 +27,6 @@ import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from jinja2 import Environment
 from pydantic import BaseModel, Field, field_validator
 from scalo.logger import logger
 
@@ -35,6 +34,7 @@ from dfe_engine.api.deps import (
     CurrentUser,
     HuntConfigReg,
     OptionalAlertDestRegistry,
+    OptionalRuleReg,
     Settings,
     require_action,
 )
@@ -77,27 +77,27 @@ def _rules_to_yaml(rule_names: list[str]) -> list[dict[str, str]]:
     return [{"rule_name": name} for name in rule_names]
 
 
-def _validate_hunt_config(config: dict[str, Any], settings: Any) -> None:
+def _validate_hunt_config(config: dict[str, Any], settings: Any, rules: Any) -> None:
     """Run the deep HuntValidator on an API create/update hunt config (422 on error).
 
     Pydantic only checks the request SHAPE; this closes the gap where API CRUD skipped
-    rule-file-existence + Jinja2 rule-syntax + structural (source/customer) validation.
-    Rule lookup uses the CONSUMED rules dir (hunts.rules_dir). checkpoint_timestamp_field
-    is API-optional so it falls back to the setting then a default. source_registry is
-    None (source-ref checks only warn), so an unknown source ref is not blocked here.
+    rule-file + structural (source/customer) validation. Each rule is looked up as the
+    ``{name}.yaml`` the rule registry writes and the hunt runner reads: in the registry's
+    directory (the deploy repo's ``config/rules`` under gitops), else ``hunts.rules_dir``.
+    checkpoint_timestamp_field is API-optional so it falls back to the setting then a
+    default. source_registry is None (source-ref checks only warn), so an unknown source
+    ref is not blocked here.
     """
     checkpoint_field = (
         config.get("checkpoint_timestamp_field")
         or settings.hunts.checkpoint_timestamp_field
         or "timestamp"
     )
+    rules_dir = rules.directory if rules is not None else settings.hunts.rules_dir
     try:
         HuntValidator.validate_hunt_configuration(
             config,
-            # Not XSS: HuntValidator only calls env.parse() on SQL rule templates and renders nothing.
-            # nosemgrep: python.flask.security.xss.audit.direct-use-of-jinja2.direct-use-of-jinja2
-            Environment(),  # noqa: S701 - parses SQL rule templates, not HTML
-            settings.hunts.rules_dir,
+            rules_dir,
             checkpoint_field,
             source_registry=None,
         )
@@ -196,7 +196,7 @@ class HuntWriteRequest(_HuntConfigFields):
 
     rules: list[str] = Field(
         min_length=1,
-        description="Hunt rule template names (``{name}.jinja2`` under the rule repo)",
+        description="Rule names, each the ``{name}.yaml`` rule file the hunt runner reads",
     )
 
     @field_validator("rules", mode="before")
@@ -439,6 +439,7 @@ def create_hunt(
     body: HuntCreateRequest,
     user: CurrentUser,
     registry: HuntConfigReg,
+    rules: OptionalRuleReg,
     settings: Settings,
     response: Response,
 ) -> HuntDetailResponse:
@@ -453,7 +454,7 @@ def create_hunt(
             detail={"code": "conflict", "message": f"Hunt '{body.name}' already exists"},
         )
     config = body.to_config_dict(hunt_name=body.name)
-    _validate_hunt_config(config, settings)
+    _validate_hunt_config(config, settings, rules)
     outcome = registry.save(
         body.name,
         config,
@@ -496,6 +497,7 @@ def update_hunt(
     body: HuntWriteRequest,
     user: CurrentUser,
     registry: HuntConfigReg,
+    rules: OptionalRuleReg,
     settings: Settings,
     response: Response,
 ) -> HuntDetailResponse:
@@ -513,7 +515,7 @@ def update_hunt(
         ) from None
 
     config = body.to_config_dict(hunt_name=name)
-    _validate_hunt_config(config, settings)
+    _validate_hunt_config(config, settings, rules)
     outcome = registry.save(
         name,
         config,

@@ -287,6 +287,11 @@ def get_rule_registry():
     return reg
 
 
+def get_rule_registry_optional():
+    """Optional RuleRegistry (for checking the rule files a hunt names)."""
+    return _registries.get("rules")
+
+
 def get_hunt_config_registry():
     """FastAPI dependency: resolve HuntConfigRegistry singleton."""
     reg = _registries.get("hunt_configs")
@@ -310,6 +315,7 @@ AlertDestRegistry = Annotated[Any, Depends(get_alert_destinations_registry)]
 OptionalAlertDestRegistry = Annotated[Any | None, Depends(get_alert_destinations_registry_optional)]
 DeploymentConfigReg = Annotated[Any, Depends(get_deployment_config_registry)]
 RuleReg = Annotated[Any, Depends(get_rule_registry)]
+OptionalRuleReg = Annotated[Any | None, Depends(get_rule_registry_optional)]
 HuntConfigReg = Annotated[Any, Depends(get_hunt_config_registry)]
 
 
