@@ -11410,7 +11410,7 @@
           "sampler"
         ],
         "summary": "Get Sample",
-        "description": "Poll a sample task's status and result.",
+        "description": "Poll a sample task's status and result.\n\nA caller held to its orgs gets 404 for a task not held to them, as for one that\ndoes not exist.",
         "operationId": "get_sample_api_v1_samples__task_id__get",
         "parameters": [
           {
@@ -11478,7 +11478,7 @@
           "sampler"
         ],
         "summary": "List Samples",
-        "description": "List recent sample tasks (most recent first).",
+        "description": "List recent sample tasks (most recent first); a caller held to its orgs sees only theirs.",
         "operationId": "list_samples_api_v1_samples_get",
         "responses": {
           "200": {

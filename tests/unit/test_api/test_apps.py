@@ -11,7 +11,9 @@ from dataclasses import replace
 
 import pytest
 
+from dfe_engine.api.deps import create_access_token
 from dfe_engine.appmgmt import catalogue
+from dfe_engine.auth.roles import RoleDefinition
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import PolicyStore
@@ -1166,14 +1168,22 @@ class TestDryRun:
     """Running an authored file over sampled events, and the gates on doing it."""
 
     @staticmethod
-    def _sampler(app, lines: list[str] | None = None):
-        """A stand-in sampler returning what Sampler.run really returns: a dict."""
+    def _sampler(app, lines: list[str] | None = None) -> dict:
+        """A stand-in sampler returning what Sampler.run really returns: a dict.
+
+        Returns the orgs each step was held to, keyed ``checked`` and ``ran``.
+        """
+        held: dict = {}
 
         class _Sampler:
             def resolve_or_raise(self, req, registry):
                 return None
 
-            async def run(self, req, ch, registry):
+            def check_org_scope(self, req, ch, registry, org_ids):
+                held["checked"] = org_ids
+
+            async def run(self, req, ch, registry, *, org_ids=None):
+                held["ran"] = org_ids
                 sample_lines = lines if lines is not None else ['{"message": "hi"}']
                 return SampleResult(
                     mode=req.mode,
@@ -1184,6 +1194,7 @@ class TestDryRun:
                 ).model_dump()
 
         app.state.sampler = _Sampler()
+        return held
 
     def _deployed(self, client, app, admin_headers, tmp_path):
         gc = _wire(app, tmp_path)
@@ -1290,10 +1301,36 @@ class TestDryRun:
         # A dry run needs dryrun:execute (infra_admin) AND sampler:read
         # (data_analyst); the operator resolves both, so both gates pass.
         self._deployed(client, app, admin_headers, tmp_path)
-        self._sampler(app)
+        held = self._sampler(app)
         resp = client.post(
             f"{BASE}/files/transforms/dry-run",
             json={"name": "000.vrl"},
             headers=operator_headers,
         )
         assert resp.status_code == 200, resp.text
+        assert held == {"ran": None}
+
+    def test_a_caller_without_a_platform_grant_samples_only_its_own_orgs(
+        self, client, app, admin_headers, api_settings, tmp_path
+    ):
+        # sampler:read comes only from org_viewer, so the dry run's sample is held
+        # to the caller's orgs as POST /sample holds it.
+        self._deployed(client, app, admin_headers, tmp_path)
+        held = self._sampler(app)
+        app.state.role_config.roles["dry-runner"] = RoleDefinition(
+            description="runs authored code only", permissions=["dryrun:execute"]
+        )
+        app.state.group_store.create("dry-runners", roles=["dry-runner", "org_viewer"])
+        app.state.group_store.update("dry-runners", org_ids=["test_org"])
+        app.state.account_store.create("runner", "runner-password", groups=["dry-runners"])
+        app.state.group_store.add_member("dry-runners", "runner")
+        token = create_access_token(data={"sub": "runner"}, settings=api_settings)
+
+        resp = client.post(
+            f"{BASE}/files/transforms/dry-run",
+            json={"name": "000.vrl"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert held == {"checked": ["test_org"], "ran": ["test_org"]}
