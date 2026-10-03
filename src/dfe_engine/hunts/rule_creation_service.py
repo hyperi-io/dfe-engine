@@ -53,6 +53,7 @@ from .rule_guard import (
     match_everything,
     preview_settings,
     preview_sql,
+    refuse_offbox_calls,
     source_label,
     unmeasured_warning,
     volume_verdict,
@@ -194,6 +195,8 @@ def _mask_quoted(sql: str) -> str:
 _EXPLAIN_PREFIX = "EXPLAIN AST "
 _CH_POSITION_RE = re.compile(r"failed at position (\d+)")
 
+_OFFBOX_FIX = "A rule matches rows of its own source table; take the call out of the SQL."
+
 
 def _syntax_error(message: str) -> SqlValidationError:
     """ClickHouse's syntax error, with its 1-based position moved back onto the rule's SQL."""
@@ -329,6 +332,13 @@ class RuleCreationService:
         )
         rule = Rule.from_create(rule_create, rule_id=rule_id, rewriter=self._rewriter)
 
+        # The stored WHERE is what the preview and the hunt runner execute, which a
+        # transpiled CEL filter reaches without passing through the SQL check above.
+        if not sql_errors:
+            offbox = refuse_offbox_calls(rule.where_clause)
+            if offbox is not None:
+                sql_errors = [SqlValidationError(message=offbox, suggestion=_OFFBOX_FIX)]
+
         # Phase 4: a rule the API will refuse is neither judged nor measured further.
         refused = bool(sql_errors or rule.validate_rule())
         matches_everything = (
@@ -386,6 +396,8 @@ class RuleCreationService:
         6. Its FROM names a ``<db>.<table>``, read the way the rule model reads it
         7. No clause a row filter cannot carry (HAVING, a join, a union, ...),
            refused as the HyperDX sanitiser refuses it
+        8. No call that reads outside the row (``url``, ``s3``, a dictionary) or
+           sends it to another service (the ``ai*`` functions)
         """
         errors: list[SqlValidationError] = []
         trimmed = sql.strip()
@@ -443,6 +455,10 @@ class RuleCreationService:
                     suggestion="Check parentheses around WHERE conditions.",
                 )
             )
+
+        offbox = refuse_offbox_calls(trimmed, subject="A rule's SQL")
+        if offbox is not None:
+            errors.append(SqlValidationError(message=offbox, suggestion=_OFFBOX_FIX))
 
         # The keyword checks above read like a lint; only a parse says the SQL is SQL.
         if not errors:

@@ -11,6 +11,9 @@
 already taken out, and explains why it matches every event -- or returns None
 when the condition narrows anything at all, or cannot be read.
 
+``refuse_offbox_calls`` reads the same WHERE and refuses a condition that calls
+a ClickHouse function reading outside the row or sending it to another service.
+
 ``preview_sql`` counts what the rule matches over a lookback window on its own
 source table, and ``volume_verdict`` turns that count into a band and the
 plain-language warnings the UI shows beside the saved rule.
@@ -24,6 +27,7 @@ from sqlglot import exp
 from sqlglot.errors import SqlglotError
 from sqlglot.optimizer.simplify import simplify
 
+from ..clickhouse.function_guard import CallNotPermittedError, refuse_calls_outside_the_row
 from ..clickhouse.quoting import quote_identifier
 from ..settings import DetectionGuardSettings
 from .rule_model import Rule
@@ -285,13 +289,44 @@ def preview_settings(guard: DetectionGuardSettings) -> dict[str, float | int | s
 
     ``throw`` rather than ``break``: a broken-off aggregate returns zero rows,
     which would read as a rule that matches nothing.
+
+    ``readonly=1`` because the preview runs the rule author's own condition: it
+    makes ClickHouse refuse a read through ``url()`` whatever the engine's user
+    is granted, as the sampler's reads do.
     """
     return {
         "max_execution_time": guard.preview_timeout_seconds,
         "timeout_overflow_mode": "throw",
         "max_rows_to_read": guard.preview_max_rows,
         "read_overflow_mode": "throw",
+        "readonly": 1,
     }
+
+
+def refuse_offbox_calls(where: str, *, subject: str = "A rule's detection condition") -> str | None:
+    """Say why a detection condition may not run, or None when every call is fine.
+
+    The condition is spliced into the preview's ``countIf`` and into the hunt
+    runner's ``INSERT ... SELECT``, which needs write access and so cannot be
+    made read-only. A call that reads outside the row or posts to another
+    service is refused here instead -- in the API before the rule is saved, and
+    again in the runner, which also compiles a rule YAML written straight into
+    the deploy repo.
+
+    Args:
+        where: The rule's detection WHERE, as it will run.
+        subject: What the message names the SQL as.
+
+    Returns:
+        The refusal message, or None when the condition calls nothing refused.
+    """
+    if not where.strip():
+        return None
+    try:
+        refuse_calls_outside_the_row(where, subject=subject)
+    except CallNotPermittedError as exc:
+        return str(exc)
+    return None
 
 
 def volume_verdict(

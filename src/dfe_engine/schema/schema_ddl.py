@@ -713,9 +713,21 @@ class DDLGenerator:
 
     @staticmethod
     def _default_expr(col: SchemaColumn) -> str | None:
-        """Build the DEFAULT / MATERIALIZED / ALIAS clause."""
+        """Build the DEFAULT / MATERIALIZED / ALIAS clause.
+
+        The expression is emitted verbatim and ClickHouse evaluates it on every
+        insert or read of the column, so a call that reads outside the row or
+        sends it to another service is refused here as well as at validation.
+
+        Raises:
+            DDLGenerationError: If the expression makes such a call.
+        """
         if not col.default:
             return None
+
+        refusals = col.offbox_default_errors()
+        if refusals:
+            raise DDLGenerationError(refusals[0])
 
         if "materialized" in col.attribute:
             return f"MATERIALIZED {col.default}"
