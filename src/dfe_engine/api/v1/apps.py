@@ -107,7 +107,7 @@ from dfe_engine.gitcrud.commit_policy import (
 from dfe_engine.gitcrud.engine import ResourceNotFoundError, del_path, set_path
 from dfe_engine.gitcrud.routing import ReviewRequiredError, route_write
 from dfe_engine.governance import PolicyStore, ProtectedVarError
-from dfe_engine.sampling import SampleRequest, SamplerError
+from dfe_engine.sampling import SampleMode, SampleRequest, SamplerError
 from dfe_engine.source.flow import stage_instance_ceiling
 from dfe_engine.source.registry import SourceNotFoundError
 
@@ -2015,7 +2015,8 @@ async def _sample_events(
         raise HTTPException(
             503, detail={"code": "not_configured", "message": "Sampler not initialised"}
         )
-    req = SampleRequest(source=source, limit=limit)
+    # logreducer is not a dependency, so the gated default mode cannot run in a default install.
+    req = SampleRequest(mode=SampleMode.RECENT, source=source, limit=limit)
     org_ids = sample_org_scope(request, user)
     try:
         await run_blocking(functools.partial(sampler.resolve_or_raise, req, source_registry))

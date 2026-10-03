@@ -18,9 +18,12 @@ fence the platform's own analysts out. A role marked ``scoped`` is a tenant role
 wherever it is bound, and an org-scoped group's roles bind at that org's scope
 only, so either gets its org's pinned user.
 
-A group claiming an org that is not registered fails closed - it is skipped and
-gets no ClickHouse user at all, because the alternative is an unrestricted user,
-and an unrestricted user reads EVERY org's rows.
+A group's org markers resolve to registered orgs by name or by tenant id, as the
+HyperDX connection read and the sampler resolve them
+(:func:`~dfe_engine.orgs.tenant_scope.resolve_orgs`). A group whose markers name
+no registered org fails closed - it is skipped and gets no ClickHouse user at all,
+because the alternative is an unrestricted user, and an unrestricted user reads
+EVERY org's rows.
 """
 
 from typing import Any
@@ -29,6 +32,7 @@ from scalo.logger import logger
 
 from dfe_engine.auth.models import Scope, ScopedGrant, platform_grants
 from dfe_engine.auth.roles import RoleConfig
+from dfe_engine.orgs.tenant_scope import resolve_orgs
 
 from .models import GroupChBinding
 
@@ -52,7 +56,6 @@ def derive_group_bindings(
     The tier is left empty so the reconciler resolves it to the default analyst
     tier - the least-privilege end of the tier list.
     """
-    org_names = {o.name for o in orgs}
     bindings: list[GroupChBinding] = []
 
     for group in groups:
@@ -73,10 +76,10 @@ def derive_group_bindings(
             )
             claimed = set()
 
-        resolved = claimed & org_names
+        resolved = {org.name for org in resolve_orgs(claimed, orgs)}
         if claimed and not resolved:
             logger.error(
-                "group claims orgs that are not registered; skipping its CH user",
+                "group's org markers name no registered org; skipping its CH user",
                 group=group.name,
                 claimed=sorted(claimed),
             )

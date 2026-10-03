@@ -870,8 +870,9 @@ def held_tenant_ids(request: Request, user: AuthContext, action: str) -> list[st
     """The tenant ids a caller's reads are held to, or None when it may read every org.
 
     A caller is held unless :func:`reads_every_org` passes for ``action``. A held
-    caller's org names map to the tenant ids the ClickHouse row policy binds
-    (:func:`~dfe_engine.orgs.tenant_scope.tenant_ids_for`); a name that is not a
+    caller's org markers, each an org's name or one of its tenant ids, map to the
+    tenant ids the ClickHouse row policy binds
+    (:func:`~dfe_engine.orgs.tenant_scope.tenant_ids_for`); a marker that names no
     registered org maps to none, and an empty list is refused, never read.
 
     Args:

@@ -50,6 +50,7 @@ from dfe_engine.api.deps import (
 from dfe_engine.auth import Scope
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.governance.ch.models import org_user_name
+from dfe_engine.orgs.tenant_scope import resolve_orgs
 
 router = APIRouter(prefix="/hyperdx", tags=["HyperDX"])
 
@@ -123,12 +124,10 @@ def _resolve_identity(request: Request, user) -> ConnectionIdentity | _Refusal:
     if _reads_every_org(request, user):
         return ConnectionIdentity("platform", _PLATFORM_USERNAME, _PLATFORM_SECRET)
 
-    # Org-scoped: resolve the caller to exactly ONE registered org. org_ids carry
-    # both the owning org name and the group's tenant ids, so match on either.
+    # A held caller reads as exactly one registered org, resolved as every org-held read resolves it.
     org_registry = getattr(request.app.state, "org_registry", None)
     orgs = list(org_registry.list()) if org_registry is not None else []
-    caller = set(user.org_ids)
-    matched = [o for o in orgs if o.name in caller or (set(o.org_ids) & caller)]
+    matched = resolve_orgs(user.org_ids, orgs)
     if len(matched) != 1:
         return _Refusal("no_single_org", "caller does not resolve to exactly one org")
 
