@@ -276,6 +276,16 @@ class TestShippedManifest:
         assert binding.entries_key == "sources"
         assert binding.variant("okta", "default") == "filebeat.okta.default"
 
+    def test_elastic_names_ecs_and_a_derived_and_vendor_layer_per_stream(self):
+        binding = catalogue.descriptor("dfe-transform-elastic").catalogue
+        assert binding is not None
+        layers = binding.schema_layers
+
+        assert layers is not None
+        assert layers.meta_schema == "meta/elastic/ecs"
+        assert layers.derived("cisco_ios", "log") == "derived/cisco_ios/log"
+        assert layers.additional("cisco_ios", "log") == "additional/cisco_ios/log"
+
     def test_the_mounted_catalogue_finds_its_owner_by_filename(self):
         assert catalogue.catalogue_app("sources.yaml").service == "dfe-transform-elastic"
 
@@ -576,6 +586,56 @@ class TestManifestParsing:
         )
 
         with pytest.raises(CatalogueError, match="takes only"):
+            load_catalogue(path)
+
+    @staticmethod
+    def _catalogue(**layers: str) -> dict:
+        return {
+            "catalogue": {
+                "file": "sources.yaml",
+                "entries_key": "sources",
+                "variant_pattern": "{entry}.{transform}",
+                **layers,
+            }
+        }
+
+    def test_a_catalogue_naming_no_schema_layers_loads_with_none(self, tmp_path):
+        binding = load_catalogue(self._manifest(tmp_path, self._catalogue()))["dfe-thing"].catalogue
+
+        assert binding is not None
+        assert binding.schema_layers is None
+
+    def test_some_schema_layers_without_the_rest_are_refused_by_name(self, tmp_path):
+        path = self._manifest(tmp_path, self._catalogue(meta_schema="meta/elastic/ecs"))
+
+        with pytest.raises(CatalogueError, match="without derived_pattern, additional_pattern"):
+            load_catalogue(path)
+
+    def test_a_meta_schema_with_a_file_extension_is_refused(self, tmp_path):
+        # A derived schema names its base extensionless, so this one could never match.
+        path = self._manifest(
+            tmp_path,
+            self._catalogue(
+                meta_schema="meta/elastic/ecs.yaml",
+                derived_pattern="derived/{package}/{data_stream}",
+                additional_pattern="additional/{package}/{data_stream}",
+            ),
+        )
+
+        with pytest.raises(CatalogueError, match="without a file extension"):
+            load_catalogue(path)
+
+    def test_a_layer_pattern_naming_an_unknown_placeholder_is_refused(self, tmp_path):
+        path = self._manifest(
+            tmp_path,
+            self._catalogue(
+                meta_schema="meta/elastic/ecs",
+                derived_pattern="derived/{vendor}/{data_stream}",
+                additional_pattern="additional/{package}/{data_stream}",
+            ),
+        )
+
+        with pytest.raises(CatalogueError, match=r"derived_pattern .* takes only \{package\}"):
             load_catalogue(path)
 
     def test_a_catalogue_package_naming_a_family_the_app_lacks_is_refused(self, tmp_path):
