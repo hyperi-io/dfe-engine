@@ -27,11 +27,13 @@ disk use - only what the deploy repo says the deployment asked for.
 
 Node and broker counts are UP-ONLY here, and not out of caution: both stores place
 data per member, so removing one takes its copy with it unless something moves the
-data off first. CPU and memory move freely both ways.
+data off first. CPU and memory move freely both ways. A revert that would lower or
+un-declare a count needs helmvars:override, because the chart default it falls back
+to is not readable here.
 """
 
 import copy
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, TypeGuard
@@ -42,14 +44,16 @@ from pydantic import BaseModel, Field
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.rbac_scopes import scopes_dict
-from dfe_engine.gitcrud.engine import ResourceNotFoundError, get_path, set_path
+from dfe_engine.gitcrud.engine import ResourceNotFoundError, del_path, get_path, set_path
 
 from .helm import (
     SetVarRequest,
     WriteResult,
     check_name,
     delete_var_governed,
+    enforce_protected,
     gitcrud_of,
+    has_override,
     policy_of,
     set_var_governed,
     shown_vars,
@@ -313,9 +317,9 @@ def _is_count(value: Any) -> TypeGuard[int]:
 
 
 def _stack_with(
-    request: Request, spec: BackingService, name: str, path: str, value: Any
+    request: Request, spec: BackingService, name: str, edit: Callable[[dict], object]
 ) -> list[tuple[str, dict]]:
-    """The overlay stack as it would read with this write applied to ``name``."""
+    """The overlay stack as it would read with ``edit`` applied to ``name``."""
     gc = gitcrud_of(request)
     out: list[tuple[str, dict]] = []
     for candidate in (_COMMON, spec.chart):
@@ -326,21 +330,40 @@ def _stack_with(
                 continue
             doc = {}
         if candidate == name:
-            set_path(doc, path, value)
+            edit(doc)
         out.append((candidate, doc))
     return out
 
 
-def _guard_member_count(request: Request, name: str, path: str, value: Any) -> None:
-    """Refuse a write that lowers a declared node or broker count, or drops it.
+def _guard_member_count(
+    request: Request,
+    name: str,
+    path: str,
+    edit: Callable[[dict], object],
+    *,
+    verb: str = "write",
+    remedy: str = "",
+) -> None:
+    """Refuse an edit that lowers a declared node or broker count, or drops it.
 
-    Compares the value the overlay stack declares BEFORE the write with what it
-    would declare after, so writing into the shared file cannot be refused for a
-    drop the per-chart file goes on to override anyway. Nothing declared means
-    nothing to compare against, and the write is accepted. A write to a parent of
-    a count is compared on every count below it, since the map it writes replaces
-    them; a declared count the write leaves undeclared, or as anything but a
-    count, hands the members to the chart default, which can be fewer.
+    Compares the value the overlay stack declares BEFORE the edit with what it
+    would declare after, so editing the shared file cannot be refused for a drop
+    the per-chart file goes on to override anyway. Nothing declared means nothing
+    to compare against, and the edit is accepted. An edit to a parent of a count
+    is compared on every count below it, since it replaces or removes them; a
+    declared count the edit leaves undeclared, or as anything but a count, hands
+    the members to the chart default, which can be fewer.
+
+    Args:
+        request: The request carrying the gitops client.
+        name: The overlay resource the edit lands in.
+        path: The dot-path the edit sets or removes.
+        edit: Applies the edit to a copy of ``name``'s document.
+        verb: What the refusal calls the edit.
+        remedy: Appended to the refusal after the service's scale-down reason.
+
+    Raises:
+        HTTPException: 400 ``scale_down_refused`` naming the count and the change.
     """
     spec = _owner(path)
     if spec is None or name not in (_COMMON, spec.chart):
@@ -351,19 +374,19 @@ def _guard_member_count(request: Request, name: str, path: str, value: Any) -> N
         return
 
     current = _docs(request, spec.chart)
-    written = _stack_with(request, spec, name, path, value)
+    edited = _stack_with(request, spec, name, edit)
     for count in reached:
         before = _resolved(current, count)
         if not _is_count(before):
             continue
-        after = _resolved(written, count)
+        after = _resolved(edited, count)
         if _is_count(after) and after >= before:
             continue
         if _is_count(after):
             change = f"{before} -> {after} would remove a member"
         elif after is None:
             change = (
-                f"this write leaves it undeclared where {before} is declared, which hands "
+                f"this {verb} leaves it undeclared where {before} is declared, which hands "
                 "it to the chart default and can remove members"
             )
         else:
@@ -372,7 +395,7 @@ def _guard_member_count(request: Request, name: str, path: str, value: Any) -> N
             400,
             detail={
                 "code": "scale_down_refused",
-                "message": f"{count} is up-only: {change}. {spec.scale_down_reason}.",
+                "message": f"{count} is up-only: {change}. {spec.scale_down_reason}.{remedy}",
             },
         )
 
@@ -449,10 +472,10 @@ def set_overlay_var(
     model, the data-layer modes and the disk size are decided at deploy, and moving
     one on a live deployment is a data migration. 400 when the value would lower a
     declared node or broker count, or leave it undeclared (a parent map that omits
-    it), which loses data rather than capacity.
+    it), which loses data rather than capacity; helmvars:override does not lift it.
     """
     check_name(name)
-    _guard_member_count(request, name, path, body.value)
+    _guard_member_count(request, name, path, lambda doc: set_path(doc, path, body.value))
     result = set_var_governed(_CLASS, name, path, body.value, user, request, if_match)
     return BackingWriteResult(**result.model_dump(), reload=str(_reload_for(path)))
 
@@ -467,8 +490,22 @@ def delete_overlay_var(
 ) -> BackingWriteResult:
     """Revert a substrate/platform value to its chart default. Protected vars refuse.
 
-    Not guarded up-only: reverting a count hands it back to the chart or profile
-    default, which the engine cannot read, so there is no after-value to compare.
+    400 when the revert would lower a declared node or broker count, or leave it
+    undeclared, unless the caller holds helmvars:override. An undeclared count falls
+    to the chart or profile default, which the engine cannot read, so a revert that
+    leaves one undeclared is refused whatever that default is.
     """
+    check_name(name)
+    if not has_override(request, user):
+        # A revert reaching a policy lock refuses as protected_var before the count guard runs.
+        enforce_protected(request, user, _CLASS, name, path)
+        _guard_member_count(
+            request,
+            name,
+            path,
+            lambda doc: del_path(doc, path),
+            verb="revert",
+            remedy=" A revert that lowers or un-declares a count needs helmvars:override.",
+        )
     result = delete_var_governed(_CLASS, name, path, user, request)
     return BackingWriteResult(**result.model_dump(), reload=str(_reload_for(path)))
