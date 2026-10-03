@@ -39,6 +39,12 @@ LOADER_ENDPOINT = "http://dfe-loader:6000"
 ARCHIVER_ENDPOINT = "http://dfe-archiver:6000"
 VRL_AUTH_ENDPOINT = "http://dfe-transform-vrl-auth:6000"
 
+# Read off the shipped manifest, so a family added there is covered without an edit here.
+FLAT_FETCHER_FAMILIES = sorted(
+    set(catalogue.descriptor(FETCHER).source_types)
+    - catalogue.descriptor(FETCHER).keyed_source_types
+)
+
 
 def _matched(name: str = "auth", **fields):
     from dfe_engine.source.models import Source
@@ -804,6 +810,82 @@ class TestFetcherInstance:
             },
             "output": {"type": "kafka"},
         }
+
+    def test_a_rest_source_nests_its_stanza_under_its_name(self, settings):
+        """The fetcher reads sources.rest as instances, each with its own enabled and topic."""
+        registry = FakeRegistry(
+            [
+                _fetched(
+                    "runzero-assets",
+                    fetcher={"source_type": "rest", "config": {"profile": "runzero"}},
+                )
+            ]
+        )
+
+        compiled = routing.compile_for(
+            catalogue.descriptor(FETCHER), registry, settings, instance="runzero-assets"
+        )
+
+        assert compiled["sources"] == {
+            "rest": {
+                "runzero-assets": {
+                    "enabled": True,
+                    "topic": "runzero-assets",
+                    "profile": "runzero",
+                }
+            }
+        }
+
+    @pytest.mark.parametrize("family", ["db", "file"])
+    def test_the_other_keyed_families_nest_the_same_way(self, settings, family):
+        registry = FakeRegistry(
+            [_fetched("exports", fetcher={"source_type": family, "config": {}})]
+        )
+
+        compiled = routing.compile_for(
+            catalogue.descriptor(FETCHER), registry, settings, instance="exports"
+        )
+
+        assert compiled["sources"] == {family: {"exports": {"enabled": True, "topic": "exports"}}}
+
+    @pytest.mark.parametrize("family", FLAT_FETCHER_FAMILIES)
+    def test_every_flat_family_composes_onto_the_family_itself(self, settings, family):
+        registry = FakeRegistry([_fetched("vendor", fetcher={"source_type": family, "config": {}})])
+
+        compiled = routing.compile_for(
+            catalogue.descriptor(FETCHER), registry, settings, instance="vendor"
+        )
+
+        assert compiled["sources"] == {family: {"enabled": True, "topic": "vendor"}}
+
+    def test_a_keyed_source_spanning_two_types_is_still_refused(self, settings):
+        """The alignment reads the flat stanza, so the extra level hides no connection."""
+        registry = FakeRegistry(
+            [
+                _fetched(
+                    "runzero-assets",
+                    fetcher={
+                        "source_type": "rest",
+                        "config": {"connections": [{"id": "falcon", "type": "crowdstrike"}]},
+                    },
+                )
+            ]
+        )
+
+        with pytest.raises(MixedConnectorTypesError, match="crowdstrike, rest"):
+            routing.compile_for(
+                catalogue.descriptor(FETCHER), registry, settings, instance="runzero-assets"
+            )
+
+    def test_sync_writes_a_keyed_stanza_under_the_same_id_as_instance_id(self, settings):
+        registry = FakeRegistry(
+            [_fetched("runzero-assets", fetcher={"source_type": "rest", "config": {}})]
+        )
+        app = instances.instance_of(FETCHER, "runzero-assets")
+        doc = instances.initial_overlay(app)
+
+        assert routing.sync(app.descriptor, doc, registry, settings, instance="runzero-assets")
+        assert set(doc["config"]["sources"]["rest"]) == {doc["config"]["instance_id"]}
 
     def test_on_direct_it_pushes_at_the_loader(self, direct_settings):
         compiled = routing.compile_for(

@@ -268,6 +268,14 @@ class AppDescriptor:
     than a second copy of ``source_types``.
     """
 
+    keyed_source_types: frozenset[str] = frozenset()
+    """The families whose stanza is a map of instances keyed by id, not one flat block.
+
+    The app reads such a family as ``sources.<family>.<id>``, each instance
+    carrying its own ``enabled`` and ``topic``, so the composed stanza is nested
+    under the source's name. Empty means every family is flat.
+    """
+
     transports: frozenset[str] = frozenset({"bus"})
     """Which transports this app can carry a source's records on.
 
@@ -539,6 +547,9 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
         catalogue_packages=_catalogue_packages_from(
             service, raw.get("catalogue_packages"), families
         ),
+        keyed_source_types=_keyed_source_types_from(
+            service, raw.get("keyed_source_types"), families
+        ),
         transports=_transports_from(service, raw.get("transports")),
         profiles=_profiles_from(service, "profiles", raw.get("profiles")),
         default_in=_default_in_from(service, raw.get("default_in")),
@@ -684,6 +695,28 @@ def _catalogue_packages_from(
             )
         out[str(family)] = tuple(str(p) for p in packages)
     return out
+
+
+def _keyed_source_types_from(
+    service: str, raw: object, families: tuple[str, ...]
+) -> frozenset[str]:
+    """Which of this app's families are maps of instances keyed by id.
+
+    Every entry has to be one of the app's own ``source_types``: no source can
+    declare any other family, so a typo there would nest nothing and leave the
+    family it meant composed flat.
+    """
+    if raw is None:
+        return frozenset()
+    if not isinstance(raw, list):
+        raise CatalogueError(f"{service}: keyed_source_types must be a list of families")
+    for family in raw:
+        if str(family) not in families:
+            raise CatalogueError(
+                f"{service}: keyed_source_types names {family!r}, which is not one of its "
+                f"source_types ({', '.join(families) or 'none'})"
+            )
+    return frozenset(str(f) for f in raw)
 
 
 def _catalogue_from(service: str, raw: object) -> CatalogueBinding | None:

@@ -306,6 +306,13 @@ class TestShippedManifest:
     def test_a_package_no_family_polls_has_none(self):
         assert catalogue.source_type_for_package("zoom") is None
 
+    def test_the_fetchers_instance_maps_are_its_keyed_families(self):
+        # dfe-fetcher's SourcesConfig carries rest, db and file as maps keyed by
+        # instance id, and every other family as one flat block.
+        assert catalogue.descriptor("dfe-fetcher").keyed_source_types == frozenset(
+            {"rest", "db", "file"}
+        )
+
     def test_hyperdx_is_the_one_app_a_console_labels_by_another_name(self):
         labelled = {
             name: app.display_name
@@ -653,6 +660,30 @@ class TestManifestParsing:
         )
 
         with pytest.raises(CatalogueError, match="non-empty list of packages"):
+            load_catalogue(path)
+
+    def test_an_app_naming_no_keyed_families_composes_every_family_flat(self, tmp_path):
+        apps = load_catalogue(self._manifest(tmp_path, {"source_types": ["rest", "okta"]}))
+
+        assert apps["dfe-thing"].keyed_source_types == frozenset()
+
+    def test_the_keyed_families_are_read_as_the_manifest_gives_them(self, tmp_path):
+        path = self._manifest(
+            tmp_path, {"source_types": ["rest", "okta"], "keyed_source_types": ["rest"]}
+        )
+
+        assert load_catalogue(path)["dfe-thing"].keyed_source_types == frozenset({"rest"})
+
+    def test_a_keyed_family_the_app_lacks_is_refused(self, tmp_path):
+        path = self._manifest(tmp_path, {"source_types": ["okta"], "keyed_source_types": ["rest"]})
+
+        with pytest.raises(CatalogueError, match=r"keyed_source_types names 'rest'.*source_types"):
+            load_catalogue(path)
+
+    def test_keyed_families_that_are_not_a_list_are_refused(self, tmp_path):
+        path = self._manifest(tmp_path, {"source_types": ["rest"], "keyed_source_types": "rest"})
+
+        with pytest.raises(CatalogueError, match="keyed_source_types must be a list"):
             load_catalogue(path)
 
 
