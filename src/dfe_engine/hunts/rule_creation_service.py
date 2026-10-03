@@ -332,11 +332,12 @@ class RuleCreationService:
         )
         rule = Rule.from_create(rule_create, rule_id=rule_id, rewriter=self._rewriter)
 
-        # The stored WHERE is what the preview and the hunt runner execute, so the
-        # off-box check runs on it rather than on the SQL it was parsed out of.
-        offbox = refuse_offbox_calls(rule.where_clause)
-        if offbox is not None:
-            sql_errors = [*sql_errors, SqlValidationError(message=offbox, suggestion=_OFFBOX_FIX)]
+        # The stored WHERE is what the preview and the hunt runner execute, which a
+        # transpiled CEL filter reaches without passing through the SQL check above.
+        if not sql_errors:
+            offbox = refuse_offbox_calls(rule.where_clause)
+            if offbox is not None:
+                sql_errors = [SqlValidationError(message=offbox, suggestion=_OFFBOX_FIX)]
 
         # Phase 4: a rule the API will refuse is neither judged nor measured further.
         refused = bool(sql_errors or rule.validate_rule())
