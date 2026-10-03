@@ -159,31 +159,43 @@ def test_re_running_the_same_deploy_ddl_leaves_the_table_as_it_was(ch_client, so
     assert _indexes(ch_client, source_database, source.table_name) == indexes_before
 
 
-def test_an_index_on_a_dotted_column_lands_through_the_create_and_the_alter(
-    ch_client, source_database
+@pytest.mark.parametrize(
+    ("created_name", "added_name"),
+    [
+        ("event.action", "event.outcome"),
+        (
+            "fortinet_firewall_app-type",
+            "kubernetes_audit_annotations_authorization_k8s_io/decision",
+        ),
+    ],
+    ids=["dotted", "hyphen-and-slash"],
+)
+def test_an_index_on_a_column_named_with_punctuation_lands_through_the_create_and_the_alter(
+    ch_client, source_database, created_name, added_name
 ):
-    """An ECS column such as ``event.action`` names its index after itself, dot included.
+    """A column names its index after itself, dot, hyphen or slash included.
 
-    The server is asked to run both statements that carry an index name, and then
-    asked which indexes it holds.
+    ECS columns carry dots, and Elastic integrations spell vendor fields with
+    hyphens and slashes. The server is asked to run both statements that carry an
+    index name, and then asked which indexes it holds.
     """
     gen = DDLGenerator(TypeRegistry.default(), resolver=EngineResolver(client=ch_client))
     cfg = DDLConfig(db=source_database)
-    table = "dotted_index_probe"
+    table = "punctuated_index_probe"
 
     created = SchemaColumn.model_validate(
-        {"name": "event.action", "type": "string", "use_case": "exact_match"}
+        {"name": created_name, "type": "string", "use_case": "exact_match"}
     )
     ch_client.command(gen.generate_create_table(table, [created], cfg))
-    assert "idx_event.action" in _indexes(ch_client, source_database, table)
+    assert f"idx_{created_name}" in _indexes(ch_client, source_database, table)
 
     added = SchemaColumn.model_validate(
-        {"name": "event.outcome", "type": "string", "use_case": "dimension"}
+        {"name": added_name, "type": "string", "use_case": "dimension"}
     )
     ch_client.command(gen.generate_alter_add_column(table, added, cfg))
     for statement in gen.generate_alter_add_indexes(table, added, cfg):
         ch_client.command(statement)
 
-    assert {"idx_event.action", "idx_event.outcome"} <= set(
+    assert {f"idx_{created_name}", f"idx_{added_name}"} <= set(
         _indexes(ch_client, source_database, table)
     )

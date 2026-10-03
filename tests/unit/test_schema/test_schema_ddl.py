@@ -592,6 +592,23 @@ class TestIndexNames:
             "    INDEX `idx_event.action` `event.action` TYPE bloom_filter GRANULARITY 4"
         ]
 
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "fortinet_firewall_app-type",
+            "kubernetes_audit_annotations_authorization_k8s_io/decision",
+            "kubernetes_audit_annotations_pod-security_kubernetes_io/audit-violations",
+        ],
+    )
+    def test_a_vendor_column_with_a_hyphen_or_slash_quotes_its_index_name(
+        self, gen: DDLGenerator, name: str
+    ):
+        ddl = gen.generate_create_table(
+            "t", [_col(name=name, type="string", use_case="exact_match")]
+        )
+        index_lines = [line for line in ddl.splitlines() if "INDEX" in line]
+        assert index_lines == [f"    INDEX `idx_{name}` `{name}` TYPE bloom_filter GRANULARITY 4"]
+
     def test_a_dotted_column_quotes_a_declared_index_name(self, gen: DDLGenerator):
         cols = [_col(name="log.original", type="text", index="text(tokenizer = 'default')")]
         ddl = gen.generate_create_table("t", cols)
