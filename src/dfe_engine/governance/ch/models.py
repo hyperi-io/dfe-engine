@@ -187,8 +187,9 @@ class ChTier(BaseModel):
 class ChServiceRole(BaseModel):
     """A fixed service identity (loader / query_reader / hunt_runner base).
 
-    Not tiered. ``mint_user`` creates a CH user + secret via the scalo.secrets
-    seam; otherwise the role is granted to an existing identity by the reconciler.
+    Not tiered. ``mint_user`` creates a CH user whose password the deployment
+    provides or the engine mints through the scalo.secrets seam; otherwise the
+    role is granted to an existing identity by the reconciler.
     """
 
     name: str
@@ -205,6 +206,10 @@ class ChServiceRole(BaseModel):
     def user(self) -> str:
         """The minted user name (used when ``mint_user`` is set)."""
         return f"dfe_{self.name}"
+
+    def secret_path(self) -> str:
+        """Where the minted user's password lives in the engine's secrets store."""
+        return f"ch/service/{self.name}"
 
 
 class GroupChBinding(BaseModel):

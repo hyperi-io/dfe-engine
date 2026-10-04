@@ -180,6 +180,154 @@ class TestReconcilePasswordSync:
         )
 
 
+class TestProvidedServicePassword:
+    """A deployment-provided password wins over mint-or-reuse for its service user.
+
+    A separate pod (the hunt runner) connects with the provided value, so the user
+    must carry exactly it, and the store must serve the same value afterwards.
+    """
+
+    _RUNNER = ChServiceRole(
+        name="hunt_runner", mint_user=True, grants=["SELECT ON dfe.*", "INSERT ON dfe.*"]
+    )
+
+    def _store(self, tmp_path):
+        return build_secrets(SecretsSettings(provider="file", path=str(tmp_path)))
+
+    def _alter(self, password: str) -> str:
+        digest = hashlib.sha256(password.encode()).hexdigest()
+        return f"ALTER USER `dfe_hunt_runner` IDENTIFIED WITH sha256_hash BY '{digest}'"
+
+    def test_the_user_takes_the_provided_password_and_the_store_serves_it(self, tmp_path):
+        store = self._store(tmp_path)
+        client = _FakeAdminClient()
+        result = ChRbacReconciler(
+            client, secrets_store=store, provided_passwords={"hunt_runner": "given-by-deploy"}
+        ).reconcile(tiers=[], service_roles=[self._RUNNER], orgs=[], bindings=[])
+
+        assert self._alter("given-by-deploy") in client.executed
+        assert store.get("ch/service/hunt_runner") == "given-by-deploy"
+        assert "service/hunt_runner" in result.minted
+
+    def test_a_provided_password_replaces_one_the_engine_minted_earlier(self, tmp_path):
+        store = self._store(tmp_path)
+        store.put("ch/service/hunt_runner", "minted-last-boot")
+        client = _FakeAdminClient()
+        ChRbacReconciler(
+            client, secrets_store=store, provided_passwords={"hunt_runner": "given-by-deploy"}
+        ).reconcile(tiers=[], service_roles=[self._RUNNER], orgs=[], bindings=[])
+
+        assert self._alter("given-by-deploy") in client.executed
+        assert self._alter("minted-last-boot") not in client.executed
+        assert store.get("ch/service/hunt_runner") == "given-by-deploy"
+
+    def test_a_provided_password_is_not_trimmed(self, tmp_path):
+        """The runner reads the same Secret verbatim; one stray byte is an auth failure."""
+        client = _FakeAdminClient()
+        ChRbacReconciler(
+            client,
+            secrets_store=self._store(tmp_path),
+            provided_passwords={"hunt_runner": " padded\n"},
+        ).reconcile(tiers=[], service_roles=[self._RUNNER], orgs=[], bindings=[])
+
+        assert self._alter(" padded\n") in client.executed
+
+    def test_a_provided_password_creates_the_user_without_a_secrets_store(self):
+        client = _FakeAdminClient()
+        ChRbacReconciler(client, provided_passwords={"hunt_runner": "given-by-deploy"}).reconcile(
+            tiers=[], service_roles=[self._RUNNER], orgs=[], bindings=[]
+        )
+
+        assert self._alter("given-by-deploy") in client.executed
+
+    def test_without_a_store_or_a_provided_password_no_service_user_is_made(self):
+        client = _FakeAdminClient()
+        ChRbacReconciler(client).reconcile(
+            tiers=[], service_roles=[self._RUNNER], orgs=[], bindings=[]
+        )
+
+        assert not any("CREATE USER" in s for s in client.executed)
+        assert "CREATE ROLE IF NOT EXISTS `dfe_hunt_runner_role`" in client.executed
+
+    def test_a_role_without_a_provided_password_still_mints_its_own(self, tmp_path):
+        store = self._store(tmp_path)
+        loader = ChServiceRole(name="loader", mint_user=True, grants=["INSERT ON dfe.*"])
+        client = _FakeAdminClient()
+        ChRbacReconciler(
+            client, secrets_store=store, provided_passwords={"hunt_runner": "given-by-deploy"}
+        ).reconcile(tiers=[], service_roles=[self._RUNNER, loader], orgs=[], bindings=[])
+
+        minted = store.get("ch/service/loader")
+        assert minted != "given-by-deploy"
+        digest = hashlib.sha256(minted.encode()).hexdigest()
+        assert f"ALTER USER `dfe_loader` IDENTIFIED WITH sha256_hash BY '{digest}'" in (
+            client.executed
+        )
+
+    def test_a_provided_password_for_a_role_that_mints_no_user_makes_none(self, tmp_path):
+        role = self._RUNNER.model_copy(update={"mint_user": False})
+        client = _FakeAdminClient()
+        ChRbacReconciler(
+            client,
+            secrets_store=self._store(tmp_path),
+            provided_passwords={"hunt_runner": "given-by-deploy"},
+        ).reconcile(tiers=[], service_roles=[role], orgs=[], bindings=[])
+
+        assert not any("CREATE USER" in s for s in client.executed)
+
+
+class TestReconcileServiceRoles:
+    """The service-only reconcile that runs when tenant isolation is off."""
+
+    def _store(self, tmp_path):
+        return build_secrets(SecretsSettings(provider="file", path=str(tmp_path)))
+
+    def test_it_makes_the_service_users_and_touches_nothing_tenant(self, tmp_path):
+        store = self._store(tmp_path)
+        client = _FakeAdminClient()
+        roles = [
+            ChServiceRole(name="hunt_runner", mint_user=True, grants=["SELECT ON {db}.*"]),
+            ChServiceRole(name="query_reader", mint_user=True, grants=["SELECT ON {db}.*"]),
+            ChServiceRole(name="otel_reader", grants=["SELECT ON {db}.*"]),
+        ]
+        result = ChRbacReconciler(
+            client,
+            secrets_store=store,
+            database="acme",
+            provided_passwords={"hunt_runner": "given-by-deploy"},
+        ).reconcile_service_roles(roles)
+
+        executed = "\n".join(client.executed)
+        assert "CREATE USER IF NOT EXISTS `dfe_hunt_runner`" in executed
+        assert "CREATE USER IF NOT EXISTS `dfe_query_reader`" in executed
+        assert "CREATE USER IF NOT EXISTS `dfe_otel_reader`" not in executed
+        assert "GRANT SELECT ON acme.* TO `dfe_hunt_runner_role`" in executed
+        # No tier, tenant role, row policy, projection or drop.
+        for absent in ("dfe_tenant_role", "ROW POLICY", "TRUNCATE", "DROP", "_tier_"):
+            assert absent not in executed
+        assert sorted(result.minted) == ["service/hunt_runner", "service/query_reader"]
+        assert result.statements == client.executed
+        assert result.errors == []
+
+    def test_a_failing_statement_is_recorded_and_the_rest_still_run(self, tmp_path):
+        class _Refuses(_FakeAdminClient):
+            def command(self, stmt: str) -> None:
+                if stmt.startswith("GRANT SELECT"):
+                    raise RuntimeError("refused")
+                super().command(stmt)
+
+        client = _Refuses()
+        result = ChRbacReconciler(
+            client, secrets_store=self._store(tmp_path), database="dfe"
+        ).reconcile_service_roles(
+            [ChServiceRole(name="query_reader", mint_user=True, grants=["SELECT ON {db}.*"])]
+        )
+
+        assert len(result.errors) == 1
+        assert "refused" in result.errors[0]
+        assert "GRANT `dfe_query_reader_role` TO `dfe_query_reader`" in client.executed
+
+
 class TestDefaultTierName:
     def test_flagged_default_wins(self):
         tiers = [
