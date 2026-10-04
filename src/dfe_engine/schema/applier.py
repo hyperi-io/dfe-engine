@@ -32,6 +32,7 @@ from typing import Any, Literal
 
 from scalo.logger import logger
 
+from dfe_engine.clickhouse.statements import StatementTooLargeError, ddl_settings
 from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerationError, DDLGenerator, quote_ident
 from dfe_engine.source.models import SchemaColumn
@@ -309,7 +310,9 @@ class SchemaApplier:
         if self._dry_run:
             return
         try:
-            self._client.command(sql)
+            self._client.command(sql, settings=ddl_settings(sql))
+        except StatementTooLargeError as exc:
+            raise SchemaApplyError(str(exc)) from exc
         except Exception as exc:
             head = sql.splitlines()[0]
             raise SchemaApplyError(f"ClickHouse rejected: {head} -- {exc}") from exc
