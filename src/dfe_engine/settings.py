@@ -34,6 +34,7 @@ ClickHouse:
 - DFE_CLICKHOUSE_VERIFY (legacy: CLICKHOUSE_VERIFY) -> clickhouse.verify (true/false)
 - DFE_CLICKHOUSE_CONNECTIONS_MIN -> clickhouse.connections_min
 - DFE_CLICKHOUSE_CONNECTIONS_MAX -> clickhouse.connections_max
+- DFE_CLICKHOUSE_DDL_MAX_QUERY_SIZE -> clickhouse.ddl_max_query_size (bytes)
 - DFE_CLICKHOUSE_TOPOLOGY -> clickhouse.topology
 - DFE_CLICKHOUSE_DEFAULT_TTL_DAYS -> clickhouse.default_ttl_days (0 = no default TTL)
 - DFE_CLICKHOUSE_BOOTSTRAP_TABLES -> clickhouse.bootstrap_tables (true/false)
@@ -305,6 +306,16 @@ class ClickHouseSettings(BaseModel):
     )
     connections_min: int = Field(default=10)
     connections_max: int = Field(default=300)
+    ddl_max_query_size: int = Field(
+        default=16_777_216,
+        ge=262_144,
+        description=(
+            "Ceiling in bytes on the max_query_size sent with a schema DDL statement "
+            "(DFE_CLICKHOUSE_DDL_MAX_QUERY_SIZE). A statement over ClickHouse's 256 KiB "
+            "default is sent with its own size plus a small margin; one that would need "
+            "more than this is refused before it is sent."
+        ),
+    )
     # Deployment topology FALLBACK: "single" (standalone CH -> MergeTree DDL) or
     # "replicated" (Replicated/Shared db or Cloud -> ReplicatedMergeTree). Live
     # paths sense the server and ignore this; it only decides when sensing is
@@ -2134,6 +2145,8 @@ def _get_env_overrides() -> dict:
         overrides["clickhouse"]["connections_min"] = int(val)
     if val := _get_env("DFE_CLICKHOUSE_CONNECTIONS_MAX"):
         overrides["clickhouse"]["connections_max"] = int(val)
+    if val := _get_env("DFE_CLICKHOUSE_DDL_MAX_QUERY_SIZE"):
+        overrides["clickhouse"]["ddl_max_query_size"] = int(val)
     if val := _get_env("DFE_CLICKHOUSE_TOPOLOGY"):
         overrides["clickhouse"]["topology"] = val
     if val := _get_env("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS"):

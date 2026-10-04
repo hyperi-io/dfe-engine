@@ -28,6 +28,7 @@ in scalo (promoted from dfe in scalo 2.29.6). Budget exhaustion raises scalo's
 from __future__ import annotations
 
 from collections.abc import Callable
+from itertools import chain
 from threading import Lock
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -39,6 +40,7 @@ from scalo.resilience import ReconnectingResilience, ResilienceConfig, ServiceUn
 from ..settings import get_settings
 from .attribution import merge_log_comment
 from .errors import is_connection_error, is_retryable_error
+from .statements import split_statements
 from .tls import resolve_clickhouse_tls
 
 if TYPE_CHECKING:
@@ -138,26 +140,21 @@ class ClickHouseClientWrapper:
         """
         Execute a query, routing to command() or query() based on query type.
 
-        For backward compatibility with clickhouse-driver style code.
-        Handles multi-statement queries by splitting on semicolons.
+        For backward compatibility with clickhouse-driver style code. A script of
+        several statements runs one statement at a time, cut where a semicolon ends
+        a statement (:func:`~dfe_engine.clickhouse.statements.split_statements`),
+        so a ``;`` inside a string, a quoted identifier or a comment never splits
+        one in two. Each statement is its own resilient unit, so a reconnect
+        mid-script re-runs only the failing one, never those already applied.
+
+        A single statement returns what its route returns. Several return the rows
+        of those that return rows, in order.
         """
-        # Strip trailing semicolons and whitespace
-        query = query.strip().rstrip(";").strip()
-
-        # Check if this is a multi-statement query
-        # Simple heuristic: if there's a semicolon not inside quotes, split.
-        # Each statement is its OWN resilient unit (via _execute_single), so a
-        # reconnect mid-batch re-runs only the failing statement, never the ones
-        # already applied.
-        if ";" in query:
-            # Split and execute each statement
-            statements = [s.strip() for s in query.split(";") if s.strip()]
-            result = []
-            for stmt in statements:
-                result += self._execute_single(stmt, *args, **kwargs)
-            return result
-
-        return self._execute_single(query, *args, **kwargs)
+        statements = split_statements(query) or [query.strip()]
+        results = [self._execute_single(stmt, *args, **kwargs) for stmt in statements]
+        if len(results) == 1:
+            return results[0]
+        return list(chain.from_iterable(rows for rows in results if isinstance(rows, list)))
 
     def _execute_single(self, query: str, *args, **kwargs):
         """Execute a single query statement through the resilience layer."""

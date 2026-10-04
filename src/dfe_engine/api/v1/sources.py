@@ -85,6 +85,7 @@ from dfe_engine.source.deployment import (
     SourcePlanArtifact,
     deploy_statements_for_build,
     ensure_build_artifact,
+    execute_ddl,
     plan_from_build,
     previous_deployed_version_ids,
 )
@@ -1597,7 +1598,7 @@ def _apply_source_schema(
 
         SchemaApplier(ch, resolver).ensure_database(db)
         for stmt in statements:
-            ch.execute(stmt)
+            execute_ddl(ch, stmt)
             applied += 1
     except Exception as exc:
         raise HTTPException(

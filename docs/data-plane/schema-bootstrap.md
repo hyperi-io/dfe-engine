@@ -86,6 +86,7 @@ install with no deploy repo boots core-only.
 |---|---|---|
 | `DFE_CLICKHOUSE_BOOTSTRAP_TABLES` | `true` | Apply the manifest at startup. Off reports the schema state as unknown and gates nothing. |
 | `DFE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS` | `180` | How long to keep retrying an unreachable ClickHouse before reporting the pass failed. |
+| `DFE_CLICKHOUSE_DDL_MAX_QUERY_SIZE` | `16777216` | Ceiling in bytes on the `max_query_size` sent with schema DDL. A statement over ClickHouse's 256 KiB default -- the widest Elastic vendor table is 688 KB -- is sent with its own size plus 4 KiB, by the manifest apply and by a source deploy alike. One that would need more is refused before it is sent. A caller's own SQL never gets the setting. |
 | `DFE_KAFKA_BOOTSTRAP_TOPICS` | `true` | Create the declared topic set at startup, create-only. |
 | `DFE_KAFKA_TIERED_STORAGE` | `false` | The brokers tier to object storage, so the landing topic is created with `remote.storage.enable`. Off leaves the key unset rather than false, which is what a broker-level setting needs. |
 | `DFE_KAFKA_TOPIC_MAX_MESSAGE_BYTES` | the manifest's | `max.message.bytes` on every topic the engine creates, this set and each source's `_land` and `_load`. Set it to the deployment's message size: a managed broker capped below the manifest's refuses the create, and the dead-letter set then holds the engine NotReady. |
