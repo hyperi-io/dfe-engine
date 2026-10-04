@@ -7,6 +7,7 @@ from typing import Any, TypeVar
 from pydantic import BaseModel, Field, model_validator
 from scalo.logger import logger
 
+from dfe_engine.clickhouse.statements import ddl_settings
 from dfe_engine.schema.engine_resolver import EngineResolver
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2, SchemaBuildResult
 from dfe_engine.services.schema.json_promotion_service import clickhouse_table_exists
@@ -14,7 +15,7 @@ from dfe_engine.source.models import Source
 from dfe_engine.source.type_registry import TypeRegistry
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
-TDoc = TypeVar("TDoc", bound="VersionedSourceArtifactDocument")
+TDoc = TypeVar("TDoc", bound=BaseModel)
 
 
 class SourceBuildVersionRecord(BaseModel):
@@ -350,6 +351,18 @@ def plan_from_build(
     )
 
 
+def execute_ddl(client: Any, statement: str) -> Any:
+    """Run one deploy DDL statement with the ``max_query_size`` it needs.
+
+    A wide vendor schema renders a table definition several times ClickHouse's
+    256 KiB parse limit, which the server refuses unless the query raises it.
+
+    Raises:
+        StatementTooLargeError: The statement needs more than the configured ceiling.
+    """
+    return client.execute(statement, settings=ddl_settings(statement))
+
+
 def execute_ddl_statements(
     client: Any,
     statements: list[str],
@@ -359,7 +372,7 @@ def execute_ddl_statements(
     failed: list[tuple[str, str]] = []
     for stmt in statements:
         try:
-            client.execute(stmt)
+            execute_ddl(client, stmt)
             executed.append(stmt)
             logger.info(f"Source deploy DDL executed: {stmt[:80]}...")
         except Exception as exc:

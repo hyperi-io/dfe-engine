@@ -58,7 +58,7 @@ class _FakeClient:
             return _Result([(name,) for name in self.columns])
         return _Result([[1]])
 
-    def command(self, sql: str) -> None:
+    def command(self, sql: str, settings: dict[str, Any] | None = None) -> None:
         self.statements.append(sql)
 
 

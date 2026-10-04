@@ -45,6 +45,7 @@ from typing import Any, Literal
 from dfe_schemas.render import RenderedObject
 from scalo.logger import logger
 
+from dfe_engine.clickhouse.statements import StatementTooLargeError, ddl_settings
 from dfe_engine.schema.ledger import LedgerRow, MigrationLedger
 
 Action = Literal["created", "altered", "unchanged", "refused", "skipped"]
@@ -647,7 +648,9 @@ class ManifestApplier:
         if self._dry_run:
             return
         try:
-            self._client.command(sql)
+            self._client.command(sql, settings=ddl_settings(sql))
+        except StatementTooLargeError as exc:
+            raise ManifestApplyError(str(exc)) from exc
         except Exception as exc:
             raise ManifestApplyError(
                 f"ClickHouse rejected: {sql.splitlines()[0]} -- {exc}"
