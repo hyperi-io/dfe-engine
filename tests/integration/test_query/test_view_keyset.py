@@ -46,7 +46,7 @@ def executor(clickhouse_client, clickhouse_test_database) -> ViewExecutor:
     )
     clickhouse_client.command(
         "CREATE VIEW dfe_v_probe_capped AS SELECT n, id FROM probe_events "
-        "WHERE org = {org_id:String} ORDER BY n LIMIT {limit:UInt32}"
+        "WHERE org = {org_id:String} ORDER BY n, id LIMIT {limit:UInt32}"
     )
     catalog = ViewCatalog(client=clickhouse_client, database=clickhouse_test_database)
     return ViewExecutor(
