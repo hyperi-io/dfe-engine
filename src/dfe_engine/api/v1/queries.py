@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
-from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.deps import CurrentUser, Settings, require_action
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.query.models import (
     QueryOptions,
@@ -71,22 +71,37 @@ class QueryResponse(BaseModel):
 # -- Dependencies --------------------------------------------
 
 
-def _get_view_executor(request: Request):
-    """Resolve ViewExecutor from app state. Returns None if not configured."""
-    return getattr(request.app.state, "view_executor", None)
+def _require_view_executor(request: Request, settings: Settings):
+    """The app's ViewExecutor, built on first use, or 503 when it cannot be built.
 
+    Built on demand rather than at startup: the reader's password is minted by the
+    startup reconcile, and ClickHouse may not be reachable when the app boots. A
+    failed build is not kept, so the next request tries again.
+    """
+    executor = getattr(request.app.state, "view_executor", None)
+    if executor is not None:
+        return executor
 
-def _require_view_executor(request: Request):
-    """Resolve ViewExecutor, raising 503 if not configured."""
-    executor = _get_view_executor(request)
-    if executor is None:
+    from dfe_engine.query.datasources.clickhouse import RestrictedReaderUnavailableError
+    from dfe_engine.query.executor import build_view_executor
+
+    try:
+        executor = build_view_executor(settings)
+    except RestrictedReaderUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "reader_unprovisioned", "message": str(exc)},
+        ) from exc
+    except Exception as exc:
+        logger.warning("view executor unavailable", error=str(exc))
         raise HTTPException(
             status_code=503,
             detail={
                 "code": "not_configured",
                 "message": "Query engine not configured -- ClickHouse connection required",
             },
-        )
+        ) from exc
+    request.app.state.view_executor = executor
     return executor
 
 
@@ -101,7 +116,7 @@ ViewExec = Annotated[Any, Depends(_require_view_executor)]
     response_model=list[ViewDefinition],
     dependencies=[Depends(require_action(scopes_dict["query_read"]))],
 )
-async def list_views(
+def list_views(
     user: CurrentUser,
     executor: ViewExec,
     namespace: str | None = Query(None, description="Filter by namespace"),
@@ -115,7 +130,7 @@ async def list_views(
     response_model=list[str],
     dependencies=[Depends(require_action(scopes_dict["query_read"]))],
 )
-async def list_namespaces(
+def list_namespaces(
     user: CurrentUser,
     executor: ViewExec,
 ) -> list[str]:
@@ -128,7 +143,7 @@ async def list_namespaces(
     response_model=ViewDefinition,
     dependencies=[Depends(require_action(scopes_dict["query_read"]))],
 )
-async def get_view(
+def get_view(
     label: str,
     user: CurrentUser,
     executor: ViewExec,
@@ -146,12 +161,13 @@ async def get_view(
 # -- View execution ------------------------------------------
 
 
+# The view routes are plain defs: their queries block, so FastAPI runs them off the event loop.
 @router.post(
     "/views/{label:path}/execute",
     response_model=QueryResponse,
     dependencies=[Depends(require_action(scopes_dict["query_execute"]))],
 )
-async def execute_view(
+def execute_view(
     label: str,
     body: ViewExecuteRequest,
     user: CurrentUser,

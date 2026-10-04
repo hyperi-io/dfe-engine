@@ -11,9 +11,14 @@ from dfe_engine.query.datasources import (
     list_adapters,
     register_adapter,
 )
-from dfe_engine.query.datasources.clickhouse import ClickHouseAdapter
+from dfe_engine.query.datasources.clickhouse import (
+    ClickHouseAdapter,
+    RestrictedReaderUnavailableError,
+    restricted_password,
+)
 from dfe_engine.query.models import ExplainPlan, ExplainStepType
-from dfe_engine.settings import DFESettings
+from dfe_engine.secrets import build_secrets
+from dfe_engine.settings import DFESettings, SecretsSettings
 
 
 class TestAdapterRegistry:
@@ -213,6 +218,7 @@ class TestGetRestrictedClientTls:
         ca = tmp_path / "internal-ca.pem"
         ca.write_text("cert")
         settings = DFESettings(env="test")
+        settings.query_views.restricted_password = "reader-pw"
         settings.clickhouse.secure = True
         settings.clickhouse.verify = True
         settings.clickhouse.ca_cert = str(ca)
@@ -228,6 +234,7 @@ class TestGetRestrictedClientTls:
 
     def test_insecure_settings_pass_no_tls_kwargs(self, monkeypatch) -> None:
         settings = DFESettings(env="test")
+        settings.query_views.restricted_password = "reader-pw"
         settings.clickhouse.secure = False
         monkeypatch.setattr("dfe_engine.settings.get_settings", lambda: settings)
 
@@ -238,6 +245,44 @@ class TestGetRestrictedClientTls:
         assert "secure" not in kwargs
         assert "verify" not in kwargs
         assert "ca_cert" not in kwargs
+
+
+class TestRestrictedReaderPassword:
+    """The views run as the minted reader, on the password the reconcile gave it."""
+
+    @pytest.fixture(autouse=True)
+    def _no_provided_password(self, monkeypatch):
+        monkeypatch.delenv("DFE_CLICKHOUSE_QUERY_READER_PASSWORD", raising=False)
+
+    def _settings(self, tmp_path) -> DFESettings:
+        return DFESettings(env="test", secrets=SecretsSettings(provider="file", path=str(tmp_path)))
+
+    def test_the_configured_password_wins(self, tmp_path) -> None:
+        settings = self._settings(tmp_path)
+        build_secrets(settings.secrets).put("ch/service/query_reader", "stored-pw")
+        settings.query_views.restricted_password = "configured-pw"
+        assert restricted_password(settings) == "configured-pw"
+
+    def test_unset_reads_the_minted_readers_stored_secret(self, tmp_path) -> None:
+        settings = self._settings(tmp_path)
+        build_secrets(settings.secrets).put("ch/service/query_reader", "stored-pw")
+        assert restricted_password(settings) == "stored-pw"
+
+    def test_the_client_connects_as_the_reader_with_the_stored_secret(self, tmp_path) -> None:
+        settings = self._settings(tmp_path)
+        build_secrets(settings.secrets).put("ch/service/query_reader", "stored-pw")
+
+        with patch("clickhouse_connect.get_client") as get_client:
+            ClickHouseAdapter("default").get_restricted_client(settings)
+        kwargs = get_client.call_args[1]
+        assert kwargs["username"] == "dfe_query_reader"
+        assert kwargs["password"] == "stored-pw"
+
+    def test_no_password_anywhere_is_refused_before_connecting(self, tmp_path) -> None:
+        with patch("clickhouse_connect.get_client") as get_client:
+            with pytest.raises(RestrictedReaderUnavailableError, match="dfe_query_reader"):
+                ClickHouseAdapter("default").get_restricted_client(self._settings(tmp_path))
+        get_client.assert_not_called()
 
 
 class TestClickHouseAdapterExplainParsing:

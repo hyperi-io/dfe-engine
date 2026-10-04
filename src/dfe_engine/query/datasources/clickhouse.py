@@ -19,6 +19,20 @@ from dfe_engine.query.datasources import DatasourceAdapter, register_adapter
 from dfe_engine.query.models import ExplainPlan, ExplainStep, ExplainStepType
 
 
+class RestrictedReaderUnavailableError(Exception):
+    """The restricted reader has no password yet, so views cannot run as it."""
+
+
+def restricted_password(settings: Any) -> str:
+    """The restricted reader's password: the configured one, else the minted user's own."""
+    qv = settings.query_views
+    if qv.restricted_password:
+        return qv.restricted_password
+    from dfe_engine.governance.ch.bootstrap import service_user_password
+
+    return service_user_password(settings, qv.restricted_user)
+
+
 def _estimated_rows(estimate: Any) -> int | None:
     """Rows EXPLAIN ESTIMATE expects the query to read; None when it lists no MergeTree read."""
     if not estimate.result_rows:
@@ -53,24 +67,39 @@ class ClickHouseAdapter(DatasourceAdapter):
                 self._manager = ClickHouseManager.get_instance()
         return self._manager
 
-    def get_restricted_client(self) -> Any:
-        """Get a restricted clickhouse-connect client for parameterized view execution."""
+    def get_restricted_client(self, settings: Any = None) -> Any:
+        """Get a restricted clickhouse-connect client for parameterized view execution.
+
+        Args:
+            settings: The engine settings; None reads the process-wide ones.
+
+        Returns:
+            A clickhouse-connect client authenticated as ``query_views.restricted_user``.
+
+        Raises:
+            RestrictedReaderUnavailableError: When the reader has no password yet.
+        """
         if self._restricted_client is None:
             import clickhouse_connect
 
             from dfe_engine.clickhouse.tls import resolve_clickhouse_tls
             from dfe_engine.settings import get_settings
 
-            settings = get_settings()
+            settings = settings or get_settings()
             ch = settings.clickhouse
             qv = settings.query_views
+            password = restricted_password(settings)
+            if not password:
+                raise RestrictedReaderUnavailableError(
+                    f"ClickHouse user {qv.restricted_user!r} has no password yet"
+                )
             tls = resolve_clickhouse_tls(secure=ch.secure, verify=ch.verify, ca_cert=ch.ca_cert)
 
             connect_params: dict[str, Any] = {
                 "host": ch.host,
                 "port": ch.port,
                 "username": qv.restricted_user,
-                "password": qv.restricted_password,
+                "password": password,
                 "database": ch.database,
             }
             connect_params.update(tls.connect_kwargs())

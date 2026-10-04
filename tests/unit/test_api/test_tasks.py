@@ -247,10 +247,10 @@ class TestQueriesRouter:
     """GET/POST /api/v1/queries endpoints."""
 
     def test_views_not_configured_returns_503(self, client, admin_headers):
-        """Returns 503 when ViewExecutor is not configured."""
+        """Returns 503 while the restricted reader has no password to connect with."""
         resp = client.get("/api/v1/queries/views", headers=admin_headers)
         assert resp.status_code == 503
-        assert resp.json()["code"] == "not_configured"
+        assert resp.json()["code"] == "reader_unprovisioned"
 
     def test_namespaces_not_configured_returns_503(self, client, admin_headers):
         resp = client.get("/api/v1/queries/views/namespaces", headers=admin_headers)

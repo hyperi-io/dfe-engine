@@ -117,37 +117,10 @@ class QueryClient:
         """Get ViewExecutor, creating it lazily if possible."""
         if self._view_executor is None:
             try:
-                from dfe_engine.query.catalog import ViewCatalog
-                from dfe_engine.query.datasources.clickhouse import ClickHouseAdapter
-                from dfe_engine.query.executor import ViewExecutor
+                from dfe_engine.query.executor import build_view_executor
                 from dfe_engine.settings import get_settings
 
-                settings = get_settings()
-                qv = settings.query_views
-
-                # `target` selects the connection (auth db); catalog/executor
-                # qualify view + table lookups against the data database.
-                adapter = ClickHouseAdapter(target=settings.clickhouse.database)
-                restricted_client = adapter.get_restricted_client()
-                admin_client = adapter.manager.get_clickhouse_client()
-                data_db = settings.clickhouse.effective_data_database
-
-                catalog = ViewCatalog(
-                    client=admin_client,
-                    database=data_db,
-                    cache_ttl=qv.catalog_cache_ttl,
-                    view_prefix=qv.view_prefix,
-                )
-
-                self._view_executor = ViewExecutor(
-                    restricted_client=restricted_client,
-                    catalog=catalog,
-                    database=data_db,
-                    default_limit=qv.default_limit,
-                    max_limit=qv.max_limit,
-                    default_timeout=qv.default_timeout,
-                    max_timeout=qv.max_timeout,
-                )
+                self._view_executor = build_view_executor(get_settings())
             except Exception:
                 return None
 

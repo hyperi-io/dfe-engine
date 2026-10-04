@@ -395,9 +395,8 @@ class TestDefaultServiceRoles:
         by_name = {r.name: r for r in DEFAULT_SERVICE_ROLES}
         assert by_name["loader"].mint_user is True
         assert by_name["query_reader"].mint_user is True
-        # hunt_runner and otel_reader are granted alongside a tier, never
-        # minted users of their own
-        assert by_name["hunt_runner"].mint_user is False
+        # otel_reader is composed onto group users, never a minted user of its own.
+        # hunt_runner's flag is the dfe-schemas catalogue's, and moves with its version.
         assert by_name["otel_reader"].mint_user is False
 
     def test_otel_reader_reads_the_otel_database(self):

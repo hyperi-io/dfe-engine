@@ -22,7 +22,13 @@ The catalogue is gitcrud config, not code; the reconciler renders whatever tiers
 """
 
 from .bindings import derive_group_bindings
-from .bootstrap import ch_admin_client, reconcile_from_stores, tenant_isolation_enabled
+from .bootstrap import (
+    ch_admin_client,
+    reconcile_from_stores,
+    reconcile_service_roles_from_settings,
+    service_user_password,
+    tenant_isolation_enabled,
+)
 from .models import (
     DEFAULT_SERVICE_ROLES,
     DEFAULT_TIERS,
@@ -34,7 +40,13 @@ from .models import (
     org_user_name,
     tenant_policy_name,
 )
-from .reconciler import ChRbacReconciler, ReconcileResult, compute_drops, reconcile_ch_rbac
+from .reconciler import (
+    ChRbacReconciler,
+    ReconcileResult,
+    compute_drops,
+    reconcile_ch_rbac,
+    reconcile_ch_service_roles,
+)
 from .render import (
     render_materialise,
     render_pinned_user,
@@ -62,8 +74,11 @@ __all__ = [
     "derive_group_bindings",
     "org_user_name",
     "reconcile_ch_rbac",
+    "reconcile_ch_service_roles",
     "reconcile_from_stores",
+    "reconcile_service_roles_from_settings",
     "request_ch_rbac_reconcile",
+    "service_user_password",
     "tenant_isolation_enabled",
     "render_materialise",
     "render_pinned_user",
