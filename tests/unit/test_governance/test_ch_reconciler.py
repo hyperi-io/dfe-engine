@@ -17,6 +17,8 @@ from __future__ import annotations
 import hashlib
 from types import SimpleNamespace
 
+import pytest
+
 from dfe_engine.governance.ch.models import ChServiceRole, ChTier, GroupChBinding
 from dfe_engine.governance.ch.reconciler import (
     ChRbacReconciler,
@@ -326,6 +328,20 @@ class TestReconcileServiceRoles:
         assert len(result.errors) == 1
         assert "refused" in result.errors[0]
         assert "GRANT `dfe_query_reader_role` TO `dfe_query_reader`" in client.executed
+
+    def test_a_lost_connection_fails_the_run_rather_than_reading_as_partial(self, tmp_path):
+        """A partial run is never retried, so an outage recorded as one leaves the users unmade."""
+
+        class _Gone(_FakeAdminClient):
+            def command(self, stmt: str) -> None:
+                raise ConnectionRefusedError("[Errno 111] Connection refused")
+
+        with pytest.raises(ConnectionRefusedError):
+            ChRbacReconciler(
+                _Gone(), secrets_store=self._store(tmp_path), database="dfe"
+            ).reconcile_service_roles(
+                [ChServiceRole(name="hunt_runner", mint_user=True, grants=["SELECT ON {db}.*"])]
+            )
 
 
 class TestDefaultTierName:

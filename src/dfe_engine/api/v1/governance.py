@@ -431,7 +431,12 @@ def reconcile_ch_rbac_endpoint(user: CurrentUser, request: Request) -> dict[str,
     ClickHouse, minting the service-user secrets via the secrets seam. Idempotent.
     governance:write.
     """
-    from dfe_engine.governance.ch import ch_admin_client, reconcile_from_stores
+    from dfe_engine.clickhouse.errors import is_connection_error
+    from dfe_engine.governance.ch import (
+        ch_admin_client,
+        note_ch_rbac_reconciled,
+        reconcile_from_stores,
+    )
     from dfe_engine.settings import load_settings
 
     settings = load_settings()
@@ -443,13 +448,23 @@ def reconcile_ch_rbac_endpoint(user: CurrentUser, request: Request) -> dict[str,
             detail={"code": "clickhouse_unavailable", "message": str(exc)},
         ) from exc
 
-    result = reconcile_from_stores(
-        admin_client,
-        settings=settings,
-        org_registry=getattr(request.app.state, "org_registry", None),
-        group_store=getattr(request.app.state, "group_store", None),
-        role_config=live_role_config(request),
-    )
+    try:
+        result = reconcile_from_stores(
+            admin_client,
+            settings=settings,
+            org_registry=getattr(request.app.state, "org_registry", None),
+            group_store=getattr(request.app.state, "group_store", None),
+            role_config=live_role_config(request),
+        )
+    except Exception as exc:
+        if not is_connection_error(exc):
+            raise
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "clickhouse_unavailable", "message": str(exc)},
+        ) from exc
+    # A full run covers every identity, so a startup retry still waiting stands down.
+    note_ch_rbac_reconciled(request.app.state)
     return {
         "statements": len(result.statements),
         "dropped": len(result.dropped),

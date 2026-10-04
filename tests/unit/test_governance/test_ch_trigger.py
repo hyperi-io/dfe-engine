@@ -14,13 +14,19 @@ ran, and a real prometheus manager counts how each run ended.
 import itertools
 import threading
 import time
+from types import SimpleNamespace
 
 import clickhouse_connect
 from prometheus_client.parser import text_string_to_metric_families
 from scalo.metrics import create_metrics
 
-from dfe_engine.governance.ch import ReconcileMetrics, ReconcileResult, ReconcileTrigger
-from dfe_engine.governance.ch.trigger import RECONCILES
+from dfe_engine.governance.ch import (
+    ReconcileMetrics,
+    ReconcileResult,
+    ReconcileTrigger,
+    note_ch_rbac_reconciled,
+)
+from dfe_engine.governance.ch.trigger import RECONCILES, RETRIES
 
 _SETTLE = 0.2
 _WAIT = 10.0
@@ -155,19 +161,119 @@ def test_retries_back_off_and_stop_growing_at_the_cap() -> None:
         raise ConnectionRefusedError("clickhouse is down")
 
     trigger = ReconcileTrigger(
-        down, settle_seconds=0.0, retry_initial_seconds=0.05, retry_max_seconds=0.2
+        down, settle_seconds=0.0, retry_initial_seconds=0.1, retry_max_seconds=0.4
     )
 
     trigger.request()
     assert _wait_for(lambda: len(calls) >= 6)
     assert trigger.close(_WAIT)
 
-    # 0.05, 0.1, then 0.2 each; uncapped the fifth gap would be 0.8.
+    # Nominal 0.1, 0.2, then 0.4 each, each jittered into its upper half; uncapped
+    # the fifth gap would be 1.6.
     gaps = [later - earlier for earlier, later in itertools.pairwise(calls)]
     assert gaps[0] >= 0.05
     assert gaps[1] >= 0.1
     assert all(gap >= 0.2 for gap in gaps[2:5])
-    assert max(gaps[2:5]) < 0.5
+    assert max(gaps[2:5]) < 0.8
+
+
+def test_each_retry_wait_is_jittered_within_the_upper_half_of_its_back_off() -> None:
+    trigger = ReconcileTrigger(ReconcileResult, retry_initial_seconds=4.0, retry_max_seconds=300.0)
+
+    waits = {failures: [trigger._backoff(failures) for _ in range(200)] for failures in (1, 3, 9)}
+
+    assert all(2.0 <= w <= 4.0 for w in waits[1])
+    assert all(8.0 <= w <= 16.0 for w in waits[3])
+    assert all(150.0 <= w <= 300.0 for w in waits[9])
+    assert len({round(w, 6) for w in waits[9]}) > 1, "the waits at the cap are all one value"
+
+
+def _retries(manager) -> dict[str, float]:
+    counts: dict[str, float] = {}
+    for family in text_string_to_metric_families(manager.metrics_text):
+        for sample in family.samples:
+            if sample.name == RETRIES:
+                counts[sample.labels["reconcile"]] = sample.value
+    return counts
+
+
+def test_a_startup_run_that_gets_through_starts_no_background_run() -> None:
+    manager = _manager()
+    recorder = _Recorder()
+    trigger = ReconcileTrigger(recorder, metrics=ReconcileMetrics(manager))
+
+    assert trigger.run_now() is True
+
+    assert trigger.wait_idle(0.0)
+    assert recorder.calls == 1
+    assert _outcomes(manager) == {"ok": 1.0}
+    assert _retries(manager) == {}
+
+
+def test_a_startup_run_that_fails_is_retried_until_it_gets_through() -> None:
+    """ClickHouse down at the engine's boot: the users arrive once it is back, no restart."""
+    manager = _manager()
+    recorder = _Recorder()
+    failures = iter([ConnectionRefusedError("clickhouse is down")] * 3)
+
+    def down_three_times() -> ReconcileResult:
+        recorder.raise_next = next(failures, None)
+        return recorder()
+
+    trigger = ReconcileTrigger(
+        down_three_times,
+        metrics=ReconcileMetrics(manager),
+        reconcile="service_roles",
+        retry_initial_seconds=0.05,
+    )
+
+    assert trigger.run_now() is False
+    assert trigger.wait_idle(_WAIT)
+
+    assert recorder.calls == 4
+    assert _outcomes(manager) == {"failed": 3.0, "ok": 1.0}
+    assert _retries(manager) == {"service_roles": 3.0}
+
+
+def test_a_reconcile_that_got_through_elsewhere_stands_a_retry_down() -> None:
+    """The governance endpoint's run covers the identities the retry was waiting to make."""
+    recorder = _Recorder()
+    recorder.raise_next = ConnectionRefusedError("clickhouse is down")
+    trigger = ReconcileTrigger(recorder, settle_seconds=0.0, retry_initial_seconds=_WAIT * 6)
+
+    assert trigger.run_now() is False
+    started = time.monotonic()
+    trigger.succeeded()
+
+    assert trigger.wait_idle(_WAIT / 2)
+    assert time.monotonic() - started < _WAIT / 2
+    assert recorder.calls == 1
+
+
+def test_a_change_waiting_behind_a_retry_still_runs_after_one_got_through_elsewhere() -> None:
+    recorder = _Recorder()
+    recorder.raise_next = ConnectionRefusedError("clickhouse is down")
+    trigger = ReconcileTrigger(recorder, settle_seconds=0.0, retry_initial_seconds=0.3)
+
+    assert trigger.run_now() is False
+    trigger.request()
+    trigger.succeeded()
+
+    assert trigger.wait_idle(_WAIT)
+    assert recorder.calls == 2
+
+
+def test_note_reconciled_stands_down_whichever_trigger_the_app_carries() -> None:
+    recorder = _Recorder()
+    recorder.raise_next = ConnectionRefusedError("clickhouse is down")
+    trigger = ReconcileTrigger(recorder, reconcile="service_roles", retry_initial_seconds=_WAIT * 6)
+    state = SimpleNamespace(ch_service_role_reconcile=trigger)
+
+    assert trigger.run_now() is False
+    note_ch_rbac_reconciled(state)
+
+    assert trigger.wait_idle(_WAIT / 2)
+    assert recorder.calls == 1
 
 
 def test_a_reconcile_with_failed_statements_is_counted_partial_and_not_retried() -> None:

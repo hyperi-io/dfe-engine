@@ -48,6 +48,8 @@ class _Recorder:
 def reconciles(app, client):
     """The app's trigger, reconciling into a recorder; settles long enough for a burst."""
     assert app.state.ch_rbac_reconcile is not None
+    # The startup run failed against the guard, so its retry is stood down first.
+    assert app.state.ch_rbac_reconcile.close(_WAIT)
     recorder = _Recorder()
     app.state.ch_rbac_reconcile = ReconcileTrigger(
         recorder, settle_seconds=1.0, retry_initial_seconds=0.2
@@ -283,8 +285,8 @@ def test_a_unit_test_app_never_reconciles_against_a_listening_clickhouse(api_set
     assert clickhouse.connections == 0
 
 
-def test_tenant_isolation_off_wires_no_trigger(api_settings, monkeypatch):
-    """The reconcile is off with tenant isolation, and so is every reconcile after it."""
+def test_tenant_isolation_off_wires_no_change_trigger(api_settings, monkeypatch):
+    """With tenant isolation off an org or group change reconciles nothing."""
     from fastapi.testclient import TestClient
 
     from dfe_engine.api.app import create_app
@@ -296,5 +298,40 @@ def test_tenant_isolation_off_wires_no_trigger(api_settings, monkeypatch):
     try:
         with TestClient(application, raise_server_exceptions=False):
             assert getattr(application.state, "ch_rbac_reconcile", None) is None
+    finally:
+        _registries.clear()
+
+
+@pytest.mark.parametrize(
+    ("isolation", "attribute"),
+    [("true", "ch_rbac_reconcile"), ("false", "ch_service_role_reconcile")],
+    ids=["isolation-on", "isolation-off"],
+)
+def test_a_startup_reconcile_that_fails_is_left_retrying_and_the_api_still_starts(
+    api_settings, monkeypatch, isolation, attribute
+):
+    """ClickHouse down at boot: the API serves, and a retry is waiting to make the users.
+
+    The conftest guard refuses the admin client, which is how the startup run sees
+    a ClickHouse that is down. The retry runs on the trigger's own back-off, so the
+    test reads that one is pending rather than waiting it out.
+    """
+    from fastapi.testclient import TestClient
+    from scalo.metrics import create_metrics
+
+    from dfe_engine.api.app import create_app
+    from dfe_engine.api.deps import _registries
+    from dfe_engine.governance.ch.bootstrap import TENANT_ISOLATION_ENV
+
+    monkeypatch.setenv(TENANT_ISOLATION_ENV, isolation)
+    manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+    application = create_app(settings=api_settings, metrics_manager=manager)
+    try:
+        with TestClient(application, raise_server_exceptions=False) as client:
+            trigger = getattr(application.state, attribute)
+            assert _failed_runs(manager) == 1
+            assert trigger.wait_idle(0.0) is False, "no retry is waiting behind the failed run"
+            assert client.get("/livez").status_code == 200
+        assert trigger.wait_idle(0.0), "shutdown left the retry running"
     finally:
         _registries.clear()

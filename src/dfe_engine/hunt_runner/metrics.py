@@ -35,6 +35,7 @@ BACKLOG = "hunt_backlog"
 TICK_DURATION = "hunt_tick_duration_seconds"
 DETECTIONS_CAPPED = "hunt_detections_capped_total"
 DETECTIONS_DROPPED = "hunt_detections_dropped_total"
+CLICKHOUSE_UNAVAILABLE = "hunt_clickhouse_unavailable_total"
 
 
 class HuntRunnerMetrics:
@@ -74,6 +75,12 @@ class HuntRunnerMetrics:
             DETECTIONS_DROPPED,
             "Matches a rule's detection cap left unwritten",
             ["hunt_id", "rule_id"],
+        )
+        self._unavailable = manager.counter(
+            CLICKHOUSE_UNAVAILABLE,
+            "Connects and ticks that found ClickHouse unreachable or refusing the runner's "
+            "user, and were retried",
+            ["stage", "reason"],
         )
 
     @property
@@ -138,6 +145,17 @@ class HuntRunnerMetrics:
         self._capped.labels(hunt_id=hunt_id, rule_id=rule_id).inc()
         self._dropped.labels(hunt_id=hunt_id, rule_id=rule_id).inc(dropped)
 
+    def clickhouse_unavailable(self, *, stage: str, reason: str) -> None:
+        """Record a connect or a tick ClickHouse refused, which the runner retries.
+
+        Args:
+            stage: ``connect`` at startup, or ``tick`` once running.
+            reason: ``connection`` for an outage, ``authentication`` for a refused user.
+        """
+        if self._manager is None:
+            return
+        self._unavailable.labels(stage=stage, reason=reason).inc()
+
 
 def create(app_name: str = "dfe-hunt-runner") -> HuntRunnerMetrics:
     """Build the instrument set on scalo's metrics backend.
@@ -159,6 +177,7 @@ def create(app_name: str = "dfe-hunt-runner") -> HuntRunnerMetrics:
 __all__ = [
     "BACKLOG",
     "CLAIMS",
+    "CLICKHOUSE_UNAVAILABLE",
     "DETECTIONS_CAPPED",
     "DETECTIONS_DROPPED",
     "OVERRUNS",
