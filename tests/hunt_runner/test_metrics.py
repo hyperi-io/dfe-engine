@@ -34,6 +34,20 @@ def test_the_whole_instrument_set_is_registered_up_front(manager):
         ("histogram", "hunt_tick_duration_seconds"),
         ("counter", "hunt_detections_capped_total"),
         ("counter", "hunt_detections_dropped_total"),
+        ("counter", "hunt_clickhouse_unavailable_total"),
+    ]
+
+
+def test_a_clickhouse_refusal_counts_by_stage_and_reason(manager):
+    HuntRunnerMetrics(manager).clickhouse_unavailable(stage="connect", reason="authentication")
+
+    assert manager.observed("hunt_clickhouse_unavailable_total") == [
+        Observation(
+            "hunt_clickhouse_unavailable_total",
+            {"stage": "connect", "reason": "authentication"},
+            "inc",
+            1,
+        )
     ]
 
 
@@ -51,6 +65,7 @@ def test_no_backend_registers_nothing_and_records_nothing():
     metrics.backlog(3)
     metrics.tick_completed(0.2)
     metrics.detections_capped("h", "r", dropped=4)
+    metrics.clickhouse_unavailable(stage="tick", reason="connection")
 
 
 def test_a_completed_fire_counts_once_and_records_its_duration(manager):

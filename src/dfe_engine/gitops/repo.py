@@ -26,7 +26,6 @@ through.
 
 import math
 import os
-import random
 import re
 import sys
 import threading
@@ -49,6 +48,7 @@ from scalo.resilience import (
     ServiceUnavailable,
 )
 
+from ..backoff import jittered_sleep
 from ..settings import GitopsWriteSettings
 from .dulwich_auth import RedactingErrStream, redact_credentials, scrub_remote_credentials
 from .metrics import GitopsMetrics, WriteOp
@@ -135,11 +135,6 @@ def _is_transient(exc: BaseException, *, outer: BaseException | None = None) -> 
         else:
             current = current.__context__
     return False
-
-
-def _jittered_sleep(seconds: float) -> None:
-    """Sleep a random share of the back-off, so replicas that failed together retry apart."""
-    time.sleep(random.uniform(seconds / 2, seconds))  # noqa: S311 - schedules a retry, not crypto
 
 
 # The clones whose head this scope has already taken; None outside a scope.
@@ -303,7 +298,7 @@ class GitopsRepo:
             is_reconnectable=lambda _exc: False,
             reconnect=lambda: None,
             unavailable_exc=GitopsUnavailableError,
-            sleep=_jittered_sleep,
+            sleep=jittered_sleep,
         )
         self._write_breaker = CircuitBreaker(
             "gitops.write",

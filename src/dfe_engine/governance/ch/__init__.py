@@ -55,13 +55,20 @@ from .render import (
     render_tenant_axis,
     render_tier,
 )
-from .trigger import ReconcileMetrics, ReconcileTrigger, request_ch_rbac_reconcile
+from .trigger import (
+    TRIGGER_ATTRIBUTES,
+    ReconcileMetrics,
+    ReconcileTrigger,
+    note_ch_rbac_reconciled,
+    request_ch_rbac_reconcile,
+)
 
 __all__ = [
     "DEFAULT_SERVICE_ROLES",
     "DEFAULT_TIERS",
     "TENANT_ROLE",
     "TENANT_SETTING",
+    "TRIGGER_ATTRIBUTES",
     "ChRbacReconciler",
     "ChServiceRole",
     "ChTier",
@@ -72,6 +79,7 @@ __all__ = [
     "ch_admin_client",
     "compute_drops",
     "derive_group_bindings",
+    "note_ch_rbac_reconciled",
     "org_user_name",
     "reconcile_ch_rbac",
     "reconcile_ch_service_roles",

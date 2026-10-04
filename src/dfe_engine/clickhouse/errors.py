@@ -114,6 +114,9 @@ _CODES: dict[int, _Meta] = {
 # The retry SSoT - categories a backoff retry can help. CONNECTION also reconnects.
 _RETRYABLE_CATEGORIES = frozenset({ErrorCategory.CONNECTION, ErrorCategory.RATE_LIMITED})
 
+# ClickHouse refused the connecting user itself: UNKNOWN_USER, WRONG_PASSWORD, AUTHENTICATION_FAILED.
+_IDENTITY_CODES = frozenset({192, 193, 516})
+
 
 class ChError(Exception):
     """A typed ClickHouse error - carries the CH ``code``, category + ``user_safe``.
@@ -183,6 +186,16 @@ def is_retryable_error(exc: BaseException) -> bool:
 def is_connection_error(exc: BaseException) -> bool:
     """True when *exc* is a CONNECTION outage (worth a reconnect, not just backoff)."""
     return classify(exc) is ErrorCategory.CONNECTION
+
+
+def is_identity_error(exc: BaseException) -> bool:
+    """True when ClickHouse refused the connecting user: unknown, or the wrong password.
+
+    Not in the resilience retry set: for most callers a refused login is
+    configuration. A worker whose user the engine mints treats it as the user not
+    being there yet.
+    """
+    return parse_code(exc) in _IDENTITY_CODES
 
 
 def wrap_ch_error(exc: BaseException) -> ChError:

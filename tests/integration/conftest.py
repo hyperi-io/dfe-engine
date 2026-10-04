@@ -399,6 +399,64 @@ def ch_client(ch_params):
 
 
 @pytest.fixture
+def late_clickhouse(request):
+    """A ClickHouse whose address is fixed now and which starts only when asked.
+
+    Yields ``(params, start)``. Nothing listens on ``params`` until the test calls
+    ``start()``, which runs the container on that port and returns once it answers,
+    so a test can bring up whatever depends on ClickHouse first. Local docker only:
+    the port is reserved on this host before the server exists. Removed on teardown.
+    """
+    import socket
+
+    clickhouse_connect = pytest.importorskip("clickhouse_connect")
+    if _resolve_tier() != "local":
+        pytest.skip("a ClickHouse that starts late needs the local docker tier")
+    docker = _docker_prefix("local")
+    name = _container_name(request.node.name, "clickhouse")
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    params = {
+        "host": "127.0.0.1",
+        "port": port,
+        "username": "default",
+        "password": "",
+        "secure": False,
+    }
+    run_cmd = [
+        *docker,
+        "run",
+        "-d",
+        "--name",
+        name,
+        *_container_labels("clickhouse"),
+        "-p",
+        f"127.0.0.1:{port}:8123",
+        "-e",
+        "CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1",
+        os.environ.get("DFE_TEST_CH_IMAGE", _DEFAULT_IMAGE),
+    ]
+
+    def start() -> dict:
+        _reap_stale(docker, name)
+        try:
+            _run(run_cmd, timeout=240)  # first image pull can be slow
+        except (subprocess.SubprocessError, FileNotFoundError) as exc:
+            pytest.skip(f"local docker cannot start ClickHouse: {exc}")
+        _connect_when_ready(clickhouse_connect, params).close()
+        return params
+
+    try:
+        yield params, start
+    finally:
+        try:
+            _run([*docker, "rm", "-f", name], timeout=60)
+        except subprocess.SubprocessError, FileNotFoundError:
+            pass
+
+
+@pytest.fixture
 def dfe_db(ch_client):
     """An isolated database carrying the REAL landing, detection and coordination tables.
 
