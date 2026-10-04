@@ -112,6 +112,7 @@ class ViewExecutor:
 
         start = time.perf_counter()
         try:
+            # No readonly key: the reader's profile pins readonly=2 and ClickHouse refuses a change.
             settings = {"max_execution_time": timeout}
             result = self._client.query(
                 sql,
@@ -292,3 +293,44 @@ class ViewExecutor:
         if options.timeout_seconds is not None:
             return min(options.timeout_seconds, self._max_timeout)
         return self._default_timeout
+
+
+def build_view_executor(settings: Any) -> ViewExecutor:
+    """A ViewExecutor that runs every view as the restricted reader.
+
+    The catalogue lists views through the engine's own connection, because the
+    discovery query reads ``system.tables``; the views themselves run only on the
+    restricted one.
+
+    Args:
+        settings: The engine settings.
+
+    Returns:
+        The executor, with its restricted client connected.
+
+    Raises:
+        RestrictedReaderUnavailableError: When the reader has no password yet.
+    """
+    from dfe_engine.query.datasources.clickhouse import ClickHouseAdapter
+
+    qv = settings.query_views
+    # `target` selects the connection (auth db); catalog/executor qualify view +
+    # table lookups against the data database.
+    adapter = ClickHouseAdapter(target=settings.clickhouse.database)
+    restricted_client = adapter.get_restricted_client(settings)
+    data_db = settings.clickhouse.effective_data_database
+    catalog = ViewCatalog(
+        client=adapter.manager.get_clickhouse_client(),
+        database=data_db,
+        cache_ttl=qv.catalog_cache_ttl,
+        view_prefix=qv.view_prefix,
+    )
+    return ViewExecutor(
+        restricted_client=restricted_client,
+        catalog=catalog,
+        database=data_db,
+        default_limit=qv.default_limit,
+        max_limit=qv.max_limit,
+        default_timeout=qv.default_timeout,
+        max_timeout=qv.max_timeout,
+    )

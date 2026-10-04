@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets as _stdlib_secrets
+from collections.abc import Mapping
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -159,17 +160,25 @@ class ChRbacReconciler:
     ``admin_client`` is a clickhouse-connect client with admin rights (duck-typed:
     ``.command(stmt)`` + ``.query(sql, parameters=...).result_rows``).
     ``secrets_store`` is the scalo.secrets seam (``DfeSecrets``): when absent, tiers
-    / roles / org policies still reconcile but no group/service USERS are minted.
+    / roles / org policies still reconcile but no group/org USERS are minted.
     ``database`` is what the ``{db}`` placeholder in the seeded grants resolves to,
-    defaulting to the deployment's data database.
+    defaulting to the deployment's data database. ``provided_passwords`` maps a
+    service role name to the password its deployment supplies, which that minted
+    user adopts in place of one the engine mints.
     """
 
     def __init__(
-        self, admin_client: Any, *, secrets_store: Any = None, database: str | None = None
+        self,
+        admin_client: Any,
+        *,
+        secrets_store: Any = None,
+        database: str | None = None,
+        provided_passwords: Mapping[str, str] | None = None,
     ) -> None:
         self._client = admin_client
         self._secrets = secrets_store
         self._database = database or self._settings_database()
+        self._provided = dict(provided_passwords or {})
 
     @staticmethod
     def _settings_database() -> str:
@@ -256,7 +265,57 @@ class ChRbacReconciler:
                 self._secrets.put(path, plaintext)
         return hashlib.sha256(plaintext.encode()).hexdigest()
 
+    def _service_hash(self, role: Any) -> str | None:
+        """sha256 for a minted service user, or None when there is no password to set.
+
+        A password the deployment provides wins over mint-or-reuse: a separate pod
+        connects with that value, so the user has to carry it. It is also written
+        to the store, so a reader of the stored secret gets the password that works.
+        """
+        path = role.secret_path()
+        provided = self._provided.get(role.name, "")
+        if not provided:
+            return self._hash_for(path) if self._secrets is not None else None
+        if self._secrets is not None:
+            stored = self._secrets.get(path) if self._secrets.exists(path) else None
+            if stored != provided:
+                self._secrets.put(path, provided)
+        return hashlib.sha256(provided.encode()).hexdigest()
+
+    def _service_hashes(self, service_roles: list[Any], result: ReconcileResult) -> dict[str, str]:
+        """Hash every minted service user that has a password, recording each in ``result``."""
+        hashes: dict[str, str] = {}
+        for r in service_roles:
+            if not r.mint_user:
+                continue
+            pw_hash = self._service_hash(r)
+            if pw_hash is None:
+                continue
+            hashes[r.name] = pw_hash
+            result.minted.append(f"service/{r.name}")
+        return hashes
+
+    def _apply(self, stmts: list[str], result: ReconcileResult) -> None:
+        """Run each statement, recording a failure and carrying on with the rest."""
+        for stmt in stmts:
+            try:
+                self._client.command(stmt)
+            except Exception as exc:  # a bad statement must not abort the rest
+                result.errors.append(f"{stmt[:60]}...: {exc}")
+
     # ---- pure render -----------------------------------------------------
+
+    @staticmethod
+    def _render_service_identities(
+        service_roles: list[Any], service_hashes: dict[str, str]
+    ) -> list[str]:
+        """Each service role, then its minted user where it has a password hash."""
+        stmts: list[str] = []
+        for r in service_roles:
+            stmts += render_service_role(r)
+            if r.mint_user and r.name in service_hashes:
+                stmts += render_service_user(r, service_hashes[r.name])
+        return stmts
 
     def render_all(
         self,
@@ -283,10 +342,7 @@ class ChRbacReconciler:
         stmts: list[str] = []
         for t in tiers:
             stmts += render_tier(t)
-        for r in service_roles:
-            stmts += render_service_role(r)
-            if r.mint_user and r.name in service_hashes:
-                stmts += render_service_user(r, service_hashes[r.name])
+        stmts += self._render_service_identities(service_roles, service_hashes)
         default_analyst = _default_tier_name(tiers, "analyst")
         default_tier_role = f"dfe_{default_analyst}_role"
         stmts += render_tenant_axis(org_tables, deny_tables)
@@ -345,14 +401,10 @@ class ChRbacReconciler:
                 count=len(deny_tables),
             )
 
-        service_hashes: dict[str, str] = {}
+        service_hashes = self._service_hashes(service_roles, result)
         group_hashes: dict[str, str] = {}
         org_hashes: dict[str, str] = {}
         if self._secrets is not None:
-            for r in service_roles:
-                if r.mint_user:
-                    service_hashes[r.name] = self._hash_for(f"ch/service/{r.name}")
-                    result.minted.append(f"service/{r.name}")
             for o in orgs:
                 org_hashes[o.name] = self._hash_for(f"ch/orgs/{o.name}")
                 result.minted.append(f"org/{o.name}")
@@ -383,11 +435,7 @@ class ChRbacReconciler:
         )
         materialise = render_materialise(orgs, tiers)
 
-        for stmt in stmts + drops + materialise:
-            try:
-                self._client.command(stmt)
-            except Exception as exc:  # a bad statement must not abort the rest
-                result.errors.append(f"{stmt[:60]}...: {exc}")
+        self._apply(stmts + drops + materialise, result)
         result.statements = stmts + materialise
         result.dropped = drops
 
@@ -401,6 +449,30 @@ class ChRbacReconciler:
                 statements=len(stmts),
                 dropped=len(drops),
                 minted=len(result.minted),
+            )
+        return result
+
+    def reconcile_service_roles(self, service_roles: list[Any]) -> ReconcileResult:
+        """Reconcile the service roles and their minted users alone.
+
+        The service identities are least privilege for the engine's own workers,
+        not tenant fencing, so a deployment with tenant isolation off still gets
+        them. Touches no tier, org, group or row policy, and drops nothing.
+        """
+        result = ReconcileResult()
+        service_roles = resolve_grant_databases(service_roles, self._database)
+        stmts = self._render_service_identities(
+            service_roles, self._service_hashes(service_roles, result)
+        )
+        self._apply(stmts, result)
+        result.statements = stmts
+        if result.errors:
+            logger.warning(
+                "CH service roles reconciled with errors", error_count=len(result.errors)
+            )
+        else:
+            logger.info(
+                "CH service roles reconciled", statements=len(stmts), minted=len(result.minted)
             )
         return result
 
@@ -447,6 +519,7 @@ def reconcile_ch_rbac(
     tiers: list[Any] | None = None,
     service_roles: list[Any] | None = None,
     bindings: list[Any] | None = None,
+    provided_passwords: Mapping[str, str] | None = None,
 ) -> ReconcileResult:
     """The one entry point to reconcile the CH-RBAC config into ClickHouse.
 
@@ -454,12 +527,35 @@ def reconcile_ch_rbac(
     (e.g. once tiers load from gitcrud). ``bindings`` come from
     ``derive_group_bindings`` over the RBAC group store. ``secrets_store`` (the
     scalo.secrets seam) enables minting the service/group USERS - without it only
-    tiers, roles and org row policies reconcile. Used by app.py startup and the
-    governance API endpoint.
+    tiers, roles, org row policies and service users with a ``provided_passwords``
+    entry reconcile. Used by app.py startup and the governance API endpoint.
     """
-    return ChRbacReconciler(admin_client, secrets_store=secrets_store).reconcile(
+    reconciler = ChRbacReconciler(
+        admin_client, secrets_store=secrets_store, provided_passwords=provided_passwords
+    )
+    return reconciler.reconcile(
         tiers=tiers if tiers is not None else DEFAULT_TIERS,
         service_roles=service_roles if service_roles is not None else DEFAULT_SERVICE_ROLES,
         orgs=orgs or [],
         bindings=bindings or [],
+    )
+
+
+def reconcile_ch_service_roles(
+    admin_client: Any,
+    *,
+    secrets_store: Any = None,
+    service_roles: list[Any] | None = None,
+    provided_passwords: Mapping[str, str] | None = None,
+) -> ReconcileResult:
+    """Reconcile the service roles and their users alone, defaulting to the seeded set.
+
+    What app.py startup runs when tenant isolation is off, so the engine's workers
+    still get their least-privilege identities.
+    """
+    reconciler = ChRbacReconciler(
+        admin_client, secrets_store=secrets_store, provided_passwords=provided_passwords
+    )
+    return reconciler.reconcile_service_roles(
+        service_roles if service_roles is not None else DEFAULT_SERVICE_ROLES
     )

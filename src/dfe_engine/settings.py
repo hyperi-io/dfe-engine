@@ -24,6 +24,9 @@ ClickHouse:
 - DFE_CLICKHOUSE_PORT (legacy: CLICKHOUSE_PORT) -> clickhouse.port
 - DFE_CLICKHOUSE_USERNAME (legacy: CLICKHOUSE_USER) -> clickhouse.username
 - DFE_CLICKHOUSE_PASSWORD (legacy: CLICKHOUSE_PASSWORD) -> clickhouse.password
+- DFE_CLICKHOUSE_<ROLE>_PASSWORD -> the password a minted service user adopts instead
+  of one the engine mints, e.g. DFE_CLICKHOUSE_HUNT_RUNNER_PASSWORD. Environment only,
+  never a config file (see provided_service_password)
 - DFE_CLICKHOUSE_DATABASE (legacy: CLICKHOUSE_DATABASE) -> clickhouse.database
 - DFE_CLICKHOUSE_DATA_DATABASE (legacy: CLICKHOUSE_DATA_DATABASE) -> clickhouse.data_database
 - DFE_CLICKHOUSE_LANDING_TABLE (legacy: CLICKHOUSE_LANDING_TABLE) -> clickhouse.landing_table
@@ -857,13 +860,18 @@ class QueryViewSettings(BaseModel):
     """
 
     restricted_user: str = Field(
-        # The query_reader service user minted by governance.ch.ChRbacReconciler;
-        # its password comes from the secrets seam (ch/service/query_reader),
-        # injected via DFE_QUERY_VIEWS_RESTRICTED_PASSWORD.
+        # The query_reader service user minted by governance.ch.ChRbacReconciler.
         default="dfe_query_reader",
         description="Username for the restricted query user (the query_reader service user)",
     )
-    restricted_password: str = Field(default="", description="Password for restricted query user")
+    restricted_password: str = Field(
+        default="",
+        description=(
+            "Password for the restricted query user. Empty reads the minted service "
+            "user's own password: the deployment-provided one, else the secrets store "
+            "(ch/service/query_reader for dfe_query_reader)."
+        ),
+    )
     auto_bootstrap: bool = Field(
         default=True,
         description="Automatically apply builtin views on startup (reader RBAC is reconciled separately)",
@@ -2776,6 +2784,23 @@ def default_data_database() -> str:
     no-settings fallback.
     """
     return str(ClickHouseSettings.model_fields["data_database"].default)
+
+
+def provided_service_password(role: str) -> str:
+    """The password a deployment supplies for a minted ClickHouse service user, or "".
+
+    Read from ``DFE_CLICKHOUSE_<ROLE>_PASSWORD`` and never from a config file,
+    because config files live in the deployment's git repo. Not stripped: the pod
+    that connects as the user reads the same Secret verbatim, and a password that
+    differs by one byte fails ClickHouse auth.
+
+    Args:
+        role: The service role name, e.g. ``hunt_runner``.
+
+    Returns:
+        The provided password, or ``""`` when the deployment supplies none.
+    """
+    return os.getenv(f"DFE_CLICKHOUSE_{role.upper()}_PASSWORD") or ""
 
 
 def get_clickhouse_config(settings: DFESettings | None = None) -> dict:

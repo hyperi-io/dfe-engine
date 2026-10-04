@@ -430,6 +430,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             reconcile_ch_rbac_now, metrics=ReconcileMetrics(app.state.metrics_manager)
         )
         app.state.org_registry.on_change(lambda: request_ch_rbac_reconcile(app.state))
+    else:
+        # The service users are the workers' least privilege, not the tenant fence,
+        # so the hunt runner and the view reader get theirs with isolation off too.
+        from dfe_engine.governance.ch import (
+            ch_admin_client,
+            reconcile_service_roles_from_settings,
+        )
+
+        try:
+            reconcile_service_roles_from_settings(ch_admin_client(settings), settings=settings)
+        except Exception:
+            logger.exception("CH service-role reconcile failed; continuing without it")
 
     # Bootstrap org lifecycle manager
     from dfe_engine.orgs.lifecycle import OrgLifecycleManager
