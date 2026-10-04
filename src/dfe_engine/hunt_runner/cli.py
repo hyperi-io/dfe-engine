@@ -23,7 +23,9 @@ Two commands, matching the two ways the runner is driven:
 
   run - the long-running worker. It builds the CH coordinator, ensures the
       coordination schema, then repeats ``HuntRunner.tick`` on a poll interval until
-      k8s sends SIGTERM (or a local ctrl-c sends SIGINT). Add a pod and it competes
+      k8s sends SIGTERM (or a local ctrl-c sends SIGINT). A ClickHouse that is down,
+      or does not know the runner's user yet, is waited out at the connect and at
+      every tick rather than ending the process (see ``connect``). Add a pod and it competes
       for claims; kill one and its lease expires and is reclaimed - the coordination
       is entirely in ClickHouse, so the loop here owns nothing but cadence + signals.
 
@@ -46,6 +48,7 @@ from dfe_engine.settings import DFESettings, load_settings
 
 from . import metrics as runner_metrics
 from .ch_coordinator import ChCoordinator
+from .connect import TickGuard, connect_when_available
 from .daemon import run_loop
 from .rule_compiler import detection_cap
 from .runner import HuntRunner
@@ -110,6 +113,23 @@ def _build_ch(settings: DFESettings) -> tuple[Any, str]:
     return client, settings.clickhouse.effective_data_database
 
 
+def _connect_coordinator(settings: DFESettings) -> tuple[Any, ChCoordinator]:
+    """One attempt at a raw client whose coordination tables are in place.
+
+    A client from a failed attempt is closed before the error goes on, so a retry
+    never leaves a pool behind.
+    """
+    client, db = _build_ch(settings)
+    try:
+        # The hostname is the pod name under k8s: stable per process, distinct per pod.
+        coord = ChCoordinator(client, database=db, worker_id=socket.gethostname())
+        coord.ensure_schema()
+    except Exception:
+        client.close()
+        raise
+    return client, coord
+
+
 @app.command("materialise")
 def materialise() -> None:
     """Publish the deterministic ``hunt_schedule`` table KEDA scales on (one-shot).
@@ -149,14 +169,17 @@ def run(
     """
     init_scalo_logger(_SERVICE_NAME, otel_tracing=True)
     settings = load_settings()
-    ch, db = _build_ch(settings)
     poll_seconds = settings.hunts.runner_poll_seconds if poll is None else poll
-    # The hostname is the pod name under k8s: stable per process, distinct per pod.
-    coord = ChCoordinator(ch, database=db, worker_id=socket.gethostname())
-    coord.ensure_schema()
     # The long-running worker is the only entry point that reports telemetry; the
     # one-shot materialise publishes and exits before an export interval elapses.
     obs = runner_metrics.create()
+    ch, coord = connect_when_available(
+        lambda: _connect_coordinator(settings),
+        resilience=settings.clickhouse.resilience,
+        metrics=obs,
+        user=settings.clickhouse.username,
+    )
+    db = settings.clickhouse.effective_data_database
     worker = HuntWorker(ch, coord, metrics=obs)
     hunt_dir = settings.hunts.hunt_dir
     sources = _spec_sources(settings, db)
@@ -190,7 +213,7 @@ def run(
         cell[0] = _build_runner()
 
     ticks = run_loop(
-        tick=lambda now: cell[0].tick(now),
+        tick=TickGuard(lambda now: cell[0].tick(now), metrics=obs),
         should_stop=lambda: stop["flag"],
         clock=time.time,
         sleep=time.sleep,

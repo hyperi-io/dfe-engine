@@ -395,20 +395,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # policies on _org_id into ClickHouse, plus one CH user per RBAC group
     # holding that group's org role. On by default: these policies ARE the tenant
     # fence, so a deployment that skipped them would carry _org_id on every row
-    # and enforce none of it. Fully non-fatal. Every org or group change after
-    # this runs it again in the background, so a new org's users are provisioned
-    # without a restart.
-    from dfe_engine.governance.ch import tenant_isolation_enabled
+    # and enforce none of it. Never fatal and never a readiness gate: a failed run
+    # retries in the background until it gets through, and every org or group
+    # change runs it again, so neither a late ClickHouse nor a new org needs a restart.
+    from dfe_engine.governance.ch import (
+        ReconcileMetrics,
+        ReconcileResult,
+        ReconcileTrigger,
+        ch_admin_client,
+        tenant_isolation_enabled,
+    )
 
     if tenant_isolation_enabled():
-        from dfe_engine.governance.ch import (
-            ReconcileMetrics,
-            ReconcileResult,
-            ReconcileTrigger,
-            ch_admin_client,
-            reconcile_from_stores,
-            request_ch_rbac_reconcile,
-        )
+        from dfe_engine.governance.ch import reconcile_from_stores, request_ch_rbac_reconcile
 
         def reconcile_ch_rbac_now() -> ReconcileResult:
             return reconcile_from_stores(
@@ -419,29 +418,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 role_config=app.state.role_config,
             )
 
-        try:
-            reconcile_ch_rbac_now()
-            logger.info("CH RBAC reconcile complete")
-        except Exception:
-            logger.exception("CH RBAC reconcile failed; continuing without it")
-
-        # Wired after the startup run, which already covers the orgs seeded above.
         app.state.ch_rbac_reconcile = ReconcileTrigger(
             reconcile_ch_rbac_now, metrics=ReconcileMetrics(app.state.metrics_manager)
         )
+        if app.state.ch_rbac_reconcile.run_now():
+            logger.info("CH RBAC reconcile complete")
+        # Wired after the startup run, which already covers the orgs seeded above.
         app.state.org_registry.on_change(lambda: request_ch_rbac_reconcile(app.state))
     else:
         # The service users are the workers' least privilege, not the tenant fence,
         # so the hunt runner and the view reader get theirs with isolation off too.
-        from dfe_engine.governance.ch import (
-            ch_admin_client,
-            reconcile_service_roles_from_settings,
-        )
+        from dfe_engine.governance.ch import reconcile_service_roles_from_settings
 
-        try:
-            reconcile_service_roles_from_settings(ch_admin_client(settings), settings=settings)
-        except Exception:
-            logger.exception("CH service-role reconcile failed; continuing without it")
+        def reconcile_service_roles_now() -> ReconcileResult:
+            return reconcile_service_roles_from_settings(
+                ch_admin_client(settings), settings=settings
+            )
+
+        app.state.ch_service_role_reconcile = ReconcileTrigger(
+            reconcile_service_roles_now,
+            metrics=ReconcileMetrics(app.state.metrics_manager),
+            reconcile="service_roles",
+        )
+        if app.state.ch_service_role_reconcile.run_now():
+            logger.info("CH service-role reconcile complete")
 
     # Bootstrap org lifecycle manager
     from dfe_engine.orgs.lifecycle import OrgLifecycleManager
@@ -542,10 +542,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # A sync writes group files and asks for a reconcile, so it stops before both close.
         oidc_group_sync.cancel()
         await asyncio.gather(oidc_group_sync, return_exceptions=True)
-    reconcile_trigger = getattr(app.state, "ch_rbac_reconcile", None)
-    if reconcile_trigger is not None:
-        # A run reads the org and group stores, so it ends before the stores close.
-        await asyncio.to_thread(reconcile_trigger.close, 10.0)
+    from dfe_engine.governance.ch import TRIGGER_ATTRIBUTES
+
+    for attribute in TRIGGER_ATTRIBUTES:
+        reconcile_trigger = getattr(app.state, attribute, None)
+        if reconcile_trigger is not None:
+            # A run reads the org and group stores, so it ends before the stores close.
+            await asyncio.to_thread(reconcile_trigger.close, 10.0)
     autostart_tasks = getattr(app.state, "synthetic_autostart", [])
     for task in autostart_tasks:
         task.cancel()

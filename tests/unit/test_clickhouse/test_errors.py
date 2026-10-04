@@ -20,6 +20,7 @@ from dfe_engine.clickhouse.errors import (
     ErrorCategory,
     classify,
     is_connection_error,
+    is_identity_error,
     is_retryable_error,
     parse_code,
     wrap_ch_error,
@@ -97,6 +98,25 @@ class TestIsConnectionError:
 
     def test_query_error_is_not_a_connection_error(self):
         assert is_connection_error(_exc(62)) is False
+
+
+class TestIsIdentityError:
+    def test_a_refused_login_is_an_identity_error(self):
+        assert (
+            is_identity_error(_exc(516, "Authentication failed")) is True
+        )  # AUTHENTICATION_FAILED
+        assert is_identity_error(_exc(192, "There is no user")) is True  # UNKNOWN_USER
+        assert is_identity_error(_exc(193, "Wrong password")) is True  # WRONG_PASSWORD
+
+    def test_a_missing_grant_is_not(self):
+        """The user exists and is known; it lacks a privilege, which waiting does not fix."""
+        assert is_identity_error(_exc(497, "Not enough privileges")) is False
+
+    def test_an_outage_is_not(self):
+        assert is_identity_error(ConnectionRefusedError("Connection refused")) is False
+
+    def test_a_refused_login_is_outside_the_resilience_retry_set(self):
+        assert is_retryable_error(_exc(516)) is False
 
 
 class TestWrapChError:

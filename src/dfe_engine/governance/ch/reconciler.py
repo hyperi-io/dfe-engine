@@ -24,6 +24,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
+from dfe_engine.clickhouse.errors import is_connection_error
 from dfe_engine.orgs.tenant_scope import org_tenant_ids
 
 from .models import (
@@ -296,11 +297,17 @@ class ChRbacReconciler:
         return hashes
 
     def _apply(self, stmts: list[str], result: ReconcileResult) -> None:
-        """Run each statement, recording a failure and carrying on with the rest."""
+        """Run each statement, recording a failure and carrying on with the rest.
+
+        A lost connection is not a bad statement: it raises, so the run reads as
+        failed and is retried, rather than as a partial run nobody runs again.
+        """
         for stmt in stmts:
             try:
                 self._client.command(stmt)
             except Exception as exc:  # a bad statement must not abort the rest
+                if is_connection_error(exc):
+                    raise
                 result.errors.append(f"{stmt[:60]}...: {exc}")
 
     # ---- pure render -----------------------------------------------------
