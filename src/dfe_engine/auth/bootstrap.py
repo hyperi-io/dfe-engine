@@ -57,7 +57,7 @@ if TYPE_CHECKING:
 # Default local admin username
 _DEFAULT_ADMIN_NAME = "admin"
 # The shipped placeholder password. Refused outside a dev posture.
-_DEFAULT_PASSWORD = "changeme"
+_DEFAULT_PASSWORD = "changeme"  # noqa: S105 - dev placeholder
 # Floor for any password the operator sets through the API.
 MIN_ADMIN_PASSWORD_LENGTH = 12
 # Group the local admin belongs to.
