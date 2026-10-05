@@ -106,6 +106,7 @@ Thumbs.db
 .env.*
 !.env.example
 !.env.example.*
+!.env.e2e.example
 
 # Agent working docs: local by default, never committed.
 docs/superpowers/
