@@ -853,9 +853,14 @@ class SourceVersion(BaseModel):
             )
         return self
 
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def origin(self) -> SourceOrigin | None:
-        """Which way this version's data enters the platform, or None when nothing selects it."""
+        """Which way this version's data enters the platform, or None when nothing selects it.
+
+        Serialized on API responses (source detail ``versions`` and the single-version
+        GET). Derived from ``match`` / ``fetcher``, never stored in YAML.
+        """
         if self.fetcher is not None:
             return "fetcher"
         return "receiver" if self.match is not None else None
@@ -874,7 +879,8 @@ class SourceVersion(BaseModel):
 
     def to_yaml_dict(self) -> dict[str, Any]:
         """Serialize for YAML persistence under ``versions.<id>``."""
-        raw = self.model_dump(mode="json", by_alias=True, exclude_none=True)
+        # origin is derived for the API; writing it back would duplicate match/fetcher.
+        raw = self.model_dump(mode="json", by_alias=True, exclude_none=True, exclude={"origin"})
         # Prune empty per-view containers (e.g. custom_mappings: {}) for clean YAML.
         for view in raw.get("views") or []:
             for key in list(view.keys()):
