@@ -8,7 +8,7 @@
 
 """Live e2e: the CH-RBAC reconcile endpoint against a REAL deployed engine + CH.
 
-Complements test_live_pipeline (which covers the infra/schema DEPLOY flows over
+Complements test_live_pipeline (which covers the schema DEPLOY flow over
 the git deploy repo). This drives ``POST /api/v1/governance/ch-rbac/reconcile`` on
 the real engine and asserts the seeded quota-tier + service roles actually
 materialise in the deployment's ClickHouse - the two-axis RBAC model wired end to

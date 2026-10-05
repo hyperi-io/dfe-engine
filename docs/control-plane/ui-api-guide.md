@@ -182,18 +182,6 @@ Schema-less service config for Rust services (receiver, loader, archiver, etc.)
 | GET | `/services/{service}/{instance}/history` | Config change history |
 | POST | `/services/seed` | Seed defaults |
 
-### Deployments (`/api/v1/deployments`)
-
-K8s/KEDA deployment config (replicas, resources, scaling).
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/deployments` | List deployment configs |
-| GET/PUT/DELETE | `/deployments/{service}/{instance}` | CRUD per service+instance |
-| POST | `/deployments/{service}/{instance}/size/{size}` | Apply t-shirt size |
-| POST | `/deployments/{service}/{instance}/validate` | Validate config |
-| POST | `/deployments/seed` | Seed defaults |
-
 ### Hunts (`/api/v1/hunts`)
 
 | Method | Path | Purpose |
@@ -284,7 +272,6 @@ es.addEventListener('complete', (e) => {
 | CRUD | `/orgs` | Organisation management |
 | POST | `/rules` | Create hunt rule |
 | POST | `/rules/validate` | Validate rule |
-| GET | `/service-surfaces` | Schema-less service discovery |
 | POST | `/transforms/compile` | Compile VRL/CEL transform |
 | POST | `/transforms/test` | Test transform against sample data |
 | GET | `/system/version` | Stack, engine, ui and every pinned app's version (the console footer) |

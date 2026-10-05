@@ -14,7 +14,6 @@ from dfe_engine.api.v1.authoring import router as authoring_router
 from dfe_engine.api.v1.backing_services import router as backing_services_router
 from dfe_engine.api.v1.cel import router as cel_router
 from dfe_engine.api.v1.config import router as config_router
-from dfe_engine.api.v1.deployments import router as deployments_router
 from dfe_engine.api.v1.derived_schemas import router as derived_schemas_router
 from dfe_engine.api.v1.discovery import router as discovery_router
 from dfe_engine.api.v1.fieldmaps import router as fieldmaps_router
@@ -37,7 +36,6 @@ from dfe_engine.api.v1.rules import router as rules_router
 from dfe_engine.api.v1.sampler import router as sampler_router
 from dfe_engine.api.v1.schemas import router as schemas_router
 from dfe_engine.api.v1.scim import router as scim_router
-from dfe_engine.api.v1.service_surfaces import router as service_surfaces_router
 from dfe_engine.api.v1.services import router as services_router
 from dfe_engine.api.v1.sigma import router as sigma_router
 from dfe_engine.api.v1.sources import router as sources_router
@@ -95,12 +93,10 @@ v1_router.include_router(sources_router)
 # The Kafka topics those sources imply: ensure, converge, status, remove
 v1_router.include_router(kafka_topics_router)
 v1_router.include_router(services_router)
-v1_router.include_router(deployments_router)
 v1_router.include_router(admin_links_router)
 v1_router.include_router(fieldmaps_router)
 v1_router.include_router(rules_router)
 v1_router.include_router(alerts_router)
-v1_router.include_router(service_surfaces_router)
 v1_router.include_router(system_router)
 v1_router.include_router(transforms_router)
 v1_router.include_router(hunts_router)

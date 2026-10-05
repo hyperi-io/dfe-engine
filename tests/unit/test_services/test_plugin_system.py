@@ -7,7 +7,6 @@ from dfe_engine.services.plugin import ServicePlugin
 from dfe_engine.services.plugins import (
     all_plugins,
     config_classes,
-    deployment_classes,
     get_plugin,
     register,
     reset,
@@ -55,13 +54,6 @@ class TestPluginDiscovery:
 
     def test_config_classes_mapping(self):
         classes = config_classes()
-        assert len(classes) == 7
-        for name, cls in classes.items():
-            assert name in valid_services()
-            assert hasattr(cls, "model_validate")
-
-    def test_deployment_classes_mapping(self):
-        classes = deployment_classes()
         assert len(classes) == 7
         for name, cls in classes.items():
             assert name in valid_services()
@@ -140,27 +132,3 @@ class TestDescriptors:
         d = get_plugin("receiver").descriptor
         assert "grpc" in d.extra_ports
         assert d.extra_ports["grpc"] == 6000
-
-
-class TestPluginDefaults:
-    """Test default_size and keda_defaults per plugin."""
-
-    def test_receiver_default_size(self):
-        assert get_plugin("receiver").default_size == "small"
-
-    def test_loader_default_size(self):
-        assert get_plugin("loader").default_size == "medium"
-
-    def test_transform_vector_default_size(self):
-        assert get_plugin("transform-vector").default_size == "medium"
-
-    def test_transform_wasm_default_size(self):
-        assert get_plugin("transform-wasm").default_size == "medium"
-
-    def test_fetcher_default_size(self):
-        assert get_plugin("fetcher").default_size == "small"
-
-    def test_keda_defaults_present(self):
-        for name in valid_services():
-            plugin = get_plugin(name)
-            assert isinstance(plugin.keda_defaults, dict)
