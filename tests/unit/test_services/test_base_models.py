@@ -1,13 +1,7 @@
-"""Tests for base service and deployment config models."""
+"""Tests for the base service config model and the service descriptor."""
 
 import pytest
 
-from dfe_engine.deployment.models.common import (
-    BaseDeploymentConfig,
-    ResourceQuantity,
-    ResourceSpec,
-    TShirtSize,
-)
 from dfe_engine.services.descriptor import KafkaRole, ServiceDescriptor
 from dfe_engine.services.models.base import BaseServiceConfig
 
@@ -80,52 +74,3 @@ class TestServiceDescriptor:
             extra_ports={"grpc": 6000, "admin": 9091},
         )
         assert d.extra_ports["grpc"] == 6000
-
-
-class TestBaseDeploymentConfig:
-    """Test BaseDeploymentConfig — the abstract base for deployment configs."""
-
-    def test_defaults(self):
-        cfg = BaseDeploymentConfig()
-        assert cfg.size == TShirtSize.small
-        assert cfg.replicas == 1
-        assert cfg.resources is None
-        assert cfg.keda.enabled is False
-        assert cfg.hpa.enabled is False
-
-    def test_custom_resources(self):
-        cfg = BaseDeploymentConfig(
-            size=TShirtSize.custom,
-            resources=ResourceSpec(
-                requests=ResourceQuantity(cpu="500m", memory="1Gi"),
-                limits=ResourceQuantity(cpu="1", memory="2Gi"),
-            ),
-        )
-        assert cfg.resources.requests.cpu == "500m"
-        assert cfg.resources.limits.memory == "2Gi"
-
-    def test_inherits_properly(self):
-        """All 6 deployment configs should inherit from BaseDeploymentConfig."""
-        from dfe_engine.deployment.models.archiver import ArchiverDeploymentConfig
-        from dfe_engine.deployment.models.fetcher import FetcherDeploymentConfig
-        from dfe_engine.deployment.models.loader import LoaderDeploymentConfig
-        from dfe_engine.deployment.models.receiver import ReceiverDeploymentConfig
-        from dfe_engine.deployment.models.transform_vector import TransformVectorDeploymentConfig
-        from dfe_engine.deployment.models.transform_wasm import TransformWasmDeploymentConfig
-
-        for cls in [
-            ReceiverDeploymentConfig,
-            LoaderDeploymentConfig,
-            ArchiverDeploymentConfig,
-            TransformVectorDeploymentConfig,
-            TransformWasmDeploymentConfig,
-            FetcherDeploymentConfig,
-        ]:
-            assert issubclass(cls, BaseDeploymentConfig), (
-                f"{cls.__name__} must inherit BaseDeploymentConfig"
-            )
-
-    def test_tshirt_sizes(self):
-        for size in TShirtSize:
-            cfg = BaseDeploymentConfig(size=size)
-            assert cfg.size == size

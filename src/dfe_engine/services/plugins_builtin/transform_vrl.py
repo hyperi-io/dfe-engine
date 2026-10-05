@@ -1,6 +1,6 @@
 """Built-in plugin for dfe-transform-vrl.
 
-Consolidates descriptor, validation, sizing, and template overrides
+Consolidates descriptor, validation, and template overrides
 for the embedded VRL transform service. Unlike transform-vector, this
 service embeds the VRL crate directly -- no subprocess, no Vector binary.
 Simpler config: flat source/sink Kafka, VRL transforms directory.
@@ -46,19 +46,6 @@ def _validate_transform_vrl(config: Any, errors: list[str], warnings: list[str])
         )
 
 
-_sizing_overrides: dict[str, dict[str, Any]] = {
-    "xs": {"pipeline": {"batch_size": 500}},
-    "small": {},
-    "medium": {"pipeline": {"batch_size": 2000}},
-    "large": {"pipeline": {"batch_size": 5000}},
-    "xlarge": {"pipeline": {"batch_size": 10000}},
-}
-
-_keda_defaults: dict[str, Any] = {
-    "min_replicas": 1,
-    "max_replicas": 10,
-}
-
 _template_overrides: dict[str, dict[str, Any]] = {
     "production": {
         "source": {
@@ -91,19 +78,12 @@ _template_overrides: dict[str, dict[str, Any]] = {
 
 
 def _make_plugin() -> ServicePlugin:
-    from dfe_engine.deployment.models.transform_vrl import (
-        TransformVrlDeploymentConfig,
-    )
     from dfe_engine.services.models.transform_vrl import TransformVrlConfig
 
     return ServicePlugin(
         descriptor=descriptor,
         config_class=TransformVrlConfig,
-        deployment_class=TransformVrlDeploymentConfig,
         validate_config=_validate_transform_vrl,
-        sizing_overrides=_sizing_overrides,
-        keda_defaults=_keda_defaults,
-        default_size="small",
         config_template_overrides=_template_overrides,
     )
 

@@ -1,10 +1,8 @@
-"""The 4 critical full-stack e2e tests (live deployment required).
+"""The 3 critical full-stack e2e tests (live deployment required).
 
   1. HTTPS ingest -> data lands in the ClickHouse `default` table.
   2. that same data is visible through HyperDX.
-  3. dfe-ui (engine API) can see + change + deploy an INFRA change via the git
-     deploy repo (a Helm-values change).
-  4. dfe-ui (engine API) can see + change + deploy a SCHEMA change via the git
+  3. dfe-ui (engine API) can see + change + deploy a SCHEMA change via the git
      deploy repo (a meta-schema deployment -> DDL).
 
 All are skipped unless the relevant DFE_E2E_* env vars are set (see conftest).
@@ -131,7 +129,7 @@ def test_ingested_data_visible_in_hyperdx(e2e: E2EConfig, ch_client) -> None:
 
 
 # ---------------------------------------------------------------------------
-# deploy-repo helper (tests 3 + 4)
+# deploy-repo helper (test 3)
 # ---------------------------------------------------------------------------
 def _clone_deploy_repo(e2e: E2EConfig, dest: Path) -> Path:
     """Clone the deploy repo via HTTPS creds so we can assert the engine's writes."""
@@ -159,61 +157,7 @@ def _engine_headers(e2e: E2EConfig) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# 3. dfe-ui can see + change + deploy an INFRA change via the deploy repo
-# ---------------------------------------------------------------------------
-def test_ui_deploys_infra_change_via_git(e2e: E2EConfig) -> None:
-    require(e2e, "engine_url", "deploy_repo_url")
-    base = must(e2e.engine_url).rstrip("/")
-    headers = _engine_headers(e2e)
-    svc, inst = "receiver", "production"
-
-    # The service/instance is a TWO-SEGMENT path, not a `{svc}-{inst}` slug. The
-    # slug form 404s, which reads as "no such deployment" rather than "wrong URL".
-    dep_url = f"{base}/api/v1/deployments/{svc}/{inst}"
-
-    # A deployment only exists once the built-in set has been seeded. Seeding is
-    # non-destructive (it never overwrites an existing config), so an already-
-    # seeded deployment is unaffected.
-    httpx.post(f"{base}/api/v1/deployments/seed", headers=headers, verify=e2e.verify, timeout=60.0)
-
-    # READ current deployment config (what the UI shows).
-    cur = httpx.get(dep_url, headers=headers, verify=e2e.verify, timeout=15.0)
-    assert cur.status_code == 200, f"read deployment failed: {cur.status_code} {cur.text}"
-
-    # CHANGE a Helm var (resources.requests.cpu) to a unique sentinel value.
-    #
-    # PUT, not PATCH - the endpoint serves get/put/delete and a PATCH is a 405.
-    # It is a whole-document write, so send the config we just read with the one
-    # field changed rather than a sparse patch, which would blank the rest.
-    sentinel = "137m"
-    config = cur.json()
-    config.setdefault("resources", {}).setdefault("requests", {})["cpu"] = sentinel
-    upd = httpx.put(
-        dep_url,
-        headers=headers,
-        content=json.dumps(config),
-        verify=e2e.verify,
-        timeout=15.0,
-    )
-    assert upd.status_code in (200, 202), f"update failed: {upd.status_code} {upd.text}"
-
-    # NO PUBLISH CALL. There is no `/deployments/publish` endpoint - the engine
-    # publishes to the deploy repo as part of the write itself (the gitops
-    # survivability model: every mutation IS a commit). The old call 404'd, and
-    # the assertion on it hid the fact that the write below had already worked.
-
-    # VERIFY the change reached the deploy repo (the GitOps hand-off surface).
-    def _committed():
-        with tempfile.TemporaryDirectory() as d:
-            repo = _clone_deploy_repo(e2e, Path(d) / "repo")
-            vf = repo / "values" / f"{svc}-{inst}-values.yaml"
-            return vf.exists() and sentinel in vf.read_text()
-
-    assert poll_until(_committed, timeout=90, interval=5, desc=f"{sentinel} in deploy repo values")
-
-
-# ---------------------------------------------------------------------------
-# 4. dfe-ui can see + change + deploy a SCHEMA change via the deploy repo
+# 3. dfe-ui can see + change + deploy a SCHEMA change via the deploy repo
 # ---------------------------------------------------------------------------
 def test_ui_deploys_schema_change_via_git(e2e: E2EConfig) -> None:
     require(e2e, "engine_url", "deploy_repo_url")

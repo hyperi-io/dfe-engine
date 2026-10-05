@@ -1,6 +1,6 @@
 """Built-in plugin for dfe-fetcher.
 
-Consolidates descriptor, validation, sizing, and template overrides
+Consolidates descriptor, validation, and template overrides
 for the fetcher service. Type 2 service (multi-source) -- pulls from
 SaaS APIs and routes events to Kafka like a receiver.
 """
@@ -41,19 +41,6 @@ def _validate_fetcher(config: Any, errors: list[str], warnings: list[str]) -> No
             warnings.append(f"Source '{src.name}': OAuth2 auth without token_url configured")
 
 
-_sizing_overrides: dict[str, dict[str, Any]] = {
-    "xs": {},
-    "small": {},
-    "medium": {},
-    "large": {},
-    "xlarge": {},
-}
-
-_keda_defaults: dict[str, Any] = {
-    "min_replicas": 1,
-    "max_replicas": 4,
-}
-
 _template_overrides: dict[str, dict[str, Any]] = {
     "production": {
         "kafka": {
@@ -85,17 +72,12 @@ _template_overrides: dict[str, dict[str, Any]] = {
 
 
 def _make_plugin() -> ServicePlugin:
-    from dfe_engine.deployment.models.fetcher import FetcherDeploymentConfig
     from dfe_engine.services.models.fetcher import FetcherConfig
 
     return ServicePlugin(
         descriptor=descriptor,
         config_class=FetcherConfig,
-        deployment_class=FetcherDeploymentConfig,
         validate_config=_validate_fetcher,
-        sizing_overrides=_sizing_overrides,
-        keda_defaults=_keda_defaults,
-        default_size="small",
         config_template_overrides=_template_overrides,
     )
 

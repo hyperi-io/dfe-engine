@@ -11,7 +11,7 @@
 | **Phase 1** | RBAC foundation, account/group/API key CRUD, 4 auth paths, audit | Done |
 | **Phase 2** | Per-org pinned ClickHouse users, shared tenant row policies, quota tiers | Done |
 | **Phase 3** | OrgRegistry, HyperDX team/connection sync | Done |
-| **Phase 4** | Schema-less service discovery, service surfaces | In progress - service surfaces shipped (`services/surfaces/registry.py`, `/api/v1/service-surfaces`); typed plugin removal pending |
+| **Phase 4** | Schema-less service discovery | Not pursued - see section 13 |
 
 ---
 
@@ -850,20 +850,10 @@ graph TD
 
 ## 13. Phase 4 status - schema-less service discovery
 
-Adding a new `dfe-transform-elastic` should require zero Python code
-changes. Shipped so far:
-
-1. **Service surface YAML files** (`config/service-surfaces/{name}.yaml`)
-   describing configurable settings and metrics - SHIPPED
-   (`services/surfaces/registry.py`)
-2. **`/api/v1/service-surfaces/`** API endpoints with RBAC - SHIPPED
-
-Remaining:
-
-1. **Metrics manifest caching** from the scalo-rs `/metrics/manifest`
-   endpoint
-2. **Removal of the typed plugin system** (`plugins.py`,
-   `plugins_builtin/` - still present, still the live path)
+Not pursued. An app's shape is data in `dfe-infra/apps.yaml`, served through
+`/api/v1/apps`, so there is no per-service surface registry and no
+`/api/v1/service-surfaces` endpoint. The typed plugin system (`plugins.py`,
+`plugins_builtin/`) still backs `/api/v1/services`.
 
 ---
 

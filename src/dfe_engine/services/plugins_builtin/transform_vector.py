@@ -1,6 +1,6 @@
 """Built-in plugin for dfe-transform-vector.
 
-Consolidates descriptor, validation, sizing, and template overrides
+Consolidates descriptor, validation, and template overrides
 for the vector.dev-based transform service. Type 2 service (multi-source)
 with instance-specific config tree (vector-only pattern).
 """
@@ -43,25 +43,6 @@ def _validate_transform_vector(config: Any, errors: list[str], warnings: list[st
         if src.parent and src.parent not in name_set:
             errors.append(f"Source '{src.name}' references unknown parent '{src.parent}'")
 
-
-_sizing_overrides: dict[str, dict[str, Any]] = {
-    "xs": {},
-    "small": {},
-    "medium": {
-        "memory": {"limit_bytes": 2147483648},
-    },
-    "large": {
-        "memory": {"limit_bytes": 4294967296},
-    },
-    "xlarge": {
-        "memory": {"limit_bytes": 8589934592},
-    },
-}
-
-_keda_defaults: dict[str, Any] = {
-    "min_replicas": 1,
-    "max_replicas": 8,
-}
 
 _template_overrides: dict[str, dict[str, Any]] = {
     "production": {
@@ -115,19 +96,12 @@ _template_overrides: dict[str, dict[str, Any]] = {
 
 
 def _make_plugin() -> ServicePlugin:
-    from dfe_engine.deployment.models.transform_vector import (
-        TransformVectorDeploymentConfig,
-    )
     from dfe_engine.services.models.transform_vector import TransformVectorConfig
 
     return ServicePlugin(
         descriptor=descriptor,
         config_class=TransformVectorConfig,
-        deployment_class=TransformVectorDeploymentConfig,
         validate_config=_validate_transform_vector,
-        sizing_overrides=_sizing_overrides,
-        keda_defaults=_keda_defaults,
-        default_size="medium",
         config_template_overrides=_template_overrides,
     )
 

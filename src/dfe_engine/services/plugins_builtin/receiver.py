@@ -1,8 +1,6 @@
 """Built-in plugin for dfe-receiver.
 
-Consolidates receiver-specific descriptor, validation, sizing, and template
-overrides that were previously scattered across validators.py, templates.py,
-sizing.py, and state.py.
+Consolidates receiver-specific descriptor, validation, and template overrides.
 """
 
 import copy
@@ -55,32 +53,6 @@ def _validate_receiver(config: Any, errors: list[str], warnings: list[str]) -> N
     if config.grpc.enabled and config.grpc.bind_address == config.server.bind_address:
         errors.append("gRPC and HTTP server cannot share the same bind_address")
 
-
-_sizing_overrides: dict[str, dict[str, Any]] = {
-    "xs": {
-        "buffer": {"memory_limit": 0, "pressure_threshold": 0.8},
-    },
-    "small": {
-        "buffer": {"memory_limit": 0, "pressure_threshold": 0.8},
-    },
-    "medium": {
-        "buffer": {"memory_limit": 0, "pressure_threshold": 0.8},
-        "server": {"max_body_size": 10 * 1024 * 1024},
-    },
-    "large": {
-        "buffer": {"memory_limit": 0, "pressure_threshold": 0.9},
-        "server": {"max_body_size": 20 * 1024 * 1024},
-    },
-    "xlarge": {
-        "buffer": {"memory_limit": 0, "pressure_threshold": 0.9},
-        "server": {"max_body_size": 20 * 1024 * 1024},
-    },
-}
-
-_keda_defaults: dict[str, Any] = {
-    "min_replicas": 2,
-    "max_replicas": 10,
-}
 
 _template_overrides: dict[str, dict[str, Any]] = {
     "production": {
@@ -135,7 +107,6 @@ _template_overrides: dict[str, dict[str, Any]] = {
 
 def _make_plugin() -> ServicePlugin:
     from dfe_engine.appmgmt import catalogue
-    from dfe_engine.deployment.models.receiver import ReceiverDeploymentConfig
     from dfe_engine.services.models.receiver import ReceiverConfig
 
     overrides = copy.deepcopy(_template_overrides)
@@ -144,11 +115,7 @@ def _make_plugin() -> ServicePlugin:
     return ServicePlugin(
         descriptor=descriptor,
         config_class=ReceiverConfig,
-        deployment_class=ReceiverDeploymentConfig,
         validate_config=_validate_receiver,
-        sizing_overrides=_sizing_overrides,
-        keda_defaults=_keda_defaults,
-        default_size="small",
         config_template_overrides=overrides,
     )
 

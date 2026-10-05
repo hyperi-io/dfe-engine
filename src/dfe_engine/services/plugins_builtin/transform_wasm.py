@@ -1,6 +1,6 @@
 """Built-in plugin for dfe-transform-wasm.
 
-Consolidates descriptor, validation, sizing, and template overrides
+Consolidates descriptor, validation, and template overrides
 for the WASM-based transform service. Type 2 service (multi-source)
 with flat source list (no config tree -- tree is vector-only).
 """
@@ -42,25 +42,6 @@ def _validate_transform_wasm(config: Any, errors: list[str], warnings: list[str]
         if not src.wasm_module:
             errors.append(f"Source '{src.name}' is missing wasm_module path")
 
-
-_sizing_overrides: dict[str, dict[str, Any]] = {
-    "xs": {},
-    "small": {},
-    "medium": {
-        "memory": {"limit_bytes": 2147483648},
-    },
-    "large": {
-        "memory": {"limit_bytes": 4294967296},
-    },
-    "xlarge": {
-        "memory": {"limit_bytes": 8589934592},
-    },
-}
-
-_keda_defaults: dict[str, Any] = {
-    "min_replicas": 1,
-    "max_replicas": 8,
-}
 
 _template_overrides: dict[str, dict[str, Any]] = {
     "production": {
@@ -114,19 +95,12 @@ _template_overrides: dict[str, dict[str, Any]] = {
 
 
 def _make_plugin() -> ServicePlugin:
-    from dfe_engine.deployment.models.transform_wasm import (
-        TransformWasmDeploymentConfig,
-    )
     from dfe_engine.services.models.transform_wasm import TransformWasmConfig
 
     return ServicePlugin(
         descriptor=descriptor,
         config_class=TransformWasmConfig,
-        deployment_class=TransformWasmDeploymentConfig,
         validate_config=_validate_transform_wasm,
-        sizing_overrides=_sizing_overrides,
-        keda_defaults=_keda_defaults,
-        default_size="medium",
         config_template_overrides=_template_overrides,
     )
 
