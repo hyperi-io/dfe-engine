@@ -39017,11 +39017,29 @@
               }
             ],
             "description": "Last deploy run for this version (source-deploys)"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "receiver",
+                  "fetcher"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin",
+            "description": "Which way this version's data enters the platform, or None when nothing selects it.\n\nSerialized on API responses (source detail ``versions`` and the single-version\nGET). Derived from ``match`` / ``fetcher``, never stored in YAML.",
+            "readOnly": true
           }
         },
         "type": "object",
         "required": [
-          "date_time"
+          "date_time",
+          "origin"
         ],
         "title": "SourceVersionDetail",
         "description": "Source version snapshot plus persisted build/deploy payloads."
