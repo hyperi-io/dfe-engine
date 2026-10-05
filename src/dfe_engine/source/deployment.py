@@ -312,11 +312,13 @@ def plan_ready_status(
         suffix = f" (+{len(validation_errors) - 1} more)" if len(validation_errors) > 1 else ""
         return False, f"Schema validation failed: {head}{suffix}"
     if not statements:
+        # A deploy also fences the table, ensures topics, moves the version pointer and
+        # reconciles the apps and HyperDX, so a table already in shape is still deployable.
         if table_exists:
             return (
-                False,
-                "ClickHouse table already exists and all planned columns are present "
-                "(no DDL to apply)",
+                True,
+                "ClickHouse table already matches this version (no DDL to apply); "
+                "deploy applies routing, topics and the deployed version",
             )
         return False, "No deploy DDL was generated for this version"
     count = len(statements)
