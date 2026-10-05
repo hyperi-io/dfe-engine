@@ -77,14 +77,14 @@ def _contract(service: str) -> contract.AppContract:
     return contract.load_contract(service, FIXTURES)
 
 
-def _marked_root(root: Path) -> Path:
+def _marked_root(root: Path, marker: str = contract.SECRET_MARKERS[0]) -> Path:
     """A mounted dfe-receiver contract whose one marked field has a name that says nothing."""
     schema = {
         "type": "object",
         "properties": {
             "server": {
                 "type": "object",
-                "properties": {"banner": {"type": "string", contract.SECRET_MARKER: True}},
+                "properties": {"banner": {"type": "string", marker: True}},
             }
         },
     }
@@ -211,7 +211,7 @@ class TestSecrets:
         assert REDACTED not in json.dumps([[f.default, f.value] for f in view.fields])
 
     def test_an_unmarked_password_is_still_a_secret(self):
-        # dfe-receiver ships no x-dfe-secret at all, so the marker alone would hand
+        # dfe-receiver ships no secret marker at all, so the marker alone would hand
         # an operator's Kafka password back over the API.
         by_path = {f.path: f for f in contract.resolve_config(_contract("dfe-receiver"), {}).fields}
         assert by_path["config.kafka.sasl.password"].secret is True
@@ -318,7 +318,7 @@ class TestSecrets:
     def test_a_definition_that_lists_itself_is_judged_and_ends(self, marked, secret):
         node: dict = {"type": "string"}
         if marked:
-            node[contract.SECRET_MARKER] = True
+            node[contract.SECRET_MARKERS[0]] = True
         schema = {
             "type": "object",
             "properties": {"tree": {"type": "array", "items": {"$ref": "#/$defs/Node"}}},
@@ -978,8 +978,11 @@ class TestRedactingTheOverlay:
         ):
             assert credential not in text
 
-    def test_a_document_naming_its_app_is_read_against_that_app(self, monkeypatch, tmp_path):
-        monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(_marked_root(tmp_path)))
+    @pytest.mark.parametrize("marker", contract.SECRET_MARKERS)
+    def test_a_document_naming_its_app_is_read_against_that_app(
+        self, monkeypatch, tmp_path, marker
+    ):
+        monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(_marked_root(tmp_path, marker)))
         contract.reload_contracts()
         doc = {"deploy": {"service": "dfe-receiver"}, "config": {"server": {"banner": "b-1"}}}
         # Only the app's marker says the banner is secret.

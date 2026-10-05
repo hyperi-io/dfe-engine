@@ -31,8 +31,7 @@ from scalo.deployment import (
     SecretGroupContract,
 )
 
-# dfe identity default; scalo's cascade helper neutralises to localhost:5000, so
-# default to dfe's registry here and let ops override via env (#60).
+# scalo requires an explicit registry, so default to the one dfe-engine publishes to; ops override via env.
 _DEFAULT_IMAGE_REGISTRY = "ghcr.io/hyperi-io"
 
 
@@ -101,11 +100,14 @@ def engine_deployment_contract() -> DeploymentContract:
         # KEDA not used for dfe-engine (control plane -- HPA on CPU is sufficient).
         keda=None,
         image_profile=ImageProfile.PRODUCTION,
+        # scalo ships no vendor, licence or copyright defaults, so the product identity is set here.
         oci_labels=OciLabels(
             title="dfe-engine",
             description="DFE Engine -- REST API and config control plane",
-            # Explicit: scalo's DEFAULT_VENDOR is being neutralised; keep dfe identity (#60).
-            vendor="HyperI",
+            vendor="HYPERI PTY LIMITED",
+            label_namespace="io.hyperi",
+            licenses="BUSL-1.1",
+            copyright="(c) 2026 HYPERI PTY LIMITED",
         ),
     )
 
