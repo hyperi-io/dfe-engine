@@ -363,6 +363,7 @@ class TestGetSource:
         assert data["source"] == "test-source"
         assert data["display_name"] == "Test Source"
         ver = data["versions"]["1.0.0"]
+        assert ver["origin"] == "receiver"
         assert ver["source_build"] is None
         assert ver["source_deployment"] is None
 
@@ -386,6 +387,7 @@ class TestMainFlow:
         # No match and no fetcher: the loader sends records here when it has nowhere else.
         assert body["match"] is None
         assert body["origin"] is None
+        assert body["versions"][body["current"]]["origin"] is None
         assert body["transform"] is None
         assert body["archive"] is False
 
@@ -579,6 +581,7 @@ class TestGetSourceVersion:
         assert body["versions"] == ["1.0.0"]
         assert body["previous_deployed_versions"] == []
         assert body["version"]["schema"]["engine"] == "MergeTree"
+        assert body["version"]["origin"] == "receiver"
         assert body["version"]["source_build"] is None
         assert body["version"]["source_deployment"] is None
 

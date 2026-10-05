@@ -722,6 +722,26 @@ class TestSourceVersion:
         assert "views" not in out
         assert out["date_time"] == "2026-06-10"
 
+    def test_origin_is_on_the_api_dump_but_not_in_yaml(self):
+        """origin is derived for responses; writing it would duplicate match/fetcher."""
+        receiver = SourceVersion(
+            date_time="2026-06-10",
+            match=SourceMatch(field="f", value="v"),
+        )
+        assert receiver.model_dump(mode="json")["origin"] == "receiver"
+        assert "origin" not in receiver.to_yaml_dict()
+
+        fetcher = SourceVersion(
+            date_time="2026-06-10",
+            fetcher=SourceFetcher(source_type="okta"),
+        )
+        assert fetcher.model_dump(mode="json")["origin"] == "fetcher"
+        assert "origin" not in fetcher.to_yaml_dict()
+
+        bare = SourceVersion(date_time="2026-06-10")
+        assert bare.model_dump(mode="json")["origin"] is None
+        assert "origin" not in bare.to_yaml_dict()
+
     def test_to_yaml_dict_prunes_empty_view_containers(self):
         ver = SourceVersion(
             date_time="2026-06-10",
