@@ -1,7 +1,6 @@
 """Built-in plugin for dfe-loader.
 
-Consolidates loader-specific descriptor, validation, sizing, and template
-overrides.
+Consolidates loader-specific descriptor, validation, and template overrides.
 """
 
 from typing import Any
@@ -118,34 +117,6 @@ def _validate_loader(config: Any, errors: list[str], warnings: list[str]) -> Non
         )
 
 
-_sizing_overrides: dict[str, dict[str, Any]] = {
-    "xs": {
-        "buffer": {"flush_bytes": 524_288, "flush_rows": 1_000},
-        "memory": {"limit_bytes": 0},
-    },
-    "small": {
-        "buffer": {"flush_bytes": 1_048_576, "flush_rows": 10_000},
-        "memory": {"limit_bytes": 0},
-    },
-    "medium": {
-        "buffer": {"flush_bytes": 4_194_304, "flush_rows": 50_000},
-        "memory": {"limit_bytes": 0},
-    },
-    "large": {
-        "buffer": {"flush_bytes": 8_388_608, "flush_rows": 100_000},
-        "memory": {"limit_bytes": 0},
-    },
-    "xlarge": {
-        "buffer": {"flush_bytes": 16_777_216, "flush_rows": 200_000},
-        "memory": {"limit_bytes": 0},
-    },
-}
-
-_keda_defaults: dict[str, Any] = {
-    "min_replicas": 2,
-    "max_replicas": 8,
-}
-
 _template_overrides: dict[str, dict[str, Any]] = {
     "production": {
         "kafka": {
@@ -188,17 +159,12 @@ _template_overrides: dict[str, dict[str, Any]] = {
 
 
 def _make_plugin() -> ServicePlugin:
-    from dfe_engine.deployment.models.loader import LoaderDeploymentConfig
     from dfe_engine.services.models.loader import LoaderConfig
 
     return ServicePlugin(
         descriptor=descriptor,
         config_class=LoaderConfig,
-        deployment_class=LoaderDeploymentConfig,
         validate_config=_validate_loader,
-        sizing_overrides=_sizing_overrides,
-        keda_defaults=_keda_defaults,
-        default_size="medium",
         config_template_overrides=_template_overrides,
     )
 

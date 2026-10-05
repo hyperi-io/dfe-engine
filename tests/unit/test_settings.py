@@ -55,7 +55,7 @@ def _hermetic_env(monkeypatch, tmp_path):
 @pytest.fixture
 def config_dir(tmp_path):
     """Create a temporary config directory with expected subdirs."""
-    for subdir in ("services", "sources", "deployment", "hunts", "rules", "queries"):
+    for subdir in ("services", "sources", "hunts", "rules", "queries"):
         (tmp_path / subdir).mkdir()
     return str(tmp_path)
 
@@ -64,7 +64,6 @@ def _clear_registry_path_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Strip path overrides so tests/conftest .env cannot shadow DFE_CONFIG_DIR."""
     for key in (
         "DFE_SOURCES_DIR",
-        "DFE_DEPLOYMENT_CONFIG_DIR",
         "DFE_SERVICES_CONFIG_YAML_DIR",
         "DFE_HUNTS_DIR",
         "DFE_QUERY_YAML_DIR",
@@ -85,12 +84,6 @@ class TestConfigDir:
         monkeypatch.setenv("DFE_CONFIG_DIR", config_dir)
         settings = load_settings()
         assert settings.source.sources_dir == os.path.join(config_dir, "sources")
-
-    def test_config_dir_resolves_deployment_dir(self, config_dir, monkeypatch):
-        _clear_registry_path_env(monkeypatch)
-        monkeypatch.setenv("DFE_CONFIG_DIR", config_dir)
-        settings = load_settings()
-        assert settings.deployment.config_dir == os.path.join(config_dir, "deployment")
 
     def test_config_dir_resolves_hunts_dir(self, config_dir, monkeypatch):
         _clear_registry_path_env(monkeypatch)
@@ -586,11 +579,6 @@ class TestEnvOverrides:
         settings = load_settings()
         assert "email" in settings.hunts.alert_channels
 
-    def test_deployment_config_dir_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_DEPLOYMENT_CONFIG_DIR", "/custom/deploy")
-        settings = load_settings()
-        assert settings.deployment.config_dir == "/custom/deploy"
-
     def test_profile_override(self, monkeypatch):
         monkeypatch.setenv("DFE_PROFILE", " mesh ")
         settings = load_settings()
@@ -619,39 +607,6 @@ class TestEnvOverrides:
         monkeypatch.setenv("DFE_SERVICES_CONFIG_YAML_DIR", "/custom/svc")
         settings = load_settings()
         assert settings.services.config_yaml_dir == "/custom/svc"
-
-    def test_metrics_manifest_url_names_each_app(self, monkeypatch):
-        monkeypatch.setenv(
-            "DFE_SERVICES_METRICS_MANIFEST_URL", " http://{service}:9090/metrics/manifest "
-        )
-        services = load_settings().services
-        assert services.metrics_manifest_url_for("dfe-loader") == (
-            "http://dfe-loader:9090/metrics/manifest"
-        )
-
-    def test_metrics_manifest_url_defaults_to_none(self):
-        services = load_settings().services
-        assert services.metrics_manifest_url == ""
-        assert services.metrics_manifest_url_for("dfe-loader") == ""
-
-    @pytest.mark.parametrize(
-        "template",
-        [
-            "http://dfe-loader:9090/metrics/manifest",
-            "http://{service}.{namespace}.svc:9090/metrics/manifest",
-            "http://{service!r}:9090/metrics/manifest",
-            "http://{service:>20}:9090/metrics/manifest",
-            "http://{}:9090/metrics/manifest",
-            "http://{service:9090/metrics/manifest",
-            "{service}:9090/metrics/manifest",
-            "ftp://{service}/metrics/manifest",
-            "http:///{service}/metrics/manifest",
-        ],
-    )
-    def test_metrics_manifest_url_refuses_a_template_it_cannot_fill(self, monkeypatch, template):
-        monkeypatch.setenv("DFE_SERVICES_METRICS_MANIFEST_URL", template)
-        with pytest.raises(ValidationError, match="metrics_manifest_url"):
-            load_settings()
 
     def test_sources_dir_override(self, monkeypatch):
         monkeypatch.setenv("DFE_SOURCES_DIR", "/custom/sources")

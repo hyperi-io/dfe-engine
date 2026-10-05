@@ -1,7 +1,6 @@
 """Built-in plugin for dfe-archiver.
 
-Consolidates archiver-specific descriptor, validation, sizing, and template
-overrides.
+Consolidates archiver-specific descriptor, validation, and template overrides.
 """
 
 from typing import Any
@@ -67,30 +66,6 @@ def _validate_archiver(config: Any, errors: list[str], warnings: list[str]) -> N
         errors.append("routing.mode is 'expression' but no expression_fields configured")
 
 
-_sizing_overrides: dict[str, dict[str, Any]] = {
-    "xs": {
-        "buffer": {"flush_bytes": 16_777_216, "writer_parallelism": 1},
-    },
-    "small": {
-        "buffer": {"flush_bytes": 33_554_432, "writer_parallelism": 2},
-    },
-    "medium": {
-        "buffer": {"flush_bytes": 134_217_728, "writer_parallelism": 4},
-    },
-    "large": {
-        "buffer": {"flush_bytes": 268_435_456, "writer_parallelism": 8},
-    },
-    "xlarge": {
-        "buffer": {"flush_bytes": 536_870_912, "writer_parallelism": 16},
-        "compression": {"level": 9},
-    },
-}
-
-_keda_defaults: dict[str, Any] = {
-    "min_replicas": 1,
-    "max_replicas": 4,
-}
-
 _template_overrides: dict[str, dict[str, Any]] = {
     "production": {
         "kafka": {
@@ -110,17 +85,12 @@ _template_overrides: dict[str, dict[str, Any]] = {
 
 
 def _make_plugin() -> ServicePlugin:
-    from dfe_engine.deployment.models.archiver import ArchiverDeploymentConfig
     from dfe_engine.services.models.archiver import ArchiverConfig
 
     return ServicePlugin(
         descriptor=descriptor,
         config_class=ArchiverConfig,
-        deployment_class=ArchiverDeploymentConfig,
         validate_config=_validate_archiver,
-        sizing_overrides=_sizing_overrides,
-        keda_defaults=_keda_defaults,
-        default_size="small",
         config_template_overrides=_template_overrides,
     )
 

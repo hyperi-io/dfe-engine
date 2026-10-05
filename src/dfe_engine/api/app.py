@@ -366,18 +366,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     except Exception as exc:  # a failed seed must never break startup
         logger.warning("organisations not seeded at startup", error=str(exc))
 
-    # Bootstrap service surface registry (schema-less Rust service discovery)
-    from dfe_engine.services.surfaces.registry import SurfaceRegistry
-
-    surfaces_config_dir = settings.config_dir or os.environ.get("DFE_CONFIG_DIR", "")
-    if surfaces_config_dir:
-        surfaces_dir = Path(surfaces_config_dir) / "service-surfaces"
-    else:
-        surfaces_dir = Path("config") / "service-surfaces"
-    app.state.surface_registry = SurfaceRegistry(
-        surfaces_dir, manifest_url_for=settings.services.metrics_manifest_url_for
-    )
-
     # Bootstrap HyperDX client (optional)
     if settings.hyperdx.enabled and settings.hyperdx.base_url:
         from dfe_engine.auth.jwt_authority import HYPERDX_AUDIENCE, MachineTokenSource

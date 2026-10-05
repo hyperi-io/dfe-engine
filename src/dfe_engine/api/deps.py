@@ -145,13 +145,6 @@ def bootstrap_registries(
             directory=settings.hunts.alert_destinations_dir,
         )
 
-    if settings.deployment.config_dir:
-        from dfe_engine.deployment.registry import DeploymentConfigRegistry
-
-        _registries["deployment"] = DeploymentConfigRegistry(
-            config_directory=settings.deployment.config_dir
-        )
-
 
 def shutdown_registries() -> None:
     """Cleanup registries on shutdown. Called from lifespan."""
@@ -260,21 +253,6 @@ def get_alert_destinations_registry_optional():
     return _registries.get("alert_destinations")
 
 
-def get_deployment_config_registry():
-    """FastAPI dependency: resolve DeploymentConfigRegistry singleton."""
-    reg = _registries.get("deployment")
-    if reg is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": "DeploymentConfigRegistry not initialized"
-                " -- set DFE_DEPLOYMENT_CONFIG_DIR",
-            },
-        )
-    return reg
-
-
 def get_rule_registry():
     """FastAPI dependency: resolve RuleRegistry singleton."""
     reg = _registries.get("rules")
@@ -315,7 +293,6 @@ ServiceConfigReg = Annotated[Any, Depends(get_service_config_registry)]
 FieldMapReg = Annotated[Any, Depends(get_field_map_registry)]
 AlertDestRegistry = Annotated[Any, Depends(get_alert_destinations_registry)]
 OptionalAlertDestRegistry = Annotated[Any | None, Depends(get_alert_destinations_registry_optional)]
-DeploymentConfigReg = Annotated[Any, Depends(get_deployment_config_registry)]
 RuleReg = Annotated[Any, Depends(get_rule_registry)]
 OptionalRuleReg = Annotated[Any | None, Depends(get_rule_registry_optional)]
 HuntConfigReg = Annotated[Any, Depends(get_hunt_config_registry)]

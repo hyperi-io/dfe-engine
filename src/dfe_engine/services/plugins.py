@@ -99,16 +99,6 @@ def config_classes() -> dict[str, type[BaseModel]]:
     return {name: p.config_class for name, p in _ensure_loaded().items()}
 
 
-def deployment_classes() -> dict[str, type[BaseModel]]:
-    """Return service name -> deployment config class mapping."""
-    out: dict[str, type[BaseModel]] = {}
-    for name, p in _ensure_loaded().items():
-        cls = p.deployment_class
-        if cls is not None:
-            out[name] = cls
-    return out
-
-
 def all_plugins() -> dict[str, ServicePlugin]:
     """Return a copy of the full plugin registry."""
     return dict(_ensure_loaded())

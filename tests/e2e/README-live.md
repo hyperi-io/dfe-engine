@@ -48,7 +48,7 @@ Both lanes run this same suite from a checkout of this repo:
 `dfe-ops acceptance --suite flows` for Kubernetes, `make test-flows` in
 dfe-docker for a compose stack. Neither carries a copy of the fixtures.
 
-## test_live_pipeline.py -- the 4 critical tests
+## test_live_pipeline.py -- the 3 critical tests
 
 1. **HTTPS -> ClickHouse** (`test_https_ingest_lands_in_clickhouse`)
    POST a uniquely-tagged event to the receiver over HTTPS; assert it lands in
@@ -56,10 +56,7 @@ dfe-docker for a compose stack. Neither carries a copy of the fixtures.
 2. **-> HyperDX** (`test_ingested_data_visible_in_hyperdx`)
    Ingest, confirm it is in CH, then confirm HyperDX's search API returns it
    (proves the HyperDX -> CH datasource wiring).
-3. **dfe-ui infra change via git** (`test_ui_deploys_infra_change_via_git`)
-   Read a deployment config via the engine API, change a Helm var, publish, and
-   assert the change reached the deploy repo (`values/<svc>-<inst>-values.yaml`).
-4. **dfe-ui schema change via git** (`test_ui_deploys_schema_change_via_git`)
+3. **dfe-ui schema change via git** (`test_ui_deploys_schema_change_via_git`)
    Create a source/meta-schema via the engine API, publish, and assert the
    generated DDL (`ddl/<table>.sql`) reached the deploy repo with the new column.
 
