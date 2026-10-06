@@ -9,7 +9,7 @@
 """Tests for dfe_engine.cel.classify.
 
 These MUST match the Rust classifier behaviour in
-/projects/scalo-rs/src/transport/filter/classify.rs — if these
+src/transport/filter/classify.rs (hyperi-io/scalo-rs) — if these
 tests diverge, the UI validates differently from the runtime engine.
 """
 

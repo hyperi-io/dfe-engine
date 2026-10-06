@@ -14,7 +14,7 @@ and a noun-verb command tree that is DATA-DRIVEN from the API's own contract. Th
 is the CLIENT half; it speaks HTTP to a deployed dfe-engine, exactly as `aws` speaks
 to AWS service endpoints.
 
-Reference: the AWS CLI v2 source is cloned to `/Volumes/projects/aws-cli` (the
+Reference: the AWS CLI v2 source, `aws/aws-cli` on GitHub (the
 bundled-installer machinery under `backends/`/`exe/`/`macpkg/`/`docker/`, and the
 `aws configure` family under `awscli/customizations/configure/`).
 

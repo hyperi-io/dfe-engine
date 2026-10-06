@@ -1,6 +1,6 @@
 # DFE Infrastructure (dfe-infra) - research summary (ARCHIVED)
 
-> **ARCHIVED SNAPSHOT.** Last synced from `/projects/dfe-infra` on
+> **ARCHIVED SNAPSHOT.** Last synced from `hyperi-io/dfe-infra` on
 > 2026-03-31; component versions and structures have moved on. Kept for
 > the 2.1 -> 2.2 decision trail. Current material lives in
 > [deployment/index.md](../deployment/index.md) and the dfe-infra repo's
@@ -13,7 +13,6 @@ Multi-cloud Infrastructure-as-Code for deploying the full DFE 2.2 platform.
 Terraform + Helm + ArgoCD. Replaces the AWS-specific `dfe-core` from 2.1.
 
 **Repository:** `hyperi-io/dfe-infra`
-**Location:** `/projects/dfe-infra`
 
 ## Two-Layer Architecture
 
@@ -160,7 +159,7 @@ hosts it.
 
 ## dfe-infra Docs Corpus
 
-Research docs in `/projects/dfe-infra/docs/`:
+Research docs in `docs/` of `hyperi-io/dfe-infra`:
 
 | File | Content |
 |------|---------|
