@@ -12,8 +12,9 @@
 #   packages/dfe-engine-types/types/index.d.ts   (generated)
 #   packages/dfe-engine-types/types/e2e.d.ts     (generated)
 #
-# Required secret: DFE_UI_TOKEN - PAT with PR open/close + push; must delete
-#   remote branches when superseding prior sync PRs (--delete-branch on close)
+# Auth: a GitHub App installation token (vars.GH_APP_CLIENT_ID + secrets.GH_APP_PRIVATE_KEY),
+#   scoped to the dfe-ui repo with contents + pull-requests write, which covers push,
+#   PR open/close and deleting superseded sync branches (--delete-branch on close)
 # Optional var: DFE_UI_REPO - repo as owner/name (default: hyperi-io/dfe-ui)
 # Note: Git clone URLs require owner/name; numeric repo IDs are not supported.
 
@@ -50,9 +51,28 @@ jobs:
       - name: Generate RBAC scope TypeScript constants
         run: python3 rbac-scopes-spec/generate.py
 
+      - name: Resolve the dfe-ui repo
+        id: target
+        env:
+          DFE_UI_REPO: ${{ vars.DFE_UI_REPO || 'hyperi-io/dfe-ui' }}
+        run: |
+          echo "owner=${DFE_UI_REPO%%/*}" >> "$GITHUB_OUTPUT"
+          echo "name=${DFE_UI_REPO#*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint a dfe-ui token from the GitHub App
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: ${{ steps.target.outputs.owner }}
+          repositories: ${{ steps.target.outputs.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Create PR with dfe-engine-types sync in dfe-ui
         env:
-          DFE_UI_TOKEN: ${{ secrets.DFE_UI_TOKEN }}
+          DFE_UI_TOKEN: ${{ steps.app-token.outputs.token }}
           DFE_UI_REPO: ${{ vars.DFE_UI_REPO || 'hyperi-io/dfe-ui' }}
         run: |
           set -e
