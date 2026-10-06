@@ -81,6 +81,8 @@ dependencies = [
     "bcrypt>=5.0.0",
     # OIDC relying-party (external IdP termination) + SCIM identity schema
     "authlib>=1.7.2",
+    # authlib's HTTP client imports httpx2 first and warns on every start when it falls back to httpx.
+    "httpx2>=2.13.1",
     # Signs the OIDC RP session cookie (SessionMiddleware / Authlib OAuth state+nonce)
     "itsdangerous>=2.2.0",
     # Held on 0.6 for GA: later 0.x minors change the SCIM models' API.
