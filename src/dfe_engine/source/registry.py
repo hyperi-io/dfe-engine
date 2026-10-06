@@ -624,6 +624,7 @@ class SourceRegistry:
                     "has_transform": source.transform is not None,
                     "has_fetcher": source.fetcher is not None,
                     "origin": source.origin,
+                    "current_table_topic_type": source.table_topic_type,
                     "views": [v.standard for v in source.views],
                     "updated_at": updated_at or "",
                 }

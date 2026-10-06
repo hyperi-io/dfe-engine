@@ -378,6 +378,7 @@ class TestSourceOrigin:
         assert s.origin == "receiver"
         assert s.fetcher is None
         assert s.landing_label() == "syslog"
+        assert s.table_topic_type == "main"
         assert s.model_dump(mode="json")["origin"] == "receiver"
 
     def test_a_fetcher_makes_a_fetcher_source(self):
@@ -387,7 +388,29 @@ class TestSourceOrigin:
         assert s.origin == "fetcher"
         assert s.match is None
         assert s.landing_label() == "main"
+        assert s.table_topic_type == "main"
         assert "match" not in s.to_yaml_dict()["versions"]["1.0.0"]
+
+    def test_a_meta_schema_pin_means_the_source_owns_its_table(self):
+        s = Source.model_validate(
+            {
+                "source": "aws-cloudtrail",
+                "match": {"field": "f", "value": "v"},
+                "schema": {"meta_schema": "meta/aws_cloudtrail", "meta_schema_version": "1.0.0"},
+            }
+        )
+        assert s.table_topic_type == "own"
+
+    def test_no_meta_schema_shares_the_main_table(self):
+        s = Source.model_validate(
+            {"source": "azure", "match": {"field": "azure", "value": "azure"}, "schema": {}}
+        )
+        assert s.schema_config.meta_schema is None
+        assert s.table_topic_type == "main"
+
+    def test_the_landing_source_is_the_main_table(self):
+        s = Source.model_validate({"source": "main", "resource_type": "core"})
+        assert s.table_topic_type == "main"
 
     def test_the_write_body_needs_exactly_one_origin(self):
         with pytest.raises(ValueError, match="exactly one"):

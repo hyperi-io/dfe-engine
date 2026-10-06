@@ -651,6 +651,7 @@ class TestRoundTrip:
         assert loaded.fetcher.source_type == "crowdstrike"
         assert loaded.fetcher.config == source.fetcher.config
         assert registry.list_sources()[0]["origin"] == "fetcher"
+        assert registry.list_sources()[0]["current_table_topic_type"] == "main"
 
     def test_update_draft_drops_stale_source_build(self, registry: SourceRegistry, tmp_path):
         store = SourceDeploymentStore(
