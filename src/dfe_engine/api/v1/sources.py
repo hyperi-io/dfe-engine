@@ -2263,6 +2263,7 @@ def _to_summary(raw: dict[str, Any]) -> SourceSummaryObject:
         has_transform=bool(raw.get("has_transform")),
         has_fetcher=bool(raw.get("has_fetcher")),
         origin=raw.get("origin"),
+        current_table_topic_type=raw.get("current_table_topic_type", "own"),
         views=list(raw.get("views") or []),
     )
 
