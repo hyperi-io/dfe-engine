@@ -200,3 +200,53 @@ def test_update_replaces_definition(client, app, admin_headers, tmp_path):
     assert upd.status_code == 200
     assert upd.json()["description"] == "slimmed"
     assert len(upd.json()["columns"]) == 1
+
+
+# -- Field-map preview holds to the table's columns ----------
+
+
+def _add_mapped_source(name: str, mappings: dict[str, str]) -> None:
+    _registries["source"].save_source(
+        {
+            "source": name,
+            "enabled": True,
+            "match": {"field": "tags.collector.type", "value": name},
+            "schema": {"engine": "MergeTree"},
+            "views": [{"standard": "sigma", "taxonomy": "windows", "custom_mappings": mappings}],
+        }
+    )
+
+
+def test_field_map_preview_keeps_only_columns_the_table_carries(client, admin_headers):
+    # _source is a header column every table has; process_executable is on none of these.
+    _add_mapped_source("winlog", {"EventID": "_source", "Image": "process_executable"})
+
+    gen = client.post("/api/v1/sigma/views/winlog", headers=admin_headers)
+
+    assert gen.status_code == 200, gen.text
+    ddl = gen.json()["ddl"]
+    assert "`_source` AS `EventID`" in ddl
+    assert "process_executable" not in ddl
+
+
+def test_field_map_preview_with_no_usable_mapping_is_null(client, admin_headers):
+    _add_mapped_source("winlog", {"Image": "process_executable"})
+
+    one = client.post("/api/v1/sigma/views/winlog", headers=admin_headers)
+    every = client.post("/api/v1/sigma/views", headers=admin_headers)
+
+    assert one.status_code == 200, one.text
+    assert one.json()["ddl"] is None
+    assert every.status_code == 200, every.text
+    assert "winlog" not in {row["source_name"] for row in every.json()}
+
+
+def test_field_map_mappings_report_the_configuration(client, admin_headers):
+    """GET mappings is what is configured, so the operator sees what the preview dropped."""
+    _add_mapped_source("winlog", {"EventID": "_source", "Image": "process_executable"})
+
+    got = client.get("/api/v1/sigma/mappings/winlog", headers=admin_headers)
+
+    assert got.status_code == 200, got.text
+    pairs = {row["sigma_field"]: row["column_name"] for row in got.json()["mappings"]}
+    assert pairs == {"EventID": "_source", "Image": "process_executable"}

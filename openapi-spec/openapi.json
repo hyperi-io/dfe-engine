@@ -14834,7 +14834,7 @@
           "sigma"
         ],
         "summary": "Generate Sigma View",
-        "description": "Generate (preview) Sigma view DDL for a source.\n\nA stored view definition drives generation - including its JSON-derived\ncolumns - when one exists; otherwise falls back to the static field maps via\nthe source mapper. Returns the DDL string; does NOT execute it against\nClickHouse.\n\nDefaults to the data database, since that is where a propagated hunt reads\nthe view from (``{source}_sigma``); an explicit ``database`` still overrides it.",
+        "description": "Generate (preview) Sigma view DDL for a source.\n\nA stored view definition drives generation - including its JSON-derived\ncolumns - when one exists; otherwise falls back to the static field maps via\nthe source mapper, keeping only the mappings whose column the source's table\ncarries. Returns the DDL string; does NOT execute it against ClickHouse.\n\nDefaults to the data database, since that is where a propagated hunt reads\nthe view from (``{source}_sigma``); an explicit ``database`` still overrides it.",
         "operationId": "generate_sigma_view_api_v1_sigma_views__source_name__post",
         "parameters": [
           {

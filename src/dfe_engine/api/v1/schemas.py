@@ -24,6 +24,7 @@ from dfe_engine.api.deps import (
     CurrentUser,
     SchemaReg,
     SourceReg,
+    get_field_map_registry_optional,
     held_tenant_ids,
     require_action,
     ttl_settings,
@@ -1328,6 +1329,7 @@ def build_schema(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
         derived_base_dir=derived_reference_root(settings),
+        field_map_registry=get_field_map_registry_optional(),
         **inherited_builder_kwargs(settings),
     )
     try:

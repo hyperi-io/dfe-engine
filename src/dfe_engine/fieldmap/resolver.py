@@ -15,8 +15,7 @@ Usage:
     column = resolve_field("CommandLine", merged)
 """
 
-from __future__ import annotations
-
+from collections.abc import Collection
 from typing import TYPE_CHECKING
 
 from dfe_engine.fieldmap.models import FieldMap
@@ -105,6 +104,32 @@ def resolve_registry_mappings(
             pass
 
     return resolve_field_map(default_map, source_map)
+
+
+def split_by_columns(
+    mappings: dict[str, str],
+    columns: Collection[str],
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Split *mappings* by whether each target column exists on the table.
+
+    ClickHouse refuses a whole view (code 47) when any one of its columns is
+    missing, and a default map names far more columns than any single table holds,
+    so a view is rendered from the usable part only.
+
+    Args:
+        mappings: Resolved standard_field -> column_name mappings.
+        columns: Column names the view's table carries.
+
+    Returns:
+        ``(usable, dropped)``: the mappings whose target is in *columns*, and the rest.
+    """
+    available = set(columns)
+    usable: dict[str, str] = {}
+    dropped: dict[str, str] = {}
+    for standard_field, column_name in mappings.items():
+        target = usable if column_name in available else dropped
+        target[standard_field] = column_name
+    return usable, dropped
 
 
 def resolve_field(

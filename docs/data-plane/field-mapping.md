@@ -26,7 +26,7 @@ resolver lives at `src/dfe_engine/fieldmap/resolver.py`; view generation at
 ## Generated views
 
 Each standard x source produces a ClickHouse VIEW named
-`{standard}_{source}` (e.g. `sigma_windows_audit`) that aliases DFE columns
+`{table}_{standard}` (e.g. `windows_audit_sigma`) that aliases DFE columns
 back to the standard's field names:
 
 ```sql
@@ -37,6 +37,8 @@ SELECT
     *
 FROM {db}.windows_audit;
 ```
+
+A view carries only the mappings whose column the source's table holds. ClickHouse refuses a whole view when one of its columns is missing, and a default map names far more columns than any one table has, so the rest are dropped and logged at debug. A view left with no mapping is not created. The source build, plan, deploy and the sigma view preview all apply the same rule.
 
 Zero storage overhead - views compute at query time. Consumers:
 [hunt-runner-scaling.md](hunt-runner-scaling.md) (detections),

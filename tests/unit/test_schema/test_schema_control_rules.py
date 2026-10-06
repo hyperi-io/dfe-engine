@@ -274,13 +274,21 @@ def test_the_engine_ships_no_file_the_wheel_already_ships() -> None:
 
     wheel = core_schemas_root()
     shipped = {path.relative_to(wheel).as_posix() for path in wheel.rglob("*") if path.is_file()}
+
+    def tail(relative: str) -> str:
+        return "/".join(relative.split("/")[-2:])
+
+    # A copy keeps its directory and name wherever it is put, so that pair is what
+    # collides; a bare name alone also matches an unrelated vendor dataset's file.
+    # A file at the wheel's root has no directory, so its name alone is the match.
+    shipped_tails = {tail(entry) for entry in shipped}
+    root_names = {entry for entry in shipped if "/" not in entry}
     duplicates = sorted(
         _relative(path)
         for path in SRC.rglob("*")
-        if path.is_file() and path.name in {Path(entry).name for entry in shipped}
+        if path.is_file() and (tail(_relative(path)) in shipped_tails or path.name in root_names)
     )
-    # A name collision on a bare filename is what a second copy looks like; the
-    # engine's own modules are .py and the wheel ships .yaml and .sql.
+    # The engine's own modules are .py and the wheel ships .yaml and .sql.
     offending = [entry for entry in duplicates if entry.endswith((".yaml", ".sql"))]
     assert not offending, (
         "the engine ships a file dfe-schemas already ships; delete the copy:\n  "

@@ -70,6 +70,26 @@ def schemas_dir(tmp_path):
         tmp_path / "additional.yaml",
     )
 
+    # Every column the view tests map to, so a precedence assertion is not
+    # answered by the missing-column filter instead.
+    view_columns = [
+        "user_name",
+        "event_id",
+        "source_ip",
+        "x",
+        "custom_user",
+        "default_user",
+        "convention_user",
+        "pinned_user",
+        "inline_user",
+        "pinned_event_id",
+        "cs_event_id",
+    ]
+    yaml_dump(
+        {"columns": [{"name": name, "type": "string"} for name in view_columns]},
+        tmp_path / "view_meta.yaml",
+    )
+
     return tmp_path
 
 
@@ -603,7 +623,7 @@ class TestViewDDLIntegration:
             field_map_registry=fm_registry,
         )
         source = _make_source(
-            meta_schema="meta.yaml",
+            meta_schema="view_meta.yaml",
             views=[{"standard": "sigma"}, {"standard": "ecs"}],
         )
         result = builder.build(source)
@@ -623,7 +643,7 @@ class TestViewDDLIntegration:
             field_map_registry=fm_registry,
         )
         source = _make_source(
-            meta_schema="meta.yaml",
+            meta_schema="view_meta.yaml",
             views=[{"standard": "sigma"}, {"standard": "ecs"}],
         )
         result = builder.build(source)
@@ -660,7 +680,7 @@ class TestViewDDLIntegration:
             field_map_registry=fm_registry,
         )
         source = _make_source(
-            meta_schema="meta.yaml",
+            meta_schema="view_meta.yaml",
             views=[{"standard": "sigma", "custom_mappings": {"User": "custom_user"}}],
         )
         result = builder.build(source)
@@ -687,7 +707,7 @@ class TestViewDDLIntegration:
             field_map_registry=fm_registry,
         )
         source = _make_source(
-            meta_schema="meta.yaml",
+            meta_schema="view_meta.yaml",
             views=[{"standard": "sigma", "field_map": "corp-pin"}],
         )
         result = builder.build(source)
@@ -708,14 +728,14 @@ class TestViewDDLIntegration:
             field_map_registry=fm_registry,
         )
         source = _make_source(
-            meta_schema="meta.yaml",
+            meta_schema="view_meta.yaml",
             views=[{"standard": "sigma", "field_map": "sigma/corp-pin"}],
         )
         result = builder.build(source)
         assert "`pinned_user` AS `User`" in result.view_ddls["sigma"]
 
     def test_field_map_pin_standard_mismatch_raises(self, registry, schemas_dir, fm_registry):
-        """A pin declaring a DIFFERENT standard than its view is a config error."""
+        """A pin declaring a DIFFERENT standard than its view is a build error the API answers 400."""
         from dfe_engine.fieldmap.registry import FieldMapError
 
         fm_registry.save_map(FieldMap(standard="sigma", mappings={"User": "default_user"}))
@@ -725,11 +745,12 @@ class TestViewDDLIntegration:
             field_map_registry=fm_registry,
         )
         source = _make_source(
-            meta_schema="meta.yaml",
+            meta_schema="view_meta.yaml",
             views=[{"standard": "sigma", "field_map": "ecs/corp-pin"}],
         )
-        with pytest.raises(FieldMapError, match="ecs"):
+        with pytest.raises(SchemaBuildError, match="pins standard 'ecs'") as raised:
             builder.build(source)
+        assert isinstance(raised.value.__cause__, FieldMapError)
 
     def test_inline_wins_over_field_map_pin(self, registry, schemas_dir, fm_registry):
         """Inline custom_mappings still WIN per-key on top of a pinned map."""
@@ -746,7 +767,7 @@ class TestViewDDLIntegration:
             field_map_registry=fm_registry,
         )
         source = _make_source(
-            meta_schema="meta.yaml",
+            meta_schema="view_meta.yaml",
             views=[
                 {
                     "standard": "sigma",
@@ -782,13 +803,89 @@ class TestViewDDLIntegration:
             field_map_registry=fm_registry,
         )
         source = _make_source(
-            meta_schema="meta.yaml",
+            meta_schema="view_meta.yaml",
             views=[{"standard": "sigma"}],
         )
         result = builder.build(source)
 
         assert "`cs_event_id` AS `EventID`" in result.view_ddls["sigma"]
         assert "`user_name` AS `User`" in result.view_ddls["sigma"]
+
+    def test_registry_mapping_to_a_missing_column_is_dropped(
+        self, registry, schemas_dir, fm_registry
+    ):
+        """A default map names more columns than the table holds: only the held ones render."""
+        fm_registry.save_map(
+            FieldMap(
+                standard="sigma",
+                mappings={"User": "user_name", "Image": "process_executable"},
+            )
+        )
+        builder = SchemaBuilderV2(
+            registry=registry,
+            schemas_base_dir=schemas_dir,
+            field_map_registry=fm_registry,
+        )
+        source = _make_source(meta_schema="meta.yaml", views=[{"standard": "sigma"}])
+        ddl = builder.build(source).view_ddls["sigma"]
+
+        assert "`user_name` AS `User`" in ddl
+        assert "process_executable" not in ddl
+        assert "`Image`" not in ddl
+
+    def test_view_with_no_usable_mapping_is_not_rendered(self, registry, schemas_dir, fm_registry):
+        """No mapped column on the table: no view, rather than one ClickHouse refuses."""
+        fm_registry.save_map(FieldMap(standard="sigma", mappings={"Image": "process_executable"}))
+        builder = SchemaBuilderV2(
+            registry=registry,
+            schemas_base_dir=schemas_dir,
+            field_map_registry=fm_registry,
+        )
+        source = _make_source(meta_schema="meta.yaml", views=[{"standard": "sigma"}])
+
+        assert builder.build(source).view_ddls == {}
+
+    def test_inline_mapping_to_a_missing_column_is_dropped(self, registry, schemas_dir):
+        """An operator's inline mapping is held to the table too, with no registry at all."""
+        builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
+        source = _make_source(
+            meta_schema="meta.yaml",
+            views=[
+                {
+                    "standard": "cim",
+                    "custom_mappings": {"user": "user_name", "dest": "destination_domain"},
+                }
+            ],
+        )
+        ddl = builder.build(source).view_ddls["cim"]
+
+        assert "`user_name` AS `user`" in ddl
+        assert "destination_domain" not in ddl
+
+    def test_inline_only_missing_columns_renders_no_view(self, registry, schemas_dir):
+        builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
+        source = _make_source(
+            meta_schema="meta.yaml",
+            views=[{"standard": "ecs", "custom_mappings": {"host.name": "host_name"}}],
+        )
+
+        assert builder.build(source).view_ddls == {}
+
+    def test_header_columns_are_mappable(self, registry, schemas_dir, fm_registry):
+        """The profile's columns are on the table too, so a map onto them renders."""
+        fm_registry.save_map(
+            FieldMap(standard="ecs", mappings={"@timestamp": "_timestamp", "x.y": "nope"})
+        )
+        builder = SchemaBuilderV2(
+            registry=registry,
+            schemas_base_dir=schemas_dir,
+            field_map_registry=fm_registry,
+        )
+        source = _make_source(meta_schema="meta.yaml", views=[{"standard": "ecs"}])
+        ddl = builder.build(source).view_ddls["ecs"]
+
+        assert "`_timestamp` AS `@timestamp`" in ddl
+        assert "nope" not in ddl
 
 
 class TestLoadColumnsForSourceVersion:

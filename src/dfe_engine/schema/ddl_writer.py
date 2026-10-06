@@ -328,6 +328,7 @@ class DDLFileWriter:
             files["detection"][hunt_results_version] = {}
             for profile_name in _PROFILES:
                 files["detection"][hunt_results_version][profile_name] = {}
+                profile_path = _resolve_profiles_dir() / f"{profile_name}.yaml"
                 profile_versions = SchemaLoader.load_version_metadata(profile_path)[
                     "versions"
                 ].keys()

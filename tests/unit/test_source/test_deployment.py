@@ -232,16 +232,23 @@ class TestDeployStatements:
         assert plan.validation_errors == ["bad column"]
         assert "validation failed" in (plan.ready_reason or "").lower()
 
-    def test_plan_ready_false_when_table_in_sync(self):
+    def test_plan_ready_when_table_in_sync(self):
+        # A routing or transform change leaves the columns alone and must still deploy.
         result = SchemaBuildResult(
             source_name="x",
             columns=[],
             create_table_ddl="CREATE TABLE {db}.x (`a` String)",
         )
         plan = plan_from_build(result, version="1.0.0", statements=[], table_exists=True)
-        assert plan.ready is False
+        assert plan.ready is True
         assert plan.ready_reason is not None
-        assert "already exists" in plan.ready_reason
+        assert "already matches" in plan.ready_reason
+
+    def test_plan_not_ready_without_ddl_or_table(self):
+        result = SchemaBuildResult(source_name="x", columns=[], create_table_ddl="")
+        plan = plan_from_build(result, version="1.0.0", statements=[], table_exists=False)
+        assert plan.ready is False
+        assert "No deploy DDL" in (plan.ready_reason or "")
 
     def test_plan_ready_status_helper(self):
         ready, reason = plan_ready_status(

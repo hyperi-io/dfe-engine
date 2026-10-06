@@ -64,11 +64,20 @@ def _settings(database: str, days: int) -> DFESettings:
 
 
 def _release_a_column(root: Path) -> None:
-    """Add a column to the current timeseries profile, as a dfe-schemas release would."""
+    """Add a column to the current timeseries profile, as a dfe-schemas release would.
+
+    The current version is read from the file, because ``data.main`` takes its
+    columns from whichever version the profile names current.
+    """
     profile = root / "common-header" / "timeseries.yaml"
-    head, sep, tail = profile.read_text(encoding="utf-8").partition('  "1.0.0":')
+    text = profile.read_text(encoding="utf-8")
+    current = re.search(r'^current: "([^"]+)"', text, re.MULTILINE)
+    assert current, "the timeseries profile names no current version"
+    head, version, tail = text.partition(f'  "{current.group(1)}":')
+    before, columns, rest = tail.partition("    columns:\n")
+    assert version and columns, f"no columns under the current version {current.group(1)}"
     column = f"      - name: {NEW_COLUMN}\n        type: string\n        _field_type: base\n\n"
-    profile.write_text(head.rstrip("\n") + "\n\n" + column + sep + tail, encoding="utf-8")
+    profile.write_text(head + version + before + columns + column + rest, encoding="utf-8")
 
 
 def _live_columns(ch_client, database: str, table: str) -> set[str]:

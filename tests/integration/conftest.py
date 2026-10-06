@@ -59,16 +59,20 @@ import pytest
 # for a datastore whose defaults move between majors.
 #
 # Tag on its own line, separate from the image name, so one Renovate regex
-# covers every language in the fleet.
+# covers every language in the fleet. The digest is dfe-infra versions.yaml's
+# services-digests pin for the same tag, so a retag cannot change what runs.
 # renovate: datasource=docker depName=clickhouse/clickhouse-server
-_CH_TAG = "26.3"
-_DEFAULT_IMAGE = f"clickhouse/clickhouse-server:{_CH_TAG}"
+_CH_TAG = "26.3.42.3"
+_CH_DIGEST = "sha256:21d572843e59539c7d100286b6f5a6053c341fe4b33c2d7b74b1ff7cb24c5399"
+_DEFAULT_IMAGE = f"clickhouse/clickhouse-server:{_CH_TAG}@{_CH_DIGEST}"
 
 # The document store production runs (dfe-infra versions.yaml); the eval image
-# bundles its PostgreSQL + DocumentDB backend into one container.
+# bundles its PostgreSQL + DocumentDB backend into one container. versions.yaml
+# pins the production image, not this one, so the digest is ghcr's index for the tag.
 # renovate: datasource=docker depName=ghcr.io/ferretdb/ferretdb-eval
 _FERRETDB_TAG = "2.7.0"
-_FERRETDB_IMAGE = f"ghcr.io/ferretdb/ferretdb-eval:{_FERRETDB_TAG}"
+_FERRETDB_DIGEST = "sha256:1bf47a449dd65839aabfc1a535d1370c98326f8a90de20437eda0aeb30bd8dd5"
+_FERRETDB_IMAGE = f"ghcr.io/ferretdb/ferretdb-eval:{_FERRETDB_TAG}@{_FERRETDB_DIGEST}"
 _FERRETDB_USER = "dfe"
 
 
