@@ -280,6 +280,23 @@ class TestGenerateAllSigmaViews:
             assert "CREATE OR REPLACE VIEW" in ddl
             assert f"{source_name}_sigma" in ddl
 
+    def test_a_source_whose_schema_cannot_load_leaves_the_others(
+        self, source_registry, type_registry
+    ):
+        from dfe_engine.schema.schema_builder_v2 import SchemaBuildError
+        from dfe_engine.sigma.source_mapper import SigmaSourceMapper
+
+        def columns_for(source: Source) -> list[str]:
+            if source.source == "windows-audit":
+                raise SchemaBuildError("meta_schema missing")
+            return ["process_name", "command_line"]
+
+        m = SigmaSourceMapper(source_registry, registry=type_registry, columns_for=columns_for)
+        views = m.generate_all_sigma_views()
+
+        assert "windows-audit" not in views
+        assert "linux-syslog" in views
+
 
 # ---------------------------------------------------------------------------
 # Tests: get_sources_for_logsource

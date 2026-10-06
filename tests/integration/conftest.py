@@ -67,7 +67,8 @@ _CH_DIGEST = "sha256:21d572843e59539c7d100286b6f5a6053c341fe4b33c2d7b74b1ff7cb24
 _DEFAULT_IMAGE = f"clickhouse/clickhouse-server:{_CH_TAG}@{_CH_DIGEST}"
 
 # The document store production runs (dfe-infra versions.yaml); the eval image
-# bundles its PostgreSQL + DocumentDB backend into one container.
+# bundles its PostgreSQL + DocumentDB backend into one container. versions.yaml
+# pins the production image, not this one, so the digest is ghcr's index for the tag.
 # renovate: datasource=docker depName=ghcr.io/ferretdb/ferretdb-eval
 _FERRETDB_TAG = "2.7.0"
 _FERRETDB_DIGEST = "sha256:1bf47a449dd65839aabfc1a535d1370c98326f8a90de20437eda0aeb30bd8dd5"

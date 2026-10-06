@@ -19,10 +19,15 @@ Usage:
 from collections.abc import Callable, Collection
 from typing import TYPE_CHECKING
 
+from scalo.logger import logger
+
+from dfe_engine.fieldmap.registry import FieldMapError
 from dfe_engine.fieldmap.view_generator import usable_view_mappings
 from dfe_engine.gitcrud import ResourceNotFoundError
+from dfe_engine.schema.schema_builder_v2 import SchemaBuildError
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
-from dfe_engine.sigma.views import build_sigma_view_ddl
+from dfe_engine.schema.schema_loader import SchemaLoadError
+from dfe_engine.sigma.views import SigmaViewError, build_sigma_view_ddl
 from dfe_engine.source.models import Source
 from dfe_engine.source.registry import SourceRegistry
 from dfe_engine.source.type_registry import TypeRegistry
@@ -130,14 +135,20 @@ class SigmaSourceMapper:
         """Generate Sigma view DDLs for all sources with a view.
 
         A source contributes a view when it has a stored view definition OR
-        non-empty field mappings.
+        non-empty field mappings. A source whose schema, field map or stored view
+        cannot render is logged and left out, so one broken source does not
+        blank the views of every other.
 
         Returns:
             Dict mapping source_name -> Sigma view DDL string.
         """
         views: dict[str, str] = {}
         for source in self._source_registry.get_all_sources(enabled_only=enabled_only):
-            ddl = self._generate_for_source(source, db)
+            try:
+                ddl = self._generate_for_source(source, db)
+            except (SchemaBuildError, SchemaLoadError, FieldMapError, SigmaViewError) as exc:
+                logger.warning(f"sigma view for source {source.source!r} not rendered: {exc}")
+                continue
             if ddl:
                 views[source.source] = ddl
 
