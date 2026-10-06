@@ -192,6 +192,9 @@ filterwarnings = [
     # starlette 1.x deprecates httpx-0.x under TestClient and points at httpx2; the
     # httpx2 migration is a separate follow-up (test-infra only; prod unaffected).
     "ignore:Using .httpx. with .starlette.testclient",
+    # authlib 1.8 warns on its own httpx import for the same reason; risk accepted
+    # until the httpx2 move (hyperi-io/scalo-py#32).
+    "ignore:The httpx module is deprecated",
     # pytest-benchmark can't run under xdist and the suite always runs -n 4, so
     # benchmarks are intentionally disabled here (run them with -p no:xdist).
     "ignore:Benchmarks are automatically disabled because xdist plugin is active",

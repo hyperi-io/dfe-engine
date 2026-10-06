@@ -70,7 +70,8 @@ _DEFAULT_IMAGE = f"clickhouse/clickhouse-server:{_CH_TAG}@{_CH_DIGEST}"
 # bundles its PostgreSQL + DocumentDB backend into one container.
 # renovate: datasource=docker depName=ghcr.io/ferretdb/ferretdb-eval
 _FERRETDB_TAG = "2.7.0"
-_FERRETDB_IMAGE = f"ghcr.io/ferretdb/ferretdb-eval:{_FERRETDB_TAG}"
+_FERRETDB_DIGEST = "sha256:1bf47a449dd65839aabfc1a535d1370c98326f8a90de20437eda0aeb30bd8dd5"
+_FERRETDB_IMAGE = f"ghcr.io/ferretdb/ferretdb-eval:{_FERRETDB_TAG}@{_FERRETDB_DIGEST}"
 _FERRETDB_USER = "dfe"
 
 
