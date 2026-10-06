@@ -1359,9 +1359,10 @@ async def deploy_source_schema(
 
     Runs the v2 YAML -> DDL pipeline. In plan mode the CREATE TABLE (+ any standard
     views) and validation errors are returned for review WITHOUT touching
-    ClickHouse. In deploy mode the DDL is applied - it is idempotent (CREATE ... IF
-    NOT EXISTS) so a re-deploy is a no-op. A schema that failed validation is never
-    deployed.
+    ClickHouse. In deploy mode the DDL is applied: an absent table is created, and
+    an existing one gains the columns it lacks and moves to the version's TTL, so a
+    re-deploy changes only what differs. The engine and the type of an existing
+    column are left as created. A schema that failed validation is never deployed.
     """
     ddl_settings = await run_blocking(functools.partial(ttl_settings, request, settings))
     applied = await run_blocking(
@@ -1586,7 +1587,7 @@ def _apply_source_schema(
         )
 
     db = settings.clickhouse.effective_data_database
-    statements, _table_exists = deploy_statements_for_build(
+    statements, table_exists = deploy_statements_for_build(
         builder,
         source,
         version_id,
@@ -1600,10 +1601,17 @@ def _apply_source_schema(
         # on one replica, leaving the ON CLUSTER table DDL nowhere to go.
         from dfe_engine.schema.applier import SchemaApplier
 
-        SchemaApplier(ch, resolver).ensure_database(db)
+        applier = SchemaApplier(ch, resolver)
+        applier.ensure_database(db)
         for stmt in statements:
             execute_ddl(ch, stmt)
             applied += 1
+        # The statements only add what an existing table lacks; its TTL moves here.
+        if table_exists:
+            before = len(applier.report.statements)
+            cfg = builder.build_ddl_config_for_version(source, version_id)
+            applier.ensure_table(db, source.table_name, result.columns, cfg)
+            applied += len(applier.report.statements) - before
     except Exception as exc:
         raise HTTPException(
             status_code=502,

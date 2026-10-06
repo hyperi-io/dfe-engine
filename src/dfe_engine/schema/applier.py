@@ -24,8 +24,6 @@ cluster gets the table on every replica rather than on whichever one the
 connection happened to land on.
 """
 
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
@@ -43,6 +41,9 @@ Action = Literal["created", "altered", "unchanged"]
 # system.tables.engine_full renders a day TTL as toIntervalDay(N) or INTERVAL N DAY.
 _TTL_DAYS_RE = re.compile(r"toIntervalDay\((\d+)\)|INTERVAL\s+(\d+)\s+DAY\b")
 
+# The resolver adds these to a variant for the topology; config never declares them.
+_TOPOLOGY_PREFIXES = ("Replicated", "Shared")
+
 
 class SchemaApplyError(Exception):
     """A DDL statement failed, or the server could not be read.
@@ -51,6 +52,61 @@ class SchemaApplyError(Exception):
     that reports success on a failed apply lets the data plane start against a
     database that has no tables.
     """
+
+
+def ttl_days_from_engine_full(engine_full: str) -> int | None:
+    """The day TTL in a ``system.tables.engine_full`` value, or None when it has none."""
+    _, sep, ttl_clause = engine_full.partition(" TTL ")
+    if not sep:
+        return None
+    match = _TTL_DAYS_RE.search(ttl_clause)
+    if match is None:
+        return None
+    return int(match.group(1) or match.group(2))
+
+
+@dataclass(frozen=True, slots=True)
+class LiveTable:
+    """A table as ClickHouse reports it in ``system.tables``.
+
+    Attributes:
+        engine: The engine name, topology prefix included (``ReplicatedMergeTree``).
+        ttl_days: The day TTL, or None when the table has none.
+    """
+
+    engine: str
+    ttl_days: int | None
+
+    @property
+    def variant(self) -> str:
+        """The MergeTree-family variant, without the prefix the topology adds."""
+        for prefix in _TOPOLOGY_PREFIXES:
+            if self.engine.startswith(prefix) and len(self.engine) > len(prefix):
+                return self.engine[len(prefix) :]
+        return self.engine
+
+
+def live_tables(client: Any, database: str) -> dict[str, LiveTable]:
+    """Every table in *database* by name, in one ``system.tables`` read.
+
+    Raises:
+        SchemaApplyError: ClickHouse could not be read.
+    """
+    try:
+        rows = client.query(
+            "SELECT name, engine, engine_full FROM system.tables WHERE database = {db:String}",
+            parameters={"db": database},
+        ).result_rows
+    except Exception as exc:
+        raise SchemaApplyError(f"could not read ClickHouse state: {exc}") from exc
+    return {
+        str(name): LiveTable(engine=str(engine), ttl_days=ttl_days_from_engine_full(str(full)))
+        for name, engine, full in rows
+    }
+
+
+def _nullable(ch_type: str) -> bool:
+    return "Nullable(" in ch_type
 
 
 @dataclass(frozen=True)
@@ -65,6 +121,8 @@ class TableChange:
     on_cluster: str = ""
     # The TTL move in days, "none -> 90" or "30 -> 90"; empty when it did not change.
     ttl: str = ""
+    # Why a declared TTL that differs from the live one could not be placed; empty otherwise.
+    ttl_skipped: str = ""
 
     def describe(self) -> str:
         """One line, in the past tense, for the apply log."""
@@ -217,7 +275,7 @@ class SchemaApplier:
 
         # After the column adds: the TTL column may be one of them.
         on_cluster = f" ON CLUSTER {cfg.cluster}" if cfg.cluster else resolved.on_cluster
-        ttl = self._reconcile_ttl(database, table, columns, cfg, on_cluster)
+        ttl, ttl_skipped = self._reconcile_ttl(database, table, columns, cfg, on_cluster)
 
         return self._record(
             TableChange(
@@ -228,6 +286,7 @@ class SchemaApplier:
                 engine=resolved.clause,
                 on_cluster=resolved.on_cluster,
                 ttl=ttl,
+                ttl_skipped=ttl_skipped,
             )
         )
 
@@ -238,34 +297,38 @@ class SchemaApplier:
         columns: list[SchemaColumn],
         cfg: DDLConfig,
         on_cluster: str,
-    ) -> str:
-        """Bring the live TTL to ``cfg.ttl_days``. Returns the move, or "" for none.
+    ) -> tuple[str, str]:
+        """Bring the live TTL to ``cfg.ttl_days``.
 
         An undeclared ``ttl_days`` leaves the table alone; only a declared 0 removes the TTL.
         A declared TTL over a column the table lacks is logged and skipped rather
         than failing the apply, since the columns are the gate's real job.
+
+        Returns:
+            The move (empty for none), and why a TTL that differs was not placed
+            (empty unless it was skipped).
         """
         wanted = cfg.ttl_days
         if wanted is None:
-            return ""
+            return "", ""
         live = self._table_ttl_days(database, table)
         target = f"{quote_ident(database, what='database')}.{quote_ident(table, what='table name')}"
         # A live 0-day TTL expires every row, so it is removed rather than matched.
         if wanted == 0:
             if live is None:
-                return ""
+                return "", ""
             logger.info(f"{database}.{table}: TTL {live} -> none; rows are kept forever")
             self._run(f"ALTER TABLE {target}{on_cluster} REMOVE TTL")
-            return f"{live} -> none"
+            return f"{live} -> none", ""
         if live == wanted:
-            return ""
+            return "", ""
         try:
             clause = DDLGenerator._ttl_clause(cfg, columns)
         except (DDLGenerationError, ValueError) as exc:
             logger.warning(f"{database}.{table}: TTL not reconciled: {exc}")
-            return ""
+            return "", str(exc)
         if clause is None:
-            return ""
+            return "", ""
         move = f"{'none' if live is None else live} -> {wanted}"
         if live is not None and wanted < live:
             logger.warning(
@@ -275,7 +338,31 @@ class SchemaApplier:
         else:
             logger.info(f"{database}.{table}: TTL {move} days")
         self._run(f"ALTER TABLE {target}{on_cluster} MODIFY {clause}")
-        return move
+        return move, ""
+
+    def nullability_mismatches(
+        self, database: str, table: str, columns: list[SchemaColumn]
+    ) -> tuple[str, ...]:
+        """Columns of *columns* the table already has with the other nullability.
+
+        :meth:`ensure_table` never retypes an existing column, so these keep the
+        nullability they were created with.
+
+        Raises:
+            SchemaApplyError: ClickHouse could not be read.
+        """
+        rows = self._select(
+            "SELECT name, type FROM system.columns WHERE database = {db:String} "
+            "AND table = {tbl:String}",
+            {"db": database, "tbl": table},
+        )
+        live = {str(name): str(ch_type) for name, ch_type in rows}
+        return tuple(
+            col.name
+            for col in columns
+            if col.name in live
+            and _nullable(live[col.name]) != _nullable(self._ddl_gen._resolve_type(col)[0])
+        )
 
     # -- materialised views ------------------------------------------
 
@@ -347,13 +434,7 @@ class SchemaApplier:
             {"db": database, "tbl": table},
         )
         engine_full = str(rows[0][0]) if rows and rows[0][0] is not None else ""
-        _, sep, ttl_clause = engine_full.partition(" TTL ")
-        if not sep:
-            return None
-        match = _TTL_DAYS_RE.search(ttl_clause)
-        if match is None:
-            return None
-        return int(match.group(1) or match.group(2))
+        return ttl_days_from_engine_full(engine_full)
 
     def _select(self, sql: str, parameters: dict[str, Any]) -> list:
         """Read server state. A read failure RAISES rather than reporting absence.

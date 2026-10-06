@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from dfe_engine.schema.applier import SchemaApplier
+from dfe_engine.schema.applier import LiveTable, SchemaApplier
 from dfe_engine.schema.engine_resolver import EngineResolver
 from dfe_engine.schema.schema_ddl import DDLConfig
 from dfe_engine.source.models import SchemaColumn
@@ -170,6 +170,29 @@ def test_a_ttl_over_an_absent_column_is_skipped_not_raised():
 
     assert client.statements == []
     assert change.action == "unchanged"
+    assert change.ttl == ""
+    assert "gone" in change.ttl_skipped
+
+
+def test_a_ttl_already_in_place_is_not_reported_as_skipped():
+    client = _FakeClient(columns=["_timestamp_load", "message"], live_ttl_days=90)
+
+    _, change = _apply(client, wanted=90)
+
+    assert change.ttl_skipped == ""
+
+
+@pytest.mark.parametrize(
+    ("engine", "variant"),
+    [
+        ("MergeTree", "MergeTree"),
+        ("ReplicatedMergeTree", "MergeTree"),
+        ("SharedReplacingMergeTree", "ReplacingMergeTree"),
+        ("ReplacingMergeTree", "ReplacingMergeTree"),
+    ],
+)
+def test_a_live_engine_compares_without_its_topology_prefix(engine: str, variant: str):
+    assert LiveTable(engine=engine, ttl_days=None).variant == variant
 
 
 def test_dry_run_records_the_modify_ttl_without_running_it():

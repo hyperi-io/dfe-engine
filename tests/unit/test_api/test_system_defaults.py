@@ -10,6 +10,8 @@
 
 Header type, header version and engine are stored for the next deploy. Only a
 patch that names ttl_days reconciles live TTL, the same way PUT /retention does.
+No source here is deployed, so apply and drift never need a table; what they do
+to a deployed one is proven in tests/integration/test_system_defaults_apply_ch.py.
 """
 
 import pytest
@@ -69,21 +71,22 @@ class TestGetDefaults:
         assert client.get(URL, headers=viewer_headers).status_code == 403
 
 
-class TestPatchDefaults:
-    @pytest.fixture
-    def unreachable_clickhouse(self, api_settings):
-        api_settings.clickhouse = api_settings.clickhouse.model_copy(
-            update={
-                "host": "127.0.0.1",
-                "port": 1,
-                "secure": False,
-                "resilience": ClickHouseResilienceSettings(enabled=False),
-            }
-        )
-        ClickHouseManager.reset_instance()
-        yield
-        ClickHouseManager.reset_instance()
+@pytest.fixture
+def unreachable_clickhouse(api_settings):
+    api_settings.clickhouse = api_settings.clickhouse.model_copy(
+        update={
+            "host": "127.0.0.1",
+            "port": 1,
+            "secure": False,
+            "resilience": ClickHouseResilienceSettings(enabled=False),
+        }
+    )
+    ClickHouseManager.reset_instance()
+    yield
+    ClickHouseManager.reset_instance()
 
+
+class TestPatchDefaults:
     def test_a_partial_patch_stores_only_the_named_fields(
         self, unreachable_clickhouse, admin_headers, app, client, tmp_path
     ):
@@ -230,7 +233,10 @@ class TestApplyDefaults:
         resp = client.post(APPLY, headers=admin_headers, json={"sources": ["alpha"]})
 
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"updated": ["alpha"], "unchanged": []}
+        body = resp.json()
+        assert body["updated"] == ["alpha"]
+        assert body["unchanged"] == []
+        assert [entry["source"] for entry in body["live"]] == ["alpha"]
         alpha = _version(client, admin_headers, "alpha")
         assert alpha["header"] == {"type": "minimal", "version": "1.0.0"}
         assert alpha["schema"]["ttl_days"] == 90
@@ -252,7 +258,31 @@ class TestApplyDefaults:
         second = client.post(APPLY, headers=admin_headers, json={"sources": ["alpha", "alpha"]})
 
         assert second.status_code == 200, second.text
-        assert second.json() == {"updated": [], "unchanged": ["alpha"]}
+        assert second.json()["updated"] == []
+        assert second.json()["unchanged"] == ["alpha"]
+        assert [entry["source"] for entry in second.json()["live"]] == ["alpha"]
+
+    def test_a_source_never_deployed_is_pinned_without_reaching_clickhouse(
+        self, unreachable_clickhouse, admin_headers, app, client, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _create_source(client, admin_headers, "alpha")
+
+        resp = client.post(APPLY, headers=admin_headers, json={"sources": ["alpha"]})
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["updated"] == ["alpha"]
+        assert resp.json()["live"] == [
+            {
+                "source": "alpha",
+                "status": "not_deployed",
+                "table": None,
+                "ttl": None,
+                "columns_added": [],
+                "not_applied": [],
+                "reason": "never deployed; its table is created with these values",
+            }
+        ]
 
     def test_a_missing_source_writes_nothing(self, admin_headers, app, client, tmp_path):
         _wire(app, tmp_path)
@@ -303,11 +333,40 @@ class TestDefaultDrift:
         alpha = by_name["alpha"]
         assert alpha["core"] is False
         assert alpha["drifted"] == ["common_header_type", "engine"]
-        assert alpha["common_header_type"] == {"stored": "timeseries", "default": "minimal"}
-        assert alpha["engine"] == {"stored": "MergeTree", "default": "ReplacingMergeTree"}
+        assert alpha["common_header_type"] == {
+            "stored": "timeseries",
+            "default": "minimal",
+            "live": None,
+        }
+        assert alpha["engine"] == {
+            "stored": "MergeTree",
+            "default": "ReplacingMergeTree",
+            "live": None,
+        }
         assert alpha["ttl_days"]["stored"] == 90
         assert alpha["ttl_days"]["default"] == 90
         assert "ttl_days" not in alpha["drifted"]
+
+    def test_a_header_named_by_its_registry_path_is_not_drift(
+        self, unreachable_clickhouse, admin_headers, app, client, tmp_path
+    ):
+        _wire(app, tmp_path)
+        resp = client.post(
+            "/api/v1/sources",
+            headers=admin_headers,
+            json={
+                "source": "alpha",
+                "match": {"field": "tags.collector.type", "value": "alpha"},
+                "header": {"type": "common-header/timeseries", "version": "1.0.0"},
+                "schema": {"ttl_days": 90, "engine": "MergeTree"},
+            },
+        )
+        assert resp.status_code == 201, resp.text
+
+        drift = client.get(DRIFT, headers=admin_headers)
+
+        assert drift.status_code == 200, drift.text
+        assert drift.json()["items"] == []
 
     def test_applying_the_defaults_clears_the_drift(self, admin_headers, app, client, tmp_path):
         _wire(app, tmp_path)

@@ -9,8 +9,8 @@ GET /api/v1/system/retention   -> The effective default TTL and where it comes f
 PUT /api/v1/system/retention   -> Set or clear the admin's override, then apply it
 GET /api/v1/system/defaults    -> TTL, common header and merge engine a source inherits
 PATCH /api/v1/system/defaults  -> Change any of those; only ttl_days is applied live
-POST /api/v1/system/defaults/apply -> Pin those defaults onto the named sources
-GET /api/v1/system/defaults/drift  -> Those sources, searched and paginated
+POST /api/v1/system/defaults/apply -> Pin those defaults onto the named sources and their tables
+GET /api/v1/system/defaults/drift  -> Sources and tables off the defaults, searched and paginated
 """
 
 import sys
@@ -52,7 +52,14 @@ from dfe_engine.gitcrud.table_defaults import (
 )
 from dfe_engine.gitcrud.table_defaults import resolve as resolve_defaults
 from dfe_engine.gitops.pins import UI_COMPONENT, component_overrides, load_pins, stack_version
-from dfe_engine.schema.retention import reconcile_default_ttl
+from dfe_engine.schema.applier import LiveTable, SchemaApplyError, live_tables
+from dfe_engine.schema.retention import (
+    LiveStatus,
+    SourceLiveOutcome,
+    apply_pinned_defaults,
+    reconcile_default_ttl,
+)
+from dfe_engine.source.models import Source
 from dfe_engine.source.registry import SourceCoreResourceError, SourceNotFoundError
 from dfe_engine.yaml_health import write_health
 
@@ -850,11 +857,62 @@ class ApplyDefaultsRequest(BaseModel):
         return names
 
 
+class FieldNotApplied(BaseModel):
+    """A pinned value the deployed table did not take."""
+
+    field: Literal["ttl_days", "common_header_type", "common_header_version", "engine"]
+    reason: str
+
+
+class SourceLiveApply(BaseModel):
+    """What applying the defaults did to one named source's deployed table."""
+
+    source: str
+    status: LiveStatus = Field(
+        description=(
+            "altered or unchanged once the table was brought to the pinned values; "
+            "not_deployed when no table runs the pinned version; failed when "
+            "ClickHouse or the schema build refused"
+        )
+    )
+    table: str | None = Field(
+        description="database.table; null when the source has never been deployed."
+    )
+    ttl: str | None = Field(
+        description="The TTL move in days, such as '90 -> 91'; null when it did not move."
+    )
+    columns_added: list[str] = Field(description="Columns the pinned header added to the table.")
+    not_applied: list[FieldNotApplied] = Field(
+        description="Pinned values the table did not take, each with the reason."
+    )
+    reason: str | None = Field(
+        description="Why nothing reached the table, for not_deployed and failed; else null."
+    )
+
+
+def _live_body(outcome: SourceLiveOutcome) -> SourceLiveApply:
+    return SourceLiveApply(
+        source=outcome.source,
+        status=outcome.status,
+        table=outcome.table or None,
+        ttl=outcome.ttl or None,
+        columns_added=list(outcome.columns_added),
+        not_applied=[
+            FieldNotApplied.model_validate({"field": item.field, "reason": item.reason})
+            for item in outcome.not_applied
+        ],
+        reason=outcome.reason or None,
+    )
+
+
 class ApplyDefaultsResponse(BaseModel):
-    """Which named sources were pinned, and which already had these defaults."""
+    """Which named sources were pinned, which already had these defaults, and their tables."""
 
     updated: list[str]
     unchanged: list[str]
+    live: list[SourceLiveApply] = Field(
+        description="One entry per named source, in request order: what reached its table."
+    )
 
 
 @router.post(
@@ -876,12 +934,20 @@ def apply_defaults(
     settings: Settings,
     registry: SourceReg,
 ) -> ApplyDefaultsResponse:
-    """Pin the current TTL, common header and merge engine onto the named sources.
+    """Pin the current TTL, common header and merge engine onto the named sources and their tables.
 
     Sources that are not in the list are left alone. A source that already stores
-    these values is unchanged. Nothing is deployed: the next deploy of a source
-    is what brings its table to the pinned values. A missing or engine-owned
-    name fails the request before any source is written.
+    these values is unchanged in the deploy repo. A missing or engine-owned name
+    fails the request before any source is written.
+
+    Then every named source whose current version is the deployed one, pinned now
+    or earlier, has its table brought to the pinned values in this request: the
+    TTL moves and the header's missing columns are added. The engine of an
+    existing table needs a rebuild, so it reaches new tables only, and existing
+    columns keep their type. ``live`` reports each source: what reached the table,
+    what did not and why. A source with no table for the pinned version takes the
+    values on its next deploy. A ClickHouse failure is reported on that source,
+    and the pin stays committed.
     """
     gc = _optional_gitcrud(request)
     ttl = resolve_state(gc, settings)
@@ -908,6 +974,7 @@ def apply_defaults(
 
     updated: list[str] = []
     unchanged: list[str] = []
+    saved: list[Source] = []
     author = git_author(user)
     for source in loaded:
         pinned = pin_table_defaults(
@@ -919,12 +986,14 @@ def apply_defaults(
         )
         if pinned is None:
             unchanged.append(source.source)
+            saved.append(source)
             continue
-        registry.save_source(
+        stored = registry.save_source(
             pinned,
             created_by=author,
             description=f"source: apply table defaults to {source.source}",
         )
+        saved.append(stored)
         audit_resource_change(
             user.user_id,
             "source",
@@ -938,18 +1007,47 @@ def apply_defaults(
             },
         )
         updated.append(source.source)
-    return ApplyDefaultsResponse(updated=updated, unchanged=unchanged)
+
+    def connect() -> Any:
+        return get_clickhouse_client(settings)
+
+    outcomes = apply_pinned_defaults(
+        connect, settings=effective_settings(settings, gc), sources=saved
+    )
+    for outcome in outcomes:
+        if outcome.status == "altered":
+            audit_resource_change(
+                user.user_id,
+                "schema",
+                outcome.source,
+                "updated",
+                {
+                    "table": outcome.table,
+                    "ttl": outcome.ttl,
+                    "columns_added": list(outcome.columns_added),
+                },
+            )
+    return ApplyDefaultsResponse(
+        updated=updated, unchanged=unchanged, live=[_live_body(o) for o in outcomes]
+    )
 
 
 class DefaultComparison(BaseModel):
-    """A stored source value beside the default it is measured against."""
+    """A stored source value, and its table's value, beside the default it is measured against."""
 
     stored: str | int | None
     default: str | int | None
+    live: str | int | None = Field(
+        default=None,
+        description=(
+            "The deployed table's value: TTL in days (0 for none) or the engine variant. "
+            "null for the header, and when the source has no deployed table."
+        ),
+    )
 
 
 class SourceDefaultDrift(BaseModel):
-    """One source whose current version stores a value other than the default."""
+    """One source whose deployed table or stored values differ from the defaults."""
 
     source: str
     core: bool
@@ -963,7 +1061,7 @@ class SourceDefaultDrift(BaseModel):
 def _drift_body(report: SourceDrift) -> SourceDefaultDrift:
     def comparison(name: str) -> DefaultComparison:
         field = getattr(report, name)
-        return DefaultComparison(stored=field.stored, default=field.default)
+        return DefaultComparison(stored=field.stored, default=field.default, live=field.live)
 
     return SourceDefaultDrift(
         source=report.source,
@@ -977,11 +1075,10 @@ def _drift_body(report: SourceDrift) -> SourceDefaultDrift:
 
 
 def _drift_search_row(item: SourceDefaultDrift) -> dict[str, Any]:
-    stored = [
-        str(getattr(item, name).stored)
-        for name in item.drifted
-        if getattr(item, name).stored is not None
-    ]
+    stored: list[str] = []
+    for name in item.drifted:
+        field = getattr(item, name)
+        stored.extend(str(value) for value in (field.stored, field.live) if value is not None)
     return {
         "item": item,
         "source": item.source,
@@ -990,10 +1087,35 @@ def _drift_search_row(item: SourceDefaultDrift) -> dict[str, Any]:
     }
 
 
+def _deployed_tables(settings: Any, sources: list[Source]) -> dict[str, LiveTable]:
+    """The data database's tables, read once, when any source has been deployed; else none."""
+    if not any(source.deployed_version is not None for source in sources):
+        return {}
+    database = settings.clickhouse.effective_data_database
+    try:
+        return live_tables(get_clickhouse_client(settings), database)
+    except SchemaApplyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "clickhouse_unavailable",
+                "message": f"the deployed tables could not be read: {exc}",
+            },
+        ) from exc
+
+
 @router.get(
     "/defaults/drift",
     response_model=PaginatedResponse[SourceDefaultDrift],
     dependencies=[Depends(require_action(scopes_dict["system_read"]))],
+    responses={
+        503: {
+            "model": ErrorResponse,
+            "description": (
+                "clickhouse_unavailable: a source is deployed and its table could not be read"
+            ),
+        },
+    },
 )
 def get_default_drift(
     user: CurrentUser,
@@ -1003,31 +1125,40 @@ def get_default_drift(
     pagination: PaginationParams = Depends(),
     search: str | None = Query(
         None,
-        description="Search in source name, drifted field, and stored value",
+        description="Search in source name, drifted field, and stored or live value",
     ),
 ) -> PaginatedResponse[SourceDefaultDrift]:
-    """Sources whose current version stores a header, TTL or engine other than the default.
+    """Sources whose table or current version runs a header, TTL or engine other than the default.
 
-    A field the source leaves unset inherits the default on its next deploy, so
-    it is not drift. A stored value that already equals the default is not drift
-    either. ``core`` is true for an engine-owned source, which the apply endpoint
-    will refuse. The landing source is never listed. ``search`` matches the source
-    name, a drifted field name, or a stored value. ``per_page=-1`` returns every match.
+    TTL and engine are measured on a deployed source's table, read from ClickHouse,
+    so a value pinned in the source that the table never took is still drift. An
+    engine change persists as drift until the table is rebuilt. For a source with
+    no deployed table, and for the header, the stored value is measured: a field
+    the source leaves unset inherits the default on its next deploy and is not
+    drift, nor is a stored value equal to the default. Header types compare as
+    bare profile names, so ``common-header/timeseries`` is ``timeseries``.
+
+    ``core`` is true for an engine-owned source, which the apply endpoint will
+    refuse. The landing source is never listed. ``search`` matches the source
+    name, a drifted field name, or a stored or live value. ``per_page=-1``
+    returns every match.
     """
     gc = _optional_gitcrud(request)
     ttl = resolve_state(gc, settings)
     table = resolve_defaults(gc, settings)
     landing = settings.clickhouse.landing_table
+    sources = [source for source in registry.get_all_sources() if source.source != landing]
+    tables = _deployed_tables(settings, sources)
     found: list[SourceDefaultDrift] = []
-    for source in registry.get_all_sources():
-        if source.source == landing:
-            continue
+    for source in sources:
+        live = tables.get(source.table_name) if source.deployed_version is not None else None
         report = source_default_drift(
             source,
             header_type=table.header_type,
             header_version=table.header_version,
             ttl_days=ttl.effective,
             engine=table.engine,
+            live=live,
         )
         if report is not None:
             found.append(_drift_body(report))

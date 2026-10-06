@@ -21,6 +21,7 @@ from dfe_engine.gitcrud.table_defaults import (
     source_default_drift,
 )
 from dfe_engine.gitops.repo import GitopsRepo
+from dfe_engine.schema.applier import LiveTable
 from dfe_engine.settings import ClickHouseSettings, DFESettings
 from dfe_engine.source.models import Source
 
@@ -57,6 +58,19 @@ class TestResolve:
         assert state.engine == "SummingMergeTree"
         assert state.engine_stored is None
         assert state.header_type_stored is None
+
+    def test_a_header_stored_by_its_registry_path_reads_as_the_bare_name(self, crud):
+        crud.put_many(
+            [("gov_settings", "defaults", {"common_header_type": "common-header/minimal"})],
+            "derek",
+            "cfg(defaults): update table defaults",
+        )
+
+        state = resolve(crud, _settings())
+
+        assert state.header_type == "minimal"
+        assert state.header_type_stored == "minimal"
+        assert state.header_type_origin == "override"
 
 
 class TestCommitPatch:
@@ -120,6 +134,11 @@ class TestCommitPatch:
         with pytest.raises(ValueError):
             commit_patch(crud, actor="derek", **kwargs)
         assert crud.head_revision() is None
+
+    def test_a_header_named_by_its_registry_path_is_stored_bare(self, crud):
+        commit_patch(crud, actor="derek", common_header_type="common-header/minimal")
+
+        assert crud.get("gov_settings", "defaults") == {"common_header_type": "minimal"}
 
     def test_unset_is_not_a_clear(self, crud):
         commit_patch(crud, actor="derek", engine="ReplacingMergeTree")
@@ -218,14 +237,49 @@ class TestPinTableDefaults:
             is None
         )
 
+    def test_a_header_stored_by_its_registry_path_already_matches(self):
+        source = _source(
+            "syslog",
+            header={"type": "common-header/minimal", "version": "1.0.0"},
+            schema={"ttl_days": 30, "engine": "ReplacingMergeTree"},
+        )
 
-def _drift(source: Source):
+        assert (
+            pin_table_defaults(
+                source,
+                header_type="minimal",
+                header_version="1.0.0",
+                ttl_days=30,
+                engine="ReplacingMergeTree",
+            )
+            is None
+        )
+
+    def test_the_pinned_header_is_written_bare(self):
+        source = _source("syslog", schema={"meta_schema": "meta.yaml"})
+
+        pinned = pin_table_defaults(
+            source,
+            header_type="common-header/minimal",
+            header_version="1.0.0",
+            ttl_days=30,
+            engine="MergeTree",
+        )
+
+        assert pinned is not None
+        header = pinned.versions["1.0.0"].header
+        assert header is not None
+        assert header.type == "minimal"
+
+
+def _drift(source: Source, live: LiveTable | None = None):
     return source_default_drift(
         source,
         header_type="minimal",
         header_version="1.0.0",
         ttl_days=30,
         engine="ReplacingMergeTree",
+        live=live,
     )
 
 
@@ -258,3 +312,44 @@ class TestSourceDefaultDrift:
         assert report.common_header_type.stored == "timeseries"
         assert report.common_header_version.drifted is False
         assert report.engine.stored == "MergeTree"
+        assert report.ttl_days.live is None
+
+    def test_a_header_stored_by_its_registry_path_is_not_drift(self):
+        source = _source(
+            "syslog",
+            header={"type": "common-header/minimal", "version": "1.0.0"},
+            schema={"ttl_days": 30, "engine": "ReplacingMergeTree"},
+        )
+
+        assert _drift(source) is None
+
+    def test_a_deployed_table_is_measured_rather_than_what_the_source_stores(self):
+        source = _source(
+            "syslog",
+            header={"type": "minimal", "version": "1.0.0"},
+            schema={"ttl_days": 30, "engine": "ReplacingMergeTree"},
+        )
+
+        report = _drift(source, LiveTable(engine="MergeTree", ttl_days=7))
+
+        assert report is not None
+        assert report.drifted == ("ttl_days", "engine")
+        assert report.ttl_days.stored == 30
+        assert report.ttl_days.live == 7
+        assert report.engine.stored == "ReplacingMergeTree"
+        assert report.engine.live == "MergeTree"
+        assert report.common_header_type.live is None
+
+    def test_a_table_on_the_defaults_has_no_drift_whatever_its_topology(self):
+        source = _source("syslog", schema={"engine": ""})
+
+        assert _drift(source, LiveTable(engine="ReplicatedReplacingMergeTree", ttl_days=30)) is None
+
+    def test_a_table_with_no_ttl_runs_zero_days(self):
+        source = _source("syslog", schema={"engine": ""})
+
+        report = _drift(source, LiveTable(engine="ReplacingMergeTree", ttl_days=None))
+
+        assert report is not None
+        assert report.drifted == ("ttl_days",)
+        assert report.ttl_days.live == 0

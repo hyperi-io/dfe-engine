@@ -19,25 +19,51 @@ The engine runs the source pass on every start. An admin's change of the default
 runs both, through :func:`reconcile_default_ttl`. The default each pass applies is
 ``settings.clickhouse.default_ttl_days``, so a caller hands in settings carrying the
 effective value (:func:`dfe_engine.gitcrud.retention.effective_settings`).
+
+Pinning the table defaults onto chosen sources moves their deployed tables through
+:func:`apply_pinned_defaults`, which uses the same per-table apply as the source pass.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal, NamedTuple
 
 from scalo.logger import logger
 
 from dfe_engine import __version__ as engine_version
 from dfe_engine.gitcrud.retention import with_default_ttl_days
-from dfe_engine.schema.applier import ApplyReport, SchemaApplier, SchemaApplyError
+from dfe_engine.schema.applier import (
+    ApplyReport,
+    LiveTable,
+    SchemaApplier,
+    SchemaApplyError,
+    TableChange,
+    live_tables,
+)
 from dfe_engine.schema.derived_registry import derived_reference_root
-from dfe_engine.schema.engine_resolver import EngineResolver
+from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
 from dfe_engine.schema.manifest_applier import ManifestApplier, declared_ttl_days
 from dfe_engine.schema.plan import build_plan
 from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
+from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerationError
 from dfe_engine.schema.schema_loader import SchemaLoadError
 from dfe_engine.source.deployment import SourceDeploymentStore
-from dfe_engine.source.models import Source
+from dfe_engine.source.models import SchemaColumn, Source
 from dfe_engine.source.type_registry import TypeRegistry
+
+LiveStatus = Literal["altered", "unchanged", "not_deployed", "failed"]
+
+# A table's engine is fixed when it is created; changing it means copying the data out.
+ENGINE_NEEDS_REBUILD = "needs a table rebuild; applies to new tables only"
+
+# What one table can refuse during a pinned apply; anything else is a defect and raises.
+_TABLE_ERRORS = (
+    SchemaApplyError,
+    SchemaBuildError,
+    SchemaLoadError,
+    DDLGenerationError,
+    ValueError,
+)
 
 
 @dataclass
@@ -104,6 +130,70 @@ def reconcile_core_ttls(client: Any, *, settings: Any) -> list[str]:
     return altered
 
 
+class TableApply(NamedTuple):
+    """One source table brought to a version: the change, and what it was built from."""
+
+    change: TableChange
+    columns: list[SchemaColumn]
+    config: DDLConfig
+
+
+class SourceTables:
+    """Brings deployed source tables to a source version's columns and TTL.
+
+    One per pass: the resolver senses the topology once, and :attr:`applier`
+    records every change in its report.
+    """
+
+    def __init__(self, client: Any, *, settings: Any) -> None:
+        self.client = client
+        self.database = settings.clickhouse.effective_data_database
+        resolver = EngineResolver(client=client, topology_setting=settings.clickhouse.topology)
+        self.applier = SchemaApplier(client, resolver)
+        # Header defaults are not passed. ensure_table adds any column this build says
+        # is missing, and the admin's common-header override is inherited on the next
+        # deploy rather than written onto live tables from a retention reconcile.
+        self._builder = SchemaBuilderV2(
+            TypeRegistry.default(),
+            schemas_base_dir=settings.schemas.schemas_dir or None,
+            derived_base_dir=derived_reference_root(settings),
+            default_engine=settings.clickhouse.default_engine,
+            default_ttl_days=settings.clickhouse.default_ttl_days,
+            resolver=resolver,
+        )
+
+    def apply(self, source: Source, version: str) -> TableApply:
+        """Add the columns *version* says the table lacks, and move its TTL to *version*'s.
+
+        Nothing is dropped or retyped, and the engine is left as created.
+
+        Raises:
+            SchemaApplyError: ClickHouse refused a statement or could not be read.
+            SchemaBuildError: The version does not build.
+            SchemaLoadError: A schema file the version names does not load.
+        """
+        # Built here, not read from the stored artefact: that keeps no columns, and
+        # the TTL cannot be placed without the column it is declared over.
+        result = self._builder.build_for_source_version(source, source_version=version)
+        cfg = self._builder.build_ddl_config_for_version(source, version)
+        change = self.applier.ensure_table(self.database, source.table_name, result.columns, cfg)
+        return TableApply(change=change, columns=result.columns, config=cfg)
+
+    def header_nullability_kept(
+        self, source: Source, version: str, columns: list[SchemaColumn]
+    ) -> tuple[str, ...]:
+        """Header columns on the table whose nullability differs from *version*'s header.
+
+        Raises:
+            SchemaApplyError: ClickHouse could not be read.
+            SchemaBuildError: The header profile does not load.
+        """
+        profile = self._builder._load_profile_for_snapshot(source.source, source.versions[version])
+        names = {col.name for col in profile}
+        header = [col for col in columns if col.name in names]
+        return self.applier.nullability_mismatches(self.database, source.table_name, header)
+
+
 def reconcile_source_ttls(
     client: Any, *, settings: Any, sources: list[Source]
 ) -> RetentionReconcile:
@@ -111,23 +201,10 @@ def reconcile_source_ttls(
 
     One source failing is logged and counted as skipped; it never stops the rest.
     """
-    database = settings.clickhouse.effective_data_database
-    resolver = EngineResolver(client=client, topology_setting=settings.clickhouse.topology)
-    applier = SchemaApplier(client, resolver)
-    outcome = RetentionReconcile(report=applier.report)
+    tables = SourceTables(client, settings=settings)
+    database = tables.database
+    outcome = RetentionReconcile(report=tables.applier.report)
     store = SourceDeploymentStore.from_settings(settings)
-    schemas_dir = settings.schemas.schemas_dir or None
-    # Header defaults are not passed. ensure_table adds any column this build says
-    # is missing, and the admin's common-header override is inherited on the next
-    # deploy rather than written onto live tables from a retention reconcile.
-    builder = SchemaBuilderV2(
-        TypeRegistry.default(),
-        schemas_base_dir=schemas_dir,
-        derived_base_dir=derived_reference_root(settings),
-        default_engine=settings.clickhouse.default_engine,
-        default_ttl_days=settings.clickhouse.default_ttl_days,
-        resolver=resolver,
-    )
     for source in sources:
         # reconcile_core_ttls and the schema phase own the engine's own tables.
         if source.resource_type == "core":
@@ -138,15 +215,11 @@ def reconcile_source_ttls(
             continue
         table = source.table_name
         try:
-            if not (applier.table_exists(database, table)):
+            if not (tables.applier.table_exists(database, table)):
                 logger.warning(f"{database}.{table}: absent, TTL left to the next deploy")
                 outcome.sources_skipped += 1
                 continue
-            # Built here, not read from the stored artefact: that keeps no columns, and
-            # the TTL cannot be placed without the column it is declared over.
-            result = builder.build_for_source_version(source, source_version=version)
-            cfg = builder.build_ddl_config_for_version(source, version)
-            applier.ensure_table(database, table, result.columns, cfg)
+            tables.apply(source, version)
         except (SchemaApplyError, SchemaBuildError, SchemaLoadError) as exc:
             logger.warning(f"{database}.{table}: TTL left to the next deploy: {exc}")
             outcome.sources_skipped += 1
@@ -168,3 +241,143 @@ def reconcile_default_ttl(
     outcome = reconcile_source_ttls(client, settings=settings, sources=sources)
     outcome.core_altered = core_altered
     return outcome
+
+
+@dataclass(frozen=True, slots=True)
+class FieldNotApplied:
+    """A pinned value the deployed table did not take, and why."""
+
+    field: str
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class SourceLiveOutcome:
+    """What bringing one source's deployed table to its pinned defaults did.
+
+    Attributes:
+        source: The source name.
+        status: ``altered`` or ``unchanged`` once the table was reconciled;
+            ``not_deployed`` when no table runs the pinned version; ``failed`` when
+            ClickHouse or the build refused.
+        table: ``database.table``; empty when the source has never been deployed.
+        ttl: The TTL move in days, such as ``90 -> 91``; empty when it did not move.
+        columns_added: Columns the table gained.
+        not_applied: Pinned values the table did not take.
+        reason: Why nothing reached the table, for ``not_deployed`` and ``failed``.
+    """
+
+    source: str
+    status: LiveStatus
+    table: str = ""
+    ttl: str = ""
+    columns_added: tuple[str, ...] = ()
+    not_applied: tuple[FieldNotApplied, ...] = ()
+    reason: str = ""
+
+
+def apply_pinned_defaults(
+    connect: Callable[[], Any], *, settings: Any, sources: list[Source]
+) -> list[SourceLiveOutcome]:
+    """Bring each source's deployed table to the TTL and header its current version pins.
+
+    Only a source whose current version is the deployed one has a table running
+    those pins. Its table gains the columns the version adds and moves to the
+    version's TTL; the engine stays as created and existing columns keep their
+    type, so each outcome names what the table did not take. *connect* is called
+    only when some source has such a table.
+
+    No source raises: the pins are committed before this runs, so one table
+    failing must not hide what happened to the others.
+
+    Returns:
+        One outcome per source, in the order given.
+    """
+    database = settings.clickhouse.effective_data_database
+    outcomes: dict[str, SourceLiveOutcome] = {}
+    deployed: list[Source] = []
+    for source in sources:
+        if source.deployed_version is None:
+            outcomes[source.source] = SourceLiveOutcome(
+                source=source.source,
+                status="not_deployed",
+                reason="never deployed; its table is created with these values",
+            )
+        elif source.deployed_version != source.current:
+            outcomes[source.source] = SourceLiveOutcome(
+                source=source.source,
+                status="not_deployed",
+                table=f"{database}.{source.table_name}",
+                reason=(
+                    f"version {source.current} carries these values and version "
+                    f"{source.deployed_version} is deployed; deploying {source.current} "
+                    "applies them"
+                ),
+            )
+        else:
+            deployed.append(source)
+    if deployed:
+        for outcome in _apply_deployed(connect, settings=settings, sources=deployed):
+            outcomes[outcome.source] = outcome
+    return [outcomes[source.source] for source in sources]
+
+
+def _apply_deployed(
+    connect: Callable[[], Any], *, settings: Any, sources: list[Source]
+) -> list[SourceLiveOutcome]:
+    database = settings.clickhouse.effective_data_database
+    try:
+        tables = SourceTables(connect(), settings=settings)
+        before = live_tables(tables.client, database)
+    # The pins are committed, so a ClickHouse that cannot be reached is reported per source.
+    except Exception as exc:
+        logger.warning(f"table defaults not applied to the deployed tables: {exc}")
+        return [
+            SourceLiveOutcome(
+                source=source.source,
+                status="failed",
+                table=f"{database}.{source.table_name}",
+                reason=str(exc),
+            )
+            for source in sources
+        ]
+    return [_apply_one(tables, source, before.get(source.table_name)) for source in sources]
+
+
+def _apply_one(tables: SourceTables, source: Source, live: LiveTable | None) -> SourceLiveOutcome:
+    target = f"{tables.database}.{source.table_name}"
+    if live is None:
+        return SourceLiveOutcome(
+            source=source.source,
+            status="not_deployed",
+            table=target,
+            reason="the table is not in ClickHouse; the next deploy creates it with these values",
+        )
+    try:
+        applied = tables.apply(source, source.current)
+        kept = tables.header_nullability_kept(source, source.current, applied.columns)
+    except _TABLE_ERRORS as exc:
+        logger.warning(f"{target}: table defaults not applied: {exc}")
+        return SourceLiveOutcome(
+            source=source.source, status="failed", table=target, reason=str(exc)
+        )
+    not_applied: list[FieldNotApplied] = []
+    if applied.change.ttl_skipped:
+        not_applied.append(FieldNotApplied("ttl_days", applied.change.ttl_skipped))
+    if live.variant != parse_engine(applied.config.engine).variant:
+        not_applied.append(FieldNotApplied("engine", ENGINE_NEEDS_REBUILD))
+    if kept:
+        not_applied.append(
+            FieldNotApplied(
+                "common_header_version",
+                f"existing columns keep their nullability: {', '.join(kept)}",
+            )
+        )
+    return SourceLiveOutcome(
+        source=source.source,
+        status="altered" if applied.change.action == "altered" else "unchanged",
+        table=target,
+        ttl=applied.change.ttl,
+        columns_added=applied.change.columns_added,
+        not_applied=tuple(not_applied),
+    )

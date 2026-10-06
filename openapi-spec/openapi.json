@@ -5123,7 +5123,7 @@
           "Sources"
         ],
         "summary": "Deploy Source Schema",
-        "description": "Plan (``dry_run=true``) or deploy a source version's schema to ClickHouse.\n\nRuns the v2 YAML -> DDL pipeline. In plan mode the CREATE TABLE (+ any standard\nviews) and validation errors are returned for review WITHOUT touching\nClickHouse. In deploy mode the DDL is applied - it is idempotent (CREATE ... IF\nNOT EXISTS) so a re-deploy is a no-op. A schema that failed validation is never\ndeployed.",
+        "description": "Plan (``dry_run=true``) or deploy a source version's schema to ClickHouse.\n\nRuns the v2 YAML -> DDL pipeline. In plan mode the CREATE TABLE (+ any standard\nviews) and validation errors are returned for review WITHOUT touching\nClickHouse. In deploy mode the DDL is applied: an absent table is created, and\nan existing one gains the columns it lacks and moves to the version's TTL, so a\nre-deploy changes only what differs. The engine and the type of an existing\ncolumn are left as created. A schema that failed validation is never deployed.",
         "operationId": "deploy_source_schema_api_v1_sources__name__deploy_post",
         "parameters": [
           {
@@ -8968,7 +8968,7 @@
           "System"
         ],
         "summary": "Apply Defaults",
-        "description": "Pin the current TTL, common header and merge engine onto the named sources.\n\nSources that are not in the list are left alone. A source that already stores\nthese values is unchanged. Nothing is deployed: the next deploy of a source\nis what brings its table to the pinned values. A missing or engine-owned\nname fails the request before any source is written.",
+        "description": "Pin the current TTL, common header and merge engine onto the named sources and their tables.\n\nSources that are not in the list are left alone. A source that already stores\nthese values is unchanged in the deploy repo. A missing or engine-owned name\nfails the request before any source is written.\n\nThen every named source whose current version is the deployed one, pinned now\nor earlier, has its table brought to the pinned values in this request: the\nTTL moves and the header's missing columns are added. The engine of an\nexisting table needs a rebuild, so it reaches new tables only, and existing\ncolumns keep their type. ``live`` reports each source: what reached the table,\nwhat did not and why. A source with no table for the pinned version takes the\nvalues on its next deploy. A ClickHouse failure is reported on that source,\nand the pin stays committed.",
         "operationId": "apply_defaults_api_v1_system_defaults_apply_post",
         "requestBody": {
           "content": {
@@ -9055,7 +9055,7 @@
           "System"
         ],
         "summary": "Get Default Drift",
-        "description": "Sources whose current version stores a header, TTL or engine other than the default.\n\nA field the source leaves unset inherits the default on its next deploy, so\nit is not drift. A stored value that already equals the default is not drift\neither. ``core`` is true for an engine-owned source, which the apply endpoint\nwill refuse. The landing source is never listed. ``search`` matches the source\nname, a drifted field name, or a stored value. ``per_page=-1`` returns every match.",
+        "description": "Sources whose table or current version runs a header, TTL or engine other than the default.\n\nTTL and engine are measured on a deployed source's table, read from ClickHouse,\nso a value pinned in the source that the table never took is still drift. An\nengine change persists as drift until the table is rebuilt. For a source with\nno deployed table, and for the header, the stored value is measured: a field\nthe source leaves unset inherits the default on its next deploy and is not\ndrift, nor is a stored value equal to the default. Header types compare as\nbare profile names, so ``common-header/timeseries`` is ``timeseries``.\n\n``core`` is true for an engine-owned source, which the apply endpoint will\nrefuse. The landing source is never listed. ``search`` matches the source\nname, a drifted field name, or a stored or live value. ``per_page=-1``\nreturns every match.",
         "operationId": "get_default_drift_api_v1_system_defaults_drift_get",
         "parameters": [
           {
@@ -9071,10 +9071,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Search in source name, drifted field, and stored value",
+              "description": "Search in source name, drifted field, and stored or live value",
               "title": "Search"
             },
-            "description": "Search in source name, drifted field, and stored value"
+            "description": "Search in source name, drifted field, and stored or live value"
           },
           {
             "name": "page",
@@ -9135,6 +9135,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "clickhouse_unavailable: a source is deployed and its table could not be read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -24039,15 +24049,24 @@
             },
             "type": "array",
             "title": "Unchanged"
+          },
+          "live": {
+            "items": {
+              "$ref": "#/components/schemas/SourceLiveApply"
+            },
+            "type": "array",
+            "title": "Live",
+            "description": "One entry per named source, in request order: what reached its table."
           }
         },
         "type": "object",
         "required": [
           "updated",
-          "unchanged"
+          "unchanged",
+          "live"
         ],
         "title": "ApplyDefaultsResponse",
-        "description": "Which named sources were pinned, and which already had these defaults."
+        "description": "Which named sources were pinned, which already had these defaults, and their tables."
       },
       "AppsReconcileResponse": {
         "properties": {
@@ -26357,6 +26376,21 @@
               }
             ],
             "title": "Default"
+          },
+          "live": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Live",
+            "description": "The deployed table's value: TTL in days (0 for none) or the engine variant. null for the header, and when the source has no deployed table."
           }
         },
         "type": "object",
@@ -26365,7 +26399,7 @@
           "default"
         ],
         "title": "DefaultComparison",
-        "description": "A stored source value beside the default it is measured against."
+        "description": "A stored source value, and its table's value, beside the default it is measured against."
       },
       "DegradedCondition": {
         "properties": {
@@ -27219,6 +27253,31 @@
         ],
         "title": "FieldMapping",
         "description": "A single Sigma field -> column mapping."
+      },
+      "FieldNotApplied": {
+        "properties": {
+          "field": {
+            "type": "string",
+            "enum": [
+              "ttl_days",
+              "common_header_type",
+              "common_header_version",
+              "engine"
+            ],
+            "title": "Field"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "field",
+          "reason"
+        ],
+        "title": "FieldNotApplied",
+        "description": "A pinned value the deployed table did not take."
       },
       "FileDetail": {
         "properties": {
@@ -36633,7 +36692,7 @@
           "engine"
         ],
         "title": "SourceDefaultDrift",
-        "description": "One source whose current version stores a value other than the default."
+        "description": "One source whose deployed table or stored values differ from the defaults."
       },
       "SourceDetailResponse": {
         "properties": {
@@ -37021,6 +37080,89 @@
         ],
         "title": "SourceImportResponse",
         "description": "A bundle applied, plus what the apps now need to follow it."
+      },
+      "SourceLiveApply": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "altered",
+              "unchanged",
+              "not_deployed",
+              "failed"
+            ],
+            "title": "Status",
+            "description": "altered or unchanged once the table was brought to the pinned values; not_deployed when no table runs the pinned version; failed when ClickHouse or the schema build refused"
+          },
+          "table": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table",
+            "description": "database.table; null when the source has never been deployed."
+          },
+          "ttl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttl",
+            "description": "The TTL move in days, such as '90 -> 91'; null when it did not move."
+          },
+          "columns_added": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Columns Added",
+            "description": "Columns the pinned header added to the table."
+          },
+          "not_applied": {
+            "items": {
+              "$ref": "#/components/schemas/FieldNotApplied"
+            },
+            "type": "array",
+            "title": "Not Applied",
+            "description": "Pinned values the table did not take, each with the reason."
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "description": "Why nothing reached the table, for not_deployed and failed; else null."
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "status",
+          "table",
+          "ttl",
+          "columns_added",
+          "not_applied",
+          "reason"
+        ],
+        "title": "SourceLiveApply",
+        "description": "What applying the defaults did to one named source's deployed table."
       },
       "SourceMappingSummary": {
         "properties": {
