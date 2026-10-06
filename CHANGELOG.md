@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.13](https://github.com/hyperi-io/dfe-engine/compare/v1.22.12...v1.22.13) (2026-10-06)
+
+### Bug Fixes
+
+* **deps:** add httpx2 so authlib stops warning on every start ([#751](https://github.com/hyperi-io/dfe-engine/issues/751)) ([4bda0e9](https://github.com/hyperi-io/dfe-engine/commit/4bda0e9bbe52724adf098ab01331afe30a507378))
+* source-list-surface-table-type-for-current ([#749](https://github.com/hyperi-io/dfe-engine/issues/749)) ([970bd95](https://github.com/hyperi-io/dfe-engine/commit/970bd95b44163628d198aa525dc89960b9513853))
+
 ## [1.22.12](https://github.com/hyperi-io/dfe-engine/compare/v1.22.11...v1.22.12) (2026-10-06)
 
 ### Bug Fixes
