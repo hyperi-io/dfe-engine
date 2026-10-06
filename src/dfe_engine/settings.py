@@ -332,6 +332,15 @@ class ClickHouseSettings(BaseModel):
     default_header_version: str = Field(default="1.0.0")
     cloud: ClickHouseCloudSettings = Field(default_factory=ClickHouseCloudSettings)
     resilience: ClickHouseResilienceSettings = Field(default_factory=ClickHouseResilienceSettings)
+    interactive_budget_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        description=(
+            "Reconnect budget for a read a console request waits on, with no Cloud "
+            "auto-wake, so a down server answers 503 within it rather than within "
+            "resilience.budget_seconds."
+        ),
+    )
 
     @property
     def effective_data_database(self) -> str:

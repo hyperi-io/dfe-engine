@@ -73,12 +73,14 @@ def quote_ident(name: str, *, what: str = "identifier") -> str:
 _BARE_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
-def _index_ident(name: str, *, what: str = "index name") -> str:
-    """An index or projection name bare when ClickHouse reads it bare, else quoted.
+def _ident(name: str, *, what: str = "index name") -> str:
+    """A name bare when ClickHouse reads it bare, else quoted through :func:`quote_ident`.
 
-    A safe name stays bare because dfe-schemas diff-checks its committed DDL against
-    a fresh render. A name taken from a dotted column such as ``event.action`` is
-    one identifier only once quoted, through :func:`quote_ident`.
+    For the positions the renderer has always written bare: index and projection
+    names, TTL columns and the ``ON CLUSTER`` name. A safe name stays bare because
+    dfe-schemas diff-checks its committed DDL against a fresh render. A name taken
+    from a dotted column such as ``event.action`` is one identifier only once
+    quoted, and an unsafe one is refused.
     """
     if _BARE_IDENT.fullmatch(name):
         return name
@@ -311,7 +313,7 @@ class DDLGenerator:
         resolver = self._resolver or EngineResolver(override=cfg.topology)
         return resolver.resolve(spec, cfg.db)
 
-    def _on_cluster(self, cfg: DDLConfig) -> str:
+    def on_cluster(self, cfg: DDLConfig) -> str:
         """The ``ON CLUSTER`` suffix for any statement, or "".
 
         An explicit ``cfg.cluster`` pin wins, else the resolver decides -- the
@@ -321,9 +323,12 @@ class DDLGenerator:
         and the siblings behind a headless Service silently diverge. Without an
         injected resolver this is always "" (a named topology from config
         carries no ON CLUSTER intent), so the offline render paths are unchanged.
+
+        Raises:
+            DDLGenerationError: The pinned cluster name is unsafe in DDL.
         """
         if cfg.cluster:
-            return f" ON CLUSTER {cfg.cluster}"
+            return f" ON CLUSTER {_ident(cfg.cluster, what='cluster name')}"
         return self._resolve_engine(cfg).on_cluster
 
     # -- CREATE TABLE ------------------------------------------------
@@ -365,10 +370,7 @@ class DDLGenerator:
         # Replicated table is created on the ONE node the connection landed on,
         # and the siblings behind a headless service silently diverge.
         create = f"CREATE TABLE IF NOT EXISTS {_qualified(cfg.db, table_name, what='table name')}"
-        if cfg.cluster:
-            create += f" ON CLUSTER {cfg.cluster}"
-        else:
-            create += resolved.on_cluster
+        create += self.on_cluster(cfg)
         lines.append(f"{create}\n(")
 
         # Column + index + projection definitions
@@ -423,7 +425,7 @@ class DDLGenerator:
             lines.append(f"SAMPLE BY {cfg.sample_by}")
 
         # TTL
-        ttl = self._ttl_clause(cfg, columns)
+        ttl = self.ttl_clause(cfg, columns)
         if ttl:
             lines.append(ttl)
 
@@ -467,7 +469,7 @@ class DDLGenerator:
         col_def = self._column_def(column)
         sql = (
             f"ALTER TABLE {_qualified(cfg.db, table_name, what='table name')}"
-            f"{self._on_cluster(cfg)} ADD COLUMN IF NOT EXISTS {col_def}"
+            f"{self.on_cluster(cfg)} ADD COLUMN IF NOT EXISTS {col_def}"
         )
         if after:
             sql += f" AFTER `{after}`"
@@ -493,7 +495,7 @@ class DDLGenerator:
         col_def = self._column_def(column)
         return (
             f"ALTER TABLE {_qualified(cfg.db, table_name, what='table name')}"
-            f"{self._on_cluster(cfg)} MODIFY COLUMN {col_def};\n"
+            f"{self.on_cluster(cfg)} MODIFY COLUMN {col_def};\n"
         )
 
     def generate_alter_add_indexes(
@@ -509,7 +511,7 @@ class DDLGenerator:
         """
         cfg = config or DDLConfig()
         qualified = _qualified(cfg.db, table_name, what="table name")
-        on_cluster = self._on_cluster(cfg)
+        on_cluster = self.on_cluster(cfg)
         return [
             f"ALTER TABLE {qualified}{on_cluster} ADD {idx};\n" for idx in self._index_defs(column)
         ]
@@ -553,7 +555,7 @@ class DDLGenerator:
 
         return (
             f"CREATE OR REPLACE VIEW {_qualified(cfg.db, view_name, what='view name')}"
-            f"{self._on_cluster(cfg)} AS\n"
+            f"{self.on_cluster(cfg)} AS\n"
             f"SELECT\n"
             f"{select_parts}\n"
             f"FROM {_qualified(cfg.db, table_name, what='table name')};\n"
@@ -634,7 +636,7 @@ class DDLGenerator:
         if cfg.projection_order_by:
             col_names = {c.name for c in columns}
             if cfg.projection_order_by in col_names:
-                name = _index_ident(f"{cfg.projection_order_by}_optimized", what="projection name")
+                name = _ident(f"{cfg.projection_order_by}_optimized", what="projection name")
                 body.append(
                     f"    PROJECTION {name} (SELECT * ORDER BY `{cfg.projection_order_by}`)"
                 )
@@ -649,7 +651,7 @@ class DDLGenerator:
         Format:
             `name` Type [DEFAULT|MATERIALIZED|ALIAS expr] [COMMENT '...'] [CODEC(...)]
         """
-        ch_type, codec = self._resolve_type(col)
+        ch_type, codec = self.resolve_type(col)
         parts = [f"`{col.name}`", ch_type]
 
         # DEFAULT / MATERIALIZED / ALIAS expression
@@ -668,11 +670,14 @@ class DDLGenerator:
 
         return " ".join(parts)
 
-    def _resolve_type(self, col: SchemaColumn) -> tuple[str, str | None]:
+    def resolve_type(self, col: SchemaColumn) -> tuple[str, str | None]:
         """Resolve column to (ch_type, codec).
 
         Handles enum placeholder substitution by constructing
         a ch_override from the default field values.
+
+        Raises:
+            TypeRegistryError: The column's type, attribute or override is not in the registry.
         """
         ch_override = col.ch_override
 
@@ -748,7 +753,7 @@ class DDLGenerator:
         index_name = f"idx_{col.name}"
         quoted = f"`{col.name}`"
         if col.index:
-            return [f"INDEX {_index_ident(index_name)} {quoted} TYPE {col.index}"]
+            return [f"INDEX {_ident(index_name)} {quoted} TYPE {col.index}"]
 
         use_case, dims = split_use_case(col.use_case)
         if use_case is None:
@@ -756,7 +761,7 @@ class DDLGenerator:
 
         if use_case == "key_search":
             return [
-                template.format(name=_index_ident(f"{index_name}_{suffix}"), col=quoted)
+                template.format(name=_ident(f"{index_name}_{suffix}"), col=quoted)
                 for suffix, template in self._key_search_templates
             ]
 
@@ -767,9 +772,7 @@ class DDLGenerator:
                     f"dimension count, as similarity_search(<dims>)"
                 )
             return [
-                _SIMILARITY_SEARCH_TEMPLATE.format(
-                    name=_index_ident(index_name), col=quoted, dims=dims
-                )
+                _SIMILARITY_SEARCH_TEMPLATE.format(name=_ident(index_name), col=quoted, dims=dims)
             ]
 
         if use_case == "exact_match":
@@ -778,12 +781,12 @@ class DDLGenerator:
                 if col.declared_cardinality == LOW_CARDINALITY
                 else _EXACT_MATCH_HIGH_CARDINALITY
             )
-            return [template.format(name=_index_ident(index_name), col=quoted)]
+            return [template.format(name=_ident(index_name), col=quoted)]
 
         template = self._index_templates.get(use_case)
         if template is None:
             return []
-        return [template.format(name=_index_ident(index_name), col=quoted)]
+        return [template.format(name=_ident(index_name), col=quoted)]
 
     # -- Internal: ORDER BY ------------------------------------------
 
@@ -806,7 +809,7 @@ class DDLGenerator:
         result: list[str] = []
         for col in ordered:
             # Skip any Nullable key, including LowCardinality(Nullable(T)).
-            ch_type, _ = self._resolve_type(col)
+            ch_type, _ = self.resolve_type(col)
             if "Nullable" in ch_type:
                 logger.warning(
                     f"Column {col.name!r} resolves to {ch_type} and is marked "
@@ -835,13 +838,13 @@ class DDLGenerator:
         return all(col in partition for col in cfg.ttl_columns)
 
     @staticmethod
-    def _ttl_clause(cfg: DDLConfig, columns: list[SchemaColumn]) -> str | None:
-        """Build the TTL clause.
+    def ttl_clause(cfg: DDLConfig, columns: list[SchemaColumn]) -> str | None:
+        """Build the TTL clause, or None when ``cfg.ttl_days`` declares no TTL.
 
         Raises:
             DDLGenerationError: Retention was declared over columns the table does
                 not carry, which would otherwise render as a table that silently
-                keeps everything forever.
+                keeps everything forever, or a TTL column's name is unsafe in DDL.
         """
         if not (cfg.ttl_days):
             return None
@@ -858,10 +861,10 @@ class DDLGenerator:
                 f"{', '.join(missing)}; the table would keep every row forever"
             )
 
-        parts = [
-            f"{col} + INTERVAL {cfg.ttl_days} DAY DELETE WHERE {col} >= 0"
-            for col in cfg.ttl_columns
-        ]
+        parts: list[str] = []
+        for col in cfg.ttl_columns:
+            ident = _ident(col, what="TTL column")
+            parts.append(f"{ident} + INTERVAL {cfg.ttl_days} DAY DELETE WHERE {ident} >= 0")
         return "TTL " + ",\n    ".join(parts)
 
     # -- Internal: table comment -------------------------------------

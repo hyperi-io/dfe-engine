@@ -13,8 +13,12 @@ Common-header type, common-header version and the merge engine live in
 already owns, so :func:`commit_patch` writes that key into the same file.
 
 A source that leaves the field unset inherits the stored value the next time it
-is deployed. Nothing here alters a live table: retention reconcile is the only
-apply, and it runs from the API when the patch names ``ttl_days``.
+is deployed. Nothing here alters a live table: a patch naming ``ttl_days`` runs
+retention reconcile, and pinning the defaults onto sources runs
+:func:`dfe_engine.schema.retention.apply_pinned_defaults`, both from the API.
+
+A common-header type is stored and compared as the bare profile name, so
+``common-header/minimal`` and ``minimal`` are the same header.
 """
 
 from dataclasses import dataclass
@@ -22,6 +26,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from scalo.logger import logger
 
+from dfe_engine.schema.engine_resolver import parse_engine
 from dfe_engine.source.engine_registry import InvalidEngineError
 from dfe_engine.source.models import (
     DEFAULT_HEADER_TYPE,
@@ -40,6 +45,7 @@ from .retention import NAME as TTL_NAME
 
 if TYPE_CHECKING:
     from dfe_engine.gitops.repo import PublishResult
+    from dfe_engine.schema.applier import LiveTable
 
 NAME = "defaults"
 KEY_HEADER_TYPE = "common_header_type"
@@ -70,8 +76,23 @@ class TableDefaults:
     engine_fallback: str
 
 
+def header_profile_name(header_type: str) -> str:
+    """The bare profile name *header_type* refers to: ``common-header/minimal`` is ``minimal``.
+
+    A value that names no profile file comes back stripped, so a compare still sees it.
+    """
+    from dfe_engine.schema.schema_loader import SchemaLoadError, profile_file_stem
+
+    try:
+        stem = profile_file_stem(header_type)
+    except SchemaLoadError:
+        return header_type.strip()
+    return stem or header_type.strip()
+
+
 def _fallback_header_type(settings: Any) -> str:
-    return getattr(settings.clickhouse, "default_header_type", "") or DEFAULT_HEADER_TYPE
+    configured = getattr(settings.clickhouse, "default_header_type", "") or DEFAULT_HEADER_TYPE
+    return header_profile_name(configured)
 
 
 def _fallback_header_version(settings: Any) -> str:
@@ -161,6 +182,8 @@ def resolve(crud: GitCrud | None, settings: Any) -> TableDefaults:
     fallback_engine = _fallback_engine(settings)
     doc = _read_doc(crud, NAME)
     header_type_stored = _stored_text(doc, KEY_HEADER_TYPE)
+    if header_type_stored is not None:
+        header_type_stored = header_profile_name(header_type_stored)
     header_version_stored = _stored_text(doc, KEY_HEADER_VERSION)
     engine_stored = _stored_text(doc, KEY_ENGINE)
 
@@ -261,6 +284,8 @@ def commit_patch(
     header_type = _next_stored(
         _stored_text(current, KEY_HEADER_TYPE), common_header_type, "common_header_type"
     )
+    if header_type is not None:
+        header_type = header_profile_name(header_type)
     header_version = _next_stored(
         _stored_text(current, KEY_HEADER_VERSION),
         common_header_version,
@@ -329,17 +354,20 @@ def pin_table_defaults(
     Other versions are left alone, and so is every other field on the current
     version. Header, TTL and engine are written even when the source was only
     inheriting the same values, so a later change to the deployment default
-    does not move this source again.
+    does not move this source again. The header type is written as the bare
+    profile name, and a stored ``common-header/<name>`` already matches ``<name>``.
     """
     snap = source.versions[source.current]
-    header = SourceHeader(type=header_type, version=header_version)
+    header = SourceHeader(type=header_profile_name(header_type), version=header_version)
     schema = (
         snap.schema_config.model_copy(update={"ttl_days": ttl_days, "engine": engine})
         if snap.schema_config is not None
         else SourceSchema(ttl_days=ttl_days, engine=engine)
     )
     if (
-        snap.header == header
+        snap.header is not None
+        and header_profile_name(snap.header.type) == header.type
+        and snap.header.version == header.version
         and snap.schema_config is not None
         and snap.schema_config.ttl_days == ttl_days
         and snap.schema_config.engine == engine
@@ -352,19 +380,30 @@ def pin_table_defaults(
 
 @dataclass(frozen=True)
 class StoredDefault:
-    """One field as the source stores it, beside the default it is compared with.
+    """One field as the source stores it and as its table runs it, beside the default.
 
     ``stored`` is None when the source leaves the field unset and therefore
-    inherits. An inheriting field is not drift: the next deploy follows the
-    default. Drift is a stored value that is not that default.
+    inherits. ``live`` is the deployed table's value, None when no table was
+    read or the field is not a table property. ``drifted`` is decided by
+    :func:`source_default_drift`.
     """
 
     stored: str | int | None
     default: str | int | None
+    live: str | int | None = None
+    drifted: bool = False
 
-    @property
-    def drifted(self) -> bool:
-        return self.stored is not None and self.stored != self.default
+
+def _stored_differs(stored: str | int | None, default: str | int | None) -> bool:
+    return stored is not None and stored != default
+
+
+def _live_ttl_value(live: LiveTable) -> int | str:
+    """Days for a table with no TTL (0) or a whole-day one; else the interval, such as ``6 hour``."""
+    if live.ttl is None:
+        return 0
+    days = live.ttl.days
+    return live.ttl.describe() if days is None else days
 
 
 @dataclass(frozen=True)
@@ -380,6 +419,7 @@ class SourceDrift:
 
     @property
     def drifted(self) -> tuple[str, ...]:
+        """The fields that differ from the defaults, in report order."""
         return tuple(name for name in _DRIFT_FIELDS if getattr(self, name).drifted)
 
 
@@ -393,34 +433,60 @@ def source_default_drift(
     header_version: str,
     ttl_days: int,
     engine: str,
+    live: LiveTable | None = None,
 ) -> SourceDrift | None:
     """The current version's drift from these defaults, or None when it has none.
 
-    Unset header, unset TTL and an empty engine inherit, so they are not drift.
-    A stored value that already equals the default is not drift either.
+    TTL and engine belong to the table. With *live*, the source's deployed
+    table, they are measured on it, so a value the table never took is drift
+    whatever the source stores; a table without a TTL runs 0 days, a TTL that is
+    not whole days is reported as its interval and is always drift, and the
+    engine compares as a variant without its topology prefix. Without *live*,
+    and always for the header, the stored value is measured: unset inherits on
+    the next deploy and is not drift, nor is a stored value equal to the
+    default. Header types compare as bare profile names.
     """
     snap = source.versions[source.current]
     header = snap.header
     schema = snap.schema_config
+    stored_ttl = None if schema is None else schema.ttl_days
+    stored_engine = None if schema is None or not schema.engine else schema.engine
+    stored_type = None if header is None else header.type
+    stored_version = None if header is None else header.version
+    if live is None:
+        ttl_field = StoredDefault(
+            stored=stored_ttl, default=ttl_days, drifted=_stored_differs(stored_ttl, ttl_days)
+        )
+        engine_field = StoredDefault(
+            stored=stored_engine, default=engine, drifted=_stored_differs(stored_engine, engine)
+        )
+    else:
+        live_ttl = _live_ttl_value(live)
+        ttl_field = StoredDefault(
+            stored=stored_ttl, default=ttl_days, live=live_ttl, drifted=live_ttl != ttl_days
+        )
+        engine_field = StoredDefault(
+            stored=stored_engine,
+            default=engine,
+            live=live.variant,
+            drifted=live.variant != parse_engine(engine).variant,
+        )
     report = SourceDrift(
         source=source.source,
         core=source.resource_type == "core",
-        ttl_days=StoredDefault(
-            stored=None if schema is None else schema.ttl_days,
-            default=ttl_days,
-        ),
+        ttl_days=ttl_field,
         common_header_type=StoredDefault(
-            stored=None if header is None else header.type,
+            stored=stored_type,
             default=header_type,
+            drifted=stored_type is not None
+            and header_profile_name(stored_type) != header_profile_name(header_type),
         ),
         common_header_version=StoredDefault(
-            stored=None if header is None else header.version,
+            stored=stored_version,
             default=header_version,
+            drifted=_stored_differs(stored_version, header_version),
         ),
-        engine=StoredDefault(
-            stored=None if schema is None or not schema.engine else schema.engine,
-            default=engine,
-        ),
+        engine=engine_field,
     )
     if not report.drifted:
         return None
