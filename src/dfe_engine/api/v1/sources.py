@@ -47,6 +47,7 @@ from dfe_engine.api.deps import (
     SchemaReg,
     Settings,
     SourceReg,
+    get_field_map_registry_optional,
     require_action,
     ttl_settings,
 )
@@ -1061,7 +1062,7 @@ def get_source_schema_columns(
     )
     try:
         columns = builder.load_columns_for_source_version(source, source_version=version_id)
-    # Both, and neither is redundant: schema_builder_v2.py:373 re-raises a
+    # Both, and neither is redundant: the builder re-raises a profile or meta_schema
     # SchemaLoadError as SchemaBuildError, so which one arrives depends on where
     # the load failed. Narrowing to one answers 500 for the other.
     except (SchemaBuildError, SchemaLoadError) as exc:
@@ -1139,6 +1140,7 @@ def build_source_schema(
             schemas_base_dir=settings.schemas.schemas_dir or None,
             refresh=True,
             settings=settings,
+            field_map_registry=get_field_map_registry_optional(),
         )
     except (SchemaBuildError, SchemaLoadError) as exc:
         raise HTTPException(
@@ -1217,6 +1219,7 @@ def plan_source_deploy(
             refresh=True,
             resolver=resolver,
             settings=settings,
+            field_map_registry=get_field_map_registry_optional(),
         )
     except (SchemaBuildError, SchemaLoadError) as exc:
         raise HTTPException(
@@ -1536,11 +1539,12 @@ def _apply_source_schema(
         schemas_base_dir=settings.schemas.schemas_dir or None,
         derived_base_dir=derived_reference_root(settings),
         resolver=resolver,
+        field_map_registry=get_field_map_registry_optional(),
         **inherited_builder_kwargs(settings),
     )
     try:
         result = builder.build_for_source_version(source, source_version=version_id)
-    # Both, and neither is redundant: schema_builder_v2.py:373 re-raises a
+    # Both, and neither is redundant: the builder re-raises a profile or meta_schema
     # SchemaLoadError as SchemaBuildError, so which one arrives depends on where
     # the load failed. Narrowing to one answers 500 for the other.
     except (SchemaBuildError, SchemaLoadError) as exc:

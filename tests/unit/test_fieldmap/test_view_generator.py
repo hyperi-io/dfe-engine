@@ -127,6 +127,34 @@ class TestGenerateView:
         assert ddl is not None
         assert "*" in ddl
 
+    def test_columns_drop_mappings_the_table_cannot_carry(
+        self, gen: ViewGenerator, registry: FieldMapRegistry
+    ):
+        registry.save_map(
+            _make_field_map(
+                standard="sigma",
+                mappings={"EventID": "event_code", "Image": "process_executable"},
+            )
+        )
+        ddl = gen.generate_view("sigma", "src", "tbl", columns=["event_code", "_raw"])
+        assert ddl is not None
+        assert "`event_code` AS `EventID`" in ddl
+        assert "process_executable" not in ddl
+
+    def test_columns_with_no_match_render_nothing(
+        self, gen: ViewGenerator, registry: FieldMapRegistry
+    ):
+        registry.save_map(
+            _make_field_map(standard="sigma", mappings={"Image": "process_executable"})
+        )
+        assert gen.generate_view("sigma", "src", "tbl", columns=["_raw"]) is None
+        assert gen.generate_views_for_source("src", "tbl", columns=["_raw"]) == {}
+
+    def test_empty_column_set_renders_nothing(self, gen: ViewGenerator, registry: FieldMapRegistry):
+        """An empty set is a table with no columns, not an unknown table."""
+        registry.save_map(_make_field_map(standard="sigma", mappings={"A": "a"}))
+        assert gen.generate_view("sigma", "src", "tbl", columns=[]) is None
+
 
 # ---------------------------------------------------------------
 # generate_views_for_source

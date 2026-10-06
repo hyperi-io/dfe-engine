@@ -16,11 +16,18 @@ Usage:
     view_ddl = mapper.generate_sigma_view("windows_audit")
 """
 
+from collections.abc import Callable, Collection
 from typing import TYPE_CHECKING
 
+from scalo.logger import logger
+
+from dfe_engine.fieldmap.registry import FieldMapError
+from dfe_engine.fieldmap.view_generator import usable_view_mappings
 from dfe_engine.gitcrud import ResourceNotFoundError
+from dfe_engine.schema.schema_builder_v2 import SchemaBuildError
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
-from dfe_engine.sigma.views import build_sigma_view_ddl
+from dfe_engine.schema.schema_loader import SchemaLoadError
+from dfe_engine.sigma.views import SigmaViewError, build_sigma_view_ddl
 from dfe_engine.source.models import Source
 from dfe_engine.source.registry import SourceRegistry
 from dfe_engine.source.type_registry import TypeRegistry
@@ -45,6 +52,10 @@ class SigmaSourceMapper:
     columns DERIVED FROM the source's ``_json`` payload, which the field maps
     (real-column -> Sigma-field only) cannot. Generation falls back to the field
     maps when a source has no stored definition.
+
+    When ``columns_for`` is provided, a field-map view keeps only the mappings
+    whose column the source's table carries, the same rule the source deploy
+    applies, so the rendered DDL is one ClickHouse accepts.
     """
 
     def __init__(
@@ -53,6 +64,7 @@ class SigmaSourceMapper:
         registry: TypeRegistry | None = None,
         field_map_registry: FieldMapRegistry | None = None,
         view_store: SigmaViewStore | None = None,
+        columns_for: Callable[[Source], Collection[str]] | None = None,
     ) -> None:
         """Bind the mapper to the registries its mappings and views come from.
 
@@ -61,12 +73,15 @@ class SigmaSourceMapper:
             registry: Type registry, the default one when omitted.
             field_map_registry: Registry field maps, the base of every mapping.
             view_store: Stored sigma view definitions, which win over the field maps.
+            columns_for: The column names of a source's table; None renders every
+                mapping whatever the table holds.
         """
         self._source_registry = source_registry
         self._type_registry = registry or TypeRegistry.default()
         self._ddl_gen = DDLGenerator(self._type_registry)
         self._field_map_registry = field_map_registry
         self._view_store = view_store
+        self._columns_for = columns_for
 
     def get_source(self, source_name: str) -> Source:
         """Get a Source by name from the registry."""
@@ -107,7 +122,7 @@ class SigmaSourceMapper:
            ``custom_mappings`` winning per-key.
 
         Returns None if the source has neither a stored definition nor any
-        field mappings.
+        usable field mapping.
         """
         source = self._source_registry.get_source(source_name)
         return self._generate_for_source(source, db)
@@ -120,14 +135,20 @@ class SigmaSourceMapper:
         """Generate Sigma view DDLs for all sources with a view.
 
         A source contributes a view when it has a stored view definition OR
-        non-empty field mappings.
+        non-empty field mappings. A source whose schema, field map or stored view
+        cannot render is logged and left out, so one broken source does not
+        blank the views of every other.
 
         Returns:
             Dict mapping source_name -> Sigma view DDL string.
         """
         views: dict[str, str] = {}
         for source in self._source_registry.get_all_sources(enabled_only=enabled_only):
-            ddl = self._generate_for_source(source, db)
+            try:
+                ddl = self._generate_for_source(source, db)
+            except (SchemaBuildError, SchemaLoadError, FieldMapError, SigmaViewError) as exc:
+                logger.warning(f"sigma view for source {source.source!r} not rendered: {exc}")
+                continue
             if ddl:
                 views[source.source] = ddl
 
@@ -148,7 +169,12 @@ class SigmaSourceMapper:
             if definition is not None:
                 return build_sigma_view_ddl(definition, db=db, table_name=source.table_name)
 
-        mappings = self._get_mappings_for_source(source)
+        columns = self._columns_for(source) if self._columns_for is not None else None
+        mappings = usable_view_mappings(
+            self._get_mappings_for_source(source),
+            columns,
+            view_name=f"{source.table_name}_sigma",
+        )
         if not mappings:
             return None
         return self._ddl_gen.generate_sigma_view(source.table_name, mappings, DDLConfig(db=db))

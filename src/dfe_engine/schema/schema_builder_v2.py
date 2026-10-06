@@ -14,8 +14,6 @@ Usage:
     print(result.create_table_ddl)
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -220,7 +218,9 @@ class SchemaBuilderV2:
             generated_time=datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC"),
         )
 
-        view_ddls = self._generate_view_ddls(source, ddl_config, views=snap.views)
+        view_ddls = self._generate_view_ddls(
+            source, ddl_config, views=snap.views, columns=[c.name for c in columns]
+        )
 
         return SchemaBuildResult(
             source_name=source.source,
@@ -306,6 +306,7 @@ class SchemaBuilderV2:
         config: DDLConfig,
         *,
         views: list[SourceView] | None = None,
+        columns: list[str] | None = None,
     ) -> dict[str, str]:
         """Generate standard view DDLs for the source's declared views.
 
@@ -315,7 +316,15 @@ class SchemaBuilderV2:
         per-key over the registry result (locked precedence) - such a view
         renders even without a registry. Views with neither go through the
         ViewGenerator (interface unchanged); each view renders exactly once.
+
+        ``columns`` is the composed column set of the table the views select
+        from. A mapping whose column is not in it is left out, and a view left
+        with no mapping is not rendered, so a deploy never applies a view
+        ClickHouse refuses. A deploy only ever adds columns, so the live table
+        carries at least this set.
         """
+        from dfe_engine.fieldmap.view_generator import usable_view_mappings
+
         declared = list(views) if views is not None else list(source.views)
         if not declared:
             return {}
@@ -335,10 +344,12 @@ class SchemaBuilderV2:
                 table_name=source.table_name,
                 standards=[v.standard for v in plain],
                 config=config,
+                columns=columns,
             )
 
         # Inline-wins overlay: merge registry base (honouring a field_map pin)
         # + per-view custom_mappings.
+        from dfe_engine.fieldmap.registry import FieldMapError
         from dfe_engine.fieldmap.resolver import resolve_registry_mappings
 
         for view in declared:
@@ -346,18 +357,26 @@ class SchemaBuilderV2:
                 continue
             mappings: dict[str, str] = {}
             if self._field_map_registry:
-                mappings.update(
-                    resolve_registry_mappings(
+                try:
+                    registry_mappings = resolve_registry_mappings(
                         self._field_map_registry,
                         view.standard,
                         source.source,
                         field_map=view.field_map,
                     )
-                )
+                # Build callers answer SchemaBuildError with a 400: a bad pin is the source's fault.
+                except FieldMapError as exc:
+                    raise SchemaBuildError(
+                        f"Source {source.source!r} view {view.standard!r}: {exc}"
+                    ) from exc
+                mappings.update(registry_mappings)
             mappings.update(view.custom_mappings)
+            mappings = usable_view_mappings(
+                mappings, columns, view_name=f"{source.table_name}_{view.standard}"
+            )
             if not mappings:
-                # A pin-only view whose maps are absent: same skip the
-                # ViewGenerator applies to a standard with no maps.
+                # Absent maps or no column on the table: the same skip the
+                # ViewGenerator applies to a standard with nothing usable.
                 continue
             view_ddls[view.standard] = self._ddl_gen.generate_view(
                 source.table_name, mappings, view.standard, config

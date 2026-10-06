@@ -33,7 +33,14 @@ def run() -> None:
     settings = load_settings()
     ks = settings.keda_shim
     uvicorn.Server(
-        uvicorn.Config(create_app(settings=settings), host=ks.host, port=ks.port, log_level="info")
+        uvicorn.Config(
+            create_app(settings=settings),
+            host=ks.host,
+            port=ks.port,
+            log_level="info",
+            # None keeps uvicorn's loggers on scalo's handlers, which scrub tokens from access lines.
+            log_config=None,
+        )
     ).run()
 
 

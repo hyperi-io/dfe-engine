@@ -233,6 +233,11 @@ def get_field_map_registry():
     return reg
 
 
+def get_field_map_registry_optional():
+    """Optional FieldMapRegistry, for a build that renders views with or without one."""
+    return _registries.get("fieldmap")
+
+
 def get_alert_destinations_registry():
     """FastAPI dependency: resolve the AlertDestinationRegistry singleton."""
     reg = _registries.get("alert_destinations")

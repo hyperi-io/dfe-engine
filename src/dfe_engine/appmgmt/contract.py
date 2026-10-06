@@ -48,8 +48,11 @@ CAPABILITIES_FILE = "capability-catalog.json"
 SOURCE_FILE = "source.json"
 """scalo's own file names - the CLI chooses the directory and nothing else."""
 
-SECRET_MARKER = "x-dfe-secret"  # noqa: S105, RUF100 - a schema keyword
-"""The schema keyword an app uses to mark a field as credential material."""
+SECRET_MARKERS = ("x-scalo-secret", "x-dfe-secret")  # noqa: S105, RUF100 - schema keywords
+"""The schema keywords an app uses to mark a field as credential material.
+
+scalo writes ``x-scalo-secret``; an app built on an older scalo writes ``x-dfe-secret``.
+"""
 
 ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
 """What a key under ``extraEnv`` may be called.
@@ -114,7 +117,7 @@ scalo-py's own ``SENSITIVE_FIELDS``, extended by :data:`_FLOOR_TERMS` and
 ``KAFKA_SASL_JAAS_CONFIG`` each end in one; ``token_url`` and ``password_field``
 do not. A trailing ``s`` is read as the plural of the term's last word.
 
-Part of the fleet ships no ``x-dfe-secret`` at all, so trusting the marker alone
+Part of the fleet ships no secret marker at all, so trusting the marker alone
 would hand an operator's Kafka password back over the API. The rule errs towards
 hiding, and holds for an app that has not adopted the marker yet.
 """
@@ -810,12 +813,17 @@ def _wholly_secret(path: str, node: dict, root: dict) -> bool:
     if secret_name(parts[-1], section, mapping=_takes_fields(node, root)):
         return True
     for branch in _branches(node, root):
-        if branch.get(SECRET_MARKER):
+        if _marked_secret(branch):
             return True
         items = branch.get("items")
-        if isinstance(items, dict) and any(b.get(SECRET_MARKER) for b in _branches(items, root)):
+        if isinstance(items, dict) and any(_marked_secret(b) for b in _branches(items, root)):
             return True
     return False
+
+
+def _marked_secret(branch: dict) -> bool:
+    """Whether a schema branch carries either secret marker."""
+    return any(branch.get(marker) for marker in SECRET_MARKERS)
 
 
 def _masked(value: Any) -> Any:
@@ -863,7 +871,7 @@ def _redact(
     if isinstance(value, _Missing):
         return value
     branches = _branches(node, root) if node is not None else []
-    if any(b.get(SECRET_MARKER) for b in branches) or secret_name(
+    if any(_marked_secret(b) for b in branches) or secret_name(
         name, section, mapping=_has_fields(value)
     ):
         return _masked(value)

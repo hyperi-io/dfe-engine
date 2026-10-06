@@ -16,6 +16,7 @@ selected rules into DFE rules.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -30,7 +31,10 @@ from dfe_engine.api.task_manager import TaskInfo, TaskManager, TaskStatus
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.clickhouse.quoting import plain_table_name
+from dfe_engine.fieldmap.registry import FieldMapError
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError
+from dfe_engine.schema.schema_builder_v2 import SchemaBuildError
+from dfe_engine.schema.schema_loader import SchemaLoadError
 from dfe_engine.sigma.catalog import (
     SigmaCatalogStore,
     SigmaProviderStore,
@@ -45,6 +49,7 @@ from dfe_engine.sigma.views import (
     SigmaViewError,
     SigmaViewStore,
 )
+from dfe_engine.source.models import Source
 from dfe_engine.source.registry import SourceNotFoundError
 
 router = APIRouter(prefix="/sigma", tags=["sigma"])
@@ -125,11 +130,34 @@ def _view_store_or_none(request: Request) -> SigmaViewStore | None:
     return SigmaViewStore(gc)
 
 
-def _get_source_mapper(request: Request):
+def _table_columns_loader(request: Request) -> Callable[[Source], list[str]]:
+    """Column names of a source's table, composed the way its deploy composes them.
+
+    Raises SchemaBuildError or SchemaLoadError when the source's schema cannot load.
+    """
+    from dfe_engine.schema.derived_registry import derived_reference_root
+    from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2, inherited_builder_kwargs
+
+    settings = request.app.state.settings
+    builder = SchemaBuilderV2(
+        schemas_base_dir=settings.schemas.schemas_dir or None,
+        derived_base_dir=derived_reference_root(settings),
+        **inherited_builder_kwargs(settings),
+    )
+
+    def columns_for(source: Source) -> list[str]:
+        return [col.name for col in builder.load_columns_for_source_version(source)]
+
+    return columns_for
+
+
+def _get_source_mapper(request: Request, *, with_columns: bool = False):
     """Build a SigmaSourceMapper from app state registries.
 
     A stored view definition (when gitops is enabled) drives generation over the
     static field maps, so the mapper is handed the SigmaViewStore too.
+    ``with_columns`` makes a field-map view keep only the mappings its table can
+    carry, for the endpoints that render DDL.
     """
     from dfe_engine.api.deps import _registries
     from dfe_engine.sigma.source_mapper import SigmaSourceMapper
@@ -150,7 +178,13 @@ def _get_source_mapper(request: Request):
         registry=None,
         field_map_registry=fieldmap_registry,
         view_store=_view_store_or_none(request),
+        columns_for=_table_columns_loader(request) if with_columns else None,
     )
+
+
+def _view_build_error(exc: Exception) -> HTTPException:
+    """The 400 a view render answers when the source's schema or field-map pin is invalid."""
+    return HTTPException(status_code=400, detail={"code": "build_error", "message": str(exc)})
 
 
 def _source_not_found(source_name: str) -> HTTPException:
@@ -180,6 +214,8 @@ async def get_field_mappings(
         mappings = mapper.get_field_mappings(source_name)
     except KeyError, FileNotFoundError, SourceNotFoundError:
         raise _source_not_found(source_name)
+    except FieldMapError as exc:
+        raise _view_build_error(exc) from exc
     items = [FieldMapping(sigma_field=k, column_name=v) for k, v in mappings.items()]
     return SourceMappingSummary(
         source_name=source_name,
@@ -278,8 +314,8 @@ async def generate_sigma_view(
 
     A stored view definition drives generation - including its JSON-derived
     columns - when one exists; otherwise falls back to the static field maps via
-    the source mapper. Returns the DDL string; does NOT execute it against
-    ClickHouse.
+    the source mapper, keeping only the mappings whose column the source's table
+    carries. Returns the DDL string; does NOT execute it against ClickHouse.
 
     Defaults to the data database, since that is where a propagated hunt reads
     the view from (``{source}_sigma``); an explicit ``database`` still overrides it.
@@ -293,13 +329,15 @@ async def generate_sigma_view(
             raise HTTPException(422, detail={"code": "invalid_view", "message": str(exc)}) from exc
         return SigmaViewResult(source_name=source_name, ddl=ddl)
 
-    mapper = _get_source_mapper(request)
+    mapper = _get_source_mapper(request, with_columns=True)
     try:
         ddl = mapper.generate_sigma_view(source_name, target_db)
     except KeyError, FileNotFoundError, SourceNotFoundError:
         raise _source_not_found(source_name)
     except SigmaViewError as exc:
         raise HTTPException(422, detail={"code": "invalid_view", "message": str(exc)}) from exc
+    except (SchemaBuildError, SchemaLoadError, FieldMapError) as exc:
+        raise _view_build_error(exc) from exc
     return SigmaViewResult(source_name=source_name, ddl=ddl)
 
 
@@ -318,8 +356,11 @@ async def generate_all_sigma_views(
     the view from (``{source}_sigma``); an explicit ``database`` still overrides it.
     """
     target_db = database or request.app.state.settings.clickhouse.effective_data_database
-    mapper = _get_source_mapper(request)
-    views = mapper.generate_all_sigma_views(target_db, enabled_only=enabled_only)
+    mapper = _get_source_mapper(request, with_columns=True)
+    try:
+        views = mapper.generate_all_sigma_views(target_db, enabled_only=enabled_only)
+    except (SchemaBuildError, SchemaLoadError, FieldMapError, SigmaViewError) as exc:
+        raise _view_build_error(exc) from exc
     return [SigmaViewResult(source_name=src, ddl=ddl) for src, ddl in views.items()]
 
 

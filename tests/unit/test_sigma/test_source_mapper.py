@@ -208,6 +208,47 @@ class TestGenerateSigmaView:
         with pytest.raises(SourceNotFoundError):
             mapper.generate_sigma_view("nonexistent")
 
+    def test_columns_for_keeps_only_mappings_the_table_carries(
+        self, source_registry, type_registry
+    ):
+        from dfe_engine.sigma.source_mapper import SigmaSourceMapper
+
+        asked: list[str] = []
+
+        def columns_for(source: Source) -> list[str]:
+            asked.append(source.source)
+            return ["event_id", "process_name", "_raw"]
+
+        m = SigmaSourceMapper(source_registry, registry=type_registry, columns_for=columns_for)
+        ddl = m.generate_sigma_view("windows-audit")
+
+        assert asked == ["windows-audit"]
+        assert ddl is not None
+        assert "`event_id` AS `EventID`" in ddl
+        assert "`process_name` AS `Image`" in ddl
+        assert "command_line" not in ddl
+        assert "parent_process_name" not in ddl
+
+    def test_columns_for_with_no_match_returns_none(self, source_registry, type_registry):
+        from dfe_engine.sigma.source_mapper import SigmaSourceMapper
+
+        m = SigmaSourceMapper(
+            source_registry, registry=type_registry, columns_for=lambda _source: ["_raw"]
+        )
+        assert m.generate_sigma_view("windows-audit") is None
+        assert m.generate_all_sigma_views() == {}
+
+    def test_columns_for_does_not_change_the_reported_mappings(
+        self, source_registry, type_registry
+    ):
+        """GET mappings reports the configuration, not what one table can carry."""
+        from dfe_engine.sigma.source_mapper import SigmaSourceMapper
+
+        m = SigmaSourceMapper(
+            source_registry, registry=type_registry, columns_for=lambda _source: ["_raw"]
+        )
+        assert m.get_field_mappings("windows-audit")["CommandLine"] == "command_line"
+
 
 # ---------------------------------------------------------------------------
 # Tests: generate_all_sigma_views
@@ -238,6 +279,23 @@ class TestGenerateAllSigmaViews:
         for source_name, ddl in views.items():
             assert "CREATE OR REPLACE VIEW" in ddl
             assert f"{source_name}_sigma" in ddl
+
+    def test_a_source_whose_schema_cannot_load_leaves_the_others(
+        self, source_registry, type_registry
+    ):
+        from dfe_engine.schema.schema_builder_v2 import SchemaBuildError
+        from dfe_engine.sigma.source_mapper import SigmaSourceMapper
+
+        def columns_for(source: Source) -> list[str]:
+            if source.source == "windows-audit":
+                raise SchemaBuildError("meta_schema missing")
+            return ["process_name", "command_line"]
+
+        m = SigmaSourceMapper(source_registry, registry=type_registry, columns_for=columns_for)
+        views = m.generate_all_sigma_views()
+
+        assert "windows-audit" not in views
+        assert "linux-syslog" in views
 
 
 # ---------------------------------------------------------------------------

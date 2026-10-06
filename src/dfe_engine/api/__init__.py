@@ -112,6 +112,8 @@ class _DfeEngineApp:
                         host=settings.api.host,
                         port=settings.api.port,
                         log_level="info",
+                        # None keeps uvicorn's loggers on scalo's handlers, which scrub tokens from access lines.
+                        log_config=None,
                         proxy_headers=False,
                     )
                 )

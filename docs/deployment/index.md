@@ -27,7 +27,7 @@ flowchart TB
         BARE[bare cluster + admin creds]
         STORE[StorageClass]
         DARGO[DFE's own Argo CD - dfe-system]
-        OPS[operators via DETECT-OR-INSTALL<br/>cert-manager - ESO - KEDA - CH-op - CNPG - gateway]
+        OPS[operators via DETECT-OR-INSTALL<br/>cert-manager - ESO - KEDA - CH-op - gateway]
     end
     subgraph L1["Layer 1 - backing services"]
         CH[(ClickHouse)]
@@ -206,8 +206,9 @@ cluster-secret annotations). Full swap matrix:
   by an ESO Password generator - no external secret backend required.
 - **Kafka** - Strimzi by default, Redpanda opt-in (BSL licence gate), or
   external (incl. MSK IAM). With gRPC transport, Kafka is omitted entirely.
-- **Postgres + FerretDB** - via CloudNativePG; FerretDB provides the Mongo
-  wire protocol on a DocumentDB-extension Postgres backend.
+- **FerretDB** - provides the Mongo wire protocol for HyperDX on its own
+  single-instance Postgres with the DocumentDB extension. Nothing else in the
+  stack uses Postgres.
 
 ## Network model
 

@@ -8,6 +8,7 @@ from dfe_engine.fieldmap.resolver import (
     resolve_field,
     resolve_field_map,
     resolve_registry_mappings,
+    split_by_columns,
 )
 
 # ---------------------------------------------------------------
@@ -173,3 +174,32 @@ class TestResolveField:
         resolved = {"User": "user_name"}
         assert resolve_field("user", resolved) == "user"
         assert resolve_field("User", resolved) == "user_name"
+
+
+class TestSplitByColumns:
+    def test_splits_on_target_column(self):
+        mappings = {
+            "EventID": "event_code",
+            "Image": "process_executable",
+            "@timestamp": "_timestamp",
+        }
+        usable, dropped = split_by_columns(mappings, ["event_code", "_timestamp", "_raw"])
+        assert usable == {"EventID": "event_code", "@timestamp": "_timestamp"}
+        assert dropped == {"Image": "process_executable"}
+
+    def test_matches_the_column_not_the_field(self):
+        """`network_protocol` is a field name here, not the column it reads."""
+        usable, dropped = split_by_columns(
+            {"network_protocol": "network_transport"}, ["network_protocol"]
+        )
+        assert usable == {}
+        assert dropped == {"network_protocol": "network_transport"}
+
+    def test_column_names_are_case_sensitive(self):
+        usable, dropped = split_by_columns({"User": "user_name"}, ["User_Name"])
+        assert usable == {}
+        assert dropped == {"User": "user_name"}
+
+    def test_empty_inputs(self):
+        assert split_by_columns({}, ["a"]) == ({}, {})
+        assert split_by_columns({"A": "a"}, []) == ({}, {"A": "a"})
