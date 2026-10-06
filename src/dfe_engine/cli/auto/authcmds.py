@@ -18,21 +18,22 @@ from __future__ import annotations
 
 import click
 import httpx
+import httpx2
 
 from .build import HelpGroup
 from .config import Credential, Store
-from .errors import DfeConfigError, handle
+from .errors import HTTP_ERRORS, DfeConfigError, handle
 
 
 def _store(ctx: click.Context) -> Store:
     return ctx.obj.store
 
 
-def _handle_http(ctx: click.Context, exc: httpx.HTTPError) -> None:
+def _handle_http(ctx: click.Context, exc: httpx.HTTPError | httpx2.HTTPError) -> None:
     """Render an HTTP failure from a built-in the same way generated commands do.
 
     The hand-written built-ins bypass the generated ``_make_callback`` wrapper, so
-    without this a bad-credentials login re-raises a raw ``httpx.HTTPStatusError``
+    without this a bad-credentials login re-raises a raw ``HTTPStatusError``
     (traceback, exit 1). Route it through ``errors.handle`` for the friendly
     ``Error (401): ...`` line + the right taxonomy exit code.
     """
@@ -106,7 +107,7 @@ def login(
                     "No stored credentials for this profile. Pass --api-key or "
                     "--username/--password."
                 )
-    except httpx.HTTPError as exc:
+    except HTTP_ERRORS as exc:
         # e.g. bad password -> 401. Render friendly + right exit code (not a raw
         # traceback), the same way the generated commands do.
         _handle_http(ctx, exc)
