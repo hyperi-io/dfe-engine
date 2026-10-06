@@ -14,8 +14,11 @@ No source here is deployed, so apply and drift never need a table; what they do
 to a deployed one is proven in tests/integration/test_system_defaults_apply_ch.py.
 """
 
+import time
+
 import pytest
 
+from dfe_engine.api.deps import _registries
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
@@ -69,6 +72,25 @@ class TestGetDefaults:
 
     def test_a_viewer_cannot_read_them(self, client, viewer_headers):
         assert client.get(URL, headers=viewer_headers).status_code == 403
+
+
+@pytest.fixture
+def refusing_clickhouse(api_settings, monkeypatch):
+    """A ClickHouse that refuses every connection, behind a 60s data-plane budget."""
+    api_settings.clickhouse = api_settings.clickhouse.model_copy(
+        update={
+            "host": "127.0.0.1",
+            "port": 1,
+            "secure": False,
+            "resilience": ClickHouseResilienceSettings(budget_seconds=60.0),
+            "interactive_budget_seconds": 1.0,
+        }
+    )
+    # The manager reads its resilience from the process settings.
+    monkeypatch.setattr("dfe_engine.settings._settings", api_settings)
+    ClickHouseManager.reset_instance()
+    yield
+    ClickHouseManager.reset_instance()
 
 
 @pytest.fixture
@@ -385,6 +407,21 @@ class TestDefaultDrift:
 
         assert resp.status_code == 200, resp.text
         assert "alpha" not in {item["source"] for item in resp.json()["items"]}
+
+    def test_a_down_clickhouse_answers_503_within_the_interactive_budget(
+        self, refusing_clickhouse, admin_headers, app, client, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _create_source(client, admin_headers, "alpha")
+        _registries["source"].set_deployed_version("alpha", "1.0.0")
+
+        started = time.monotonic()
+        resp = client.get(DRIFT, headers=admin_headers)
+        elapsed = time.monotonic() - started
+
+        assert resp.status_code == 503, resp.text
+        assert resp.json()["code"] == "clickhouse_unavailable"
+        assert elapsed < 15, f"drift took {elapsed:.1f}s against a refused connection"
 
     def test_a_viewer_cannot_read_drift(self, client, viewer_headers):
         resp = client.get(DRIFT, headers=viewer_headers)

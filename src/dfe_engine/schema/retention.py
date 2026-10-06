@@ -49,18 +49,19 @@ from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerationError
 from dfe_engine.schema.schema_loader import SchemaLoadError
 from dfe_engine.source.deployment import SourceDeploymentStore
 from dfe_engine.source.models import SchemaColumn, Source
-from dfe_engine.source.type_registry import TypeRegistry
+from dfe_engine.source.type_registry import TypeRegistry, TypeRegistryError
 
 LiveStatus = Literal["altered", "unchanged", "not_deployed", "failed"]
 
 # A table's engine is fixed when it is created; changing it means copying the data out.
 ENGINE_NEEDS_REBUILD = "needs a table rebuild; applies to new tables only"
 
-# What one table can refuse during a pinned apply; anything else is a defect and raises.
+# What one source's table can refuse: the build, its types, its DDL or the server.
 _TABLE_ERRORS = (
     SchemaApplyError,
     SchemaBuildError,
     SchemaLoadError,
+    TypeRegistryError,
     DDLGenerationError,
     ValueError,
 )
@@ -171,6 +172,8 @@ class SourceTables:
             SchemaApplyError: ClickHouse refused a statement or could not be read.
             SchemaBuildError: The version does not build.
             SchemaLoadError: A schema file the version names does not load.
+            TypeRegistryError: A column's type is not in the type registry.
+            DDLGenerationError: A name or declaration cannot be rendered as DDL.
         """
         # Built here, not read from the stored artefact: that keeps no columns, and
         # the TTL cannot be placed without the column it is declared over.
@@ -187,8 +190,9 @@ class SourceTables:
         Raises:
             SchemaApplyError: ClickHouse could not be read.
             SchemaBuildError: The header profile does not load.
+            TypeRegistryError: A header column's type is not in the type registry.
         """
-        profile = self._builder._load_profile_for_snapshot(source.source, source.versions[version])
+        profile = self._builder.load_profile_for_snapshot(source.source, source.versions[version])
         names = {col.name for col in profile}
         header = [col for col in columns if col.name in names]
         return self.applier.nullability_mismatches(self.database, source.table_name, header)
@@ -220,7 +224,7 @@ def reconcile_source_ttls(
                 outcome.sources_skipped += 1
                 continue
             tables.apply(source, version)
-        except (SchemaApplyError, SchemaBuildError, SchemaLoadError) as exc:
+        except _TABLE_ERRORS as exc:
             logger.warning(f"{database}.{table}: TTL left to the next deploy: {exc}")
             outcome.sources_skipped += 1
             continue

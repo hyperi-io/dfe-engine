@@ -35367,6 +35367,29 @@
             "type": "array",
             "title": "Restart Required",
             "description": "One command per app whose running process cannot take this deploy's config change where it stands. Empty where every write was hot, or where a GitOps controller rolls the pod itself."
+          },
+          "ttl_change": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TtlChange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The TTL move this deploy makes (or, on a dry run, would make) on the table it already has; null when the TTL does not move"
+          },
+          "live_table_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Live Table Error",
+            "description": "On a dry run, why the deployed table could not be read; its TTL move is then unknown. Null otherwise."
           }
         },
         "type": "object",
@@ -37128,7 +37151,7 @@
             },
             "type": "array",
             "title": "Columns Added",
-            "description": "Columns the pinned header added to the table."
+            "description": "Columns the pinned version declares that the table lacked: the pinned header's, and any other the version's schema adds."
           },
           "not_applied": {
             "items": {
@@ -37314,6 +37337,17 @@
             ],
             "title": "Ready Reason",
             "description": "Why the plan is or is not ready to deploy"
+          },
+          "ttl_change": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TtlChange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The TTL move among the statements, on a table that already exists; null when the TTL does not move"
           }
         },
         "type": "object",
@@ -39441,6 +39475,33 @@
         ],
         "title": "TransportFacts",
         "description": "What this deployment can carry a source's records on, between its stages."
+      },
+      "TtlChange": {
+        "properties": {
+          "move": {
+            "type": "string",
+            "title": "Move",
+            "description": "<live> -> <declared>: whole days as a number, 'none' for no TTL, or the live interval as ClickHouse prints it when it is not whole days"
+          },
+          "expires_rows": {
+            "type": "boolean",
+            "title": "Expires Rows",
+            "description": "True when the move deletes rows the table keeps today: the new TTL is shorter, the table had none, or its live TTL is not whole days"
+          },
+          "statement": {
+            "type": "string",
+            "title": "Statement",
+            "description": "The ALTER TABLE that makes the move"
+          }
+        },
+        "type": "object",
+        "required": [
+          "move",
+          "expires_rows",
+          "statement"
+        ],
+        "title": "TtlChange",
+        "description": "The TTL move a deploy makes on a table that already exists."
       },
       "UnknownFieldModel": {
         "properties": {

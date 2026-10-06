@@ -98,6 +98,29 @@ class TestQuotedIdentifiers:
         assert unsafe_ident_reason("a`b") is not None
         assert unsafe_ident_reason("dfe-alerts") is None
 
+    def test_a_plain_ttl_column_stays_bare(self):
+        """The committed dfe-schemas DDL is diff-checked against a fresh render."""
+        clause = DDLGenerator.ttl_clause(DDLConfig(ttl_days=30), _basic_columns())
+        assert clause == "TTL _timestamp_load + INTERVAL 30 DAY DELETE WHERE _timestamp_load >= 0"
+
+    def test_a_ttl_column_that_is_not_one_identifier_bare_is_quoted(self):
+        columns = [_col(name="event.time", type="timestamp")]
+        cfg = DDLConfig(ttl_days=30, ttl_columns=["event.time"])
+        clause = DDLGenerator.ttl_clause(cfg, columns)
+        assert clause == "TTL `event.time` + INTERVAL 30 DAY DELETE WHERE `event.time` >= 0"
+
+    def test_an_unsafe_ttl_column_is_refused(self):
+        name = "x) DELETE; DROP TABLE y; --"
+        cfg = DDLConfig(ttl_days=30, ttl_columns=[name])
+        with pytest.raises(DDLGenerationError, match="unsafe TTL column"):
+            DDLGenerator.ttl_clause(cfg, [_col(name=name, type="timestamp")])
+
+    def test_a_cluster_name_is_bare_or_quoted_and_an_unsafe_one_refused(self, gen: DDLGenerator):
+        assert gen.on_cluster(DDLConfig(cluster="dfe_cluster")) == " ON CLUSTER dfe_cluster"
+        assert gen.on_cluster(DDLConfig(cluster="dfe-cluster")) == " ON CLUSTER `dfe-cluster`"
+        with pytest.raises(DDLGenerationError, match="unsafe cluster name"):
+            gen.on_cluster(DDLConfig(cluster="c; DROP TABLE x"))
+
 
 # ── CREATE TABLE ────────────────────────────────────────────────────
 

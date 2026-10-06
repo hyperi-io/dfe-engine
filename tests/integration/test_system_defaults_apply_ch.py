@@ -269,25 +269,48 @@ def test_an_engine_change_needs_a_rebuild_and_stays_drift(ch_client, stack):
     assert live["not_applied"] == [{"field": "engine", "reason": REBUILD}]
 
 
-def test_a_header_version_change_keeps_existing_columns_nullability(ch_client, stack):
+def test_an_existing_header_column_keeps_its_nullability(ch_client, stack):
     db = stack.database
-    _deploy_source(stack, "syslog-version")
-    before = _columns(ch_client, db, "syslog-version")
-    _patch(stack, {"common_header_version": "1.0.1"})
+    _deploy_source(stack, "syslog-nullable")
+    # The header declares _uuid Nullable(UUID); the table now holds it non-nullable.
+    ch_client.command(f"ALTER TABLE `{db}`.`syslog-nullable` MODIFY COLUMN `_uuid` UUID")
+    retyped = {"_uuid"}
+    before = _columns(ch_client, db, "syslog-nullable")
 
-    body = _apply(stack, "syslog-version")
+    body = _apply(stack, "syslog-nullable")
 
+    assert _columns(ch_client, db, "syslog-nullable")["_uuid"] == before["_uuid"]
     live = body["live"][0]
     assert live["status"] == "unchanged"
-    assert live["not_applied"] == [
-        {
-            "field": "common_header_version",
-            "reason": "existing columns keep their nullability: _json, _tags",
-        }
-    ]
-    after = _columns(ch_client, db, "syslog-version")
-    assert after["_json"] == before["_json"]
-    assert after["_tags"] == before["_tags"]
+    [kept] = live["not_applied"]
+    assert kept["field"] == "common_header_version"
+    _, _, named = kept["reason"].partition(": ")
+    assert set(named.split(", ")) == retyped
+
+
+def test_plan_and_dry_run_show_the_ttl_move_and_that_it_deletes_rows(ch_client, stack):
+    db = stack.database
+    _deploy_source(stack, "syslog-plan")
+    # Stored without the reconcile a PATCH runs, so the table keeps its 90 days.
+    commit_patch(stack.crud, actor="test", ttl_days=30)
+
+    plan = stack.client.post("/api/v1/sources/syslog-plan/plan", headers=stack.headers)
+    dry = stack.client.post(
+        "/api/v1/sources/syslog-plan/deploy", headers=stack.headers, params={"dry_run": "true"}
+    )
+
+    assert _live_ttl_days(ch_client, db, "syslog-plan") == 90
+    assert plan.status_code == 200, plan.text
+    change = plan.json()["ttl_change"]
+    assert change is not None
+    assert change["move"] == "90 -> 30"
+    assert change["expires_rows"] is True
+    assert "MODIFY TTL" in change["statement"]
+    assert change["statement"] in plan.json()["statements"]
+    assert "rows past the new TTL are deleted" in plan.json()["ready_reason"]
+    assert dry.status_code == 200, dry.text
+    assert dry.json()["ttl_change"] == change
+    assert dry.json()["live_table_error"] is None
 
 
 def test_a_header_named_by_its_registry_path_is_not_drift(ch_client, stack):
@@ -332,3 +355,5 @@ def test_a_redeploy_moves_an_existing_tables_ttl(ch_client, stack):
     assert resp.status_code == 200, resp.text
     assert _live_ttl_days(ch_client, db, "syslog-redeploy") == 60
     assert resp.json()["statements_applied"] >= 1
+    assert resp.json()["ttl_change"]["move"] == "90 -> 60"
+    assert resp.json()["ttl_change"]["expires_rows"] is True

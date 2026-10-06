@@ -81,10 +81,10 @@ def header_profile_name(header_type: str) -> str:
 
     A value that names no profile file comes back stripped, so a compare still sees it.
     """
-    from dfe_engine.schema.schema_loader import SchemaLoadError, _profile_file_stem
+    from dfe_engine.schema.schema_loader import SchemaLoadError, profile_file_stem
 
     try:
-        stem = _profile_file_stem(header_type)
+        stem = profile_file_stem(header_type)
     except SchemaLoadError:
         return header_type.strip()
     return stem or header_type.strip()
@@ -398,6 +398,14 @@ def _stored_differs(stored: str | int | None, default: str | int | None) -> bool
     return stored is not None and stored != default
 
 
+def _live_ttl_value(live: LiveTable) -> int | str:
+    """Days for a table with no TTL (0) or a whole-day one; else the interval, such as ``6 hour``."""
+    if live.ttl is None:
+        return 0
+    days = live.ttl.days
+    return live.ttl.describe() if days is None else days
+
+
 @dataclass(frozen=True)
 class SourceDrift:
     """How one source's current version compares with the table defaults."""
@@ -411,6 +419,7 @@ class SourceDrift:
 
     @property
     def drifted(self) -> tuple[str, ...]:
+        """The fields that differ from the defaults, in report order."""
         return tuple(name for name in _DRIFT_FIELDS if getattr(self, name).drifted)
 
 
@@ -430,7 +439,8 @@ def source_default_drift(
 
     TTL and engine belong to the table. With *live*, the source's deployed
     table, they are measured on it, so a value the table never took is drift
-    whatever the source stores; a table without a TTL runs 0 days, and the
+    whatever the source stores; a table without a TTL runs 0 days, a TTL that is
+    not whole days is reported as its interval and is always drift, and the
     engine compares as a variant without its topology prefix. Without *live*,
     and always for the header, the stored value is measured: unset inherits on
     the next deploy and is not drift, nor is a stored value equal to the
@@ -451,7 +461,7 @@ def source_default_drift(
             stored=stored_engine, default=engine, drifted=_stored_differs(stored_engine, engine)
         )
     else:
-        live_ttl = live.ttl_days or 0
+        live_ttl = _live_ttl_value(live)
         ttl_field = StoredDefault(
             stored=stored_ttl, default=ttl_days, live=live_ttl, drifted=live_ttl != ttl_days
         )

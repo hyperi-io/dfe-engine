@@ -21,7 +21,7 @@ from dfe_engine.gitcrud.table_defaults import (
     source_default_drift,
 )
 from dfe_engine.gitops.repo import GitopsRepo
-from dfe_engine.schema.applier import LiveTable
+from dfe_engine.schema.applier import LiveTable, LiveTtl
 from dfe_engine.settings import ClickHouseSettings, DFESettings
 from dfe_engine.source.models import Source
 
@@ -330,7 +330,7 @@ class TestSourceDefaultDrift:
             schema={"ttl_days": 30, "engine": "ReplacingMergeTree"},
         )
 
-        report = _drift(source, LiveTable(engine="MergeTree", ttl_days=7))
+        report = _drift(source, LiveTable(engine="MergeTree", ttl=LiveTtl(7, "day")))
 
         assert report is not None
         assert report.drifted == ("ttl_days", "engine")
@@ -343,13 +343,29 @@ class TestSourceDefaultDrift:
     def test_a_table_on_the_defaults_has_no_drift_whatever_its_topology(self):
         source = _source("syslog", schema={"engine": ""})
 
-        assert _drift(source, LiveTable(engine="ReplicatedReplacingMergeTree", ttl_days=30)) is None
+        live = LiveTable(engine="ReplicatedReplacingMergeTree", ttl=LiveTtl(30, "day"))
+        assert _drift(source, live) is None
 
     def test_a_table_with_no_ttl_runs_zero_days(self):
         source = _source("syslog", schema={"engine": ""})
 
-        report = _drift(source, LiveTable(engine="ReplacingMergeTree", ttl_days=None))
+        report = _drift(source, LiveTable(engine="ReplacingMergeTree", ttl=None))
 
         assert report is not None
         assert report.drifted == ("ttl_days",)
         assert report.ttl_days.live == 0
+
+    def test_a_ttl_that_is_not_whole_days_is_reported_as_its_interval(self):
+        source = _source("syslog", schema={"engine": ""})
+
+        report = _drift(source, LiveTable(engine="ReplacingMergeTree", ttl=LiveTtl(6, "hour")))
+
+        assert report is not None
+        assert report.drifted == ("ttl_days",)
+        assert report.ttl_days.live == "6 hour"
+
+    def test_a_ttl_in_whole_days_by_another_unit_matches(self):
+        source = _source("syslog", schema={"engine": ""})
+
+        live = LiveTable(engine="ReplacingMergeTree", ttl=LiveTtl(720, "hour"))
+        assert _drift(source, live) is None

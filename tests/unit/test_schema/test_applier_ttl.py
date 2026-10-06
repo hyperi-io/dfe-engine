@@ -19,7 +19,13 @@ from typing import Any
 
 import pytest
 
-from dfe_engine.schema.applier import LiveTable, SchemaApplier
+from dfe_engine.schema.applier import (
+    LiveTable,
+    LiveTtl,
+    SchemaApplier,
+    ttl_from_engine_full,
+    ttl_move,
+)
 from dfe_engine.schema.engine_resolver import EngineResolver
 from dfe_engine.schema.schema_ddl import DDLConfig
 from dfe_engine.source.models import SchemaColumn
@@ -192,7 +198,61 @@ def test_a_ttl_already_in_place_is_not_reported_as_skipped():
     ],
 )
 def test_a_live_engine_compares_without_its_topology_prefix(engine: str, variant: str):
-    assert LiveTable(engine=engine, ttl_days=None).variant == variant
+    assert LiveTable(engine=engine, ttl=None).variant == variant
+
+
+def test_a_ttl_in_hours_is_not_read_as_no_ttl_and_a_declared_zero_removes_it():
+    class _HourTtlClient(_FakeClient):
+        def query(self, sql: str, parameters: dict[str, Any] | None = None) -> _Result:
+            if "engine_full" in sql:
+                return _Result([["MergeTree ORDER BY x TTL x + toIntervalHour(6) SETTINGS a = 1"]])
+            return super().query(sql, parameters)
+
+    client = _HourTtlClient(columns=["_timestamp_load", "message"], live_ttl_days=None)
+
+    _, change = _apply(client, wanted=0)
+
+    assert client.statements == [f"ALTER TABLE `{DB}`.`{TABLE}` REMOVE TTL"]
+    assert change.ttl == "6 hour -> none"
+
+
+@pytest.mark.parametrize(
+    ("live", "wanted", "expires"),
+    [
+        (LiveTtl(90, "day"), 30, True),
+        (LiveTtl(30, "day"), 90, False),
+        (None, 90, True),
+        (LiveTtl(6, "hour"), 90, True),
+        (LiveTtl(3, "month"), 400, True),
+    ],
+)
+def test_a_move_that_deletes_rows_kept_today_is_marked(
+    live: LiveTtl | None, wanted: int, expires: bool
+):
+    move = ttl_move(
+        target="`dfe`.`t`",
+        on_cluster="",
+        cfg=DDLConfig(db=DB, ttl_days=wanted),
+        columns=_columns(),
+        live=live,
+    )
+
+    assert "MODIFY TTL _timestamp_load + INTERVAL" in move.statement
+    assert move.expires_rows is expires
+
+
+def test_removing_a_ttl_never_expires_rows():
+    move = ttl_move(
+        target="`dfe`.`t`",
+        on_cluster="",
+        cfg=DDLConfig(db=DB, ttl_days=0),
+        columns=_columns(),
+        live=LiveTtl(30, "day"),
+    )
+
+    assert move.statement == "ALTER TABLE `dfe`.`t` REMOVE TTL"
+    assert move.move == "30 -> none"
+    assert move.expires_rows is False
 
 
 def test_dry_run_records_the_modify_ttl_without_running_it():
@@ -219,19 +279,31 @@ def test_a_missing_column_and_a_ttl_move_report_together():
 
 
 @pytest.mark.parametrize(
-    ("engine_full", "expected"),
+    ("engine_full", "expected", "days"),
     [
-        (_engine_full(30), 30),
-        ("MergeTree ORDER BY x TTL x + INTERVAL 7 DAY SETTINGS index_granularity = 8192", 7),
-        (_engine_full(None), None),
-        ("MergeTree ORDER BY x TTL x + toIntervalHour(6) SETTINGS index_granularity = 8192", None),
+        (_engine_full(30), LiveTtl(30, "day"), 30),
+        (
+            "MergeTree ORDER BY x TTL x + INTERVAL 7 DAY SETTINGS index_granularity = 8192",
+            LiveTtl(7, "day"),
+            7,
+        ),
+        (_engine_full(None), None, None),
+        (
+            "MergeTree ORDER BY x TTL x + toIntervalHour(6) SETTINGS index_granularity = 8192",
+            LiveTtl(6, "hour"),
+            None,
+        ),
+        ("MergeTree ORDER BY x TTL x + toIntervalHour(48) SETTINGS a = 1", LiveTtl(48, "hour"), 2),
+        ("MergeTree ORDER BY x TTL x + toIntervalWeek(2) SETTINGS a = 1", LiveTtl(2, "week"), 14),
+        (
+            "MergeTree ORDER BY x TTL x + toIntervalMonth(3) SETTINGS a = 1",
+            LiveTtl(3, "month"),
+            None,
+        ),
     ],
 )
-def test_live_ttl_parsing(engine_full: str, expected: int | None):
-    class _Client:
-        def query(self, sql: str, parameters: dict[str, Any] | None = None) -> _Result:
-            return _Result([[engine_full]])
+def test_live_ttl_parsing(engine_full: str, expected: LiveTtl | None, days: int | None):
+    live = ttl_from_engine_full(engine_full)
 
-    applier = SchemaApplier(_Client(), EngineResolver(override="single"))
-
-    assert applier._table_ttl_days(DB, TABLE) == expected
+    assert live == expected
+    assert (None if live is None else live.days) == days

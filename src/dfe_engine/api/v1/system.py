@@ -27,6 +27,7 @@ from dfe_engine.api.deps import (
     Settings,
     SourceReg,
     get_clickhouse_client,
+    get_interactive_clickhouse_client,
     require_action,
 )
 from dfe_engine.api.errors import ErrorResponse
@@ -881,7 +882,12 @@ class SourceLiveApply(BaseModel):
     ttl: str | None = Field(
         description="The TTL move in days, such as '90 -> 91'; null when it did not move."
     )
-    columns_added: list[str] = Field(description="Columns the pinned header added to the table.")
+    columns_added: list[str] = Field(
+        description=(
+            "Columns the pinned version declares that the table lacked: the pinned "
+            "header's, and any other the version's schema adds."
+        )
+    )
     not_applied: list[FieldNotApplied] = Field(
         description="Pinned values the table did not take, each with the reason."
     )
@@ -1088,12 +1094,16 @@ def _drift_search_row(item: SourceDefaultDrift) -> dict[str, Any]:
 
 
 def _deployed_tables(settings: Any, sources: list[Source]) -> dict[str, LiveTable]:
-    """The data database's tables, read once, when any source has been deployed; else none."""
+    """The data database's tables, read once, when any source has been deployed; else none.
+
+    Read within ``clickhouse.interactive_budget_seconds``, so a down server answers
+    503 in seconds.
+    """
     if not any(source.deployed_version is not None for source in sources):
         return {}
     database = settings.clickhouse.effective_data_database
     try:
-        return live_tables(get_clickhouse_client(settings), database)
+        return live_tables(get_interactive_clickhouse_client(settings), database)
     except SchemaApplyError as exc:
         raise HTTPException(
             status_code=503,

@@ -69,8 +69,15 @@ class ClickHouseClientWrapper:
     raw driver client still work.
     """
 
-    def __init__(self, manager: ClickHouseManager):
+    def __init__(
+        self,
+        manager: ClickHouseManager,
+        *,
+        run: Callable[[Callable[[], Any]], Any] | None = None,
+    ):
         self._manager = manager
+        # The resilience every op runs through; the manager's own unless a bounded one is given.
+        self._run_resilient = run or manager.run_resilient
 
     def __enter__(self) -> ClickHouseClientWrapper:
         # The ClickHouseManager singleton owns the underlying client's lifecycle;
@@ -101,12 +108,12 @@ class ClickHouseClientWrapper:
         ``(columns, rows)``.
         """
         kwargs["settings"] = merge_log_comment(kwargs.get("settings"))
-        return self._manager.run_resilient(lambda: self._client.query(query, *args, **kwargs))
+        return self._run_resilient(lambda: self._client.query(query, *args, **kwargs))
 
     def command(self, statement: str, *args, **kwargs):
         """Raw DDL/DML passthrough to clickhouse-connect's ``command()``."""
         kwargs["settings"] = merge_log_comment(kwargs.get("settings"))
-        return self._manager.run_resilient(lambda: self._client.command(statement, *args, **kwargs))
+        return self._run_resilient(lambda: self._client.command(statement, *args, **kwargs))
 
     def insert(self, table: str, *args, **kwargs):
         """Row insert -> clickhouse-connect's ``insert(table, rows, column_names=,
@@ -117,7 +124,7 @@ class ClickHouseClientWrapper:
         ReplacingMergeTree.
         """
         kwargs["settings"] = merge_log_comment(kwargs.get("settings"))
-        return self._manager.run_resilient(lambda: self._client.insert(table, *args, **kwargs))
+        return self._run_resilient(lambda: self._client.insert(table, *args, **kwargs))
 
     def query_rows(self, query: str, *args, **kwargs):
         """Run a SELECT and return ``(column_names, result_rows)``.
@@ -134,7 +141,7 @@ class ClickHouseClientWrapper:
             result = self._client.query(query, *args, **kwargs)
             return list(result.column_names), result.result_rows
 
-        return self._manager.run_resilient(op)
+        return self._run_resilient(op)
 
     def execute(self, query: str, *args, **kwargs):
         """
@@ -166,7 +173,7 @@ class ClickHouseClientWrapper:
 
         # DESCRIBE, DESC, EXISTS, EXPLAIN, SHOW return data - use query()
         if query_upper.startswith(("DESCRIBE", "DESC", "EXISTS", "EXPLAIN", "SHOW")):
-            return self._manager.run_resilient(
+            return self._run_resilient(
                 lambda: self._client.query(query, *args, **kwargs).result_rows
             )
 
@@ -174,7 +181,7 @@ class ClickHouseClientWrapper:
         # clickhouse-driver style: execute("INSERT INTO table (cols) VALUES", [(data, ...)])
         if query_upper.startswith("INSERT") and args and isinstance(args[0], (list, tuple)):
             data = args[0]
-            return self._manager.run_resilient(lambda: self._handle_insert_with_data(query, data))
+            return self._run_resilient(lambda: self._handle_insert_with_data(query, data))
 
         # DDL/DML commands that don't return data go to command()
         if query_upper.startswith(
@@ -200,12 +207,10 @@ class ClickHouseClientWrapper:
                 "KILL",
             )
         ):
-            return self._manager.run_resilient(lambda: self._client.command(query, *args, **kwargs))
+            return self._run_resilient(lambda: self._client.command(query, *args, **kwargs))
 
         # SELECT queries return data
-        return self._manager.run_resilient(
-            lambda: self._client.query(query, *args, **kwargs).result_rows
-        )
+        return self._run_resilient(lambda: self._client.query(query, *args, **kwargs).result_rows)
 
     def _handle_insert_with_data(self, query: str, data: list):
         """Handle INSERT statements with data using clickhouse-connect's insert() method.
@@ -300,6 +305,38 @@ class ClickHouseManager:
         execute() method.
         """
         return ClickHouseClientWrapper(self)
+
+    def get_bounded_client(self, budget_seconds: float) -> ClickHouseClientWrapper:
+        """A client whose ops give up on a down server after *budget_seconds*.
+
+        The same pooled client, classifiers and reconnect as
+        :meth:`get_clickhouse_client`, with a budget of its own and no CH Cloud
+        auto-wake: for a read a console request waits on, which should answer
+        :class:`~scalo.resilience.ServiceUnavailable` (503) in seconds rather than
+        sit out the data-plane budget or wake a paused service. An attempt already
+        in flight still runs to the driver's own timeout.
+        """
+        ch = self._settings.clickhouse
+        config = ResilienceConfig(
+            **ch.resilience.model_dump(exclude={"budget_seconds", "waking_budget_seconds"}),
+            budget_seconds=budget_seconds,
+            waking_budget_seconds=budget_seconds,
+        )
+        clock: dict[str, Any] = {}
+        if self._sleep is not None:
+            clock["sleep"] = self._sleep
+        if self._now is not None:
+            clock["now"] = self._now
+        bounded = ReconnectingResilience(
+            config,
+            name="ClickHouse",
+            is_transient=is_retryable_error,
+            is_reconnectable=is_connection_error,
+            reconnect=self._reconnect,
+            unavailable_exc=ServiceUnavailable,
+            **clock,
+        )
+        return ClickHouseClientWrapper(self, run=bounded.run)
 
     def run_resilient(self, op: Callable[[], T]) -> T:
         """Run *op* through the reconnect-and-retry engine.

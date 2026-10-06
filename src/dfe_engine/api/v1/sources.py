@@ -48,6 +48,7 @@ from dfe_engine.api.deps import (
     Settings,
     SourceReg,
     get_field_map_registry_optional,
+    get_interactive_clickhouse_client,
     require_action,
     ttl_settings,
 )
@@ -76,6 +77,7 @@ from dfe_engine.exchange.schemas import ExchangeError
 from dfe_engine.exchange.sources import apply_source_bundle, build_source_bundle
 from dfe_engine.git_identity import git_author
 from dfe_engine.manifest import ManifestError
+from dfe_engine.schema.applier import SchemaApplyError, live_tables
 from dfe_engine.schema.derived_registry import derived_reference_root
 from dfe_engine.settings import get_settings
 from dfe_engine.source import catalogue as source_catalogue_module
@@ -84,11 +86,13 @@ from dfe_engine.source.deployment import (
     SourceBuildArtifact,
     SourceDeploymentStore,
     SourcePlanArtifact,
-    deploy_statements_for_build,
+    TtlChange,
     ensure_build_artifact,
     execute_ddl,
+    plan_deploy_statements,
     plan_from_build,
     previous_deployed_version_ids,
+    ttl_change_for_table,
 )
 from dfe_engine.source.flow import FlowError, SourceFlow, resolve_flow
 from dfe_engine.source.models import (
@@ -559,6 +563,13 @@ class SourcePlanResponse(BaseModel):
     ready_reason: str | None = Field(
         default=None,
         description="Why the plan is or is not ready to deploy",
+    )
+    ttl_change: TtlChange | None = Field(
+        default=None,
+        description=(
+            "The TTL move among the statements, on a table that already exists; "
+            "null when the TTL does not move"
+        ),
     )
 
 
@@ -1235,19 +1246,26 @@ def plan_source_deploy(
         **inherited_builder_kwargs(settings),
     )
     db = settings.clickhouse.effective_data_database
-    statements, table_exists = deploy_statements_for_build(
-        builder,
-        source,
-        version_id,
-        result,
-        db=db,
-        ch_client=ch_client,
-    )
+    try:
+        planned = plan_deploy_statements(
+            builder,
+            source,
+            version_id,
+            result,
+            db=db,
+            ch_client=ch_client,
+        )
+    except SchemaApplyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "clickhouse_unavailable", "message": str(exc)},
+        ) from exc
     plan = plan_from_build(
         result,
         version=version_id,
-        statements=statements,
-        table_exists=table_exists,
+        statements=planned.statements,
+        table_exists=planned.table_exists,
+        ttl_change=planned.ttl_change,
     )
     audit_resource_change(user.user_id, "source", name, "planned")
     return _plan_to_response(plan)
@@ -1370,7 +1388,7 @@ async def deploy_source_schema(
     )
     if isinstance(applied, SchemaDeployResult):
         return applied
-    source, version_id, result, views, statements_applied, db = applied
+    source, version_id, result, views, statements_applied, db, ttl_change = applied
 
     # Off the event loop: the admin calls block for their full timeout when no
     # broker answers, which is the norm on the Kafka-less profile.
@@ -1390,6 +1408,7 @@ async def deploy_source_schema(
         topics_ensured=topics_ensured,
         topics_failed=topics_failed,
         topics_stranded=topics_stranded,
+        ttl_change=ttl_change,
     )
     store = SourceDeploymentStore.from_settings(settings)
     apps = await run_blocking(
@@ -1450,6 +1469,7 @@ class _AppliedSchema(NamedTuple):
     views: dict[str, str]
     statements_applied: int
     database: str
+    ttl_change: TtlChange | None
 
 
 def _record_source_deploy(
@@ -1477,6 +1497,28 @@ def _record_source_deploy(
     # The receiver's rule for this source, the loader's table map and (for a
     # fetcher-based source) the fetcher instance are what make the deploy live.
     return _reconcile_apps(request, user, registry)
+
+
+def _dry_run_ttl_change(
+    builder: Any, source: Source, version_id: str, result: Any, settings: Any
+) -> tuple[TtlChange | None, str | None]:
+    """The TTL move a deploy would make on the source's table, and why it is unknown.
+
+    Only a deployed source has a table to move. The table is read within
+    ``clickhouse.interactive_budget_seconds``; a ClickHouse that cannot be read
+    leaves the move unknown and says so.
+    """
+    if source.deployed_version is None:
+        return None, None
+    db = settings.clickhouse.effective_data_database
+    try:
+        live = live_tables(get_interactive_clickhouse_client(settings), db).get(source.table_name)
+    except SchemaApplyError as exc:
+        return None, str(exc)
+    if live is None:
+        return None, None
+    change = ttl_change_for_table(builder, source, version_id, result, db=db, live=live.ttl)
+    return change, None
 
 
 def _apply_source_schema(
@@ -1516,7 +1558,7 @@ def _apply_source_schema(
 
     # A deploy reaches ClickHouse before the build: the table engine and ON CLUSTER
     # are sensed from the live server, so the DDL lands on every replica of a
-    # cluster. A dry run stays CH-free and renders the deployment's topology.
+    # cluster. A dry run renders the deployment's topology and only reads ClickHouse.
     ch = None
     resolver = None
     if not dry_run:
@@ -1563,8 +1605,11 @@ def _apply_source_schema(
     views = dict(result.view_ddls or {})
     validation_errors = list(result.validation_errors or [])
 
-    # Plan mode: hand the DDL + validation back for review; never touch ClickHouse.
+    # Plan mode: hand the DDL + validation back for review; never write to ClickHouse.
     if dry_run:
+        ttl_change, live_table_error = _dry_run_ttl_change(
+            builder, source, version_id, result, settings
+        )
         return SchemaDeployResult(
             source_name=name,
             version=version_id,
@@ -1573,6 +1618,8 @@ def _apply_source_schema(
             create_table=result.create_table_ddl,
             views=views,
             validation_errors=validation_errors,
+            ttl_change=ttl_change,
+            live_table_error=live_table_error,
         )
 
     # Deploy mode: refuse to apply a schema that failed validation.
@@ -1587,31 +1634,30 @@ def _apply_source_schema(
         )
 
     db = settings.clickhouse.effective_data_database
-    statements, table_exists = deploy_statements_for_build(
-        builder,
-        source,
-        version_id,
-        result,
-        db=db,
-        ch_client=ch,
-    )
+    try:
+        planned = plan_deploy_statements(
+            builder,
+            source,
+            version_id,
+            result,
+            db=db,
+            ch_client=ch,
+        )
+    except SchemaApplyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "clickhouse_unavailable", "message": str(exc)},
+        ) from exc
     applied = 0
     try:
         # Through the applier on the sensed resolver: a bare CREATE DATABASE lands
         # on one replica, leaving the ON CLUSTER table DDL nowhere to go.
         from dfe_engine.schema.applier import SchemaApplier
 
-        applier = SchemaApplier(ch, resolver)
-        applier.ensure_database(db)
-        for stmt in statements:
+        SchemaApplier(ch, resolver).ensure_database(db)
+        for stmt in planned.statements:
             execute_ddl(ch, stmt)
             applied += 1
-        # The statements only add what an existing table lacks; its TTL moves here.
-        if table_exists:
-            before = len(applier.report.statements)
-            cfg = builder.build_ddl_config_for_version(source, version_id)
-            applier.ensure_table(db, source.table_name, result.columns, cfg)
-            applied += len(applier.report.statements) - before
     except Exception as exc:
         raise HTTPException(
             status_code=502,
@@ -1630,7 +1676,7 @@ def _apply_source_schema(
     except Exception as exc:
         logger.warning(f"Tenant fence not applied after deploying '{name}': {exc}")
 
-    return _AppliedSchema(source, version_id, result, views, applied, db)
+    return _AppliedSchema(source, version_id, result, views, applied, db, planned.ttl_change)
 
 
 @router.get(
@@ -2244,6 +2290,7 @@ def _plan_to_response(plan: SourcePlanArtifact) -> SourcePlanResponse:
         ddl=ddl,
         ready=plan.ready,
         ready_reason=plan.ready_reason,
+        ttl_change=plan.ttl_change,
     )
 
 

@@ -38,8 +38,15 @@ from dfe_engine.source.type_registry import TypeRegistry
 
 Action = Literal["created", "altered", "unchanged"]
 
-# system.tables.engine_full renders a day TTL as toIntervalDay(N) or INTERVAL N DAY.
-_TTL_DAYS_RE = re.compile(r"toIntervalDay\((\d+)\)|INTERVAL\s+(\d+)\s+DAY\b")
+# engine_full prints an interval as toInterval<Unit>(N); DDL text carries INTERVAL N <UNIT>.
+_TTL_INTERVAL_RE = re.compile(
+    r"toInterval(?P<fn_unit>[A-Za-z]+)\((?P<fn_amount>\d+)\)"
+    r"|INTERVAL\s+(?P<amount>\d+)\s+(?P<unit>[A-Za-z]+)\b"
+)
+
+# Seconds in each unit of fixed length; a month, quarter or year depends on the calendar.
+_UNIT_SECONDS = {"second": 1, "minute": 60, "hour": 3_600, "day": 86_400, "week": 604_800}
+_DAY_SECONDS = 86_400
 
 # The resolver adds these to a variant for the topology; config never declares them.
 _TOPOLOGY_PREFIXES = ("Replicated", "Shared")
@@ -54,15 +61,128 @@ class SchemaApplyError(Exception):
     """
 
 
-def ttl_days_from_engine_full(engine_full: str) -> int | None:
-    """The day TTL in a ``system.tables.engine_full`` value, or None when it has none."""
+@dataclass(frozen=True, slots=True)
+class LiveTtl:
+    """The interval of a table's TTL, as ClickHouse prints it.
+
+    Attributes:
+        amount: The interval's count; 0 when no interval could be read from the clause.
+        unit: The interval's unit in lower case, such as ``day`` or ``month``; empty
+            when no interval could be read from the clause.
+    """
+
+    amount: int
+    unit: str
+
+    @property
+    def days(self) -> int | None:
+        """The interval in whole days; None when it is not a whole number of days."""
+        seconds = _UNIT_SECONDS.get(self.unit)
+        if seconds is None:
+            return None
+        total = self.amount * seconds
+        if total % _DAY_SECONDS:
+            return None
+        return total // _DAY_SECONDS
+
+    def describe(self) -> str:
+        """Whole days as a number (``90``), else the interval as printed (``6 hour``)."""
+        days = self.days
+        if days is not None:
+            return str(days)
+        if not self.unit:
+            return "unknown"
+        return f"{self.amount} {self.unit}"
+
+
+def ttl_matches(live: LiveTtl | None, days: int | None) -> bool:
+    """Whether a table whose TTL is *live* already runs *days*; None is no TTL."""
+    if days is None:
+        return live is None
+    return live is not None and live.days == days
+
+
+def ttl_from_engine_full(engine_full: str) -> LiveTtl | None:
+    """The TTL interval in a ``system.tables.engine_full`` value, or None when it has no TTL."""
     _, sep, ttl_clause = engine_full.partition(" TTL ")
     if not sep:
         return None
-    match = _TTL_DAYS_RE.search(ttl_clause)
+    match = _TTL_INTERVAL_RE.search(ttl_clause)
     if match is None:
-        return None
-    return int(match.group(1) or match.group(2))
+        return LiveTtl(amount=0, unit="")
+    amount = match.group("fn_amount") or match.group("amount")
+    unit = match.group("fn_unit") or match.group("unit")
+    return LiveTtl(amount=int(amount), unit=unit.lower())
+
+
+@dataclass(frozen=True, slots=True)
+class TtlMove:
+    """What bringing a table's TTL to the declared one takes.
+
+    Attributes:
+        statement: The ALTER TABLE that makes the move; empty when nothing moves.
+        move: ``<live> -> <declared>``, whole days as a number and ``none`` for no
+            TTL; empty when nothing moves.
+        expires_rows: Whether the move deletes rows the table keeps today: the new
+            TTL is shorter, the table had none, or the live one is not whole days.
+        skipped: Why a declared TTL that differs from the live one cannot be placed.
+    """
+
+    statement: str = ""
+    move: str = ""
+    expires_rows: bool = False
+    skipped: str = ""
+
+
+def ttl_move(
+    *,
+    target: str,
+    on_cluster: str,
+    cfg: DDLConfig,
+    columns: list[SchemaColumn],
+    live: LiveTtl | None,
+) -> TtlMove:
+    """The statement that brings a table whose TTL is *live* to ``cfg.ttl_days``, not run.
+
+    An undeclared ``ttl_days`` leaves the table alone, and only a declared 0 removes
+    the TTL. A declared TTL over a column the table lacks is reported in ``skipped``
+    rather than raised, since the columns are what an apply is for.
+
+    Args:
+        target: The quoted ``database.table``.
+        on_cluster: The ``ON CLUSTER`` suffix, or "".
+        cfg: The table's DDL configuration.
+        columns: The columns the table has once the apply adds what it lacks.
+        live: The table's TTL now; None when it has none.
+    """
+    wanted = cfg.ttl_days
+    if wanted is None:
+        return TtlMove()
+    if wanted == 0:
+        if live is None:
+            return TtlMove()
+        return TtlMove(
+            statement=f"ALTER TABLE {target}{on_cluster} REMOVE TTL",
+            move=f"{live.describe()} -> none",
+        )
+    if live is not None and live.days == wanted:
+        return TtlMove()
+    try:
+        clause = DDLGenerator.ttl_clause(cfg, columns)
+    except (DDLGenerationError, ValueError) as exc:
+        return TtlMove(skipped=str(exc))
+    if clause is None:
+        return TtlMove()
+    return TtlMove(
+        statement=f"ALTER TABLE {target}{on_cluster} MODIFY {clause}",
+        move=f"{'none' if live is None else live.describe()} -> {wanted}",
+        expires_rows=live is None or live.days is None or wanted < live.days,
+    )
+
+
+def table_target(database: str, table: str) -> str:
+    """The quoted ``database.table`` a statement names."""
+    return f"{quote_ident(database, what='database')}.{quote_ident(table, what='table name')}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,11 +191,11 @@ class LiveTable:
 
     Attributes:
         engine: The engine name, topology prefix included (``ReplicatedMergeTree``).
-        ttl_days: The day TTL, or None when the table has none.
+        ttl: The TTL interval, or None when the table has none.
     """
 
     engine: str
-    ttl_days: int | None
+    ttl: LiveTtl | None
 
     @property
     def variant(self) -> str:
@@ -100,9 +220,27 @@ def live_tables(client: Any, database: str) -> dict[str, LiveTable]:
     except Exception as exc:
         raise SchemaApplyError(f"could not read ClickHouse state: {exc}") from exc
     return {
-        str(name): LiveTable(engine=str(engine), ttl_days=ttl_days_from_engine_full(str(full)))
+        str(name): LiveTable(engine=str(engine), ttl=ttl_from_engine_full(str(full)))
         for name, engine, full in rows
     }
+
+
+def read_table_ttl(client: Any, database: str, table: str) -> LiveTtl | None:
+    """The TTL of ``database.table`` as the server reports it; None when it has none.
+
+    Raises:
+        SchemaApplyError: ClickHouse could not be read.
+    """
+    try:
+        rows = client.query(
+            "SELECT engine_full FROM system.tables WHERE database = {db:String} "
+            "AND name = {tbl:String}",
+            parameters={"db": database, "tbl": table},
+        ).result_rows
+    except Exception as exc:
+        raise SchemaApplyError(f"could not read ClickHouse state: {exc}") from exc
+    engine_full = str(rows[0][0]) if rows and rows[0][0] is not None else ""
+    return ttl_from_engine_full(engine_full)
 
 
 def _nullable(ch_type: str) -> bool:
@@ -274,19 +412,18 @@ class SchemaApplier:
                 self._run(index_stmt)
 
         # After the column adds: the TTL column may be one of them.
-        on_cluster = f" ON CLUSTER {cfg.cluster}" if cfg.cluster else resolved.on_cluster
-        ttl, ttl_skipped = self._reconcile_ttl(database, table, columns, cfg, on_cluster)
+        ttl = self._reconcile_ttl(database, table, columns, cfg)
 
         return self._record(
             TableChange(
                 database=database,
                 table=table,
-                action="altered" if missing or ttl else "unchanged",
+                action="altered" if missing or ttl.statement else "unchanged",
                 columns_added=tuple(col.name for col in missing),
                 engine=resolved.clause,
                 on_cluster=resolved.on_cluster,
-                ttl=ttl,
-                ttl_skipped=ttl_skipped,
+                ttl=ttl.move,
+                ttl_skipped=ttl.skipped,
             )
         )
 
@@ -296,49 +433,25 @@ class SchemaApplier:
         table: str,
         columns: list[SchemaColumn],
         cfg: DDLConfig,
-        on_cluster: str,
-    ) -> tuple[str, str]:
-        """Bring the live TTL to ``cfg.ttl_days``.
-
-        An undeclared ``ttl_days`` leaves the table alone; only a declared 0 removes the TTL.
-        A declared TTL over a column the table lacks is logged and skipped rather
-        than failing the apply, since the columns are the gate's real job.
-
-        Returns:
-            The move (empty for none), and why a TTL that differs was not placed
-            (empty unless it was skipped).
-        """
-        wanted = cfg.ttl_days
-        if wanted is None:
-            return "", ""
-        live = self._table_ttl_days(database, table)
-        target = f"{quote_ident(database, what='database')}.{quote_ident(table, what='table name')}"
-        # A live 0-day TTL expires every row, so it is removed rather than matched.
-        if wanted == 0:
-            if live is None:
-                return "", ""
-            logger.info(f"{database}.{table}: TTL {live} -> none; rows are kept forever")
-            self._run(f"ALTER TABLE {target}{on_cluster} REMOVE TTL")
-            return f"{live} -> none", ""
-        if live == wanted:
-            return "", ""
-        try:
-            clause = DDLGenerator._ttl_clause(cfg, columns)
-        except (DDLGenerationError, ValueError) as exc:
-            logger.warning(f"{database}.{table}: TTL not reconciled: {exc}")
-            return "", str(exc)
-        if clause is None:
-            return "", ""
-        move = f"{'none' if live is None else live} -> {wanted}"
-        if live is not None and wanted < live:
-            logger.warning(
-                f"{database}.{table}: TTL shortened {move} days; rows older than "
-                f"{wanted} days will expire"
-            )
+    ) -> TtlMove:
+        """Bring the live TTL to ``cfg.ttl_days``, as :func:`ttl_move` plans it."""
+        move = ttl_move(
+            target=table_target(database, table),
+            on_cluster=self._ddl_gen.on_cluster(cfg),
+            cfg=cfg,
+            columns=columns,
+            live=self._table_ttl(database, table),
+        )
+        if move.skipped:
+            logger.warning(f"{database}.{table}: TTL not reconciled: {move.skipped}")
+        if not move.statement:
+            return move
+        if move.expires_rows:
+            logger.warning(f"{database}.{table}: TTL {move.move}; rows past the new TTL expire")
         else:
-            logger.info(f"{database}.{table}: TTL {move} days")
-        self._run(f"ALTER TABLE {target}{on_cluster} MODIFY {clause}")
-        return move, ""
+            logger.info(f"{database}.{table}: TTL {move.move}")
+        self._run(move.statement)
+        return move
 
     def nullability_mismatches(
         self, database: str, table: str, columns: list[SchemaColumn]
@@ -361,7 +474,7 @@ class SchemaApplier:
             col.name
             for col in columns
             if col.name in live
-            and _nullable(live[col.name]) != _nullable(self._ddl_gen._resolve_type(col)[0])
+            and _nullable(live[col.name]) != _nullable(self._ddl_gen.resolve_type(col)[0])
         )
 
     # -- materialised views ------------------------------------------
@@ -426,15 +539,8 @@ class SchemaApplier:
         )
         return {str(row[0]) for row in rows}
 
-    def _table_ttl_days(self, database: str, table: str) -> int | None:
-        """The live TTL in days, or None when the table has no day-based TTL."""
-        rows = self._select(
-            "SELECT engine_full FROM system.tables WHERE database = {db:String} "
-            "AND name = {tbl:String}",
-            {"db": database, "tbl": table},
-        )
-        engine_full = str(rows[0][0]) if rows and rows[0][0] is not None else ""
-        return ttl_days_from_engine_full(engine_full)
+    def _table_ttl(self, database: str, table: str) -> LiveTtl | None:
+        return read_table_ttl(self._client, database, table)
 
     def _select(self, sql: str, parameters: dict[str, Any]) -> list:
         """Read server state. A read failure RAISES rather than reporting absence.
