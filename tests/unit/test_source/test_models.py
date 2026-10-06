@@ -1644,12 +1644,14 @@ class TestPaginatedSourceSummaryResponse:
                 current="1.0.0",
                 deployed_version="1.0.0",
                 versions=["1.0.0"],
+                current_table_topic_type="own",
             ),
             SourceSummaryObject(
                 name="syslog",
                 current="1.0.0",
                 deployed_version="1.0.0",
                 versions=["1.0.0"],
+                current_table_topic_type="main",
             ),
         ]
         resp = PaginatedSourceSummaryResponse.from_summaries(objs, page=1, per_page=1)
