@@ -12,13 +12,51 @@ Usage:
     all_ddls = gen.generate_views_for_source("windows_audit", "windows_audit")
 """
 
-from __future__ import annotations
+from collections.abc import Collection
+
+from scalo.logger import logger
 
 from dfe_engine.fieldmap.models import FieldMap
 from dfe_engine.fieldmap.registry import FieldMapNotFoundError, FieldMapRegistry
-from dfe_engine.fieldmap.resolver import resolve_field_map
+from dfe_engine.fieldmap.resolver import resolve_field_map, split_by_columns
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
 from dfe_engine.source.type_registry import TypeRegistry
+
+
+def usable_view_mappings(
+    mappings: dict[str, str],
+    columns: Collection[str] | None,
+    *,
+    view_name: str,
+) -> dict[str, str]:
+    """The part of *mappings* a view over a table with *columns* can carry.
+
+    ``columns=None`` means the table is unknown and every mapping is kept. A
+    mapping whose target column is absent is dropped and logged, because one such
+    column makes ClickHouse refuse the whole view.
+
+    Args:
+        mappings: Resolved standard_field -> column_name mappings.
+        columns: Column names the view's table carries, or None when unknown.
+        view_name: The view the mappings are for, named in the log line.
+
+    Returns:
+        The usable mappings; empty when none of them target a column on the table.
+    """
+    if columns is None:
+        return mappings
+    usable, dropped = split_by_columns(mappings, columns)
+    if dropped:
+        logger.debug(
+            f"View {view_name!r}: dropped {len(dropped)} of {len(mappings)} mappings "
+            f"whose column is not on the table: {sorted(dropped.items())}"
+        )
+    if mappings and not usable:
+        logger.info(
+            f"View {view_name!r} not rendered: none of its {len(mappings)} mappings "
+            "target a column on the table"
+        )
+    return usable
 
 
 class ViewGenerator:
@@ -64,6 +102,7 @@ class ViewGenerator:
         source_name: str,
         table_name: str,
         config: DDLConfig | None = None,
+        columns: Collection[str] | None = None,
     ) -> str | None:
         """Generate a single view DDL for a standard × source.
 
@@ -72,11 +111,17 @@ class ViewGenerator:
             source_name: Source name for source-specific overrides.
             table_name: ClickHouse base table name.
             config: DDL configuration.
+            columns: Column names on *table_name*. When given, a mapping whose
+                column is absent is left out of the view.
 
         Returns:
-            CREATE VIEW DDL string, or None if no mappings resolved.
+            CREATE VIEW DDL string, or None if no usable mappings resolved.
         """
-        mappings = self._resolve_map(standard, source_name)
+        mappings = usable_view_mappings(
+            self._resolve_map(standard, source_name),
+            columns,
+            view_name=f"{table_name}_{standard}",
+        )
         if not mappings:
             return None
 
@@ -88,6 +133,7 @@ class ViewGenerator:
         table_name: str,
         standards: list[str] | None = None,
         config: DDLConfig | None = None,
+        columns: Collection[str] | None = None,
     ) -> dict[str, str]:
         """Generate view DDLs for all standards that have maps for a source.
 
@@ -98,6 +144,7 @@ class ViewGenerator:
                 from registry (all standards with either a default or
                 source-specific map).
             config: DDL configuration.
+            columns: Column names on *table_name*; see :meth:`generate_view`.
 
         Returns:
             Dict of standard -> view DDL string.
@@ -107,7 +154,7 @@ class ViewGenerator:
 
         views: dict[str, str] = {}
         for standard in standards:
-            ddl = self.generate_view(standard, source_name, table_name, config)
+            ddl = self.generate_view(standard, source_name, table_name, config, columns)
             if ddl:
                 views[standard] = ddl
 

@@ -288,22 +288,28 @@ class TestSeedDefaults:
 
         loaded = registry.get_map("sigma")
         assert "Custom" not in loaded.mappings
-        assert "User" in loaded.mappings  # original default field
+        assert "EventID" in loaded.mappings  # original default field
 
     def test_seeded_sigma_has_expected_fields(self, registry):
         registry.seed_defaults()
         sigma = registry.get_map("sigma")
-        assert sigma.mappings["EventID"] == "event_id"
-        assert sigma.mappings["CommandLine"] == "command_line"
-        assert sigma.mappings["Image"] == "process_name"
-        assert sigma.mappings["User"] == "user_name"
+        assert sigma.mappings["EventID"] == "event_code"
+        assert sigma.mappings["Image"] == "process_executable"
+        assert sigma.mappings["ParentImage"] == "process_parent_executable"
+        assert sigma.mappings["TargetFilename"] == "file_path"
+        assert sigma.mappings["ImageLoaded"] == "file_path"
+        # Their ECS target depends on the rule's logsource, so only a source map sets them.
+        assert "CommandLine" not in sigma.mappings
+        assert "User" not in sigma.mappings
 
     def test_seeded_ecs_has_expected_fields(self, registry):
         registry.seed_defaults()
         ecs = registry.get_map("ecs")
         assert ecs.mappings["source.ip"] == "source_ip"
         assert ecs.mappings["user.name"] == "user_name"
-        assert ecs.mappings["process.name"] == "process_name"
+        assert ecs.mappings["host.name"] == "host_name"
+        assert ecs.mappings["process.command_line"] == "process_command_line"
+        assert ecs.mappings["process.pid"] == "process_pid"
         assert ecs.version == "8.11"
 
     def test_seeded_cim_has_expected_fields(self, registry):
@@ -311,7 +317,9 @@ class TestSeedDefaults:
         cim = registry.get_map("cim")
         assert cim.mappings["src_ip"] == "source_ip"
         assert cim.mappings["user"] == "user_name"
-        assert cim.mappings["process_name"] == "process_name"
+        assert cim.mappings["dest"] == "destination_domain"
+        assert cim.mappings["src"] == "source_domain"
+        assert cim.mappings["process"] == "process_command_line"
 
 
 # ---------------------------------------------------------------

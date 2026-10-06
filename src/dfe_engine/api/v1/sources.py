@@ -47,6 +47,7 @@ from dfe_engine.api.deps import (
     SchemaReg,
     Settings,
     SourceReg,
+    get_field_map_registry_optional,
     require_action,
     ttl_settings,
 )
@@ -1139,6 +1140,7 @@ def build_source_schema(
             schemas_base_dir=settings.schemas.schemas_dir or None,
             refresh=True,
             settings=settings,
+            field_map_registry=get_field_map_registry_optional(),
         )
     except (SchemaBuildError, SchemaLoadError) as exc:
         raise HTTPException(
@@ -1217,6 +1219,7 @@ def plan_source_deploy(
             refresh=True,
             resolver=resolver,
             settings=settings,
+            field_map_registry=get_field_map_registry_optional(),
         )
     except (SchemaBuildError, SchemaLoadError) as exc:
         raise HTTPException(
@@ -1536,6 +1539,7 @@ def _apply_source_schema(
         schemas_base_dir=settings.schemas.schemas_dir or None,
         derived_base_dir=derived_reference_root(settings),
         resolver=resolver,
+        field_map_registry=get_field_map_registry_optional(),
         **inherited_builder_kwargs(settings),
     )
     try:

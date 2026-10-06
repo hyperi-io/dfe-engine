@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import BaseModel, Field, model_validator
 from scalo.logger import logger
@@ -14,6 +14,9 @@ from dfe_engine.services.schema.json_promotion_service import clickhouse_table_e
 from dfe_engine.source.models import Source
 from dfe_engine.source.type_registry import TypeRegistry
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
+
+if TYPE_CHECKING:
+    from dfe_engine.fieldmap.registry import FieldMapRegistry
 
 TDoc = TypeVar("TDoc", bound=BaseModel)
 
@@ -661,11 +664,14 @@ def run_source_build(
     schemas_base_dir: str | Path | None,
     resolver: EngineResolver | None = None,
     settings: Any | None = None,
+    field_map_registry: FieldMapRegistry | None = None,
 ) -> SchemaBuildResult:
     """Build *source* at *version_id* under *settings*, or the process settings when None.
 
     A caller that has resolved the effective defaults passes its settings, so the
     build carries the retention, header and engine the deploy will apply.
+    ``field_map_registry`` supplies the maps a source's declared views render
+    from; without it only a view's inline ``custom_mappings`` render.
     """
     from dfe_engine.schema.derived_registry import derived_reference_root
     from dfe_engine.schema.schema_builder_v2 import inherited_builder_kwargs
@@ -677,6 +683,7 @@ def run_source_build(
         schemas_base_dir=schemas_base_dir or None,
         derived_base_dir=derived_reference_root(settings),
         resolver=resolver,
+        field_map_registry=field_map_registry,
         **inherited_builder_kwargs(settings),
     )
     return builder.build_for_source_version(source, source_version=version_id)
@@ -691,12 +698,14 @@ def ensure_build_artifact(
     refresh: bool = False,
     resolver: EngineResolver | None = None,
     settings: Any | None = None,
+    field_map_registry: FieldMapRegistry | None = None,
 ) -> tuple[SchemaBuildResult, SourceBuildArtifact]:
     """Load build from source-builds or run build and persist.
 
     ``resolver`` is the live server's engine resolver when the build is bound for
     that server; the persisted artefact then carries the cluster form of the DDL.
-    ``settings`` is what a fresh build runs under; see :func:`run_source_build`.
+    ``settings`` and ``field_map_registry`` are what a fresh build runs under;
+    see :func:`run_source_build`.
     """
     if not refresh:
         existing = store.load_build(source.source, version_id)
@@ -709,6 +718,7 @@ def ensure_build_artifact(
         schemas_base_dir=schemas_base_dir,
         resolver=resolver,
         settings=settings,
+        field_map_registry=field_map_registry,
     )
     artifact = artifact_from_build(result, version=version_id)
     store.save_build(artifact, source)

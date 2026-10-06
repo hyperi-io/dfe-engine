@@ -44,11 +44,10 @@ dependencies = [
     # The DFE schema trees as package data under dfe_schemas/data/, replacing
     # the `schemas` git submodule. schema_loader resolves them through
     # importlib.resources; the Dockerfile bakes its seed from the installed
-    # wheel. Floor is the release that added the apply manifest, the renderer
-    # and the views, roles and topic set the bootstrap iterates; uv.lock pins
-    # the hash.
+    # wheel. Floor is the release whose default field maps target real ECS
+    # columns, which the field-map tests assert; uv.lock pins the hash.
     # Upper bound: <1 is the API-stability boundary while dfe-schemas is 0.x.
-    "dfe-schemas>=0.2.8,<1",
+    "dfe-schemas>=0.2.9,<1",
     # Data processing
     "pandas>=3.0.3",
     "numpy>=2.5.0",
