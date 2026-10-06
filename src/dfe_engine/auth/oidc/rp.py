@@ -29,8 +29,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-# Risk accepted: authlib 1.8 warns once per process that it fell back to httpx,
-# and forces the warning past every filter. Cleared by installing httpx2 (scalo-py#32).
 from authlib.integrations.starlette_client import OAuth
 from pydantic import BaseModel
 from scalo.logger import logger

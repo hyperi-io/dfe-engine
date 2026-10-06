@@ -30,6 +30,13 @@ from typing import Any
 
 import click
 import httpx
+import httpx2
+
+# The CLI runs on scalo.http (httpx) and its tests on Starlette's TestClient (httpx2).
+HTTP_ERRORS = (httpx.HTTPError, httpx2.HTTPError)
+HTTP_STATUS_ERRORS = (httpx.HTTPStatusError, httpx2.HTTPStatusError)
+CONNECT_ERRORS = (httpx.ConnectError, httpx2.ConnectError)
+DECODING_ERRORS = (httpx.DecodingError, httpx2.DecodingError)
 
 
 class ExitCode(IntEnum):
@@ -69,13 +76,13 @@ class DfeConfigError(DfeCliError):
         super().__init__(message, ExitCode.CONFIG)
 
 
-def _extract_error_body(response: httpx.Response) -> tuple[str, str]:
+def _extract_error_body(response: httpx.Response | httpx2.Response) -> tuple[str, str]:
     """Pull ``(code, message)`` from an ErrorResponse-shaped body, best effort."""
     code = str(response.status_code)
     message = response.reason_phrase or "request failed"
     try:
         body = response.json()
-    except ValueError, httpx.DecodingError:
+    except (ValueError, *DECODING_ERRORS):
         return code, message
     if isinstance(body, dict):
         # ErrorResponse: {code, message}. FastAPI HTTPException: {detail: {...}}
@@ -98,7 +105,7 @@ def _extract_error_body(response: httpx.Response) -> tuple[str, str]:
     return code, message
 
 
-def from_http_status_error(exc: httpx.HTTPStatusError) -> DfeCliError:
+def from_http_status_error(exc: httpx.HTTPStatusError | httpx2.HTTPStatusError) -> DfeCliError:
     """Build a DfeCliError from a non-2xx response."""
     response = exc.response
     code, message = _extract_error_body(response)
@@ -128,7 +135,7 @@ def handle(exc: BaseException, *, debug: bool = False, emit: Any = None) -> int:
         else:
             click.echo(text, err=True)
 
-    if isinstance(exc, httpx.HTTPStatusError):
+    if isinstance(exc, HTTP_STATUS_ERRORS):
         cli = from_http_status_error(exc)
         _write(cli.message)
         return int(cli.exit_code)
@@ -137,11 +144,11 @@ def handle(exc: BaseException, *, debug: bool = False, emit: Any = None) -> int:
         _write(cli_message(exc))
         return int(exc.exit_code)
 
-    if isinstance(exc, httpx.ConnectError):
+    if isinstance(exc, CONNECT_ERRORS):
         _write(f"Error (connection): could not reach the engine ({exc}).")
         return int(ExitCode.API)
 
-    if isinstance(exc, httpx.HTTPError):
+    if isinstance(exc, HTTP_ERRORS):
         _write(f"Error (http): {exc}")
         return int(ExitCode.API)
 
