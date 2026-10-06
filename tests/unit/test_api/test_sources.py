@@ -27,6 +27,7 @@ class TestListSources:
         assert [item["name"] for item in data["items"]] == ["main"]
         assert data["items"][0]["resource_type"] == "core"
         assert data["items"][0]["origin"] is None
+        assert data["items"][0]["current_table_topic_type"] == "main"
         assert data["total"] == 1
         assert data["page"] == 1
         assert data["total_pages"] == 1
@@ -44,6 +45,28 @@ class TestListSources:
         assert created["versions"] == ["1.0.0"]
         assert created["current"] == "1.0.0"
         assert created["deployed_version"] is None
+        # sample_source pins no meta_schema, so records share the landing table.
+        assert created["current_table_topic_type"] == "main"
+        assert by_name["main"]["current_table_topic_type"] == "main"
+
+    def test_list_reports_own_when_a_meta_schema_is_pinned(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        client.post(
+            "/api/v1/sources",
+            json={
+                **sample_source,
+                "source": "aws-own",
+                "schema_config": {
+                    "meta_schema": "meta/aws_cloudtrail",
+                    "meta_schema_version": "1.0.0",
+                },
+            },
+            headers=admin_headers,
+        )
+        resp = client.get("/api/v1/sources", headers=admin_headers)
+        by_name = {item["name"]: item for item in resp.json()["items"]}
+        assert by_name["aws-own"]["current_table_topic_type"] == "own"
 
     def test_list_pagination(self, client: TestClient, admin_headers: dict):
         # Create 5 sources

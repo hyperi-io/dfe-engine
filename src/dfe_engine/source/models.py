@@ -1423,6 +1423,15 @@ class Source(BaseModel):
             return self.source
         return fetcher.landing_label(self.source)
 
+    @property
+    def table_topic_type(self) -> FetcherTopic:
+        """Whether records land on this source's own table or the shared main one.
+
+        A pinned ``meta_schema`` means the source has its own ClickHouse table.
+        Without one, records share the platform landing table (``main``).
+        """
+        return "own" if self.schema_config.meta_schema else "main"
+
     # -----------------------------------------------------------------
     # Derived properties
     # -----------------------------------------------------------------
@@ -1544,6 +1553,12 @@ class SourceSummaryObject(BaseModel):
     origin: SourceOrigin | None = Field(
         default=None,
         description="How data enters: a receiver match, a fetcher, or null when nothing selects it",
+    )
+    current_table_topic_type: FetcherTopic = Field(
+        description=(
+            "Where records land: ``own`` when a meta schema pins a per-source table, "
+            "``main`` when there is none and records share the landing table"
+        ),
     )
     views: list[str] = Field(
         default_factory=list,

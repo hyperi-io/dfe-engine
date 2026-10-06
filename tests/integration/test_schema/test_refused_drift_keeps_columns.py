@@ -75,7 +75,8 @@ def _release_a_column(root: Path) -> None:
     assert current, "the timeseries profile names no current version"
     head, version, tail = text.partition(f'  "{current.group(1)}":')
     before, columns, rest = tail.partition("    columns:\n")
-    assert version and columns, f"no columns under the current version {current.group(1)}"
+    assert version, f"no version block for the current version {current.group(1)}"
+    assert columns, f"no columns under the current version {current.group(1)}"
     column = f"      - name: {NEW_COLUMN}\n        type: string\n        _field_type: base\n\n"
     profile.write_text(head + version + before + columns + column + rest, encoding="utf-8")
 

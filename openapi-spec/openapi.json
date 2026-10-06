@@ -37607,6 +37607,15 @@
             "title": "Origin",
             "description": "How data enters: a receiver match, a fetcher, or null when nothing selects it"
           },
+          "current_table_topic_type": {
+            "type": "string",
+            "enum": [
+              "own",
+              "main"
+            ],
+            "title": "Current Table Topic Type",
+            "description": "Where records land: ``own`` when a meta schema pins a per-source table, ``main`` when there is none and records share the landing table"
+          },
           "views": {
             "items": {
               "type": "string"
@@ -37620,7 +37629,8 @@
         "required": [
           "name",
           "current",
-          "versions"
+          "versions",
+          "current_table_topic_type"
         ],
         "title": "SourceSummaryObject",
         "description": "Summary row for paginated source list (mirrors ``SchemaSummaryObject``)."
