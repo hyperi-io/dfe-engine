@@ -18,7 +18,7 @@ _ADMIN_GROUP = "dfe-admins"
 _DFE_ANALYST_GROUP = "dfe-analysts"
 _DFE_INFRA_GROUP = "dfe-infra"
 _DFE_VIEWERS_GROUP = "dfe-viewers"
-_WELL_KNOWN_E2E_PASSWORD = "changeme"  # noqa: S105 - e2e seed
+_WELL_KNOWN_E2E_PASSWORD = "changeme"  # noqa: S105, RUF100 - e2e seed
 _SEED_ACTOR = "e2e-seed"
 
 

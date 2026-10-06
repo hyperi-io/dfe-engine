@@ -1700,7 +1700,7 @@ class GitopsSettings(BaseModel):
 
 # Known placeholder JWT secret - fine for local dev, REJECTED in a production
 # posture when auth is on (see DFESettings._reject_insecure_production_posture).
-_DEV_JWT_SECRET = "dev-secret-key-change-in-production"  # noqa: S105 - dev placeholder
+_DEV_JWT_SECRET = "dev-secret-key-change-in-production"  # noqa: S105, RUF100 - dev placeholder
 
 # Postures that are NOT production; anything else (incl. the default
 # "production") is treated as production for the placeholder-secret guard.
