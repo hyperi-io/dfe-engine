@@ -13,7 +13,7 @@ models, CEL syntax classifier, and validation for transport-level message
 filters. Used by the control plane to validate filter configs before they
 reach scalo-rs at service startup.
 
-See: /projects/scalo-rs/src/transport/filter/
+See: ``src/transport/filter/`` in hyperi-io/scalo-rs
 
 ## Performance Tiers
 
