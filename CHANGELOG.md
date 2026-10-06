@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.14](https://github.com/hyperi-io/dfe-engine/compare/v1.22.13...v1.22.14) (2026-10-06)
+
+### Bug Fixes
+
+* apply defaults changes the deployed tables, and drift reads them ([#753](https://github.com/hyperi-io/dfe-engine/issues/753)) ([6b90549](https://github.com/hyperi-io/dfe-engine/commit/6b90549ac75fa8b4e9e87319e40161b1306f23ad))
+
 ## [1.22.13](https://github.com/hyperi-io/dfe-engine/compare/v1.22.12...v1.22.13) (2026-10-06)
 
 ### Bug Fixes
