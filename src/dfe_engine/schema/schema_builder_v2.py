@@ -26,7 +26,7 @@ from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
 from dfe_engine.schema.schema_loader import (
     SchemaLoader,
     SchemaLoadError,
-    _profile_file_stem,
+    profile_file_stem,
     resolve_schema_yaml_path,
 )
 from dfe_engine.source.models import (
@@ -60,11 +60,11 @@ def _authored_header_profile(
     An authored empty type names no file and must not become ``.yaml``.
     """
     if snap.header is None:
-        if _profile_file_stem(default_type) is None:
+        if profile_file_stem(default_type) is None:
             return None
         return default_type, default_version
     raw = snap.header.type or ""
-    if _profile_file_stem(raw) is None:
+    if profile_file_stem(raw) is None:
         return None
     return raw, snap.header.version
 
@@ -178,6 +178,11 @@ class SchemaBuilderV2:
         self._default_header_type = default_header_type or DEFAULT_HEADER_TYPE
         self._default_header_version = default_header_version or DEFAULT_HEADER_VERSION
 
+    @property
+    def ddl_generator(self) -> DDLGenerator:
+        """The generator this builder renders with, on its engine resolver."""
+        return self._ddl_gen
+
     # -- Main entry points -------------------------------------------
 
     def build(self, source: Source) -> SchemaBuildResult:
@@ -201,7 +206,7 @@ class SchemaBuilderV2:
             )
         snap = source.versions[version_id]
 
-        profile_columns = self._load_profile_for_snapshot(source.source, snap)
+        profile_columns = self.load_profile_for_snapshot(source.source, snap)
         source_columns = self._load_source_columns_for_snapshot(source.source, snap)
         columns = SchemaLoader.compose(profile_columns, source_columns)
 
@@ -248,7 +253,7 @@ class SchemaBuilderV2:
                 f"Source version '{version_id}' is not defined for source '{source.source}'"
             )
         snap = source.versions[version_id]
-        profile_columns = self._load_profile_for_snapshot(source.source, snap)
+        profile_columns = self.load_profile_for_snapshot(source.source, snap)
         source_columns = self._load_source_columns_for_snapshot(source.source, snap)
         return SchemaLoader.compose(profile_columns, source_columns)
 
@@ -388,12 +393,19 @@ class SchemaBuilderV2:
 
     def _load_profile(self, source: Source) -> list[SchemaColumn]:
         """Load the common header profile for the deployed source version."""
-        return self._load_profile_for_snapshot(source.source, source.version())
+        return self.load_profile_for_snapshot(source.source, source.version())
 
-    def _load_profile_for_snapshot(
+    def load_profile_for_snapshot(
         self, source_name: str, snap: SourceVersion
     ) -> list[SchemaColumn]:
-        """Load the common header profile from a source version snapshot."""
+        """Load the common header profile a source version snapshot builds with.
+
+        The snapshot's own header, else this builder's default header; empty when
+        the snapshot names no profile file.
+
+        Raises:
+            SchemaBuildError: The profile does not load.
+        """
         # The same derivation _build_ddl_config_for_snapshot uses, so the columns
         # loaded are the ones the DDL config declares a profile and a TTL over.
         profile_ref = _authored_header_profile(

@@ -320,6 +320,19 @@ def get_clickhouse_client(settings: Settings) -> Any:
     return manager.get_clickhouse_client()
 
 
+def get_interactive_clickhouse_client(settings: Any) -> Any:
+    """The pooled client wrapper, giving up on a down server within ``interactive_budget_seconds``.
+
+    For a read a console request waits on: an unreachable ClickHouse raises
+    ``ServiceUnavailable`` in seconds instead of after the data-plane budget.
+    """
+    from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+    from dfe_engine.settings import get_clickhouse_config
+
+    manager = ClickHouseManager.get_instance(get_clickhouse_config(settings))
+    return manager.get_bounded_client(settings.clickhouse.interactive_budget_seconds)
+
+
 ClickHouseClient = Annotated[Any, Depends(get_clickhouse_client)]
 
 

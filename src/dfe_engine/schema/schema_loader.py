@@ -224,13 +224,17 @@ def _strip_yaml_suffix(name: str) -> str:
     return name
 
 
-def _profile_file_stem(profile_name: str) -> str | None:
+def profile_file_stem(profile_name: str) -> str | None:
     """YAML stem for a profile ref, or None when it names no profile file.
 
-    Empty, whitespace, a bare ``.yml``/``.yaml`` suffix, and the
+    ``common-header/minimal``, ``minimal`` and ``minimal.yaml`` all name the
+    ``minimal`` stem. Empty, whitespace, a bare ``.yml``/``.yaml`` suffix, and the
     ``common-header`` directory (with or without a trailing slash) are not
     profiles -- appending ``.yaml`` would look for ``.yaml`` or
     ``common-header.yaml``.
+
+    Raises:
+        SchemaLoadError: The ref climbs out of the profiles directory with ``..``.
     """
     normalized = profile_name.replace("\\", "/").strip()
     _reject_traversal(profile_name, normalized.strip("/"))
@@ -256,7 +260,7 @@ def _resolve_profile_yaml_path(
     profiles_dir: str | Path | None = None,
 ) -> Path:
     """Map a profile ref (short name or ``common-header/...`` registry path) to a YAML file."""
-    stem = _profile_file_stem(profile_name)
+    stem = profile_file_stem(profile_name)
     if stem is None:
         raise SchemaLoadError(f"Profile {profile_name!r} is empty")
 
@@ -264,7 +268,7 @@ def _resolve_profile_yaml_path(
         return _profile_yaml_path(Path(profiles_dir), stem)
 
     normalized = profile_name.replace("\\", "/").strip()
-    # Traversal is already rejected in _profile_file_stem; keep the same
+    # Traversal is already rejected in profile_file_stem; keep the same
     # guard on this join path so a future edit cannot skip it.
     _reject_traversal(profile_name, normalized.strip("/"))
 

@@ -46,11 +46,12 @@ from dfe_schemas.render import RenderedObject
 from scalo.logger import logger
 
 from dfe_engine.clickhouse.statements import StatementTooLargeError, ddl_settings
+from dfe_engine.schema.applier import LiveTtl, ttl_from_engine_full, ttl_matches
 from dfe_engine.schema.ledger import LedgerRow, MigrationLedger
 
 Action = Literal["created", "altered", "unchanged", "refused", "skipped"]
 
-# system.tables.engine_full renders a day TTL as toIntervalDay(N) or INTERVAL N DAY.
+# A rendered CREATE declares a day TTL as INTERVAL N DAY, or toIntervalDay(N).
 _TTL_DAYS_RE = re.compile(r"toIntervalDay\((\d+)\)|INTERVAL\s+(\d+)\s+DAY\b")
 _ORDER_BY_RE = re.compile(r"^ORDER BY \((.*)\)$", re.MULTILINE)
 _PARTITION_BY_RE = re.compile(r"^PARTITION BY (.+)$", re.MULTILINE)
@@ -250,6 +251,10 @@ def _declared_ttl_clause(statement: str) -> str | None:
     return tail.split("\nSETTINGS", 1)[0].strip()
 
 
+def _ttl_text(live: LiveTtl | None) -> str:
+    return "none" if live is None else live.describe()
+
+
 def declared_ttl_days(statement: str) -> int | None:
     """The day TTL a rendered CREATE TABLE declares, or None when it declares none."""
     clause = _declared_ttl_clause(statement)
@@ -363,8 +368,10 @@ class ManifestApplier:
             return ""
         statement = rendered.statements[0]
         wanted = declared_ttl_days(statement)
-        live = self._live_ttl_days(self._live_shape(database, rendered.name).get("engine_full", ""))
-        if wanted == live:
+        live = ttl_from_engine_full(
+            self._live_shape(database, rendered.name).get("engine_full", "")
+        )
+        if ttl_matches(live, wanted):
             return ""
         target = f"{self._target(database, rendered.name)}{self._on_cluster(statement)}"
         clause = _declared_ttl_clause(statement)
@@ -372,7 +379,7 @@ class ManifestApplier:
             self._run(f"ALTER TABLE {target} REMOVE TTL")
         else:
             self._run(f"ALTER TABLE {target} MODIFY TTL {clause}")
-        return f"{'none' if live is None else live} -> {'none' if wanted is None else wanted}"
+        return f"{_ttl_text(live)} -> {'none' if wanted is None else wanted}"
 
     # -- per kind ------------------------------------------------------------
 
@@ -511,12 +518,15 @@ class ManifestApplier:
                 )
 
         declared_ttl = declared_ttl_days(statement)
-        live_ttl = self._live_ttl_days(shape.get("engine_full", ""))
-        if declared_ttl is not None and declared_ttl != live_ttl:
-            drift.append(
-                f"TTL is {'none' if live_ttl is None else live_ttl} days, "
-                f"the schema declares {declared_ttl}"
-            )
+        live_ttl = ttl_from_engine_full(shape.get("engine_full", ""))
+        if declared_ttl is not None and not ttl_matches(live_ttl, declared_ttl):
+            live_days = "none" if live_ttl is None else live_ttl.days
+            if live_days is None:
+                drift.append(
+                    f"TTL is {_ttl_text(live_ttl)}, the schema declares {declared_ttl} days"
+                )
+            else:
+                drift.append(f"TTL is {live_days} days, the schema declares {declared_ttl}")
 
         for name, families in _column_codecs(statement).items():
             live_families = self._live_codec(database, rendered.name, name)
@@ -585,14 +595,6 @@ class ManifestApplier:
             "partition_key": str(rows[0][1] or ""),
             "engine_full": str(rows[0][2] or ""),
         }
-
-    @staticmethod
-    def _live_ttl_days(engine_full: str) -> int | None:
-        _, sep, clause = engine_full.partition(" TTL ")
-        if not sep:
-            return None
-        match = _TTL_DAYS_RE.search(clause)
-        return int(match.group(1) or match.group(2)) if match else None
 
     def _database_exists(self, database: str) -> bool:
         return bool(

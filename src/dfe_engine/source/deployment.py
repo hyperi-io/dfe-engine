@@ -2,12 +2,19 @@
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, NamedTuple, TypeVar
 
 from pydantic import BaseModel, Field, model_validator
 from scalo.logger import logger
 
 from dfe_engine.clickhouse.statements import ddl_settings
+from dfe_engine.schema.applier import (
+    LiveTtl,
+    read_table_ttl,
+    replace_db,
+    table_target,
+    ttl_move,
+)
 from dfe_engine.schema.engine_resolver import EngineResolver
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2, SchemaBuildResult
 from dfe_engine.services.schema.json_promotion_service import clickhouse_table_exists
@@ -46,6 +53,24 @@ class SourceBuildVersionRecord(BaseModel):
         return data
 
 
+class TtlChange(BaseModel):
+    """The TTL move a deploy makes on a table that already exists."""
+
+    move: str = Field(
+        description=(
+            "<live> -> <declared>: whole days as a number, 'none' for no TTL, or the "
+            "live interval as ClickHouse prints it when it is not whole days"
+        )
+    )
+    expires_rows: bool = Field(
+        description=(
+            "True when the move deletes rows the table keeps today: the new TTL is "
+            "shorter, the table had none, or its live TTL is not whole days"
+        )
+    )
+    statement: str = Field(description="The ALTER TABLE that makes the move")
+
+
 class SourcePlanVersionRecord(BaseModel):
     """Dry-run deploy plan for one source version."""
 
@@ -62,6 +87,7 @@ class SourcePlanVersionRecord(BaseModel):
         default=None,
         description="Why the plan is or is not ready to deploy",
     )
+    ttl_change: TtlChange | None = None
 
 
 class SchemaDeployResult(BaseModel):
@@ -131,6 +157,20 @@ class SchemaDeployResult(BaseModel):
             "One command per app whose running process cannot take this deploy's "
             "config change where it stands. Empty where every write was hot, or "
             "where a GitOps controller rolls the pod itself."
+        ),
+    )
+    ttl_change: TtlChange | None = Field(
+        default=None,
+        description=(
+            "The TTL move this deploy makes (or, on a dry run, would make) on the "
+            "table it already has; null when the TTL does not move"
+        ),
+    )
+    live_table_error: str | None = Field(
+        default=None,
+        description=(
+            "On a dry run, why the deployed table could not be read; its TTL move "
+            "is then unknown. Null otherwise."
         ),
     )
 
@@ -211,6 +251,7 @@ class SourcePlanArtifact(BaseModel):
     view_ddls: dict[str, str] = Field(default_factory=dict)
     ready: bool = False
     ready_reason: str | None = None
+    ttl_change: TtlChange | None = None
 
 
 def qualify_ddl_statements(statements: list[str], db: str) -> list[str]:
@@ -268,6 +309,97 @@ def artifact_from_build(result: SchemaBuildResult, *, version: str) -> SourceBui
     )
 
 
+class DeployStatements(NamedTuple):
+    """What a deploy of one source version runs, and the TTL move among it."""
+
+    statements: list[str]
+    table_exists: bool
+    ttl_change: TtlChange | None
+
+
+def ttl_change_for_table(
+    builder: SchemaBuilderV2,
+    source: Source,
+    version_id: str,
+    result: SchemaBuildResult,
+    *,
+    db: str,
+    live: LiveTtl | None,
+) -> TtlChange | None:
+    """The TTL move a deploy of *version_id* makes on a table whose TTL is *live*.
+
+    None when the TTL does not move, or when the declared one cannot be placed over
+    the version's columns.
+    """
+    cfg = replace_db(builder.build_ddl_config_for_version(source, version_id), db)
+    move = ttl_move(
+        target=table_target(db, source.table_name),
+        on_cluster=builder.ddl_generator.on_cluster(cfg),
+        cfg=cfg,
+        columns=result.columns,
+        live=live,
+    )
+    if move.skipped:
+        logger.warning(f"{db}.{source.table_name}: TTL left as it is: {move.skipped}")
+    if not move.statement:
+        return None
+    return TtlChange(move=move.move, expires_rows=move.expires_rows, statement=move.statement)
+
+
+def plan_deploy_statements(
+    builder: SchemaBuilderV2,
+    source: Source,
+    version_id: str,
+    result: SchemaBuildResult,
+    *,
+    db: str,
+    ch_client: Any | None = None,
+) -> DeployStatements:
+    """DDL statements to apply for *version_id*, using a prior build result.
+
+    An absent table is created. An existing one gains the columns it lacks and,
+    when its live TTL differs from the version's, the ``MODIFY TTL`` or ``REMOVE
+    TTL`` that moves it, after the columns it may be declared over. Views follow.
+
+    Raises:
+        SchemaApplyError: The existing table's TTL could not be read.
+    """
+    table = source.table_name
+    table_exists = clickhouse_table_exists(ch_client, db, table) if ch_client is not None else False
+    statements: list[str] = []
+    ttl_change: TtlChange | None = None
+    cfg = builder.build_ddl_config_for_version(source, version_id)
+
+    if not table_exists:
+        if result.create_table_ddl:
+            statements.append(result.create_table_ddl.strip())
+    else:
+        existing = _list_table_columns(ch_client, db, table) if ch_client is not None else set()
+        ddl_gen = builder.ddl_generator
+        for col in result.columns:
+            if col.name in existing:
+                continue
+            add_stmt = ddl_gen.generate_alter_add_column(table, col, cfg)
+            statements.append(add_stmt.strip())
+            for index_stmt in ddl_gen.generate_alter_add_indexes(table, col, cfg):
+                statements.append(index_stmt.strip())
+        ttl_change = ttl_change_for_table(
+            builder,
+            source,
+            version_id,
+            result,
+            db=db,
+            live=read_table_ttl(ch_client, db, table),
+        )
+        if ttl_change is not None:
+            statements.append(ttl_change.statement)
+
+    for view_ddl in (result.view_ddls or {}).values():
+        statements.append(view_ddl.strip())
+
+    return DeployStatements(qualify_ddl_statements(statements, db), table_exists, ttl_change)
+
+
 def deploy_statements_for_build(
     builder: SchemaBuilderV2,
     source: Source,
@@ -277,30 +409,11 @@ def deploy_statements_for_build(
     db: str,
     ch_client: Any | None = None,
 ) -> tuple[list[str], bool]:
-    """DDL statements to apply for *version_id*, using a prior build result."""
-    table = source.table_name
-    table_exists = clickhouse_table_exists(ch_client, db, table) if ch_client is not None else False
-    statements: list[str] = []
-    cfg = builder.build_ddl_config_for_version(source, version_id)
-
-    if not table_exists:
-        if result.create_table_ddl:
-            statements.append(result.create_table_ddl.strip())
-    else:
-        existing = _list_table_columns(ch_client, db, table) if ch_client is not None else set()
-        ddl_gen = builder._ddl_gen
-        for col in result.columns:
-            if col.name in existing:
-                continue
-            add_stmt = ddl_gen.generate_alter_add_column(table, col, cfg)
-            statements.append(add_stmt.strip())
-            for index_stmt in ddl_gen.generate_alter_add_indexes(table, col, cfg):
-                statements.append(index_stmt.strip())
-
-    for view_ddl in (result.view_ddls or {}).values():
-        statements.append(view_ddl.strip())
-
-    return qualify_ddl_statements(statements, db), table_exists
+    """The statements and table-exists flag of :func:`plan_deploy_statements`."""
+    planned = plan_deploy_statements(
+        builder, source, version_id, result, db=db, ch_client=ch_client
+    )
+    return planned.statements, planned.table_exists
 
 
 def plan_ready_status(
@@ -335,13 +448,20 @@ def plan_from_build(
     version: str,
     statements: list[str],
     table_exists: bool,
+    ttl_change: TtlChange | None = None,
 ) -> SourcePlanArtifact:
+    """The plan a deploy of *version* would carry out; a TTL move that expires rows is named."""
     errors = list(result.validation_errors)
     ready, ready_reason = plan_ready_status(
         validation_errors=errors,
         statements=statements,
         table_exists=table_exists,
     )
+    if ttl_change is not None and ttl_change.expires_rows:
+        ready_reason = (
+            f"{ready_reason}; the TTL moves {ttl_change.move}, "
+            "and rows past the new TTL are deleted"
+        )
     return SourcePlanArtifact(
         source_name=result.source_name,
         version=version,
@@ -353,6 +473,7 @@ def plan_from_build(
         view_ddls=dict(result.view_ddls or {}),
         ready=ready,
         ready_reason=ready_reason,
+        ttl_change=ttl_change,
     )
 
 
@@ -422,6 +543,7 @@ def _plan_record_from_artifact(artifact: SourcePlanArtifact) -> SourcePlanVersio
         view_ddls=dict(artifact.view_ddls),
         ready=artifact.ready,
         ready_reason=artifact.ready_reason,
+        ttl_change=artifact.ttl_change,
     )
 
 
@@ -441,6 +563,7 @@ def _plan_artifact_from_record(
         view_ddls=dict(record.view_ddls),
         ready=record.ready,
         ready_reason=record.ready_reason,
+        ttl_change=record.ttl_change,
     )
 
 
