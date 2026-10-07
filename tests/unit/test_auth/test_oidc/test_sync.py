@@ -7,6 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 import json
+from pathlib import Path
 
 import pytest
 from prometheus_client.parser import text_string_to_metric_families
@@ -16,12 +17,23 @@ from scalo.metrics import create_metrics
 from dfe_engine.api.deps import _resolve_roles_from_groups
 from dfe_engine.auth.bootstrap import bootstrap_auth
 from dfe_engine.auth.groups import GROUPS_SKIPPED, GroupMetrics, GroupStore
+from dfe_engine.auth.membership import linked_groups
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.adapters.mock import MockDirectoryAdapter
 from dfe_engine.auth.oidc.adapters.okta import _group_info_from_okta
 from dfe_engine.auth.oidc.models import GroupInfo, GroupResolutionConfig, OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.sync import SYNC_GROUPS_SKIPPED, SyncMetrics, _safe_name, sync_provider
+from tests.unit.test_auth.factories import make_directory_reply, make_okta_directory_provider
+from tests.unit.test_auth.test_oidc.local_directory import LocalDirectory
+from tests.unit.test_auth.test_oidc.sync_cases import (
+    HONOURED_LINK_CASES,
+    ID_TAKEN_CASES,
+    NON_API_MODE_CASES,
+    HonouredLinkCase,
+    IdTakenCase,
+    NonApiModeCase,
+)
 
 # ---------------------------------------------------------------------------
 # Fake adapter — dependency injection, not mocking
@@ -255,6 +267,120 @@ class TestSyncUpdatesTheGroupsLinkedToIt:
         assert provider_registry.get("test-sso").last_sync_status == "ok"
 
 
+class TestSyncHonoursALinkAnAdminMade:
+    """A stored group carrying a provider group's id is that group, whatever name the directory gives it."""
+
+    @pytest.mark.parametrize(
+        "case", HONOURED_LINK_CASES, ids=[case["id"] for case in HONOURED_LINK_CASES]
+    )
+    async def test_it_is_updated_and_no_second_group_is_created(
+        self,
+        api_provider: OIDCProvider,
+        registries: tuple[OIDCProviderRegistry, GroupStore],
+        case: HonouredLinkCase,
+    ):
+        provider_registry, group_store = registries
+        provider_registry.create(name="test-sso", provider=api_provider)
+        group_store.create(description="Ours", name="dfe-viewers", roles=["data_viewer"])
+        group_store.update(
+            name="dfe-viewers", source_id="00g-viewers", source_provider=case["source_provider"]
+        )
+        groups = [
+            GroupInfo(description="Okta viewers", email="", id="00g-viewers", name="Okta Viewers")
+        ]
+
+        result = await sync_provider(
+            adapter=FakeAdapter(groups=groups, provider=api_provider),
+            bindings=case["bindings"],
+            group_store=group_store,
+            provider_name="test-sso",
+            provider_registry=provider_registry,
+        )
+
+        assert (result["created"], result["updated"], result["groups_skipped"]) == (0, 1, 0)
+        stored = [
+            (group.name, group.description, group.roles, group.source_provider)
+            for group in group_store.list()
+        ]
+        assert stored == [
+            ("dfe-viewers", "Okta viewers", ["data_viewer"], case["expected_source_provider"])
+        ]
+
+    @pytest.mark.parametrize("case", ID_TAKEN_CASES, ids=[case["id"] for case in ID_TAKEN_CASES])
+    async def test_one_linked_to_another_provider_is_skipped_as_id_taken(
+        self,
+        api_provider: OIDCProvider,
+        registries: tuple[OIDCProviderRegistry, GroupStore],
+        case: IdTakenCase,
+    ):
+        provider_registry, group_store = registries
+        provider_registry.create(name="test-sso", provider=api_provider)
+        group_store.create(description="Ours", name="dfe-viewers", roles=["data_viewer"])
+        group_store.update(
+            name="dfe-viewers", source_id="00g-viewers", source_provider=case["source_provider"]
+        )
+        groups = [
+            GroupInfo(description="Okta viewers", email="", id="00g-viewers", name="Okta Viewers")
+        ]
+        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+
+        result = await sync_provider(
+            adapter=FakeAdapter(groups=groups, provider=api_provider),
+            bindings=case["bindings"],
+            group_store=group_store,
+            metrics=SyncMetrics(manager),
+            provider_name="test-sso",
+            provider_registry=provider_registry,
+        )
+
+        assert (result["created"], result["updated"], result["groups_skipped"]) == (0, 0, 1)
+        assert [(group.name, group.description) for group in group_store.list()] == [
+            ("dfe-viewers", "Ours")
+        ]
+        assert _sync_skips(manager) == {"id_taken": 1.0}
+        status = "partial: 1 of 1 groups skipped, their id is held by a group linked to a provider not bound to this one"
+        assert [
+            (name, provider.last_sync_status) for name, provider in provider_registry.list()
+        ] == [("test-sso", status)]
+
+
+class TestSyncOverAHolderItCannotUpdate:
+    """A stored group carrying a provider group's id under a name no group can have is skipped while the rest sync."""
+
+    async def test_it_is_skipped_counted_and_the_rest_sync(
+        self,
+        api_provider: OIDCProvider,
+        registries: tuple[OIDCProviderRegistry, GroupStore],
+        tmp_path: Path,
+    ):
+        provider_registry, group_store = registries
+        provider_registry.create(name="test-sso", provider=api_provider)
+        legacy = tmp_path / "groups" / "_legacy-admins.yaml"
+        legacy.write_text("roles: [admin]\nsource_id: g1\n", encoding="utf-8")
+        groups = [
+            GroupInfo(email="", id="g0", name="Zero"),
+            GroupInfo(email="", id="g1", name="One"),
+            GroupInfo(email="", id="g2", name="Two"),
+        ]
+        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+
+        result = await sync_provider(
+            adapter=FakeAdapter(groups=groups, provider=api_provider),
+            group_store=group_store,
+            metrics=SyncMetrics(manager),
+            provider_name="test-sso",
+            provider_registry=provider_registry,
+        )
+
+        assert (result["created"], result["updated"], result["groups_skipped"]) == (2, 0, 1)
+        assert [group.name for group in group_store.list()] == ["_legacy-admins", "two", "zero"]
+        assert _sync_skips(manager) == {"holder_unwritable": 1.0}
+        status = "partial: 1 of 3 groups skipped, their id is held by a stored group the sync cannot update"
+        assert [
+            (name, provider.last_sync_status) for name, provider in provider_registry.list()
+        ] == [("test-sso", status)]
+
+
 class TestSyncNeverTakesAGroupNoAdminLinked:
     """An IdP group reaches a stored group only through a link an admin made, never its name.
 
@@ -351,7 +477,10 @@ class TestSyncNeverTakesAGroupNoAdminLinked:
         assert (result["updated"], result["groups_skipped"]) == (0, 1)
         assert group_store.get("soc-team").source_id == "g-soc"
         assert _resolve_roles_from_groups([self.ATTACKER], group_store) == ([], [])
-        assert _resolve_roles_from_groups(["g-soc"], group_store) == (["data_analyst"], [])
+        linked = linked_groups(
+            groups=group_store.list(), identifiers=["g-soc"], providers={"test-sso"}
+        )
+        assert [group.name for group in linked] == ["soc-team"]
 
     async def test_a_group_linked_by_id_alone_syncs_and_gains_its_provider(
         self, registries, api_provider
@@ -560,7 +689,7 @@ class TestSyncSkipsDisabledProvider:
 
         result = await sync_provider("disabled-sso", provider_registry, group_store)
 
-        assert result["skipped"] == "disabled"
+        assert result["skipped"] == "The provider is disabled"
         assert result["error"] is None
         assert result["created"] == 0
 
@@ -579,21 +708,20 @@ class TestSyncSkipsDisabledProvider:
 
 
 class TestSyncSkipsNonApiMode:
-    @pytest.mark.parametrize("mode", ["manual", "token_claim"])
-    async def test_non_api_mode_returns_skipped(self, registries, mode):
+    @pytest.mark.parametrize(
+        "case", NON_API_MODE_CASES, ids=[case["id"] for case in NON_API_MODE_CASES]
+    )
+    async def test_non_api_mode_returns_skipped(
+        self, registries: tuple[OIDCProviderRegistry, GroupStore], case: NonApiModeCase
+    ):
         provider_registry, group_store = registries
-        provider = OIDCProvider(
-            type="generic",
-            enabled=True,
-            groups=GroupResolutionConfig(mode=mode),
+        provider_registry.create(name="sso", provider=case["provider"])
+
+        result = await sync_provider(
+            group_store=group_store, provider_name="sso", provider_registry=provider_registry
         )
-        provider_registry.create("sso", provider)
 
-        result = await sync_provider("sso", provider_registry, group_store)
-
-        assert result["skipped"] == f"mode is '{mode}'"
-        assert result["error"] is None
-        assert result["created"] == 0
+        assert result == case["expected_result"]
 
     async def test_non_api_mode_does_not_create_groups(self, registries):
         provider_registry, group_store = registries
@@ -609,8 +737,46 @@ class TestSyncSkipsNonApiMode:
         assert group_store.list() == []
 
 
+class TestSyncReportsADirectoryFailure:
+    @pytest.mark.usefixtures("okta_api_token")
+    async def test_refused_listing(
+        self, registries: tuple[OIDCProviderRegistry, GroupStore], tls_directory: LocalDirectory
+    ):
+        provider_registry, group_store = registries
+        tls_directory.replies = {
+            "/api/v1/groups?limit=200": make_directory_reply(
+                body=json.dumps({"errorSummary": "Invalid token provided"}), status=401
+            )
+        }
+        provider_registry.create(
+            name="okta-dir", provider=make_okta_directory_provider(okta_domain=tls_directory.host)
+        )
+
+        result = await sync_provider(
+            group_store=group_store, provider_name="okta-dir", provider_registry=provider_registry
+        )
+
+        error = "okta directory: GET '/api/v1/groups' returned HTTP 401: 'Invalid token provided'"
+        stored = provider_registry.get(name="okta-dir")
+        assert (result, stored.last_sync_status, stored.sync_error, group_store.list()) == (
+            {
+                "created": 0,
+                "error": error,
+                "groups_skipped": 0,
+                "skipped": None,
+                "total": 0,
+                "updated": 0,
+            },
+            "error",
+            error,
+            [],
+        )
+
+
 class TestSyncHandlesAdapterError:
-    async def test_adapter_error_returns_error_dict(self, registries, api_provider):
+    async def test_adapter_error_returns_error_dict(
+        self, api_provider: OIDCProvider, log_lines: list[str], registries
+    ):
         provider_registry, group_store = registries
         provider_registry.create("test-sso", api_provider)
 
@@ -619,10 +785,18 @@ class TestSyncHandlesAdapterError:
             "test-sso", provider_registry, group_store, adapter=error_adapter
         )
 
-        assert result["error"] == "connection refused"
+        assert result["error"] == "generic directory: RuntimeError"
         assert result["skipped"] is None
         assert result["created"] == 0
         assert result["total"] == 0
+        # An unexpected error's own text could quote a credential, so only its type and frames are logged.
+        leaked = [
+            line
+            for line in log_lines
+            if ("RuntimeError: connection refused" in line)
+            or ("'error': 'connection refused'" in line)
+        ]
+        assert leaked == []
 
     async def test_adapter_error_sets_provider_sync_error(self, registries, api_provider):
         provider_registry, group_store = registries
@@ -634,7 +808,7 @@ class TestSyncHandlesAdapterError:
         updated_provider = provider_registry.get("test-sso")
         assert updated_provider is not None
         assert updated_provider.last_sync_status == "error"
-        assert updated_provider.sync_error == "connection refused"
+        assert updated_provider.sync_error == "generic directory: RuntimeError"
         assert updated_provider.last_sync_at != ""
 
     async def test_adapter_error_does_not_create_groups(self, registries, api_provider):

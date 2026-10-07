@@ -22,8 +22,11 @@ system-scope group:write holder manages everything, while an org-scope
 group:write holder manages only that org's groups. Visibility follows
 the same rule, plus members always see the groups they belong to --
 org-local groups are never listed outside their org.
+
+A group's ``source_id`` and ``source_provider`` link it to an IdP group: a login asserting that id takes the group's roles, so setting or moving the link needs the role rights adding a member does. No two groups may carry one id.
 """
 
+import unicodedata
 from collections.abc import Iterable
 from typing import Any
 
@@ -36,6 +39,7 @@ from dfe_engine.api.deps import (
     check_action,
     groups_granting,
     is_action_allowed,
+    provider_bindings,
     require_action,
 )
 from dfe_engine.api.pagination import (
@@ -45,13 +49,39 @@ from dfe_engine.api.pagination import (
     apply_sort,
 )
 from dfe_engine.auth import AuthorizationError, Scope, ScopedGrant
-from dfe_engine.auth.audit import audit_permission_denied
-from dfe_engine.auth.groups import Group, GroupExistsError, validate_group_scope
-from dfe_engine.auth.membership import groups_named
+from dfe_engine.auth.audit import audit_permission_denied, audit_resource_change
+from dfe_engine.auth.groups import (
+    Group,
+    GroupExistsError,
+    source_id_holder,
+    validate_group_scope,
+)
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
+from dfe_engine.yaml_utils import YAMLError
 
 router = APIRouter(prefix="/groups", tags=["Groups"])
+
+_LINK_FIELD_MAX_LENGTH = 512
+
+# The group fields a create, update or delete audit event records.
+_AUDITED_FIELDS = ("description", "members", "roles", "scope", "source_id", "source_provider")
+
+_SOURCE_ID_DESCRIPTION = (
+    "The group identifier the identity provider asserts in its tokens: the group name for "
+    "Okta, dex and Keycloak groups claims, the object ID for Entra. A login through "
+    "source_provider asserting it takes this group's roles. Empty for a group managed only "
+    "here. A non-empty source ID needs a source_provider. At most 512 characters, with no "
+    "control characters and no leading or trailing whitespace; no other group may carry it."
+)
+_SOURCE_PROVIDER_DESCRIPTION = (
+    "The provider whose logins the source ID answers, required with a source ID: an OIDC "
+    "provider name, a key or value of auth.source_provider_bindings, 'scim' or, while "
+    "auth.trust_proxy_auth_headers is on, auth.proxy_provider. At most 512 characters. A link "
+    "saved before a provider was required may have none; it answers any provider until it is "
+    "saved with one or a group sync pins it."
+)
 
 
 # -- Request / Response models --------------------------------
@@ -70,12 +100,21 @@ class CreateGroupRequest(BaseModel):
         default_factory=list,
         description="Account usernames in this group (local login resolves roles from this list)",
     )
+    source_id: str = Field("", description=_SOURCE_ID_DESCRIPTION)
+    source_provider: str = Field("", description=_SOURCE_PROVIDER_DESCRIPTION)
 
 
 class UpdateGroupRequest(BaseModel):
     roles: list[str] | None = Field(None, description="Replace role list")
     description: str | None = Field(None, description="Replace description")
     members: list[str] | None = Field(None, description="Replace member username list")
+    source_id: str | None = Field(
+        None, description=f"Replace the source ID; omit to keep it. {_SOURCE_ID_DESCRIPTION}"
+    )
+    source_provider: str | None = Field(
+        None,
+        description=f"Replace the source provider; omit to keep it. {_SOURCE_PROVIDER_DESCRIPTION}",
+    )
 
 
 class AddMemberRequest(BaseModel):
@@ -88,6 +127,8 @@ class GroupResponse(BaseModel):
     roles: list[str]
     members: list[str]
     scope: str
+    source_id: str
+    source_provider: str
 
 
 class AttributesRequest(BaseModel):
@@ -119,10 +160,7 @@ def _member_name(request: Request, user) -> str | None:
 
 
 def _held(request: Request, user) -> set[str]:
-    """The names of the groups the session's roles come from, resolved as its roles were.
-
-    An identifier that names one group and is another's provider id holds the first alone.
-    """
+    """The names of the groups the session's roles come from, resolved as its roles were, by group name."""
     return set(groups_granting(user.groups, request.app.state.group_store))
 
 
@@ -142,11 +180,128 @@ def _visible(request: Request, user, group: Group, member: str | None, held: set
 
 def _response(group: Group) -> GroupResponse:
     return GroupResponse(
-        name=group.name,
         description=group.description,
-        roles=group.roles,
         members=group.members,
+        name=group.name,
+        roles=group.roles,
         scope=group.scope,
+        source_id=group.source_id,
+        source_provider=group.source_provider,
+    )
+
+
+def _audited_fields(*, group: Group) -> dict[str, object]:
+    """The fields of *group* a create, update or delete audit event records."""
+    return {field: getattr(group, field) for field in _AUDITED_FIELDS}
+
+
+def _changed_fields(*, after: Group, before: Group) -> dict[str, dict[str, object]]:
+    """Each audited field an update changed, with its value before and after."""
+    changed = {}
+    for field, value in _audited_fields(group=after).items():
+        previous = getattr(before, field)
+        if value != previous:
+            changed[field] = {"after": value, "before": previous}
+    return changed
+
+
+def _is_known_source_provider(*, name: str, request: Request) -> bool:
+    """Whether a login can answer for provider *name*: SCIM's stamp, a binding, a registered OIDC provider or the proxy provider while the proxy headers are trusted."""
+    if name == SCIM_SOURCE_PROVIDER:
+        return True
+    bindings = provider_bindings(request)
+    if (name in bindings) or (name in bindings.values()):
+        return True
+    settings = getattr(request.app.state, "settings", None)
+    # The proxy provider answers logins only through the trusted X-Oidc-* headers.
+    if (
+        settings is not None
+        and settings.auth.trust_proxy_auth_headers
+        and name == settings.auth.proxy_provider
+    ):
+        return True
+    registry = getattr(request.app.state, "oidc_provider_registry", None)
+    if registry is None:
+        return False
+    # A provider file that does not load answers for no login, so it names no known provider.
+    try:
+        return registry.get(name) is not None
+    except OSError, UnicodeDecodeError, YAMLError, RecursionError, ValueError:
+        return False
+
+
+def _refuse_bad_link(
+    *,
+    before: Group | None,
+    name: str,
+    request: Request,
+    source_id: str,
+    source_provider: str,
+) -> None:
+    """Refuse a source ID or provider the request changes to one no login could use to reach group *name* alone.
+
+    *source_id* and *source_provider* are the values the group would hold and *before* the group as stored, None for a new one. Only a changed value is checked, so a stored value these rules would now refuse (a SCIM externalId, a deleted provider, a link saved before a provider was required) never blocks an edit.
+    """
+    changes_source_id = source_id != (before.source_id if before is not None else "")
+    changes_source_provider = source_provider != (
+        before.source_provider if before is not None else ""
+    )
+    if changes_source_id:
+        _refuse_malformed_source_id(source_id=source_id)
+    if changes_source_provider and source_provider:
+        _refuse_unknown_source_provider(name=source_provider, request=request)
+    changes_link = (changes_source_id) or (changes_source_provider)
+    if changes_link and source_id and not (source_provider):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "missing_source_provider",
+                "message": "a source_id needs a source_provider naming the provider whose logins it answers",
+            },
+        )
+    if not (changes_source_id) or not (source_id):
+        return
+    groups = request.app.state.group_store.list()
+    if source_id_holder(groups=groups, name=name, source_id=source_id) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "conflict",
+                "message": f"source_id {source_id!r} is already another group's",
+            },
+        )
+
+
+def _refuse_malformed_source_id(*, source_id: str) -> None:
+    """Refuse a source ID no login could assert: one past the length cap, padded with whitespace or carrying a control character."""
+    problem = ""
+    if len(source_id) > _LINK_FIELD_MAX_LENGTH:
+        problem = f"source_id is at most {_LINK_FIELD_MAX_LENGTH} characters"
+    # Both login paths strip each asserted group, so a padded source ID could never match one.
+    elif source_id != source_id.strip():
+        problem = "source_id must not start or end with whitespace"
+    elif any(unicodedata.category(character) == "Cc" for character in source_id):
+        problem = "source_id must not contain control characters"
+    if problem:
+        raise HTTPException(
+            status_code=422, detail={"code": "invalid_source_id", "message": problem}
+        )
+
+
+def _refuse_unknown_source_provider(*, name: str, request: Request) -> None:
+    """Refuse a source provider no login answers for, echoing it only when it is within the length cap."""
+    if len(name) > _LINK_FIELD_MAX_LENGTH:
+        message = f"source_provider is at most {_LINK_FIELD_MAX_LENGTH} characters"
+    elif not (_is_known_source_provider(name=name, request=request)):
+        message = (
+            f"source_provider {name!r} is not a provider a login answers for: use an OIDC "
+            "provider name, an auth.source_provider_bindings entry, 'scim' or "
+            "auth.proxy_provider while the proxy headers are trusted"
+        )
+    else:
+        return
+    raise HTTPException(
+        status_code=422, detail={"code": "invalid_source_provider", "message": message}
     )
 
 
@@ -185,34 +340,17 @@ def check_role_assignment(request: Request, user, roles: Iterable[str], scope: S
 
 
 def check_group_changes(
-    request: Request,
-    user,
-    groups: list[Group],
-    before: Iterable[str],
-    after: Iterable[str],
+    *, after: Iterable[str], before: Iterable[str], groups: list[Group], request: Request, user
 ) -> None:
-    """Refuse an account joining or leaving a group whose roles the caller could not grant.
+    """Refuse an account write that changes the groups it holds unless the caller could grant each gained or lost group's roles.
 
-    An account takes every role its groups carry, so writing its group list, or
-    deleting it, hands those roles out or takes them away, as a group route would.
-    Both lists resolve to groups first, so naming a group by its provider id instead
-    of its name is no change.
-
-    Args:
-        request: The request.
-        user: The caller.
-        groups: Every stored group, listed once per request.
-        before: The group identifiers the account holds now.
-        after: The group identifiers it would hold.
-
-    Raises:
-        AuthorizationError: 403 from :func:`check_role_assignment`.
+    *before* and *after* are the names of the groups the account holds now and would hold once written (:func:`~dfe_engine.auth.membership.groups_held`, :func:`~dfe_engine.auth.membership.groups_held_after`), so a change by membership and one through an IdP-owned account's link are both seen. *groups* is every stored group, listed once per request.
     """
-    held = {group.name: group for group in groups_named(before, groups)}
-    wanted = {group.name: group for group in groups_named(after, groups)}
-    for name in sorted(held.keys() ^ wanted.keys()):
-        group = held.get(name) or wanted[name]
-        check_role_assignment(request, user, group.roles, scope_of(group))
+    by_name = {group.name: group for group in groups}
+    for name in sorted(set(before) ^ set(after)):
+        group = by_name.get(name)
+        if group is not None:
+            check_role_assignment(request, user, group.roles, scope_of(group))
 
 
 # -- Endpoints ------------------------------------------------
@@ -250,16 +388,25 @@ async def create_group(
             detail={"code": "invalid_scope", "message": f"Org '{org}' not found"},
         )
 
+    _refuse_bad_link(
+        before=None,
+        name=body.name,
+        request=request,
+        source_id=body.source_id,
+        source_provider=body.source_provider,
+    )
     store: GroupStore = request.app.state.group_store
     account_store: AccountStore = request.app.state.account_store
     # create() decides, not get(): get() reports a stored group that does not load as absent.
     try:
         group = store.create(
-            body.name,
-            roles=body.roles,
             description=body.description,
             members=body.members,
+            name=body.name,
+            roles=body.roles,
             scope=body.scope,
+            source_id=body.source_id,
+            source_provider=body.source_provider,
         )
     except GroupExistsError as exc:
         raise HTTPException(
@@ -271,6 +418,13 @@ async def create_group(
         account_store,
         group.name,
         added=group.members,
+    )
+    audit_resource_change(
+        admin_id=user.user_id,
+        change="created",
+        details={"after": _audited_fields(group=group)},
+        resource_name=group.name,
+        resource_type="group",
     )
     return _response(group)
 
@@ -325,7 +479,7 @@ async def update_group(
     user: CurrentUser,
     request: Request,
 ):
-    """Update group roles, description, or members (group:write at the group's scope)."""
+    """Update group roles, description, members or IdP link (group:write at the group's scope)."""
     from dfe_engine.auth.accounts import AccountStore
     from dfe_engine.auth.groups import GroupStore
     from dfe_engine.auth.membership import sync_account_groups_for_membership_change
@@ -340,15 +494,33 @@ async def update_group(
         )
     check_action(request, user, scopes_dict["group_write"], scope=scope_of(existing))
     changes_members = body.members is not None and set(body.members) != set(existing.members)
-    if body.roles is not None or changes_members:
-        # Members keep, gain or lose the roles before and after; a role removed counts too.
+    source_id = existing.source_id if body.source_id is None else body.source_id
+    source_provider = (
+        existing.source_provider if body.source_provider is None else body.source_provider
+    )
+    changes_source_id = source_id != existing.source_id
+    changes_source_provider = source_provider != existing.source_provider
+    changes_link = (changes_source_id) or (changes_source_provider)
+    if (body.roles is not None) or (changes_members) or (changes_link):
+        # Members and linked logins keep, gain or lose the roles before and after; a role removed counts too.
         roles_after = body.roles if body.roles is not None else existing.roles
         check_role_assignment(request, user, [*existing.roles, *roles_after], scope_of(existing))
+    _refuse_bad_link(
+        before=existing,
+        name=name,
+        request=request,
+        source_id=source_id,
+        source_provider=source_provider,
+    )
     update_fields: dict[str, object] = {}
     if body.roles is not None:
         update_fields["roles"] = body.roles
     if body.description is not None:
         update_fields["description"] = body.description
+    if body.source_id is not None:
+        update_fields["source_id"] = body.source_id
+    if body.source_provider is not None:
+        update_fields["source_provider"] = body.source_provider
     if body.members is not None:
         seen: set[str] = set()
         deduped: list[str] = []
@@ -369,6 +541,13 @@ async def update_group(
     else:
         group = store.update(name, **update_fields)
     request_ch_rbac_reconcile(request.app.state)
+    audit_resource_change(
+        admin_id=user.user_id,
+        change="updated",
+        details={"changed": _changed_fields(after=group, before=existing)},
+        resource_name=name,
+        resource_type="group",
+    )
     return _response(group)
 
 
@@ -467,6 +646,9 @@ async def delete_group(
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
         )
     check_action(request, user, scopes_dict["group_delete"], scope=scope_of(existing))
+    if (existing.members) or (existing.source_id):
+        # Its members and every login its source ID answers lose the roles it carries.
+        check_role_assignment(request, user, existing.roles, scope_of(existing))
     try:
         store.delete(name)
     except ValueError as exc:
@@ -475,6 +657,13 @@ async def delete_group(
             detail={"code": "conflict", "message": str(exc)},
         ) from exc
     request_ch_rbac_reconcile(request.app.state)
+    audit_resource_change(
+        admin_id=user.user_id,
+        change="deleted",
+        details={"before": _audited_fields(group=existing)},
+        resource_name=name,
+        resource_type="group",
+    )
 
 
 # -- Attributes -----------------------------------------------

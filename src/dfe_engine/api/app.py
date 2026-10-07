@@ -509,6 +509,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         from dfe_engine.governance.ch import request_ch_rbac_reconcile
 
         scheduler = OidcSyncScheduler(
+            bindings=settings.auth.source_provider_bindings,
             group_store=app.state.group_store,
             metrics=app.state.oidc_sync_metrics,
             on_groups_created=functools.partial(request_ch_rbac_reconcile, state=app.state),

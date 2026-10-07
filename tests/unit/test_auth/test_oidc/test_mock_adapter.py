@@ -17,8 +17,13 @@ membership through it without any network.
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
+
+import pytest
 
 from dfe_engine.auth.oidc.adapters import get_adapter
+from dfe_engine.auth.oidc.adapters.base import DirectoryError
 from dfe_engine.auth.oidc.adapters.mock import MockDirectoryAdapter
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
@@ -86,14 +91,24 @@ async def test_mock_unknown_user_has_no_groups(tmp_path, monkeypatch):
 
 
 async def test_mock_fails_open_when_fixture_missing(tmp_path, monkeypatch):
-    """No fixture -> empty directory + a False test_connection, never a crash."""
+    """No fixture -> no user groups + a False test_connection, never a crash."""
     monkeypatch.setenv("DFE_OIDC_MOCK_DIRECTORY", str(tmp_path / "nope.json"))
     adapter = get_adapter(_mock_provider())
-    assert await adapter.list_all_groups() == []
     assert await adapter.resolve_user_groups("anyone") == []
     ok, msg = await adapter.test_connection()
     assert ok is False
     assert "not loaded" in msg
+
+
+async def test_mock_listing_raises_when_fixture_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    missing = tmp_path / "nope.json"
+    monkeypatch.setenv("DFE_OIDC_MOCK_DIRECTORY", str(missing))
+    adapter = get_adapter(_mock_provider())
+    message = f"entra_id directory: the mock directory fixture is not loaded: fixture not found at {missing}"
+    with pytest.raises(DirectoryError, match=f"^{re.escape(message)}$"):
+        await adapter.list_all_groups()
 
 
 # ── the RP overage enrichment path, at >200 scale ────────────────

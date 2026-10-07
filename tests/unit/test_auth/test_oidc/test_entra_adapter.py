@@ -19,15 +19,28 @@ Tests that require a live Entra / Microsoft Graph endpoint are marked
 from __future__ import annotations
 
 import os
+import re
 
 import pytest
 
+from dfe_engine.auth.oidc.adapters.base import DirectoryError
 from dfe_engine.auth.oidc.adapters.entra import EntraAdapter, graph_credentials
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+from tests.unit.test_auth.factories import make_entra_adapter, make_oidc_provider
 from tests.unit.test_auth.test_oidc.entra_adapter_cases import (
+    CONNECTION_CHECK_CASES,
+    FIRST_PAGE,
     GRAPH_CREDENTIALS_CASES,
+    LIST_ALL_GROUPS_CASES,
+    LIST_ALL_GROUPS_MISSING_CREDENTIAL_CASES,
+    LIST_ALL_GROUPS_RAISES_CASES,
+    ConnectionCheckCase,
     GraphCredentialsCase,
+    ListAllGroupsCase,
+    ListAllGroupsMissingCredentialCase,
+    ListAllGroupsRaisesCase,
 )
+from tests.unit.test_auth.test_oidc.local_directory import LocalDirectory
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -226,29 +239,41 @@ class TestResolveUserGroupsNoCredentials:
         assert await adapter.resolve_user_groups("") == []
 
 
-# ---------------------------------------------------------------------------
-# list_all_groups — empty list when no credentials
-# ---------------------------------------------------------------------------
+class TestListAllGroups:
+    @pytest.mark.parametrize(
+        "case", LIST_ALL_GROUPS_CASES, ids=[case["id"] for case in LIST_ALL_GROUPS_CASES]
+    )
+    async def test_matches_expected(self, http_directory: LocalDirectory, case: ListAllGroupsCase):
+        # Graph tokens come only from login.microsoftonline.com, so the paging is driven directly.
+        http_directory.replies = case["replies"]
+        adapter = make_entra_adapter(provider=_make_provider())
+        groups = await adapter._list_graph_groups(
+            token="test-graph-token", url=f"{http_directory.base_url}{FIRST_PAGE}"
+        )
+        assert groups == case["expected_groups"]
 
+    @pytest.mark.parametrize(
+        "case",
+        LIST_ALL_GROUPS_MISSING_CREDENTIAL_CASES,
+        ids=[case["id"] for case in LIST_ALL_GROUPS_MISSING_CREDENTIAL_CASES],
+    )
+    async def test_missing_credential(self, case: ListAllGroupsMissingCredentialCase):
+        with pytest.raises(DirectoryError, match=re.escape(case["message"])):
+            await make_entra_adapter(provider=case["provider"]).list_all_groups()
 
-class TestListAllGroupsNoCredentials:
-    async def test_returns_empty_list_when_no_credentials(self, monkeypatch):
-        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
-
-        adapter = EntraAdapter(_make_provider())
-        result = await adapter.list_all_groups()
-        assert result == []
-
-    async def test_return_type_is_list(self, monkeypatch):
-        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
-
-        adapter = EntraAdapter(_make_provider())
-        result = await adapter.list_all_groups()
-        assert isinstance(result, list)
+    @pytest.mark.parametrize(
+        "case",
+        LIST_ALL_GROUPS_RAISES_CASES,
+        ids=[case["id"] for case in LIST_ALL_GROUPS_RAISES_CASES],
+    )
+    async def test_raises(self, http_directory: LocalDirectory, case: ListAllGroupsRaisesCase):
+        # Graph tokens come only from login.microsoftonline.com, so the paging is driven directly.
+        http_directory.replies = case["replies"]
+        adapter = make_entra_adapter(provider=_make_provider())
+        with pytest.raises(DirectoryError, match=re.escape(case["message"])):
+            await adapter._list_graph_groups(
+                token="test-graph-token", url=f"{http_directory.base_url}{FIRST_PAGE}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +311,18 @@ class TestTestConnectionNoCredentials:
         assert isinstance(result, tuple)
         assert len(result) == 2
 
+    async def test_names_the_missing_settings(self):
+        provider = make_oidc_provider(
+            groups={"mode": "api"},
+            issuer="https://login.microsoftonline.com/t/v2.0",
+            type="entra_id",
+        )
+        message = (
+            "Entra credentials not configured, missing 'groups.tenant_id', 'client_id', "
+            "'groups.client_secret'"
+        )
+        assert await make_entra_adapter(provider=provider).test_connection() == (False, message)
+
     async def test_message_mentions_credentials(self, monkeypatch):
         monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
         monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
@@ -298,6 +335,22 @@ class TestTestConnectionNoCredentials:
             keyword in message.lower()
             for keyword in ("credential", "token", "configure", "missing", "env")
         )
+
+
+class TestTestConnectionAgainstGraph:
+    @pytest.mark.parametrize(
+        "case", CONNECTION_CHECK_CASES, ids=[case["id"] for case in CONNECTION_CHECK_CASES]
+    )
+    async def test_reports_the_graph_answer(
+        self, http_directory: LocalDirectory, case: ConnectionCheckCase
+    ):
+        # Graph tokens come only from login.microsoftonline.com, so the check is driven directly.
+        http_directory.replies = case["replies"]
+        adapter = make_entra_adapter(provider=_make_provider())
+        result = await adapter._check_graph(
+            token="test-graph-token", url=f"{http_directory.base_url}{FIRST_PAGE}"
+        )
+        assert result == case["expected_result"]
 
 
 # ---------------------------------------------------------------------------

@@ -71,15 +71,16 @@ def resolve_credential(
 ) -> str:
     """Resolve one credential: plain value, then the secret store, then the env.
 
-    Returns '' when none of the three yields anything.
+    Surrounding whitespace is stripped, so the newline a mounted secret file often ends with never reaches an HTTP header. Returns '' when none of the three yields anything.
     """
-    if value:
-        return value
-    stored = _from_store(secret_path, secrets)
+    plain = value.strip()
+    if plain:
+        return plain
+    stored = _from_store(secret_path, secrets).strip()
     if stored:
         return stored
     if env_name:
-        return os.environ.get(env_name) or ""
+        return (os.environ.get(env_name) or "").strip()
     return ""
 
 
@@ -96,15 +97,15 @@ def credential_check(
     Misconfigured YAML often puts the secret itself where the env var NAME
     belongs; that shape is named in the detail so an operator can act on it.
     """
-    if value:
+    if value.strip():
         return True, f"{label} is set"
-    if _from_store(secret_path, secrets):
+    if _from_store(secret_path, secrets).strip():
         return True, f"{label} resolved from the secret store at {secret_path}"
     if not env_name:
         if secret_path:
             return False, f"nothing stored at {secret_path} and no env var configured"
         return False, "no env var configured"
-    if os.environ.get(env_name):
+    if (os.environ.get(env_name) or "").strip():
         return True, f"{env_name} is set"
     if not is_env_var_name(env_name):
         return (

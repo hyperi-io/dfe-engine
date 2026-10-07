@@ -28,7 +28,7 @@ from dfe_engine.auth.audit import (
     audit_login_denied,
     audit_permission_denied,
 )
-from dfe_engine.auth.groups import Group, GroupStore
+from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.jit import (
     API_KEY_SUBJECT_PREFIX,
     JitAccountUnavailableError,
@@ -381,8 +381,7 @@ def _resolve_group_grants(
     group file carries, or the names an IdP assertion was already resolved to by
     :func:`~dfe_engine.auth.membership.linked_groups`. An IdP's raw assertion never
     comes here, because a name it sends would take the stored group of that name.
-    Each identifier is looked up by group NAME first, then by provider
-    ``source_id``. Unknown identifiers are silently skipped (no error -- the user
+    Each identifier is looked up by group name only; a provider ``source_id`` names no group here, since only an IdP assertion reaches a group by its source ID. Unknown identifiers are silently skipped (no error; the user
     just gets fewer roles). A system group's roles bind at system scope; an
     org-scoped group's roles bind at that org's scope only. org_ids collects the
     caller's org memberships (the owning org of each org-scoped group, plus each
@@ -393,14 +392,8 @@ def _resolve_group_grants(
     matched: set[str] = set()
     grants: list[ScopedGrant] = []
     seen_grants: set[tuple[str, str]] = set()
-    # The source_id index is built only when a name misses, so name-only lookups pay nothing for it.
-    source_index: dict[str, Group] | None = None
     for group_name in groups:
         group = group_store.get(group_name)
-        if group is None:
-            if source_index is None:
-                source_index = group_store.by_source_id()
-            group = source_index.get(group_name)
         if group is None:
             continue
         matched.add(group.name)
@@ -418,6 +411,36 @@ def _resolve_group_grants(
     return GroupResolution(sorted(roles), sorted(org_ids), grants, sorted(matched))
 
 
+# Each API-key identifier that names a provider ID is warned about once per process, never per request.
+_PROVIDER_ID_KEY_GROUPS_WARNED: set[str] = set()
+_PROVIDER_ID_KEY_GROUPS_WARNED_MAX = 1024
+
+
+def _warn_of_provider_id_key_groups(
+    *, group_store: GroupStore, identifiers: list[str], key_name: str
+) -> None:
+    """Warn once per identifier that an API key names a group's provider ID, which grants it nothing."""
+    unwarned = [name for name in identifiers if name not in _PROVIDER_ID_KEY_GROUPS_WARNED]
+    if not (unwarned) or (
+        len(_PROVIDER_ID_KEY_GROUPS_WARNED) >= _PROVIDER_ID_KEY_GROUPS_WARNED_MAX
+    ):
+        return
+    by_source_id = group_store.by_source_id()
+    for identifier in unwarned:
+        group = by_source_id.get(identifier)
+        if (group is None) or (
+            len(_PROVIDER_ID_KEY_GROUPS_WARNED) >= _PROVIDER_ID_KEY_GROUPS_WARNED_MAX
+        ):
+            continue
+        _PROVIDER_ID_KEY_GROUPS_WARNED.add(identifier)
+        logger.warning(
+            "API key names a group's provider ID, which grants nothing",
+            group=group.name,
+            identifier=identifier,
+            key_name=key_name,
+        )
+
+
 def _resolve_roles_from_groups(
     groups: list[str],
     group_store: GroupStore,
@@ -430,11 +453,10 @@ def _resolve_roles_from_groups(
 def groups_granting(identifiers: list[str], group_store: GroupStore) -> list[str]:
     """The names of the stored groups a session's roles come from.
 
-    The lookup :func:`_resolve_group_grants` makes, so an identifier that names one
-    group and is another's provider ``source_id`` resolves to the group it names alone.
+    The lookup :func:`_resolve_group_grants` makes, so each identifier resolves by group name only.
 
     Args:
-        identifiers: The session's group names or IdP-asserted provider ids.
+        identifiers: The session's group names.
         group_store: The group store.
 
     Returns:
@@ -678,6 +700,11 @@ async def get_current_user(request: Request) -> AuthContext:
             )
         group_store = request.app.state.group_store
         resolution = _resolve_group_grants(key_meta.groups, group_store)
+        _warn_of_provider_id_key_groups(
+            group_store=group_store,
+            identifiers=[name for name in key_meta.groups if name not in resolution.groups],
+            key_name=key_meta.name,
+        )
         roles, org_ids = resolution.roles, resolution.org_ids
         logger.debug(
             "API key auth",

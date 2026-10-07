@@ -64,6 +64,11 @@ class TestCredentialCheck:
         assert "oidc/acme/client_secret" in detail
         assert "stored-value" not in detail
 
+    def test_whitespace_only_env_is_unset(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("BLANK_OIDC_ID", " \n")
+        result = credential_check("client_id", env_name="BLANK_OIDC_ID")
+        assert result == (False, "BLANK_OIDC_ID is unset or empty")
+
     def test_path_with_nothing_stored_and_no_env_is_reported(self, store):
         ok, detail = credential_check(
             "client_secret", secret_path="oidc/acme/client_secret", secrets=store
@@ -126,6 +131,24 @@ class TestResolveCredential:
             secrets=_BrokenStore(),
         )
         assert resolved == "from-env"
+
+    def test_surrounding_whitespace_is_stripped_from_the_env(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("OIDC_RP_SECRET", " from-env\n")
+        assert resolve_credential(env_name="OIDC_RP_SECRET") == "from-env"
+
+    def test_surrounding_whitespace_is_stripped_from_the_store(self, store):
+        store.put("oidc/acme/client_secret", "from-store\n")
+        resolved = resolve_credential(secret_path="oidc/acme/client_secret", secrets=store)
+        assert resolved == "from-store"
+
+    def test_surrounding_whitespace_is_stripped_from_a_value(self):
+        assert resolve_credential(value=" plain-id ") == "plain-id"
+
+    def test_a_whitespace_only_value_falls_through_to_the_env(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setenv("OIDC_CLIENT_ID", "from-env")
+        assert resolve_credential(env_name="OIDC_CLIENT_ID", value=" ") == "from-env"
 
 
 class TestPathAndNameHelpers:

@@ -33,7 +33,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field, field_validator
 
-from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.deps import CurrentUser, provider_bindings, require_action
 from dfe_engine.api.pagination import (
     PaginatedResponse,
     PaginationParams,
@@ -256,11 +256,21 @@ class SyncResponse(BaseModel):
     groups_skipped: int = Field(
         default=0,
         description="Provider groups left unsynced: an identifier that makes no valid group "
-        "name, a name held by a stored group that does not load, or a name held by a stored "
-        "group not linked to that provider group. Each is counted on "
+        "name (invalid_name), a name held by a stored group that does not load "
+        "(stored_unloadable) or by one not linked to that provider group (name_taken) and an "
+        "id held by a group linked to a provider not bound to this one (id_taken) or by a "
+        "stored group the sync cannot update (holder_unwritable). Each is counted on "
         "auth_oidc_sync_groups_skipped_total{reason}.",
     )
-    error: str | None
+    error: str | None = Field(
+        description="Why the sync failed, such as the directory refusing or failing a request; "
+        "it is also stored as the provider's sync_error. Null when the sync did not fail.",
+    )
+    skipped: str | None = Field(
+        default=None,
+        description="Why the sync did not run: the provider is disabled or its groups mode is not "
+        "'api', so there is no directory to sync. Null when the sync ran.",
+    )
 
 
 class TestResponse(BaseModel):
@@ -702,11 +712,12 @@ async def sync_provider_groups(
 
     group_store = request.app.state.group_store
     result = await sync_provider(
-        name,
-        registry,
-        group_store,
-        secrets=getattr(request.app.state, "dfe_secrets", None),
+        bindings=provider_bindings(request),
+        group_store=group_store,
         metrics=getattr(request.app.state, "oidc_sync_metrics", None),
+        provider_name=name,
+        provider_registry=registry,
+        secrets=getattr(request.app.state, "dfe_secrets", None),
     )
     # A group the sync created is a new ClickHouse user to provision.
     if result["created"]:
@@ -719,6 +730,7 @@ async def sync_provider_groups(
         total=result["total"],
         groups_skipped=result["groups_skipped"],
         error=result.get("error"),
+        skipped=result.get("skipped"),
     )
 
 

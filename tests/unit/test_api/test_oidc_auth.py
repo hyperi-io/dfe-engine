@@ -8,7 +8,9 @@ from fastapi.testclient import TestClient
 from dfe_engine.api.deps import create_access_token
 from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.jit import JitProvisioner
+from dfe_engine.settings import DFESettings
 from tests.support.failing_stores import StampFailingAccountStore
+from tests.unit.test_auth.factories import make_oidc_provider
 
 
 def _link(app, *names: str) -> None:
@@ -127,7 +129,7 @@ class TestOidcAuthentication:
         assert resp.json()["roles"] == []
 
     def test_a_group_linked_by_its_id_alone_answers_any_provider(self, client: TestClient, app):
-        """A group file an operator linked carries only source_id, as the sync fills the rest."""
+        """A link made before a provider was required carries only source_id and answers any provider."""
         app.state.group_store.update("dfe-analysts", source_id="00g-analysts")
 
         resp = client.get(
@@ -467,3 +469,115 @@ class TestAJitFailureRefusesTheLogin:
         assert retried.status_code == 200, retried.text
         assert retried.json()["roles"] == ["admin"]
         assert not [e for e in audit_events if e["event"] == "auth.login.denied"]
+
+
+class TestAGroupLinkedThroughTheGroupsApi:
+    """Okta, dex and Keycloak send group names, so a group whose source ID is the name it is sent takes its roles at login."""
+
+    IDP = {"X-Oidc-Subject": "jane@corp.example", "X-Oidc-Groups": "dfe-viewers"}
+    VIEWER_ROLES = ["data_analyst_viewer", "data_viewer", "infra_viewer"]
+
+    def test_a_created_group_grants_its_roles_on_the_proxy_and_bound_account_paths(
+        self, admin_headers: dict[str, str], api_settings: DFESettings, client: TestClient
+    ):
+        created = client.post(
+            "/api/v1/auth/groups",
+            headers=admin_headers,
+            json={
+                "name": "okta-soc",
+                "roles": ["data_analyst"],
+                "source_id": "SOC Analysts",
+                "source_provider": "oidc",
+            },
+        )
+        proxied = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "jane@corp.example", "X-Oidc-Groups": "SOC Analysts"},
+        )
+        token = create_access_token(data={"sub": "jane@corp.example"}, settings=api_settings)
+        bound = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+
+        assert created.status_code == 201, created.text
+        assert proxied.status_code == 200, proxied.text
+        assert (proxied.json()["roles"], proxied.json()["groups"]) == (
+            ["data_analyst"],
+            ["okta-soc"],
+        )
+        assert bound.status_code == 200, bound.text
+        assert (bound.json()["roles"], bound.json()["groups"]) == (["data_analyst"], ["okta-soc"])
+
+    def test_a_seeded_group_given_its_own_name_grants_its_roles(
+        self, admin_headers: dict[str, str], client: TestClient
+    ):
+        linked = client.put(
+            "/api/v1/auth/groups/dfe-viewers",
+            headers=admin_headers,
+            json={"source_id": "dfe-viewers", "source_provider": "oidc"},
+        )
+        resp = client.get("/api/v1/auth/me", headers=self.IDP)
+
+        assert linked.status_code == 200, linked.text
+        assert resp.status_code == 200, resp.text
+        assert (resp.json()["roles"], resp.json()["groups"]) == (
+            self.VIEWER_ROLES,
+            ["dfe-viewers"],
+        )
+
+    def test_the_seeded_group_without_a_source_id_grants_nothing(self, client: TestClient):
+        resp = client.get("/api/v1/auth/me", headers=self.IDP)
+
+        assert resp.status_code == 200, resp.text
+        assert (resp.json()["roles"], resp.json()["groups"]) == ([], [])
+
+    def test_a_token_claim_login_jit_records_takes_the_roles(
+        self, admin_headers: dict[str, str], api_settings: DFESettings, app, client: TestClient
+    ):
+        # ensure_account is what the relying-party callback runs with the groups claim, so only the IdP exchange is left out.
+        app.state.oidc_provider_registry.create(name="okta", provider=make_oidc_provider())
+        created = client.post(
+            "/api/v1/auth/groups",
+            headers=admin_headers,
+            json={
+                "name": "okta-soc",
+                "roles": ["data_analyst"],
+                "source_id": "SOC Analysts",
+                "source_provider": "okta",
+            },
+        )
+        app.state.jit_provisioner.ensure_account(
+            email="kate@corp.example",
+            oidc_groups=["SOC Analysts"],
+            source_provider="okta",
+            user_id="kate@corp.example",
+        )
+        token = create_access_token(data={"sub": "kate@corp.example"}, settings=api_settings)
+
+        resp = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+
+        assert created.status_code == 201, created.text
+        assert resp.status_code == 200, resp.text
+        assert (resp.json()["roles"], resp.json()["groups"]) == (["data_analyst"], ["okta-soc"])
+
+    def test_a_login_through_another_provider_takes_nothing(
+        self, admin_headers: dict[str, str], app, client: TestClient
+    ):
+        app.state.oidc_provider_registry.create(name="okta", provider=make_oidc_provider())
+        created = client.post(
+            "/api/v1/auth/groups",
+            headers=admin_headers,
+            json={
+                "name": "okta-soc",
+                "roles": ["data_analyst"],
+                "source_id": "SOC Analysts",
+                "source_provider": "okta",
+            },
+        )
+
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "lee@corp.example", "X-Oidc-Groups": "SOC Analysts"},
+        )
+
+        assert created.status_code == 201, created.text
+        assert resp.status_code == 200, resp.text
+        assert (resp.json()["roles"], resp.json()["groups"]) == ([], [])

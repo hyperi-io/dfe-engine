@@ -250,6 +250,12 @@ flowchart TD
 
 An identifier an IdP asserts, in a token's groups claim, `X-Oidc-Groups` or a SCIM record, takes a group only when that group's `source_id` is the identifier and its `source_provider` is empty or the provider the login came through (or one `auth.source_provider_bindings` joins to it). A group's name links nothing, so an IdP group that happens to be called `dfe-admins` gets no roles until an admin links it. Logins through `X-Oidc-Groups` count as the provider named in `auth.proxy_provider` (default `oidc`).
 
+An admin sets `source_id` and `source_provider` together through the groups API or dfe-ui's group form (section 4.4); `source_provider` names the provider whose logins the link answers. Where a `token_claim` provider's claim carries names (Okta's default, dex, Keycloak), `source_id` is the name the IdP sends; for Entra it is the object ID. A link saved before a provider was required has none and answers any provider until it is saved with one or a group sync pins it.
+
+A groups claim sent as one string is split on commas (on whitespace when it has none, `auth/oidc/rp.py`) and `X-Oidc-Groups` is split on commas. So a group name containing a space needs an array claim; a `source_id` containing a comma matches only an array claim on the relying-party path.
+
+Group identifiers an operator chose resolve by group name only: an API key's groups and the groups a session was already resolved to. An API key naming a group's `source_id` holds nothing from that group; the engine logs one warning per such identifier.
+
 For a local account the group files are the authority. The account's own `groups` list is kept in step by the API routes, but it grants nothing. A member removed from a group file in the live store loses that group's roles and orgs at its next engine request, whether the API removed it, someone edited the file in the engine's auth directory, or the Helm chart's `authConfig.groupsConfigMap` copied a new file in at pod start. The deploy repo's `governance/rbac` classes are neither read nor written at runtime, so an edit there changes nothing. An account an IdP owns (JIT or SCIM) also holds the groups its record says the IdP asserts, so a group an operator adds it to by hand sits beside those.
 
 dfe-hyperdx decides on the `role` claim of the token it holds, so there a role taken away lasts until that token expires or is refreshed (`api.jwt_expire_minutes`).
@@ -560,11 +566,7 @@ groups:
   domain: "example.com"
 ```
 
-Config holds a secret PATH into the `DfeSecrets` seam, or the NAME of an env var
-(`client_id_env`, `client_secret_env`, `service_account_json_env`) — never a
-secret value. Resolution reads the store first, so a credential sent to
-`POST /api/v1/auth/oidc-providers` takes effect without a restart, then the
-environment, so an ESO-mounted variable keeps working.
+Config holds a secret PATH into the `DfeSecrets` seam or the NAME of an env var (`client_id_env`, `client_secret_env`, `service_account_json_env`), never a secret value. Resolution reads the store first, so a credential sent to `POST /api/v1/auth/oidc-providers` takes effect without a restart, then the environment, so an ESO-mounted variable keeps working. Surrounding whitespace, such as the newline a mounted secret file ends with, is stripped from a resolved credential. An Okta API token still holding a space, a control character or a non-ASCII one is never sent: the sync and the connection test report it by setting name, never by value.
 
 ### 4.3 Adapter Implementations
 
@@ -575,9 +577,7 @@ environment, so an ESO-mounted variable keeps working.
 | Entra ID | Done | Graph API `/groups` | Yes — `$top=999` pagination |
 | Okta | Done | Groups API `/api/v1/groups` | Yes — `Link` header pagination |
 
-All adapters are failsafe — credential or API failures return empty results
-rather than raising exceptions, so auth continues working even if group
-resolution degrades.
+The adapters' login-path calls are failsafe: a credential or API failure returns an empty or identity result rather than raising, so auth continues working even if group resolution degrades. `list_all_groups` is the exception: it raises, so a sync reports a directory it cannot list instead of syncing an empty one.
 
 ### 4.4 Group Sync Process
 
@@ -594,14 +594,19 @@ sequenceDiagram
 
     Sync->>Adapter: list_all_groups()
     Adapter-->>Sync: list[GroupInfo]
+    Note over Sync: A listing that fails stops the sync as an error
+
+    Sync->>GS: by_source_id()
+    GS-->>Sync: stored groups keyed by source_id
 
     loop Each remote group
-        Sync->>GS: get(group_name)
-        alt No group of that name
+        alt A group carries its id, linked to this provider, a bound one or any
+            Sync->>GS: update(description, pin an empty provider,<br/>keep roles)
+        else A group carries its id, linked to an unbound provider
+            Note over Sync: skip, count id_taken
+        else No group of its name
             Sync->>GS: create(empty roles,<br/>source_provider + source_id)
-        else Group linked to this IdP group
-            Sync->>GS: update(metadata only,<br/>preserve existing roles)
-        else Group not linked to it
+        else A group of its name, not linked to it
             Note over Sync: skip, count name_taken
         end
     end
@@ -609,13 +614,36 @@ sequenceDiagram
     Sync->>Reg: update(last_sync_at,<br/>last_sync_status)
 ```
 
-The sync updates a stored group only when it is already linked to that IdP group: its `source_id` is the IdP group's id. The directory assigns that id, so a user cannot choose it the way they choose a display name. A group the sync creates is linked in the same write. A linked group keeps its roles, and the sync refreshes only its description and source metadata. Admins assign roles to synced groups by hand.
+The sync updates a stored group only when it is already linked to that IdP group: its `source_id` is the IdP group's id, whatever the stored group is called. The directory assigns that id, so a user cannot choose it the way they choose a display name. A linked group keeps its roles. The sync refreshes its description and pins an empty `source_provider` to itself; a provider already set (or bound to it) stays.
+
+A group the sync creates is linked in the same write. Admins assign roles to synced groups by hand. A group carrying the id but linked to another provider not bound to this one by `auth.source_provider_bindings` is left untouched and counted as `id_taken`.
+
+Two things can make a sync report `id_taken` for a group it expects to own. Deleting a provider leaves its name on its groups, so a provider re-added under another name finds them linked to the old name until they are relinked. Two groups carrying one id, saved before the groups API refused a duplicate, can also leave the id held by a group linked elsewhere.
 
 A name match links nothing. Directory display names are not unique, and in a tenant where users can create groups anyone can pick one, so an IdP group named `DFE Admins` would otherwise take the seeded `dfe-admins` and its `admin` role. A stored group of the same name with no `source_id`, or carrying another IdP group's id, is left untouched and counted as `name_taken`.
 
-Linking an IdP group to the stored group that holds its name is an admin's act. Set `source_id` to the IdP group's id in that group's file, in the live store or through the chart's `authConfig.groupsConfigMap`; the next sync fills in `source_provider`. The groups API sets neither field. `PUT /api/v1/scim/v2/Groups/{name}` sets `source_id` from `externalId`, which links the group for logins and for the sync alike.
+Linking an IdP group to a stored group is an admin's act. Set `source_id` to the IdP group's id and `source_provider` to its provider through the groups API (`POST` or `PUT /api/v1/auth/groups`), dfe-ui's group form, the group's file in the live store or the chart's `authConfig.groupsConfigMap`. `PUT /api/v1/scim/v2/Groups/{name}` sets it from `externalId`. Each links the group for logins and for the sync alike.
 
-One bad group never aborts the sync. A provider group whose email, name or id makes no valid group name, whose name is held by a stored group that does not load, or whose name is held by a stored group not linked to it, is skipped and counted on `auth_oidc_sync_groups_skipped_total{reason}` (`invalid_name`, `stored_unloadable`, `name_taken`), and the provider's `last_sync_status` reads `partial` with each reason.
+The groups API refuses a link no login could use to reach the group alone:
+
+- `409 conflict`: another group carries the `source_id` (SCIM answers `uniqueness`).
+- `422 invalid_source_id`: the `source_id` is over 512 characters, starts or ends with whitespace or holds a control character.
+- `422 invalid_source_provider`: the `source_provider` is over 512 characters or is not an OIDC provider, a binding, `scim` or (while `auth.trust_proxy_auth_headers` is on) `auth.proxy_provider`.
+- `422 missing_source_provider`: a new or changed link has a `source_id` but no `source_provider`.
+
+Only a changed value is checked, so an edit to other fields of a group whose stored link these rules now refuse still succeeds. Setting, changing or clearing a link needs the role rights adding a member does, since each changes who holds the group's roles. Deleting a linked group needs them too.
+
+One bad group never aborts the sync. A skipped provider group is counted on `auth_oidc_sync_groups_skipped_total{reason}` and named in the provider's `partial` `last_sync_status`:
+
+- `invalid_name`: its email, name or id makes no valid group name.
+- `stored_unloadable`: a stored group that does not load holds its name.
+- `name_taken`: a stored group not linked to it holds its name.
+- `id_taken`: a group linked to a provider not bound to this one carries its id.
+- `holder_unwritable`: a stored group the sync cannot update carries its id.
+
+A sync that does not run says why in the response's `skipped`: the provider is disabled or its groups mode is `token_claim` or `manual`, which have no directory to sync. `skipped` is null when the sync ran.
+
+A directory the sync cannot list in full fails the whole run and nothing is synced. The causes are a missing directory setting or credential, a non-2xx answer, a body that is not a group listing and a request that fails on any page. The response's `error` names the provider type, then the failed request's path and HTTP status or the missing setting; it never carries a credential. The provider's `last_sync_status` becomes `error`, with the same text in `sync_error`.
 
 ---
 

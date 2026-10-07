@@ -14,11 +14,13 @@
 import secrets
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.deps import create_access_token
 from dfe_engine.auth.breakglass import GROUP as BREAKGLASS_GROUP
 from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
+from dfe_engine.settings import DFESettings
 
 ACCOUNTS = "/api/v1/auth/accounts"
 KEYS = "/api/v1/auth/api-keys"
@@ -101,6 +103,42 @@ class TestAnAccountsGroupsNeedTheirRoles:
 
         assert resp.status_code == 200, resp.text
 
+    def test_a_name_that_is_a_linked_groups_source_id_is_checked_as_that_group(
+        self, api_settings: DFESettings, app: FastAPI, client: TestClient, mgr: dict[str, str]
+    ):
+        # An IdP-owned account's own list is also its assertion, so a roleless group named like an admin group's source ID links the account to that admin group.
+        app.state.group_store.update(name="dfe-admins", source_id="DFE-Admins")
+        app.state.group_store.create(members=[], name="DFE-Admins", roles=[])
+        app.state.account_store.create(
+            groups=["dfe-viewers"], password="", username="jane-corp-com"
+        )
+        app.state.account_store.update(
+            external=True, source_provider="entra", username="jane-corp-com"
+        )
+
+        resp = client.put(f"{ACCOUNTS}/jane-corp-com", headers=mgr, json={"groups": ["DFE-Admins"]})
+
+        assert resp.status_code == 403, resp.text
+        assert app.state.account_store.get("jane-corp-com").groups == ["dfe-viewers"]
+        jane = _bearer(api_settings=api_settings, sub="jane-corp-com")
+        assert "admin" not in _roles(client=client, headers=jane)
+
+    def test_a_roleless_group_is_accepted_for_an_idp_account(
+        self, app: FastAPI, client: TestClient, mgr: dict[str, str]
+    ):
+        app.state.group_store.create(members=[], name="DFE-Admins", roles=[])
+        app.state.account_store.create(
+            groups=["dfe-viewers"], password="", username="jane-corp-com"
+        )
+        app.state.account_store.update(
+            external=True, source_provider="entra", username="jane-corp-com"
+        )
+
+        resp = client.put(f"{ACCOUNTS}/jane-corp-com", headers=mgr, json={"groups": ["DFE-Admins"]})
+
+        assert resp.status_code == 200, resp.text
+        assert app.state.account_store.get("jane-corp-com").groups == ["DFE-Admins"]
+
     def test_groups_whose_roles_the_caller_holds_are_accepted(self, client, app, mgr):
         resp = client.post(
             ACCOUNTS,
@@ -123,16 +161,29 @@ class TestAnAccountsGroupsNeedTheirRoles:
 
 
 class TestAKeysGroupsNeedTheirRoles:
-    @pytest.mark.parametrize("by", ["name", "source_id"])
-    def test_minting_a_key_in_the_admin_group_is_refused(self, client, app, mgr, by):
-        """A key's groups resolve by name, else by the provider id the sync recorded."""
+    def test_minting_a_key_in_the_admin_group_is_refused(self, client, app, mgr):
+        """A key's groups resolve by name, as a session's do."""
         app.state.group_store.update("dfe-admins", source_id="entra-admins-guid")
-        group = "dfe-admins" if by == "name" else "entra-admins-guid"
 
-        resp = client.post(KEYS, json={"name": "ci-escalate", "groups": [group]}, headers=mgr)
+        resp = client.post(
+            KEYS, json={"name": "ci-escalate", "groups": ["dfe-admins"]}, headers=mgr
+        )
 
         assert resp.status_code == 403, resp.text
         assert app.state.api_key_store.get("ci-escalate") is None
+
+    def test_a_key_naming_a_provider_id_is_minted_and_holds_no_roles(
+        self, app: FastAPI, client: TestClient, mgr: dict[str, str]
+    ):
+        app.state.group_store.update(name="dfe-admins", source_id="entra-admins-guid")
+
+        resp = client.post(
+            KEYS, headers=mgr, json={"groups": ["entra-admins-guid"], "name": "ci-guid"}
+        )
+
+        assert resp.status_code == 201, resp.text
+        key = {"X-API-Key": resp.json()["full_key"]}
+        assert _roles(client=client, headers=key) == []
 
     def test_a_key_in_groups_whose_roles_the_caller_holds_is_minted(self, client, mgr):
         resp = client.post(

@@ -19,6 +19,8 @@ from dfe_engine.auth.accounts import Account, AccountStore
 from dfe_engine.auth.groups import Group, GroupStore
 from dfe_engine.auth.membership import (
     groups_held,
+    groups_held_after,
+    groups_named,
     linked_groups,
     linked_providers,
     sync_account_groups_for_membership_change,
@@ -173,3 +175,34 @@ class TestGroupsHeld:
             _group("by-link", source_id="g-1"),
         ]
         assert groups_held(account, groups, bindings={}) == ["by-hand", "by-link"]
+
+
+class TestGroupsHeldAfter:
+    def test_an_idp_accounts_new_list_is_its_assertion_and_its_membership(self):
+        account = _idp_account(["DFE-Admins"])
+        groups = [_group("DFE-Admins"), _group("dfe-admins", source_id="DFE-Admins")]
+
+        held = groups_held_after(
+            account=account, added=["DFE-Admins"], bindings={}, groups=groups, removed=[]
+        )
+
+        assert held == ["DFE-Admins", "dfe-admins"]
+
+    def test_a_removed_membership_is_no_longer_held(self):
+        account = Account(groups=[], password_hash="!", username="bob")
+        groups = [_group("dfe-analysts", members=["bob", "carol"])]
+
+        held = groups_held_after(
+            account=account, added=[], bindings={}, groups=groups, removed=["dfe-analysts"]
+        )
+
+        assert (held, groups[0].members) == ([], ["bob", "carol"])
+
+
+class TestGroupsNamed:
+    def test_a_provider_id_names_no_group(self):
+        groups = [_group("dfe-admins", source_id="DFE-Admins"), _group("dfe-viewers")]
+
+        named = groups_named(groups=groups, identifiers=["DFE-Admins", "dfe-viewers"])
+
+        assert [group.name for group in named] == ["dfe-viewers"]

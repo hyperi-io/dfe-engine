@@ -1834,7 +1834,7 @@
           "Groups"
         ],
         "summary": "Update Group",
-        "description": "Update group roles, description, or members (group:write at the group's scope).",
+        "description": "Update group roles, description, members or IdP link (group:write at the group's scope).",
         "operationId": "update_group_api_v1_auth_groups__name__put",
         "parameters": [
           {
@@ -26055,6 +26055,18 @@
             "type": "array",
             "title": "Members",
             "description": "Account usernames in this group (local login resolves roles from this list)"
+          },
+          "source_id": {
+            "type": "string",
+            "title": "Source Id",
+            "description": "The group identifier the identity provider asserts in its tokens: the group name for Okta, dex and Keycloak groups claims, the object ID for Entra. A login through source_provider asserting it takes this group's roles. Empty for a group managed only here. A non-empty source ID needs a source_provider. At most 512 characters, with no control characters and no leading or trailing whitespace; no other group may carry it.",
+            "default": ""
+          },
+          "source_provider": {
+            "type": "string",
+            "title": "Source Provider",
+            "description": "The provider whose logins the source ID answers, required with a source ID: an OIDC provider name, a key or value of auth.source_provider_bindings, 'scim' or, while auth.trust_proxy_auth_headers is on, auth.proxy_provider. At most 512 characters. A link saved before a provider was required may have none; it answers any provider until it is saved with one or a group sync pins it.",
+            "default": ""
           }
         },
         "type": "object",
@@ -27936,6 +27948,14 @@
           "scope": {
             "type": "string",
             "title": "Scope"
+          },
+          "source_id": {
+            "type": "string",
+            "title": "Source Id"
+          },
+          "source_provider": {
+            "type": "string",
+            "title": "Source Provider"
           }
         },
         "type": "object",
@@ -27944,7 +27964,9 @@
           "description",
           "roles",
           "members",
-          "scope"
+          "scope",
+          "source_id",
+          "source_provider"
         ],
         "title": "GroupResponse"
       },
@@ -39645,6 +39667,30 @@
             ],
             "title": "Members",
             "description": "Replace member username list"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id",
+            "description": "Replace the source ID; omit to keep it. The group identifier the identity provider asserts in its tokens: the group name for Okta, dex and Keycloak groups claims, the object ID for Entra. A login through source_provider asserting it takes this group's roles. Empty for a group managed only here. A non-empty source ID needs a source_provider. At most 512 characters, with no control characters and no leading or trailing whitespace; no other group may carry it."
+          },
+          "source_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Provider",
+            "description": "Replace the source provider; omit to keep it. The provider whose logins the source ID answers, required with a source ID: an OIDC provider name, a key or value of auth.source_provider_bindings, 'scim' or, while auth.trust_proxy_auth_headers is on, auth.proxy_provider. At most 512 characters. A link saved before a provider was required may have none; it answers any provider until it is saved with one or a group sync pins it."
           }
         },
         "type": "object",
@@ -41006,7 +41052,7 @@
           "groups_skipped": {
             "type": "integer",
             "title": "Groups Skipped",
-            "description": "Provider groups left unsynced: an identifier that makes no valid group name, a name held by a stored group that does not load, or a name held by a stored group not linked to that provider group. Each is counted on auth_oidc_sync_groups_skipped_total{reason}.",
+            "description": "Provider groups left unsynced: an identifier that makes no valid group name (invalid_name), a name held by a stored group that does not load (stored_unloadable) or by one not linked to that provider group (name_taken) and an id held by a group linked to a provider not bound to this one (id_taken) or by a stored group the sync cannot update (holder_unwritable). Each is counted on auth_oidc_sync_groups_skipped_total{reason}.",
             "default": 0
           },
           "error": {
@@ -41018,7 +41064,20 @@
                 "type": "null"
               }
             ],
-            "title": "Error"
+            "title": "Error",
+            "description": "Why the sync failed, such as the directory refusing or failing a request; it is also stored as the provider's sync_error. Null when the sync did not fail."
+          },
+          "skipped": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skipped",
+            "description": "Why the sync did not run: the provider is disabled or its groups mode is not 'api', so there is no directory to sync. Null when the sync ran."
           }
         },
         "type": "object",

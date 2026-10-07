@@ -66,7 +66,7 @@ from dfe_engine.api.deps import CurrentUser, provider_bindings, require_action
 from dfe_engine.api.password_floor import FLOOR_MESSAGE, below_floor, count_floor_refusal
 from dfe_engine.api.v1.account_groups import check_group_changes, check_role_assignment, scope_of
 from dfe_engine.auth.accounts import AccountExistsError, discard_created
-from dfe_engine.auth.groups import GroupExistsError
+from dfe_engine.auth.groups import GroupExistsError, source_id_holder
 from dfe_engine.auth.membership import forget_member, groups_held
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.scim_mapping import (
@@ -187,18 +187,12 @@ def _page_params(request: Request) -> tuple[int, int]:
 
 
 def _refuse_taken_provider_id(store, source_id: str, name: str) -> JSONResponse | None:
-    """Refuse an externalId another group already carries as its provider id.
-
-    Login resolves a provider id to one group, and a second group sharing it would
-    decide by name order whose roles every IdP user asserting it gets.
-    """
-    if not source_id:
+    """Refuse an externalId another group already carries (:func:`source_id_holder`)."""
+    if source_id_holder(groups=store.list(), name=name, source_id=source_id) is None:
         return None
-    if any(group.source_id == source_id and group.name != name for group in store.list()):
-        return scim_error(
-            409, f"externalId '{source_id}' is already another group's provider id", "uniqueness"
-        )
-    return None
+    return scim_error(
+        409, f"externalId '{source_id}' is already another group's provider id", "uniqueness"
+    )
 
 
 # -- /Users ---------------------------------------------------
@@ -403,7 +397,7 @@ async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Resp
     # Deleting a user takes it out of every group it holds, so it needs their roles.
     groups = group_store.list()
     held = groups_held(existing, groups, bindings=provider_bindings(request))
-    check_group_changes(request, user, groups, held, ())
+    check_group_changes(after=(), before=held, groups=groups, request=request, user=user)
     store.delete(user_id)
     forget_member(group_store, user_id)
     logger.info("SCIM user deleted", username=user_id)
@@ -618,8 +612,8 @@ async def delete_group(group_id: str, user: CurrentUser, request: Request) -> Re
     # GroupStore.delete refuses a non-empty group; detach members first and mirror
     # the removal onto each Account.groups.
     members = list(group.members)
-    if members:
-        # Every member loses the roles the group carries.
+    if (members) or (group.source_id):
+        # Its members and every login its source ID answers lose the roles it carries.
         check_role_assignment(request, user, group.roles, scope_of(group))
     # Checked before the first detach, so deleting the admin group with a recovery
     # credential in it refuses whole rather than part-way through.

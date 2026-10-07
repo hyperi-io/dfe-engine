@@ -22,7 +22,9 @@ from dfe_engine.auth.groups import (
     GroupExistsError,
     GroupMetrics,
     GroupStore,
+    source_id_holder,
 )
+from tests.unit.test_auth.groups_cases import SOURCE_ID_HOLDER_CASES, SourceIdHolderCase
 
 
 def test_the_stores_annotations_can_be_read():
@@ -50,6 +52,17 @@ class TestGroupModel:
         """The org part is looked up in the org registry, so it follows the org name rule."""
         with pytest.raises(ValueError, match="Group scope"):
             Group(name="climber", scope=scope)
+
+
+class TestSourceIdHolder:
+    @pytest.mark.parametrize(
+        "case", SOURCE_ID_HOLDER_CASES, ids=[case["id"] for case in SOURCE_ID_HOLDER_CASES]
+    )
+    def test_matches_expected(self, case: SourceIdHolderCase):
+        holder = source_id_holder(
+            groups=case["groups"], name=case["name"], source_id=case["source_id"]
+        )
+        assert holder == case["expected_holder"]
 
 
 _SKIPPED = "stored group skipped: not a valid group"

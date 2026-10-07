@@ -123,10 +123,7 @@ Every provider's groups normalise to `NormalizedGroup { id, name, source }`.
 `GroupInfo { id, name, email, description }` (models.py) already provides this
 for api-mode; the token_claim/login path (`extract_identity`, rp.py) still emits
 a flat `list[str]`, but the resolution gap it created is now CLOSED at the
-matching layer: the sync tags each group file with its provider `source_id`, and
-`_resolve_group_grants` (deps.py) resolves each token identifier by group NAME
-first, then by `source_id`. So an Entra login carrying object GUIDs - which match
-no group filename - resolves against `source_id` and lands the right roles.
+matching layer. Each group carries the identifier its IdP asserts as `source_id`, with the `source_provider` whose logins it answers, set by the sync, by SCIM's `externalId` or by an admin through the groups API or dfe-ui's group form. `linked_groups` (membership.py) links a login only to the groups whose `source_id` it asserts and whose provider it came through, never by group name. Group names an API key carries resolve by name only (`_resolve_group_grants`, deps.py). So a `token_claim` login carrying names (Okta, dex, Keycloak) lands its roles once each group's `source_id` is the name the IdP sends. An Entra login carrying object GUIDs lands the right roles.
 Verified against the live tenant (see the emulation section). The adapter is the
 ONLY place the remaining quirks live:
 
@@ -141,15 +138,11 @@ ONLY place the remaining quirks live:
 
 ### Adapters
 
-`auth/oidc/adapters/`: `generic` (token_claim/manual, no API), `google` (Admin
-SDK Directory API), `entra` (Microsoft Graph), `okta` (Groups API). Contract:
-`resolve_groups`, `list_all_groups`, `test_connection`. All are failsafe -
-credential/API failure returns empty rather than raising, so auth keeps working
-if group resolution degrades.
+`auth/oidc/adapters/`: `generic` (token_claim/manual, no API), `google` (Admin SDK Directory API), `entra` (Microsoft Graph), `okta` (Groups API). Contract: `resolve_groups`, `list_all_groups`, `test_connection`. The login-path calls are failsafe: a credential or API failure returns empty rather than raising, so auth keeps working if group resolution degrades. `list_all_groups` raises `DirectoryError` instead, so a sync records a directory it cannot list as an error rather than syncing an empty one.
 
 ### Sync and control-plane independence
 
-`auth/oidc/sync.py` enumerates a provider's groups (api mode). It creates a group file for each new one, linked by `source_provider` and `source_id`, and updates only files already linked to that IdP group (their `source_id` is its id), preserving their roles. A file of the same name with no link is skipped as `name_taken`: a display name is no identity, so linking one is an admin's act (rbac.md section 4.4). Detaching a provider does NOT delete its groups - they orphan with `source_provider` set, reported on delete.
+`auth/oidc/sync.py` enumerates a provider's groups (api mode). It creates a group file for each new one, linked by `source_provider` and `source_id`. The group already carrying an IdP group's id is updated whatever its name, refreshing its description and pinning an empty provider to this one. One linked to another provider not bound to this one by `auth.source_provider_bindings` is skipped as `id_taken`. A file of the same name with no link is skipped as `name_taken`: a display name is no identity, so linking one is an admin's act through the groups API or dfe-ui's group form (rbac.md section 4.4). Detaching a provider does NOT delete its groups - they orphan with `source_provider` set, reported on delete. A provider re-added under another name finds them linked to the old name, so its sync counts them as `id_taken` until they are relinked.
 
 **The OIDC auth flow does not depend on dfe-engine running.** Envoy (fallback
 path) keeps doing OIDC from a static CRD; group files on disk keep resolving
@@ -263,8 +256,7 @@ exists in the engine and is now exercised end to end against a real provider.
 
 Done since this doc landed:
 
-- **id -> role resolution** across name and `source_id`, so GUID-emitting
-  providers (Entra) resolve. Verified against the live Entra tenant: 12 fixture
+- **id -> role resolution** by `source_id` for IdP assertions only (`linked_groups`), so GUID-emitting providers (Entra) resolve; group names an operator chose resolve by name. Verified against the live Entra tenant: 12 fixture
   users deliver exactly their expected group claims.
 - **Login-config verification** (`GET /{name}/verify-login`) and the RP client
   secret in the onboarding CRUD, written to the `DfeSecrets` seam and live on

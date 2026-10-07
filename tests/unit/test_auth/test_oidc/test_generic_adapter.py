@@ -8,9 +8,15 @@
 
 from __future__ import annotations
 
+import re
+
+import pytest
+
 from dfe_engine.auth.oidc.adapters import get_adapter
+from dfe_engine.auth.oidc.adapters.base import DirectoryError
 from dfe_engine.auth.oidc.adapters.generic import GenericAdapter
 from dfe_engine.auth.oidc.models import OIDCProvider
+from tests.unit.test_auth.factories import make_generic_adapter, make_oidc_provider
 
 
 def _generic_provider() -> OIDCProvider:
@@ -39,15 +45,14 @@ class TestGenericAdapterResolveGroups:
 
 
 class TestGenericAdapterListAllGroups:
-    async def test_list_all_groups_returns_empty_list(self):
-        adapter = GenericAdapter(_generic_provider())
-        result = await adapter.list_all_groups()
-        assert result == []
-
-    async def test_list_all_groups_returns_list_type(self):
-        adapter = GenericAdapter(_generic_provider())
-        result = await adapter.list_all_groups()
-        assert isinstance(result, list)
+    async def test_no_directory(self):
+        provider = make_oidc_provider(groups={"mode": "api"}, issuer="https://sso.example.com")
+        message = (
+            "generic directory: there is no directory API to list groups from; set the "
+            "provider's groups mode to 'token_claim' or 'manual'"
+        )
+        with pytest.raises(DirectoryError, match=re.escape(message)):
+            await make_generic_adapter(provider=provider).list_all_groups()
 
 
 class TestGenericAdapterTestConnection:

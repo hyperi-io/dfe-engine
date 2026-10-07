@@ -11,15 +11,42 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any
+from urllib.parse import urlsplit
 
+from pydantic import ValidationError
 from scalo.logger import logger
 
-from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
+from dfe_engine.auth.oidc.adapters.base import (
+    DIRECTORY_SUMMARY_LIMIT,
+    DirectoryError,
+    OIDCGroupAdapter,
+)
 from dfe_engine.auth.oidc.credential_env import resolve_credential
 from dfe_engine.auth.oidc.models import GroupInfo
 
 # Google Admin SDK scope for read-only group directory access.
 _DIRECTORY_SCOPE = "https://www.googleapis.com/auth/admin.directory.group.readonly"
+
+
+def _describe_google_error(*, exc: BaseException) -> str:
+    """Describe an Admin SDK, token or transport failure without its text, which can carry the token endpoint's whole body.
+
+    An Admin SDK refusal is its HTTP status and Google's bounded reason, a token refusal the endpoint's bounded error and description and anything else its exception type.
+    """
+    from google.auth.exceptions import RefreshError
+    from googleapiclient.errors import HttpError
+
+    if isinstance(exc, HttpError):
+        status = f"HTTP {exc.resp.status}"
+        reason = exc.reason[:DIRECTORY_SUMMARY_LIMIT] if isinstance(exc.reason, str) else ""
+        return f"{status}: {reason!r}" if reason else status
+    if isinstance(exc, RefreshError):
+        # The first argument is the token endpoint's error and description; the second is its whole body.
+        first = exc.args[0] if exc.args else None
+        summary = first[:DIRECTORY_SUMMARY_LIMIT] if isinstance(first, str) else ""
+        failed = "the service account token request failed"
+        return f"{failed}: {summary!r}" if summary else failed
+    return type(exc).__name__
 
 
 class GoogleAdapter(OIDCGroupAdapter):
@@ -30,8 +57,7 @@ class GoogleAdapter(OIDCGroupAdapter):
     provider.groups.service_account_json_path in the DfeSecrets seam, falling
     back to the env var named in service_account_json_env.
 
-    Falls back gracefully when credentials are missing or the API is unavailable --
-    all public methods return safe empty/identity values rather than raising.
+    Falls back gracefully when credentials are missing or the API is unavailable: the login-path methods return safe empty/identity values rather than raising. ``list_all_groups`` raises :class:`DirectoryError` instead, so a group sync reports the failure.
     """
 
     # ------------------------------------------------------------------
@@ -63,7 +89,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             logger.warning(
                 "Google Admin SDK group fetch failed -- using identity fallback",
                 provider=self._provider.issuer,
-                error=str(exc),
+                error=_describe_google_error(exc=exc),
             )
             return {g: g for g in group_ids}
 
@@ -101,44 +127,34 @@ class GoogleAdapter(OIDCGroupAdapter):
             logger.warning(
                 "Google Admin SDK resolve_user_groups failed -- default deny",
                 provider=self._provider.issuer,
-                error=str(exc),
+                error=_describe_google_error(exc=exc),
             )
             return []
 
         return [GroupInfo(id=g["id"], name=g["name"], email=g.get("email", "")) for g in raw]
 
     async def list_all_groups(self) -> list[GroupInfo]:
-        """List all groups in the configured Google Workspace domain.
+        """List every group in the configured Google Workspace domain via the Admin SDK, following each page token.
 
-        Uses the Admin SDK Directory API groups.list with domain filtering and
-        handles pagination transparently.
-
-        Returns:
-            List of GroupInfo. Returns empty list when credentials are missing
-            or the API call fails.
+        Raises :class:`DirectoryError` when the service account is missing or does not load and when any page fails, so no partial listing is returned.
         """
         service = self._get_service()
         if service is None:
-            return []
-
-        try:
-            raw = await asyncio.to_thread(self._fetch_all_groups_sync, service)
-        except Exception as exc:
-            logger.warning(
-                "Google Admin SDK list_all_groups failed",
-                provider=self._provider.issuer,
-                error=str(exc),
-            )
-            return []
-
-        return [
-            GroupInfo(
-                id=g["id"],
-                name=g["name"],
-                email=g.get("email", ""),
-            )
-            for g in raw
-        ]
+            if self._service_account_json():
+                detail = "the service account JSON does not load; the reason is in the engine log"
+            else:
+                env = self._provider.groups.service_account_json_env
+                where = (
+                    f"the env var {env!r}"
+                    if env
+                    else "an env var named in 'groups.service_account_json_env'"
+                )
+                detail = (
+                    "no service account; send 'groups.service_account_json' to the provider API "
+                    f"or set {where}"
+                )
+            raise DirectoryError(detail=detail, provider_type=self._provider.type)
+        return await self._list_groups(service=service)
 
     async def test_connection(self) -> tuple[bool, str]:
         """Test connectivity to the Google Admin SDK.
@@ -163,12 +179,48 @@ class GoogleAdapter(OIDCGroupAdapter):
             await asyncio.to_thread(self._probe_sync, service)
             return True, "OK"
         except Exception as exc:
+            error = _describe_google_error(exc=exc)
             logger.warning(
                 "Google Admin SDK test_connection failed",
                 provider=self._provider.issuer,
-                error=str(exc),
+                error=error,
             )
-            return False, str(exc)
+            return False, f"Google Admin SDK connection failed: {error}"
+
+    # ------------------------------------------------------------------
+    # Group listing
+    # ------------------------------------------------------------------
+
+    async def _list_groups(self, *, service: Any) -> list[GroupInfo]:
+        """List every group *service* returns, raising :class:`DirectoryError` when the Admin SDK call fails."""
+        from google.auth.exceptions import GoogleAuthError, RefreshError
+        from googleapiclient.errors import HttpError
+        from httplib2 import HttpLib2Error
+
+        provider_type = self._provider.type
+        try:
+            raw = await asyncio.to_thread(self._fetch_all_groups_sync, service)
+        except HttpError as exc:
+            path = urlsplit(exc.uri or "").path
+            detail = f"GET {path!r} returned {_describe_google_error(exc=exc)}"
+            raise DirectoryError(detail=detail, provider_type=provider_type) from exc
+        except RefreshError as exc:
+            detail = _describe_google_error(exc=exc)
+            raise DirectoryError(detail=detail, provider_type=provider_type) from exc
+        except (GoogleAuthError, HttpLib2Error, OSError) as exc:
+            error = _describe_google_error(exc=exc)
+            logger.warning(
+                "Google Admin SDK list_all_groups failed",
+                error=error,
+                provider=self._provider.issuer,
+            )
+            detail = f"the groups request failed: {error}"
+            raise DirectoryError(detail=detail, provider_type=provider_type) from exc
+        try:
+            return [GroupInfo(email=g.get("email", ""), id=g["id"], name=g["name"]) for g in raw]
+        except (KeyError, ValidationError) as exc:
+            detail = "the groups listing returned a group without a string id and name"
+            raise DirectoryError(detail=detail, provider_type=provider_type) from exc
 
     # ------------------------------------------------------------------
     # Service construction
@@ -203,7 +255,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             logger.warning(
                 "Could not parse service account JSON",
                 provider=self._provider.issuer,
-                error=str(exc),
+                error=_describe_google_error(exc=exc),
             )
             return None
 
@@ -235,7 +287,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             logger.warning(
                 "Failed to build Google Admin SDK service",
                 provider=self._provider.issuer,
-                error=str(exc),
+                error=_describe_google_error(exc=exc),
             )
             return None
 
@@ -263,8 +315,14 @@ class GoogleAdapter(OIDCGroupAdapter):
             if page_token:
                 kwargs["pageToken"] = page_token
 
-            response = service.groups().list(**kwargs).execute()
-            groups.extend(response.get("groups", []))
+            request = service.groups().list(**kwargs)
+            response = request.execute()
+            page = response.get("groups", []) if isinstance(response, dict) else None
+            if not (isinstance(page, list)) or not (all(isinstance(group, dict) for group in page)):
+                path = urlsplit(request.uri).path
+                detail = f"GET {path!r} returned a body that is not a list of groups"
+                raise DirectoryError(detail=detail, provider_type=self._provider.type)
+            groups.extend(page)
 
             page_token = response.get("nextPageToken")
             if not page_token:

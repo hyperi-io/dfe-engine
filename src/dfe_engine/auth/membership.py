@@ -89,25 +89,42 @@ def groups_held(
     return sorted(held)
 
 
-def groups_named(identifiers: Iterable[str], groups: Iterable[Group]) -> list[Group]:
-    """The stored groups *identifiers* name, each by group name else by provider source_id.
+def groups_held_after(
+    *,
+    account: Account,
+    added: Iterable[str],
+    bindings: Mapping[str, str],
+    groups: Iterable[Group],
+    removed: Iterable[str],
+) -> list[str]:
+    """Return the names of the groups *account* holds once a write gives it its groups list and the group files catch up.
 
-    The lookup role resolution makes, so these are the groups whose roles those
-    identifiers carry. An identifier that names no group is left out.
-
-    Args:
-        identifiers: Group names or IdP-asserted provider ids.
-        groups: Every stored group, listed once by the caller.
-
-    Returns:
-        The named groups, each once, in the order first named.
+    *account* already carries the list the write gives it; *added* and *removed* are the group names :func:`sync_group_members_for_account_groups_change` then lists it in or takes it out of. An IdP-owned account's list is also its assertion, so a write can change what it holds by link as well as by membership.
     """
-    listed = list(groups)
-    by_name = {group.name: group for group in listed}
-    by_source_id = {group.source_id: group for group in listed if group.source_id}
-    named: dict[str, Group] = {}
+    gained = set(added)
+    lost = set(removed)
+    rewritten = []
+    for group in groups:
+        members = [
+            member
+            for member in group.members
+            if (member != account.username) or (group.name not in lost)
+        ]
+        if group.name in gained and account.username not in members:
+            members.append(account.username)
+        rewritten.append(group.model_copy(update={"members": members}))
+    return groups_held(account, rewritten, bindings=bindings)
+
+
+def groups_named(identifiers: Iterable[str], groups: Iterable[Group]) -> list[Group]:
+    """Return the stored groups *identifiers* name, by group name only, each once in the order first named.
+
+    A provider source ID names no group here: only an IdP assertion reaches a group by its source ID (:func:`linked_groups`).
+    """
+    by_name = {group.name: group for group in groups}
+    named = {}
     for identifier in identifiers:
-        group = by_name.get(identifier) or by_source_id.get(identifier)
+        group = by_name.get(identifier)
         if group is not None:
             named.setdefault(group.name, group)
     return list(named.values())

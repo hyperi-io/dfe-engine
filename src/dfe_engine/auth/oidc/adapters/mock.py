@@ -49,7 +49,7 @@ from typing import TYPE_CHECKING
 
 from scalo.logger import logger
 
-from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
+from dfe_engine.auth.oidc.adapters.base import DirectoryError, OIDCGroupAdapter
 from dfe_engine.auth.oidc.models import GroupInfo
 
 if TYPE_CHECKING:
@@ -93,8 +93,10 @@ class MockDirectoryAdapter(OIDCGroupAdapter):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            self._load_error = f"fixture unreadable: {exc}"
-            logger.warning("mock directory: fixture unreadable", path=str(path), error=str(exc))
+            self._load_error = f"fixture unreadable: {type(exc).__name__}"
+            logger.warning(
+                "mock directory: fixture unreadable", error=type(exc).__name__, path=str(path)
+            )
             return
 
         for item in data.get("groups", []):
@@ -129,7 +131,10 @@ class MockDirectoryAdapter(OIDCGroupAdapter):
         return self._groups_for(directory_id)
 
     async def list_all_groups(self) -> list[GroupInfo]:
-        """Every group in the fixture (the bulk-sync source)."""
+        """Every group in the fixture (the bulk-sync source); raises :class:`DirectoryError` when the fixture did not load."""
+        if self._load_error:
+            detail = f"the mock directory fixture is not loaded: {self._load_error}"
+            raise DirectoryError(detail=detail, provider_type=self._provider.type)
         return list(self._groups)
 
     async def test_connection(self) -> tuple[bool, str]:

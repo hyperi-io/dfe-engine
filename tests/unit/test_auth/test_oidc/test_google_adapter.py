@@ -8,16 +8,49 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 
 import pytest
 
+from dfe_engine.auth.oidc.adapters.base import DirectoryError
 from dfe_engine.auth.oidc.adapters.google import GoogleAdapter
 from dfe_engine.auth.oidc.models import GroupInfo, GroupResolutionConfig, OIDCProvider
+from tests.unit.test_auth.factories import (
+    make_directory_reply,
+    make_google_adapter,
+    make_google_directory_service,
+    make_google_service_account_json,
+    make_oidc_provider,
+)
+from tests.unit.test_auth.test_oidc.google_adapter_cases import (
+    GOOGLE_ISSUER,
+    LIST_ALL_GROUPS_CASES,
+    LIST_ALL_GROUPS_MISSING_SERVICE_ACCOUNT_CASES,
+    LIST_ALL_GROUPS_RAISES_CASES,
+    TOKEN_PATH,
+    TOKEN_REPLY,
+    ListAllGroupsCase,
+    ListAllGroupsMissingServiceAccountCase,
+    ListAllGroupsRaisesCase,
+)
+from tests.unit.test_auth.test_oidc.local_directory import LocalDirectory
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+
+def _make_listing_provider() -> OIDCProvider:
+    """An api-mode Google provider for example.com whose service account JSON is read from DFE_TEST_GOOGLE_SA_JSON."""
+    groups = {
+        "admin_email": "admin@example.com",
+        "domain": "example.com",
+        "mode": "api",
+        "service_account_json_env": "DFE_TEST_GOOGLE_SA_JSON",
+    }
+    return make_oidc_provider(groups=groups, issuer=GOOGLE_ISSUER, type="google")
 
 
 def _make_provider(
@@ -156,25 +189,73 @@ class TestResolveUserGroupsMissingCredentials:
         assert await adapter.resolve_user_groups("") == []
 
 
-# ---------------------------------------------------------------------------
-# list_all_groups — missing credentials
-# ---------------------------------------------------------------------------
+class TestListAllGroups:
+    @pytest.mark.parametrize(
+        "case", LIST_ALL_GROUPS_CASES, ids=[case["id"] for case in LIST_ALL_GROUPS_CASES]
+    )
+    async def test_matches_expected(self, http_directory: LocalDirectory, case: ListAllGroupsCase):
+        # The Admin SDK only answers at admin.googleapis.com, so a service pointed at the local directory is passed in.
+        http_directory.replies = {TOKEN_PATH: TOKEN_REPLY, **case["replies"]}
+        adapter = make_google_adapter(provider=_make_listing_provider())
+        service = make_google_directory_service(api_endpoint=http_directory.base_url)
+        assert await adapter._list_groups(service=service) == case["expected_groups"]
 
+    @pytest.mark.parametrize(
+        "case",
+        LIST_ALL_GROUPS_MISSING_SERVICE_ACCOUNT_CASES,
+        ids=[case["id"] for case in LIST_ALL_GROUPS_MISSING_SERVICE_ACCOUNT_CASES],
+    )
+    async def test_missing_service_account(
+        self, monkeypatch: pytest.MonkeyPatch, case: ListAllGroupsMissingServiceAccountCase
+    ):
+        for name, value in case["env"].items():
+            monkeypatch.setenv(name, value)
+        with pytest.raises(DirectoryError, match=re.escape(case["message"])):
+            await make_google_adapter(provider=case["provider"]).list_all_groups()
 
-class TestListAllGroupsMissingCredentials:
-    async def test_returns_empty_list_when_no_credentials(self) -> None:
-        provider = _make_provider(service_account_json_env="")
-        adapter = GoogleAdapter(provider)
-        result = await adapter.list_all_groups()
-        assert result == []
+    @pytest.mark.parametrize(
+        "case",
+        LIST_ALL_GROUPS_RAISES_CASES,
+        ids=[case["id"] for case in LIST_ALL_GROUPS_RAISES_CASES],
+    )
+    async def test_raises(self, http_directory: LocalDirectory, case: ListAllGroupsRaisesCase):
+        # The Admin SDK only answers at admin.googleapis.com, so a service pointed at the local directory is passed in.
+        http_directory.replies = {TOKEN_PATH: TOKEN_REPLY, **case["replies"]}
+        adapter = make_google_adapter(provider=_make_listing_provider())
+        service = make_google_directory_service(api_endpoint=http_directory.base_url)
+        with pytest.raises(DirectoryError, match=re.escape(case["message"])):
+            await adapter._list_groups(service=service)
 
-    async def test_returns_empty_list_when_env_var_missing(self) -> None:
-        os.environ.pop("DFE_MISSING_SA_JSON_DEF", None)
-        provider = _make_provider(service_account_json_env="DFE_MISSING_SA_JSON_DEF")
-        adapter = GoogleAdapter(provider)
-        result = await adapter.list_all_groups()
-        assert isinstance(result, list)
-        assert result == []
+    async def test_token_refused(
+        self, http_directory: LocalDirectory, monkeypatch: pytest.MonkeyPatch
+    ):
+        body = {
+            "error": "unauthorized_client",
+            "error_description": "Client is unauthorized to retrieve access tokens using this method.",
+        }
+        http_directory.replies = {"/token": make_directory_reply(body=json.dumps(body), status=401)}
+        token_uri = f"{http_directory.base_url}/token"
+        monkeypatch.setenv(
+            "DFE_TEST_GOOGLE_SA_JSON", make_google_service_account_json(token_uri=token_uri)
+        )
+        adapter = make_google_adapter(provider=_make_listing_provider())
+        message = (
+            "google directory: the service account token request failed: 'unauthorized_client: "
+            "Client is unauthorized to retrieve access tokens using this method.'"
+        )
+        with pytest.raises(DirectoryError, match=re.escape(message)):
+            await adapter.list_all_groups()
+
+    async def test_unreachable(self, monkeypatch: pytest.MonkeyPatch):
+        # Nothing listens on port 1, so the token request is refused before any HTTP.
+        token_uri = "http://127.0.0.1:1/token"
+        monkeypatch.setenv(
+            "DFE_TEST_GOOGLE_SA_JSON", make_google_service_account_json(token_uri=token_uri)
+        )
+        adapter = make_google_adapter(provider=_make_listing_provider())
+        message = "google directory: the groups request failed: ConnectionRefusedError"
+        with pytest.raises(DirectoryError, match=re.escape(message)):
+            await adapter.list_all_groups()
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +297,28 @@ class TestConnectionMissingCredentials:
 # ---------------------------------------------------------------------------
 # GroupInfo model used by adapter
 # ---------------------------------------------------------------------------
+
+
+class TestConnectionTokenRefused:
+    async def test_reports_the_token_endpoint_summary(
+        self, http_directory: LocalDirectory, monkeypatch: pytest.MonkeyPatch
+    ):
+        body = {
+            "error": "unauthorized_client",
+            "error_description": "Client is unauthorized to retrieve access tokens using this method.",
+        }
+        http_directory.replies = {"/token": make_directory_reply(body=json.dumps(body), status=401)}
+        token_uri = f"{http_directory.base_url}/token"
+        monkeypatch.setenv(
+            "DFE_TEST_GOOGLE_SA_JSON", make_google_service_account_json(token_uri=token_uri)
+        )
+        adapter = make_google_adapter(provider=_make_listing_provider())
+        message = (
+            "Google Admin SDK connection failed: the service account token request failed: "
+            "'unauthorized_client: Client is unauthorized to retrieve access tokens using this "
+            "method.'"
+        )
+        assert await adapter.test_connection() == (False, message)
 
 
 class TestGroupInfo:

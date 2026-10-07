@@ -17,7 +17,7 @@ Gateway or the token validator).  No admin API calls are made.
 
 from __future__ import annotations
 
-from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
+from dfe_engine.auth.oidc.adapters.base import DirectoryError, OIDCGroupAdapter
 from dfe_engine.auth.oidc.models import GroupInfo
 
 
@@ -27,8 +27,7 @@ class GenericAdapter(OIDCGroupAdapter):
     ``resolve_groups`` maps each group identifier directly to a GroupInfo
     where id and name are the same string (the raw claim value).
 
-    ``list_all_groups`` always returns an empty list -- there is no API to
-    enumerate groups from a generic provider.
+    ``list_all_groups`` raises :class:`DirectoryError`: a generic provider has no API to enumerate groups from, so a sync must not read it as an empty directory.
 
     ``test_connection`` always succeeds -- there is no connection to test.
     """
@@ -48,12 +47,9 @@ class GenericAdapter(OIDCGroupAdapter):
         return []
 
     async def list_all_groups(self) -> list[GroupInfo]:
-        """Return an empty list -- generic providers have no enumeration API.
-
-        Returns:
-            An empty list.
-        """
-        return []
+        """Raise :class:`DirectoryError`: a generic provider has no directory API to list groups from."""
+        detail = "there is no directory API to list groups from; set the provider's groups mode to 'token_claim' or 'manual'"
+        raise DirectoryError(detail=detail, provider_type=self._provider.type)
 
     async def test_connection(self) -> tuple[bool, str]:
         """Report success with an informational message.

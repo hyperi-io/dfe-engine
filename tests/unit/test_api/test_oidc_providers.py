@@ -9,9 +9,69 @@
 """Tests for POST/GET/PUT/DELETE /api/v1/auth/oidc-providers endpoints."""
 
 import json
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from dfe_engine.settings import DFESettings
+from tests.unit.test_api.oidc_providers_cases import (
+    SYNC_DIRECTORY_ENV,
+    SYNC_PROVIDER_CASES,
+    SyncProviderCase,
+)
+from tests.unit.test_auth.factories import (
+    OKTA_API_TOKEN_ENV,
+    make_directory_reply,
+    make_oidc_provider,
+    make_okta_directory_provider,
+)
+from tests.unit.test_auth.test_oidc.local_directory import LocalDirectory
+
+SCIM_GROUP_DIRECTORY_ENV = "DFE_TEST_SCIM_GROUP_DIRECTORY"
+
+
+def _link_a_scim_group_to_a_mock_directory(
+    *, app: FastAPI, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Store a SCIM-made group carrying 00g-viewers and register mock-dir, whose directory lists that id."""
+    directory = tmp_path / "scim-directory.json"
+    group = {"description": "From the directory", "id": "00g-viewers", "name": "Okta Viewers"}
+    directory.write_text(json.dumps({"groups": [group]}), encoding="utf-8")
+    monkeypatch.setenv(SCIM_GROUP_DIRECTORY_ENV, str(directory))
+    app.state.group_store.create(description="Ours", members=[], name="scim-viewers", roles=[])
+    app.state.group_store.update(
+        name="scim-viewers", source_id="00g-viewers", source_provider="scim"
+    )
+    groups = {
+        "directory_backend": "mock",
+        "mock_directory_env": SCIM_GROUP_DIRECTORY_ENV,
+        "mode": "api",
+    }
+    app.state.oidc_provider_registry.create(
+        name="mock-dir", provider=make_oidc_provider(groups=groups)
+    )
+
+
+def _viewers_groups(*, app: FastAPI) -> list[tuple[str, str, str]]:
+    """Name, description and provider of every stored group carrying 00g-viewers."""
+    return [
+        (group.name, group.description, group.source_provider)
+        for group in app.state.group_store.list()
+        if group.source_id == "00g-viewers"
+    ]
+
+
+def _wait_until(*, condition: Callable[[], bool]) -> bool:
+    """Poll *condition* for up to ten seconds and report whether it came true."""
+    for _attempt in range(200):
+        if condition():
+            return True
+        time.sleep(0.05)
+    return False
 
 
 def _provider_yaml(api_settings, name: str) -> Path:
@@ -381,6 +441,97 @@ class TestSyncProvider:
         resp = client.post("/api/v1/auth/oidc-providers/anything/sync", headers=viewer_headers)
         assert resp.status_code == 403
 
+    def test_a_scim_group_bound_to_the_provider_is_refreshed_not_duplicated(
+        self,
+        admin_headers: dict[str, str],
+        app: FastAPI,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ):
+        app.state.settings.auth.source_provider_bindings = {"scim": "mock-dir"}
+        _link_a_scim_group_to_a_mock_directory(app=app, monkeypatch=monkeypatch, tmp_path=tmp_path)
+
+        resp = client.post("/api/v1/auth/oidc-providers/mock-dir/sync", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert (body["created"], body["updated"], body["groups_skipped"]) == (0, 1, 0)
+        assert _viewers_groups(app=app) == [("scim-viewers", "From the directory", "scim")]
+
+    @pytest.mark.parametrize(
+        "case", SYNC_PROVIDER_CASES, ids=[case["id"] for case in SYNC_PROVIDER_CASES]
+    )
+    def test_matches_expected(
+        self,
+        admin_headers: dict[str, str],
+        app: FastAPI,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        case: SyncProviderCase,
+    ):
+        directory = tmp_path / "sync-directory.json"
+        directory.write_text(
+            json.dumps({"groups": [{"id": "g-ops", "name": "operators"}]}), encoding="utf-8"
+        )
+        monkeypatch.setenv(SYNC_DIRECTORY_ENV, str(directory))
+        app.state.oidc_provider_registry.create(name="sso", provider=case["provider"])
+
+        resp = client.post("/api/v1/auth/oidc-providers/sso/sync", headers=admin_headers)
+
+        assert (resp.status_code, resp.json()) == (200, case["expected_body"])
+
+    @pytest.mark.usefixtures("okta_api_token")
+    def test_a_refused_directory_listing_is_reported(
+        self,
+        admin_headers: dict[str, str],
+        app: FastAPI,
+        client: TestClient,
+        tls_directory: LocalDirectory,
+    ):
+        tls_directory.replies = {
+            "/api/v1/groups?limit=200": make_directory_reply(
+                body=json.dumps({"errorSummary": "Invalid token provided"}), status=401
+            )
+        }
+        app.state.oidc_provider_registry.create(
+            name="okta-dir", provider=make_okta_directory_provider(okta_domain=tls_directory.host)
+        )
+
+        resp = client.post("/api/v1/auth/oidc-providers/okta-dir/sync", headers=admin_headers)
+
+        expected_body = {
+            "created": 0,
+            "error": "okta directory: GET '/api/v1/groups' returned HTTP 401: "
+            "'Invalid token provided'",
+            "groups_skipped": 0,
+            "skipped": None,
+            "total": 0,
+            "updated": 0,
+        }
+        assert (resp.status_code, resp.json()) == (200, expected_body)
+
+
+class TestTheIntervalSyncReadsTheBindings:
+    """The background sync takes auth.source_provider_bindings, so it refreshes a SCIM group bound to its provider."""
+
+    @pytest.fixture(autouse=True)
+    def bound_settings(self, api_settings: DFESettings) -> None:
+        """Bind the scim stamp to mock-dir and tick every second, before the app's lifespan builds the scheduler."""
+        api_settings.auth.source_provider_bindings = {"scim": "mock-dir"}
+        api_settings.auth.oidc_group_sync_tick_seconds = 1
+
+    def test_a_scim_group_bound_to_the_provider_is_refreshed_not_duplicated(
+        self, app: FastAPI, client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ):
+        def refreshed() -> bool:
+            return _viewers_groups(app=app) == [("scim-viewers", "From the directory", "scim")]
+
+        _link_a_scim_group_to_a_mock_directory(app=app, monkeypatch=monkeypatch, tmp_path=tmp_path)
+
+        assert _wait_until(condition=refreshed) is True
+
 
 class TestTestProvider:
     """GET /api/v1/auth/oidc-providers/{name}/test"""
@@ -401,6 +552,61 @@ class TestTestProvider:
     def test_test_requires_admin(self, client, viewer_headers):
         resp = client.get("/api/v1/auth/oidc-providers/anything/test", headers=viewer_headers)
         assert resp.status_code == 403
+
+    def test_a_token_ending_in_a_newline_connects_and_stays_out_of_the_log(
+        self,
+        admin_headers: dict[str, str],
+        app: FastAPI,
+        client: TestClient,
+        log_lines: list[str],
+        monkeypatch: pytest.MonkeyPatch,
+        tls_directory: LocalDirectory,
+    ):
+        monkeypatch.setenv(OKTA_API_TOKEN_ENV, "test-okta-api-token\n")
+        tls_directory.required_authorization = "SSWS test-okta-api-token"
+        tls_directory.replies = {
+            "/api/v1/groups?limit=1": make_directory_reply(
+                body=json.dumps([{"id": "00g-one", "profile": {"name": "One"}}])
+            )
+        }
+        app.state.oidc_provider_registry.create(
+            name="okta-dir", provider=make_okta_directory_provider(okta_domain=tls_directory.host)
+        )
+
+        resp = client.get("/api/v1/auth/oidc-providers/okta-dir/test", headers=admin_headers)
+
+        expected_body = {
+            "message": "Okta Groups API connection successful -- 1 group(s) returned",
+            "success": True,
+        }
+        leaked = [line for line in log_lines if "test-okta-api-token" in line]
+        assert (resp.status_code, resp.json(), leaked) == (200, expected_body, [])
+
+    def test_a_token_no_header_can_carry_stays_out_of_the_answer_and_the_log(
+        self,
+        admin_headers: dict[str, str],
+        app: FastAPI,
+        client: TestClient,
+        log_lines: list[str],
+        monkeypatch: pytest.MonkeyPatch,
+        tls_directory: LocalDirectory,
+    ):
+        # A line break inside the token survives stripping, and an HTTP header cannot carry it.
+        monkeypatch.setenv(OKTA_API_TOKEN_ENV, "test-okta\napi-token")
+        app.state.oidc_provider_registry.create(
+            name="okta-dir", provider=make_okta_directory_provider(okta_domain=tls_directory.host)
+        )
+
+        resp = client.get("/api/v1/auth/oidc-providers/okta-dir/test", headers=admin_headers)
+
+        expected_body = {
+            "message": "Okta API token holds a character an HTTP header cannot carry: a space, a "
+            "control character or a non-ASCII one; re-send 'groups.api_token' to the provider API "
+            "or fix the env var 'DFE_TEST_OKTA_API_TOKEN'",
+            "success": False,
+        }
+        leaked = [line for line in log_lines if "api-token" in line]
+        assert (resp.status_code, resp.json(), leaked) == (200, expected_body, [])
 
 
 class TestVerifyLoginConfig:

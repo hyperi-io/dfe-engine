@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         auth/oidc/adapters/base.py
-#  Purpose:      Abstract base class for OIDC group resolution adapters
+#  Purpose:      Abstract base class for OIDC group adapters, their directory listing error and page fetch
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -14,12 +14,41 @@ All methods are async to allow network calls without blocking the event loop.
 
 from __future__ import annotations
 
+import traceback
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
+
+import httpx
+from scalo.logger import logger
 
 if TYPE_CHECKING:
+    from scalo.http import AsyncHttpClient
+
     from dfe_engine.auth.oidc.models import GroupInfo, OIDCProvider
     from dfe_engine.secrets import DfeSecrets
+
+# An error summary a directory sends is cut to this many characters before an operator sees it.
+DIRECTORY_SUMMARY_LIMIT = 200
+
+
+def _error_summary(*, read_summary: Callable[[Any], str], response: httpx.Response) -> str:
+    """The directory's own one-line summary of a refused request; empty when its body carries none."""
+    try:
+        body = response.json()
+    except ValueError:
+        return ""
+    return read_summary(body)[:DIRECTORY_SUMMARY_LIMIT]
+
+
+class DirectoryError(Exception):
+    """A directory listing failed; the message names the provider type and the failed request or missing setting, never a credential."""
+
+    def __init__(self, *, detail: str, provider_type: str) -> None:
+        """Prefix *detail* with the provider type, such as ``okta directory: ...``, keeping *detail* for a caller that names the provider itself."""
+        super().__init__(f"{provider_type} directory: {detail}")
+        self.detail = detail
 
 
 class OIDCGroupAdapter(ABC):
@@ -49,13 +78,9 @@ class OIDCGroupAdapter(ABC):
 
     @abstractmethod
     async def list_all_groups(self) -> list[GroupInfo]:
-        """Return all groups available in the provider.
+        """Return every group in the provider's directory, for the group sync.
 
-        Used for bulk sync and admin enumeration.
-
-        Returns:
-            List of GroupInfo records.  Returns an empty list when the
-            provider does not support group enumeration via API.
+        Raises :class:`DirectoryError` when the directory cannot be listed in full, so a failed listing is never read as an empty directory.
         """
 
     @abstractmethod
@@ -88,3 +113,62 @@ class OIDCGroupAdapter(ABC):
         this.
         """
         return []
+
+
+def describe_error(*, exc: BaseException, read_summary: Callable[[Any], str] | None = None) -> str:
+    """Describe *exc* for a log line or an API answer without its text, which can quote the request's credential.
+
+    An HTTP error is its status, with the directory's own bounded summary when ``read_summary`` finds one in the body; anything else is its exception type.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = f"HTTP {exc.response.status_code}"
+        summary = (
+            _error_summary(read_summary=read_summary, response=exc.response)
+            if read_summary is not None
+            else ""
+        )
+        return f"{status}: {summary!r}" if summary else status
+    return type(exc).__name__
+
+
+def error_frames(*, exc: BaseException) -> str:
+    """The file, line and source of each frame *exc* passed through, for a log line that must not carry the error's own text or local values."""
+    return "".join(traceback.format_tb(exc.__traceback__))
+
+
+async def fetch_directory_page(
+    *,
+    client: AsyncHttpClient,
+    headers: dict[str, str],
+    provider_type: str,
+    read_summary: Callable[[Any], str],
+    url: str,
+) -> tuple[Any, httpx.Headers]:
+    """GET one page of a directory listing and return its JSON body and response headers.
+
+    Raises :class:`DirectoryError` naming the request path when the request cannot be built or sent (named by the error's type alone), the directory answers other than 2xx (with the summary ``read_summary`` finds in its body) or the body is not JSON.
+    """
+    path = urlsplit(url).path
+    try:
+        response = await client.get(url, headers=headers)
+    except httpx.HTTPStatusError as exc:
+        detail = f"GET {path!r} returned {describe_error(exc=exc, read_summary=read_summary)}"
+        raise DirectoryError(detail=detail, provider_type=provider_type) from exc
+    except Exception as exc:
+        # Building or sending the request also fails outside httpx's own errors, such as a header value it cannot encode.
+        error = describe_error(exc=exc)
+        logger.warning(
+            "Directory listing request failed",
+            error=error,
+            path=path,
+            provider_type=provider_type,
+        )
+        raise DirectoryError(
+            detail=f"GET {path!r} failed: {error}", provider_type=provider_type
+        ) from exc
+    try:
+        body = response.json()
+    except ValueError as exc:
+        detail = f"GET {path!r} returned a body that is not JSON"
+        raise DirectoryError(detail=detail, provider_type=provider_type) from exc
+    return body, response.headers

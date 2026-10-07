@@ -21,11 +21,14 @@ from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.scheduler import sync_is_due, sync_outcome
 from tests.unit.test_auth.factories import (
+    make_directory_reply,
     make_group_store,
     make_oidc_provider,
     make_oidc_provider_registry,
     make_oidc_sync_scheduler,
+    make_okta_directory_provider,
 )
+from tests.unit.test_auth.test_oidc.local_directory import LocalDirectory
 from tests.unit.test_auth.test_oidc.scheduler_cases import (
     NOW,
     SYNC_IS_DUE_CASES,
@@ -168,6 +171,33 @@ class TestOidcSyncScheduler:
                 ["requested"],
             )
 
+        async def test_passes_its_bindings_to_the_sync(
+            self,
+            group_store: GroupStore,
+            monkeypatch: pytest.MonkeyPatch,
+            registry: OIDCProviderRegistry,
+            tmp_path: Path,
+        ):
+            groups = [{"description": "From the directory", "id": "g-ops", "name": "operators"}]
+            _write_directory(groups=groups, monkeypatch=monkeypatch, tmp_path=tmp_path)
+            group_store.create(description="Ours", name="scim-ops", roles=[])
+            group_store.update(name="scim-ops", source_id="g-ops", source_provider="scim")
+            registry.create(name="mock-dir", provider=_mock_directory_provider())
+            scheduler = make_oidc_sync_scheduler(
+                bindings={"scim": "mock-dir"}, group_store=group_store, registry=registry
+            )
+
+            outcomes = await scheduler.run_once(now=NOW)
+
+            stored = [
+                (group.name, group.description, group.source_provider)
+                for group in group_store.list()
+            ]
+            assert (outcomes, stored) == (
+                {"mock-dir": "ok"},
+                [("scim-ops", "From the directory", "scim")],
+            )
+
         async def test_leaves_a_provider_that_is_not_due(
             self, directory: None, group_store: GroupStore, registry: OIDCProviderRegistry
         ):
@@ -194,4 +224,32 @@ class TestOidcSyncScheduler:
                 {"mock-dir": "error"},
                 {},
                 {"mock-dir": "error"},
+            )
+
+        @pytest.mark.usefixtures("okta_api_token")
+        async def test_reports_a_refused_directory_listing_as_an_error(
+            self,
+            group_store: GroupStore,
+            registry: OIDCProviderRegistry,
+            tls_directory: LocalDirectory,
+        ):
+            tls_directory.replies = {
+                "/api/v1/groups?limit=200": make_directory_reply(
+                    body=json.dumps({"errorSummary": "Invalid token provided"}), status=401
+                )
+            }
+            registry.create(
+                name="okta-dir",
+                provider=make_okta_directory_provider(okta_domain=tls_directory.host),
+            )
+            scheduler = make_oidc_sync_scheduler(group_store=group_store, registry=registry)
+
+            outcomes = await scheduler.run_once(now=NOW)
+
+            stored = registry.get(name="okta-dir")
+            assert (outcomes, stored.last_sync_status, stored.sync_error, group_store.list()) == (
+                {"okta-dir": "error"},
+                "error",
+                "okta directory: GET '/api/v1/groups' returned HTTP 401: 'Invalid token provided'",
+                [],
             )

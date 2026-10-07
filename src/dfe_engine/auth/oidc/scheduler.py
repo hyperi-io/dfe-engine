@@ -10,7 +10,7 @@
 
 import asyncio
 import random
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -67,6 +67,7 @@ class OidcSyncScheduler:
     def __init__(
         self,
         *,
+        bindings: Mapping[str, str] | None,
         group_store: GroupStore,
         metrics: SyncMetrics | None,
         on_groups_created: Callable[[], None] | None,
@@ -74,6 +75,7 @@ class OidcSyncScheduler:
         secrets: DfeSecrets | None,
         tick_seconds: float,
     ) -> None:
+        self._bindings = bindings
         self._group_store = group_store
         self._last_outcomes: dict[str, SyncOutcome] = {}
         self._metrics = metrics if metrics is not None else SyncMetrics()
@@ -104,6 +106,7 @@ class OidcSyncScheduler:
         """Run one provider's sync and report how it ended, with the error text when it failed."""
         try:
             result = await sync_provider(
+                bindings=self._bindings,
                 group_store=self._group_store,
                 metrics=self._metrics,
                 provider_name=name,

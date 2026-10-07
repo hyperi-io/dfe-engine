@@ -8,6 +8,7 @@
 
 import builtins
 import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -115,9 +116,13 @@ class Group(BaseModel):
     ``org:<name>`` (exists only inside that org - invisible outside it, and its
     roles bind at that org's scope only, never system-wide)."""
     source_provider: str = ""
-    """Name of the OIDC provider that owns this group (empty for manually managed groups)."""
+    """The provider whose logins this group's ``source_id`` answers.
+
+    A link saved before a provider was required may have none, which answers any provider until a group sync pins it or it is saved with one."""
     source_id: str = ""
-    """Provider-specific group identifier (e.g. Google group key, Entra object ID)."""
+    """The group identifier an IdP asserts (Okta, dex or Keycloak send a name, Entra an object ID).
+
+    Empty links no IdP login to the group."""
     org_ids: list[str] = Field(default_factory=list)
     """Organisation IDs this group has access to (empty means no org-scoped access)."""
     attributes: dict[str, Any] = Field(default_factory=dict)
@@ -138,6 +143,19 @@ class Group(BaseModel):
         if self.scope.startswith(_ORG_SCOPE_PREFIX):
             return self.scope[len(_ORG_SCOPE_PREFIX) :]
         return ""
+
+
+def source_id_holder(*, groups: Iterable[Group], name: str, source_id: str) -> Group | None:
+    """Return the group other than *name* that already carries *source_id* (None when no other does).
+
+    Where login looks an identifier up by source ID (:meth:`GroupStore.by_source_id`) two groups carrying it resolve by name order whatever their providers, so each source ID names one group. An empty source ID links nothing and is never held.
+    """
+    if not (source_id):
+        return None
+    for group in groups:
+        if group.source_id == source_id and group.name != name:
+            return group
+    return None
 
 
 class GroupStore:

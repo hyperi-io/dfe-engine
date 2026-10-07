@@ -59,7 +59,7 @@ from dfe_engine.auth.bootstrap import (
 )
 from dfe_engine.auth.groups import Group
 from dfe_engine.auth.login_throttle import LoginThrottle
-from dfe_engine.auth.membership import forget_member, groups_held
+from dfe_engine.auth.membership import forget_member, groups_held, groups_held_after
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/accounts", tags=["Accounts"])
@@ -430,7 +430,16 @@ async def create_account(
     )
     if store.get(body.username) is not None:
         raise conflict
-    check_group_changes(request, user, group_store.list(), (), body.groups)
+    groups = group_store.list()
+    created = Account(groups=body.groups, password_hash="", username=body.username)
+    held_after = groups_held_after(
+        account=created,
+        added=body.groups,
+        bindings=provider_bindings(request),
+        groups=groups,
+        removed=(),
+    )
+    check_group_changes(after=held_after, before=(), groups=groups, request=request, user=user)
     # The create decides: another replica can take the name after the lookup above.
     # It hashes the password, so it runs off the event loop.
     try:
@@ -600,8 +609,22 @@ async def update_account(
     existing = _require_account(store, username)
     if body.groups is not None:
         groups = group_store.list()
-        held = groups_held(existing, groups, bindings=provider_bindings(request))
-        check_group_changes(request, user, groups, held, body.groups)
+        bindings = provider_bindings(request)
+        listed = {group.name for group in groups if username in group.members}
+        held_after = groups_held_after(
+            account=existing.model_copy(update={"groups": body.groups}),
+            added=body.groups,
+            bindings=bindings,
+            groups=groups,
+            removed=listed - set(body.groups),
+        )
+        check_group_changes(
+            after=held_after,
+            before=groups_held(existing, groups, bindings=bindings),
+            groups=groups,
+            request=request,
+            user=user,
+        )
     update_fields: dict[str, object] = _contact_updates(body)
     if body.groups is not None:
         update_fields["groups"] = body.groups
@@ -860,7 +883,7 @@ async def delete_account(
     # Deleting an account takes it out of every group it holds, so it needs their roles.
     groups = group_store.list()
     held = groups_held(existing, groups, bindings=provider_bindings(request))
-    check_group_changes(request, user, groups, held, ())
+    check_group_changes(after=(), before=held, groups=groups, request=request, user=user)
     # The store refuses the break-glass admin, the one account the deploy repo carries.
     store.delete(username)
     forget_member(group_store, username)

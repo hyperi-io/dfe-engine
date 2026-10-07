@@ -143,8 +143,12 @@ accepts repeated `schema_type` (top-level path segment, e.g. `meta`).
 | GET | `/auth/roles/scopes` | RBAC permission scopes for role editors |
 | CRUD | `/auth/api-keys` | API key management |
 | CRUD | `/auth/oidc-providers` | OIDC provider configuration |
-| POST | `/auth/oidc-providers/{name}/sync` | Force group sync |
+| POST | `/auth/oidc-providers/{name}/sync` | Force group sync; `skipped` says why it did not run, `error` why it failed |
 | GET | `/auth/oidc-providers/{name}/test` | Test provider connectivity |
+
+A group's `source_id` and `source_provider` link it to an IdP group; the group form sets both through `POST` and `PUT /auth/groups`. A login through that provider asserting `source_id` takes the group's roles: for a `token_claim` provider sending names (Okta, dex, Keycloak) it is the group name the IdP sends. A `source_id` without a provider answers `422 missing_source_provider`, a taken one `409 conflict`, a malformed one `422 invalid_source_id` and an unknown or overlong provider `422 invalid_source_provider`. A group read back with a `source_id` and no provider was linked before a provider was required: it answers any provider until it is saved with one or a group sync pins it.
+
+A group sync answers 200 with `created`, `updated`, `total`, `groups_skipped`, `error` and `skipped`. `skipped` says why it did not run: the provider is disabled or its groups mode is `token_claim` or `manual`, which have no directory to sync. `error` says why it failed: the provider type, then the failed request's path and HTTP status or the missing directory setting. Each is null otherwise.
 
 ### Sources (`/api/v1/sources`)
 
