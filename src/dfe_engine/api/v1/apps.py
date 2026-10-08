@@ -1257,7 +1257,7 @@ def _checked_changes(
                     409,
                     "chart_set_env",
                     path,
-                    f"the {service} deployment sets {key} itself, for {decides}; change "
+                    f"the {service} deployment sets {key} itself, for {decides}. Change "
                     "it where the deployment sets it, not in one instance's overlay",
                 )
             env_changes[key] = value
@@ -1276,7 +1276,7 @@ def _checked_changes(
                 409,
                 "chart_derived",
                 path,
-                f"the deployment decides this through {supplier}; change it there, "
+                f"the deployment decides this through {supplier}. Change it there, "
                 "not in one instance's overlay",
             )
         option = options.get(path)
