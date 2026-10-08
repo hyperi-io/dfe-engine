@@ -68,6 +68,55 @@ class TestListSources:
         by_name = {item["name"]: item for item in resp.json()["items"]}
         assert by_name["aws-own"]["current_table_topic_type"] == "own"
 
+    def test_list_table_topic_type_tracks_the_working_current_version(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        # Deployed 1.0.0 owns a table; working current 2.0.0 dropped the meta schema.
+        client.post(
+            "/api/v1/sources",
+            json={
+                **sample_source,
+                "source": "azure-drift",
+                "schema_config": {
+                    "meta_schema": "meta/azure",
+                    "meta_schema_version": "1.0.0",
+                },
+            },
+            headers=admin_headers,
+        )
+        registry = _registries["source"]
+        registry.set_deployed_version("azure-drift", "1.0.0")
+        registry.save_source(
+            {
+                "source": "azure-drift",
+                "deployed_version": "1.0.0",
+                "current": "2.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": sample_source["match"],
+                        "schema": {
+                            "meta_schema": "meta/azure",
+                            "meta_schema_version": "1.0.0",
+                        },
+                    },
+                    "2.0.0": {
+                        "date_time": "2026-01-02",
+                        "match": sample_source["match"],
+                        "schema": {},
+                    },
+                },
+            },
+            created_by="test",
+            description="e2e: current without meta schema",
+        )
+
+        resp = client.get("/api/v1/sources", headers=admin_headers)
+        by_name = {item["name"]: item for item in resp.json()["items"]}
+        assert by_name["azure-drift"]["current"] == "2.0.0"
+        assert by_name["azure-drift"]["deployed_version"] == "1.0.0"
+        assert by_name["azure-drift"]["current_table_topic_type"] == "main"
+
     def test_list_pagination(self, client: TestClient, admin_headers: dict):
         # Create 5 sources
         for i in range(5):

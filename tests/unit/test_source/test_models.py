@@ -412,6 +412,38 @@ class TestSourceOrigin:
         s = Source.model_validate({"source": "main", "resource_type": "core"})
         assert s.table_topic_type == "main"
 
+    def test_table_topic_type_follows_the_current_version_not_the_deployed_one(self):
+        """An undeployed current without a meta schema shares main, even if deployed owns a table."""
+        s = Source.model_validate(
+            {
+                "source": "azure",
+                "deployed_version": "1.0.0",
+                "current": "2.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": {"field": "azure", "value": "azure"},
+                        "schema": {
+                            "meta_schema": "meta/azure",
+                            "meta_schema_version": "1.0.0",
+                        },
+                    },
+                    "2.0.0": {
+                        "date_time": "2026-01-02",
+                        "match": {"field": "azure", "value": "azure"},
+                        "schema": {},
+                    },
+                },
+            }
+        )
+        assert s.version("1.0.0").effective_schema().meta_schema == "meta/azure"
+        assert s.version("2.0.0").effective_schema().meta_schema is None
+        assert s.table_topic_type == "main"
+
+        # Flip current back to the deployed pin: own table again.
+        s = s.model_copy(update={"current": "1.0.0"})
+        assert s.table_topic_type == "own"
+
     def test_the_write_body_needs_exactly_one_origin(self):
         with pytest.raises(ValueError, match="exactly one"):
             SourceWriteRequest(source="x")

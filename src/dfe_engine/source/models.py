@@ -1425,12 +1425,13 @@ class Source(BaseModel):
 
     @property
     def table_topic_type(self) -> FetcherTopic:
-        """Whether records land on this source's own table or the shared main one.
+        """Where the working ``current`` version's records land: own table or main.
 
-        A pinned ``meta_schema`` means the source has its own ClickHouse table.
-        Without one, records share the platform landing table (``main``).
+        A pinned ``meta_schema`` on ``current`` means that version has its own
+        ClickHouse table. Without one, it shares the platform landing table
+        (``main``) -- even when a still-deployed older version pinned a schema.
         """
-        return "own" if self.schema_config.meta_schema else "main"
+        return "own" if self.version(self.current).effective_schema().meta_schema else "main"
 
     # -----------------------------------------------------------------
     # Derived properties
@@ -1556,8 +1557,9 @@ class SourceSummaryObject(BaseModel):
     )
     current_table_topic_type: FetcherTopic = Field(
         description=(
-            "Where records land: ``own`` when a meta schema pins a per-source table, "
-            "``main`` when there is none and records share the landing table"
+            "Where the working ``current`` version lands: ``own`` when that version "
+            "pins a meta schema, ``main`` when it does not (even if a deployed older "
+            "version still has its own table)"
         ),
     )
     views: list[str] = Field(
