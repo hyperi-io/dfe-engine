@@ -504,6 +504,10 @@ class SourceRegistry:
                 raise SourceValidationError(f"Invalid source definition: {e}") from e
 
         existing = self.get_source(source_name)
+        # Refuse engine-owned sources before merge/origin checks so PUT main
+        # stays a 409 conflict, not a 422 about origin None -> receiver.
+        if self.is_core(source_name):
+            raise SourceCoreResourceError(action="modify", source=source_name)
         try:
             updated = apply_source_write_update(existing, write)
         except ValueError as e:

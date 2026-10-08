@@ -68,6 +68,55 @@ class TestListSources:
         by_name = {item["name"]: item for item in resp.json()["items"]}
         assert by_name["aws-own"]["current_table_topic_type"] == "own"
 
+    def test_list_table_topic_type_tracks_the_working_current_version(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        # Deployed 1.0.0 owns a table; working current 2.0.0 dropped the meta schema.
+        client.post(
+            "/api/v1/sources",
+            json={
+                **sample_source,
+                "source": "azure-drift",
+                "schema_config": {
+                    "meta_schema": "meta/azure",
+                    "meta_schema_version": "1.0.0",
+                },
+            },
+            headers=admin_headers,
+        )
+        registry = _registries["source"]
+        registry.set_deployed_version("azure-drift", "1.0.0")
+        registry.save_source(
+            {
+                "source": "azure-drift",
+                "deployed_version": "1.0.0",
+                "current": "2.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": sample_source["match"],
+                        "schema": {
+                            "meta_schema": "meta/azure",
+                            "meta_schema_version": "1.0.0",
+                        },
+                    },
+                    "2.0.0": {
+                        "date_time": "2026-01-02",
+                        "match": sample_source["match"],
+                        "schema": {},
+                    },
+                },
+            },
+            created_by="test",
+            description="e2e: current without meta schema",
+        )
+
+        resp = client.get("/api/v1/sources", headers=admin_headers)
+        by_name = {item["name"]: item for item in resp.json()["items"]}
+        assert by_name["azure-drift"]["current"] == "2.0.0"
+        assert by_name["azure-drift"]["deployed_version"] == "1.0.0"
+        assert by_name["azure-drift"]["current_table_topic_type"] == "main"
+
     def test_list_pagination(self, client: TestClient, admin_headers: dict):
         # Create 5 sources
         for i in range(5):
@@ -603,10 +652,84 @@ class TestGetSourceVersion:
         assert body["current"] == "1.0.0"
         assert body["versions"] == ["1.0.0"]
         assert body["previous_deployed_versions"] == []
+        assert body["current_table_topic_type"] == "main"
         assert body["version"]["schema"]["engine"] == "MergeTree"
         assert body["version"]["origin"] == "receiver"
         assert body["version"]["source_build"] is None
         assert body["version"]["source_deployment"] is None
+
+    def test_get_version_reports_own_when_current_pins_meta_schema(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        client.post(
+            "/api/v1/sources",
+            json={
+                **sample_source,
+                "schema_config": {
+                    "meta_schema": "meta/aws_cloudtrail",
+                    "meta_schema_version": "1.0.0",
+                },
+            },
+            headers=admin_headers,
+        )
+        resp = client.get(
+            "/api/v1/sources/test-source/versions/1.0.0",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["current_table_topic_type"] == "own"
+
+    def test_get_version_table_topic_type_tracks_working_current(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        # Selected 1.0.0 owns a table; working current 2.0.0 does not.
+        client.post(
+            "/api/v1/sources",
+            json={
+                **sample_source,
+                "schema_config": {
+                    "meta_schema": "meta/azure",
+                    "meta_schema_version": "1.0.0",
+                },
+            },
+            headers=admin_headers,
+        )
+        registry = _registries["source"]
+        registry.set_deployed_version("test-source", "1.0.0")
+        registry.save_source(
+            {
+                "source": "test-source",
+                "deployed_version": "1.0.0",
+                "current": "2.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": sample_source["match"],
+                        "schema": {
+                            "meta_schema": "meta/azure",
+                            "meta_schema_version": "1.0.0",
+                        },
+                    },
+                    "2.0.0": {
+                        "date_time": "2026-01-02",
+                        "match": sample_source["match"],
+                        "schema": {},
+                    },
+                },
+            },
+            created_by="test",
+            description="current without meta schema",
+        )
+
+        resp = client.get(
+            "/api/v1/sources/test-source/versions/1.0.0",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["selected"] == "1.0.0"
+        assert body["current"] == "2.0.0"
+        assert body["current_table_topic_type"] == "main"
 
     def test_get_version_after_update_preserves_history(
         self, client: TestClient, admin_headers: dict, sample_source: dict
@@ -722,6 +845,43 @@ class TestUpdateSource:
         assert "2.0.0" not in body["versions"]
         assert body["current"] == "1.0.0"
         assert body["versions"]["1.0.0"]["schema"]["engine"] == "MergeTree"
+
+    def test_update_refuses_to_swap_origin(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+        resp = client.put(
+            "/api/v1/sources/test-source",
+            json={
+                "source": "test-source",
+                "fetcher": {"source_type": "okta", "topic": "own"},
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422, resp.text
+        assert "Cannot change source origin" in resp.json()["message"]
+
+    def test_update_refuses_to_clear_a_meta_schema(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        client.post(
+            "/api/v1/sources",
+            json={
+                **sample_source,
+                "schema_config": {
+                    "meta_schema": "meta/aws_cloudtrail",
+                    "meta_schema_version": "1.0.0",
+                },
+            },
+            headers=admin_headers,
+        )
+        resp = client.put(
+            "/api/v1/sources/test-source",
+            json={**sample_source, "schema_config": {"engine": "MergeTree"}},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422, resp.text
+        assert "Cannot remove the meta schema" in resp.json()["message"]
 
     def test_update_rejects_versions_payload(
         self, client: TestClient, admin_headers: dict, sample_source: dict
