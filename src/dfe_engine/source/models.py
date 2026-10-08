@@ -1556,6 +1556,13 @@ class SourceVersionGetResponse(BaseModel):
             "excluding the live deployed_version"
         ),
     )
+    current_table_topic_type: FetcherTopic = Field(
+        description=(
+            "Where the working ``current`` version lands: ``own`` when that version "
+            "pins a meta schema, ``main`` when it does not (even if a deployed older "
+            "version still has its own table)"
+        ),
+    )
     version: SourceVersion = Field(
         ..., description="Immutable configuration snapshot for ``selected``"
     )

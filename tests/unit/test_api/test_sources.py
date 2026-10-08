@@ -652,10 +652,84 @@ class TestGetSourceVersion:
         assert body["current"] == "1.0.0"
         assert body["versions"] == ["1.0.0"]
         assert body["previous_deployed_versions"] == []
+        assert body["current_table_topic_type"] == "main"
         assert body["version"]["schema"]["engine"] == "MergeTree"
         assert body["version"]["origin"] == "receiver"
         assert body["version"]["source_build"] is None
         assert body["version"]["source_deployment"] is None
+
+    def test_get_version_reports_own_when_current_pins_meta_schema(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        client.post(
+            "/api/v1/sources",
+            json={
+                **sample_source,
+                "schema_config": {
+                    "meta_schema": "meta/aws_cloudtrail",
+                    "meta_schema_version": "1.0.0",
+                },
+            },
+            headers=admin_headers,
+        )
+        resp = client.get(
+            "/api/v1/sources/test-source/versions/1.0.0",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["current_table_topic_type"] == "own"
+
+    def test_get_version_table_topic_type_tracks_working_current(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        # Selected 1.0.0 owns a table; working current 2.0.0 does not.
+        client.post(
+            "/api/v1/sources",
+            json={
+                **sample_source,
+                "schema_config": {
+                    "meta_schema": "meta/azure",
+                    "meta_schema_version": "1.0.0",
+                },
+            },
+            headers=admin_headers,
+        )
+        registry = _registries["source"]
+        registry.set_deployed_version("test-source", "1.0.0")
+        registry.save_source(
+            {
+                "source": "test-source",
+                "deployed_version": "1.0.0",
+                "current": "2.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": sample_source["match"],
+                        "schema": {
+                            "meta_schema": "meta/azure",
+                            "meta_schema_version": "1.0.0",
+                        },
+                    },
+                    "2.0.0": {
+                        "date_time": "2026-01-02",
+                        "match": sample_source["match"],
+                        "schema": {},
+                    },
+                },
+            },
+            created_by="test",
+            description="current without meta schema",
+        )
+
+        resp = client.get(
+            "/api/v1/sources/test-source/versions/1.0.0",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["selected"] == "1.0.0"
+        assert body["current"] == "2.0.0"
+        assert body["current_table_topic_type"] == "main"
 
     def test_get_version_after_update_preserves_history(
         self, client: TestClient, admin_headers: dict, sample_source: dict

@@ -1004,6 +1004,7 @@ def get_source_version(
         selected=version,
         versions=version_ids,
         previous_deployed_versions=prev_deployed,
+        current_table_topic_type=source.table_topic_type,
         version=_version_detail_from_snapshot(source.source, version, snap, store),
     )
 

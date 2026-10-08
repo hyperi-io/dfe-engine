@@ -1840,6 +1840,7 @@ class TestSourceVersionGetResponse:
             deployed_version="1.0.0",
             selected="1.0.0",
             versions=["1.0.0", "2.0.0"],
+            current_table_topic_type="main",
             version=SourceVersion(
                 date_time="2026-06-12",
                 header=SourceHeader(type="timeseries", version="1.0.0"),
@@ -1849,6 +1850,7 @@ class TestSourceVersionGetResponse:
             ),
         )
         assert resp.source == "my-source"
+        assert resp.current_table_topic_type == "main"
         assert resp.version.schema_config.engine == "MergeTree"
         assert resp.version.match is not None
         assert resp.version.match.value == "x"
