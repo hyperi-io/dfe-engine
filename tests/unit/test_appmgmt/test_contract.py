@@ -629,7 +629,10 @@ class TestProvenance:
 
     @pytest.mark.parametrize(
         ("service", "own"),
-        [("dfe-transform-vrl", set()), ("dfe-transform-vector", {"config.vector.data_dir"})],
+        [
+            ("dfe-transform-vrl", {"config.source.tls.enabled", "config.sink.tls.enabled"}),
+            ("dfe-transform-vector", {"config.vector.data_dir"}),
+        ],
     )
     def test_the_transform_families_the_chart_derives(self, service, own):
         view = contract.resolve_config(_contract(service), {})
