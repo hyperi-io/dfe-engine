@@ -7,9 +7,6 @@
 #
 # Override defaults with HYPERCI_* env vars.
 
-build:
-  type: app
-
 release:
   enabled: true
   channel: release
