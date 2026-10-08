@@ -1129,16 +1129,136 @@ class TestSourceWriteRequest:
                 },
             }
         )
+        # Match alone does not shape the table, so the deployed version stays current.
         write = SourceWriteRequest.model_validate(
             {
                 "match": {"field": "g", "value": "w"},
-                "schema": {"ttl_days": 30, "meta_schema_version": "1.0.0"},
+                "schema": {"ttl_days": 90, "meta_schema_version": "1.0.0"},
             }
         )
         updated = apply_source_write_update(existing, write)
         assert updated.versions.keys() == {"1.0.0"}
-        assert updated.versions["1.0.0"].schema_config.ttl_days == 30
+        assert updated.versions["1.0.0"].schema_config.ttl_days == 90
         assert updated.versions["1.0.0"].match.field == "g"
+
+    def test_apply_write_update_bumps_on_ttl_days_after_deploy(self):
+        existing = Source.model_validate(
+            {
+                "source": "src-a",
+                "deployed_version": "1.0.0",
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": {"field": "f", "value": "v"},
+                        "schema": {"ttl_days": 90},
+                    }
+                },
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {
+                "match": {"field": "f", "value": "v"},
+                "schema": {"ttl_days": 30},
+            }
+        )
+        updated = apply_source_write_update(existing, write)
+        assert updated.current == "2.0.0"
+        assert updated.versions["1.0.0"].schema_config.ttl_days == 90
+        assert updated.versions["2.0.0"].schema_config.ttl_days == 30
+
+    def test_apply_write_update_bumps_on_engine_after_deploy(self):
+        existing = Source.model_validate(
+            {
+                "source": "src-a",
+                "deployed_version": "1.0.0",
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": {"field": "f", "value": "v"},
+                        "schema": {"engine": "MergeTree"},
+                    }
+                },
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {
+                "match": {"field": "f", "value": "v"},
+                "schema": {"engine": "ReplacingMergeTree"},
+            }
+        )
+        updated = apply_source_write_update(existing, write)
+        assert updated.current == "2.0.0"
+        assert updated.versions["2.0.0"].schema_config.engine == "ReplacingMergeTree"
+
+    def test_apply_write_update_bumps_on_header_after_deploy(self):
+        existing = Source.model_validate(
+            {
+                "source": "src-a",
+                "deployed_version": "1.0.0",
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "header": {"type": "timeseries", "version": "1.0.0"},
+                        "match": {"field": "f", "value": "v"},
+                        "schema": {},
+                    }
+                },
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {
+                "header": {"type": "timeseries", "version": "1.0.1"},
+                "match": {"field": "f", "value": "v"},
+                "schema": {},
+            }
+        )
+        updated = apply_source_write_update(existing, write)
+        assert updated.current == "2.0.0"
+        assert updated.versions["2.0.0"].header is not None
+        assert updated.versions["2.0.0"].header.version == "1.0.1"
+
+    def test_source_version_bump_required_ttl_engine_and_header(self):
+        base = {
+            "date_time": "2026-01-01",
+            "header": {"type": "timeseries", "version": "1.0.0"},
+            "match": {"field": "f", "value": "v"},
+            "schema": {"ttl_days": 90, "engine": "MergeTree"},
+        }
+        prev = SourceVersion.model_validate(base)
+        assert (
+            source_version_bump_required(
+                prev,
+                SourceVersion.model_validate(
+                    {**base, "schema": {"ttl_days": 30, "engine": "MergeTree"}}
+                ),
+            )
+            is True
+        )
+        assert (
+            source_version_bump_required(
+                prev,
+                SourceVersion.model_validate(
+                    {**base, "schema": {"ttl_days": 90, "engine": "ReplacingMergeTree"}}
+                ),
+            )
+            is True
+        )
+        assert (
+            source_version_bump_required(
+                prev,
+                SourceVersion.model_validate(
+                    {
+                        **base,
+                        "header": {"type": "minimal", "version": "1.0.0"},
+                    }
+                ),
+            )
+            is True
+        )
+        assert source_version_bump_required(prev, SourceVersion.model_validate(base)) is False
 
     def test_apply_write_update_bumps_on_meta_schema_path_after_deploy(self):
         existing = Source.model_validate(

@@ -1086,14 +1086,23 @@ def _build_merged_version_snapshot(existing: Source, write: SourceWriteRequest) 
 
 
 def _schema_pin_for_bump(schema: SourceSchema) -> tuple[Any, ...]:
-    """Schema references that change composed columns / deploy DDL."""
+    """Schema fields that change the table shape or retention / engine DDL."""
     return (
         schema.meta_schema,
         schema.meta_schema_version,
         schema.derived_schema,
         schema.derived_schema_version,
         schema.additional_fields,
+        schema.ttl_days,
+        schema.engine,
     )
+
+
+def _header_pin_for_bump(header: SourceHeader | None) -> tuple[str | None, str | None]:
+    """Common-header type and version; absent header is a distinct pin from a defaulted one."""
+    if header is None:
+        return (None, None)
+    return (header.type, header.version)
 
 
 def _transform_pin_for_bump(transform: SourceTransform | None) -> dict[str, Any] | None:
@@ -1106,6 +1115,10 @@ def _transform_pin_for_bump(transform: SourceTransform | None) -> dict[str, Any]
 def source_version_bump_required(previous: SourceVersion, updated: SourceVersion) -> bool:
     """True when a deployed source needs a new major version id for this snapshot change.
 
+    Bumps when the composed table would change: schema pins (meta / derived /
+    additional), ``ttl_days``, ``engine``, common-header type/version, ``views``,
+    or table-affecting ``transform`` fields.
+
     ``transport``, ``archive``, ``transform.variant`` and ``fetcher.routes`` are
     deliberately absent: they move records around, and a version id exists to
     pin the shape of the table those records land in.
@@ -1113,6 +1126,8 @@ def source_version_bump_required(previous: SourceVersion, updated: SourceVersion
     prev_schema = previous.effective_schema()
     new_schema = updated.effective_schema()
     if _schema_pin_for_bump(prev_schema) != _schema_pin_for_bump(new_schema):
+        return True
+    if _header_pin_for_bump(previous.header) != _header_pin_for_bump(updated.header):
         return True
     # Any view change bumps: the standard set, a field_map pin, per-view
     # custom_mappings, or the sigma view's taxonomy/category/service.

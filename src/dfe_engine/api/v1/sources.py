@@ -1832,10 +1832,11 @@ def update_source(
     """Update a source from a flat revision body.
 
     Before the first deploy, edits update the working version in place. After deploy, a new
-    major version is created only when ``current`` equals ``deployed_version`` and schema pins
-    (``meta_schema``, ``meta_schema_version``, ``derived_schema``, ``additional_fields``),
-    ``views``, or ``transform`` change. Draft versions (``current`` not deployed) update
-    in place.
+    major version is created only when ``current`` equals ``deployed_version`` and a
+    table-shaping field changes: schema pins (``meta_schema``, ``meta_schema_version``,
+    ``derived_schema``, ``additional_fields``), ``ttl_days``, ``engine``, common-header
+    type/version, ``views``, or ``transform``. Draft versions (``current`` not deployed)
+    update in place.
 
     Origin (receiver vs fetcher) cannot change, and a pinned ``meta_schema`` cannot be
     cleared: once a source owns its own table it cannot move back onto ``main``.
