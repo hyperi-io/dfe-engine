@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
+from scalo.logger import logger
+
 from dfe_engine.manifest import ManifestError, manifest_path, read_manifest
 from dfe_engine.transport import TRANSPORTS
 
@@ -370,9 +372,10 @@ class AppDescriptor:
     deployment_owned: dict[str, str] = field(default_factory=dict)
     """Config paths the deployment sets over the overlay, each with what sets it.
 
-    Overlay paths, ``config.`` rooted. The value is what an operator changes
-    instead: the env var the app reads, or the values path the deployment sets,
-    so a refused write names what outranks the overlay.
+    Overlay paths, ``config.`` rooted. The value is what decides the path
+    instead: the env var the app reads, the ``configOverrides`` path the
+    deployment sets, or the contract port a listener's address binds, so a
+    refused write names it.
     """
 
     deployment_owned_when: dict[str, str] = field(default_factory=dict)
@@ -509,6 +512,14 @@ BUNDLED_MANIFEST = Path(__file__).parent / "apps.yaml"
 
 
 def _file_set_from(service: str, raw: dict) -> ConsumedFileSet:
+    declared_mount = str(raw.get("mount_path") or "")
+    # Without the trailing slash, so an entry path is never written with two.
+    mount_path = declared_mount.rstrip("/")
+    if declared_mount and not mount_path.startswith("/"):
+        raise CatalogueError(
+            f"{service}: file set {raw.get('name')!r} mount_path {declared_mount!r} must be "
+            "an absolute directory below /, because the app is told to read it as one"
+        )
     try:
         values_path = str(raw["values_path"])
         file_set = ConsumedFileSet(
@@ -517,7 +528,7 @@ def _file_set_from(service: str, raw: dict) -> ConsumedFileSet:
             links_path=str(raw.get("links_path") or f"{values_path}Links"),
             dir_path=str(raw.get("dir_setting", "")),
             entries_path=str(raw.get("entries_path", "")),
-            mount_path=str(raw.get("mount_path") or ""),
+            mount_path=mount_path,
             suffixes=tuple(str(s) for s in raw["suffixes"]),
             language=str(raw["language"]),
             reload=ReloadMode(str(raw.get("reload", ReloadMode.RESTART))),
@@ -530,11 +541,6 @@ def _file_set_from(service: str, raw: dict) -> ConsumedFileSet:
         raise CatalogueError(
             f"{service}: file set {file_set.name!r} declares both dir_setting and "
             "entries_path; an app reads a set as a directory or entry by entry, not both"
-        )
-    if file_set.mount_path and not file_set.mount_path.startswith("/"):
-        raise CatalogueError(
-            f"{service}: file set {file_set.name!r} mount_path {file_set.mount_path!r} "
-            "must be an absolute path, because the app is told to read it as one"
         )
     return file_set
 
@@ -972,8 +978,8 @@ def _kind_from(name: str, raw: dict) -> ArtifactKind:
         raise CatalogueError(f"invalid kind {name!r}: {exc}") from exc
 
 
-def _read_manifest(path: Path | str | None) -> dict:
-    """Load the manifest document.
+def _manifest_source(path: Path | str | None) -> Path:
+    """Where the manifest is read from.
 
     Resolution order: the given path, then ``DFE_APP_CATALOGUE_FILE``, then the
     snapshot bundled in the image. The snapshot is always there, so the resolver
@@ -982,7 +988,43 @@ def _read_manifest(path: Path | str | None) -> dict:
     source = manifest_path(path, "DFE_APP_CATALOGUE_FILE", BUNDLED_MANIFEST)
     if source is None:
         raise CatalogueError("app manifest not found: nothing names one")
-    return read_manifest(source, what="app manifest")
+    return source
+
+
+def _read_manifest(path: Path | str | None) -> dict:
+    """Load the manifest document from wherever ``_manifest_source`` resolves."""
+    return read_manifest(_manifest_source(path), what="app manifest")
+
+
+OWNED_KEYS = ("deployment_owned", "deployment_owned_when")
+"""The per-app keys a mounted manifest that predates them takes from the bundled one."""
+
+
+def _with_bundled_ownership(apps: dict) -> dict:
+    """``apps`` with each app that lacks ``deployment_owned`` given the bundled snapshot's.
+
+    A manifest written before the key existed is one whose deployment still sets
+    those paths, so reading its absence as "owns nothing" would let a write
+    through that the deployment then shadows. An app that declares the key, even
+    empty, keeps its own.
+    """
+    bundled = read_manifest(BUNDLED_MANIFEST, what="bundled app manifest").get("apps") or {}
+    out: dict = {}
+    borrowed: list[str] = []
+    for name, raw in apps.items():
+        entry = dict(raw or {})
+        source = bundled.get(name) or {}
+        if OWNED_KEYS[0] not in entry and source.get(OWNED_KEYS[0]):
+            entry.update({key: source[key] for key in OWNED_KEYS if key in source})
+            borrowed.append(str(name))
+        out[name] = entry
+    if borrowed:
+        logger.warning(
+            "the mounted app manifest declares no deployment_owned for these apps, so "
+            "the engine's bundled copy decides which of their config paths it refuses",
+            apps=borrowed,
+        )
+    return out
 
 
 def load_catalogue(path: Path | str | None = None) -> dict[str, AppDescriptor]:
@@ -992,10 +1034,13 @@ def load_catalogue(path: Path | str | None = None) -> dict[str, AppDescriptor]:
     each one is, so adding or changing an app is an edit there rather than a change
     here.
     """
-    doc = _read_manifest(path)
+    source = _manifest_source(path)
+    doc = read_manifest(source, what="app manifest")
     apps = doc.get("apps")
     if not isinstance(apps, dict) or not apps:
         raise CatalogueError("app manifest declares no apps")
+    if source.resolve() != BUNDLED_MANIFEST.resolve():
+        apps = _with_bundled_ownership(apps)
     return {name: _descriptor_from(name, raw or {}) for name, raw in apps.items()}
 
 

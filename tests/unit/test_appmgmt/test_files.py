@@ -199,6 +199,60 @@ def test_an_unchanged_file_with_no_entry_still_reports_a_change(tables):
     assert files.upsert_file(doc, tables, "geo.csv", "a\n") is False
 
 
+def test_deleting_a_file_an_authored_entry_names_warns_as_compose_does(tables, monkeypatch):
+    seen: list[tuple[str, dict]] = []
+    monkeypatch.setattr(files.logger, "warning", lambda msg, **kw: seen.append((msg, kw)))
+    path = f"{tables.mount_path}/geo.csv"
+    authored = {"name": "geo", "path": path, "key_columns": ["ip"]}
+    doc: dict = {"config": {"enrichment_tables": [authored]}}
+    files.upsert_file(doc, tables, "geo.csv", "ip,cc\n")
+    files.delete_file(doc, tables, "geo.csv")
+
+    assert seen == [
+        (
+            "a declared entry names a file this set no longer carries",
+            {"file_set": "enrichment", "entry": "geo", "missing_file": "geo.csv", "path": path},
+        )
+    ]
+
+
+def test_deleting_a_file_only_a_derived_entry_named_warns_nothing(tables, monkeypatch):
+    seen: list[tuple[str, dict]] = []
+    monkeypatch.setattr(files.logger, "warning", lambda msg, **kw: seen.append((msg, kw)))
+    doc: dict = {}
+    files.upsert_file(doc, tables, "geo.csv", "ip,cc\n")
+    files.delete_file(doc, tables, "geo.csv")
+    assert seen == []
+
+
+def test_a_second_file_with_one_table_name_is_refused_naming_both(tables):
+    doc: dict = {}
+    files.upsert_file(doc, tables, "geo.csv", "ip,cc\n")
+    with pytest.raises(files.TableNameTakenError) as refused:
+        files.upsert_file(doc, tables, "geo.json", "{}\n")
+
+    assert (refused.value.existing, refused.value.name) == ("geo.csv", "geo.json")
+    assert "geo.csv" in str(refused.value)
+    assert "geo.json" in str(refused.value)
+    assert [f.name for f in files.list_files(doc, tables)] == ["geo.csv"]
+
+
+def test_a_file_already_sharing_a_table_name_can_still_be_edited(tables):
+    # A set that came in with both files keeps working; it only gets no second entry.
+    both = [{"name": "geo.csv", "content": "a\n"}, {"name": "geo.json", "content": "{}\n"}]
+    doc: dict = {"fileSets": {"enrichment": {"files": both}}}
+    files.upsert_file(doc, tables, "geo.json", "[]\n")
+    assert _entries(doc) == [{"name": "geo", "path": f"{tables.mount_path}/geo.csv"}]
+
+
+def test_a_set_read_as_a_directory_takes_two_files_with_one_stem():
+    # Only a table-by-table set looks a file up by its stem.
+    transforms = catalogue.file_set(VECTOR, "transforms")
+    doc: dict = {}
+    files.upsert_file(doc, transforms, "geo.yaml", "a: 1\n")
+    assert files.upsert_file(doc, transforms, "geo.yml", "b: 1\n") is True
+
+
 def test_a_malformed_entry_list_is_refused_rather_than_replaced(tables):
     doc: dict = {"config": {"enrichment_tables": {"geo": "/x"}}}
     with pytest.raises(ValueError, match="expected a list"):

@@ -11,8 +11,6 @@ These assert the shipped manifest's VALUES, not that a parse succeeded: the
 model's refusals are only as trustworthy as the transports declared here.
 """
 
-from __future__ import annotations
-
 import pytest
 
 from dfe_engine.appmgmt import catalogue
@@ -20,16 +18,54 @@ from dfe_engine.appmgmt.catalogue import CatalogueError, load_catalogue
 from dfe_engine.yaml_utils import yaml_dump
 
 
-class TestShippedManifest:
-    def test_every_file_set_is_the_chart_s_mounted_set(self):
-        # The thin chart mounts fileSets.<set>.files at fileSets.<set>.mountPath;
-        # content anywhere else in the overlay reaches no pod.
-        sets = [(a.service, fs) for a in catalogue.APP_CATALOGUE.values() for fs in a.files]
-        assert sets
-        for service, file_set in sets:
-            assert file_set.values_path == f"fileSets.{file_set.name}.files", service
-            assert file_set.mount_path.startswith("/"), service
+class TestAMountedManifestWithoutOwnership:
+    """A mounted manifest that predates deployment_owned takes the bundled one's."""
 
+    @staticmethod
+    def _mounted(tmp_path, apps: dict):
+        path = tmp_path / "apps.yaml"
+        yaml_dump({"apps": apps}, path)
+        return path
+
+    @staticmethod
+    def _warnings(monkeypatch) -> list[tuple[str, dict]]:
+        seen: list[tuple[str, dict]] = []
+        monkeypatch.setattr(
+            catalogue.logger, "warning", lambda message, **fields: seen.append((message, fields))
+        )
+        return seen
+
+    def test_an_app_lacking_the_key_takes_the_bundled_paths_and_gates(self, tmp_path):
+        apps = {"dfe-loader": {"multiplicity": "single"}, "dfe-transform-vrl": {}}
+        loaded = load_catalogue(self._mounted(tmp_path, apps))
+        bundled = catalogue.APP_CATALOGUE
+
+        for service in apps:
+            assert loaded[service].deployment_owned == bundled[service].deployment_owned
+            assert loaded[service].deployment_owned_when == bundled[service].deployment_owned_when
+        assert loaded["dfe-loader"].deployment_owned["config.clickhouse.protocol"]
+        assert loaded["dfe-transform-vrl"].deployment_owned_when
+
+    def test_an_app_declaring_the_key_empty_keeps_its_own(self, tmp_path):
+        loaded = load_catalogue(self._mounted(tmp_path, {"dfe-loader": {"deployment_owned": {}}}))
+        assert loaded["dfe-loader"].deployment_owned == {}
+
+    def test_one_warning_names_every_app_that_took_the_bundled_paths(self, tmp_path, monkeypatch):
+        seen = self._warnings(monkeypatch)
+        apps = {"dfe-loader": {}, "dfe-receiver": {}, "dfe-ui": {}, "dfe-new-thing": {}}
+        load_catalogue(self._mounted(tmp_path, apps))
+
+        assert len(seen) == 1
+        # dfe-ui owns nothing in the bundled copy and dfe-new-thing is not in it.
+        assert seen[0][1]["apps"] == ["dfe-loader", "dfe-receiver"]
+
+    def test_the_bundled_manifest_itself_warns_nothing(self, monkeypatch):
+        seen = self._warnings(monkeypatch)
+        load_catalogue(catalogue.BUNDLED_MANIFEST)
+        assert seen == []
+
+
+class TestShippedManifest:
     def test_only_an_app_whose_config_the_engine_writes_owns_config_paths(self):
         for app in catalogue.APP_CATALOGUE.values():
             if app.deployment_owned:
@@ -612,22 +648,24 @@ class TestManifestParsing:
         with pytest.raises(CatalogueError, match=r"gates config\.b"):
             load_catalogue(self._manifest(tmp_path, app))
 
-    def test_a_relative_mount_path_is_refused(self, tmp_path):
-        files = [{**self._FILES, "mount_path": "etc/tables"}]
+    @pytest.mark.parametrize("mount", ["etc/tables", "/", "//"])
+    def test_a_mount_path_that_is_not_a_directory_below_root_is_refused(self, tmp_path, mount):
+        files = [{**self._FILES, "mount_path": mount}]
 
-        with pytest.raises(CatalogueError, match="must be an absolute path"):
+        with pytest.raises(CatalogueError, match="must be an absolute directory below /"):
             load_catalogue(self._manifest(tmp_path, {"files": files}))
 
     def test_a_set_named_entry_by_entry_without_a_mount_path_still_loads(self, tmp_path):
-        # A manifest from before mount_path existed is one a chart derives the
-        # entries for; refusing it would stop the engine at import.
+        # The chart that mounts such a set derives its entries, and refusing the
+        # manifest would stop the engine at import.
         files = [{**self._FILES, "entries_path": "config.tables"}]
         thing = load_catalogue(self._manifest(tmp_path, {"files": files}))["dfe-thing"]
 
         assert thing.files[0].mount_path == ""
 
-    def test_a_mount_path_is_carried_onto_the_file_set(self, tmp_path):
-        files = [{**self._FILES, "entries_path": "config.tables", "mount_path": "/etc/t"}]
+    @pytest.mark.parametrize("mount", ["/etc/t", "/etc/t/", "/etc/t//"])
+    def test_a_mount_path_is_carried_without_its_trailing_slash(self, tmp_path, mount):
+        files = [{**self._FILES, "entries_path": "config.tables", "mount_path": mount}]
         thing = load_catalogue(self._manifest(tmp_path, {"files": files}))["dfe-thing"]
 
         assert thing.files[0].mount_path == "/etc/t"

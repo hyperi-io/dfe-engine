@@ -26,6 +26,8 @@ write goes through the same policy and review routing as every other helm-var ch
 import re
 from dataclasses import dataclass
 
+from scalo.logger import logger
+
 from dfe_engine.gitcrud.engine import get_path, set_path
 from dfe_engine.yaml_utils import literal_block
 
@@ -57,6 +59,27 @@ class FileNotInSetError(KeyError):
     """Raised when the named file is not present in the set."""
 
 
+class TableNameTakenError(ValueError):
+    """Raised when a new file in a table-by-table set has another file's table name.
+
+    The name a program looks a table up by is the file name less its extension,
+    so ``geo.csv`` beside ``geo.json`` would be two tables under one name.
+
+    Attributes:
+        name: The file being added.
+        existing: The file already carrying that table name.
+    """
+
+    def __init__(self, name: str, existing: str) -> None:
+        """Name both files and the table name they share."""
+        super().__init__(
+            f"{name!r} would be looked up as table {table_name(name)!r}, which "
+            f"{existing!r} already is; rename one of the two"
+        )
+        self.name = name
+        self.existing = existing
+
+
 @dataclass(frozen=True, slots=True)
 class AppFile:
     """One file an app consumes."""
@@ -67,6 +90,7 @@ class AppFile:
 
     @property
     def size_bytes(self) -> int:
+        """The content's size as UTF-8, which is what the overlay stores."""
         return len(self.content.encode("utf-8"))
 
 
@@ -145,6 +169,7 @@ def upsert_file(doc: dict, file_set: ConsumedFileSet, name: str, content: str) -
     validate_filename(file_set, name)
     validate_content(content)
     entries = _entries(doc, file_set)
+    _refuse_a_second_table_name(file_set, [str(e[_NAME_FIELD]) for e in entries], name)
     body = literal_block(content)
     changed = True
     for entry in entries:
@@ -162,14 +187,45 @@ def upsert_file(doc: dict, file_set: ConsumedFileSet, name: str, content: str) -
 
 
 def delete_file(doc: dict, file_set: ConsumedFileSet, name: str) -> bool:
-    """Remove a file from the set. Mutates ``doc``. Returns whether it changed."""
+    """Remove a file from the set. Mutates ``doc``. Returns whether it changed.
+
+    An entry the author declared for the file is kept for its key columns, and
+    warned about as the Compose render warns, since the app cannot load it now.
+    """
     entries = _entries(doc, file_set)
     remaining = [e for e in entries if e[_NAME_FIELD] != name]
     if len(remaining) == len(entries):
         raise FileNotInSetError(name)
     set_path(doc, file_set.values_path, remaining)
     sync_table_entries(doc, file_set)
+    _warn_on_orphaned_entries(doc, file_set, name)
     return True
+
+
+def _refuse_a_second_table_name(file_set: ConsumedFileSet, carried: list[str], name: str) -> None:
+    """Refuse a new file whose table name another file in the set already has."""
+    if not file_set.entries_path or name in carried:
+        return
+    for existing in carried:
+        if table_name(existing) == table_name(name):
+            raise TableNameTakenError(name, existing)
+
+
+def _warn_on_orphaned_entries(doc: dict, file_set: ConsumedFileSet, name: str) -> None:
+    """Warn about each entry still naming a file just removed from the set."""
+    if not file_set.entries_path or not file_set.mount_path:
+        return
+    declared = get_path(doc, file_set.entries_path, default=None)
+    path = f"{file_set.mount_path}/{name}"
+    for entry in declared if isinstance(declared, list) else []:
+        if isinstance(entry, dict) and entry.get("path") == path:
+            logger.warning(
+                "a declared entry names a file this set no longer carries",
+                file_set=file_set.name,
+                entry=entry.get(_NAME_FIELD),
+                missing_file=name,
+                path=path,
+            )
 
 
 def table_name(filename: str) -> str:
@@ -203,7 +259,11 @@ def sync_table_entries(doc: dict, file_set: ConsumedFileSet) -> bool:
     carried = [str(entry[_NAME_FIELD]) for entry in _entries(doc, file_set)]
     kept = [entry for entry in current if not _dead_derived(entry, file_set, set(carried))]
     named = {entry.get(_NAME_FIELD) for entry in kept if isinstance(entry, dict)}
-    added = [derived_entry(file_set, name) for name in carried if table_name(name) not in named]
+    added: list[dict[str, str]] = []
+    for name in carried:
+        if table_name(name) not in named:
+            added.append(derived_entry(file_set, name))
+            named.add(table_name(name))
     wanted = kept + added
     if wanted == current:
         return False

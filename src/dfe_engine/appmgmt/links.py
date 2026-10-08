@@ -27,13 +27,12 @@ These are pure document operations. Committing them is the router's job, so the
 write goes through the same policy and review routing as every other overlay change.
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud.engine import ResourceNotFoundError, get_path, set_path
+from dfe_engine.yaml_utils import literal_block
 
 from . import files, library
 from .catalogue import ConsumedFileSet, descriptor
@@ -270,7 +269,9 @@ def relink(doc: dict, file_set: ConsumedFileSet, source: LibrarySource) -> list[
             content = source.content(link.artifact, found.path)
         except library.VersionNotFoundError, ResourceNotFoundError:
             continue
-        moved_here = files.upsert_file(doc, file_set, link.name, content)
+        # The content alone decides: upsert_file also reports a table entry it named.
+        moved_here = _content_of(doc, file_set, link.name) != str(literal_block(content))
+        files.upsert_file(doc, file_set, link.name, content)
         if target != link.version or found.digest != link.digest:
             moved_here = True
         _store(
@@ -287,6 +288,14 @@ def relink(doc: dict, file_set: ConsumedFileSet, source: LibrarySource) -> list[
         if moved_here:
             moved.append(read_link(doc, file_set, link.name))
     return moved
+
+
+def _content_of(doc: dict, file_set: ConsumedFileSet, name: str) -> str | None:
+    """The content the set holds under ``name``, or None when it holds no such file."""
+    try:
+        return files.read_file(doc, file_set, name).content
+    except files.FileNotInSetError:
+        return None
 
 
 def _current_of(env: dict) -> int | None:

@@ -14,16 +14,14 @@ expects, and neither notices when the two names stop agreeing. Every assertion h
 is about that seam.
 
 These are the charts a rollback renders the overlay on, so what is held here is that
-the identity and telemetry keys still name each instance there. File content now
-lives under the thin chart's ``fileSets``, which these charts do not read; dfe-infra's
+the identity and telemetry keys name each instance there. File content sits under
+the thin chart's ``fileSets``, which these charts do not read, and dfe-infra's
 ``scripts/tests/test_weave_transforms.py`` holds its delivery to the pod.
 
 The charts come from a dfe-infra checkout (``$DFE_INFRA_DIR``, or one beside this
 repo), else from the dfe-infra release pinned in ``tests/support/producer_contract.py``.
 The module skips when the ``helm`` binary is absent.
 """
-
-from __future__ import annotations
 
 import re
 import shutil
@@ -214,12 +212,6 @@ class TestOverlayRendersThroughTheChart:
             (o["kind"], o["metadata"]["name"]) for o in without
         }
 
-    def test_files_absent_from_the_overlay_render_no_configmap(self, charts, service, tmp_path):
-        doc = overlay_with_files(service, "edge", {})
-        objects = render(charts, service, doc, "edge", tmp_path)
-        names = {o["metadata"]["name"] for o in objects if o["kind"] == "ConfigMap"}
-        assert not any(n.endswith("-transforms") for n in names)
-
     @pytest.mark.parametrize("case", sorted(HOSTILE_BODIES))
     def test_hostile_content_survives_byte_exact(self, service, case):
         # What Helm parses is the committed YAML, so the body has to come back
@@ -230,19 +222,6 @@ class TestOverlayRendersThroughTheChart:
         parsed = yaml.safe_load(yaml_dump_string(doc))
         file_set = catalogue.file_set(service, "transforms")
         assert files.read_file(parsed, file_set, name).content == body
-
-    def test_content_cannot_forge_a_sibling_key_in_the_rendered_objects(
-        self, charts, service, tmp_path
-    ):
-        # A body that breaks out of its own scalar would set replicaCount. The chart
-        # renders replicas only while KEDA is off, so the replica count is the evidence.
-        doc = overlay_with_files(
-            service, "edge", {FILE_FOR[service]: HOSTILE_BODIES["carriage-return-injection"]}
-        )
-        for path, value in scaling.changes(doc, keda_enabled=False).items():
-            set_path(doc, path, value)
-        objects = render(charts, service, doc, "edge", tmp_path)
-        assert only(objects, "Deployment")["spec"]["replicas"] == 1
 
     def test_scaling_dials_reach_the_scaledobject_and_the_container(
         self, charts, service, tmp_path

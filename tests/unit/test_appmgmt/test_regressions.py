@@ -80,6 +80,16 @@ class TestContentCannotForgeOverlayKeys:
         assert set(reloaded) == baseline | {_top_key(vrl_set.values_path)}
         assert files.read_file(reloaded, vrl_set, "010_indent.vrl").content == INDENT_INJECTION
 
+    @pytest.mark.parametrize("body", [CR_INJECTION, INDENT_INJECTION])
+    def test_content_forges_no_key_at_any_depth(self, crud, vrl_set, body):
+        # The content sits three mappings down, so a forged sibling would land
+        # beside it there rather than at the top: the whole document is compared.
+        app = instances.instance_of(VRL, "edge")
+        doc = instances.initial_overlay(app)
+        files.upsert_file(doc, vrl_set, "000_parse.vrl", body)
+
+        assert _committed(crud, doc, app) == doc
+
     def test_on_disk_yaml_carries_no_forged_top_level_key(self, crud, vrl_set):
         app = instances.instance_of(VRL, "edge")
         doc = instances.initial_overlay(app)
@@ -246,6 +256,28 @@ class TestInstanceCountFollowsMultiplicity:
         assert doc[catalogue.FULLNAME_OVERRIDE_PATH] == dfe_common == f"{service}-auth"
         assert get_path(doc, catalogue.OTEL_SERVICE_NAME_PATH) == f"{service}-auth"
         assert doc[catalogue.DFE_COMMON_OTEL_SERVICE_NAME_PATH] == f"{service}-auth"
+
+    def test_a_caller_s_value_cannot_rename_the_instance(self):
+        # The Argo Application and every object name come from these keys.
+        values = {
+            "fullnameOverride": "dfe-somebody-else",
+            "component": "somebody-else",
+            "deploy.instance": "other",
+            "otel.serviceName": "other",
+            "otel.endpoint": "http://collector:4317",
+            "replicaCount": 2,
+        }
+        doc = instances.initial_overlay(instances.instance_of(FETCHER, "alpha"), values)
+
+        assert doc["fullnameOverride"] == "dfe-fetcher-alpha"
+        assert doc["component"] == "fetcher-alpha"
+        assert doc["deploy"] == {"service": FETCHER, "instance": "alpha"}
+        assert doc["otel"] == {
+            "serviceName": "dfe-fetcher-alpha",
+            "endpoint": values["otel.endpoint"],
+        }
+        assert doc["replicaCount"] == 2
+        assert next(iter(doc)) == "deploy"
 
     def test_a_single_deployment_overlay_does_not_set_the_component(self):
         # One deployment per app, so overriding the component would only rename the

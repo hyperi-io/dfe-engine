@@ -1416,16 +1416,19 @@ def check_env_value(value: Any) -> str:
     return ""
 
 
-def _chart_derived(service: str, overlay: dict) -> dict[str, str]:
+def _chart_derived(service: str, overlay: dict, *, chart_deployed: bool = True) -> dict[str, str]:
     """The options the deployment decides for an instance with this overlay, and what decides each.
 
     Keyed by the path inside the config file. The app's ``deployment_owned`` in the
     manifest, less every gated path whose overlay value is empty, because the
     deployment renders nothing for it then. A path the app's schema does not carry
     never matches a field.
+
+    ``chart_deployed`` is false on a target with no chart, where the deployment's
+    base config sits under the overlay and so decides nothing.
     """
     app = APP_CATALOGUE.get(service)
-    if app is None:
+    if app is None or not chart_deployed:
         return {}
     prefix = f"{CONFIG_ROOT}."
     return {
@@ -1442,29 +1445,35 @@ def _chart_value_set(overlay: dict, path: str) -> bool:
     return not isinstance(value, _Missing) and bool(value)
 
 
-def chart_supplier(service: str, path: str, overlay: dict | None = None) -> str | None:
+def chart_supplier(
+    service: str, path: str, overlay: dict | None = None, *, chart_deployed: bool = True
+) -> str | None:
     """What the deployment sets this option with, or None where it sets nothing.
 
     ``path`` is the overlay path, ``config.`` rooted, so a caller compares the
     request's own keys rather than re-deriving them. ``overlay`` is the
     instance's, which decides the options the chart sets only on a value of its own.
+    ``chart_deployed`` is as for :func:`_chart_derived`.
     """
     inner = path.split(".", 1)[1] if path.startswith(f"{CONFIG_ROOT}.") else path
-    return _chart_derived(service, overlay or {}).get(inner)
+    return _chart_derived(service, overlay or {}, chart_deployed=chart_deployed).get(inner)
 
 
-def chart_env_names(service: str, overlay: dict | None = None) -> dict[str, str]:
+def chart_env_names(
+    service: str, overlay: dict | None = None, *, chart_deployed: bool = True
+) -> dict[str, str]:
     """Environment names the deployment sets for this app, each with the option it decides.
 
     A supplier in the app's ``deployment_owned`` is either an environment name or a
     values path, and only the names are keys here: ``ENV_NAME`` tells the two apart,
     so what an ``extraEnv`` key is compared against is data rather than prose.
     Where one variable decides several options the first is reported, which is
-    enough to say what the operator would be shadowing. ``overlay`` is the
-    instance's, as for :func:`chart_supplier`.
+    enough to say what the operator would be shadowing. ``overlay`` and
+    ``chart_deployed`` are as for :func:`chart_supplier`.
     """
     out: dict[str, str] = {}
-    for inner, supplier in _chart_derived(service, overlay or {}).items():
+    derived = _chart_derived(service, overlay or {}, chart_deployed=chart_deployed)
+    for inner, supplier in derived.items():
         if ENV_NAME.match(supplier):
             out.setdefault(supplier, f"{CONFIG_ROOT}.{inner}")
     return out
@@ -1498,6 +1507,7 @@ def resolve_config(
     overlay: dict,
     *,
     is_protected: Callable[[str], bool] | None = None,
+    chart_deployed: bool = True,
 ) -> ConfigView:
     """Every option this instance has, with its value and where the value comes from.
 
@@ -1507,11 +1517,11 @@ def resolve_config(
     A chart-derived path is reported as such before the overlay is consulted: the
     deployment decides it, and telling the console an overlay key governs a broker
     list the DFE_TRANSFORM_* env contract overrides is the answer this provenance
-    exists to prevent.
+    exists to prevent. ``chart_deployed`` is as for :func:`chart_supplier`.
     """
     block = overlay.get(CONFIG_ROOT)
     block = block if isinstance(block, dict) else {}
-    derived = _chart_derived(app_contract.service, overlay)
+    derived = _chart_derived(app_contract.service, overlay, chart_deployed=chart_deployed)
     enums = catalogue_enums(app_contract.capabilities)
     protected = is_protected or (lambda _path: False)
 

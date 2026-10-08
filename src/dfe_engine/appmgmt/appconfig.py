@@ -454,11 +454,13 @@ def _apply_entries(
                 path=path,
             )
     named = {e.get("name") for e in existing if isinstance(e, dict)}
-    derived = [
-        {"name": files.table_name(entry.name), "path": f"{mounted}/{entry.name}"}
-        for entry in entries
-        if files.table_name(entry.name) not in named
-    ]
+    derived: list[dict[str, str]] = []
+    for entry in entries:
+        if files.table_name(entry.name) not in named:
+            derived.append(
+                {"name": files.table_name(entry.name), "path": f"{mounted}/{entry.name}"}
+            )
+            named.add(files.table_name(entry.name))
     if existing or derived:
         set_path(config, inner, existing + derived)
 
