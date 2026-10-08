@@ -208,7 +208,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true,
           "default": null
         },
@@ -445,7 +445,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "bucket": {
@@ -476,7 +476,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "credentials_path": {
@@ -505,7 +505,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "sas_token": {
@@ -513,7 +513,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "container": {
@@ -547,7 +547,7 @@
         },
         "secret_key": {
           "type": "string",
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "bucket": {

@@ -569,7 +569,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true,
           "default": null
         },
@@ -683,7 +683,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "assume_role_arn": {
@@ -752,7 +752,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true,
           "default": null
         },
@@ -880,7 +880,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "credential_secret": {
@@ -963,7 +963,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true,
           "default": null
         },
@@ -1083,7 +1083,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "credential_secret": {
@@ -1320,7 +1320,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "credential_secret": {
@@ -1423,7 +1423,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "credential_secret": {
@@ -1476,7 +1476,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "use_ssws_header": {
@@ -1577,7 +1577,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "use_ssws_header": {
@@ -1637,7 +1637,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "credential_secret": {
@@ -1733,7 +1733,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "credential_secret": {
@@ -1779,7 +1779,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "credential_secret": {
@@ -1868,7 +1868,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "credential_secret": {
@@ -1928,7 +1928,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "credential_secret": {
@@ -2024,7 +2024,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "credential_secret": {
@@ -2063,7 +2063,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "credential_secret": {
@@ -2152,7 +2152,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "credential_secret": {
@@ -2205,7 +2205,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "credential_secret": {
@@ -2308,7 +2308,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "credential_secret": {
@@ -2375,7 +2375,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "credential_secret": {
@@ -2478,7 +2478,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "credential_secret": {
@@ -3122,7 +3122,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "credential_secret": {
@@ -3189,7 +3189,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "sas_token": {
@@ -3198,7 +3198,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "tenant_id": {
@@ -3221,7 +3221,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "credential_secret": {
@@ -3301,7 +3301,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "credential_secret": {
@@ -3432,7 +3432,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "credential_secret": {
@@ -3819,7 +3819,7 @@
         "password": {
           "description": "Password (always redacted in serialisation/debug output).\n\nThe schema default is pinned to the empty string: serialising the real\ndefault outside an expose window yields the mask, and a UI that\npre-filled a password box with `***REDACTED***` would send that as the\npassword.",
           "type": "string",
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true,
           "default": ""
         }
@@ -4302,7 +4302,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true,
           "default": null
         },

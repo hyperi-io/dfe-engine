@@ -787,7 +787,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "x-dfe-secret": true,
+            "x-scalo-secret": true,
             "writeOnly": true
           },
           "default": []
@@ -807,7 +807,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "x-dfe-secret": true,
+            "x-scalo-secret": true,
             "writeOnly": true
           },
           "default": []
@@ -826,7 +826,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "x-dfe-secret": true,
+            "x-scalo-secret": true,
             "writeOnly": true
           },
           "default": []

@@ -48,11 +48,8 @@ CAPABILITIES_FILE = "capability-catalog.json"
 SOURCE_FILE = "source.json"
 """scalo's own file names - the CLI chooses the directory and nothing else."""
 
-SECRET_MARKERS = ("x-scalo-secret", "x-dfe-secret")  # noqa: S105, RUF100 - schema keywords
-"""The schema keywords an app uses to mark a field as credential material.
-
-scalo writes ``x-scalo-secret``; an app built on an older scalo writes ``x-dfe-secret``.
-"""
+SECRET_MARKER = "x-scalo-secret"  # noqa: S105, RUF100 - a schema keyword
+"""The schema keyword scalo writes to mark a field as credential material."""
 
 ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
 """What a key under ``extraEnv`` may be called.
@@ -822,8 +819,8 @@ def _wholly_secret(path: str, node: dict, root: dict) -> bool:
 
 
 def _marked_secret(branch: dict) -> bool:
-    """Whether a schema branch carries either secret marker."""
-    return any(branch.get(marker) for marker in SECRET_MARKERS)
+    """Whether a schema branch carries the secret marker."""
+    return bool(branch.get(SECRET_MARKER))
 
 
 def _masked(value: Any) -> Any:
