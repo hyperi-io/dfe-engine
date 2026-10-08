@@ -1086,14 +1086,23 @@ def _build_merged_version_snapshot(existing: Source, write: SourceWriteRequest) 
 
 
 def _schema_pin_for_bump(schema: SourceSchema) -> tuple[Any, ...]:
-    """Schema references that change composed columns / deploy DDL."""
+    """Schema fields that change the table shape or retention / engine DDL."""
     return (
         schema.meta_schema,
         schema.meta_schema_version,
         schema.derived_schema,
         schema.derived_schema_version,
         schema.additional_fields,
+        schema.ttl_days,
+        schema.engine,
     )
+
+
+def _header_pin_for_bump(header: SourceHeader | None) -> tuple[str | None, str | None]:
+    """Common-header type and version; absent header is a distinct pin from a defaulted one."""
+    if header is None:
+        return (None, None)
+    return (header.type, header.version)
 
 
 def _transform_pin_for_bump(transform: SourceTransform | None) -> dict[str, Any] | None:
@@ -1106,6 +1115,10 @@ def _transform_pin_for_bump(transform: SourceTransform | None) -> dict[str, Any]
 def source_version_bump_required(previous: SourceVersion, updated: SourceVersion) -> bool:
     """True when a deployed source needs a new major version id for this snapshot change.
 
+    Bumps when the composed table would change: schema pins (meta / derived /
+    additional), ``ttl_days``, ``engine``, common-header type/version, ``views``,
+    or table-affecting ``transform`` fields.
+
     ``transport``, ``archive``, ``transform.variant`` and ``fetcher.routes`` are
     deliberately absent: they move records around, and a version id exists to
     pin the shape of the table those records land in.
@@ -1113,6 +1126,8 @@ def source_version_bump_required(previous: SourceVersion, updated: SourceVersion
     prev_schema = previous.effective_schema()
     new_schema = updated.effective_schema()
     if _schema_pin_for_bump(prev_schema) != _schema_pin_for_bump(new_schema):
+        return True
+    if _header_pin_for_bump(previous.header) != _header_pin_for_bump(updated.header):
         return True
     # Any view change bumps: the standard set, a field_map pin, per-view
     # custom_mappings, or the sigma view's taxonomy/category/service.
@@ -1156,11 +1171,36 @@ def draft_build_version_to_invalidate(existing: Source, updated: Source) -> str 
     return None
 
 
+def _reject_origin_or_table_paradigm_change(
+    previous: SourceVersion, updated: SourceVersion
+) -> None:
+    """Refuse an update that swaps intake origin or drops back onto the shared table.
+
+    Origin (receiver vs fetcher) is fixed for the life of a source: the apps and
+    routing compiled around it assume one intake. A pinned ``meta_schema`` means
+    the source owns its own ClickHouse table; clearing it would move records onto
+    ``main``, which an update is not allowed to do.
+    """
+    if previous.origin != updated.origin:
+        raise ValueError(
+            f"Cannot change source origin from {previous.origin!r} to {updated.origin!r}: "
+            "a source is receiver-based or fetcher-based for its whole life"
+        )
+    previous_owns_table = bool(previous.effective_schema().meta_schema)
+    updated_owns_table = bool(updated.effective_schema().meta_schema)
+    if previous_owns_table and not updated_owns_table:
+        raise ValueError(
+            "Cannot remove the meta schema: once a source owns its own table it "
+            "cannot move back to the shared main table"
+        )
+
+
 def apply_source_write_update(existing: Source, write: SourceWriteRequest) -> Source:
     """Persist a write: bump major version only when ``current`` is deployed and pins/mappings change."""
     snapshot = _build_merged_version_snapshot(existing, write)
     current_id = existing.current
     previous = existing.versions[current_id]
+    _reject_origin_or_table_paradigm_change(previous, snapshot)
 
     append_version = (
         existing.deployed_version is not None
@@ -1425,12 +1465,13 @@ class Source(BaseModel):
 
     @property
     def table_topic_type(self) -> FetcherTopic:
-        """Whether records land on this source's own table or the shared main one.
+        """Where the working ``current`` version's records land: own table or main.
 
-        A pinned ``meta_schema`` means the source has its own ClickHouse table.
-        Without one, records share the platform landing table (``main``).
+        A pinned ``meta_schema`` on ``current`` means that version has its own
+        ClickHouse table. Without one, it shares the platform landing table
+        (``main``) -- even when a still-deployed older version pinned a schema.
         """
-        return "own" if self.schema_config.meta_schema else "main"
+        return "own" if self.version(self.current).effective_schema().meta_schema else "main"
 
     # -----------------------------------------------------------------
     # Derived properties
@@ -1515,6 +1556,13 @@ class SourceVersionGetResponse(BaseModel):
             "excluding the live deployed_version"
         ),
     )
+    current_table_topic_type: FetcherTopic = Field(
+        description=(
+            "Where the working ``current`` version lands: ``own`` when that version "
+            "pins a meta schema, ``main`` when it does not (even if a deployed older "
+            "version still has its own table)"
+        ),
+    )
     version: SourceVersion = Field(
         ..., description="Immutable configuration snapshot for ``selected``"
     )
@@ -1556,8 +1604,9 @@ class SourceSummaryObject(BaseModel):
     )
     current_table_topic_type: FetcherTopic = Field(
         description=(
-            "Where records land: ``own`` when a meta schema pins a per-source table, "
-            "``main`` when there is none and records share the landing table"
+            "Where the working ``current`` version lands: ``own`` when that version "
+            "pins a meta schema, ``main`` when it does not (even if a deployed older "
+            "version still has its own table)"
         ),
     )
     views: list[str] = Field(

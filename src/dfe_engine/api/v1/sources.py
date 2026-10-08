@@ -1004,6 +1004,7 @@ def get_source_version(
         selected=version,
         versions=version_ids,
         previous_deployed_versions=prev_deployed,
+        current_table_topic_type=source.table_topic_type,
         version=_version_detail_from_snapshot(source.source, version, snap, store),
     )
 
@@ -1832,10 +1833,14 @@ def update_source(
     """Update a source from a flat revision body.
 
     Before the first deploy, edits update the working version in place. After deploy, a new
-    major version is created only when ``current`` equals ``deployed_version`` and schema pins
-    (``meta_schema``, ``meta_schema_version``, ``derived_schema``, ``additional_fields``),
-    ``views``, or ``transform`` change. Draft versions (``current`` not deployed) update
-    in place.
+    major version is created only when ``current`` equals ``deployed_version`` and a
+    table-shaping field changes: schema pins (``meta_schema``, ``meta_schema_version``,
+    ``derived_schema``, ``additional_fields``), ``ttl_days``, ``engine``, common-header
+    type/version, ``views``, or ``transform``. Draft versions (``current`` not deployed)
+    update in place.
+
+    Origin (receiver vs fetcher) cannot change, and a pinned ``meta_schema`` cannot be
+    cleared: once a source owns its own table it cannot move back onto ``main``.
 
     ``header`` is optional: when omitted, no header is stored on the written version snapshot
     (same as create). Send ``header`` explicitly to set or change it.
@@ -2318,7 +2323,7 @@ def _to_summary(raw: dict[str, Any]) -> SourceSummaryObject:
         has_transform=bool(raw.get("has_transform")),
         has_fetcher=bool(raw.get("has_fetcher")),
         origin=raw.get("origin"),
-        current_table_topic_type=raw.get("current_table_topic_type", "own"),
+        current_table_topic_type=raw.get("current_table_topic_type", "main"),
         views=list(raw.get("views") or []),
     )
 
