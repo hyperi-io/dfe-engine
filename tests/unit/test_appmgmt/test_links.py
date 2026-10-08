@@ -73,7 +73,7 @@ def _one(env: dict, name: str = "parse") -> links.LibrarySource:
 
 class TestFileSetDeclaresItsLinksPath:
     def test_links_path_comes_from_the_manifest(self, vrl_set):
-        assert vrl_set.values_path == "transformFiles"
+        assert vrl_set.values_path == "fileSets.transforms.files"
         assert vrl_set.links_path == "transformFileLinks"
 
     def test_an_undeclared_links_path_defaults_beside_the_values_path(self):

@@ -421,6 +421,9 @@ def _apply_entries(
     lookup into a full scan. The name is the file name without its extension,
     which is the name a program looks the table up by.
 
+    An entry whose path sits under the set's ``mount_path`` names the file where
+    a chart mounts it, so it is pointed at this render's directory instead.
+
     A declared entry whose path sits in this set's directory and names a file the
     set no longer carries is kept and warned about: this render just rewrote that
     directory, so the path is known to be dead, while an entry pointing anywhere
@@ -432,7 +435,10 @@ def _apply_entries(
         declared = declared.get(part) if isinstance(declared, dict) else None
         if declared is None:
             break
-    existing = list(declared) if isinstance(declared, list) else []
+    existing = [
+        _remounted(entry, file_set.mount_path, mounted)
+        for entry in (declared if isinstance(declared, list) else [])
+    ]
     carried = {entry.name for entry in entries}
     for entry in existing:
         path = entry.get("path") if isinstance(entry, dict) else None
@@ -449,12 +455,22 @@ def _apply_entries(
             )
     named = {e.get("name") for e in existing if isinstance(e, dict)}
     derived = [
-        {"name": entry.name.rsplit(".", 1)[0], "path": f"{mounted}/{entry.name}"}
+        {"name": files.table_name(entry.name), "path": f"{mounted}/{entry.name}"}
         for entry in entries
-        if entry.name.rsplit(".", 1)[0] not in named
+        if files.table_name(entry.name) not in named
     ]
     if existing or derived:
         set_path(config, inner, existing + derived)
+
+
+def _remounted(entry: Any, mount_path: str, mounted: str) -> Any:
+    """An entry naming a file under ``mount_path``, re-pointed at ``mounted``; any other as is."""
+    if not mount_path or not isinstance(entry, dict):
+        return entry
+    path = entry.get("path")
+    if not isinstance(path, str) or not path.startswith(f"{mount_path}/"):
+        return entry
+    return {**entry, "path": f"{mounted}/{path.removeprefix(f'{mount_path}/')}"}
 
 
 def _instances_for(gc: GitCrud, app: AppDescriptor) -> list[instances.AppInstance | None]:

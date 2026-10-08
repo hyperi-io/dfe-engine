@@ -13,13 +13,15 @@ a chart-rendered ConfigMap can only contain what is already in the values.
 
 The stored shape is a LIST of ``{name, content}`` rather than a filename-keyed map:
 gitcrud flattens documents to dot-paths, and a filename's own dot would make
-``transformFiles.000_parse.vrl`` ambiguous with a nested mapping.
+``fileSets.transforms.files.000_parse.vrl`` ambiguous with a nested mapping.
+
+A set the app reads table by table (``entries_path``) is named in the app's own
+config as its files are written, because the config file takes no template and
+nothing downstream derives the entries.
 
 These are pure document operations. Committing them is the router's job, so the
 write goes through the same policy and review routing as every other helm-var change.
 """
-
-from __future__ import annotations
 
 import re
 from dataclasses import dataclass
@@ -144,16 +146,19 @@ def upsert_file(doc: dict, file_set: ConsumedFileSet, name: str, content: str) -
     validate_content(content)
     entries = _entries(doc, file_set)
     body = literal_block(content)
+    changed = True
     for entry in entries:
         if entry[_NAME_FIELD] == name:
             if str(entry.get(_CONTENT_FIELD, "")) == str(body):
-                return False
+                changed = False
+                break
             entry[_CONTENT_FIELD] = body
             set_path(doc, file_set.values_path, entries)
-            return True
-    entries.append({_NAME_FIELD: name, _CONTENT_FIELD: body})
-    set_path(doc, file_set.values_path, entries)
-    return True
+            break
+    else:
+        entries.append({_NAME_FIELD: name, _CONTENT_FIELD: body})
+        set_path(doc, file_set.values_path, entries)
+    return sync_table_entries(doc, file_set) or changed
 
 
 def delete_file(doc: dict, file_set: ConsumedFileSet, name: str) -> bool:
@@ -163,4 +168,52 @@ def delete_file(doc: dict, file_set: ConsumedFileSet, name: str) -> bool:
     if len(remaining) == len(entries):
         raise FileNotInSetError(name)
     set_path(doc, file_set.values_path, remaining)
+    sync_table_entries(doc, file_set)
     return True
+
+
+def table_name(filename: str) -> str:
+    """The name a program looks a mounted table up by: the file name less its extension."""
+    return filename.rsplit(".", 1)[0]
+
+
+def derived_entry(file_set: ConsumedFileSet, filename: str) -> dict[str, str]:
+    """The ``{name, path}`` entry naming one file of the set where it is mounted."""
+    return {_NAME_FIELD: table_name(filename), "path": f"{file_set.mount_path}/{filename}"}
+
+
+def sync_table_entries(doc: dict, file_set: ConsumedFileSet) -> bool:
+    """Name every file of a table-by-table set in the app's config. Mutates ``doc``.
+
+    An entry the config already names is left alone, because the author's entry
+    carries key columns a derived one cannot. A derived entry whose file the set
+    no longer carries is dropped, since the app would fail to load it. Returns
+    whether the entry list changed. A set read as a directory has none, and one
+    whose manifest names no ``mount_path`` leaves them to the chart that mounts it.
+    """
+    if not file_set.entries_path or not file_set.mount_path:
+        return False
+    declared = get_path(doc, file_set.entries_path, default=None)
+    if declared is not None and not isinstance(declared, list):
+        raise ValueError(
+            f"{file_set.entries_path} holds {type(declared).__name__}, expected a list of "
+            "{name, path} entries"
+        )
+    current = list(declared or [])
+    carried = [str(entry[_NAME_FIELD]) for entry in _entries(doc, file_set)]
+    kept = [entry for entry in current if not _dead_derived(entry, file_set, set(carried))]
+    named = {entry.get(_NAME_FIELD) for entry in kept if isinstance(entry, dict)}
+    added = [derived_entry(file_set, name) for name in carried if table_name(name) not in named]
+    wanted = kept + added
+    if wanted == current:
+        return False
+    set_path(doc, file_set.entries_path, wanted)
+    return True
+
+
+def _dead_derived(entry: object, file_set: ConsumedFileSet, carried: set[str]) -> bool:
+    """Whether ``entry`` is a derived entry for a file the set no longer carries."""
+    if not isinstance(entry, dict) or set(entry) != {_NAME_FIELD, "path"}:
+        return False
+    filename = str(entry["path"]).removeprefix(f"{file_set.mount_path}/")
+    return entry == derived_entry(file_set, filename) and filename not in carried

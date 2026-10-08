@@ -17,8 +17,6 @@ Argo Application, and it becomes the app's OTel ``service.name`` - so it is vali
 as a DNS label rather than merely as a safe filename.
 """
 
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass
 
@@ -28,15 +26,18 @@ from dfe_engine.gitcrud.engine import ResourceNotFoundError, set_path
 from dfe_engine.gitcrud.log import LogEntry, read_log
 
 from .catalogue import (
-    COMPONENT_PATH,
     DEPLOY_INSTANCE_PATH,
     DEPLOY_SERVICE_PATH,
+    DFE_COMMON_COMPONENT_PATH,
+    DFE_COMMON_OTEL_SERVICE_NAME_PATH,
+    FULLNAME_OVERRIDE_PATH,
     OTEL_SERVICE_NAME_PATH,
     AppDescriptor,
     Multiplicity,
     deployed_name,
     descriptor,
     instance_component,
+    instance_name,
     render_source_binding,
     services,
 )
@@ -244,14 +245,19 @@ def initial_overlay(app: AppInstance, values: dict | None = None) -> dict:
     without it the file produces nothing. The OTel service name is set here because
     it is the only thing that makes this instance's telemetry distinguishable from
     another instance of the same app.
+
+    A per-config instance carries its names under both chart families' keys, so the
+    same overlay renders the same object names on either.
     """
     desc = descriptor(app.service)
     doc: dict = {}
     set_path(doc, DEPLOY_SERVICE_PATH, app.service)
     set_path(doc, DEPLOY_INSTANCE_PATH, app.instance)
-    set_path(doc, OTEL_SERVICE_NAME_PATH, app.telemetry_name)
+    set_path(doc, DFE_COMMON_OTEL_SERVICE_NAME_PATH, app.telemetry_name)
     if desc.component_is_per_instance:
-        set_path(doc, COMPONENT_PATH, instance_component(desc, app.instance))
+        set_path(doc, OTEL_SERVICE_NAME_PATH, app.telemetry_name)
+        set_path(doc, FULLNAME_OVERRIDE_PATH, instance_name(desc, app.instance))
+        set_path(doc, DFE_COMMON_COMPONENT_PATH, instance_component(desc, app.instance))
     # A source-bound app's instance IS the source, so the binding is derived from
     # the instance name rather than asked for separately.
     for path, value in render_source_binding(desc, app.instance).items():

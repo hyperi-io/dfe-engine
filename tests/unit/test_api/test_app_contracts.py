@@ -593,7 +593,7 @@ class TestCustomEnvCannotShadowAChartSetName:
         name = "DFE_LOADER_KAFKA_BROKERS"
         self._assert_refused(self._put(client, admin_headers, LOADER, "default", name), name)
 
-    def test_the_receiver_chart_s_bind_address_cannot_be_shadowed(
+    def test_the_receiver_chart_s_broker_list_cannot_be_shadowed(
         self, client, app, admin_headers, tmp_path
     ):
         _wire(app, tmp_path)
@@ -602,7 +602,7 @@ class TestCustomEnvCannotShadowAChartSetName:
             json={"instance": "default"},
             headers=admin_headers,
         )
-        name = "DFE_RECEIVER_BIND_ADDRESS"
+        name = "DFE_RECEIVER_KAFKA_BROKERS"
         self._assert_refused(
             self._put(client, admin_headers, "dfe-receiver", "default", name), name
         )
@@ -852,16 +852,24 @@ def _put_receiver(client, headers, changes: dict):
 
 
 class TestTheReceiverConfigmapsOwnKeysAreRefused:
-    """The receiver configmap merges its listener and buffer values over the overlay."""
+    """The receiver's configOverrides merge its listener and buffer values over the overlay."""
 
     @pytest.mark.parametrize(
         ("path", "value", "supplier"),
         [
-            ("config.grpc.enabled", False, "listeners[pushgrpc]"),
-            ("config.grpc.bind_address", "127.0.0.1:1", "listeners[pushgrpc]"),
-            ("config.buffer.memory_limit", 1234, "receiver.buffer"),
-            ("config.buffer.spillover.enabled", True, "receiver.buffer.spillover"),
-            ("config.buffer.spillover.path", "/overlay/spool", "receiver.buffer.spillover"),
+            ("config.grpc.enabled", False, "configOverrides.grpc.enabled"),
+            ("config.grpc.bind_address", "127.0.0.1:1", "configOverrides.grpc.bind_address"),
+            ("config.buffer.memory_limit", 1234, "configOverrides.buffer.memory_limit"),
+            (
+                "config.buffer.spillover.enabled",
+                True,
+                "configOverrides.buffer.spillover.enabled",
+            ),
+            (
+                "config.buffer.spillover.path",
+                "/overlay/spool",
+                "configOverrides.buffer.spillover.path",
+            ),
         ],
     )
     def test_a_write_is_refused_and_names_the_chart_value_to_change(

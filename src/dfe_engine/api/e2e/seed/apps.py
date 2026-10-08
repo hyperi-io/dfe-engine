@@ -343,7 +343,9 @@ def _baseline(app: instances.AppInstance, doc: dict | None) -> dict:
     baseline: dict = {_DEPLOY_BLOCK: dict(doc.get(_DEPLOY_BLOCK) or initial[_DEPLOY_BLOCK])}
     identity = [
         catalogue.OTEL_SERVICE_NAME_PATH,
-        catalogue.COMPONENT_PATH,
+        catalogue.DFE_COMMON_OTEL_SERVICE_NAME_PATH,
+        catalogue.FULLNAME_OVERRIDE_PATH,
+        catalogue.DFE_COMMON_COMPONENT_PATH,
         *catalogue.render_source_binding(app.descriptor, app.instance),
     ]
     for path in identity:

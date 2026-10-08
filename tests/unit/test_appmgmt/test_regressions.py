@@ -12,13 +12,14 @@ because the corruption these guard against only appears once the document has
 been emitted to YAML and parsed back.
 """
 
-from __future__ import annotations
+import copy
 
 import pytest
 
 from dfe_engine.appmgmt import catalogue, files, instances
 from dfe_engine.appmgmt.files import InvalidContentError
 from dfe_engine.appmgmt.instances import HELMVARS_CLASS
+from dfe_engine.gitcrud.engine import get_path
 
 VRL = "dfe-transform-vrl"
 LOADER = "dfe-loader"
@@ -45,6 +46,11 @@ def _committed(crud, doc: dict, app: instances.AppInstance) -> dict:
     return crud.get(HELMVARS_CLASS, app.overlay_name)
 
 
+def _top_key(path: str) -> str:
+    """The top-level overlay key a dot-path lives under."""
+    return path.split(".", 1)[0]
+
+
 class TestContentCannotForgeOverlayKeys:
     def test_carriage_returns_do_not_inject_sibling_keys(self, crud, vrl_set):
         app = instances.instance_of(VRL, "edge")
@@ -60,7 +66,7 @@ class TestContentCannotForgeOverlayKeys:
         # Writing a file may add its own key and nothing else, whatever the app's
         # own overlay carries.
         baseline = set(instances.initial_overlay(app))
-        assert set(reloaded) == baseline | {vrl_set.values_path}
+        assert set(reloaded) == baseline | {_top_key(vrl_set.values_path)}
         assert files.read_file(reloaded, vrl_set, "000_parse.vrl").content == CR_INJECTION
 
     def test_a_more_indented_first_line_round_trips(self, crud, vrl_set):
@@ -71,7 +77,7 @@ class TestContentCannotForgeOverlayKeys:
         reloaded = _committed(crud, doc, app)
 
         baseline = set(instances.initial_overlay(app))
-        assert set(reloaded) == baseline | {vrl_set.values_path}
+        assert set(reloaded) == baseline | {_top_key(vrl_set.values_path)}
         assert files.read_file(reloaded, vrl_set, "010_indent.vrl").content == INDENT_INJECTION
 
     def test_on_disk_yaml_carries_no_forged_top_level_key(self, crud, vrl_set):
@@ -84,7 +90,7 @@ class TestContentCannotForgeOverlayKeys:
             encoding="utf-8"
         )
         # A forged key would sit at column zero; the real content is indented under
-        # transformFiles no matter which scalar style the emitter chose.
+        # fileSets no matter which scalar style the emitter chose.
         assert "\nreplicaCount:" not in on_disk
         assert "\nimage:" not in on_disk
 
@@ -105,47 +111,57 @@ class TestControlCharactersAreRefused:
 
 
 class TestOtelServiceNameIsTheChartsOwnDial:
-    def test_overlay_sets_the_top_level_dial_and_never_env(self):
+    def test_overlay_sets_the_chart_dials_and_never_env(self):
         # `env` is a STRING in the dfe-infra charts (the deployment environment)
         # feeding the dfe.hyperi.io/env label and the namespace, so writing a map
         # there renders an invalid label value and every object is rejected.
         app = instances.instance_of(VRL, "edge")
         doc = instances.initial_overlay(app)
 
-        assert doc[catalogue.OTEL_SERVICE_NAME_PATH] == app.telemetry_name
-        assert doc["otelServiceName"] == "dfe-transform-vrl-edge"
+        assert get_path(doc, catalogue.OTEL_SERVICE_NAME_PATH) == app.telemetry_name
+        assert doc["otel"] == {"serviceName": "dfe-transform-vrl-edge"}
+        assert doc[catalogue.DFE_COMMON_OTEL_SERVICE_NAME_PATH] == "dfe-transform-vrl-edge"
         assert "env" not in doc
 
     def test_the_dial_survives_a_commit(self, crud):
         app = instances.instance_of("dfe-transform-vector", "edge")
         reloaded = _committed(crud, instances.initial_overlay(app), app)
+        assert reloaded["otel"]["serviceName"] == "dfe-transform-vector-edge"
         assert reloaded["otelServiceName"] == "dfe-transform-vector-edge"
         assert "env" not in reloaded
+
+    def test_a_single_deployment_overlay_leaves_the_chart_its_own_name(self):
+        # The thin chart's default is its own name, which a stack-wide app already
+        # reports; only the dfe-common key, which those charts never read, is written.
+        doc = instances.initial_overlay(instances.instance_of(LOADER, "default"))
+        assert "otel" not in doc
+        assert doc[catalogue.DFE_COMMON_OTEL_SERVICE_NAME_PATH] == LOADER
 
 
 class TestMalformedFileSetsAreRefused:
     # Both mutators write the whole list back over the key, so an entry quietly
     # filtered out on the way in is a hand-authored file deleted on the way out.
-    NAMELESS = {"transformFiles": [{"content": "x"}]}
+    NAMELESS = {"fileSets": {"transforms": {"files": [{"content": "x"}]}}}
 
     def test_list_refuses_an_entry_without_a_name(self, vrl_set):
         with pytest.raises(ValueError, match="without a 'name' key"):
-            files.list_files(dict(self.NAMELESS), vrl_set)
+            files.list_files(copy.deepcopy(self.NAMELESS), vrl_set)
 
     def test_upsert_refuses_an_entry_without_a_name(self, vrl_set):
         with pytest.raises(ValueError, match="without a 'name' key"):
-            files.upsert_file(dict(self.NAMELESS), vrl_set, "000_parse.vrl", ".a = 1\n")
+            files.upsert_file(copy.deepcopy(self.NAMELESS), vrl_set, "000_parse.vrl", ".a = 1\n")
 
     def test_delete_refuses_an_entry_without_a_name(self, vrl_set):
         with pytest.raises(ValueError, match="without a 'name' key"):
-            files.delete_file(dict(self.NAMELESS), vrl_set, "000_parse.vrl")
+            files.delete_file(copy.deepcopy(self.NAMELESS), vrl_set, "000_parse.vrl")
 
     def test_a_non_mapping_entry_is_refused(self, vrl_set):
         with pytest.raises(ValueError, match="without a 'name' key"):
-            files.list_files({"transformFiles": ["000_parse.vrl"]}, vrl_set)
+            files.list_files({"fileSets": {"transforms": {"files": ["000_parse.vrl"]}}}, vrl_set)
 
     def test_a_well_formed_set_still_loads(self, vrl_set):
-        doc = {"transformFiles": [{"name": "000_parse.vrl", "content": ".a = 1\n"}]}
+        entry = {"name": "000_parse.vrl", "content": ".a = 1\n"}
+        doc = {"fileSets": {"transforms": {"files": [entry]}}}
         assert [f.name for f in files.list_files(doc, vrl_set)] == ["000_parse.vrl"]
 
 
@@ -206,13 +222,34 @@ class TestInstanceCountFollowsMultiplicity:
         alpha_doc = instances.initial_overlay(alpha)
         beta_doc = instances.initial_overlay(beta)
 
-        assert alpha_doc[catalogue.COMPONENT_PATH] == "fetcher-alpha"
-        assert beta_doc[catalogue.COMPONENT_PATH] == "fetcher-beta"
+        assert alpha_doc[catalogue.DFE_COMMON_COMPONENT_PATH] == "fetcher-alpha"
+        assert beta_doc[catalogue.DFE_COMMON_COMPONENT_PATH] == "fetcher-beta"
         assert alpha_doc["component"] != beta_doc["component"]
+
+    def test_a_per_config_overlay_carries_the_instance_in_its_fullname(self):
+        # The thin chart names every object from fullnameOverride, else from the
+        # chart name, so it is the only thing keeping two deployments' names apart.
+        alpha_doc = instances.initial_overlay(instances.instance_of(FETCHER, "alpha"))
+        beta_doc = instances.initial_overlay(instances.instance_of(FETCHER, "beta"))
+
+        assert alpha_doc[catalogue.FULLNAME_OVERRIDE_PATH] == "dfe-fetcher-alpha"
+        assert beta_doc[catalogue.FULLNAME_OVERRIDE_PATH] == "dfe-fetcher-beta"
+
+    @pytest.mark.parametrize(
+        "service", ["dfe-fetcher", "dfe-transform-vrl", "dfe-transform-vector"]
+    )
+    def test_both_chart_families_render_one_name(self, service):
+        # A rollback re-renders the same overlay on the dfe-common chart, whose
+        # name is {project}-{component}; a second name would prune the first's PVCs.
+        doc = instances.initial_overlay(instances.instance_of(service, "auth"))
+        dfe_common = f"dfe-{doc[catalogue.DFE_COMMON_COMPONENT_PATH]}"
+        assert doc[catalogue.FULLNAME_OVERRIDE_PATH] == dfe_common == f"{service}-auth"
+        assert get_path(doc, catalogue.OTEL_SERVICE_NAME_PATH) == f"{service}-auth"
+        assert doc[catalogue.DFE_COMMON_OTEL_SERVICE_NAME_PATH] == f"{service}-auth"
 
     def test_a_single_deployment_overlay_does_not_set_the_component(self):
         # One deployment per app, so overriding the component would only rename the
         # objects the chart already names consistently.
-        assert catalogue.COMPONENT_PATH not in instances.initial_overlay(
-            instances.instance_of(LOADER, "default")
-        )
+        doc = instances.initial_overlay(instances.instance_of(LOADER, "default"))
+        assert catalogue.DFE_COMMON_COMPONENT_PATH not in doc
+        assert catalogue.FULLNAME_OVERRIDE_PATH not in doc
