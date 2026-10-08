@@ -631,7 +631,14 @@ class TestProvenance:
         ("service", "own"),
         [
             ("dfe-transform-vrl", {"config.source.tls.enabled", "config.sink.tls.enabled"}),
-            ("dfe-transform-vector", {"config.vector.data_dir"}),
+            (
+                "dfe-transform-vector",
+                {
+                    "config.vector.data_dir",
+                    "config.source.tls.enabled",
+                    "config.sink.tls.enabled",
+                },
+            ),
         ],
     )
     def test_the_transform_families_the_chart_derives(self, service, own):
