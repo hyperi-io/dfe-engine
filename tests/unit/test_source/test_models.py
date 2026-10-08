@@ -450,6 +450,72 @@ class TestSourceOrigin:
         body = SourceWriteRequest(source="x", fetcher=SourceFetcher(source_type="pypi"))
         assert body.to_version_snapshot().origin == "fetcher"
 
+    def test_an_update_cannot_swap_receiver_for_fetcher(self):
+        existing = Source.model_validate(
+            {"source": "syslog", "match": {"field": "f", "value": "v"}}
+        )
+        write = SourceWriteRequest.model_validate(
+            {"fetcher": {"source_type": "okta", "topic": "own"}}
+        )
+        with pytest.raises(ValueError, match="Cannot change source origin"):
+            apply_source_write_update(existing, write)
+
+    def test_an_update_cannot_swap_fetcher_for_receiver(self):
+        existing = Source.model_validate(
+            {"source": "okta", "fetcher": {"source_type": "okta", "topic": "own"}}
+        )
+        write = SourceWriteRequest.model_validate({"match": {"field": "f", "value": "v"}})
+        with pytest.raises(ValueError, match="Cannot change source origin"):
+            apply_source_write_update(existing, write)
+
+    def test_an_update_cannot_clear_a_pinned_meta_schema(self):
+        existing = Source.model_validate(
+            {
+                "source": "aws",
+                "match": {"field": "f", "value": "v"},
+                "schema": {"meta_schema": "meta/aws", "meta_schema_version": "1.0.0"},
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {
+                "match": {"field": "f", "value": "v"},
+                "schema": {"engine": "MergeTree"},
+            }
+        )
+        with pytest.raises(ValueError, match="Cannot remove the meta schema"):
+            apply_source_write_update(existing, write)
+
+    def test_an_update_may_still_change_which_meta_schema_is_pinned(self):
+        existing = Source.model_validate(
+            {
+                "source": "aws",
+                "match": {"field": "f", "value": "v"},
+                "schema": {"meta_schema": "meta/aws", "meta_schema_version": "1.0.0"},
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {
+                "match": {"field": "f", "value": "v"},
+                "schema": {"meta_schema": "meta/aws_cloudtrail", "meta_schema_version": "2.0.0"},
+            }
+        )
+        updated = apply_source_write_update(existing, write)
+        assert updated.versions["1.0.0"].schema_config.meta_schema == "meta/aws_cloudtrail"
+        assert updated.table_topic_type == "own"
+
+    def test_a_source_without_a_meta_schema_may_still_gain_one(self):
+        existing = Source.model_validate(
+            {"source": "azure", "match": {"field": "azure", "value": "azure"}, "schema": {}}
+        )
+        write = SourceWriteRequest.model_validate(
+            {
+                "match": {"field": "azure", "value": "azure"},
+                "schema": {"meta_schema": "meta/azure", "meta_schema_version": "1.0.0"},
+            }
+        )
+        updated = apply_source_write_update(existing, write)
+        assert updated.table_topic_type == "own"
+
 
 # ---------------------------------------------------------------------------
 # SourceView

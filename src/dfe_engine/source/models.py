@@ -1156,11 +1156,36 @@ def draft_build_version_to_invalidate(existing: Source, updated: Source) -> str 
     return None
 
 
+def _reject_origin_or_table_paradigm_change(
+    previous: SourceVersion, updated: SourceVersion
+) -> None:
+    """Refuse an update that swaps intake origin or drops back onto the shared table.
+
+    Origin (receiver vs fetcher) is fixed for the life of a source: the apps and
+    routing compiled around it assume one intake. A pinned ``meta_schema`` means
+    the source owns its own ClickHouse table; clearing it would move records onto
+    ``main``, which an update is not allowed to do.
+    """
+    if previous.origin != updated.origin:
+        raise ValueError(
+            f"Cannot change source origin from {previous.origin!r} to {updated.origin!r}: "
+            "a source is receiver-based or fetcher-based for its whole life"
+        )
+    previous_owns_table = bool(previous.effective_schema().meta_schema)
+    updated_owns_table = bool(updated.effective_schema().meta_schema)
+    if previous_owns_table and not updated_owns_table:
+        raise ValueError(
+            "Cannot remove the meta schema: once a source owns its own table it "
+            "cannot move back to the shared main table"
+        )
+
+
 def apply_source_write_update(existing: Source, write: SourceWriteRequest) -> Source:
     """Persist a write: bump major version only when ``current`` is deployed and pins/mappings change."""
     snapshot = _build_merged_version_snapshot(existing, write)
     current_id = existing.current
     previous = existing.versions[current_id]
+    _reject_origin_or_table_paradigm_change(previous, snapshot)
 
     append_version = (
         existing.deployed_version is not None

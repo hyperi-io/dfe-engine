@@ -772,6 +772,43 @@ class TestUpdateSource:
         assert body["current"] == "1.0.0"
         assert body["versions"]["1.0.0"]["schema"]["engine"] == "MergeTree"
 
+    def test_update_refuses_to_swap_origin(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+        resp = client.put(
+            "/api/v1/sources/test-source",
+            json={
+                "source": "test-source",
+                "fetcher": {"source_type": "okta", "topic": "own"},
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422, resp.text
+        assert "Cannot change source origin" in resp.json()["message"]
+
+    def test_update_refuses_to_clear_a_meta_schema(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        client.post(
+            "/api/v1/sources",
+            json={
+                **sample_source,
+                "schema_config": {
+                    "meta_schema": "meta/aws_cloudtrail",
+                    "meta_schema_version": "1.0.0",
+                },
+            },
+            headers=admin_headers,
+        )
+        resp = client.put(
+            "/api/v1/sources/test-source",
+            json={**sample_source, "schema_config": {"engine": "MergeTree"}},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422, resp.text
+        assert "Cannot remove the meta schema" in resp.json()["message"]
+
     def test_update_rejects_versions_payload(
         self, client: TestClient, admin_headers: dict, sample_source: dict
     ):

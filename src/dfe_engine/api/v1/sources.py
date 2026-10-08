@@ -1837,6 +1837,9 @@ def update_source(
     ``views``, or ``transform`` change. Draft versions (``current`` not deployed) update
     in place.
 
+    Origin (receiver vs fetcher) cannot change, and a pinned ``meta_schema`` cannot be
+    cleared: once a source owns its own table it cannot move back onto ``main``.
+
     ``header`` is optional: when omitted, no header is stored on the written version snapshot
     (same as create). Send ``header`` explicitly to set or change it.
 
