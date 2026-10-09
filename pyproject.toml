@@ -29,6 +29,8 @@ dependencies = [
     #            keeps seeing the engine's info and start time; ResourceMetrics
     #            (memory, CPU, fds) and HttpServerMetricsMiddleware, which api/app.py
     #            imports.
+    # >=2.31.3:  deployment contract schema 4, the version the scalo-service
+    #            library chart validates the published thin chart against.
     # Upper bound: <3 is the API-stability boundary. An unbounded `>=` is invisible
     # to Renovate -- the constraint is satisfied by every future release, so no PR
     # is ever raised and the version moves silently in the lock.
@@ -40,7 +42,7 @@ dependencies = [
     # /metrics 404s, and self-monitoring (one of the two default E2E acceptance tests)
     # goes green while reporting nothing. [opentelemetry] is no longer a separate
     # extra: [metrics] carries the SDK.
-    "scalo[expression,http,metrics]>=2.31.1,<3",
+    "scalo[expression,http,metrics]>=2.31.3,<3",
     # The DFE schema trees as package data under dfe_schemas/data/, replacing
     # the `schemas` git submodule. schema_loader resolves them through
     # importlib.resources; the Dockerfile bakes its seed from the installed
@@ -288,7 +290,7 @@ convention = "google"
 
 [project.scripts]
 # Order matters: hyperi-ci's generate-artefacts build step invokes the FIRST
-# entry here (deployment/stage.py _resolve_python_entry_point) as `<script>
+# entry here (deployment/manifest.py python_entry_point) as `<script>
 # generate-artefacts`. That MUST be the scalo daemon `dfe-engine`, which carries
 # deployment_contract()/generate-artefacts. The auto-CLI `dfe` (OpenAPI-generated)
 # has no such subcommand, so listing it first breaks the release Build. Keep the

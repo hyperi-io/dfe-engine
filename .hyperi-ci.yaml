@@ -18,6 +18,11 @@ release:
   stamp_paths:
     - openapi-spec/openapi.json
     - openapi-spec/openapi.e2e.json
+  # The thin chart, assembled from `dfe-engine generate-artefacts`. `library` must render the contract schema the locked scalo writes.
+  helm:
+    enabled: true
+    contract: emit
+    library: "2.14.4"
 
 test:
   min_coverage: 70  # Current: 75%. Target: 80%. Ratchet up as coverage improves.
