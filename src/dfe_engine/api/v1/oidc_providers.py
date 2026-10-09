@@ -244,9 +244,28 @@ class OrphanedGroupInfo(BaseModel):
     member_count: int
 
 
+class DisabledAccountInfo(BaseModel):
+    """An account soft-disabled and anonymized because its OIDC provider was detached."""
+
+    username: str = Field(description="Anonymized account id (``{uuid}-deleted``)")
+    previous_username: str = Field(description="Account id before anonymization")
+    source_provider: str = Field(
+        description="Ownership stamp on the account (OIDC provider name, scim, or empty)"
+    )
+    oidc_id: str = Field(description="OIDC provider name last used to log this account in")
+
+
 class DetachResponse(BaseModel):
     deleted: str
     orphaned_groups: list[OrphanedGroupInfo]
+    disabled_accounts: list[DisabledAccountInfo] = Field(
+        default_factory=list,
+        description=(
+            "Accounts soft-disabled and renamed to ``{uuid}-deleted`` because they were "
+            "owned by or last logged in through the detached provider. Already-disabled "
+            "and protected recovery accounts are left alone."
+        ),
+    )
 
 
 class SyncResponse(BaseModel):
@@ -641,13 +660,18 @@ async def delete_provider(
     user: CurrentUser,
     request: Request,
 ):
-    """Detach an OIDC provider and report orphaned groups (admin only).
+    """Detach an OIDC provider and soft-delete its accounts (admin only).
 
     Does NOT delete groups -- they become orphaned with their source_provider
-    still set to the deleted provider name. The provider's stored credentials
-    ARE removed: nothing is left that can authenticate as a detached provider.
+    still set to the deleted provider name. Accounts owned by the provider
+    (``source_provider``) or last logged in through it (``oidc_id``) are
+    soft-deleted: disabled and renamed to ``{uuid}-deleted`` with contact fields
+    cleared. The provider's stored credentials ARE removed: nothing is left that
+    can authenticate as a detached provider.
     """
+    from dfe_engine.auth.accounts import soft_delete_account
     from dfe_engine.auth.groups import GroupStore
+    from dfe_engine.auth.protected_accounts import ProtectedAccountError
 
     registry = _get_registry(request)
     provider = registry.get(name)
@@ -671,13 +695,40 @@ async def delete_provider(
                 )
             )
 
+    # Soft-delete accounts tied to this provider before the YAML is gone.
+    account_store = request.app.state.account_store
+    disabled_accounts: list[DisabledAccountInfo] = []
+    for account in account_store.list():
+        if account.source_provider != name and account.oidc_id != name:
+            continue
+        if not account.enabled:
+            continue
+        previous = account.username
+        try:
+            updated = soft_delete_account(account_store, previous)
+        except ProtectedAccountError:
+            # Recovery credentials stay usable; the detached IdP can no longer mint them.
+            continue
+        disabled_accounts.append(
+            DisabledAccountInfo(
+                username=updated.username,
+                previous_username=updated.previous_username or previous,
+                source_provider=updated.source_provider,
+                oidc_id=updated.oidc_id,
+            )
+        )
+
     registry.delete(name)
     _delete_stored_secrets(request, provider)
     # A detached provider must stop serving logins immediately, not at restart.
     _refresh_rp(request)
     audit_resource_change(user.user_id, "oidc_provider", name, "deleted")
 
-    return DetachResponse(deleted=name, orphaned_groups=orphaned)
+    return DetachResponse(
+        deleted=name,
+        orphaned_groups=orphaned,
+        disabled_accounts=disabled_accounts,
+    )
 
 
 @router.post(

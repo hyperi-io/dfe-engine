@@ -239,6 +239,7 @@ class TestDeleteProvider:
         data = resp.json()
         assert data["deleted"] == "del-test"
         assert data["orphaned_groups"] == []
+        assert data["disabled_accounts"] == []
 
         # Confirm deleted
         resp = client.get("/api/v1/auth/oidc-providers/del-test", headers=admin_headers)
@@ -271,6 +272,64 @@ class TestDeleteProvider:
         g1 = next(g for g in data["orphaned_groups"] if g["name"] == "synced-group-1")
         assert g1["member_count"] == 1
         assert g1["roles"] == ["data_viewer"]
+
+    def test_delete_soft_disables_accounts_tied_to_the_provider(self, client, admin_headers, app):
+        _create_provider(client, admin_headers, name="gone-idp")
+        store = app.state.account_store
+        store.create("jit-user", "")
+        store.update(
+            "jit-user",
+            external=True,
+            source_provider="gone-idp",
+            oidc_id="gone-idp",
+            subject="jit@corp.com",
+            email="jit@corp.com",
+            name="Jit User",
+        )
+        store.create("scim-user", "provisioned-Pw-1")
+        store.update(
+            "scim-user",
+            source_provider="scim",
+            oidc_id="gone-idp",
+            subject="scim@corp.com",
+        )
+        store.create("other-idp-user", "")
+        store.update(
+            "other-idp-user",
+            external=True,
+            source_provider="other-idp",
+            oidc_id="other-idp",
+        )
+        store.create("already-off", "")
+        store.update(
+            "already-off",
+            enabled=False,
+            source_provider="gone-idp",
+            oidc_id="gone-idp",
+        )
+
+        resp = client.delete("/api/v1/auth/oidc-providers/gone-idp", headers=admin_headers)
+        assert resp.status_code == 200
+        rows = resp.json()["disabled_accounts"]
+        by_previous = {row["previous_username"]: row for row in rows}
+        assert set(by_previous) == {"jit-user", "scim-user"}
+        for previous, row in by_previous.items():
+            assert row["username"].endswith("-deleted")
+            assert row["username"] != previous
+            assert store.get(previous) is None
+            anonymized = store.get(row["username"])
+            assert anonymized is not None
+            assert anonymized.enabled is False
+            assert anonymized.disabled_at != ""
+            assert anonymized.previous_username == previous
+            assert anonymized.email == ""
+            assert anonymized.name == ""
+            assert anonymized.subject == ""
+
+        assert by_previous["jit-user"]["source_provider"] == "gone-idp"
+        assert by_previous["scim-user"]["oidc_id"] == "gone-idp"
+        assert store.get("other-idp-user").enabled is True
+        assert store.get("already-off").enabled is False
 
     def test_delete_nonexistent_returns_404(self, client, admin_headers):
         resp = client.delete("/api/v1/auth/oidc-providers/nonexistent", headers=admin_headers)

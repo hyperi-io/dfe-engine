@@ -154,7 +154,11 @@ class JitProvisioner:
             self._require_same_identity(existing, user_id, source_provider)
             self._require_available(existing, user_id, source_provider)
             # Subsequent login -- update groups if changed + last_login_at
-            updates: dict[str, object] = {"last_login_at": now, "subject": user_id}
+            updates: dict[str, object] = {
+                "last_login_at": now,
+                "oidc_id": source_provider,
+                "subject": user_id,
+            }
             if set(existing.groups) != set(oidc_groups):
                 added = [g for g in oidc_groups if g not in existing.groups]
                 removed = [g for g in existing.groups if g not in oidc_groups]
@@ -188,6 +192,7 @@ class JitProvisioner:
             race_updates: dict[str, object] = {
                 "groups": oidc_groups,
                 "last_login_at": now,
+                "oidc_id": source_provider,
                 "subject": user_id,
             }
             if wanted_email:
@@ -202,6 +207,7 @@ class JitProvisioner:
                 safe_name,
                 external=True,
                 source_provider=source_provider,
+                oidc_id=source_provider,
                 subject=user_id,
                 last_login_at=now,
             )

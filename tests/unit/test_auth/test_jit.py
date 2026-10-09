@@ -93,6 +93,7 @@ class TestEnsureAccount:
         assert account is not None
         assert account.external is True
         assert account.source_provider == "entra"
+        assert account.oidc_id == "entra"
         # Shadow accounts carry an unusable-password sentinel (not a bcrypt hash),
         # so an external identity can never authenticate via local login.
         assert not account.password_hash.startswith("$2")
@@ -162,6 +163,7 @@ class TestEnsureAccount:
         jit.ensure_account("jane@corp.com", ["acme-viewers"], "entra")
         second = accounts.get("jane-corp-com")
         assert second.last_login_at >= first.last_login_at
+        assert second.oidc_id == "entra"
 
     def test_groups_updated_on_change(self, stores):
         accounts, groups = stores
@@ -502,6 +504,7 @@ class TestSourceProviderBinding:
         account = jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
 
         assert account.source_provider == SCIM_SOURCE_PROVIDER
+        assert account.oidc_id == "entra"
         assert account.external is False
 
     def test_an_unbound_provider_is_still_refused(self, stores):

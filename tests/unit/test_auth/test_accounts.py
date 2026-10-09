@@ -109,11 +109,17 @@ class TestCreate:
         assert yaml_file.exists()
 
     def test_create_username_not_in_yaml(self, store, tmp_path):
-        """Username is the filename stem — NOT stored inside the YAML."""
+        """Username is the filename stem — NOT stored inside the YAML.
+
+        ``previous_username`` is a different field and may appear empty; the
+        identity key itself must not.
+        """
         store.create("alice", "password123")
         yaml_file = tmp_path / "accounts" / "alice.yaml"
         content = yaml_file.read_text()
-        assert "username" not in content
+        assert "alice" not in content
+        assert "\nusername:" not in f"\n{content}"
+        assert not content.startswith("username:")
 
     def test_create_creates_dir_if_not_exists(self, tmp_path):
         nested = tmp_path / "deep" / "nested" / "accounts"
