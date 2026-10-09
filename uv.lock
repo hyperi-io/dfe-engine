@@ -694,7 +694,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },
-    { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.31.1,<3" },
+    { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.31.3,<3" },
     { name = "scim2-models", specifier = ">=0.6.12,<0.7" },
     { name = "sqlglot", specifier = ">=30.17.0" },
     { name = "sse-starlette", specifier = ">=3.4.5" },
@@ -2235,7 +2235,7 @@ wheels = [
 
 [[package]]
 name = "scalo"
-version = "2.31.1"
+version = "2.31.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2253,9 +2253,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9e/d7/9e3a3def3efbdc927e4b106924d40d43e1866e2c1d77188b580fc41ceeb3/scalo-2.31.1.tar.gz", hash = "sha256:1c2b151647cb6a49645e9bfa17fe07f35269ee373902c7c4526cff44bc044474", size = 346419, upload-time = "2026-10-06T01:48:14.436Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fa/c6/a37b968daa7616a7bb8f1ac4c85921958cb8bbb0e3f741ad98dec85bdd9c/scalo-2.31.3.tar.gz", hash = "sha256:b41b592fa7a1c2dc535d0ec7dcf7c1ce47240ce0db976928cb2ec54379b628cd", size = 359680, upload-time = "2026-10-08T08:43:37.955Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ea/fb/c9169bc8055f8efbb2f8e85d4e57ef442557a61253738b6ca9f4c99e5b43/scalo-2.31.1-py3-none-any.whl", hash = "sha256:baf5450678d33df14a0c70080fd445469f2e305b169bf5440faf7f75ae33d804", size = 419253, upload-time = "2026-10-06T01:48:12.397Z" },
+    { url = "https://files.pythonhosted.org/packages/a9/2c/d5d420954decd9b330a9976406e0462e7e66dafe6cf973ba8a64760dd42e/scalo-2.31.3-py3-none-any.whl", hash = "sha256:b567c302a544874465fffcac09d29ca2cfc4d89e675e7798f76607ec6f1ad188", size = 431628, upload-time = "2026-10-08T08:43:36.065Z" },
 ]
 
 [package.optional-dependencies]
