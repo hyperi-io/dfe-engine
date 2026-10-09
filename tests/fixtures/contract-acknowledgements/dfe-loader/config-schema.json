@@ -465,7 +465,7 @@
         },
         "password": {
           "type": "string",
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true,
           "default": "***REDACTED***"
         },
@@ -491,7 +491,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true,
           "default": null
         },
@@ -533,7 +533,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true,
           "default": null
         },
@@ -543,7 +543,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true,
           "default": null
         },
@@ -683,7 +683,7 @@
         },
         "password": {
           "type": "string",
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true,
           "default": "***REDACTED***"
         },
@@ -947,7 +947,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true,
           "default": null
         },

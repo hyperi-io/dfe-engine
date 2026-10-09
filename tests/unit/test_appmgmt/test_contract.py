@@ -7,9 +7,10 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """The reader and resolver, against the contracts the six pinned images emitted.
 
-The fixtures are the real files, byte for byte, so a flattener that stops
-descending or starts double counting shows up as a changed leaf total rather than
-as a plausible-looking list nobody checks.
+The fixtures are the real files, byte for byte but for the secret marker, which
+reads ``x-scalo-secret``. So a flattener that stops descending or starts double
+counting shows up as a changed leaf total rather than as a plausible-looking list
+nobody checks.
 """
 
 import json
@@ -23,7 +24,8 @@ from dfe_engine.gitcrud.engine import set_path
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "contract"
 
 # Schemas from the builds that hold each source acknowledgement until delivery,
-# copied byte for byte from each app's docs/config-schema.json: dfe-receiver
+# copied byte for byte from each app's docs/config-schema.json but for the secret
+# marker, which reads x-scalo-secret: dfe-receiver
 # f61c903, dfe-loader edef368, dfe-transform-vrl da42bd2, dfe-archiver 29f201a,
 # dfe-transform-vector 36dbfa6, dfe-fetcher 0ab0317.
 HELD = Path(__file__).parents[2] / "fixtures" / "contract-acknowledgements"
@@ -77,14 +79,14 @@ def _contract(service: str) -> contract.AppContract:
     return contract.load_contract(service, FIXTURES)
 
 
-def _marked_root(root: Path, marker: str = contract.SECRET_MARKERS[0]) -> Path:
+def _marked_root(root: Path) -> Path:
     """A mounted dfe-receiver contract whose one marked field has a name that says nothing."""
     schema = {
         "type": "object",
         "properties": {
             "server": {
                 "type": "object",
-                "properties": {"banner": {"type": "string", marker: True}},
+                "properties": {"banner": {"type": "string", contract.SECRET_MARKER: True}},
             }
         },
     }
@@ -220,6 +222,19 @@ class TestSecrets:
         by_path = {f.path: f for f in contract.resolve_config(_contract("dfe-loader"), {}).fields}
         assert by_path["config.clickhouse.password"].secret is True
 
+    @pytest.mark.parametrize("root", [FIXTURES, HELD], ids=["contract", "acknowledgements"])
+    def test_every_field_an_app_marks_reads_as_a_secret(self, root):
+        marked: list[str] = []
+        for service in APPS:
+            found = contract.load_contract(service, root)
+            by_path = {f.path: f for f in contract.resolve_config(found, {}).fields}
+            for path, node, _inherited in contract.walk_schema(found.schema):
+                if path and node.get(contract.SECRET_MARKER) is True:
+                    marked.append(f"{service}:{path}")
+                    assert by_path[f"{contract.CONFIG_ROOT}.{path}"].secret is True, (service, path)
+        # Fails when the fixtures carry a marker name the reader does not key on.
+        assert marked
+
     def test_a_list_of_tokens_is_a_secret_before_the_app_marks_it(self):
         # The shipped receiver marks nothing, and its bearer tokens are a list.
         by_path = {f.path: f for f in contract.resolve_config(_contract("dfe-receiver"), {}).fields}
@@ -318,7 +333,7 @@ class TestSecrets:
     def test_a_definition_that_lists_itself_is_judged_and_ends(self, marked, secret):
         node: dict = {"type": "string"}
         if marked:
-            node[contract.SECRET_MARKERS[0]] = True
+            node[contract.SECRET_MARKER] = True
         schema = {
             "type": "object",
             "properties": {"tree": {"type": "array", "items": {"$ref": "#/$defs/Node"}}},
@@ -978,11 +993,8 @@ class TestRedactingTheOverlay:
         ):
             assert credential not in text
 
-    @pytest.mark.parametrize("marker", contract.SECRET_MARKERS)
-    def test_a_document_naming_its_app_is_read_against_that_app(
-        self, monkeypatch, tmp_path, marker
-    ):
-        monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(_marked_root(tmp_path, marker)))
+    def test_a_document_naming_its_app_is_read_against_that_app(self, monkeypatch, tmp_path):
+        monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(_marked_root(tmp_path)))
         contract.reload_contracts()
         doc = {"deploy": {"service": "dfe-receiver"}, "config": {"server": {"banner": "b-1"}}}
         # Only the app's marker says the banner is secret.

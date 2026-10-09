@@ -10,8 +10,8 @@
 The mirrors forbid unknown keys, so a key the app reads and the mirror lacks is
 refused on the /services path before it reaches anything. The defaults are
 compared with the schemas the apps emit (``tests/fixtures/contract-acknowledgements``,
-copied byte for byte from each app's ``docs/config-schema.json``), not with a
-number typed in here.
+copied byte for byte from each app's ``docs/config-schema.json`` but for the secret
+marker, which reads ``x-scalo-secret``), not with a number typed in here.
 """
 
 import json
