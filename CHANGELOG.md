@@ -3,6 +3,17 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.15](https://github.com/hyperi-io/dfe-engine/compare/v1.22.14...v1.22.15) (2026-10-09)
+
+### Bug Fixes
+
+* drop the bandit_exclude_tests key hyperi-ci no longer reads ([#774](https://github.com/hyperi-io/dfe-engine/issues/774)) ([8a648bc](https://github.com/hyperi-io/dfe-engine/commit/8a648bcea8b904da13758331724ad55f5622503f))
+* drop the build.type key hyperi-ci no longer reads ([#772](https://github.com/hyperi-io/dfe-engine/issues/772)) ([cb9c71c](https://github.com/hyperi-io/dfe-engine/commit/cb9c71c65ade368403558d0dee18713ceb3de5d5))
+* mark the ServiceApp hooks for vulture and shut the black hole down before close ([#777](https://github.com/hyperi-io/dfe-engine/issues/777)) ([ebe129a](https://github.com/hyperi-io/dfe-engine/commit/ebe129a82be34fe913f6c9b4af99ae0dded3e94f))
+* oidc delete user soft delete to revoke access persist data ([#775](https://github.com/hyperi-io/dfe-engine/issues/775)) ([23c99cc](https://github.com/hyperi-io/dfe-engine/commit/23c99cca89c504c1e6ac9e1c10cdcccd00b6753a))
+* publish a schema v4 thin chart for dfe-engine ([#776](https://github.com/hyperi-io/dfe-engine/issues/776)) ([5c3f2b9](https://github.com/hyperi-io/dfe-engine/commit/5c3f2b9c56955bfb1c327714537baada38666419))
+* source tweaks ([#771](https://github.com/hyperi-io/dfe-engine/issues/771)) ([33bbb3d](https://github.com/hyperi-io/dfe-engine/commit/33bbb3d460b0526d77b2df9f78d1005762e542da))
+
 ## [1.22.14](https://github.com/hyperi-io/dfe-engine/compare/v1.22.13...v1.22.14) (2026-10-06)
 
 ### Bug Fixes
