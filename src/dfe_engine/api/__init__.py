@@ -71,7 +71,8 @@ class _DfeEngineApp:
 
                 return VersionInfo(self.name, __version__)
 
-            def deployment_contract(self):
+            # Called by scalo's ServiceApp when generate-artefacts runs, so vulture sees no caller.
+            def deployment_contract(self):  # noqa: V105
                 from dfe_engine.deployment_contract import engine_deployment_contract
 
                 return engine_deployment_contract()

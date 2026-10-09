@@ -259,6 +259,8 @@ ignore = [
     "T201",   # print (TEMP: needs audit)
     "RUF005", # collection-literal-concatenation
 ]
+# vulture's own codes, which vulture reads from `# noqa` (V105: a method only a framework calls).
+external = ["V"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
