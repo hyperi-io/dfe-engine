@@ -549,15 +549,34 @@ class TestArchiverChartDerivedPaths:
         assert resp.json()["code"] == "chart_derived"
         assert "ARCHIVER_TRANSPORT" in resp.json()["message"]
 
-    def test_an_s3_path_is_refused_and_names_the_bare_env_var(
+    def test_an_s3_path_the_deployment_names_is_refused_and_names_the_bare_env_var(
         self, client, app, admin_headers, tmp_path
     ):
         _wire(app, tmp_path)
-        _deploy_archiver(client, admin_headers)
+        _deploy_archiver(client, admin_headers, {"s3.bucket": "deployment-bucket"})
         resp = _write_archiver(client, admin_headers, {"config.archive.s3.bucket": "landing"})
         assert resp.status_code == 409, resp.text
         assert resp.json()["code"] == "chart_derived"
         assert "S3_BUCKET" in resp.json()["message"]
+
+    def test_an_s3_path_the_deployment_leaves_empty_is_the_overlay_s(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # S3_BUCKET renders empty, which the app reads as unset.
+        _wire(app, tmp_path)
+        _deploy_archiver(client, admin_headers)
+        resp = _write_archiver(client, admin_headers, {"config.archive.s3.bucket": "landing"})
+        assert resp.status_code == 200, resp.text
+
+    def test_on_compose_nothing_is_refused_as_the_deployment_s(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # The deployment's base config sits under the overlay there, so it wins.
+        _wire(app, tmp_path)
+        app.state.settings.deployment.target = "docker"
+        _deploy_archiver(client, admin_headers)
+        resp = _write_archiver(client, admin_headers, {"config.kafka.brokers": ["k:9092"]})
+        assert resp.status_code == 200, resp.text
 
     def test_a_dlq_path_is_refused_and_names_the_bare_env_var(
         self, client, app, admin_headers, tmp_path
@@ -593,7 +612,7 @@ class TestCustomEnvCannotShadowAChartSetName:
         name = "DFE_LOADER_KAFKA_BROKERS"
         self._assert_refused(self._put(client, admin_headers, LOADER, "default", name), name)
 
-    def test_the_receiver_chart_s_bind_address_cannot_be_shadowed(
+    def test_the_receiver_chart_s_broker_list_cannot_be_shadowed(
         self, client, app, admin_headers, tmp_path
     ):
         _wire(app, tmp_path)
@@ -602,7 +621,7 @@ class TestCustomEnvCannotShadowAChartSetName:
             json={"instance": "default"},
             headers=admin_headers,
         )
-        name = "DFE_RECEIVER_BIND_ADDRESS"
+        name = "DFE_RECEIVER_KAFKA_BROKERS"
         self._assert_refused(
             self._put(client, admin_headers, "dfe-receiver", "default", name), name
         )
@@ -852,16 +871,24 @@ def _put_receiver(client, headers, changes: dict):
 
 
 class TestTheReceiverConfigmapsOwnKeysAreRefused:
-    """The receiver configmap merges its listener and buffer values over the overlay."""
+    """The receiver's configOverrides merge its listener and buffer values over the overlay."""
 
     @pytest.mark.parametrize(
         ("path", "value", "supplier"),
         [
-            ("config.grpc.enabled", False, "listeners[pushgrpc]"),
-            ("config.grpc.bind_address", "127.0.0.1:1", "listeners[pushgrpc]"),
-            ("config.buffer.memory_limit", 1234, "receiver.buffer"),
-            ("config.buffer.spillover.enabled", True, "receiver.buffer.spillover"),
-            ("config.buffer.spillover.path", "/overlay/spool", "receiver.buffer.spillover"),
+            ("config.grpc.enabled", False, "configOverrides.grpc.enabled"),
+            ("config.grpc.bind_address", "127.0.0.1:1", "configOverrides.grpc.bind_address"),
+            ("config.buffer.memory_limit", 1234, "configOverrides.buffer.memory_limit"),
+            (
+                "config.buffer.spillover.enabled",
+                True,
+                "configOverrides.buffer.spillover.enabled",
+            ),
+            (
+                "config.buffer.spillover.path",
+                "/overlay/spool",
+                "configOverrides.buffer.spillover.path",
+            ),
         ],
     )
     def test_a_write_is_refused_and_names_the_chart_value_to_change(

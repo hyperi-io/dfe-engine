@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Consumed-file CRUD, and the verbatim round trip through a real git repo."""
 
-from __future__ import annotations
+import dataclasses
 
 import pytest
 
@@ -136,4 +136,146 @@ def test_committed_yaml_uses_a_block_scalar(crud, vrl_set):
 
 def test_a_malformed_file_set_value_is_reported(vrl_set):
     with pytest.raises(ValueError, match="expected a list"):
-        files.list_files({"transformFiles": {"a.vrl": "x"}}, vrl_set)
+        files.list_files({"fileSets": {"transforms": {"files": {"a.vrl": "x"}}}}, vrl_set)
+
+
+# ── a set the app names table by table ────────────────────────
+
+
+@pytest.fixture
+def tables():
+    return catalogue.file_set(VRL, "enrichment")
+
+
+def _entries(doc: dict) -> list:
+    return doc.get("config", {}).get("enrichment_tables")
+
+
+def test_a_written_table_is_named_where_the_chart_mounts_it(tables):
+    # The config file takes no template, so nothing downstream derives the entry.
+    doc: dict = {}
+    assert files.upsert_file(doc, tables, "geo.csv", "ip,cc\n") is True
+    assert _entries(doc) == [{"name": "geo", "path": f"{tables.mount_path}/geo.csv"}]
+
+
+def test_a_table_the_config_already_names_keeps_the_author_s_entry(tables):
+    # The author's entry carries key columns a derived one cannot.
+    authored = {"name": "geo", "path": "/srv/geo.csv", "key_columns": ["ip"]}
+    doc: dict = {"config": {"enrichment_tables": [authored]}}
+    files.upsert_file(doc, tables, "geo.csv", "ip,cc\n")
+    assert _entries(doc) == [authored]
+
+
+def test_a_deleted_table_takes_its_derived_entry_with_it(tables):
+    # The app fails to load a table whose file is gone.
+    doc: dict = {}
+    files.upsert_file(doc, tables, "geo.csv", "ip,cc\n")
+    files.upsert_file(doc, tables, "asn.csv", "ip,asn\n")
+    files.delete_file(doc, tables, "geo.csv")
+    assert _entries(doc) == [{"name": "asn", "path": f"{tables.mount_path}/asn.csv"}]
+
+
+def test_a_deleted_table_leaves_the_author_s_entry(tables):
+    authored = {"name": "geo", "path": f"{tables.mount_path}/geo.csv", "key_columns": ["ip"]}
+    doc: dict = {"config": {"enrichment_tables": [authored]}}
+    files.upsert_file(doc, tables, "geo.csv", "ip,cc\n")
+    files.delete_file(doc, tables, "geo.csv")
+    assert _entries(doc) == [authored]
+
+
+def test_an_entry_naming_a_file_elsewhere_survives_every_write(tables):
+    elsewhere = {"name": "tz", "path": "/etc/shared/tz.csv"}
+    doc: dict = {"config": {"enrichment_tables": [elsewhere]}}
+    files.upsert_file(doc, tables, "geo.csv", "ip,cc\n")
+    files.delete_file(doc, tables, "geo.csv")
+    assert _entries(doc) == [elsewhere]
+
+
+def test_an_unchanged_file_with_no_entry_still_reports_a_change(tables):
+    # A set carried over from another key has its files but none of its entries.
+    doc: dict = {"fileSets": {"enrichment": {"files": [{"name": "geo.csv", "content": "a\n"}]}}}
+    assert files.upsert_file(doc, tables, "geo.csv", "a\n") is True
+    assert _entries(doc) == [{"name": "geo", "path": f"{tables.mount_path}/geo.csv"}]
+    assert files.upsert_file(doc, tables, "geo.csv", "a\n") is False
+
+
+def test_deleting_a_file_an_authored_entry_names_warns_as_compose_does(tables, monkeypatch):
+    seen: list[tuple[str, dict]] = []
+    monkeypatch.setattr(files.logger, "warning", lambda msg, **kw: seen.append((msg, kw)))
+    path = f"{tables.mount_path}/geo.csv"
+    authored = {"name": "geo", "path": path, "key_columns": ["ip"]}
+    doc: dict = {"config": {"enrichment_tables": [authored]}}
+    files.upsert_file(doc, tables, "geo.csv", "ip,cc\n")
+    files.delete_file(doc, tables, "geo.csv")
+
+    assert seen == [
+        (
+            "a declared entry names a file this set no longer carries",
+            {"file_set": "enrichment", "entry": "geo", "missing_file": "geo.csv", "path": path},
+        )
+    ]
+
+
+def test_deleting_a_file_only_a_derived_entry_named_warns_nothing(tables, monkeypatch):
+    seen: list[tuple[str, dict]] = []
+    monkeypatch.setattr(files.logger, "warning", lambda msg, **kw: seen.append((msg, kw)))
+    doc: dict = {}
+    files.upsert_file(doc, tables, "geo.csv", "ip,cc\n")
+    files.delete_file(doc, tables, "geo.csv")
+    assert seen == []
+
+
+def test_a_second_file_with_one_table_name_is_refused_naming_both(tables):
+    doc: dict = {}
+    files.upsert_file(doc, tables, "geo.csv", "ip,cc\n")
+    with pytest.raises(files.TableNameTakenError) as refused:
+        files.upsert_file(doc, tables, "geo.json", "{}\n")
+
+    assert (refused.value.existing, refused.value.name) == ("geo.csv", "geo.json")
+    assert "geo.csv" in str(refused.value)
+    assert "geo.json" in str(refused.value)
+    assert [f.name for f in files.list_files(doc, tables)] == ["geo.csv"]
+
+
+def test_a_file_already_sharing_a_table_name_can_still_be_edited(tables):
+    # A set that came in with both files keeps working; it only gets no second entry.
+    both = [{"name": "geo.csv", "content": "a\n"}, {"name": "geo.json", "content": "{}\n"}]
+    doc: dict = {"fileSets": {"enrichment": {"files": both}}}
+    files.upsert_file(doc, tables, "geo.json", "[]\n")
+    assert _entries(doc) == [{"name": "geo", "path": f"{tables.mount_path}/geo.csv"}]
+
+
+def test_a_set_read_as_a_directory_takes_two_files_with_one_stem():
+    # Only a table-by-table set looks a file up by its stem.
+    transforms = catalogue.file_set(VECTOR, "transforms")
+    doc: dict = {}
+    files.upsert_file(doc, transforms, "geo.yaml", "a: 1\n")
+    assert files.upsert_file(doc, transforms, "geo.yml", "b: 1\n") is True
+
+
+def test_a_malformed_entry_list_is_refused_rather_than_replaced(tables):
+    doc: dict = {"config": {"enrichment_tables": {"geo": "/x"}}}
+    with pytest.raises(ValueError, match="expected a list"):
+        files.upsert_file(doc, tables, "geo.csv", "a\n")
+
+
+def test_a_set_read_as_a_directory_writes_no_entries(vrl_set):
+    doc: dict = {}
+    files.upsert_file(doc, vrl_set, "000_parse.vrl", VRL_SOURCE)
+    assert "config" not in doc
+
+
+def test_a_set_whose_mount_the_manifest_does_not_name_writes_no_entries(tables):
+    # The chart that mounts it derives the entries, as the dfe-common charts do.
+    unmounted = dataclasses.replace(tables, mount_path="")
+    doc: dict = {}
+    assert files.upsert_file(doc, unmounted, "geo.csv", "ip,cc\n") is True
+    assert "config" not in doc
+
+
+def test_vector_s_tables_are_named_by_its_transforms_not_its_config():
+    # dfe-transform-vector reads enrichment_tables from the Vector config its
+    # transform files assemble; its own config file has no such key.
+    doc: dict = {}
+    files.upsert_file(doc, catalogue.file_set(VECTOR, "enrichment"), "timezones.csv", "a\n")
+    assert "config" not in doc

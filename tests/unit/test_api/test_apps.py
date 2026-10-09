@@ -568,6 +568,24 @@ class TestFiles:
         resp = client.put(path, json={"content": VRL_SOURCE}, headers=admin_headers)
         assert resp.json()["changed"] is False
 
+    def test_a_second_table_under_one_name_is_409_naming_both(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        first = client.put(
+            f"{BASE}/files/enrichment/geo.csv", json={"content": "ip,cc\n"}, headers=admin_headers
+        )
+        assert first.status_code == 200, first.text
+
+        resp = client.put(
+            f"{BASE}/files/enrichment/geo.json", json={"content": "{}\n"}, headers=admin_headers
+        )
+
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "table_name_taken"
+        assert resp.json()["context"]["files"] == ["geo.csv", "geo.json"]
+
     def test_wrong_extension_is_400(self, client, app, admin_headers, tmp_path):
         _wire(app, tmp_path)
         _deploy(client, admin_headers)

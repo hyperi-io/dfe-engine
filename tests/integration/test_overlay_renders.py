@@ -5,7 +5,7 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""Render the engine's own overlays through the real dfe-infra charts.
+"""Render the engine's own overlays through the real dfe-infra dfe-common charts.
 
 The engine writes a values overlay and the chart turns it into Kubernetes objects,
 but nothing above this file ever runs both halves together: a unit test proves the
@@ -13,12 +13,15 @@ engine wrote the key it meant to, and a chart test proves the chart reads the ke
 expects, and neither notices when the two names stop agreeing. Every assertion here
 is about that seam.
 
+These are the charts a rollback renders the overlay on, so what is held here is that
+the identity and telemetry keys name each instance there. File content sits under
+the thin chart's ``fileSets``, which these charts do not read, and dfe-infra's
+``scripts/tests/test_weave_transforms.py`` holds its delivery to the pod.
+
 The charts come from a dfe-infra checkout (``$DFE_INFRA_DIR``, or one beside this
 repo), else from the dfe-infra release pinned in ``tests/support/producer_contract.py``.
 The module skips when the ``helm`` binary is absent.
 """
-
-from __future__ import annotations
 
 import re
 import shutil
@@ -44,10 +47,6 @@ VECTOR = "dfe-transform-vector"
 FETCHER = "dfe-fetcher"
 
 TRANSFORM_SERVICES = [VRL, VECTOR]
-
-# The app's own setting naming the directory it reads its transforms from. The chart
-# exports it from transformFilesDir, so it outranks anything in the config blob.
-TRANSFORMS_DIR_ENV = "DFE_TRANSFORM_TRANSFORMS_DIR"
 
 # A Kubernetes label value: 63 characters or fewer, alphanumeric at both ends, and
 # only alphanumerics, '-', '_' and '.' between. Empty is legal.
@@ -139,17 +138,6 @@ def only(objects: list[dict], kind: str) -> dict:
     return matching[0]
 
 
-def transforms_configmap(objects: list[dict]) -> dict:
-    """The ConfigMap the transforms volume is sourced from."""
-    volume = next(
-        v
-        for v in only(objects, "Deployment")["spec"]["template"]["spec"]["volumes"]
-        if v["name"] == "transforms"
-    )
-    name = volume["configMap"]["name"]
-    return next(o for o in objects if o["kind"] == "ConfigMap" and o["metadata"]["name"] == name)
-
-
 def container(objects: list[dict]) -> dict:
     """The single application container in the rendered Deployment."""
     containers = only(objects, "Deployment")["spec"]["template"]["spec"]["containers"]
@@ -160,12 +148,6 @@ def container(objects: list[dict]) -> dict:
 def env_of(objects: list[dict]) -> dict[str, str]:
     """The container's literal-valued environment, by name."""
     return {e["name"]: e["value"] for e in container(objects)["env"] if "value" in e}
-
-
-def mount_path(objects: list[dict], volume_name: str) -> str:
-    """Where the container mounts the named volume."""
-    mount = next(m for m in container(objects)["volumeMounts"] if m["name"] == volume_name)
-    return mount["mountPath"]
 
 
 # ── the contract ──────────────────────────────────────────────
@@ -216,44 +198,30 @@ class TestOverlayRendersThroughTheChart:
             names.add(env_of(objects)["OTEL_SERVICE_NAME"])
         assert len(names) == 2
 
-    def test_a_written_file_reaches_the_configmap_and_the_mount(self, charts, service, tmp_path):
-        # The whole storage decision rests on this: content lives in the overlay
-        # because Helm cannot read a raw file out of an Argo $values source.
+    def test_written_files_are_inert_on_the_dfe_common_chart(self, charts, service, tmp_path):
+        # A rollback shows the files left at the key this chart reads, so a file
+        # written under fileSets renders nothing here rather than failing the render.
         name, body = FILE_FOR[service], BODY_FOR[service]
-        doc = overlay_with_files(service, "edge", {name: body})
-        objects = render(charts, service, doc, "edge", tmp_path)
-
-        assert transforms_configmap(objects)["data"][name] == body
-        # The app reads the directory this env var names, so the mount has to land
-        # exactly there or the files are delivered somewhere nothing looks.
-        assert mount_path(objects, "transforms") == env_of(objects)[TRANSFORMS_DIR_ENV]
-
-    def test_files_absent_from_the_overlay_render_no_configmap(self, charts, service, tmp_path):
-        doc = overlay_with_files(service, "edge", {})
-        objects = render(charts, service, doc, "edge", tmp_path)
-        names = {o["metadata"]["name"] for o in objects if o["kind"] == "ConfigMap"}
+        with_files = render(
+            charts, service, overlay_with_files(service, "edge", {name: body}), "edge", tmp_path
+        )
+        without = render(charts, service, overlay_with_files(service, "edge", {}), "edge", tmp_path)
+        names = {o["metadata"]["name"] for o in with_files if o["kind"] == "ConfigMap"}
         assert not any(n.endswith("-transforms") for n in names)
+        assert {(o["kind"], o["metadata"]["name"]) for o in with_files} == {
+            (o["kind"], o["metadata"]["name"]) for o in without
+        }
 
     @pytest.mark.parametrize("case", sorted(HOSTILE_BODIES))
-    def test_hostile_content_survives_byte_exact(self, charts, service, case, tmp_path):
+    def test_hostile_content_survives_byte_exact(self, service, case):
+        # What Helm parses is the committed YAML, so the body has to come back
+        # from it byte for byte before any chart sees it.
         body = HOSTILE_BODIES[case]
         name = FILE_FOR[service]
         doc = overlay_with_files(service, "edge", {name: body})
-        objects = render(charts, service, doc, "edge", tmp_path)
-        assert transforms_configmap(objects)["data"][name] == body
-
-    def test_content_cannot_forge_a_sibling_key_in_the_rendered_objects(
-        self, charts, service, tmp_path
-    ):
-        # A body that breaks out of its own scalar would set replicaCount. The chart
-        # renders replicas only while KEDA is off, so the replica count is the evidence.
-        doc = overlay_with_files(
-            service, "edge", {FILE_FOR[service]: HOSTILE_BODIES["carriage-return-injection"]}
-        )
-        for path, value in scaling.changes(doc, keda_enabled=False).items():
-            set_path(doc, path, value)
-        objects = render(charts, service, doc, "edge", tmp_path)
-        assert only(objects, "Deployment")["spec"]["replicas"] == 1
+        parsed = yaml.safe_load(yaml_dump_string(doc))
+        file_set = catalogue.file_set(service, "transforms")
+        assert files.read_file(parsed, file_set, name).content == body
 
     def test_scaling_dials_reach_the_scaledobject_and_the_container(
         self, charts, service, tmp_path
@@ -318,3 +286,16 @@ class TestPerConfigInstancesDoNotCollide:
         doc = instances.initial_overlay(app)
         objects = render(charts, FETCHER, doc, app.telemetry_name, tmp_path)
         assert [problem for o in objects for problem in bad_labels(o)] == []
+
+
+@pytest.mark.parametrize("service", [FETCHER, *TRANSFORM_SERVICES, "dfe-transform-elastic"])
+def test_the_thin_chart_keys_render_nothing_on_the_dfe_common_chart(charts, service, tmp_path):
+    # A rollback renders the overlay these keys were written into, so each has to
+    # leave every object exactly as the dfe-common keys beside it name them.
+    app = instances.instance_of(service, "alpha")
+    doc = instances.initial_overlay(app)
+    bare = {k: v for k, v in doc.items() if k not in {catalogue.FULLNAME_OVERRIDE_PATH, "otel"}}
+    assert bare != doc
+    assert render(charts, service, doc, app.telemetry_name, tmp_path) == render(
+        charts, service, bare, app.telemetry_name, tmp_path
+    )

@@ -440,7 +440,7 @@ class TestLinking:
 
         # The chart renders content, so the content has to be in the values.
         overlay = gc.get("helmvars", f"{VRL}-syslog-values")
-        assert overlay["transformFiles"][0]["content"] == V1
+        assert overlay["fileSets"]["transforms"]["files"][0]["content"] == V1
         assert overlay["transformFileLinks"][0]["artifact"] == "parse-syslog"
 
         got = client.get(f"{self.BASE}/000_parse.vrl", headers=admin_headers).json()
