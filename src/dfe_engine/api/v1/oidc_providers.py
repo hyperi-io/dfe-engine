@@ -25,7 +25,7 @@ secret paths and the env var names, never a secret value.
 """
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal
 
@@ -96,7 +96,11 @@ class GroupResolutionRequest(BaseModel):
         description="Google service account JSON. Write-only: it goes to the secret "
         "store and only its path is kept in config.",
     )
-    service_account_json_env: str = Field(default="", description="Env var for Google SA JSON")
+    service_account_json_env: str = Field(
+        default="",
+        description="Env var for Google SA JSON. On an update, setting it without "
+        "service_account_json drops the stored JSON, so the env var is used.",
+    )
     admin_email: str = Field(default="", description="Google Workspace admin email")
     domain: str = Field(default="", description="Google Workspace domain")
     tenant_id: str = Field(
@@ -111,13 +115,21 @@ class GroupResolutionRequest(BaseModel):
         "secret store and only its path is kept in config. When neither this nor "
         "client_secret_env is set, the login client secret is used.",
     )
-    client_secret_env: str = Field(default="", description="Env var for Entra ID client secret")
+    client_secret_env: str = Field(
+        default="",
+        description="Env var for Entra ID client secret. On an update, setting it without "
+        "client_secret drops the stored secret, so the env var is used.",
+    )
     api_token: str = Field(
         default="",
         description="Okta API token. Write-only: it goes to the secret store and only "
         "its path is kept in config.",
     )
-    api_token_env: str = Field(default="", description="Env var for Okta API token")
+    api_token_env: str = Field(
+        default="",
+        description="Env var for Okta API token. On an update, setting it without api_token "
+        "drops the stored token, so the env var is used.",
+    )
     okta_domain: str = Field(default="", description="Okta organisation domain")
 
     @field_validator(
@@ -191,7 +203,11 @@ class UpdateProviderRequest(BaseModel):
         description="Rotate the RP client secret. Write-only: it goes to the secret "
         "store and only its path is kept in config.",
     )
-    client_secret_env: str | None = Field(None, description="Env var name for the RP client secret")
+    client_secret_env: str | None = Field(
+        None,
+        description="Env var name for the RP client secret. Setting it without client_secret "
+        "drops the stored secret, so the env var is used.",
+    )
     groups: GroupResolutionRequest | None = Field(None, description="Group resolution config")
 
     @field_validator("client_id_env", "client_secret_env")
@@ -423,18 +439,32 @@ def _store_group_secrets(*, groups: GroupResolutionRequest, name: str, request: 
             )
 
 
-def _delete_stored_secrets(request: Request, provider: OIDCProvider) -> None:
-    """Remove every secret the provider recorded a path for."""
+def _delete_secrets(*, paths: Iterable[str], request: Request) -> None:
+    """Remove the secret at each non-empty store path; with no secrets backend nothing was stored."""
     store = getattr(request.app.state, "dfe_secrets", None)
     if store is None:
         return
+    for path in paths:
+        if path:
+            store.delete(path)
+
+
+def _delete_stored_secrets(request: Request, provider: OIDCProvider) -> None:
+    """Remove every secret the provider recorded a path for."""
     group_paths = [
         getattr(provider.groups, path_field)
         for _value_field, _store_field, path_field in _GROUP_SECRETS
     ]
-    for path in (provider.client_secret_path, *group_paths):
-        if path:
-            store.delete(path)
+    _delete_secrets(paths=(provider.client_secret_path, *group_paths), request=request)
+
+
+def _group_secrets_moved_to_env(*, groups: GroupResolutionRequest) -> list[str]:
+    """The config field keeping the path of each directory secret the groups block names an env var for and sends no value for."""
+    return [
+        path_field
+        for value_field, _store_field, path_field in _GROUP_SECRETS
+        if getattr(groups, f"{value_field}_env") and not (getattr(groups, value_field))
+    ]
 
 
 def _refresh_rp(request: Request) -> None:
@@ -579,7 +609,7 @@ async def update_provider(
 ):
     """Update an OIDC provider configuration (admin only).
 
-    A secret the body omits keeps the path the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential. Any update that touches more than ``enabled`` or ``display_name`` must leave the provider passing the field rules, checked before a secret is written.
+    A secret the body omits keeps the path the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential. A secret the body names an env var for and sends no value for loses its stored copy once the update is saved, so the env var is read instead. Any update that touches more than ``enabled`` or ``display_name`` must leave the provider passing the field rules, checked before a secret is written or deleted.
     """
     registry = _get_registry(request)
     current = registry.get(name)
@@ -589,6 +619,7 @@ async def update_provider(
             detail={"code": "not_found", "message": f"OIDC provider '{name}' not found"},
         )
 
+    stale_paths = []
     update_fields: dict[str, object] = {}
     if body.enabled is not None:
         update_fields["enabled"] = body.enabled
@@ -604,6 +635,9 @@ async def update_provider(
         update_fields["client_secret_path"] = provider_secret_path(
             field="client_secret", provider_name=name
         )
+    elif body.client_secret_env:
+        update_fields["client_secret_path"] = ""
+        stale_paths.append(current.client_secret_path)
     if body.groups is not None:
         kept = {
             path_field: getattr(current.groups, path_field)
@@ -614,6 +648,9 @@ async def update_provider(
             directory_backend=current.groups.directory_backend,
             mock_directory_env=current.groups.mock_directory_env,
         )
+        moved_to_env = _group_secrets_moved_to_env(groups=body.groups)
+        stale_paths.extend(getattr(current.groups, path_field) for path_field in moved_to_env)
+        kept.update(dict.fromkeys(moved_to_env, ""))
         kept.update(_group_secret_paths(groups=body.groups, name=name))
         update_fields["groups"] = _group_config(
             groups=body.groups, kept=kept, provider_type=current.type
@@ -638,6 +675,8 @@ async def update_provider(
     # Picks up an enable/disable flip and a rotated client secret alike.
     _refresh_rp(request)
     audit_resource_change(user.user_id, "oidc_provider", name, "updated")
+    # Deleted only once the saved config no longer points at them, so a failed update never leaves the provider on a missing secret.
+    _delete_secrets(paths=stale_paths, request=request)
     return _provider_to_response(name, provider)
 
 

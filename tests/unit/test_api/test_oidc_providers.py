@@ -17,11 +17,16 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from dfe_engine.auth.oidc.credential_env import resolve_credential
 from dfe_engine.settings import DFESettings
 from tests.unit.test_api.oidc_providers_cases import (
+    SWITCHED_SECRET,
+    SWITCHED_SECRET_ENV,
     SYNC_DIRECTORY_ENV,
     SYNC_PROVIDER_CASES,
+    UPDATE_PROVIDER_SECRET_SOURCE_CASES,
     SyncProviderCase,
+    UpdateProviderSecretSourceCase,
 )
 from tests.unit.test_auth.factories import (
     OKTA_API_TOKEN_ENV,
@@ -54,6 +59,18 @@ def _link_a_scim_group_to_a_mock_directory(
     app.state.oidc_provider_registry.create(
         name="mock-dir", provider=make_oidc_provider(groups=groups)
     )
+
+
+def _secret_source(*, app: FastAPI, field: str, name: str, stored_path: str) -> dict[str, object]:
+    """The store path a provider keeps for one secret, the value it resolves to and whether the store still holds *stored_path*."""
+    provider = app.state.oidc_provider_registry.get(name)
+    *parents, leaf = field.split(".")
+    holder = provider.groups if parents else provider
+    path = getattr(holder, f"{leaf}_path")
+    resolved = resolve_credential(
+        env_name=getattr(holder, f"{leaf}_env"), secret_path=path, secrets=app.state.dfe_secrets
+    )
+    return {"path": path, "resolved": resolved, "stored": app.state.dfe_secrets.exists(stored_path)}
 
 
 def _viewers_groups(*, app: FastAPI) -> list[tuple[str, str, str]]:
@@ -287,6 +304,68 @@ class TestUpdateProvider:
             headers=viewer_headers,
         )
         assert resp.status_code == 403
+
+    @pytest.mark.parametrize(
+        "case",
+        UPDATE_PROVIDER_SECRET_SOURCE_CASES,
+        ids=[case["id"] for case in UPDATE_PROVIDER_SECRET_SOURCE_CASES],
+    )
+    def test_secret_source(
+        self,
+        admin_headers: dict[str, str],
+        app: FastAPI,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+        case: UpdateProviderSecretSourceCase,
+    ):
+        monkeypatch.setenv(SWITCHED_SECRET_ENV, SWITCHED_SECRET)
+        _create_provider(
+            admin_headers=admin_headers, client=client, name="sso", **case["create_body"]
+        )
+
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/sso", headers=admin_headers, json=case["update_body"]
+        )
+
+        source = _secret_source(
+            app=app, field=case["secret_field"], name="sso", stored_path=case["stored_path"]
+        )
+        assert (resp.status_code, source) == (200, case["expected_source"])
+
+    def test_a_refused_switch_to_env_deletes_nothing(
+        self, admin_headers: dict[str, str], app: FastAPI, client: TestClient
+    ):
+        _create_provider(
+            admin_headers=admin_headers,
+            client=client,
+            client_secret="stored-secret",
+            groups={"api_token": "stored-token", "mode": "api", "okta_domain": "acme.okta.com"},
+            name="sso",
+            type="okta",
+        )
+
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/sso",
+            headers=admin_headers,
+            json={
+                "client_secret_env": SWITCHED_SECRET_ENV,
+                "groups": {"api_token_env": SWITCHED_SECRET_ENV, "mode": "api"},
+            },
+        )
+
+        stored = app.state.oidc_provider_registry.get("sso")
+        kept = (
+            stored.client_secret_path,
+            stored.groups.api_token_path,
+            app.state.dfe_secrets.exists("oidc/sso/client_secret"),
+            app.state.dfe_secrets.exists("oidc/sso/groups_api_token"),
+        )
+        expected_kept = ("oidc/sso/client_secret", "oidc/sso/groups_api_token", True, True)
+        assert (resp.status_code, _field_errors(response=resp), kept) == (
+            422,
+            ["groups.okta_domain"],
+            expected_kept,
+        )
 
 
 class TestDeleteProvider:
