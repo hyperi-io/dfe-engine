@@ -14,6 +14,7 @@ transient failure without committing twice, and give up with a typed error the A
 answers 503.
 """
 
+import contextlib
 import socket
 import threading
 import time
@@ -533,6 +534,9 @@ class _CountingBlackHole:
                 self._held.append(conn)
 
     def close(self) -> None:
+        # Without shutdown, accept() stays parked, and a child's exit resumes it on the reused fd.
+        with contextlib.suppress(OSError):
+            self._listener.shutdown(socket.SHUT_RDWR)
         self._listener.close()
         self._thread.join(timeout=5)
         with self._lock:

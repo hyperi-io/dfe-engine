@@ -64,9 +64,11 @@ class _DfeEngineApp:
 
         class DfeEngineApp(ServiceApp):
             name = "dfe-engine"
-            env_prefix = ENV_PREFIX
+            # Read by scalo's ServiceApp to load the config cascade, so vulture sees no reader.
+            env_prefix = ENV_PREFIX  # noqa: V107
 
-            def version_info(self) -> VersionInfo:
+            # Called by scalo's ServiceApp for version and run, so vulture sees no caller.
+            def version_info(self) -> VersionInfo:  # noqa: V105
                 from dfe_engine import __version__
 
                 return VersionInfo(self.name, __version__)
@@ -77,18 +79,20 @@ class _DfeEngineApp:
 
                 return engine_deployment_contract()
 
-            def register_commands(self, app) -> None:
+            # Called by scalo's ServiceApp as it builds the CLI, so vulture sees no caller.
+            def register_commands(self, app) -> None:  # noqa: V105
                 # Pure daemon: no offline command registrations. The
                 # operator-facing commands (auth/gitops/governed-ops/
                 # sampler/ch-cloud) live on the separate `dfe` CLI. The
                 # daemon keeps only scalo's base run/version/config-check.
                 pass
 
-            def run_service(self, config) -> None:
-                # Delegate to async
+            # Abstract on scalo's ServiceApp, which calls run_service_async instead.
+            def run_service(self, config) -> None:  # noqa: V105
                 pass
 
-            async def run_service_async(self, config) -> None:
+            # Called by scalo's ServiceApp when run starts the service, so vulture sees no caller.
+            async def run_service_async(self, config) -> None:  # noqa: V105
                 import uvicorn
 
                 from dfe_engine.settings import load_settings
