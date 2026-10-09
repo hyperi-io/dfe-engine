@@ -104,6 +104,12 @@ class Account(BaseModel):
     ``alice-smith@corp`` both sanitise to ``alice-smith-corp``), so this is what
     tells the account's own identity from another that sanitises onto it. Empty on
     an account no IdP login has reached yet."""
+    oidc_id: str = ""
+    """OIDC provider name last used to log this account in.
+
+    Written on every successful OIDC login (JIT create and subsequent). Distinct
+    from ``source_provider``, which may stay a SCIM stamp when the same IdP owns
+    the account through a binding. Empty until an OIDC login has reached it."""
     last_login_at: str = ""
     disabled_at: str = ""
     blocked_at: str = ""
@@ -508,6 +514,7 @@ _UPDATABLE_FIELDS = (
     "source_provider",
     "external_id",
     "subject",
+    "oidc_id",
     "last_login_at",
     "email",
     "phone",
