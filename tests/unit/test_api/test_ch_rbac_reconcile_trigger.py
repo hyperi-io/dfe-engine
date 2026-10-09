@@ -13,6 +13,7 @@ endpoint until one of them did. The app's trigger is swapped for one whose
 reconcile is a call recorder, so each test counts the runs a write caused.
 """
 
+import contextlib
 import socket
 import threading
 import time
@@ -230,6 +231,9 @@ class _ListeningClickHouse:
             conn.close()
 
     def close(self) -> None:
+        # Without shutdown, accept() stays parked, and a child's exit resumes it on the reused fd.
+        with contextlib.suppress(OSError):
+            self._listener.shutdown(socket.SHUT_RDWR)
         self._listener.close()
         self._thread.join(timeout=5)
 
