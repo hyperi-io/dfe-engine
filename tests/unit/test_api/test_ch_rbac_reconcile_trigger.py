@@ -13,14 +13,13 @@ endpoint until one of them did. The app's trigger is swapped for one whose
 reconcile is a call recorder, so each test counts the runs a write caused.
 """
 
-import contextlib
-import socket
 import threading
 import time
 
 import pytest
 
 from dfe_engine.governance.ch import ReconcileResult, ReconcileTrigger
+from tests.support.loopback import CountingListener
 
 _WAIT = 10.0
 _SCIM = "/api/v1/scim/v2"
@@ -200,44 +199,6 @@ class TestGroups:
         assert reconciles.calls == 1
 
 
-class _ListeningClickHouse:
-    """A listener where a ClickHouse would be, counting every connection made to it.
-
-    Each connection is closed at once, so a client that does dial fails fast rather
-    than waiting on an answer.
-    """
-
-    def __init__(self) -> None:
-        self._listener = socket.socket()
-        self._listener.bind(("127.0.0.1", 0))
-        self._listener.listen(16)
-        self._lock = threading.Lock()
-        self.connections = 0
-        self._thread = threading.Thread(target=self._accept, daemon=True)
-        self._thread.start()
-
-    @property
-    def port(self) -> int:
-        return self._listener.getsockname()[1]
-
-    def _accept(self) -> None:
-        while True:
-            try:
-                conn, _addr = self._listener.accept()
-            except OSError:
-                return
-            with self._lock:
-                self.connections += 1
-            conn.close()
-
-    def close(self) -> None:
-        # Without shutdown, accept() stays parked, and a child's exit resumes it on the reused fd.
-        with contextlib.suppress(OSError):
-            self._listener.shutdown(socket.SHUT_RDWR)
-        self._listener.close()
-        self._thread.join(timeout=5)
-
-
 def _failed_runs(manager) -> float:
     from prometheus_client.parser import text_string_to_metric_families
 
@@ -264,7 +225,8 @@ def test_a_unit_test_app_never_reconciles_against_a_listening_clickhouse(api_set
     from dfe_engine.api.deps import _registries
     from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 
-    clickhouse = _ListeningClickHouse()
+    # Each connection is closed at once, so a reconcile that does dial fails fast.
+    clickhouse = CountingListener()
     api_settings.clickhouse.host = "127.0.0.1"
     api_settings.clickhouse.port = clickhouse.port
     api_settings.clickhouse.secure = False

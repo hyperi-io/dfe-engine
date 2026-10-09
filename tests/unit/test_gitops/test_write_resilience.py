@@ -39,6 +39,7 @@ from dfe_engine.gitops import repo as repo_module
 from dfe_engine.gitops.metrics import WRITE_BREAKER, WRITE_RETRIES, GitopsMetrics
 from dfe_engine.gitops.repo import GitopsRemoteError, GitopsRepo, GitopsUnavailableError
 from dfe_engine.settings import GitopsWriteSettings
+from tests.support.loopback import CountingListener, stop_server
 
 # Longer than the read bound, so a write held to it fails.
 _SLOW_ADVERTISEMENT_SECONDS = repo_module.REMOTE_HEAD_TIMEOUT_SECONDS + 1.0
@@ -141,25 +142,21 @@ type Hold = Callable[[Callable], _HoldAnswers]
 @pytest.fixture
 def serve(no_proxy: None) -> Iterator[Callable[..., str]]:
     """Start a git-over-HTTP server for a bare repo, optionally holding some answers."""
-    servers: list[tuple[WSGIServer, threading.Thread]] = []
+    with contextlib.ExitStack() as stack:
 
-    def start(bare: Path, hold: Hold | None = None) -> str:
-        app = make_wsgi_chain(DictBackend({"/": Repo(str(bare))}))
-        if hold is not None:
-            app = hold(app)
-        server = make_server(
-            "127.0.0.1", 0, app, server_class=_ThreadingServer, handler_class=_QuietHandler
-        )
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        servers.append((server, thread))
-        return f"http://127.0.0.1:{server.server_port}/"
+        def start(bare: Path, hold: Hold | None = None) -> str:
+            app = make_wsgi_chain(DictBackend({"/": Repo(str(bare))}))
+            if hold is not None:
+                app = hold(app)
+            server = make_server(
+                "127.0.0.1", 0, app, server_class=_ThreadingServer, handler_class=_QuietHandler
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            stack.callback(stop_server, server, thread)
+            return f"http://127.0.0.1:{server.server_port}/"
 
-    yield start
-    for server, thread in servers:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+        yield start
 
 
 def _clone(
@@ -499,54 +496,14 @@ def test_the_budget_bounds_a_call_to_a_silent_forge(tmp_path: Path, no_proxy) ->
     assert elapsed < timeout + budget + 0.5
 
 
-class _CountingBlackHole:
-    """A listener that takes every connection and never answers on it, counting each.
-
-    The wedged-forge shape from the black-holed forge in test_repo.py, with the
-    connections accepted so a test can tell whether a write dialled at all.
-    """
-
-    def __init__(self) -> None:
-        self._listener = socket.socket()
-        self._listener.bind(("127.0.0.1", 0))
-        self._listener.listen(16)
-        self._held: list[socket.socket] = []
-        self._lock = threading.Lock()
-        self._thread = threading.Thread(target=self._accept, daemon=True)
-        self._thread.start()
-
-    @property
-    def url(self) -> str:
-        return f"http://127.0.0.1:{self._listener.getsockname()[1]}/deploy.git"
-
-    @property
-    def connections(self) -> int:
-        with self._lock:
-            return len(self._held)
-
-    def _accept(self) -> None:
-        while True:
-            try:
-                conn, _addr = self._listener.accept()
-            except OSError:
-                return
-            with self._lock:
-                self._held.append(conn)
-
-    def close(self) -> None:
-        # Without shutdown, accept() stays parked, and a child's exit resumes it on the reused fd.
-        with contextlib.suppress(OSError):
-            self._listener.shutdown(socket.SHUT_RDWR)
-        self._listener.close()
-        self._thread.join(timeout=5)
-        with self._lock:
-            for conn in self._held:
-                conn.close()
-
-
 @pytest.fixture
-def black_hole(no_proxy: None) -> Iterator[_CountingBlackHole]:
-    hole = _CountingBlackHole()
+def black_hole(no_proxy: None) -> Iterator[CountingListener]:
+    """The wedged-forge shape from test_repo.py, with the connections counted.
+
+    Each connection is accepted and never answered, so a test can tell whether a
+    write dialled at all.
+    """
+    hole = CountingListener(hold=True)
     try:
         yield hole
     finally:
@@ -554,7 +511,7 @@ def black_hole(no_proxy: None) -> Iterator[_CountingBlackHole]:
 
 
 def test_the_breaker_opens_after_spent_budgets_and_answers_without_dialling(
-    tmp_path: Path, black_hole: _CountingBlackHole
+    tmp_path: Path, black_hole: CountingListener
 ) -> None:
     """Two writes spend their budget on a wedged forge; the third is a 503 at once.
 
@@ -562,13 +519,14 @@ def test_the_breaker_opens_after_spent_budgets_and_answers_without_dialling(
     its full timeout and budget, with the writer lock held and later writes queued.
     """
     timeout, reset = 0.5, 60.0
+    url = f"http://127.0.0.1:{black_hole.port}/deploy.git"
     bare, branch = _seed(tmp_path)
     manager = _manager()
     repo = _clone(
         tmp_path,
         bare,
         branch,
-        black_hole.url,
+        url,
         metrics=GitopsMetrics(manager),
         write=GitopsWriteSettings(
             timeout_seconds=timeout, budget_seconds=0.0, failure_threshold=2, reset_timeout=reset
@@ -589,7 +547,7 @@ def test_the_breaker_opens_after_spent_budgets_and_answers_without_dialling(
 
     assert elapsed < timeout
     assert black_hole.connections == dialled
-    assert caught.value.remote == black_hole.url
+    assert caught.value.remote == url
     assert reset - 5 <= caught.value.retry_after_seconds <= reset
     assert "gitops deploy repo" in str(caught.value)
     assert _breaker(manager, "rejected") == 1
