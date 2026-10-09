@@ -543,6 +543,24 @@
             "description": "Search in username, name, or email"
           },
           {
+            "name": "oidc_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact match on the OIDC provider name last used to log the account in",
+              "title": "Oidc Id"
+            },
+            "description": "Exact match on the OIDC provider name last used to log the account in"
+          },
+          {
             "name": "blocked",
             "in": "query",
             "required": false,
@@ -23593,6 +23611,12 @@
             "type": "boolean",
             "title": "External",
             "description": "True when the account authenticates through an identity provider"
+          },
+          "oidc_id": {
+            "type": "string",
+            "title": "Oidc Id",
+            "description": "OIDC provider name last used to log this account in, empty if none",
+            "default": ""
           },
           "password_change_required": {
             "type": "boolean",

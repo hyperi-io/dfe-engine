@@ -290,6 +290,32 @@ class TestListAccounts:
         assert by_name.status_code == 200
         assert any(a["username"] == "search-me" for a in by_name.json()["items"])
 
+    def test_list_filters_by_oidc_id(self, client, admin_headers, app):
+        store = app.state.account_store
+        store.create("oidc-alice", "")
+        store.update("oidc-alice", oidc_id="entra", email="alice@corp.com")
+        store.create("oidc-bob", "")
+        store.update("oidc-bob", oidc_id="okta", email="bob@corp.com")
+
+        exact = client.get(
+            "/api/v1/auth/accounts",
+            params={"oidc_id": "entra"},
+            headers=admin_headers,
+        )
+        assert exact.status_code == 200
+        names = {a["username"] for a in exact.json()["items"]}
+        assert names == {"oidc-alice"}
+        assert exact.json()["items"][0]["oidc_id"] == "entra"
+
+        # Free-text search stays on username/name/email only.
+        searched = client.get(
+            "/api/v1/auth/accounts",
+            params={"search": "okta"},
+            headers=admin_headers,
+        )
+        assert searched.status_code == 200
+        assert all(a["username"] != "oidc-bob" for a in searched.json()["items"])
+
     def test_list_blocked_omitted_returns_all(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",

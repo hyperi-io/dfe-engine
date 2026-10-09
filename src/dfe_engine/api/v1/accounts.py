@@ -242,6 +242,10 @@ class AccountResponse(BaseModel):
     external: bool = Field(
         description="True when the account authenticates through an identity provider",
     )
+    oidc_id: str = Field(
+        default="",
+        description="OIDC provider name last used to log this account in, empty if none",
+    )
     password_change_required: bool = Field(
         default=False,
         description="True until the account replaces an issued password. The account's "
@@ -281,6 +285,7 @@ def _account_response(request: Request, account: Account, groups: list[Group]) -
         phone=account.phone,
         name=account.name,
         external=account.external,
+        oidc_id=account.oidc_id,
         password_change_required=account.password_change_required,
         created_at=account.created_at,
         updated_at=account.updated_at,
@@ -478,6 +483,10 @@ async def list_accounts(
     request: Request,
     pagination: PaginationParams = Depends(),
     search: str | None = Query(None, description="Search in username, name, or email"),
+    oidc_id: str | None = Query(
+        None,
+        description="Exact match on the OIDC provider name last used to log the account in",
+    ),
     blocked: bool | None = Query(
         None,
         description="Filter by blocked status. Omitted returns every account.",
@@ -500,6 +509,8 @@ async def list_accounts(
         ]
     if blocked is not None:
         accounts = [account for account in accounts if account.blocked is blocked]
+    if oidc_id is not None:
+        accounts = [account for account in accounts if account.oidc_id == oidc_id]
     groups = request.app.state.group_store.list()
     rows = [_account_response(request, a, groups).model_dump() for a in accounts]
     rows = apply_search(rows, search, ["username", "name", "email"])
