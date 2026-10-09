@@ -55,7 +55,6 @@ quality:
     semgrep: warn
     vulture: warn
     ty: warn
-    bandit_exclude_tests: true
   ignore:
     - tool: pip-audit
       ids:
