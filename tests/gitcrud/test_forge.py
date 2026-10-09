@@ -12,8 +12,6 @@ provider's method, path, headers and JSON body are asserted against a real socke
 round-trip, and the response is really parsed.
 """
 
-from __future__ import annotations
-
 import json
 import threading
 from dataclasses import dataclass, field
@@ -30,6 +28,7 @@ from dfe_engine.gitcrud.forge import (
     build_forge,
 )
 from dfe_engine.settings import GitopsSettings
+from tests.support.loopback import stop_server
 
 
 @dataclass
@@ -45,9 +44,10 @@ class _Server:
     base_url: str
     captured: _Captured
     httpd: ThreadingHTTPServer
+    thread: threading.Thread
 
     def stop(self) -> None:
-        self.httpd.shutdown()
+        stop_server(self.httpd, self.thread)
 
 
 def _start_server(status: int = 201, response: dict | None = None) -> _Server:
@@ -73,9 +73,10 @@ def _start_server(status: int = 201, response: dict | None = None) -> _Server:
             self.wfile.write(body)
 
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
     host, port = httpd.server_address
-    return _Server(base_url=f"http://{host}:{port}", captured=captured, httpd=httpd)
+    return _Server(base_url=f"http://{host}:{port}", captured=captured, httpd=httpd, thread=thread)
 
 
 @pytest.fixture

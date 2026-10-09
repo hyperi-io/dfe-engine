@@ -8,11 +8,11 @@
 
 """Local HTTP server answering OIDC discovery and userinfo requests."""
 
-from __future__ import annotations
-
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from tests.support.loopback import stop_server
 
 
 def _handler_for(*, idp: LocalIdp) -> type[BaseHTTPRequestHandler]:
@@ -73,5 +73,4 @@ class LocalIdp:
 
     def stop(self) -> None:
         """Stop serving and release the socket."""
-        self._server.shutdown()
-        self._server.server_close()
+        stop_server(self._server, self._thread)

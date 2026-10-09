@@ -14,6 +14,7 @@ The last test reads GitHub and warns when a producer has released a change to a 
 engine still pins at an older release.
 """
 
+import contextlib
 import dataclasses
 import http.server
 import io
@@ -24,6 +25,7 @@ import threading
 import pytest
 
 from tests.support import producer_contract
+from tests.support.loopback import stop_server
 from tests.support.producer_contract import (
     DFE_LOADER,
     PRODUCERS,
@@ -76,7 +78,7 @@ def local_server():
     Yields a function taking the status and body and returning the base URL plus the
     ``Authorization`` header each request carried.
     """
-    servers: list[http.server.HTTPServer] = []
+    servers: list[tuple[http.server.HTTPServer, threading.Thread]] = []
 
     def start(status: int, body: bytes = b"") -> tuple[str, list[str | None]]:
         seen: list[str | None] = []
@@ -92,14 +94,15 @@ def local_server():
                 pass
 
         server = http.server.HTTPServer(("127.0.0.1", 0), _Answer)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        servers.append(server)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        servers.append((server, thread))
         return f"http://127.0.0.1:{server.server_port}", seen
 
     yield start
-    for server in servers:
-        server.shutdown()
-        server.server_close()
+    with contextlib.ExitStack() as stack:
+        for server, thread in servers:
+            stack.callback(stop_server, server, thread)
 
 
 def _write(root, body: bytes):
