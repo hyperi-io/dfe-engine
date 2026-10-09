@@ -30,6 +30,7 @@ from dfe_engine.admin_links import LINKS_DROPPED
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries, create_access_token
 from dfe_engine.settings import DeploymentSettings, DFESettings
+from tests.support.loopback import stop_server
 
 ADMIN_LINKS = "/api/v1/deployment/admin-links"
 
@@ -49,10 +50,10 @@ class _LoginRedirect(BaseHTTPRequestHandler):
 def console() -> Iterator[str]:
     """A serving admin UI: it answers every probe with a login redirect."""
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _LoginRedirect)
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
     yield f"http://127.0.0.1:{httpd.server_port}/"
-    httpd.shutdown()
-    httpd.server_close()
+    stop_server(httpd, thread)
 
 
 def _closed_port() -> int:
