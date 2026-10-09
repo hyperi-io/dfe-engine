@@ -791,7 +791,7 @@
           "Accounts"
         ],
         "summary": "Get Account",
-        "description": "Get a single account by username (admin only).",
+        "description": "Get a single account by username (admin only).\n\nSoft-deleted (anonymized) accounts answer 404 the same as a missing name.",
         "operationId": "get_account_api_v1_auth_accounts__username__get",
         "parameters": [
           {
@@ -1295,7 +1295,7 @@
           "Accounts"
         ],
         "summary": "Get Account Attributes",
-        "description": "Read an account's non-sensitive attribute blob (404 if the account is missing).",
+        "description": "Read an account's non-sensitive attribute blob (404 if missing or soft-deleted).",
         "operationId": "get_account_attributes_api_v1_auth_accounts__username__attributes_get",
         "parameters": [
           {
@@ -1359,7 +1359,7 @@
           "Accounts"
         ],
         "summary": "Put Account Attributes",
-        "description": "Full-replace an account's non-sensitive attribute blob (404 if missing).",
+        "description": "Full-replace an account's non-sensitive attribute blob (404 if missing or soft-deleted).",
         "operationId": "put_account_attributes_api_v1_auth_accounts__username__attributes_put",
         "parameters": [
           {
@@ -1435,7 +1435,7 @@
           "Accounts"
         ],
         "summary": "Get Account Sensitive Attributes",
-        "description": "Read an account's SENSITIVE attribute blob from the separate keyed store.\n\nThe account must exist first (404 otherwise), so a sensitive read cannot be\nused to probe for accounts that are not there.",
+        "description": "Read an account's SENSITIVE attribute blob from the separate keyed store.\n\nThe account must exist first (404 otherwise), so a sensitive read cannot be\nused to probe for accounts that are not there. Soft-deleted accounts answer\nthe same way.",
         "operationId": "get_account_sensitive_attributes_api_v1_auth_accounts__username__sensitive_attributes_get",
         "parameters": [
           {
@@ -1499,7 +1499,7 @@
           "Accounts"
         ],
         "summary": "Put Account Sensitive Attributes",
-        "description": "Full-replace an account's SENSITIVE attribute blob (404 if the account is missing).",
+        "description": "Full-replace an account's SENSITIVE attribute blob (404 if missing or soft-deleted).",
         "operationId": "put_account_sensitive_attributes_api_v1_auth_accounts__username__sensitive_attributes_put",
         "parameters": [
           {

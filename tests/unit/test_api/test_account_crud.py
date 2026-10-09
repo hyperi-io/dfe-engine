@@ -414,6 +414,24 @@ class TestGetAccount:
         assert resp.status_code == 404
         assert resp.json()["code"] == "not_found"
 
+    def test_get_soft_deleted_returns_404(self, client, admin_headers, app):
+        from dfe_engine.auth.accounts import soft_delete_account
+
+        store = app.state.account_store
+        store.create("gone-user", "Password1!")
+        anonymized = soft_delete_account(store, "gone-user")
+
+        by_old = client.get("/api/v1/auth/accounts/gone-user", headers=admin_headers)
+        assert by_old.status_code == 404
+        by_new = client.get(f"/api/v1/auth/accounts/{anonymized.username}", headers=admin_headers)
+        assert by_new.status_code == 404
+        assert by_new.json()["code"] == "not_found"
+
+        listed = client.get("/api/v1/auth/accounts", headers=admin_headers)
+        names = {row["username"] for row in listed.json()["items"]}
+        assert anonymized.username not in names
+        assert "gone-user" not in names
+
     def test_get_requires_admin(self, client, viewer_headers):
         resp = client.get("/api/v1/auth/accounts/admin", headers=viewer_headers)
         assert resp.status_code == 403

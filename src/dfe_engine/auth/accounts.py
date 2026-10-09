@@ -144,6 +144,11 @@ class Account(BaseModel):
     Written when the account is renamed to ``{uuid}-deleted``. Empty on an account
     that has never been soft-deleted."""
 
+    @property
+    def is_soft_deleted(self) -> bool:
+        """Whether this account was anonymized by soft-delete and should read as gone."""
+        return bool(self.previous_username) or self.username.endswith("-deleted")
+
     def session_marker(self) -> str:
         """The value a session token minted for this account now carries.
 
