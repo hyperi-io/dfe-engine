@@ -17,11 +17,11 @@ all of them. The app-repo charts use different names for the same dials, but Arg
 deploys the dfe-infra family, so those names are the ones that reach a cluster.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+
+from scalo.logger import logger
 
 from dfe_engine.manifest import ManifestError, manifest_path, read_manifest
 from dfe_engine.transport import TRANSPORTS
@@ -71,16 +71,21 @@ SCALING_PATHS = (
 DEPLOY_SERVICE_PATH = "deploy.service"
 DEPLOY_INSTANCE_PATH = "deploy.instance"
 
-# Feeds dfe-common.fullname, so a per-config app carries its instance here to keep
-# each deployment's Kubernetes object names distinct.
-COMPONENT_PATH = "component"
+# The stem of every Kubernetes object an instance's chart renders, so a per-config
+# app carries its instance here to keep each deployment's objects distinct.
+FULLNAME_OVERRIDE_PATH = "fullnameOverride"
 
-# The chart's dial for the OTel service.name. scalo otherwise falls back to the
-# app's binary name, leaving two instances of one app indistinguishable in the
-# otel database. `env` is NOT the place for this: in the dfe-infra charts that key
-# is a string (the deployment environment) feeding labels and the namespace, so a
-# map there renders an invalid label value and every object is rejected.
-OTEL_SERVICE_NAME_PATH = "otelServiceName"
+# The same stem as the dfe-common charts read it, `{project}-{component}`, written
+# beside FULLNAME_OVERRIDE_PATH so either chart family renders the same names.
+DFE_COMMON_COMPONENT_PATH = "component"
+
+# The OTel service.name, without which scalo reports the binary name and two
+# instances of one app are indistinguishable in the otel database.
+OTEL_SERVICE_NAME_PATH = "otel.serviceName"
+
+# The same name as the dfe-common charts read it; never under `env`, a string in
+# those charts whose value lands in every object's labels.
+DFE_COMMON_OTEL_SERVICE_NAME_PATH = "otelServiceName"
 
 
 class Multiplicity(StrEnum):
@@ -134,7 +139,7 @@ class ConsumedFileSet:
     """Stable identifier for the set, used in the API path."""
 
     values_path: str
-    """Dot-path in the overlay holding the filename -> content map."""
+    """Dot-path in the overlay holding the list of ``{name, content}`` entries."""
 
     links_path: str
     """Dot-path in the overlay holding the library links that resolved into the set."""
@@ -146,9 +151,13 @@ class ConsumedFileSet:
     """Dot-path of the app's own setting holding one ``{name, path}`` entry per file.
 
     The other half of ``dir_path``: a set the app names table by table rather
-    than by directory. Whoever owns the mount derives the entries, because only
-    it knows the path - the chart on Kubernetes, the Compose writer off it.
+    than by directory. The config file takes no template, so whoever writes the
+    files names each one there, under ``mount_path``; the Compose render points
+    those entries at its own mount instead.
     """
+
+    mount_path: str
+    """Where the deployment mounts the set; empty leaves ``entries_path`` to whoever mounts it."""
 
     suffixes: tuple[str, ...]
     """Accepted file extensions. A name outside these is refused."""
@@ -360,6 +369,22 @@ class AppDescriptor:
     telemetry, so nothing the engine derives reads this.
     """
 
+    deployment_owned: dict[str, str] = field(default_factory=dict)
+    """Config paths the deployment sets over the overlay, each with what sets it.
+
+    Overlay paths, ``config.`` rooted. The value is what decides the path
+    instead: the env var the app reads, the ``configOverrides`` path the
+    deployment sets, or the contract port a listener's address binds, so a
+    refused write names it.
+    """
+
+    deployment_owned_when: dict[str, str] = field(default_factory=dict)
+    """The owned paths the deployment sets only while an overlay value of its own is set.
+
+    Each maps to that value's overlay path, read as a Helm ``with`` reads it. A
+    value set outside the overlay, by a profile or a cloud, is not seen here.
+    """
+
     def carries(self, transport: str) -> bool:
         """Whether this app can carry a source on *transport*."""
         return transport in self.transports
@@ -420,11 +445,12 @@ class AppDescriptor:
 
     @property
     def component_is_per_instance(self) -> bool:
-        """Whether the chart's component name has to carry the instance.
+        """Whether the chart's object-name stem has to carry the instance.
 
-        ``dfe-common.fullname`` is ``{project}-{component}`` with no instance, so
-        every deployment of a per-config app would otherwise render identical
-        Kubernetes object names and fight over them under Argo self-heal.
+        Both chart families name objects from a stem with no instance in it, the
+        chart name or ``{project}-{component}``, so every deployment of a
+        per-config app would otherwise render identical Kubernetes object names and
+        fight over them under Argo self-heal.
         """
         return self.multiplicity is Multiplicity.PER_CONFIG
 
@@ -486,6 +512,14 @@ BUNDLED_MANIFEST = Path(__file__).parent / "apps.yaml"
 
 
 def _file_set_from(service: str, raw: dict) -> ConsumedFileSet:
+    declared_mount = str(raw.get("mount_path") or "")
+    # Without the trailing slash, so an entry path is never written with two.
+    mount_path = declared_mount.rstrip("/")
+    if declared_mount and not mount_path.startswith("/"):
+        raise CatalogueError(
+            f"{service}: file set {raw.get('name')!r} mount_path {declared_mount!r} must be "
+            "an absolute directory below /, because the app is told to read it as one"
+        )
     try:
         values_path = str(raw["values_path"])
         file_set = ConsumedFileSet(
@@ -494,6 +528,7 @@ def _file_set_from(service: str, raw: dict) -> ConsumedFileSet:
             links_path=str(raw.get("links_path") or f"{values_path}Links"),
             dir_path=str(raw.get("dir_setting", "")),
             entries_path=str(raw.get("entries_path", "")),
+            mount_path=mount_path,
             suffixes=tuple(str(s) for s in raw["suffixes"]),
             language=str(raw["language"]),
             reload=ReloadMode(str(raw.get("reload", ReloadMode.RESTART))),
@@ -564,12 +599,51 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
         catalogue=_catalogue_from(service, raw.get("catalogue")),
         config_file=_config_file_from(service, raw.get("consumes")),
         display_name=_display_name_from(service, raw.get("display_name")),
+        deployment_owned=_owned_paths_from(
+            service, "deployment_owned", raw.get("deployment_owned")
+        ),
+        deployment_owned_when=_owned_paths_from(
+            service, "deployment_owned_when", raw.get("deployment_owned_when")
+        ),
     )
     # The variant is written into one of the derived blocks, so a path outside
     # them would be compiled and then dropped on the next sync.
     if app.variant_path:
         app.block_for(app.variant_path)
+    # A gate on a path nothing owns is a typo that silently owns nothing.
+    ungated = sorted(set(app.deployment_owned_when) - set(app.deployment_owned))
+    if ungated:
+        raise CatalogueError(
+            f"{service}: deployment_owned_when gates {', '.join(ungated)}, which "
+            "deployment_owned does not list"
+        )
     return app
+
+
+def _owned_paths_from(service: str, key: str, raw: object) -> dict[str, str]:
+    """A ``config.``-rooted path -> non-empty string mapping, empty when absent.
+
+    Refused anywhere but under ``config.``: the deployment-owned keys are compared
+    in the app's own config file, which is that block alone.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise CatalogueError(f"{service}: {key} must be a mapping of config path to supplier")
+    out: dict[str, str] = {}
+    for path, value in raw.items():
+        name = str(path)
+        if not name.startswith("config.") or name == "config.":
+            raise CatalogueError(
+                f"{service}: {key} entry {name!r} must be a config. overlay path, "
+                "because it is compared in the app's own config file"
+            )
+        if not isinstance(value, str) or not value.strip():
+            raise CatalogueError(
+                f"{service}: {key}[{name!r}] must name what sets it, got {value!r}"
+            )
+        out[name] = value.strip()
+    return out
 
 
 def _config_file_from(service: str, raw: object) -> str:
@@ -904,8 +978,8 @@ def _kind_from(name: str, raw: dict) -> ArtifactKind:
         raise CatalogueError(f"invalid kind {name!r}: {exc}") from exc
 
 
-def _read_manifest(path: Path | str | None) -> dict:
-    """Load the manifest document.
+def _manifest_source(path: Path | str | None) -> Path:
+    """Where the manifest is read from.
 
     Resolution order: the given path, then ``DFE_APP_CATALOGUE_FILE``, then the
     snapshot bundled in the image. The snapshot is always there, so the resolver
@@ -914,7 +988,43 @@ def _read_manifest(path: Path | str | None) -> dict:
     source = manifest_path(path, "DFE_APP_CATALOGUE_FILE", BUNDLED_MANIFEST)
     if source is None:
         raise CatalogueError("app manifest not found: nothing names one")
-    return read_manifest(source, what="app manifest")
+    return source
+
+
+def _read_manifest(path: Path | str | None) -> dict:
+    """Load the manifest document from wherever ``_manifest_source`` resolves."""
+    return read_manifest(_manifest_source(path), what="app manifest")
+
+
+OWNED_KEYS = ("deployment_owned", "deployment_owned_when")
+"""The per-app keys a mounted manifest that predates them takes from the bundled one."""
+
+
+def _with_bundled_ownership(apps: dict) -> dict:
+    """``apps`` with each app that lacks ``deployment_owned`` given the bundled snapshot's.
+
+    A manifest written before the key existed is one whose deployment still sets
+    those paths, so reading its absence as "owns nothing" would let a write
+    through that the deployment then shadows. An app that declares the key, even
+    empty, keeps its own.
+    """
+    bundled = read_manifest(BUNDLED_MANIFEST, what="bundled app manifest").get("apps") or {}
+    out: dict = {}
+    borrowed: list[str] = []
+    for name, raw in apps.items():
+        entry = dict(raw or {})
+        source = bundled.get(name) or {}
+        if OWNED_KEYS[0] not in entry and source.get(OWNED_KEYS[0]):
+            entry.update({key: source[key] for key in OWNED_KEYS if key in source})
+            borrowed.append(str(name))
+        out[name] = entry
+    if borrowed:
+        logger.warning(
+            "the mounted app manifest declares no deployment_owned for these apps, so "
+            "the engine's bundled copy decides which of their config paths it refuses",
+            apps=borrowed,
+        )
+    return out
 
 
 def load_catalogue(path: Path | str | None = None) -> dict[str, AppDescriptor]:
@@ -924,10 +1034,13 @@ def load_catalogue(path: Path | str | None = None) -> dict[str, AppDescriptor]:
     each one is, so adding or changing an app is an edit there rather than a change
     here.
     """
-    doc = _read_manifest(path)
+    source = _manifest_source(path)
+    doc = read_manifest(source, what="app manifest")
     apps = doc.get("apps")
     if not isinstance(apps, dict) or not apps:
         raise CatalogueError("app manifest declares no apps")
+    if source.resolve() != BUNDLED_MANIFEST.resolve():
+        apps = _with_bundled_ownership(apps)
     return {name: _descriptor_from(name, raw or {}) for name, raw in apps.items()}
 
 

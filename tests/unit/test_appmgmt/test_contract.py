@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from dfe_engine.appmgmt import contract
+from dfe_engine.appmgmt import catalogue, contract
 from dfe_engine.gitcrud.engine import set_path
 
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "contract"
@@ -52,13 +52,30 @@ HOLDING_BLOCKS = [
 LEAF_COUNTS = {
     "dfe-receiver": 334,
     "dfe-loader": 175,
-    "dfe-archiver": 76,
+    "dfe-archiver": 78,
     "dfe-fetcher": 314,
     "dfe-transform-vrl": 45,
     "dfe-transform-vector": 70,
 }
 
 APPS = sorted(LEAF_COUNTS)
+
+# The receiver's listener addresses, each bound to a port its contract opens.
+RECEIVER_LISTENERS = (
+    "config.server.bind_address",
+    "config.otlp.grpc_bind_address",
+    "config.otlp.http_bind_address",
+    "config.lumberjack.bind_address",
+    "config.splunk_hec.bind_address",
+    "config.prometheus_rw.bind_address",
+    "config.webhook.bind_address",
+    "config.syslog.tcp_bind_address",
+    "config.syslog.udp_bind_address",
+    "config.syslog.tls_bind_address",
+    "config.fluent.bind_address",
+    "config.gelf.bind_address",
+    "config.flow.bind_address",
+)
 
 # The placeholder dfe-loader's schema carries as the default of every marked
 # secret. An operator shown this in a box types around it.
@@ -405,6 +422,7 @@ class TestProvenance:
             "config.transport",
             "config.grpc.listen",
             "config.kafka.brokers",
+            "config.kafka.tls.enabled",
             "config.kafka.sasl.username",
             "config.kafka.sasl.password",
             "config.clickhouse.hosts",
@@ -421,10 +439,10 @@ class TestProvenance:
         derived = {f.path for f in view.fields if f.provenance == contract.Provenance.CHART}
         assert {
             "config.kafka.brokers",
+            "config.kafka.tls.enabled",
             "config.kafka.sasl.username",
             "config.kafka.sasl.password",
             "config.kafka.sasl.mechanism",
-            "config.server.bind_address",
             "config.loader.transport",
             "config.grpc.enabled",
             "config.grpc.bind_address",
@@ -434,22 +452,39 @@ class TestProvenance:
             "config.routing.dlq.enabled",
             "config.routing.dlq.topic",
             "config.routing.dlq.mode",
+            *RECEIVER_LISTENERS,
         } == derived
+
+    def test_a_listener_address_names_the_contract_port_it_binds(self):
+        # The Service and the probes use the contract's port, so a moved
+        # address takes the listener off it.
+        assert contract.chart_supplier("dfe-receiver", "config.server.bind_address") == (
+            "contract port http"
+        )
+        assert "contract port http" not in contract.chart_env_names("dfe-receiver")
+
+    @pytest.mark.parametrize("service", APPS)
+    def test_every_path_the_deployment_owns_is_one_the_app_declares(self, service):
+        # A path the schema does not carry never matches a field, so a typo
+        # would leave the option writable while the deployment shadows it.
+        declared = contract.declared_options(_contract(service))
+        owned = catalogue.APP_CATALOGUE[service].deployment_owned
+        assert sorted(set(owned) - set(declared)) == []
 
     @pytest.mark.parametrize(
         ("path", "value", "supplier"),
         [
-            ("grpc.enabled", False, "listeners[pushgrpc]"),
-            ("grpc.bind_address", "127.0.0.1:1", "listeners[pushgrpc]"),
-            ("buffer.memory_limit", 1234, "receiver.buffer"),
-            ("buffer.spillover.enabled", True, "receiver.buffer.spillover"),
-            ("buffer.spillover.path", "/overlay/spool", "receiver.buffer.spillover"),
+            ("grpc.enabled", False, "configOverrides.grpc.enabled"),
+            ("grpc.bind_address", "127.0.0.1:1", "configOverrides.grpc.bind_address"),
+            ("buffer.memory_limit", 1234, "configOverrides.buffer.memory_limit"),
+            ("buffer.spillover.enabled", True, "configOverrides.buffer.spillover.enabled"),
+            ("buffer.spillover.path", "/overlay/spool", "configOverrides.buffer.spillover.path"),
         ],
     )
     def test_what_the_receiver_configmap_merges_over_the_overlay_is_the_chart_s(
         self, path, value, supplier
     ):
-        # mergeOverwrite puts the chart's value over the overlay's, so a write is shadowed.
+        # configOverrides merges over the overlay's config, so a write is shadowed.
         overlay: dict = {"config": {}}
         set_path(overlay["config"], path, value)
         by_path = {
@@ -461,7 +496,7 @@ class TestProvenance:
         assert supplier not in contract.chart_env_names("dfe-receiver", overlay)
 
     def test_the_receiver_s_loader_transport_is_the_chart_s_over_the_overlay(self):
-        # The configmap sets grpc on direct after merging the overlay, so it wins.
+        # The direct profiles set grpc in configOverrides, which merges over the overlay.
         overlay = {"config": {"loader": {"transport": "kafka"}}}
         by_path = {
             f.path: f for f in contract.resolve_config(_contract("dfe-receiver"), overlay).fields
@@ -469,9 +504,10 @@ class TestProvenance:
 
         assert by_path["config.loader.transport"].provenance == contract.Provenance.CHART
         assert contract.chart_supplier("dfe-receiver", "config.loader.transport", overlay) == (
-            "dfe-common.transport"
+            "configOverrides.loader.transport"
         )
-        assert "dfe-common.transport" not in contract.chart_env_names("dfe-receiver", overlay)
+        names = contract.chart_env_names("dfe-receiver", overlay)
+        assert "configOverrides.loader.transport" not in names
 
     def test_the_receiver_s_loader_address_and_default_destination_are_the_overlay_s(self):
         # The configmap renders each only where the overlay has none.
@@ -497,6 +533,7 @@ class TestProvenance:
         view = contract.resolve_config(_contract("dfe-fetcher"), {})
         derived = {f.path for f in view.fields if f.provenance == contract.Provenance.CHART}
         assert {
+            "config.kafka.tls.enabled",
             "config.kafka.sasl.username",
             "config.kafka.sasl.password",
             "config.kafka.sasl.mechanism",
@@ -504,6 +541,8 @@ class TestProvenance:
             "config.dlq.mode",
             "config.dlq.kafka.common_topic",
             "config.dlq.kafka.routing",
+            "config.ingest.bind_address",
+            "config.extractors.vector.grpc_bind_address",
         } == derived
 
     def test_the_flat_env_families_the_archiver_chart_sets(self):
@@ -519,22 +558,51 @@ class TestProvenance:
             "config.kafka.sasl_username",
             "config.kafka.sasl_password",
             "config.kafka.sasl_mechanism",
-            "config.kafka.topic_include",
-            "config.archive.destination",
-            "config.archive.s3.endpoint",
-            "config.archive.s3.bucket",
+            "config.buffer.spool_dir",
             "config.dlq.enabled",
             "config.dlq.mode",
             "config.dlq.kafka.common_topic",
             "config.dlq.kafka.routing",
         } == derived
 
+    @pytest.mark.parametrize(
+        ("path", "gate"),
+        [
+            ("config.archive.destination", "archive.localPath"),
+            ("config.archive.s3.endpoint", "s3.endpoint"),
+            ("config.archive.s3.bucket", "s3.bucket"),
+        ],
+    )
+    def test_the_archive_target_is_the_overlay_s_until_the_deployment_names_one(self, path, gate):
+        # The env var renders empty, which the app reads as unset, until the value is set.
+        assert contract.chart_supplier("dfe-archiver", path, {}) is None
+        overlay: dict = {}
+        set_path(overlay, gate, "s3://elsewhere")
+        assert contract.chart_supplier("dfe-archiver", path, overlay)
+
+    def test_no_chart_means_nothing_is_the_deployment_s(self):
+        # On Compose the deployment's base config sits under the overlay.
+        assert contract.chart_supplier("dfe-loader", "config.kafka.brokers") is not None
+        path = "config.kafka.brokers"
+        assert contract.chart_supplier("dfe-loader", path, chart_deployed=False) is None
+        assert contract.chart_env_names("dfe-loader", chart_deployed=False) == {}
+        view = contract.resolve_config(_contract("dfe-loader"), {}, chart_deployed=False)
+        assert [f.path for f in view.fields if f.provenance == contract.Provenance.CHART] == []
+
     def test_what_supplies_a_chart_path_is_named(self):
         # A refused write has to say what to change instead of the overlay.
-        assert contract.chart_supplier("dfe-receiver", "config.server.bind_address") == (
-            "DFE_RECEIVER_BIND_ADDRESS"
+        assert contract.chart_supplier("dfe-receiver", "config.kafka.brokers") == (
+            "DFE_RECEIVER_KAFKA_BROKERS"
         )
         assert contract.chart_supplier("dfe-loader", "config.batch_processing.format") is None
+
+    def test_the_archiver_topic_filter_is_the_overlay_s(self):
+        # Nothing in the deployment sets KAFKA_TOPIC_INCLUDE, and it is an idle_when path.
+        assert contract.chart_supplier("dfe-archiver", "config.kafka.topic_include") is None
+
+    def test_an_app_the_manifest_does_not_list_owns_nothing(self):
+        assert contract.chart_supplier("dfe-no-such-app", "config.kafka.brokers") is None
+        assert contract.chart_env_names("dfe-no-such-app") == {}
 
     def test_the_env_names_a_chart_sets_are_available_as_data(self):
         # What an extraEnv key is compared against, so the name is a key rather
@@ -543,11 +611,11 @@ class TestProvenance:
         assert names["DFE_LOADER_KAFKA_BROKERS"] == "config.kafka.brokers"
         assert "DFE_LOADER_HOUSE_KEY" not in names
 
-    def test_a_chart_helper_is_not_an_env_name(self):
-        # The transforms resolve three paths through dfe-common.transport, which
-        # names no variable an operator could shadow.
+    def test_a_values_path_is_not_an_env_name(self):
+        # The transforms take three paths from configOverrides, which names no
+        # variable an operator could shadow.
         names = contract.chart_env_names("dfe-transform-vrl")
-        assert "dfe-common.transport" not in names
+        assert "configOverrides.source.transport" not in names
         assert names["DFE_TRANSFORM_SOURCE_BROKERS"] == "config.source.brokers"
 
     def test_the_chart_wins_over_an_overlay_key_it_overrides(self):
@@ -559,8 +627,21 @@ class TestProvenance:
         }
         assert by_path["config.clickhouse.protocol"].provenance == contract.Provenance.CHART
 
-    @pytest.mark.parametrize("service", ["dfe-transform-vrl", "dfe-transform-vector"])
-    def test_the_transform_families_the_chart_derives(self, service):
+    @pytest.mark.parametrize(
+        ("service", "own"),
+        [
+            ("dfe-transform-vrl", {"config.source.tls.enabled", "config.sink.tls.enabled"}),
+            (
+                "dfe-transform-vector",
+                {
+                    "config.vector.data_dir",
+                    "config.source.tls.enabled",
+                    "config.sink.tls.enabled",
+                },
+            ),
+        ],
+    )
+    def test_the_transform_families_the_chart_derives(self, service, own):
         view = contract.resolve_config(_contract(service), {})
         derived = {f.path for f in view.fields if f.provenance == contract.Provenance.CHART}
         assert {
@@ -574,7 +655,20 @@ class TestProvenance:
             "config.source.sasl.password",
             "config.sink.sasl.username",
             "config.sink.sasl.password",
+            *own,
         } == derived
+
+    @pytest.mark.parametrize("service", ["dfe-transform-vrl", "dfe-transform-vector"])
+    def test_the_transforms_directory_is_the_deployment_s_once_files_are_written(self, service):
+        # The env var renders empty, which the app reads as unset, until the set holds a file.
+        path = "config.transforms.dir"
+        assert contract.chart_supplier(service, path, {}) is None
+        empty = {"fileSets": {"transforms": {"files": []}}}
+        assert contract.chart_supplier(service, path, empty) is None
+        written = {"fileSets": {"transforms": {"files": [{"name": "a", "content": ""}]}}}
+        assert contract.chart_supplier(service, path, written) == "DFE_TRANSFORM_TRANSFORMS_DIR"
+        by_path = {f.path: f for f in contract.resolve_config(_contract(service), written).fields}
+        assert by_path[path].provenance == contract.Provenance.CHART
 
     @pytest.mark.parametrize("service", ["dfe-transform-vrl", "dfe-transform-vector"])
     def test_the_topics_are_the_overlay_s_until_the_chart_is_given_its_own(self, service):

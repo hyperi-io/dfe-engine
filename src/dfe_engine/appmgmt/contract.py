@@ -274,127 +274,6 @@ _DOCUMENT_ROOTS = frozenset({"", CONFIG_ROOT, ENV_ROOT})
 so two settings in either are no more tied to each other than two top-level keys.
 """
 
-_TRANSFORM_CHART_ENV = {
-    # dfe-common.transport resolves these from kafka.mode in the configmap, so the
-    # app never sees what the overlay says about them. sink.endpoint is not among
-    # them: the configmap renders the loader address only where the overlay has none.
-    "source.transport": "dfe-common.transport",
-    "sink.transport": "dfe-common.transport",
-    "source.listen": "dfe-common.transport",
-    # The flat DFE_TRANSFORM_* env contract, which outranks the config file.
-    "source.brokers": "DFE_TRANSFORM_SOURCE_BROKERS",
-    "sink.brokers": "DFE_TRANSFORM_SINK_BROKERS",
-    "source.topics": "DFE_TRANSFORM_SOURCE_TOPICS",
-    "sink.topic": "DFE_TRANSFORM_SINK_TOPIC",
-    "source.group_id": "DFE_TRANSFORM_SOURCE_GROUP_ID",
-    "source.sasl.username": "DFE_TRANSFORM_SOURCE_SASL_USERNAME",
-    "source.sasl.password": "DFE_TRANSFORM_SOURCE_SASL_PASSWORD",
-    "sink.sasl.username": "DFE_TRANSFORM_SINK_SASL_USERNAME",
-    "sink.sasl.password": "DFE_TRANSFORM_SINK_SASL_PASSWORD",
-}
-
-CHART_DERIVED: dict[str, dict[str, str]] = {
-    "dfe-transform-vrl": _TRANSFORM_CHART_ENV,
-    "dfe-transform-vector": _TRANSFORM_CHART_ENV,
-    "dfe-loader": {
-        "transport": "DFE_LOADER_TRANSPORT",
-        "grpc.listen": "DFE_LOADER_GRPC__LISTEN",
-        "kafka.brokers": "DFE_LOADER_KAFKA_BROKERS",
-        "kafka.sasl.username": "DFE_LOADER_KAFKA_SASL_USERNAME",
-        "kafka.sasl.password": "DFE_LOADER_KAFKA_SASL_PASSWORD",
-        "clickhouse.hosts": "DFE_LOADER_CLICKHOUSE_HOSTS",
-        "clickhouse.database": "DFE_LOADER_CLICKHOUSE_DATABASE",
-        "clickhouse.username": "DFE_LOADER_CLICKHOUSE_USERNAME",
-        "clickhouse.password": "DFE_LOADER_CLICKHOUSE_PASSWORD",
-        # The pinned ClickHouse client has no TCP row fetch, so the chart holds
-        # this app to http.
-        "clickhouse.protocol": "DFE_LOADER_CLICKHOUSE__PROTOCOL",
-        "routing.dlq.topic": "DFE_LOADER_DLQ_TOPIC",
-        "routing.dlq.mode": "DFE_LOADER_DLQ_MODE",
-    },
-    "dfe-receiver": {
-        "kafka.brokers": "DFE_RECEIVER_KAFKA_BROKERS",
-        # The receiver's flat env spells the field USER where the loader spells it
-        # USERNAME; both land on the same config path.
-        "kafka.sasl.username": "DFE_RECEIVER_KAFKA_SASL_USER",
-        "kafka.sasl.password": "DFE_RECEIVER_KAFKA_SASL_PASSWORD",
-        "kafka.sasl.mechanism": "DFE_RECEIVER_KAFKA_SASL_MECHANISM",
-        "server.bind_address": "DFE_RECEIVER_BIND_ADDRESS",
-        # The configmap forces grpc here on direct. The loader.grpc_endpoint and
-        # destinations.default it renders beside it are defaults an overlay value beats.
-        "loader.transport": "dfe-common.transport",
-        # Merged over the overlay: the pushgrpc listener also opens the container port,
-        # and receiver.buffer.spillover also decides the spool volume the Deployment mounts.
-        "grpc.enabled": "listeners[pushgrpc]",
-        "grpc.bind_address": "listeners[pushgrpc]",
-        "buffer.memory_limit": "receiver.buffer",
-        "buffer.spillover.enabled": "receiver.buffer.spillover",
-        "buffer.spillover.path": "receiver.buffer.spillover",
-        "routing.dlq.enabled": "DFE_RECEIVER_DLQ_ENABLED",
-        "routing.dlq.topic": "DFE_RECEIVER_DLQ_TOPIC",
-        "routing.dlq.mode": "DFE_RECEIVER_DLQ_MODE",
-    },
-    "dfe-fetcher": {
-        "kafka.sasl.username": "DFE_FETCHER_KAFKA_SASL_USER",
-        "kafka.sasl.password": "DFE_FETCHER_KAFKA_SASL_PASSWORD",
-        "kafka.sasl.mechanism": "DFE_FETCHER_KAFKA_SASL_MECHANISM",
-        "dlq.enabled": "DFE_FETCHER_DLQ_ENABLED",
-        "dlq.mode": "DFE_FETCHER_DLQ_MODE",
-        # One env var sets both: naming a common topic also pins the routing to it.
-        "dlq.kafka.common_topic": "DFE_FETCHER_DLQ_TOPIC",
-        "dlq.kafka.routing": "DFE_FETCHER_DLQ_TOPIC",
-    },
-    "dfe-archiver": {
-        # Bare KAFKA_*/ARCHIVER_*/S3_*/DLQ_*, this app's own flat-env contract
-        # (core config.rs), not the DFE_ARCHIVER_* family the other apps use.
-        "transport": "ARCHIVER_TRANSPORT",
-        "grpc.listen": "ARCHIVER_GRPC_LISTEN",
-        "kafka.brokers": "KAFKA_BROKERS",
-        "kafka.security_protocol": "KAFKA_SECURITY_PROTOCOL",
-        "kafka.sasl_username": "KAFKA_SASL_USER",
-        "kafka.sasl_password": "KAFKA_SASL_PASSWORD",
-        "kafka.sasl_mechanism": "KAFKA_SASL_MECHANISM",
-        "kafka.topic_include": "KAFKA_TOPIC_INCLUDE",
-        "archive.destination": "ARCHIVER_DESTINATION",
-        "archive.s3.endpoint": "S3_ENDPOINT",
-        "archive.s3.bucket": "S3_BUCKET",
-        "dlq.enabled": "DLQ_ENABLED",
-        "dlq.mode": "DLQ_MODE",
-        # One env var sets both: naming a common topic also pins the routing to it.
-        "dlq.kafka.common_topic": "DLQ_TOPIC",
-        "dlq.kafka.routing": "DLQ_TOPIC",
-    },
-}
-"""Config paths the dfe-infra chart decides, per app, and what decides each.
-
-DATA rather than a rule, because which paths a chart derives is a property of the
-charts and moves with them. A path named here that an app's schema does not carry
-simply never matches a field.
-
-The value is what an operator has to change instead - the flat env var the app
-reads, or the chart helper that resolves it - so a refused write names the thing
-that outranks the overlay rather than saying only that something does.
-"""
-
-_TRANSFORM_CHART_GATES = {
-    "source.topics": "kafka.sourceTopic",
-    "sink.topic": "kafka.destTopic",
-}
-
-CHART_DERIVED_WHEN: dict[str, dict[str, str]] = {
-    "dfe-transform-vrl": _TRANSFORM_CHART_GATES,
-    "dfe-transform-vector": _TRANSFORM_CHART_GATES,
-}
-"""Chart-derived paths the chart sets only while one of its own values is set.
-
-Each maps to that value's overlay path. The transform charts render
-``DFE_TRANSFORM_SOURCE_TOPICS`` and ``DFE_TRANSFORM_SINK_TOPIC`` inside a
-``with`` on ``kafka.sourceTopic`` and ``kafka.destTopic``, both empty by default,
-so an instance whose overlay leaves them empty reads the topics from its own
-config file. A value set for every instance by a profile, outside the overlay, is
-not seen here.
-"""
-
 _MAX_DEPTH = 25
 """Deeper than any shipped contract - the fetcher's, at five, is the deepest."""
 
@@ -1537,17 +1416,26 @@ def check_env_value(value: Any) -> str:
     return ""
 
 
-def _chart_derived(service: str, overlay: dict) -> dict[str, str]:
-    """The options the chart decides for an instance with this overlay, and what decides each.
+def _chart_derived(service: str, overlay: dict, *, chart_deployed: bool = True) -> dict[str, str]:
+    """The options the deployment decides for an instance with this overlay, and what decides each.
 
-    :data:`CHART_DERIVED` less every gated path whose chart value the overlay
-    leaves empty, because the chart renders nothing for it then.
+    Keyed by the path inside the config file. The app's ``deployment_owned`` in the
+    manifest, less every gated path whose overlay value is empty, because the
+    deployment renders nothing for it then. A path the app's schema does not carry
+    never matches a field.
+
+    ``chart_deployed`` is false on a target with no chart, where the deployment's
+    base config sits under the overlay and so decides nothing.
     """
-    gates = CHART_DERIVED_WHEN.get(service, {})
+    app = APP_CATALOGUE.get(service)
+    if app is None or not chart_deployed:
+        return {}
+    prefix = f"{CONFIG_ROOT}."
     return {
-        inner: supplier
-        for inner, supplier in CHART_DERIVED.get(service, {}).items()
-        if inner not in gates or _chart_value_set(overlay, gates[inner])
+        path.removeprefix(prefix): supplier
+        for path, supplier in app.deployment_owned.items()
+        if path not in app.deployment_owned_when
+        or _chart_value_set(overlay, app.deployment_owned_when[path])
     }
 
 
@@ -1557,29 +1445,35 @@ def _chart_value_set(overlay: dict, path: str) -> bool:
     return not isinstance(value, _Missing) and bool(value)
 
 
-def chart_supplier(service: str, path: str, overlay: dict | None = None) -> str | None:
+def chart_supplier(
+    service: str, path: str, overlay: dict | None = None, *, chart_deployed: bool = True
+) -> str | None:
     """What the deployment sets this option with, or None where it sets nothing.
 
     ``path`` is the overlay path, ``config.`` rooted, so a caller compares the
     request's own keys rather than re-deriving them. ``overlay`` is the
     instance's, which decides the options the chart sets only on a value of its own.
+    ``chart_deployed`` is as for :func:`_chart_derived`.
     """
     inner = path.split(".", 1)[1] if path.startswith(f"{CONFIG_ROOT}.") else path
-    return _chart_derived(service, overlay or {}).get(inner)
+    return _chart_derived(service, overlay or {}, chart_deployed=chart_deployed).get(inner)
 
 
-def chart_env_names(service: str, overlay: dict | None = None) -> dict[str, str]:
-    """Environment names the chart sets for this app, each with the option it decides.
+def chart_env_names(
+    service: str, overlay: dict | None = None, *, chart_deployed: bool = True
+) -> dict[str, str]:
+    """Environment names the deployment sets for this app, each with the option it decides.
 
-    A supplier in :data:`CHART_DERIVED` is either an environment name or a chart
-    helper, and only the names are keys here: ``ENV_NAME`` tells the two apart,
+    A supplier in the app's ``deployment_owned`` is either an environment name or a
+    values path, and only the names are keys here: ``ENV_NAME`` tells the two apart,
     so what an ``extraEnv`` key is compared against is data rather than prose.
     Where one variable decides several options the first is reported, which is
-    enough to say what the operator would be shadowing. ``overlay`` is the
-    instance's, as for :func:`chart_supplier`.
+    enough to say what the operator would be shadowing. ``overlay`` and
+    ``chart_deployed`` are as for :func:`chart_supplier`.
     """
     out: dict[str, str] = {}
-    for inner, supplier in _chart_derived(service, overlay or {}).items():
+    derived = _chart_derived(service, overlay or {}, chart_deployed=chart_deployed)
+    for inner, supplier in derived.items():
         if ENV_NAME.match(supplier):
             out.setdefault(supplier, f"{CONFIG_ROOT}.{inner}")
     return out
@@ -1613,6 +1507,7 @@ def resolve_config(
     overlay: dict,
     *,
     is_protected: Callable[[str], bool] | None = None,
+    chart_deployed: bool = True,
 ) -> ConfigView:
     """Every option this instance has, with its value and where the value comes from.
 
@@ -1622,11 +1517,11 @@ def resolve_config(
     A chart-derived path is reported as such before the overlay is consulted: the
     deployment decides it, and telling the console an overlay key governs a broker
     list the DFE_TRANSFORM_* env contract overrides is the answer this provenance
-    exists to prevent.
+    exists to prevent. ``chart_deployed`` is as for :func:`chart_supplier`.
     """
     block = overlay.get(CONFIG_ROOT)
     block = block if isinstance(block, dict) else {}
-    derived = _chart_derived(app_contract.service, overlay)
+    derived = _chart_derived(app_contract.service, overlay, chart_deployed=chart_deployed)
     enums = catalogue_enums(app_contract.capabilities)
     protected = is_protected or (lambda _path: False)
 
