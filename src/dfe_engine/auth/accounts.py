@@ -29,6 +29,7 @@ import hashlib
 import os
 import secrets
 import tempfile
+import uuid
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
@@ -137,6 +138,11 @@ class Account(BaseModel):
     session_epoch: str = ""
     """Replaced whenever every session of the account ends: its owner logs out, or it
     is disabled, blocked, re-enabled or unblocked. Empty until that first happens."""
+    previous_username: str = ""
+    """Account id before soft-delete anonymization.
+
+    Written when the account is renamed to ``{uuid}-deleted``. Empty on an account
+    that has never been soft-deleted."""
 
     def session_marker(self) -> str:
         """The value a session token minted for this account now carries.
@@ -706,6 +712,54 @@ def discard_created(store: AccountStore | DocuStoreAccountStore, created: Accoun
             username=created.username,
             error=type(exc).__name__,
         )
+
+
+def anonymized_soft_delete_username() -> str:
+    """A one-use account name: a UUID with ``-deleted`` as the trailing marker.
+
+    Account names must start with an alphanumeric (:data:`VALID_NAME`), so the
+    delete marker cannot lead; it trails the UUID as ``{uuid}-deleted``.
+    """
+    return f"{uuid.uuid4()}-deleted"
+
+
+def soft_delete_account(store: AccountStore | DocuStoreAccountStore, username: str) -> Account:
+    """Disable *username* and rename it to an anonymized ``{uuid}-deleted`` id.
+
+    Clears contact and subject fields so the record no longer identifies the
+    person. Ownership stamps (``source_provider``, ``oidc_id``) stay for audit.
+
+    Raises:
+        KeyError: No account is stored under *username*.
+        ProtectedAccountError: *username* is a recovery credential.
+    """
+    existing = store.get(username)
+    if existing is None:
+        raise KeyError(username)
+    # Refuse before writing anything under a new name.
+    store.protected.check_account_update(username, {"enabled": False}, existing.groups)
+
+    anonymized = anonymized_soft_delete_username()
+    stamped = _apply_access_stamps({"enabled": False})
+    rewritten = existing.model_copy(
+        update={
+            "username": anonymized,
+            "previous_username": username,
+            "enabled": stamped["enabled"],
+            "disabled_at": stamped["disabled_at"],
+            "email": "",
+            "phone": "",
+            "name": "",
+            "subject": "",
+            "attributes": {},
+            "session_epoch": _new_session_epoch(),
+            "updated_at": _now(),
+        }
+    )
+    store.put(rewritten)
+    # Old key must go; the account now lives only under the anonymized name.
+    store.delete(username)
+    return rewritten
 
 
 def _new_session_epoch() -> str:
