@@ -242,6 +242,10 @@ class AccountResponse(BaseModel):
     external: bool = Field(
         description="True when the account authenticates through an identity provider",
     )
+    oidc_id: str = Field(
+        default="",
+        description="OIDC provider name last used to log this account in, empty if none",
+    )
     password_change_required: bool = Field(
         default=False,
         description="True until the account replaces an issued password. The account's "
@@ -281,6 +285,7 @@ def _account_response(request: Request, account: Account, groups: list[Group]) -
         phone=account.phone,
         name=account.name,
         external=account.external,
+        oidc_id=account.oidc_id,
         password_change_required=account.password_change_required,
         created_at=account.created_at,
         updated_at=account.updated_at,
@@ -302,8 +307,9 @@ def _contact_updates(
 
 
 def _require_account(store: Any, username: str) -> Account:
+    """Return the account, or 404 when it is missing or soft-deleted."""
     account = store.get(username)
-    if account is None:
+    if account is None or account.is_soft_deleted:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
@@ -477,6 +483,10 @@ async def list_accounts(
     request: Request,
     pagination: PaginationParams = Depends(),
     search: str | None = Query(None, description="Search in username, name, or email"),
+    oidc_id: str | None = Query(
+        None,
+        description="Exact match on the OIDC provider name last used to log the account in",
+    ),
     blocked: bool | None = Query(
         None,
         description="Filter by blocked status. Omitted returns every account.",
@@ -492,13 +502,15 @@ async def list_accounts(
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    accounts = store.list()
+    accounts = [account for account in store.list() if not account.is_soft_deleted]
     if not include_core:
         accounts = [
             account for account in accounts if not store.protected.is_protected(account.username)
         ]
     if blocked is not None:
         accounts = [account for account in accounts if account.blocked is blocked]
+    if oidc_id is not None:
+        accounts = [account for account in accounts if account.oidc_id == oidc_id]
     groups = request.app.state.group_store.list()
     rows = [_account_response(request, a, groups).model_dump() for a in accounts]
     rows = apply_search(rows, search, ["username", "name", "email"])
@@ -566,16 +578,14 @@ async def get_account(
     user: CurrentUser,
     request: Request,
 ):
-    """Get a single account by username (admin only)."""
+    """Get a single account by username (admin only).
+
+    Soft-deleted (anonymized) accounts answer 404 the same as a missing name.
+    """
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    account = store.get(username)
-    if account is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Account '{username}' not found"},
-        )
+    account = _require_account(store, username)
     return _account_response(request, account, request.app.state.group_store.list())
 
 
@@ -816,11 +826,7 @@ async def account_git_status(
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    if store.get(username) is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Account '{username}' not found"},
-        )
+    _require_account(store, username)
     if not account_durability.is_break_glass(username, settings.auth.local.admin_name):
         return account_durability.not_git_backed_state()
     # Fetches the deploy repo's remote, so it runs on a worker thread.
@@ -851,12 +857,7 @@ async def delete_account(
 
     store: AccountStore = request.app.state.account_store
     group_store = request.app.state.group_store
-    existing = store.get(username)
-    if existing is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Account '{username}' not found"},
-        )
+    existing = _require_account(store, username)
     # Deleting an account takes it out of every group it holds, so it needs their roles.
     groups = group_store.list()
     held = groups_held(existing, groups, bindings=provider_bindings(request))
@@ -883,16 +884,11 @@ async def get_account_attributes(
     user: CurrentUser,
     request: Request,
 ):
-    """Read an account's non-sensitive attribute blob (404 if the account is missing)."""
+    """Read an account's non-sensitive attribute blob (404 if missing or soft-deleted)."""
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    account = store.get(username)
-    if account is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Account '{username}' not found"},
-        )
+    account = _require_account(store, username)
     return {"attributes": account.attributes}
 
 
@@ -906,17 +902,12 @@ async def put_account_attributes(
     user: CurrentUser,
     request: Request,
 ):
-    """Full-replace an account's non-sensitive attribute blob (404 if missing)."""
+    """Full-replace an account's non-sensitive attribute blob (404 if missing or soft-deleted)."""
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    try:
-        account = store.set_attributes(username, body.attributes)
-    except KeyError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Account '{username}' not found"},
-        ) from exc
+    _require_account(store, username)
+    account = store.set_attributes(username, body.attributes)
     return {"attributes": account.attributes}
 
 
@@ -932,16 +923,13 @@ async def get_account_sensitive_attributes(
     """Read an account's SENSITIVE attribute blob from the separate keyed store.
 
     The account must exist first (404 otherwise), so a sensitive read cannot be
-    used to probe for accounts that are not there.
+    used to probe for accounts that are not there. Soft-deleted accounts answer
+    the same way.
     """
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    if store.get(username) is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Account '{username}' not found"},
-        )
+    _require_account(store, username)
     return {"attributes": request.app.state.account_sensitive_attributes.get(username)}
 
 
@@ -955,14 +943,10 @@ async def put_account_sensitive_attributes(
     user: CurrentUser,
     request: Request,
 ):
-    """Full-replace an account's SENSITIVE attribute blob (404 if the account is missing)."""
+    """Full-replace an account's SENSITIVE attribute blob (404 if missing or soft-deleted)."""
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    if store.get(username) is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Account '{username}' not found"},
-        )
+    _require_account(store, username)
     request.app.state.account_sensitive_attributes.put(username, body.attributes)
     return {"attributes": request.app.state.account_sensitive_attributes.get(username)}

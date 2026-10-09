@@ -29,6 +29,7 @@ import hashlib
 import os
 import secrets
 import tempfile
+import uuid
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
@@ -104,6 +105,12 @@ class Account(BaseModel):
     ``alice-smith@corp`` both sanitise to ``alice-smith-corp``), so this is what
     tells the account's own identity from another that sanitises onto it. Empty on
     an account no IdP login has reached yet."""
+    oidc_id: str = ""
+    """OIDC provider name last used to log this account in.
+
+    Written on every successful OIDC login (JIT create and subsequent). Distinct
+    from ``source_provider``, which may stay a SCIM stamp when the same IdP owns
+    the account through a binding. Empty until an OIDC login has reached it."""
     last_login_at: str = ""
     disabled_at: str = ""
     blocked_at: str = ""
@@ -131,6 +138,16 @@ class Account(BaseModel):
     session_epoch: str = ""
     """Replaced whenever every session of the account ends: its owner logs out, or it
     is disabled, blocked, re-enabled or unblocked. Empty until that first happens."""
+    previous_username: str = ""
+    """Account id before soft-delete anonymization.
+
+    Written when the account is renamed to ``{uuid}-deleted``. Empty on an account
+    that has never been soft-deleted."""
+
+    @property
+    def is_soft_deleted(self) -> bool:
+        """Whether this account was anonymized by soft-delete and should read as gone."""
+        return bool(self.previous_username) or self.username.endswith("-deleted")
 
     def session_marker(self) -> str:
         """The value a session token minted for this account now carries.
@@ -508,6 +525,7 @@ _UPDATABLE_FIELDS = (
     "source_provider",
     "external_id",
     "subject",
+    "oidc_id",
     "last_login_at",
     "email",
     "phone",
@@ -699,6 +717,54 @@ def discard_created(store: AccountStore | DocuStoreAccountStore, created: Accoun
             username=created.username,
             error=type(exc).__name__,
         )
+
+
+def anonymized_soft_delete_username() -> str:
+    """A one-use account name: a UUID with ``-deleted`` as the trailing marker.
+
+    Account names must start with an alphanumeric (:data:`VALID_NAME`), so the
+    delete marker cannot lead; it trails the UUID as ``{uuid}-deleted``.
+    """
+    return f"{uuid.uuid4()}-deleted"
+
+
+def soft_delete_account(store: AccountStore | DocuStoreAccountStore, username: str) -> Account:
+    """Disable *username* and rename it to an anonymized ``{uuid}-deleted`` id.
+
+    Clears contact and subject fields so the record no longer identifies the
+    person. Ownership stamps (``source_provider``, ``oidc_id``) stay for audit.
+
+    Raises:
+        KeyError: No account is stored under *username*.
+        ProtectedAccountError: *username* is a recovery credential.
+    """
+    existing = store.get(username)
+    if existing is None:
+        raise KeyError(username)
+    # Refuse before writing anything under a new name.
+    store.protected.check_account_update(username, {"enabled": False}, existing.groups)
+
+    anonymized = anonymized_soft_delete_username()
+    stamped = _apply_access_stamps({"enabled": False})
+    rewritten = existing.model_copy(
+        update={
+            "username": anonymized,
+            "previous_username": username,
+            "enabled": stamped["enabled"],
+            "disabled_at": stamped["disabled_at"],
+            "email": "",
+            "phone": "",
+            "name": "",
+            "subject": "",
+            "attributes": {},
+            "session_epoch": _new_session_epoch(),
+            "updated_at": _now(),
+        }
+    )
+    store.put(rewritten)
+    # Old key must go; the account now lives only under the anonymized name.
+    store.delete(username)
+    return rewritten
 
 
 def _new_session_epoch() -> str:

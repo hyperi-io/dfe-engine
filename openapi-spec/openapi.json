@@ -543,6 +543,24 @@
             "description": "Search in username, name, or email"
           },
           {
+            "name": "oidc_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact match on the OIDC provider name last used to log the account in",
+              "title": "Oidc Id"
+            },
+            "description": "Exact match on the OIDC provider name last used to log the account in"
+          },
+          {
             "name": "blocked",
             "in": "query",
             "required": false,
@@ -791,7 +809,7 @@
           "Accounts"
         ],
         "summary": "Get Account",
-        "description": "Get a single account by username (admin only).",
+        "description": "Get a single account by username (admin only).\n\nSoft-deleted (anonymized) accounts answer 404 the same as a missing name.",
         "operationId": "get_account_api_v1_auth_accounts__username__get",
         "parameters": [
           {
@@ -1295,7 +1313,7 @@
           "Accounts"
         ],
         "summary": "Get Account Attributes",
-        "description": "Read an account's non-sensitive attribute blob (404 if the account is missing).",
+        "description": "Read an account's non-sensitive attribute blob (404 if missing or soft-deleted).",
         "operationId": "get_account_attributes_api_v1_auth_accounts__username__attributes_get",
         "parameters": [
           {
@@ -1359,7 +1377,7 @@
           "Accounts"
         ],
         "summary": "Put Account Attributes",
-        "description": "Full-replace an account's non-sensitive attribute blob (404 if missing).",
+        "description": "Full-replace an account's non-sensitive attribute blob (404 if missing or soft-deleted).",
         "operationId": "put_account_attributes_api_v1_auth_accounts__username__attributes_put",
         "parameters": [
           {
@@ -1435,7 +1453,7 @@
           "Accounts"
         ],
         "summary": "Get Account Sensitive Attributes",
-        "description": "Read an account's SENSITIVE attribute blob from the separate keyed store.\n\nThe account must exist first (404 otherwise), so a sensitive read cannot be\nused to probe for accounts that are not there.",
+        "description": "Read an account's SENSITIVE attribute blob from the separate keyed store.\n\nThe account must exist first (404 otherwise), so a sensitive read cannot be\nused to probe for accounts that are not there. Soft-deleted accounts answer\nthe same way.",
         "operationId": "get_account_sensitive_attributes_api_v1_auth_accounts__username__sensitive_attributes_get",
         "parameters": [
           {
@@ -1499,7 +1517,7 @@
           "Accounts"
         ],
         "summary": "Put Account Sensitive Attributes",
-        "description": "Full-replace an account's SENSITIVE attribute blob (404 if the account is missing).",
+        "description": "Full-replace an account's SENSITIVE attribute blob (404 if missing or soft-deleted).",
         "operationId": "put_account_sensitive_attributes_api_v1_auth_accounts__username__sensitive_attributes_put",
         "parameters": [
           {
@@ -3499,7 +3517,7 @@
           "OIDC Providers"
         ],
         "summary": "Delete Provider",
-        "description": "Detach an OIDC provider and report orphaned groups (admin only).\n\nDoes NOT delete groups -- they become orphaned with their source_provider\nstill set to the deleted provider name. The provider's stored credentials\nARE removed: nothing is left that can authenticate as a detached provider.",
+        "description": "Detach an OIDC provider and soft-delete its accounts (admin only).\n\nDoes NOT delete groups -- they become orphaned with their source_provider\nstill set to the deleted provider name. Accounts owned by the provider\n(``source_provider``) or last logged in through it (``oidc_id``) are\nsoft-deleted: disabled and renamed to ``{uuid}-deleted`` with contact fields\ncleared. The provider's stored credentials ARE removed: nothing is left that\ncan authenticate as a detached provider.",
         "operationId": "delete_provider_api_v1_auth_oidc_providers__name__delete",
         "parameters": [
           {
@@ -23594,6 +23612,12 @@
             "title": "External",
             "description": "True when the account authenticates through an identity provider"
           },
+          "oidc_id": {
+            "type": "string",
+            "title": "Oidc Id",
+            "description": "OIDC provider name last used to log this account in, empty if none",
+            "default": ""
+          },
           "password_change_required": {
             "type": "boolean",
             "title": "Password Change Required",
@@ -26778,6 +26802,14 @@
             },
             "type": "array",
             "title": "Orphaned Groups"
+          },
+          "disabled_accounts": {
+            "items": {
+              "$ref": "#/components/schemas/DisabledAccountInfo"
+            },
+            "type": "array",
+            "title": "Disabled Accounts",
+            "description": "Accounts soft-disabled and renamed to ``{uuid}-deleted`` because they were owned by or last logged in through the detached provider. Already-disabled and protected recovery accounts are left alone."
           }
         },
         "type": "object",
@@ -26786,6 +26818,39 @@
           "orphaned_groups"
         ],
         "title": "DetachResponse"
+      },
+      "DisabledAccountInfo": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username",
+            "description": "Anonymized account id (``{uuid}-deleted``)"
+          },
+          "previous_username": {
+            "type": "string",
+            "title": "Previous Username",
+            "description": "Account id before anonymization"
+          },
+          "source_provider": {
+            "type": "string",
+            "title": "Source Provider",
+            "description": "Ownership stamp on the account (OIDC provider name, scim, or empty)"
+          },
+          "oidc_id": {
+            "type": "string",
+            "title": "Oidc Id",
+            "description": "OIDC provider name last used to log this account in"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "previous_username",
+          "source_provider",
+          "oidc_id"
+        ],
+        "title": "DisabledAccountInfo",
+        "description": "An account soft-disabled and anonymized because its OIDC provider was detached."
       },
       "DraftColumn": {
         "properties": {
