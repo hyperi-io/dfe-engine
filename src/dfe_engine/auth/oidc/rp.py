@@ -366,8 +366,9 @@ class OidcRelyingParty:
         Runs ONLY after Authlib has validated the id_token, so it never weakens
         token validation. Handles two shapes with one path:
           - Entra >200 overage: the token carried a ``_claim_names`` pointer, not
-            the groups; the fetched GUIDs resolve to roles by ``source_id`` just
-            like a normal (<200) Entra login.
+            the groups; Graph is asked with the user's ``access_token`` first, then
+            the app credentials, and the fetched GUIDs resolve to roles by
+            ``source_id`` just like a normal (<200) Entra login.
           - Providers with no groups claim (google-workspace): the directory is
             the only source of membership, read with the user's own
             ``access_token`` from this login.

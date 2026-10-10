@@ -134,7 +134,7 @@ ONLY place the remaining quirks live:
 |-------|-----------|---------------|--------|
 | refs are names (dex/okta) vs ids (entra) vs absent (google) | provider design | normalise to {id,name}; resolve GUIDs by source_id, call the directory API when the token lacks the name | id->name resolution DONE (source_id match) |
 | id stable, name mutable | directories rename groups | map roles on `id`, display `name` | source_id is the stable key |
-| overage (entra >200 -> a Graph pointer) | token size limits | detect the marker, fall back to the directory API | DONE: `rp.py` detects `_claim_names` and fetches `transitiveMemberOf`; needs the tenant id and a client secret |
+| overage (entra >200 -> a Graph pointer) | token size limits | detect the marker, fall back to the directory API | DONE: `rp.py` detects `_claim_names` and fetches `transitiveMemberOf` with the user's own login token (`/me`, needs the delegated `GroupMember.Read.All` scope on the login, consented once by a tenant admin), falling back to app credentials (tenant id + client secret) when that token is refused |
 | nested / transitive groups | AD/entra/google nesting | take the closure the provider already emits, or walk it when it does not | MEASURED: entra emits the full closure in-token; honour it (per-provider fact, not a global toggle) |
 | name collisions across tenants | bare names aren't unique | namespace the key (source+domain) | a name held by a group not linked to that IdP group is skipped (`name_taken`); namespacing not yet built |
 | non-role groups (mailing lists) | not all groups grant access | filter by group type | not yet built |
@@ -277,8 +277,7 @@ Done since this doc landed:
 - **`client_as(...)` role-perspective test framework** so every role is driven
   against real endpoints, not just asserted to be present in a token.
 
-Remaining Layer-2 work: overage detection (>200) + directory fallback,
-group-type filtering, and multi-tenant name namespacing. Plus the dex+glauth
+Remaining Layer-2 work: group-type filtering, and multi-tenant name namespacing. Plus the dex+glauth
 emulation rig for the headless token_claim backbone.
 
 Open: confirm "membership" means the user's own memberships in the token, full

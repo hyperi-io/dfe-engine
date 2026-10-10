@@ -38,8 +38,8 @@ def get_adapter(
     Args:
         provider: The OIDCProvider configuration instance.
         access_token: The user's access token from the login being enriched.
-            Only Google takes it: its directory answers the user about their own
-            groups, where the others read with a credential of their own.
+            Google and Entra take it: each directory answers the user about their
+            own groups, where Okta and generic read with a credential of their own.
         secrets: The DfeSecrets seam the directory credential resolves through,
             ahead of the env var named in the provider config.
 
@@ -69,7 +69,7 @@ def get_adapter(
         case "entra_id":
             from dfe_engine.auth.oidc.adapters.entra import EntraAdapter
 
-            return EntraAdapter(provider, secrets=secrets)
+            return EntraAdapter(provider, access_token=access_token, secrets=secrets)
         case "okta":
             from dfe_engine.auth.oidc.adapters.okta import OktaAdapter
 
