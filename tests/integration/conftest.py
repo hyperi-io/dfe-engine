@@ -551,12 +551,17 @@ def clickhouse_client(ch_params, clickhouse_test_database):
         client.close()
 
 
-def _mongo_when_ready(uri: str, attempts: int = 60, delay: float = 1.0) -> None:
-    """Poll until an authenticated listDatabases succeeds; ping answers before the backend."""
+def _mongo_when_ready(uri: str, timeout: float = 180.0, delay: float = 1.0) -> None:
+    """Poll until an authenticated listDatabases succeeds; ping answers before the backend.
+
+    The eval image initialises its PostgreSQL on first start, and with one container
+    per xdist worker starting at once that has taken longer than a minute on CI.
+    """
     from pymongo import MongoClient
 
+    deadline = time.monotonic() + timeout
     last: Exception | None = None
-    for _ in range(attempts):
+    while time.monotonic() < deadline:
         client = MongoClient(uri, serverSelectionTimeoutMS=1000)
         try:
             client.list_database_names()
@@ -567,6 +572,15 @@ def _mongo_when_ready(uri: str, attempts: int = 60, delay: float = 1.0) -> None:
         finally:
             client.close()
     raise last if last is not None else RuntimeError("document store unreachable")
+
+
+def _log_tail(docker: list[str], name: str, lines: int = 15) -> str:
+    """The container's last log lines on one line, or why they could not be read."""
+    try:
+        proc = _run([*docker, "logs", "--tail", str(lines), name], timeout=30)
+    except (subprocess.SubprocessError, FileNotFoundError) as exc:
+        return f"<unavailable: {exc}>"
+    return " | ".join((proc.stdout + proc.stderr).split("\n")).strip(" |")
 
 
 @pytest.fixture(scope="session")
@@ -619,8 +633,9 @@ def mongo_uri():
         uri = f"mongodb://{_FERRETDB_USER}:{password}@{_reach_address(spec)}:{port}/"
         _mongo_when_ready(uri)
     except Exception as exc:
+        tail = _log_tail(docker, name).replace(password, "***")
         teardown()
-        pytest.skip(f"FerretDB on '{spec}' did not come up: {exc}")
+        pytest.skip(f"FerretDB on '{spec}' did not come up: {exc}; container log: {tail}")
     try:
         yield uri
     finally:
