@@ -3,6 +3,15 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.18](https://github.com/hyperi-io/dfe-engine/compare/v1.22.17...v1.22.18) (2026-10-10)
+
+### Bug Fixes
+
+* double-counted metrics and SCIM PATCH replace ([#790](https://github.com/hyperi-io/dfe-engine/issues/790)) ([e81d2cc](https://github.com/hyperi-io/dfe-engine/commit/e81d2cc3723175ab80944407391735156376972e))
+* drop FastAPI OTLP export, audit SCIM writes ([#789](https://github.com/hyperi-io/dfe-engine/issues/789)) ([8d254f4](https://github.com/hyperi-io/dfe-engine/commit/8d254f4da7923594a5abfc3eb25676d119fea706))
+* keep backend error text out of API responses ([#786](https://github.com/hyperi-io/dfe-engine/issues/786)) ([2d11e06](https://github.com/hyperi-io/dfe-engine/commit/2d11e06ced4f8089d3ea711d9789dd48779d9de5))
+* role grants, admin audit and OIDC settings ([#787](https://github.com/hyperi-io/dfe-engine/issues/787)) ([e8f98c7](https://github.com/hyperi-io/dfe-engine/commit/e8f98c71515340b6e958b7bba181c8c9c0e9706e))
+
 ## [1.22.17](https://github.com/hyperi-io/dfe-engine/compare/v1.22.16...v1.22.17) (2026-10-10)
 
 ### Bug Fixes
