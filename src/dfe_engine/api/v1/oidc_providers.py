@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field, field_validator
+from scalo.logger import logger
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.pagination import (
@@ -43,6 +44,7 @@ from dfe_engine.api.pagination import (
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.oidc.credential_env import is_env_var_name, provider_secret_path
 from dfe_engine.auth.oidc.field_rules import FieldProblem, field_problems
+from dfe_engine.auth.oidc.idp_errors import describe_idp_error, idp_failure_message
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.store_names import VALID_NAME
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
@@ -933,8 +935,13 @@ async def verify_login_config(
                     LoginConfigCheck(name="discovery", ok=True, detail="discovery reachable")
                 )
         except Exception as exc:
-            checks.append(
-                LoginConfigCheck(name="discovery", ok=False, detail=f"discovery failed: {exc}")
+            logger.warning(
+                "OIDC verify-login: discovery failed",
+                operation="discovery",
+                provider=name,
+                **describe_idp_error(exc),
             )
+            detail = idp_failure_message(exc, service="The issuer's discovery endpoint")
+            checks.append(LoginConfigCheck(name="discovery", ok=False, detail=detail))
 
     return LoginConfigResponse(ok=all(c.ok for c in checks), checks=checks)

@@ -34,6 +34,7 @@ from pydantic import BaseModel
 from scalo.logger import logger
 
 from dfe_engine.auth.oidc.credential_env import resolve_credential
+from dfe_engine.auth.oidc.idp_errors import describe_idp_error
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -216,7 +217,12 @@ async def fill_from_userinfo_endpoint(
         fetched = await client.userinfo(token=token)
         return merge_userinfo_claims(id_token_claims=claims, userinfo_claims=dict(fetched))
     except Exception as exc:
-        logger.warning("OIDC RP: userinfo claims not used", error=str(exc), issuer=issuer)
+        logger.warning(
+            "OIDC RP: userinfo claims not used",
+            issuer=issuer,
+            operation="userinfo",
+            **describe_idp_error(exc),
+        )
         return claims
 
 
@@ -390,8 +396,9 @@ class OidcRelyingParty:
         except Exception as exc:  # pragma: no cover - defensive; adapters fail open
             logger.warning(
                 "OIDC RP: directory group enrichment failed",
+                operation="resolve_user_groups",
                 provider=provider.issuer,
-                error=str(exc),
+                **describe_idp_error(exc),
             )
             return identity
         group_ids = [g.id for g in fetched if g.id]

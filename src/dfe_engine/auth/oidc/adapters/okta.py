@@ -24,6 +24,7 @@ from scalo.logger import logger
 
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.credential_env import resolve_credential
+from dfe_engine.auth.oidc.idp_errors import describe_idp_error, idp_failure_message
 from dfe_engine.auth.oidc.models import GroupInfo
 
 
@@ -56,8 +57,9 @@ class OktaAdapter(OIDCGroupAdapter):
         except Exception as exc:
             logger.warning(
                 "Okta resolve_user_groups failed -- default deny",
+                operation="resolve_user_groups",
                 provider=self._provider.issuer,
-                error=str(exc),
+                **describe_idp_error(exc),
             )
             return []
 
@@ -80,8 +82,9 @@ class OktaAdapter(OIDCGroupAdapter):
                 except Exception as exc:
                     logger.warning(
                         "Okta list_all_groups: API call failed",
-                        url=url,
-                        error=str(exc),
+                        operation="list_all_groups",
+                        provider=self._provider.issuer,
+                        **describe_idp_error(exc),
                     )
                     break
 
@@ -124,10 +127,11 @@ class OktaAdapter(OIDCGroupAdapter):
         except Exception as exc:
             logger.warning(
                 "Okta test_connection failed",
+                operation="test_connection",
                 provider=self._provider.issuer,
-                error=str(exc),
+                **describe_idp_error(exc),
             )
-            return False, f"Okta Groups API connection failed: {exc}"
+            return False, idp_failure_message(exc, service="Okta Groups API")
 
     def _api_base_and_headers(self) -> tuple[str | None, dict[str, str] | None]:
         base = _normalize_okta_api_base(self._provider.groups.okta_domain)

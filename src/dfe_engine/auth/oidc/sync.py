@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from scalo.logger import logger
 
 from dfe_engine.auth.groups import GroupExistsError
+from dfe_engine.auth.oidc.idp_errors import describe_idp_error, idp_failure_message
 from dfe_engine.auth.store_names import VALID_NAME
 
 if TYPE_CHECKING:
@@ -199,11 +200,13 @@ async def sync_provider(
     try:
         remote_groups = await adapter.list_all_groups()
     except Exception as exc:
-        error_msg = str(exc)
+        # The provider record and the API answer carry this, so the IdP's own text stays out.
+        error_msg = idp_failure_message(exc, service="The directory API")
         logger.warning(
             "OIDC group sync failed",
+            operation="list_all_groups",
             provider=provider_name,
-            error=error_msg,
+            **describe_idp_error(exc),
         )
         provider_registry.update(
             provider_name,
