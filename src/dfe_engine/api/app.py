@@ -118,15 +118,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         deployed_candidates = []
     # The admin's default TTL override, so the boot renders what the console set.
     ttl_settings = effective_settings(settings, gitcrud)
-    schema_state = bootstrap_clickhouse(
-        settings=ttl_settings, sources=deployed_candidates, metrics=app.state.schema_metrics
+    run_schema_pass = functools.partial(
+        bootstrap_clickhouse,
+        settings=ttl_settings,
+        sources=deployed_candidates,
+        metrics=app.state.schema_metrics,
     )
+    schema_state = run_schema_pass()
     tables_bootstrapped = schema_state.converged
 
     # After the bootstrap, which is what makes the landing table exist: the seed records the source as deployed, and that must not be claimed before it is true.
     from dfe_engine.source.core_sources import seed_core_sources
 
-    if source_registry is not None:
+    def seed_core(*, tables_bootstrapped: bool) -> None:
+        if source_registry is None:
+            return
         try:
             seed_core_sources(
                 registry=source_registry,
@@ -134,7 +140,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 tables_bootstrapped=tables_bootstrapped,
             )
         except Exception as exc:  # a failed seed must never break startup
-            logger.warning("core sources not seeded at startup", error=str(exc))
+            logger.warning("core sources not seeded", error=str(exc))
+
+    seed_core(tables_bootstrapped=tables_bootstrapped)
+
+    if schema_state.transient:
+        from dfe_engine.clickhouse.bootstrap import SchemaRetry
+
+        app.state.schema_retry = SchemaRetry(
+            run_schema_pass,
+            resilience=settings.clickhouse.resilience,
+            on_converged=functools.partial(seed_core, tables_bootstrapped=True),
+        )
+        app.state.schema_retry.start()
 
     # Every carried source's topics, at boot rather than at its next deploy: a
     # deployment restored from its config repo otherwise has topics only for the
@@ -553,6 +571,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         if reconcile_trigger is not None:
             # A run reads the org and group stores, so it ends before the stores close.
             await asyncio.to_thread(reconcile_trigger.close, 10.0)
+    schema_retry = getattr(app.state, "schema_retry", None)
+    if schema_retry is not None:
+        # A pass seeds the core sources through the registry, so it ends before the registries close.
+        await asyncio.to_thread(schema_retry.close, 10.0)
     autostart_tasks = getattr(app.state, "synthetic_autostart", [])
     for task in autostart_tasks:
         task.cancel()
