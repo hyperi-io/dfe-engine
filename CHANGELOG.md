@@ -3,6 +3,19 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.19](https://github.com/hyperi-io/dfe-engine/compare/v1.22.18...v1.22.19) (2026-10-10)
+
+### Bug Fixes
+
+* close the name validation holes ([#800](https://github.com/hyperi-io/dfe-engine/issues/800)) ([29c6902](https://github.com/hyperi-io/dfe-engine/commit/29c6902183749993b106c2e7666592741ed52cd8))
+* fail a group sync on a bad listing and log IdP errors by class ([#799](https://github.com/hyperi-io/dfe-engine/issues/799)) ([8afd230](https://github.com/hyperi-io/dfe-engine/commit/8afd2309a639cd58ee0bdad9aed9c90c1665b599))
+* keep user identifiers out of IdP error logs and answers ([#798](https://github.com/hyperi-io/dfe-engine/issues/798)) ([007624c](https://github.com/hyperi-io/dfe-engine/commit/007624ca8d9e404f00b122de63f7e72d137e71db))
+* live Google group test mints its own user token ([#795](https://github.com/hyperi-io/dfe-engine/issues/795)) ([55374d5](https://github.com/hyperi-io/dfe-engine/commit/55374d500952a6b64ac65dace8099b607ce455f1))
+* remove the stale hand-written engine chart ([#797](https://github.com/hyperi-io/dfe-engine/issues/797)) ([b185d66](https://github.com/hyperi-io/dfe-engine/commit/b185d6669ea54d08ae4c037b8ee1945f7a19270d))
+* retire the Google live test the delegation test supersedes ([#796](https://github.com/hyperi-io/dfe-engine/issues/796)) ([4f6b668](https://github.com/hyperi-io/dfe-engine/commit/4f6b6688291a57f50295d87eae3baf6fc88ecdf3))
+* stop the test reconcile thread leak, keep schema apply running ([#794](https://github.com/hyperi-io/dfe-engine/issues/794)) ([d59b446](https://github.com/hyperi-io/dfe-engine/commit/d59b4465da3ba74e642129a643ab82e2acb2f0d5))
+* **tests:** hold the loader contract to v1.18.47, the release 2.2.1 ships ([#791](https://github.com/hyperi-io/dfe-engine/issues/791)) ([bf9c38e](https://github.com/hyperi-io/dfe-engine/commit/bf9c38e683ed6b777d9a91409bcaa1661f89e467))
+
 ## [1.22.18](https://github.com/hyperi-io/dfe-engine/compare/v1.22.17...v1.22.18) (2026-10-10)
 
 ### Bug Fixes
