@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from scalo.logger import logger
 
-from dfe_engine.auth.oidc.idp_errors import describe_idp_error
+from dfe_engine.http_errors import describe_http_error
 
 
 def audit_login_success(
@@ -258,7 +258,7 @@ def audit_org_hyperdx_failed(org_name: str, exc: BaseException | None = None) ->
         exc: The failure the HyperDX call raised, or None when HyperDX answered
             with no team.
     """
-    failure = describe_idp_error(exc) if exc is not None else {"reason": "no_team"}
+    failure = describe_http_error(exc) if exc is not None else {"reason": "no_team"}
     logger.warning("org.hyperdx.provision_failed", org_name=org_name, **failure)
 
 
@@ -351,7 +351,7 @@ def audit_jit_failed(user_id: str, exc: BaseException) -> None:
         user_id: Identity for which provisioning failed.
         exc: The failure provisioning raised.
     """
-    logger.warning("auth.jit.provision_failed", user_id=user_id, **describe_idp_error(exc))
+    logger.warning("auth.jit.provision_failed", user_id=user_id, **describe_http_error(exc))
 
 
 def audit_resource_change(

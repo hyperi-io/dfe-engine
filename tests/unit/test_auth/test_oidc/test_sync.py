@@ -22,12 +22,14 @@ from dfe_engine.auth.oidc.adapters.okta import _group_info_from_okta
 from dfe_engine.auth.oidc.models import GroupInfo, GroupResolutionConfig, OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.sync import (
+    NO_DIRECTORY_MESSAGE,
     NOT_CONFIGURED_MESSAGE,
     SYNC_GROUPS_SKIPPED,
     SyncMetrics,
     _safe_name,
     sync_provider,
 )
+from tests.unit.test_auth.test_oidc.unreachable_store import UnreachableSecretStore
 
 # ---------------------------------------------------------------------------
 # Fake adapter — dependency injection, not mocking
@@ -141,6 +143,7 @@ class TestSyncCreatesNewGroups:
         assert result["total"] == 2
         assert result["error"] is None
         assert result["skipped"] is None
+        assert result["status"] == "ok"
 
     def test_group_files_have_source_provider(self, registries, api_provider):
         import asyncio
@@ -441,13 +444,17 @@ class TestSyncOverAGroupFileThatDoesNotLoad:
         finally:
             logger.remove(handler)
 
+        synced = group_store.get("ops-example.com")
+        provider = provider_registry.get("test-sso")
+        assert synced is not None
+        assert provider is not None
         assert result["error"] is None
         assert result["created"] == 1
-        assert group_store.get("ops-example.com").source_id == "g2"
+        assert synced.source_id == "g2"
         assert stored.read_text(encoding="utf-8") == self._BAD_SCOPE
         assert "OIDC group sync skipped a group whose stored copy does not load" in warnings
         assert result["groups_skipped"] == 1
-        assert provider_registry.get("test-sso").last_sync_status == (
+        assert provider.last_sync_status == (
             "partial: 1 of 2 groups skipped, their stored copy does not load"
         )
         skipped = [
@@ -500,6 +507,7 @@ class TestSyncOverAGroupWhoseIdentifierMakesNoName:
         assert result["error"] is None
         assert result["created"] == 1
         assert result["groups_skipped"] == 1
+        assert result["status"] == "partial"
         assert [g.name for g in group_store.list()] == ["ops-example.com"]
         assert group_store.get("ops-example.com").source_id == "g2"
         assert provider_registry.get("test-sso").last_sync_status == (
@@ -563,6 +571,7 @@ class TestSyncSkipsDisabledProvider:
         assert result["skipped"] == "disabled"
         assert result["error"] is None
         assert result["created"] == 0
+        assert result["status"] == "skipped"
 
     async def test_disabled_does_not_create_groups(self, registries):
         provider_registry, group_store = registries
@@ -619,13 +628,14 @@ class TestSyncHandlesAdapterError:
             "test-sso", provider_registry, group_store, adapter=error_adapter
         )
 
-        assert (
-            result["error"]
-            == "The directory API could not be reached; the engine log has the reason"
+        # A RuntimeError carries no socket error, so nothing says the API was unreachable.
+        assert result["error"] == (
+            "The directory API gave no usable answer; the engine log has the reason"
         )
         assert result["skipped"] is None
         assert result["created"] == 0
         assert result["total"] == 0
+        assert result["status"] == "error"
 
     async def test_adapter_error_sets_provider_sync_error(self, registries, api_provider):
         provider_registry, group_store = registries
@@ -638,7 +648,7 @@ class TestSyncHandlesAdapterError:
         assert updated_provider is not None
         assert updated_provider.last_sync_status == "error"
         assert updated_provider.sync_error == (
-            "The directory API could not be reached; the engine log has the reason"
+            "The directory API gave no usable answer; the engine log has the reason"
         )
         assert updated_provider.last_sync_at != ""
 
@@ -655,7 +665,7 @@ class TestSyncHandlesAdapterError:
 class TestSyncWithNoDirectoryCredential:
     """An api-mode provider with nothing to list with is not 'ok, 0 groups'."""
 
-    @pytest.mark.parametrize("provider_type", ["entra_id", "okta", "google"])
+    @pytest.mark.parametrize("provider_type", ["entra_id", "okta"])
     async def test_reports_not_configured_in_the_result_and_on_the_provider(
         self, registries, provider_type
     ):
@@ -672,12 +682,35 @@ class TestSyncWithNoDirectoryCredential:
 
         assert result["skipped"] == NOT_CONFIGURED_MESSAGE
         assert result["error"] is None
+        assert result["status"] == "not_configured"
         assert (result["created"], result["updated"], result["total"]) == (0, 0, 0)
         stored = provider_registry.get("no-credential")
         assert stored is not None
         assert stored.last_sync_status == "not_configured"
         assert stored.sync_error == NOT_CONFIGURED_MESSAGE
         assert stored.last_sync_at != ""
+        assert group_store.list() == []
+
+    async def test_a_google_provider_with_no_service_account_is_no_fault(self, registries):
+        """Each login reads its groups with the user's token, the documented default."""
+        provider_registry, group_store = registries
+        provider = OIDCProvider(
+            type="google",
+            enabled=True,
+            issuer="https://accounts.google.com",
+            groups=GroupResolutionConfig(enrich_on_login=True, mode="api"),
+        )
+        provider_registry.create("google-default", provider)
+
+        result = await sync_provider("google-default", provider_registry, group_store)
+
+        stored = provider_registry.get("google-default")
+        assert stored is not None
+        assert (stored.last_sync_status, stored.sync_error) == ("user_token", "")
+        assert stored.last_sync_at != ""
+        assert (result["status"], result["error"]) == ("user_token", None)
+        assert result["skipped"] == NO_DIRECTORY_MESSAGE
+        assert "configure" not in result["skipped"]
         assert group_store.list() == []
 
     async def test_a_later_sync_with_a_credential_clears_the_state(self, registries, api_provider):
@@ -697,6 +730,81 @@ class TestSyncWithNoDirectoryCredential:
         stored = provider_registry.get("test-sso")
         assert stored is not None
         assert (stored.last_sync_status, stored.sync_error) == ("ok", "")
+
+
+_STORED_CREDENTIAL_PROVIDERS = pytest.mark.parametrize(
+    ("provider_type", "groups"),
+    [
+        (
+            "okta",
+            {"api_token_path": "oidc/acme/groups_api_token", "okta_domain": "example.okta.com"},
+        ),
+        (
+            "entra_id",
+            {
+                "client_secret_path": "oidc/acme/groups_client_secret",
+                "tenant_id": "test-tenant",
+            },
+        ),
+        ("google", {"service_account_json_path": "oidc/acme/groups_service_account_json"}),
+    ],
+    ids=["okta", "entra_id", "google"],
+)
+
+
+def _stored_credential_provider(*, provider_type: str, groups: dict[str, str]) -> OIDCProvider:
+    """An api-mode provider whose directory credential is held only in the secret store."""
+    return OIDCProvider.model_validate(
+        {
+            "client_id": "app-id",
+            "groups": {"mode": "api", **groups},
+            "issuer": "https://sso.example.com",
+            "type": provider_type,
+        }
+    )
+
+
+class TestSyncWhenTheSecretStoreDidNotAnswer:
+    """A credential the store holds but did not hand over is a failed run, never 'not configured'."""
+
+    @_STORED_CREDENTIAL_PROVIDERS
+    async def test_the_run_is_an_error_that_names_the_secret_store(
+        self, registries, provider_type, groups
+    ):
+        provider_registry, group_store = registries
+        provider = _stored_credential_provider(provider_type=provider_type, groups=groups)
+        provider_registry.create("stored", provider)
+
+        result = await sync_provider(
+            "stored", provider_registry, group_store, secrets=UnreachableSecretStore()
+        )
+
+        stored = provider_registry.get("stored")
+        assert stored is not None
+        assert stored.last_sync_status == "error"
+        assert "secret store did not answer" in stored.sync_error
+        assert result["status"] == "error"
+        assert stored.sync_error == result["error"]
+        assert result["skipped"] is None
+
+    @_STORED_CREDENTIAL_PROVIDERS
+    async def test_one_sync_asks_the_store_once(
+        self, audit_events, registries, provider_type, groups
+    ):
+        provider_registry, group_store = registries
+        provider = _stored_credential_provider(provider_type=provider_type, groups=groups)
+        provider_registry.create("stored", provider)
+
+        await sync_provider(
+            "stored", provider_registry, group_store, secrets=UnreachableSecretStore()
+        )
+
+        unreadable = [
+            e
+            for e in audit_events
+            if e["event"] == "OIDC credential unreadable from the secret store"
+        ]
+        assert len(unreadable) == 1
 
 
 class TestSyncUnknownProvider:

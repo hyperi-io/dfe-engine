@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
+import json
 
 import pytest
 
@@ -18,6 +18,10 @@ from dfe_engine.auth.oidc.credential_env import (
 )
 from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import SecretsSettings
+from tests.unit.test_auth.test_oidc.unreachable_store import (
+    STORE_ADDRESS,
+    UnreachableSecretStore,
+)
 
 
 @pytest.fixture
@@ -71,6 +75,39 @@ class TestCredentialCheck:
         assert ok is False
         assert "nothing stored at oidc/acme/client_secret" in detail
 
+    def test_a_store_that_did_not_answer_is_named_and_the_env_still_serves(self, monkeypatch):
+        """The check reports the outage; a login falls through to the env var, so the check does too."""
+        monkeypatch.delenv("OIDC_RP_SECRET", raising=False)
+
+        ok, detail = credential_check(
+            "client_secret",
+            secret_path="oidc/acme/client_secret",
+            env_name="OIDC_RP_SECRET",
+            secrets=UnreachableSecretStore(),
+        )
+        monkeypatch.setenv("OIDC_RP_SECRET", "from-env")
+        served, _detail = credential_check(
+            "client_secret",
+            secret_path="oidc/acme/client_secret",
+            env_name="OIDC_RP_SECRET",
+            secrets=UnreachableSecretStore(),
+        )
+
+        assert ok is False
+        assert "secret store did not answer" in detail
+        assert "oidc/acme/client_secret" in detail
+        assert "unset or empty" not in detail
+        assert served is True
+
+    def test_a_store_that_did_not_answer_with_no_env_var_is_named(self):
+        ok, detail = credential_check(
+            "client_secret", secret_path="oidc/acme/client_secret", secrets=UnreachableSecretStore()
+        )
+
+        assert ok is False
+        assert "secret store did not answer" in detail
+        assert "nothing stored" not in detail
+
 
 class TestResolveCredential:
     def test_store_wins_over_env(self, store, monkeypatch):
@@ -82,7 +119,7 @@ class TestResolveCredential:
             env_name="OIDC_RP_SECRET",
             secrets=store,
         )
-        assert resolved == "from-store"
+        assert resolved.value == "from-store"
 
     def test_env_serves_a_provider_with_no_stored_secret(self, store, monkeypatch):
         """An ESO-mounted env var keeps working when the store holds nothing."""
@@ -92,11 +129,11 @@ class TestResolveCredential:
             env_name="OIDC_RP_SECRET",
             secrets=store,
         )
-        assert resolved == "from-env"
+        assert resolved.value == "from-env"
 
     def test_env_serves_when_no_store_is_wired(self, monkeypatch):
         monkeypatch.setenv("OIDC_RP_SECRET", "from-env")
-        assert resolve_credential(env_name="OIDC_RP_SECRET") == "from-env"
+        assert resolve_credential(env_name="OIDC_RP_SECRET").value == "from-env"
 
     def test_plain_value_wins_over_both(self, store, monkeypatch):
         monkeypatch.setenv("OIDC_CLIENT_ID", "from-env")
@@ -107,25 +144,55 @@ class TestResolveCredential:
             env_name="OIDC_CLIENT_ID",
             secrets=store,
         )
-        assert resolved == "plain-id"
+        assert resolved.value == "plain-id"
 
     def test_nothing_configured_resolves_empty(self, store):
-        assert resolve_credential(secrets=store) == ""
+        assert resolve_credential(secrets=store).value == ""
 
     def test_unreachable_store_falls_through_to_env(self, monkeypatch):
         """A store that raises must not take the login path down with it."""
-
-        class _BrokenStore:
-            def get(self, path: str) -> str:
-                raise RuntimeError("openbao unreachable")
-
         monkeypatch.setenv("OIDC_RP_SECRET", "from-env")
         resolved = resolve_credential(
             secret_path="oidc/acme/client_secret",
             env_name="OIDC_RP_SECRET",
-            secrets=_BrokenStore(),
+            secrets=UnreachableSecretStore(),
         )
-        assert resolved == "from-env"
+        assert (resolved.value, resolved.unreadable) == ("from-env", False)
+
+    def test_a_store_that_did_not_answer_is_unreadable_not_absent(self, monkeypatch):
+        """With nothing in the env, a store outage is not a credential nobody configured."""
+        monkeypatch.delenv("OIDC_RP_SECRET", raising=False)
+        resolved = resolve_credential(
+            secret_path="oidc/acme/client_secret",
+            env_name="OIDC_RP_SECRET",
+            secrets=UnreachableSecretStore(),
+        )
+        assert (resolved.value, resolved.unreadable) == ("", True)
+
+    def test_a_store_holding_nothing_is_absent_not_unreadable(self, store):
+        resolved = resolve_credential(secret_path="oidc/acme/client_secret", secrets=store)
+        assert (resolved.value, resolved.unreadable) == ("", False)
+
+    def test_the_repr_never_carries_the_value(self, store):
+        store.put("oidc/acme/client_secret", "stored-value")
+        resolved = resolve_credential(secret_path="oidc/acme/client_secret", secrets=store)
+        assert "stored-value" not in repr(resolved)
+
+    def test_a_store_that_did_not_answer_is_logged_by_class_not_text(self, audit_events):
+        resolve_credential(secret_path="oidc/acme/client_secret", secrets=UnreachableSecretStore())
+
+        (line,) = [
+            e
+            for e in audit_events
+            if e["event"] == "OIDC credential unreadable from the secret store"
+        ]
+        assert STORE_ADDRESS not in json.dumps(audit_events, default=str)
+        assert "error" not in line
+        assert (line["error_type"], line["transport_failure"], line["secret_path"]) == (
+            "ConnectionError",
+            "connection_refused",
+            "oidc/acme/client_secret",
+        )
 
 
 class TestPathAndNameHelpers:

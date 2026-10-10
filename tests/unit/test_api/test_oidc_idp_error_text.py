@@ -26,6 +26,7 @@ from dfe_engine.auth.oidc.adapters.google import GoogleAdapter
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
 from tests.support.loopback import CountingListener
 from tests.support.refusing_api import refusing_api
+from tests.unit.test_auth.test_oidc.local_idp import LocalIdp
 
 SENTINEL = "idp.sentinel.7f3a@example.com"
 SENTINEL_LOCAL_PART = "idp.sentinel.7f3a"
@@ -129,6 +130,30 @@ class TestVerifyLogin:
         assert SENTINEL_LOCAL_PART not in resp.text
         assert "HTTP 404" in discovery["detail"]
         assert _status_logged(audit_events, "discovery", 404)
+
+    def test_a_discovery_answer_that_is_not_json_is_not_called_unreachable(
+        self, app, client, admin_headers, audit_events
+    ):
+        """A captive portal or proxy page answers 200, so the issuer was reached."""
+        idp = LocalIdp()
+        idp.discovery_body = "<html>sign in to the hotel wifi</html>"
+        idp.start()
+        try:
+            app.state.oidc_provider_registry.create(
+                "vl-not-json", OIDCProvider(type="generic", issuer=idp.base_url)
+            )
+            resp = client.get(
+                "/api/v1/auth/oidc-providers/vl-not-json/verify-login", headers=admin_headers
+            )
+        finally:
+            idp.stop()
+
+        discovery = next(c for c in resp.json()["checks"] if c["name"] == "discovery")
+        assert discovery["ok"] is False
+        assert "could not be reached" not in discovery["detail"]
+        assert "gave no usable answer" in discovery["detail"]
+        (line,) = [e for e in audit_events if e.get("operation") == "discovery"]
+        assert line["error_type"] == "JSONDecodeError"
 
     @pytest.mark.parametrize(
         ("ends", "expected"),

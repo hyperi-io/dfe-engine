@@ -19,7 +19,8 @@ Usage::
     from dfe_engine.auth.oidc.sync import sync_provider
 
     result = await sync_provider("my-provider", provider_registry, group_store)
-    # {"created": 3, "updated": 1, "total": 4, "groups_skipped": 0, "error": None, "skipped": None}
+    # {"created": 3, "updated": 1, "total": 4, "groups_skipped": 0, "error": None,
+    #  "skipped": None, "status": "ok"}
 """
 
 import re
@@ -29,12 +30,21 @@ from typing import TYPE_CHECKING, Any, Literal
 from scalo.logger import logger
 
 from dfe_engine.auth.groups import GroupExistsError
-from dfe_engine.auth.oidc.idp_errors import (
+from dfe_engine.auth.oidc.adapters.base import (
+    DirectoryCredentialError,
+    DirectoryCredentialUnreadableError,
     DirectoryNotConfiguredError,
-    describe_idp_error,
-    idp_failure_message,
+    DirectoryPageError,
+    DirectoryPageLimitError,
+    NoDirectoryListingError,
 )
+from dfe_engine.auth.oidc.credential_env import unreadable_credential_message
 from dfe_engine.auth.store_names import VALID_NAME
+from dfe_engine.http_errors import (
+    credential_failure_message,
+    describe_http_error,
+    http_failure_message,
+)
 
 if TYPE_CHECKING:
     from dfe_engine.auth.groups import GroupStore
@@ -45,18 +55,59 @@ if TYPE_CHECKING:
 SYNC_GROUPS_SKIPPED = "auth_oidc_sync_groups_skipped_total"
 SYNC_SCHEDULED_RUNS = "auth_oidc_sync_scheduled_runs_total"
 
-SyncOutcome = Literal["ok", "partial", "error", "not_configured"]
-"""How one sync run ended: every group synced, some left unsynced, the run failed, or the
-provider has no credential to read its directory with."""
+SyncOutcome = Literal["ok", "partial", "error", "not_configured", "user_token", "skipped"]
+"""How one sync run ended, as a sync result's ``status`` field.
+
+- ``ok``: every group synced.
+- ``partial``: some groups were left unsynced.
+- ``error``: the run failed, including when the secret store holding the credential
+  did not answer.
+- ``not_configured``: the provider has no credential to read its directory with.
+- ``user_token``: the provider reads each login's groups with the user's own token
+  and has no directory to sync, which is a Google provider's default.
+- ``skipped``: the provider is disabled or not in api mode.
+"""
 
 SYNC_NOT_CONFIGURED = "not_configured"
 """The ``last_sync_status`` of a provider whose directory credential is not configured."""
+
+SYNC_USER_TOKEN = "user_token"  # noqa: S105, RUF100 - a sync status name
+"""The ``last_sync_status`` of a provider that reads each login's groups with the user's own token."""
 
 NOT_CONFIGURED_MESSAGE = (
     "The directory credential is not configured, so no groups were synced; "
     "configure it on the provider and sync again"
 )
 """What a provider's ``sync_error`` and a sync's ``skipped`` say when there is no credential to list with."""
+
+NO_DIRECTORY_MESSAGE = (
+    "Each login reads that user's groups with their own token, so there is no directory to sync"
+)
+"""What a sync's ``skipped`` says for a provider with no directory listing; its ``sync_error`` stays empty."""
+
+_DIRECTORY_API = "The directory API"
+
+
+def _listing_failure_message(exc: BaseException) -> str:
+    """What the provider record and the API answer say about a failed listing, never the IdP's own text."""
+    match exc:
+        case DirectoryCredentialUnreadableError():
+            return unreadable_credential_message(credential="directory credential")
+        case DirectoryCredentialError():
+            return credential_failure_message(service=_DIRECTORY_API)
+        case DirectoryPageLimitError(pages=pages):
+            return (
+                f"{_DIRECTORY_API} was still handing out pages after {pages}, so the "
+                "listing was abandoned; the engine log has the reason"
+            )
+        case DirectoryPageError():
+            return (
+                f"{_DIRECTORY_API} answered a listing page that was not a list of groups; "
+                "the engine log has the reason"
+            )
+        case _:
+            return http_failure_message(exc, service=_DIRECTORY_API)
+
 
 SyncSkipReason = Literal["invalid_name", "stored_unloadable", "name_taken"]
 """Why the sync left a provider group unsynced.
@@ -163,7 +214,10 @@ async def sync_provider(
           each. Non-zero makes the provider's ``last_sync_status`` partial.
         - ``error`` (str | None): error message if the sync failed.
         - ``skipped`` (str | None): reason string if the provider was skipped, including
-          :data:`NOT_CONFIGURED_MESSAGE` when it has no directory credential.
+          :data:`NOT_CONFIGURED_MESSAGE` when it has no directory credential and
+          :data:`NO_DIRECTORY_MESSAGE` when it has no directory to list.
+        - ``status`` (:data:`SyncOutcome`): how the run ended. Callers key on this,
+          never on the text of ``error`` or ``skipped``.
     """
     # Resolve provider config
     provider = provider_registry.get(provider_name)
@@ -175,6 +229,7 @@ async def sync_provider(
             "groups_skipped": 0,
             "error": f"Provider '{provider_name}' not found",
             "skipped": None,
+            "status": "error",
         }
 
     # Skip disabled providers
@@ -187,6 +242,7 @@ async def sync_provider(
             "groups_skipped": 0,
             "error": None,
             "skipped": "disabled",
+            "status": "skipped",
         }
 
     # Skip non-API mode providers
@@ -204,6 +260,7 @@ async def sync_provider(
             "groups_skipped": 0,
             "error": None,
             "skipped": f"mode is '{mode}'",
+            "status": "skipped",
         }
 
     # Resolve adapter (lazy import to avoid circular dependency at module level)
@@ -214,6 +271,24 @@ async def sync_provider(
 
     try:
         remote_groups = await adapter.list_all_groups()
+    except NoDirectoryListingError:
+        # The stamp keeps the scheduler from listing again until the next interval.
+        logger.debug("OIDC group sync skipped -- no directory to list", provider=provider_name)
+        provider_registry.update(
+            provider_name,
+            last_sync_at=datetime.now(UTC).isoformat(),
+            last_sync_status=SYNC_USER_TOKEN,
+            sync_error="",
+        )
+        return {
+            "created": 0,
+            "updated": 0,
+            "total": 0,
+            "groups_skipped": 0,
+            "error": None,
+            "skipped": NO_DIRECTORY_MESSAGE,
+            "status": "user_token",
+        }
     except DirectoryNotConfiguredError:
         # The stamp keeps the scheduler from listing again until the next interval.
         logger.info("OIDC group sync skipped -- no directory credential", provider=provider_name)
@@ -230,15 +305,16 @@ async def sync_provider(
             "groups_skipped": 0,
             "error": None,
             "skipped": NOT_CONFIGURED_MESSAGE,
+            "status": "not_configured",
         }
     except Exception as exc:
         # The provider record and the API answer carry this, so the IdP's own text stays out.
-        error_msg = idp_failure_message(exc, service="The directory API")
+        error_msg = _listing_failure_message(exc)
         logger.warning(
             "OIDC group sync failed",
             operation="list_all_groups",
             provider=provider_name,
-            **describe_idp_error(exc),
+            **describe_http_error(exc),
         )
         provider_registry.update(
             provider_name,
@@ -253,6 +329,7 @@ async def sync_provider(
             "groups_skipped": 0,
             "error": error_msg,
             "skipped": None,
+            "status": "error",
         }
 
     metrics = metrics if metrics is not None else SyncMetrics()
@@ -319,6 +396,7 @@ async def sync_provider(
 
     total = created + updated
     skipped = sum(skips.values())
+    outcome: SyncOutcome = "partial" if skipped else "ok"
     status = "ok"
     if skipped:
         why = "; ".join(text for reason, text in _SKIP_STATUS.items() if skips[reason])
@@ -348,4 +426,5 @@ async def sync_provider(
         "groups_skipped": skipped,
         "error": None,
         "skipped": None,
+        "status": outcome,
     }

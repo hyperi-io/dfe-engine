@@ -1,20 +1,21 @@
 #  Project:      dfe-engine
-#  File:         auth/oidc/idp_errors.py
-#  Purpose:      Describe an identity provider failure without the URL or the user it names
+#  File:         http_errors.py
+#  Purpose:      Describe a failed remote API call without the URL or the user it names
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""What a failed identity provider call may say in a log line or an API answer.
+"""What a failed call to a remote API may say in a log line or an API answer.
 
-An IdP client's exception text carries the request URL, and the URL names the
-user: the Google Directory API's ``userKey=<email>``, Graph's ``/users/<id>``,
-Okta's ``/users/<id or login>``. The response body can echo the user as well. So a
-failure is described by the exception class, the HTTP status and the provider's
-own error code, never by its text. A call that got no answer says why by the class
-of the socket error under the client's own (DNS, TLS, refused, timed out). The scalo
-log scrubber does not cover this: it redacts a literal email, but not a percent-encoded
+The identity providers, HyperDX and the secret store all fail this way. A client's
+exception text carries the request URL, and the URL names the user: the Google
+Directory API's ``userKey=<email>``, Graph's ``/users/<id>``, Okta's
+``/users/<id or login>``. The response body can echo the user as well. So a failure
+is described by the exception class, the HTTP status and the provider's own error
+code, never by its text. A call that got no answer says why by the class of the
+socket error under the client's own (DNS, TLS, refused, timed out). The scalo log
+scrubber does not cover this: it redacts a literal email, but not a percent-encoded
 one or an opaque user id.
 """
 
@@ -27,22 +28,33 @@ import ssl
 # ``\Z``, not ``$``: ``$`` also matches before a trailing newline.
 _CODE = re.compile(r"^[A-Za-z0-9_.\-]{1,64}\Z")
 
+# The error codes RFC 6749 sections 4.1.2.1 and 5.2 and OpenID Connect Core 1.0 section 3.1.2.6 define.
+OAUTH_ERROR_CODES = frozenset(
+    {
+        "access_denied",
+        "account_selection_required",
+        "consent_required",
+        "interaction_required",
+        "invalid_client",
+        "invalid_grant",
+        "invalid_request",
+        "invalid_request_object",
+        "invalid_request_uri",
+        "invalid_scope",
+        "login_required",
+        "registration_not_supported",
+        "request_not_supported",
+        "request_uri_not_supported",
+        "server_error",
+        "temporarily_unavailable",
+        "unauthorized_client",
+        "unsupported_grant_type",
+        "unsupported_response_type",
+    }
+)
 
-class DirectoryNotConfiguredError(Exception):
-    """A provider's directory cannot be listed because no credential for it is configured.
-
-    An adapter raises this from ``list_all_groups`` instead of returning an empty list,
-    so group sync can tell a directory it never read from one that has no groups.
-    """
-
-
-class DirectoryCredentialError(Exception):
-    """A provider's directory credential is configured but gives no access to its directory.
-
-    An adapter raises this from ``list_all_groups`` when Entra issues no token for the
-    configured client secret, or the configured Google service account JSON does not
-    build a client. Group sync records the run as failed, never as a directory with no groups.
-    """
+UNRECOGNISED_OAUTH_ERROR = "unrecognised"
+"""The code recorded for an OAuth error code the standards do not define."""
 
 
 def _google_error_status(exc: BaseException) -> tuple[int | None, object]:
@@ -80,12 +92,25 @@ def _is_google_token_refusal(exc: BaseException) -> bool:
     return isinstance(exc, RefreshError) and not exc.retryable
 
 
+def _recognised_oauth_error(exc: BaseException, code: str) -> str:
+    """``code`` when a standard defines it or the library set it, else :data:`UNRECOGNISED_OAUTH_ERROR`.
+
+    Authlib copies a callback's ``error`` query parameter into the error it raises,
+    so whoever calls the callback chooses that value. A code the class itself
+    carries, such as ``mismatching_state``, is the library's own.
+    """
+    if code in OAUTH_ERROR_CODES or code == getattr(type(exc), "error", None):
+        return code
+    return UNRECOGNISED_OAUTH_ERROR
+
+
 def _status_and_body(exc: BaseException) -> tuple[int | None, object]:
     """The HTTP status and parsed JSON body of the provider's answer, when ``exc`` carries one.
 
     An Authlib error has no response, only the OAuth ``error`` code, and that code is
-    all it yields: a callback's ``error`` and ``error_description`` query parameters
-    land in it from whoever called, so its description never leaves this module.
+    all it yields, held to the codes the standards define: a callback's ``error`` and
+    ``error_description`` query parameters land in it from whoever called, so its
+    description never leaves this module.
     """
     # Matched by shape: httpx, Authlib's httpx2 and requests each raise their own class.
     response = getattr(exc, "response", None)
@@ -97,7 +122,7 @@ def _status_and_body(exc: BaseException) -> tuple[int | None, object]:
             return status, None
     oauth_error = getattr(exc, "error", None)
     if isinstance(oauth_error, str):
-        return None, {"error": oauth_error}
+        return None, {"error": _recognised_oauth_error(exc, oauth_error)}
     return _google_error_status(exc)
 
 
@@ -160,11 +185,11 @@ def provider_error_code(body: object) -> str:
     return ";".join(dict.fromkeys(codes))
 
 
-def describe_idp_error(exc: BaseException) -> dict[str, object]:
-    """The log fields for a failed IdP call: never its text, its URL or its response body.
+def describe_http_error(exc: BaseException) -> dict[str, object]:
+    """The log fields for a failed remote API call: never its text, its URL or its response body.
 
     Args:
-        exc: The failure the IdP client raised.
+        exc: The failure the API client raised.
 
     Returns:
         ``error_type`` always, ``status`` when the provider answered, ``code`` when
@@ -191,29 +216,35 @@ def credential_failure_message(*, service: str) -> str:
     )
 
 
-def idp_failure_message(exc: BaseException, *, service: str) -> str:
-    """What an API caller is told about a failed IdP call: its status class, never the provider's text.
+def http_failure_message(exc: BaseException, *, service: str) -> str:
+    """What an API caller is told about a failed remote API call: its status class, never the provider's text.
 
     Args:
-        exc: The failure the IdP client raised.
+        exc: The failure the API client raised.
         service: The API the call went to, as the caller knows it.
 
     Returns:
         A message naming ``service`` and the HTTP status, pointing at the engine log.
-        A :class:`DirectoryCredentialError` and a Google token refusal have no status,
-        and their message says the configured credential gave no access, not that the
-        service was unreachable.
+        A Google token refusal has no status, and its message says the configured
+        credential gave no access. Any other failure with no status says the service
+        could not be reached only when a socket error under it says so, because an
+        answer that arrived but could not be used is not an unreachable service. A
+        429 says the service is throttling, never that it rejected the request.
     """
-    if isinstance(exc, DirectoryCredentialError) or _is_google_token_refusal(exc):
+    if _is_google_token_refusal(exc):
         return credential_failure_message(service=service)
     status, _body = _status_and_body(exc)
     if status is None:
-        return f"{service} could not be reached; the engine log has the reason"
+        if _transport_failure(exc):
+            return f"{service} could not be reached; the engine log has the reason"
+        return f"{service} gave no usable answer; the engine log has the reason"
     if status in (401, 403):
         return (
             f"{service} refused the request (HTTP {status}): check the credential and the "
             "permissions granted to it; the engine log has the provider's error code"
         )
+    if status == 429:
+        return f"{service} is throttling requests (HTTP 429); retry shortly"
     if status >= 500:
         return f"{service} failed on the provider's side (HTTP {status}); retry shortly"
     return f"{service} rejected the request (HTTP {status}); the engine log has the provider's error code"
