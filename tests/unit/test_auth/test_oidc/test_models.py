@@ -6,8 +6,6 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
-
 import pytest
 from pydantic import ValidationError
 
@@ -92,6 +90,43 @@ class TestOIDCProviderDefaults:
         provider = OIDCProvider()
         assert isinstance(provider.groups, GroupResolutionConfig)
         assert provider.groups.mode == "token_claim"
+
+
+class TestOIDCProviderScopes:
+    """Each provider type requests only the scopes its IdP accepts.
+
+    Google and Entra ID advertise no ``groups`` scope and fail the login that asks
+    for one; dex (consumed as generic) and Okta emit the groups claim only when it
+    is requested.
+    """
+
+    @pytest.mark.parametrize(
+        ("provider_type", "expected"),
+        [
+            ("google", "openid email profile"),
+            ("entra_id", "openid email profile"),
+            ("generic", "openid email profile groups"),
+            ("okta", "openid email profile groups"),
+        ],
+    )
+    def test_default_scopes_follow_the_type(self, provider_type, expected):
+        assert OIDCProvider(type=provider_type).scopes == expected
+
+    @pytest.mark.parametrize("provider_type", ["google", "entra_id"])
+    def test_providers_without_a_groups_scope_never_request_one(self, provider_type):
+        assert "groups" not in OIDCProvider(type=provider_type).scopes.split()
+
+    def test_a_stored_provider_without_scopes_loads_its_type_default(self):
+        provider = OIDCProvider.model_validate({"type": "google", "issuer": "https://x"})
+        assert provider.scopes == "openid email profile"
+
+    @pytest.mark.parametrize("blank", ["", "   "])
+    def test_blank_scopes_take_the_type_default(self, blank):
+        assert OIDCProvider(type="google", scopes=blank).scopes == "openid email profile"
+
+    def test_configured_scopes_are_kept(self):
+        provider = OIDCProvider(type="google", scopes="openid email")
+        assert provider.scopes == "openid email"
 
 
 class TestOIDCProviderTypes:

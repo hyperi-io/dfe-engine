@@ -26196,6 +26196,21 @@
             "description": "Env var name for the RP client secret used in the auth-code exchange",
             "default": ""
           },
+          "scopes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scopes",
+            "description": "OAuth scopes requested at login, one scope per entry; must include openid. Omit for the provider type's default: openid email profile, plus groups for generic and okta. Google and Entra ID deliver groups without a scope and fail a login that asks for one."
+          },
           "groups": {
             "$ref": "#/components/schemas/GroupResolutionRequest"
           }
@@ -30424,7 +30439,7 @@
           "scopes": {
             "type": "string",
             "title": "Scopes",
-            "default": "openid email profile groups"
+            "default": ""
           },
           "groups": {
             "$ref": "#/components/schemas/GroupResolutionConfig"
@@ -32933,6 +32948,14 @@
             "type": "string",
             "title": "Client Secret Path"
           },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes",
+            "description": "OAuth scopes requested at login"
+          },
           "groups": {
             "$ref": "#/components/schemas/GroupResolutionResponse"
           },
@@ -32964,6 +32987,7 @@
           "client_id_env",
           "client_secret_env",
           "client_secret_path",
+          "scopes",
           "groups",
           "created_at",
           "last_sync_at",
@@ -39887,6 +39911,21 @@
             ],
             "title": "Client Secret Env",
             "description": "Env var name for the RP client secret"
+          },
+          "scopes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scopes",
+            "description": "Replace the OAuth scopes requested at login, one scope per entry; must include openid."
           },
           "groups": {
             "anyOf": [

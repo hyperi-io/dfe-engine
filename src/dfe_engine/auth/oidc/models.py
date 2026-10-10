@@ -23,11 +23,9 @@ Group resolution modes:
     api          -- Groups fetched from the provider's admin API on a schedule.
 """
 
-from __future__ import annotations
+from typing import Literal, Self
 
-from typing import Literal
-
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # ---------------------------------------------------------------------------
 # Group resolution configuration
@@ -35,6 +33,14 @@ from pydantic import BaseModel, Field
 
 _GroupResolutionMode = Literal["manual", "token_claim", "api"]
 _ProviderType = Literal["generic", "google", "entra_id", "okta"]
+
+# Google and Entra deliver groups outside any scope and fail a login that asks for `groups`; dex and Okta emit the groups claim only when it is requested.
+_DEFAULT_SCOPES: dict[_ProviderType, str] = {
+    "entra_id": "openid email profile",
+    "generic": "openid email profile groups",
+    "google": "openid email profile",
+    "okta": "openid email profile groups",
+}
 
 
 class GroupResolutionConfig(BaseModel):
@@ -166,8 +172,11 @@ class OIDCProvider(BaseModel):
     client_secret_path: str = ""
     """DfeSecrets path holding the RP client secret - a path, never the secret."""
 
-    scopes: str = "openid email profile groups"
-    """Space-separated OAuth scopes requested at login. ``openid`` is mandatory."""
+    scopes: str = ""
+    """Space-separated OAuth scopes requested at login. ``openid`` is mandatory.
+
+    Left empty, it is filled with the provider type's default on load: ``openid
+    email profile``, plus ``groups`` for ``generic`` and ``okta``."""
 
     groups: GroupResolutionConfig = Field(default_factory=GroupResolutionConfig)
     """Group resolution configuration for this provider."""
@@ -183,6 +192,13 @@ class OIDCProvider(BaseModel):
 
     sync_error: str = ""
     """Error message from the most recent failed sync, if any."""
+
+    @model_validator(mode="after")
+    def _fill_default_scopes(self) -> Self:
+        """Give a provider with no scopes configured the ones its type needs."""
+        if not self.scopes.strip():
+            self.scopes = _DEFAULT_SCOPES[self.type]
+        return self
 
 
 # ---------------------------------------------------------------------------

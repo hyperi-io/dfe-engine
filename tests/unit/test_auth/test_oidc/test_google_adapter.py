@@ -6,8 +6,6 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
-
 import os
 
 import pytest
@@ -231,48 +229,47 @@ class TestGroupInfo:
 
 
 # ---------------------------------------------------------------------------
-# Real API tests (skipped — require Google Workspace sandbox)
+# Live Directory API (runs only when a delegated service account is supplied)
 # ---------------------------------------------------------------------------
 
+# The service account JSON itself, which the adapter reads from this env var.
+_LIVE_SA_ENV = "DFE_GOOGLE_SA_JSON"
+_LIVE_ADMIN_ENV = "DFE_GOOGLE_GROUPS_ADMIN_EMAIL"
+# Defaults to the delegated admin, the one account certain to exist in the directory.
+_LIVE_USER_ENV = "DFE_OIDC_GOOGLE_FIXTURE_USER"
 
-@pytest.mark.skip(reason="Needs Google Workspace sandbox — not mocking")
-class TestGoogleAdapterRealAPI:
-    """Integration tests that exercise the real Google Admin SDK.
 
-    These require:
-    - A valid service account JSON in DFE_TEST_GOOGLE_SA_JSON
-    - Domain-wide delegation configured for admin.directory.group.readonly
-    - DFE_TEST_GOOGLE_ADMIN_EMAIL set to a Workspace admin
-    - DFE_TEST_GOOGLE_DOMAIN set to the target domain
-    """
+def _live_provider() -> OIDCProvider:
+    return OIDCProvider(
+        type="google",
+        issuer="https://accounts.google.com",
+        groups=GroupResolutionConfig(
+            admin_email=os.environ.get(_LIVE_ADMIN_ENV, ""),
+            enrich_on_login=True,
+            mode="api",
+            service_account_json_env=_LIVE_SA_ENV,
+        ),
+    )
 
-    async def test_list_groups_returns_results(self) -> None:
-        provider = OIDCProvider(
-            name="google",
-            issuer="https://accounts.google.com",
-            client_id="test",
-            groups=GroupResolutionConfig(
-                service_account_json_env="DFE_TEST_GOOGLE_SA_JSON",
-                admin_email=os.environ.get("DFE_TEST_GOOGLE_ADMIN_EMAIL"),
-                domain=os.environ.get("DFE_TEST_GOOGLE_DOMAIN"),
-            ),
-        )
-        adapter = GoogleAdapter(provider)
-        groups = await adapter.list_all_groups()
-        assert isinstance(groups, list)
-        # At minimum should not error — real assertion depends on workspace contents
+
+@pytest.mark.live
+@pytest.mark.skipif(
+    not (os.environ.get(_LIVE_SA_ENV) and os.environ.get(_LIVE_ADMIN_ENV)),
+    reason=(
+        f"Needs Google Workspace sandbox: set {_LIVE_SA_ENV} to a service account JSON "
+        f"delegated admin.directory.group.readonly, and {_LIVE_ADMIN_ENV} to the admin it acts as"
+    ),
+)
+class TestGoogleAdapterLiveDirectory:
+    """The login-time group lookup against a real Workspace directory, never a mock."""
 
     async def test_connection_succeeds(self) -> None:
-        provider = OIDCProvider(
-            name="google",
-            issuer="https://accounts.google.com",
-            client_id="test",
-            groups=GroupResolutionConfig(
-                service_account_json_env="DFE_TEST_GOOGLE_SA_JSON",
-                admin_email=os.environ.get("DFE_TEST_GOOGLE_ADMIN_EMAIL"),
-                domain=os.environ.get("DFE_TEST_GOOGLE_DOMAIN"),
-            ),
-        )
-        adapter = GoogleAdapter(provider)
-        success, message = await adapter.test_connection()
-        assert success is True, f"Connection failed: {message}"
+        success, message = await GoogleAdapter(_live_provider()).test_connection()
+        assert success is True, message
+
+    async def test_resolves_the_fixture_users_groups(self) -> None:
+        user = os.environ.get(_LIVE_USER_ENV) or os.environ.get(_LIVE_ADMIN_ENV, "")
+        groups = await GoogleAdapter(_live_provider()).resolve_user_groups(user)
+        # The adapter fails open to [], so an empty answer is either no membership or a failed lookup.
+        assert groups, "the fixture user resolved to no groups"
+        assert all(group.id for group in groups)

@@ -61,6 +61,16 @@ _ENV_NAME_HELP = (
 # An Entra tenant GUID or domain: letters, digits, dots and hyphens, starting with a letter or digit.
 _TENANT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}\Z")
 
+# An RFC 6749 section 3.3 scope-token: printable ASCII except space, double quote and backslash.
+_SCOPE_TOKEN = re.compile(r"[\x21\x23-\x5B\x5D-\x7E]+\Z")
+
+_SCOPES_HELP = (
+    "OAuth scopes requested at login, one scope per entry; must include openid. Omit "
+    "for the provider type's default: openid email profile, plus groups for generic "
+    "and okta. Google and Entra ID deliver groups without a scope and fail a login "
+    "that asks for one."
+)
+
 # Each directory secret a groups block can carry: its request field, its secret-store field and the config field that keeps the path.
 _GROUP_SECRETS = (
     ("api_token", "groups_api_token", "api_token_path"),
@@ -74,6 +84,17 @@ def _reject_non_env_name(value: str) -> str:
     if value and not is_env_var_name(value):
         raise ValueError(_ENV_NAME_HELP)
     return value
+
+
+def _checked_scopes(scopes: list[str]) -> list[str]:
+    """The scopes with duplicates dropped, refused unless each is one scope token and ``openid`` is among them."""
+    if not all(_SCOPE_TOKEN.match(scope) for scope in scopes):
+        raise ValueError(
+            "each entry must be a single scope, with no spaces, double quotes or backslashes"
+        )
+    if "openid" not in scopes:
+        raise ValueError("must include openid: without it the provider issues no ID token")
+    return list(dict.fromkeys(scopes))
 
 
 # -- Request / Response models --------------------------------
@@ -159,6 +180,7 @@ class CreateProviderRequest(BaseModel):
         default="",
         description="Env var name for the RP client secret used in the auth-code exchange",
     )
+    scopes: list[str] | None = Field(default=None, description=_SCOPES_HELP)
     groups: GroupResolutionRequest = Field(default_factory=GroupResolutionRequest)
 
     @field_validator("name")
@@ -180,6 +202,11 @@ class CreateProviderRequest(BaseModel):
     def _env_name_only(cls, value: str) -> str:
         return _reject_non_env_name(value)
 
+    @field_validator("scopes")
+    @classmethod
+    def _scopes_shape(cls, value: list[str] | None) -> list[str] | None:
+        return value if value is None else _checked_scopes(value)
+
 
 class UpdateProviderRequest(BaseModel):
     enabled: bool | None = Field(None, description="Enable or disable the provider")
@@ -192,12 +219,22 @@ class UpdateProviderRequest(BaseModel):
         "store and only its path is kept in config.",
     )
     client_secret_env: str | None = Field(None, description="Env var name for the RP client secret")
+    scopes: list[str] | None = Field(
+        None,
+        description="Replace the OAuth scopes requested at login, one scope per entry; "
+        "must include openid.",
+    )
     groups: GroupResolutionRequest | None = Field(None, description="Group resolution config")
 
     @field_validator("client_id_env", "client_secret_env")
     @classmethod
     def _env_name_only(cls, value: str | None) -> str | None:
         return value if value is None else _reject_non_env_name(value)
+
+    @field_validator("scopes")
+    @classmethod
+    def _scopes_shape(cls, value: list[str] | None) -> list[str] | None:
+        return value if value is None else _checked_scopes(value)
 
 
 class GroupResolutionResponse(BaseModel):
@@ -230,6 +267,7 @@ class ProviderResponse(BaseModel):
     client_id_env: str
     client_secret_env: str
     client_secret_path: str
+    scopes: list[str] = Field(description="OAuth scopes requested at login")
     groups: GroupResolutionResponse
     created_at: str
     last_sync_at: str
@@ -325,6 +363,7 @@ def _provider_to_response(name: str, provider: OIDCProvider) -> ProviderResponse
         client_id_env=p.client_id_env,
         client_secret_env=p.client_secret_env,
         client_secret_path=p.client_secret_path,
+        scopes=p.scopes.split(),
         groups=GroupResolutionResponse(
             mode=p.groups.mode,
             claim_name=p.groups.claim_name,
@@ -504,6 +543,8 @@ async def create_provider(
         client_id_env=body.client_id_env,
         client_secret_env=body.client_secret_env,
         client_secret_path=client_secret_path,
+        # Empty takes the provider type's default scopes.
+        scopes=" ".join(body.scopes) if body.scopes is not None else "",
         groups=_group_config(groups=body.groups, kept=group_paths, provider_type=body.type),
         created_at=datetime.now(UTC).isoformat(),
     )
@@ -609,6 +650,8 @@ async def update_provider(
         update_fields["client_id_env"] = body.client_id_env
     if body.client_secret_env is not None:
         update_fields["client_secret_env"] = body.client_secret_env
+    if body.scopes is not None:
+        update_fields["scopes"] = " ".join(body.scopes)
     if body.client_secret:
         update_fields["client_secret_path"] = provider_secret_path(
             field="client_secret", provider_name=name
