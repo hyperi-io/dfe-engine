@@ -47,8 +47,9 @@ from dfe_engine.transport import SourceTransport
 
 # _source naming: a Kubernetes DNS-1123 label that starts with a letter. A
 # source-bound app's instance name IS the source name, so this charset must stay
-# a subset of ``appmgmt.instances._INSTANCE_RE`` -- hyphens, never underscores.
-_SOURCE_PATTERN = re.compile(r"^[a-z]([a-z0-9-]*[a-z0-9])?$")
+# a subset of ``appmgmt.instances._INSTANCE_RE`` -- hyphens, never underscores. ``\Z``,
+# not ``$``: ``$`` also matches before a trailing newline.
+_SOURCE_PATTERN = re.compile(r"^[a-z]([a-z0-9-]*[a-z0-9])?\Z")
 
 # The instance label caps at 40 characters, and the source name has to fit one.
 _SOURCE_MAX_LENGTH = 40
