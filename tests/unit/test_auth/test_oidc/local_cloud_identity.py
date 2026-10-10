@@ -18,12 +18,25 @@ from tests.support.loopback import stop_server
 
 _SEARCH_PATH = "/groups/-/memberships:"
 
+_DIRECT = "searchDirectGroups"
+
+_LABELS_CLAUSE = " in labels"
+
+# Google's answer to a direct search whose query names a label.
+_INVALID_ARGUMENT = {
+    "error": {
+        "code": 400,
+        "message": "Request contains an invalid argument.",
+        "status": "INVALID_ARGUMENT",
+    }
+}
+
 
 def _handler_for(*, directory: LocalCloudIdentity) -> type[BaseHTTPRequestHandler]:
     """Build a request handler class that answers from the settings of ``directory``."""
 
     class _Handler(BaseHTTPRequestHandler):
-        def _reply(self, *, body: dict[str, Any], status: int) -> None:
+        def _reply(self, *, body: object, status: int) -> None:
             """Send ``body`` as JSON with ``status``."""
             encoded = json.dumps(body).encode("utf-8")
             self.send_response(status)
@@ -59,8 +72,15 @@ def _handler_for(*, directory: LocalCloudIdentity) -> type[BaseHTTPRequestHandle
                 status, body = directory.refuse[method]
                 self._reply(body=body, status=status)
                 return
+            # Google refuses a direct search whose query filters on labels.
+            if method == _DIRECT and _LABELS_CLAUSE in params.get("query", ""):
+                self._reply(body=_INVALID_ARGUMENT, status=400)
+                return
             pages = directory.pages.get(method) or [[]]
             index = int(params.get("pageToken") or 0)
+            if directory.non_object_page.get(method) == index:
+                self._reply(body=["not", "an", "object"], status=200)
+                return
             page: dict[str, Any] = {"memberships": pages[index]}
             if index + 1 < len(pages):
                 page["nextPageToken"] = str(index + 1)
@@ -78,13 +98,17 @@ class LocalCloudIdentity:
     ``pages`` maps a search method to its result pages, and every page but the
     last hands out a page token. ``refuse`` maps a method to the status and
     Google error body it answers instead. ``garble`` names methods that answer
-    200 with a body that is not JSON. ``requests`` records each search.
+    200 with a body that is not JSON, and ``non_object_page`` maps a method to the
+    page index that answers 200 with a JSON array. ``requests`` records each
+    search. A direct search whose query filters on labels answers 400, as Google
+    does.
     """
 
     def __init__(self) -> None:
         self.pages: dict[str, list[list[dict[str, Any]]]] = {}
         self.refuse: dict[str, tuple[int, dict[str, Any]]] = {}
         self.garble: set[str] = set()
+        self.non_object_page: dict[str, int] = {}
         self.requests: list[dict[str, Any]] = []
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), _handler_for(directory=self))
         self._thread = threading.Thread(daemon=True, target=self._server.serve_forever)

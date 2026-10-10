@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 from scalo.logger import logger
 
 from dfe_engine import __version__ as engine_version
+from dfe_engine.clickhouse.errors import is_retryable_error, parse_code
 from dfe_engine.schema.ledger import LedgerError, MigrationLedger
 from dfe_engine.schema.lock import SchemaLock, SchemaLockError, holder_name
 from dfe_engine.schema.manifest_applier import (
@@ -90,6 +91,33 @@ def _failed_stage(exc: Exception) -> str:
     return f"unexpected failure; {_SEE_LOG}"
 
 
+_MEMORY_LIMIT_EXCEEDED = 241
+
+
+def is_transient_failure(exc: BaseException) -> bool:
+    """Whether a later pass can clear *exc*: ClickHouse not answering, or refusing for load.
+
+    Each stage wraps the driver's error, so the whole cause chain is read. The query
+    retry rule never retries 241, because the same query meets the same ceiling at
+    once; a pass runs again only after a back-off, and its writes are small, so the
+    server's memory pressure may have passed by then.
+
+    Args:
+        exc: What failed the pass.
+
+    Returns:
+        True when any error in the chain is a connection outage, a rate limit or 241.
+    """
+    seen: set[int] = set()
+    link: BaseException | None = exc
+    while link is not None and id(link) not in seen:
+        seen.add(id(link))
+        if is_retryable_error(link) or parse_code(link) == _MEMORY_LIMIT_EXCEEDED:
+            return True
+        link = link.__cause__ or link.__context__
+    return False
+
+
 @dataclass
 class SchemaBootstrapState:
     """What the last pass did, for the status route, the metrics and readiness."""
@@ -114,6 +142,9 @@ class SchemaBootstrapState:
     # no topic, and a non-empty ``refused`` exits the CLI 2.
     topics_drift: list[str] = field(default_factory=list)
     counts: dict[str, int] = field(default_factory=dict)
+    # Not on the status route: it decides whether the daemon runs the pass again.
+    transient: bool = False
+    """The pass failed because ClickHouse did not answer or refused for load, which a later pass can clear."""
 
     @property
     def converged(self) -> bool:
@@ -486,12 +517,14 @@ def run_bootstrap(
     except (ManifestApplyError, SchemaPlanError, SchemaLockError, LedgerError) as exc:
         state.state = STATE_FAILED
         state.error = _failed_stage(exc)
+        state.transient = is_transient_failure(exc)
         logger.error("schema bootstrap failed; the engine stays up and NotReady", error=str(exc))
         _finish(state, started, metrics)
         return state
     except Exception as exc:
         state.state = STATE_FAILED
         state.error = _failed_stage(exc)
+        state.transient = is_transient_failure(exc)
         logger.exception("schema bootstrap failed; the engine stays up and NotReady")
         _finish(state, started, metrics)
         return state

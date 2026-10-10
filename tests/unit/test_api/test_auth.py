@@ -52,6 +52,31 @@ class TestLogin:
         )
         assert resp.status_code == 401
 
+    @pytest.mark.parametrize("username", ["admin", "nobody"])
+    def test_a_password_longer_than_bcrypt_takes_answers_as_a_wrong_one(
+        self, client: TestClient, username: str
+    ):
+        wrong = client.post("/api/v1/auth/login", json={"username": username, "password": "wrong"})
+        long = client.post("/api/v1/auth/login", json={"username": username, "password": "x" * 73})
+
+        assert long.status_code == 401, long.text
+        assert long.json() == wrong.json()
+
+    def test_the_first_72_bytes_never_authenticate_a_longer_password(self, app, client):
+        """bcrypt stops at 72 bytes, so a candidate that only starts with the password must fail."""
+        password = "p" * 72
+        app.state.account_store.create("seventy-two", password)
+
+        exact = client.post(
+            "/api/v1/auth/login", json={"username": "seventy-two", "password": password}
+        )
+        longer = client.post(
+            "/api/v1/auth/login", json={"username": "seventy-two", "password": password + "!"}
+        )
+
+        assert exact.status_code == 200, exact.text
+        assert longer.status_code == 401, longer.text
+
     def test_login_all_roles(self, client: TestClient):
         """All three local accounts should authenticate."""
         for user, pw in [

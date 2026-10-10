@@ -23,9 +23,39 @@ Group resolution modes:
     api          -- Groups fetched from the provider's admin API on a schedule.
 """
 
-from typing import Literal, Self
+from typing import Annotated, Literal, Self, get_args
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, WithJsonSchema, model_validator
+
+# ---------------------------------------------------------------------------
+# Group sync status
+# ---------------------------------------------------------------------------
+
+FixedSyncStatus = Literal["", "ok", "error", "not_configured", "user_token"]
+"""Every ``last_sync_status`` a sync writes but a partial one.
+
+- ``""``: the provider has never synced.
+- ``ok``: every group synced.
+- ``error``: the sync failed, and ``sync_error`` says why.
+- ``not_configured``: the provider has no directory credential to list with.
+- ``user_token``: each login reads its own groups, so there is no directory to sync.
+"""
+
+PARTIAL_SYNC_PREFIX = "partial: "
+"""How ``last_sync_status`` opens when a sync skipped groups, before how many and why."""
+
+SyncStatus = Annotated[
+    str,
+    WithJsonSchema(
+        {
+            "anyOf": [
+                {"type": "string", "enum": list(get_args(FixedSyncStatus))},
+                {"type": "string", "pattern": f"^{PARTIAL_SYNC_PREFIX}"},
+            ]
+        }
+    ),
+]
+"""A ``last_sync_status``, published as its values and read as any string, so any stored one loads."""
 
 # ---------------------------------------------------------------------------
 # Group resolution configuration
@@ -191,8 +221,10 @@ class OIDCProvider(BaseModel):
     last_sync_at: str = ""
     """ISO 8601 UTC timestamp of most recent group sync (api mode only)."""
 
-    last_sync_status: str = ""
-    """Human-readable result of the most recent sync ('ok', 'error', etc.)."""
+    last_sync_status: SyncStatus = ""
+    """How the most recent sync ended.
+
+    One of :data:`FixedSyncStatus`, or :data:`PARTIAL_SYNC_PREFIX` followed by the skips."""
 
     sync_error: str = ""
     """Error message from the most recent failed sync, if any."""

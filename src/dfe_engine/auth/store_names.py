@@ -14,7 +14,7 @@ store. The document stores key on the same names, so both backends share one rul
 :data:`dfe_engine.names.VALID_NAME`.
 """
 
-from dfe_engine.names import VALID_NAME
+from dfe_engine import names
 
 
 def store_key(name: str) -> str:
@@ -29,6 +29,6 @@ def store_key(name: str) -> str:
     Raises:
         KeyError: Nothing can be stored under *name*, so a lookup of it finds nothing.
     """
-    if not VALID_NAME.match(name):
+    if not names.VALID_NAME.match(name):
         raise KeyError(name)
     return name

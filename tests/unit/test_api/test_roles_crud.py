@@ -173,6 +173,25 @@ class TestRolesCrud:
     def test_every_shipped_role_name_is_a_name_create_accepts(self, name):
         CreateRoleRequest(name=name, permissions=[])
 
+    def test_a_role_stored_under_a_name_create_now_refuses_stays_editable(
+        self, app, client, admin_headers
+    ):
+        """Guard: the name rule binds create alone, so a role an older engine stored keeps working.
+
+        Role update has no name field, so this passes today. It fails if the rule is
+        ever applied to the path name of a read or an update.
+        """
+        app.state.role_store.create("_legacy-ops", description="Old", permissions=["query:execute"])
+
+        update = client.put(
+            "/api/v1/auth/roles/_legacy-ops", json={"description": "New"}, headers=admin_headers
+        )
+
+        assert update.status_code == 200, update.text
+        assert app.state.role_store.get("_legacy-ops").description == "New"
+        shown = client.get("/api/v1/auth/roles/_legacy-ops", headers=admin_headers)
+        assert shown.json()["description"] == "New"
+
     def test_delete_role_in_use_returns_409(self, client, admin_headers):
         resp = client.delete("/api/v1/auth/roles/admin", headers=admin_headers)
         assert resp.status_code == 409

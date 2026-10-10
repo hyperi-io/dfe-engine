@@ -25,8 +25,6 @@ Claim extraction is a PURE function (``extract_identity``) kept separate from
 the Authlib redirect plumbing so it is unit-testable without a live IdP.
 """
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, Any
 
 from authlib.integrations.starlette_client import OAuth
@@ -433,5 +431,6 @@ def build_relying_party(
     try:
         return OidcRelyingParty(registry, secrets=secrets)
     except Exception as exc:
-        logger.warning("OIDC relying party unavailable", error=str(exc))
+        # The text can quote a provider file's values, so the log takes the class and status only.
+        logger.warning("OIDC relying party unavailable", **describe_http_error(exc))
         return None

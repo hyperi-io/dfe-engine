@@ -18,16 +18,23 @@ refuses a changed default on a core table as TTL drift; an admin's change throug
 
 The phase is a GATE, not best-effort: its outcome decides readiness. Disable it
 with ``DFE_CLICKHOUSE_BOOTSTRAP_TABLES=false``, which reports the schema state as
-unknown and gates nothing.
+unknown and gates nothing. A pass ClickHouse failed for load or reachability runs
+again in the background (:class:`SchemaRetry`), so one transient error does not hold
+the pod NotReady until a restart.
 """
 
+import math
+import threading
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from scalo.logger import logger
+from scalo.resilience import ReconnectingResilience, ResilienceConfig
 
+from dfe_engine.backoff import jittered
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
-from dfe_engine.schema.phase import SchemaBootstrapState, run_bootstrap
-from dfe_engine.settings import DFESettings, get_clickhouse_config
+from dfe_engine.schema.phase import STATE_FAILED, SchemaBootstrapState, run_bootstrap
+from dfe_engine.settings import ClickHouseResilienceSettings, DFESettings, get_clickhouse_config
 
 if TYPE_CHECKING:
     from dfe_engine.schema.metrics import SchemaMetrics
@@ -76,3 +83,103 @@ def bootstrap_clickhouse(
     except Exception as exc:  # the schema is applied; a TTL pass must not undo that
         logger.error(f"source TTL reconcile could not run: {exc}")
     return state
+
+
+class _TransientPass(Exception):
+    """A pass ClickHouse failed for load or reachability; it carries the pass's state."""
+
+    def __init__(self, state: SchemaBootstrapState) -> None:
+        super().__init__(state.error)
+        self.state = state
+
+
+class _RetryStopped(Exception):
+    """The daemon is shutting down, so no further pass runs."""
+
+
+class SchemaRetry:
+    """Run the schema phase again, on a background thread, after a pass failed transiently.
+
+    Passes are spaced on ``clickhouse.resilience``'s back-off steps, each jittered,
+    with no budget: readiness stays false until a pass ends any other way, and the
+    process never exits over it. A pass that converges calls ``on_converged``; one
+    that fails for any other reason ends the retry and leaves the failure reported.
+
+    Args:
+        run_pass: One pass of the phase, returning its state.
+        resilience: The back-off steps; ``enabled=false`` runs one more pass and stops.
+        on_converged: Called once, on the retry's thread, after a pass converges.
+    """
+
+    def __init__(
+        self,
+        run_pass: Callable[[], SchemaBootstrapState],
+        *,
+        resilience: ClickHouseResilienceSettings,
+        on_converged: Callable[[], None] | None = None,
+    ) -> None:
+        """Hold the pass and the back-off; nothing runs until :meth:`start` or :meth:`run`."""
+        self._run_pass = run_pass
+        self._resilience = resilience
+        self._on_converged = on_converged
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run, name="schema-bootstrap-retry", daemon=True
+        )
+
+    def start(self) -> None:
+        """Start retrying in the background."""
+        self._thread.start()
+
+    def close(self, timeout: float) -> None:
+        """Stop after the pass in flight, if any, waiting up to *timeout* seconds."""
+        self._stop.set()
+        self._thread.join(timeout)
+
+    def run(self) -> SchemaBootstrapState | None:
+        """Back off, then run passes until one ends other than transiently.
+
+        Returns:
+            The last pass's state, or None when :meth:`close` stopped the retry first.
+        """
+
+        def attempt() -> SchemaBootstrapState:
+            state = self._run_pass()
+            if state.state == STATE_FAILED and state.transient:
+                raise _TransientPass(state)
+            return state
+
+        config = ResilienceConfig(
+            **self._resilience.model_dump(exclude={"budget_seconds", "waking_budget_seconds"}),
+            budget_seconds=math.inf,
+            waking_budget_seconds=math.inf,
+        )
+        retrying = ReconnectingResilience(
+            config,
+            name="ClickHouse schema bootstrap",
+            is_transient=lambda exc: isinstance(exc, _TransientPass),
+            # Each pass connects afresh, so there is no pooled client to rebuild.
+            is_reconnectable=lambda _exc: False,
+            reconnect=lambda: None,
+            sleep=self._sleep,
+        )
+        try:
+            self._sleep(self._resilience.wait_initial)
+            state = retrying.run(attempt)
+        except _TransientPass as exc:
+            return exc.state
+        except _RetryStopped:
+            return None
+        if state.converged and self._on_converged is not None:
+            self._on_converged()
+        return state
+
+    def _run(self) -> None:
+        logger.warning("schema bootstrap failed transiently; running it again with back-off")
+        state = self.run()
+        if state is not None:
+            logger.info("schema bootstrap retry finished", state=state.state)
+
+    def _sleep(self, seconds: float) -> None:
+        if self._stop.wait(jittered(seconds)):
+            raise _RetryStopped

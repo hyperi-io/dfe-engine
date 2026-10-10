@@ -57,7 +57,7 @@ _DIRECTORY_SCOPE = "https://www.googleapis.com/auth/admin.directory.group.readon
 
 _GROUP_RESOURCE_PREFIX = "groups/"
 
-# Every Google group carries this label, and Cloud Identity refuses a membership search with no label in its query.
+# Every Google group carries this label: a transitive search must filter on it and a direct search may not, so direct results are filtered here.
 _GOOGLE_GROUP_LABEL = "cloudidentity.googleapis.com/groups.discussion_forum"
 
 
@@ -65,6 +65,12 @@ def _cel_string(value: str) -> str:
     """*value* as a single-quoted CEL string literal; an email may legally hold a quote."""
     escaped = value.replace("\\", "\\\\").replace("'", "\\'")
     return f"'{escaped}'"
+
+
+def _is_google_group(item: object) -> bool:
+    """Whether one membership search result carries the label every Google group has."""
+    labels = item.get("labels") if isinstance(item, dict) else None
+    return isinstance(labels, dict) and _GOOGLE_GROUP_LABEL in labels
 
 
 def _group_from_relation(item: object) -> GroupInfo | None:
@@ -147,7 +153,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             DirectoryNotConfiguredError: A service account is configured but
                 resolves to nothing.
             DirectoryCredentialUnreadableError: The service account's secret store
-                did not answer.
+                did not answer or refused.
             DirectoryCredentialError: A service account is configured but does not
                 build a client. ``_get_service`` logs why.
             DirectoryPageLimitError: Google still handed out a page token at the
@@ -163,7 +169,7 @@ class GoogleAdapter(OIDCGroupAdapter):
                 raise NoDirectoryListingError
             service_account = self._service_account_json
             if service_account.unreadable:
-                raise DirectoryCredentialUnreadableError
+                raise DirectoryCredentialUnreadableError(refused=service_account.refused)
             if not service_account.value:
                 raise DirectoryNotConfiguredError
             raise DirectoryCredentialError
@@ -187,7 +193,9 @@ class GoogleAdapter(OIDCGroupAdapter):
             )
         service_account = self._service_account_json
         if service_account.unreadable:
-            return False, unreadable_credential_message(credential="Google service account JSON")
+            return False, unreadable_credential_message(
+                credential="Google service account JSON", refused=service_account.refused
+            )
         if not service_account.value:
             return False, (
                 "A service account is configured but resolves to nothing: send it as "
@@ -219,11 +227,13 @@ class GoogleAdapter(OIDCGroupAdapter):
 
         Transitive search also names the groups the user holds through nesting,
         but only Enterprise and Cloud Identity Premium editions serve it, so its
-        403 falls back to direct groups.
+        403 falls back to direct groups. Direct search refuses a label filter, so
+        it asks by member alone and keeps the results that carry the group label.
         """
         from scalo.http import AsyncHttpClient
 
-        query = f"member_key_id == {_cel_string(email)} && '{_GOOGLE_GROUP_LABEL}' in labels"
+        member = f"member_key_id == {_cel_string(email)}"
+        query = f"{member} && '{_GOOGLE_GROUP_LABEL}' in labels"
         headers = {"Authorization": f"Bearer {self._access_token}"}
         async with AsyncHttpClient() as client:
             try:
@@ -246,7 +256,11 @@ class GoogleAdapter(OIDCGroupAdapter):
 
             try:
                 return await self._search(
-                    client, headers=headers, method="searchDirectGroups", query=query
+                    client,
+                    headers=headers,
+                    method="searchDirectGroups",
+                    query=member,
+                    groups_only=True,
                 )
             except httpx.HTTPStatusError as exc:
                 self._log_refusal(exc=exc, method="searchDirectGroups")
@@ -255,9 +269,21 @@ class GoogleAdapter(OIDCGroupAdapter):
         return None
 
     async def _search(
-        self, client: Any, *, headers: dict[str, str], method: str, query: str
-    ) -> list[GroupInfo]:
-        """Every page of one Cloud Identity membership search, as groups keyed by directory id."""
+        self,
+        client: Any,
+        *,
+        headers: dict[str, str],
+        method: str,
+        query: str,
+        groups_only: bool = False,
+    ) -> list[GroupInfo] | None:
+        """Every page of one Cloud Identity membership search, as groups keyed by directory id.
+
+        None when a page is not a JSON object, or the search is still paging at
+        :attr:`MAX_LOGIN_PAGES`: the pages read so far are not the user's groups, so they are
+        no answer. ``groups_only`` keeps only the results that carry the Google group label,
+        for a query that could not filter on it.
+        """
         url = f"{self.CLOUD_IDENTITY_BASE}/groups/-/memberships:{method}"
         params = {"query": query}
         groups: list[GroupInfo] = []
@@ -265,8 +291,16 @@ class GoogleAdapter(OIDCGroupAdapter):
             response = await client.get(url, headers=headers, params=params)
             body = response.json()
             if not isinstance(body, dict):
-                return groups
+                logger.warning(
+                    "Google Cloud Identity: a group search page was not a JSON object",
+                    method=method,
+                    provider=self._provider.issuer,
+                    type=type(body).__name__,
+                )
+                return None
             relations = body.get("memberships") or []
+            if groups_only:
+                relations = [item for item in relations if _is_google_group(item)]
             groups.extend(group for item in relations if (group := _group_from_relation(item)))
             page_token = body.get("nextPageToken")
             if not page_token:
@@ -278,7 +312,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             pages=self.MAX_LOGIN_PAGES,
             provider=self._provider.issuer,
         )
-        return groups
+        return None
 
     def _log_refusal(self, *, exc: httpx.HTTPStatusError, method: str) -> None:
         """Log a refused Cloud Identity call with Google's error code."""

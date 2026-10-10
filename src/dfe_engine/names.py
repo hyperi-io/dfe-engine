@@ -12,13 +12,15 @@ Every name here becomes a file stem (``{name}.yaml``), a document key or a URL p
 segment, so each rule refuses a path separator, refuses a trailing newline (it anchors
 at the end of the string, not at ``$``) and caps the length at :data:`MAX_NAME_LENGTH`.
 Create requests take the annotated types, and the account, group and API key stores
-check :data:`VALID_NAME`, so a name the request accepts is one the store can hold.
+check :data:`VALID_NAME`, so a name the request accepts is one the store can hold. Each
+annotated type publishes its rule as a ``pattern`` and ``maxLength`` in the OpenAPI
+schema, so a client can check a name before it sends one.
 """
 
 import re
 from typing import Annotated
 
-from pydantic import AfterValidator
+from pydantic import AfterValidator, WithJsonSchema
 
 MAX_NAME_LENGTH = 128
 """The longest name an account, group, API key, role, rule or hunt may have."""
@@ -100,11 +102,25 @@ def validate_hunt_name(name: str) -> str:
     return _detection_name(name, "hunt")
 
 
-StoreName = Annotated[str, AfterValidator(validate_store_name)]
+def _published(rule: re.Pattern[str]) -> WithJsonSchema:
+    r"""The OpenAPI schema for *rule*, which validates nothing itself.
+
+    ECMAScript has no ``\Z``, and its ``$`` without the multiline flag ends the string.
+    """
+    return WithJsonSchema(
+        {
+            "type": "string",
+            "pattern": rule.pattern.removesuffix(r"\Z") + "$",
+            "maxLength": MAX_NAME_LENGTH,
+        }
+    )
+
+
+StoreName = Annotated[str, AfterValidator(validate_store_name), _published(VALID_NAME)]
 """A request field holding an account, group, API key or role name."""
 
-RuleName = Annotated[str, AfterValidator(validate_rule_name)]
+RuleName = Annotated[str, AfterValidator(validate_rule_name), _published(DETECTION_NAME)]
 """A request field holding the name a rule is created under."""
 
-HuntName = Annotated[str, AfterValidator(validate_hunt_name)]
+HuntName = Annotated[str, AfterValidator(validate_hunt_name), _published(DETECTION_NAME)]
 """A request field holding the name a hunt is created under."""

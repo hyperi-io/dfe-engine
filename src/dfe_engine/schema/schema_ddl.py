@@ -156,7 +156,9 @@ class DDLConfig:
     ttl_only_drop_parts: bool = True
     cluster: str | None = None
     sample_by: str | None = None
-    projection_order_by: str | None = "_timestamp"
+    # Off unless asked for: a SELECT * projection copies every column, so on a JSON-heavy
+    # table it doubles the substream metadata ClickHouse holds in memory.
+    projection_order_by: str | None = None
     schema_version: str | None = None
     profile_name: str | None = None
     profile_version: str | None = None

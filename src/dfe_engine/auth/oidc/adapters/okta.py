@@ -83,7 +83,7 @@ class OktaAdapter(OIDCGroupAdapter):
         Raises:
             DirectoryNotConfiguredError: The domain or the API token is not configured.
             DirectoryCredentialUnreadableError: The API token's secret store did
-                not answer.
+                not answer or refused.
             DirectoryPageError: A page Okta served was not a list of groups.
             DirectoryPageLimitError: Okta still linked a next page at the page limit.
             Exception: Whatever the client raised on a page Okta did not serve.
@@ -92,8 +92,9 @@ class OktaAdapter(OIDCGroupAdapter):
         """
         base, headers = self._api_base_and_headers()
         if base is None or headers is None:
-            unreadable = base is not None and self._api_token.unreadable
-            raise DirectoryCredentialUnreadableError if unreadable else DirectoryNotConfiguredError
+            if base is not None and self._api_token.unreadable:
+                raise DirectoryCredentialUnreadableError(refused=self._api_token.refused)
+            raise DirectoryNotConfiguredError
 
         from scalo.http import AsyncHttpClient
 
@@ -126,7 +127,9 @@ class OktaAdapter(OIDCGroupAdapter):
         if base is None:
             return False, "Okta domain not configured (groups.okta_domain)"
         if headers is None and self._api_token.unreadable:
-            return False, unreadable_credential_message(credential="Okta API token")
+            return False, unreadable_credential_message(
+                credential="Okta API token", refused=self._api_token.refused
+            )
         if headers is None:
             env = self._provider.groups.api_token_env or "groups.api_token_env"
             return False, (

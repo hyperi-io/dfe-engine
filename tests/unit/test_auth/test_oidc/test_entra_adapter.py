@@ -472,8 +472,11 @@ class TestEntraThrottlesOrFails:
         assert stored is not None
         assert transport.token_requests == 1
         assert (result["status"], stored.last_sync_status) == ("error", "error")
-        assert "throttling requests (HTTP 429)" in result["error"]
-        assert "could not use the configured credential" not in result["error"]
+        # No token was issued, so Graph was never asked: the directory API is not the one throttling.
+        assert result["error"] == (
+            "Entra ID is throttling token requests (HTTP 429); retry shortly"
+        )
+        assert stored.sync_error == result["error"]
 
 
 # ---------------------------------------------------------------------------

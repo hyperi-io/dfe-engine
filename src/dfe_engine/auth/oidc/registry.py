@@ -22,7 +22,8 @@ import builtins
 from pathlib import Path
 
 from dfe_engine.auth.oidc.models import OIDCProvider
-from dfe_engine.auth.store_names import VALID_NAME, store_key
+from dfe_engine.auth.store_names import store_key
+from dfe_engine.names import VALID_NAME
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 

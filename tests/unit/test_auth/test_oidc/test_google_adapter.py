@@ -68,12 +68,19 @@ def _make_provider(
     )
 
 
-def _relation(group_id: str, name: str) -> dict[str, object]:
-    """One Cloud Identity membership search result, as the API returns it."""
+GROUP_LABEL = "cloudidentity.googleapis.com/groups.discussion_forum"
+
+
+def _relation(
+    group_id: str, name: str, *, labels: dict[str, str] | None = None
+) -> dict[str, object]:
+    """One Cloud Identity membership search result, as the API returns it: a group's carries its label."""
     return {
+        "description": "",
         "displayName": name,
         "group": f"groups/{group_id}",
         "groupKey": {"id": f"{name}@example.com"},
+        "labels": {GROUP_LABEL: ""} if labels is None else labels,
         "membership": f"groups/{group_id}/memberships/112233",
         "roles": [{"name": "MEMBER"}],
     }
@@ -351,6 +358,25 @@ class TestLoginLookupPageLimit:
         (line,) = [e for e in audit_events if e.get("operation") == "resolve_user_groups"]
         assert line["error_type"] == "DirectoryPageLimitError"
 
+    async def test_a_user_token_search_still_paging_at_the_limit_is_default_deny(
+        self, cloud_identity, audit_events
+    ):
+        """The pages read so far are not the user's groups, as Okta's and Entra's lookups hold."""
+        cloud_identity.pages[TRANSITIVE] = [[_relation(f"0{n}group", f"g{n}")] for n in range(6)]
+        adapter = _token_adapter(cloud_identity)
+        adapter.MAX_LOGIN_PAGES = 3
+
+        groups = await adapter.resolve_user_groups("alice@example.com")
+
+        assert groups == []
+        assert cloud_identity.methods == [TRANSITIVE] * 3
+        (line,) = [
+            e
+            for e in audit_events
+            if e["event"] == "Google Cloud Identity: group search stopped at the page limit"
+        ]
+        assert (line["method"], line["pages"]) == (TRANSITIVE, 3)
+
 
 # ---------------------------------------------------------------------------
 # GroupInfo model used by adapter
@@ -431,6 +457,31 @@ class TestCloudIdentityUserToken:
         assert [group.id for group in groups] == [VIEWERS_ID]
         assert cloud_identity.methods == [TRANSITIVE, DIRECT]
 
+    async def test_the_direct_fallback_asks_by_member_and_keeps_only_groups(self, cloud_identity):
+        """Google refuses a direct search that filters on labels, so the label is checked here."""
+        cloud_identity.refuse[TRANSITIVE] = (403, SCOPE_REFUSED)
+        cloud_identity.pages[DIRECT] = [
+            [
+                _relation(ADMINS_ID, "dfe-admins"),
+                _relation(NESTED_PARENT_ID, "not-a-group", labels={}),
+                {
+                    key: value
+                    for key, value in _relation("05nolabel", "x").items()
+                    if key != "labels"
+                },
+                _relation(VIEWERS_ID, "dfe-viewers"),
+            ]
+        ]
+
+        groups = await _token_adapter(cloud_identity).resolve_user_groups("alice@example.com")
+
+        assert [group.id for group in groups] == [ADMINS_ID, VIEWERS_ID]
+        direct = cloud_identity.requests[1]
+        assert (direct["method"], direct["params"]["query"]) == (
+            DIRECT,
+            "member_key_id == 'alice@example.com'",
+        )
+
     async def test_a_refused_direct_search_denies_and_logs_googles_code(self, cloud_identity):
         cloud_identity.refuse[TRANSITIVE] = (403, SCOPE_REFUSED)
         cloud_identity.refuse[DIRECT] = (403, SCOPE_REFUSED)
@@ -469,17 +520,30 @@ class TestCloudIdentityUserToken:
         adapter = _token_adapter(cloud_identity)
         assert await adapter._groups_with_user_token(email="alice@example.com") is None
 
+    async def test_a_page_that_is_not_a_json_object_is_no_answer(self, cloud_identity):
+        """The pages before it are not the user's groups, so login is default deny."""
+        cloud_identity.pages[TRANSITIVE] = [
+            [_relation(ADMINS_ID, "dfe-admins")],
+            [_relation(VIEWERS_ID, "dfe-viewers")],
+        ]
+        cloud_identity.non_object_page[TRANSITIVE] = 1
+
+        groups = await _token_adapter(cloud_identity).resolve_user_groups("alice@example.com")
+
+        assert groups == []
+        assert cloud_identity.methods == [TRANSITIVE, TRANSITIVE]
+
     async def test_a_refusal_is_no_answer(self, cloud_identity):
         cloud_identity.refuse[TRANSITIVE] = (401, {})
         adapter = _token_adapter(cloud_identity)
         assert await adapter._groups_with_user_token(email="alice@example.com") is None
 
-    async def test_stops_at_the_page_limit(self, cloud_identity):
+    async def test_stops_at_the_page_limit_and_answers_nothing(self, cloud_identity):
         cloud_identity.pages[TRANSITIVE] = [
             [_relation(f"0{index:014d}", f"g{index}")] for index in range(60)
         ]
         groups = await _token_adapter(cloud_identity).resolve_user_groups("alice@example.com")
-        assert (len(groups), len(cloud_identity.requests)) == (50, 50)
+        assert (groups, len(cloud_identity.requests)) == ([], 50)
 
     async def test_without_a_token_nothing_is_asked(self, cloud_identity):
         groups = await _token_adapter(cloud_identity, token="").resolve_user_groups(

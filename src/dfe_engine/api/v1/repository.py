@@ -40,7 +40,7 @@ from dfe_engine.api.deps import (
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.models import AuthContext, Scope
 from dfe_engine.auth.rbac_scopes import scopes_dict
-from dfe_engine.auth.store_names import VALID_NAME
+from dfe_engine.names import VALID_NAME
 from dfe_engine.repository.store import ConflictError, RepositoryStore, json_merge_patch
 
 router = APIRouter(prefix="/repository", tags=["Repository"])

@@ -8,9 +8,9 @@
 
 """Tests for POST/GET/DELETE /api/v1/auth/api-keys endpoints."""
 
-from __future__ import annotations
-
 from datetime import UTC, datetime, timedelta
+
+import pytest
 
 
 def _iso_in(**delta) -> str:
@@ -68,6 +68,17 @@ class TestCreateAPIKey:
             headers=admin_headers,
         )
         assert resp.status_code == 422
+
+    @pytest.mark.parametrize("name", ["../evil", "with space", "-x", "a" * 129])
+    def test_a_name_no_key_can_have_is_a_422_like_every_other_create(
+        self, app, client, admin_headers, name
+    ):
+        resp = client.post("/api/v1/auth/api-keys", json={"name": name}, headers=admin_headers)
+
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["code"] == "validation_error"
+        assert [error["field"] for error in resp.json()["errors"]] == ["name"]
+        assert app.state.api_key_store.list() == []
 
     def test_create_without_expiry_takes_the_default_lifetime(self, client, admin_headers):
         before = datetime.now(UTC)

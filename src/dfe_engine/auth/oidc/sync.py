@@ -36,15 +36,17 @@ from dfe_engine.auth.oidc.adapters.base import (
     DirectoryNotConfiguredError,
     DirectoryPageError,
     DirectoryPageLimitError,
+    DirectoryTokenRequestError,
     NoDirectoryListingError,
 )
 from dfe_engine.auth.oidc.credential_env import unreadable_credential_message
-from dfe_engine.auth.store_names import VALID_NAME
+from dfe_engine.auth.oidc.models import PARTIAL_SYNC_PREFIX, FixedSyncStatus
 from dfe_engine.http_errors import (
     credential_failure_message,
     describe_http_error,
     http_failure_message,
 )
+from dfe_engine.names import VALID_NAME
 
 if TYPE_CHECKING:
     from dfe_engine.auth.groups import GroupStore
@@ -61,17 +63,17 @@ SyncOutcome = Literal["ok", "partial", "error", "not_configured", "user_token", 
 - ``ok``: every group synced.
 - ``partial``: some groups were left unsynced.
 - ``error``: the run failed, including when the secret store holding the credential
-  did not answer.
+  did not answer or refused access.
 - ``not_configured``: the provider has no credential to read its directory with.
 - ``user_token``: the provider reads each login's groups with the user's own token
   and has no directory to sync, which is a Google provider's default.
 - ``skipped``: the provider is disabled or not in api mode.
 """
 
-SYNC_NOT_CONFIGURED = "not_configured"
+SYNC_NOT_CONFIGURED: FixedSyncStatus = "not_configured"
 """The ``last_sync_status`` of a provider whose directory credential is not configured."""
 
-SYNC_USER_TOKEN = "user_token"  # noqa: S105, RUF100 - a sync status name
+SYNC_USER_TOKEN: FixedSyncStatus = "user_token"  # noqa: S105, RUF100 - a sync status name
 """The ``last_sync_status`` of a provider that reads each login's groups with the user's own token."""
 
 NOT_CONFIGURED_MESSAGE = (
@@ -88,11 +90,20 @@ NO_DIRECTORY_MESSAGE = (
 _DIRECTORY_API = "The directory API"
 
 
+def _token_failure_message(exc: BaseException, *, service: str) -> str:
+    """What a failed directory token request says: the token endpoint's owner, never the directory API."""
+    if describe_http_error(exc).get("status") == 429:
+        return f"{service} is throttling token requests (HTTP 429); retry shortly"
+    return http_failure_message(exc, service=service)
+
+
 def _listing_failure_message(exc: BaseException) -> str:
     """What the provider record and the API answer say about a failed listing, never the IdP's own text."""
     match exc:
-        case DirectoryCredentialUnreadableError():
-            return unreadable_credential_message(credential="directory credential")
+        case DirectoryCredentialUnreadableError(refused=refused):
+            return unreadable_credential_message(credential="directory credential", refused=refused)
+        case DirectoryTokenRequestError(service=service):
+            return _token_failure_message(exc.__cause__ or exc, service=service)
         case DirectoryCredentialError():
             return credential_failure_message(service=_DIRECTORY_API)
         case DirectoryPageLimitError(pages=pages):
@@ -109,7 +120,7 @@ def _listing_failure_message(exc: BaseException) -> str:
             return http_failure_message(exc, service=_DIRECTORY_API)
 
 
-SyncSkipReason = Literal["invalid_name", "stored_unloadable", "name_taken"]
+SyncSkipReason = Literal["invalid_name", "stored_unloadable", "name_taken", "no_id"]
 """Why the sync left a provider group unsynced.
 
 - ``invalid_name``: its email, name or id makes no valid group name: empty, over 128
@@ -117,6 +128,7 @@ SyncSkipReason = Literal["invalid_name", "stored_unloadable", "name_taken"]
 - ``stored_unloadable``: a stored group that does not load already holds its name.
 - ``name_taken``: a stored group holds its name and is not linked to it: the stored
   group carries no ``source_id``, or another provider group's id.
+- ``no_id``: the provider gave it no id, and only the id links a stored group to it.
 """
 
 # The provider's last_sync_status names each reason that skipped a group.
@@ -124,6 +136,7 @@ _SKIP_STATUS: dict[SyncSkipReason, str] = {
     "stored_unloadable": "their stored copy does not load",
     "invalid_name": "their identifier makes no valid group name",
     "name_taken": "their name is held by a group not linked to them",
+    "no_id": "they carry no id to link them by",
 }
 
 
@@ -338,6 +351,11 @@ async def sync_provider(
     skips: dict[SyncSkipReason, int] = dict.fromkeys(_SKIP_STATUS, 0)
 
     for group_info in remote_groups:
+        # Only the id links a stored group to a provider group, so a group with none is skipped.
+        if not group_info.id:
+            metrics.skipped("no_id")
+            skips["no_id"] += 1
+            continue
         # Determine a stable filename-safe group name.
         # Prefer email (most stable for Google/Entra), fall back to name, then id.
         raw_key = group_info.email or group_info.name or group_info.id
@@ -376,7 +394,7 @@ async def sync_provider(
             continue
 
         # A name match is no link: only the IdP group's own id links a group, and a user cannot choose that.
-        if not group_info.id or existing.source_id != group_info.id:
+        if existing.source_id != group_info.id:
             logger.warning(
                 "OIDC group sync skipped a group whose name is held by a group not linked to it",
                 provider=provider_name,
@@ -394,13 +412,21 @@ async def sync_provider(
         )
         updated += 1
 
+    if skips["no_id"]:
+        # One line per run: without an id there is nothing stable to name each group by.
+        logger.warning(
+            "OIDC group sync skipped groups with no id",
+            provider=provider_name,
+            count=skips["no_id"],
+        )
+
     total = created + updated
     skipped = sum(skips.values())
     outcome: SyncOutcome = "partial" if skipped else "ok"
     status = "ok"
     if skipped:
         why = "; ".join(text for reason, text in _SKIP_STATUS.items() if skips[reason])
-        status = f"partial: {skipped} of {len(remote_groups)} groups skipped, {why}"
+        status = f"{PARTIAL_SYNC_PREFIX}{skipped} of {len(remote_groups)} groups skipped, {why}"
 
     # Update provider sync metadata
     provider_registry.update(
