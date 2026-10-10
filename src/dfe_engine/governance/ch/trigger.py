@@ -33,6 +33,9 @@ from .reconciler import ReconcileResult
 RECONCILES = "ch_rbac_reconciles_total"
 RETRIES = "ch_rbac_reconcile_retries_total"
 
+# The worker thread's name, which a test reads to see whether one is still running.
+WORKER_THREAD_NAME = "ch-rbac-reconcile"
+
 ReconcileOutcome = Literal["ok", "partial", "failed"]
 """How a reconcile ended.
 
@@ -225,7 +228,7 @@ class ReconcileTrigger:
         """Start the worker, which first waits ``wait``; the caller has set ``_active``."""
         try:
             threading.Thread(
-                target=self._work, args=(wait,), name="ch-rbac-reconcile", daemon=True
+                target=self._work, args=(wait,), name=WORKER_THREAD_NAME, daemon=True
             ).start()
         except RuntimeError as exc:
             with self._lock:
@@ -330,6 +333,7 @@ __all__ = [
     "RETRY_MAX_SECONDS",
     "SETTLE_SECONDS",
     "TRIGGER_ATTRIBUTES",
+    "WORKER_THREAD_NAME",
     "ReconcileKind",
     "ReconcileMetrics",
     "ReconcileOutcome",

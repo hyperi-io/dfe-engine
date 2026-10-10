@@ -17,7 +17,8 @@ import threading
 
 import pytest
 
-from dfe_engine.governance.ch import ReconcileResult, ReconcileTrigger
+from dfe_engine.governance.ch import ReconcileResult
+from tests.support.reconcile_trigger import swap_in_trigger
 
 _WAIT = 10.0
 _ROLES = "/api/v1/auth/roles"
@@ -39,9 +40,7 @@ class _Recorder:
 @pytest.fixture
 def reconciles(app, client):
     recorder = _Recorder()
-    app.state.ch_rbac_reconcile = ReconcileTrigger(
-        recorder, settle_seconds=0.2, retry_initial_seconds=0.2
-    )
+    swap_in_trigger(app, recorder, settle_seconds=0.2, retry_initial_seconds=0.2)
     return recorder
 
 
