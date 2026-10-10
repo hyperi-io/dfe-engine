@@ -3,6 +3,15 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.17](https://github.com/hyperi-io/dfe-engine/compare/v1.22.16...v1.22.17) (2026-10-10)
+
+### Bug Fixes
+
+* contain store paths and make regexes linear ([#782](https://github.com/hyperi-io/dfe-engine/issues/782)) ([9242c30](https://github.com/hyperi-io/dfe-engine/commit/9242c30e747a45bde7b6ca7d37462c50133aaf4b))
+* default OIDC scopes by type and read Google groups as the user ([#780](https://github.com/hyperi-io/dfe-engine/issues/780)) ([3211249](https://github.com/hyperi-io/dfe-engine/commit/3211249f267b4eb872e13b9ccd43b72168e719d5))
+* keep hunt files inside the hunts directory ([#784](https://github.com/hyperi-io/dfe-engine/issues/784)) ([127bea2](https://github.com/hyperi-io/dfe-engine/commit/127bea216af8a6cf5c10fe925f2bc9f6791d8d2f))
+* read Entra overage groups with the user's own token first ([#781](https://github.com/hyperi-io/dfe-engine/issues/781)) ([edec333](https://github.com/hyperi-io/dfe-engine/commit/edec33366cd2d1161283d6893123254aca050ebe))
+
 ## [1.22.15](https://github.com/hyperi-io/dfe-engine/compare/v1.22.14...v1.22.15) (2026-10-09)
 
 ### Bug Fixes
