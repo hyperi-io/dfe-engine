@@ -1237,6 +1237,7 @@ class GitopsRepo:
 
     def _commit(self, message: str) -> str:
         """Commit the index as it stands and return the new commit's SHA."""
+        self._pack_loose_objects()
         sha = porcelain.commit(
             str(self._path),
             message=message.encode(),
@@ -1244,6 +1245,30 @@ class GitopsRepo:
             committer=self._author,
         )
         return sha.decode() if isinstance(sha, bytes) else str(sha)
+
+    def _pack_loose_objects(self) -> None:
+        """Pack the clone's loose objects once they reach half of ``gc.auto``.
+
+        dulwich runs its own gc inside a commit that leaves ``gc.auto`` loose objects,
+        and that gc rewrites every object the repo holds, so its cost grows with the
+        history and one write pays it under both locks. Packing the loose objects alone
+        costs the same at any history length and keeps the count short of dulwich's gc.
+        ``gc.auto`` of 0 leaves them loose, as it does for dulwich. Caller holds the
+        tree lock.
+        """
+        from dulwich.gc import DEFAULT_GC_AUTO
+        from dulwich.repo import Repo
+
+        with Repo(str(self._path)) as repo:
+            try:
+                gc_auto = int(repo.get_config().get(b"gc", b"auto"))
+            except KeyError:
+                gc_auto = DEFAULT_GC_AUTO
+            store = repo.object_store
+            if gc_auto <= 0 or store.count_loose_objects() < gc_auto // 2:
+                return
+            packed = store.pack_loose_objects()
+        logger.info("Packed the gitops clone's loose objects", objects=packed)
 
     def _push_refspec(self, refspec: bytes) -> None:
         """Push one refspec as a compare-and-swap, credentials never logged.
