@@ -14,6 +14,7 @@ backend fail with :data:`SENTINEL`, then checks the response carries none of it
 and the engine log carries all of it.
 """
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -460,7 +461,11 @@ class TestSampler:
 
 
 class TestOidcCallback:
-    def test_a_refused_code_exchange_hides_the_idps_text(self, app, client, audit_events):
+    def test_a_refused_code_exchange_hides_the_idps_text_from_the_log_as_well(
+        self, app, client, audit_events
+    ):
+        """The exception that reaches the callback can hold the caller's own query string."""
+
         class _RefusingRp:
             def has_provider(self, provider: str) -> bool:
                 return True
@@ -474,4 +479,6 @@ class TestOidcCallback:
 
         assert resp.status_code == 401, resp.text
         assert_hidden(resp.text)
-        assert_logged(audit_events)
+        (failed,) = [e for e in audit_events if e["event"] == "OIDC callback failed"]
+        assert failed["error_type"] == "RuntimeError"
+        assert FAKE_HASH not in json.dumps(audit_events, default=str)

@@ -52,6 +52,7 @@ from dfe_engine.auth.jit import (
     JitIdentityCollisionError,
     JitSubjectUnusableError,
 )
+from dfe_engine.auth.oidc.idp_errors import describe_idp_error
 from dfe_engine.auth.sessions import session_claims, token_lifetime
 from dfe_engine.settings import DFESettings, is_dev_posture
 
@@ -235,11 +236,14 @@ async def oidc_callback(
     try:
         identity = await rp.handle_callback(provider, request)
     except Exception as exc:
-        # Bad code, failed id_token validation, nonce/state mismatch, etc.
-        logger.warning("OIDC callback failed", provider=provider, error=str(exc))
+        # Bad code, failed id_token validation, nonce/state mismatch, etc. Authlib's text
+        # repeats the callback's error_description query parameter, which any caller can set.
+        failure = describe_idp_error(exc)
+        logger.warning("OIDC callback failed", provider=provider, **failure)
         # A refused credential is an audit event, not just an operational log line.
-        audit_login_denied("unknown", "oidc", _get_client_ip(request), str(exc))
-        # The IdP's own answer stays in the log: this route takes unauthenticated callers.
+        reason = str(failure.get("code") or failure["error_type"])
+        audit_login_denied("unknown", "oidc", _get_client_ip(request), reason)
+        # The answer carries no reason: this route takes unauthenticated callers.
         raise HTTPException(
             status_code=401,
             detail={

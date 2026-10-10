@@ -4,9 +4,11 @@ Test-session guard: every bcrypt hash in this tree runs at the minimum cost.
 """
 
 import threading
+from collections.abc import Iterator
 
 import bcrypt
 import pytest
+from scalo.logger import logger
 
 from dfe_engine.governance.ch.trigger import WORKER_THREAD_NAME
 from dfe_engine.yaml_health import YamlWriteMetrics, write_health
@@ -77,3 +79,23 @@ def _fresh_write_health():
     _forget_refused_writes()
     yield
     _forget_refused_writes()
+
+
+@pytest.fixture
+def audit_events() -> Iterator[list[dict]]:
+    """Every event the engine logs while the test runs, from a real sink on its logger.
+
+    Each entry is the event name under ``event`` plus the structured fields it carried.
+    The sink takes every level, so a test that asserts a value is absent reads the
+    debug lines too.
+    """
+    events: list[dict] = []
+
+    def record(message) -> None:
+        events.append({"event": message.record["message"], **message.record["extra"]})
+
+    handler = logger.add(record, level="DEBUG", format="{message}")
+    try:
+        yield events
+    finally:
+        logger.remove(handler)

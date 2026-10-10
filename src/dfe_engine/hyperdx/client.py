@@ -52,6 +52,8 @@ from typing import Any
 
 from scalo.logger import logger
 
+from dfe_engine.auth.oidc.idp_errors import describe_idp_error
+
 # This is a non-fatal side channel called inside interactive API requests
 # (org create), so an unreachable fork must cost seconds, not the
 # AsyncHttpClient default of 30s x 3 retries.
@@ -264,7 +266,10 @@ class HyperDXClient:
         except Exception as exc:
             self._connected = False
             self._retry_at = time.monotonic() + _RETRY_AFTER_SECONDS
-            logger.warning("HyperDX call failed (non-fatal)", op=op, error=str(exc), **log_fields)
+            # The exception text names the request URL, so the log carries the class and the status.
+            logger.warning(
+                "HyperDX call failed (non-fatal)", op=op, **describe_idp_error(exc), **log_fields
+            )
             return None
 
     def _headers(self) -> dict[str, str]:

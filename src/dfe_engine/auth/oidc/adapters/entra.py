@@ -82,10 +82,11 @@ def graph_credentials(*, provider: OIDCProvider, secrets: DfeSecrets | None) -> 
 class EntraAdapter(OIDCGroupAdapter):
     """Entra ID group adapter using the Microsoft Graph API.
 
-    All public methods fail open -- missing credentials or API errors log a
-    warning and return an unfriendly fallback rather than propagating
-    exceptions.  This keeps authentication working even when the group
-    resolution API is unreachable.
+    ``resolve_user_groups`` and ``test_connection`` fail open -- missing
+    credentials or API errors log a warning and return an unfriendly fallback
+    rather than propagating exceptions.  This keeps authentication working even
+    when the group resolution API is unreachable.  ``list_all_groups`` is not on
+    the login path and raises when Graph fails mid-listing.
     """
 
     GRAPH_BASE = "https://graph.microsoft.com/v1.0"
@@ -195,7 +196,12 @@ class EntraAdapter(OIDCGroupAdapter):
 
         Returns:
             List of GroupInfo objects.  Returns an empty list when credentials
-            are missing or the API call fails.
+            are missing.
+
+        Raises:
+            Exception: Whatever the client raised on a page Graph did not serve.
+                A listing cut short is never returned: group sync would record
+                the groups read so far as the whole tenant.
         """
         token = self._get_token()
         if token is None:
@@ -216,17 +222,8 @@ class EntraAdapter(OIDCGroupAdapter):
 
         async with AsyncHttpClient() as client:
             while url:
-                try:
-                    response = await client.get(url, headers=headers)
-                    data = response.json()
-                except Exception as exc:
-                    logger.warning(
-                        "Entra list_all_groups: API call failed",
-                        operation="list_all_groups",
-                        provider=self._provider.issuer,
-                        **describe_idp_error(exc),
-                    )
-                    break
+                response = await client.get(url, headers=headers)
+                data = response.json()
 
                 for item in data.get("value", []):
                     groups.append(
