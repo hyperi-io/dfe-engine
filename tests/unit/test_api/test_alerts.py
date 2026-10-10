@@ -662,3 +662,24 @@ class TestDestinationNameContainment:
         resp = alert_client.get("/api/v1/alerts/destinations/%2E%2E", headers=alert_admin_headers)
 
         assert resp.status_code == 404, resp.text
+
+    def test_a_hunt_name_with_a_leading_slash_links_nothing_and_writes_nothing(
+        self, alert_client, alert_admin_headers, sample_destination, tmp_path
+    ):
+        """The store reads ``/<stored hunt>`` as that hunt, so the link must not write ``/<hunt>``.
+
+        A hunt kept at a subdirectory mirroring the test's own path makes the absolute
+        write land inside tmp_path, where the test can see it.
+        """
+        outside = tmp_path / "outside" / "linked"
+        _registries["hunt_configs"].save(str(outside).lstrip("/"), {"cron": "*/5 * * * *"})
+
+        resp = alert_client.post(
+            "/api/v1/alerts/destinations",
+            json={**sample_destination, "hunt_name": str(outside)},
+            headers=alert_admin_headers,
+        )
+
+        assert resp.status_code == 404, resp.text
+        assert not (tmp_path / "outside").exists()
+        assert list((tmp_path / "alert-destinations").iterdir()) == []
