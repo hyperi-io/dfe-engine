@@ -138,7 +138,11 @@ class Sampler:
         try:
             columns = ch_reader.column_names(ch, target, self._cfg.max_execution_time)
         except DatabaseError as exc:
-            raise SamplerError(f"cannot read the columns of {target}: {exc}") from exc
+            # ClickHouse's text goes to the log: a SamplerError's message reaches the caller.
+            logger.warning("sample target columns unreadable", target=target, error=str(exc))
+            raise SamplerError(
+                f"cannot read the columns of {target}; the engine log has ClickHouse's reason"
+            ) from exc
         if ORG_ID_COLUMN not in columns:
             raise SampleScopeError(
                 f"{target} has no {ORG_ID_COLUMN} column, so a sample of it cannot be "

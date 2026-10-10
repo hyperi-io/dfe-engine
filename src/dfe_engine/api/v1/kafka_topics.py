@@ -51,7 +51,7 @@ router = APIRouter(prefix="/kafka/topics", tags=["Kafka Topics"])
 
 
 class TopicFailure(BaseModel):
-    """One topic the broker would not do the thing to, and what it said."""
+    """One topic the broker would not do the thing to; the broker's own text is in the log."""
 
     name: str
     error: str

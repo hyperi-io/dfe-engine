@@ -63,6 +63,16 @@ if TYPE_CHECKING:
     from dfe_engine.settings import DFESettings
     from dfe_engine.source.models import Source
 
+# A reason recorded here reaches API callers, so the broker's own text goes to the log.
+BROKER_UNREACHABLE = "broker unreachable; the engine log has the reason"
+BROKER_REFUSED = "the broker refused it; the engine log has the reason"
+
+
+def _unreachable(exc: Exception) -> str:
+    """The reason recorded for a broker that could not be reached, its own text logged."""
+    logger.warning("Kafka broker unreachable", error=str(exc))
+    return BROKER_UNREACHABLE
+
 
 @dataclass
 class TopicSpec:
@@ -595,7 +605,8 @@ def ensure_topics(
         result.failed = [(spec.name, f"kafka config rejected: {exc}") for spec in specs]
         return result
     except Exception as exc:
-        result.failed = [(spec.name, f"broker unreachable: {exc}") for spec in specs]
+        reason = _unreachable(exc)
+        result.failed = [(spec.name, reason) for spec in specs]
         return result
 
     for spec in specs:
@@ -615,7 +626,7 @@ def ensure_topics(
                 f"(partitions={spec.partitions}, rf={spec.replication_factor})"
             )
         except Exception as exc:
-            result.failed.append((spec.name, str(exc)))
+            result.failed.append((spec.name, BROKER_REFUSED))
             logger.error(f"Kafka topic creation failed: {spec.name} - {exc}")
 
     return result
@@ -653,7 +664,8 @@ def remove_topics(
         result.failed = [(name, f"kafka config rejected: {exc}") for name in names]
         return result
     except Exception as exc:
-        result.failed = [(name, f"broker unreachable: {exc}") for name in names]
+        reason = _unreachable(exc)
+        result.failed = [(name, reason) for name in names]
         return result
 
     for name in names:
@@ -665,7 +677,7 @@ def remove_topics(
             result.removed.append(name)
             logger.info(f"Kafka topic deleted: {name}")
         except Exception as exc:
-            result.failed.append((name, str(exc)))
+            result.failed.append((name, BROKER_REFUSED))
             logger.error(f"Kafka topic deletion failed: {name} - {exc}")
 
     return result
@@ -708,7 +720,7 @@ def topic_status(
         result.error = f"kafka config rejected: {exc}"
         return result
     except Exception as exc:
-        result.error = f"broker unreachable: {exc}"
+        result.error = _unreachable(exc)
         return result
 
     owners = sources or {}
@@ -728,7 +740,8 @@ def topic_status(
             state.partitions, state.replication_factor = admin.describe_shape(spec.name)
             state.config = admin.describe_config(spec.name)
         except Exception as exc:
-            state.drift.append(f"could not be described: {exc}")
+            logger.warning("Kafka topic could not be described", topic=spec.name, error=str(exc))
+            state.drift.append("could not be described; the engine log has the broker's reason")
             result.topics.append(state)
             continue
 
@@ -777,7 +790,8 @@ def update_topics(
         result.failed = [(spec.name, f"kafka config rejected: {exc}") for spec in specs]
         return result
     except Exception as exc:
-        result.failed = [(spec.name, f"broker unreachable: {exc}") for spec in specs]
+        reason = _unreachable(exc)
+        result.failed = [(spec.name, reason) for spec in specs]
         return result
 
     for spec in specs:
@@ -790,7 +804,7 @@ def update_topics(
             # that would find that out is skipped.
             drifted = _config_drift(spec, admin.describe_config(spec.name)) if spec.config else {}
         except Exception as exc:
-            result.failed.append((spec.name, str(exc)))
+            result.failed.append((spec.name, BROKER_REFUSED))
             logger.error(f"Kafka topic could not be described: {spec.name} - {exc}")
             continue
 
@@ -816,7 +830,7 @@ def update_topics(
             try:
                 admin.alter_config(spec.name, drifted)
             except Exception as exc:
-                result.failed.append((spec.name, str(exc)))
+                result.failed.append((spec.name, BROKER_REFUSED))
                 logger.error(f"Kafka topic config alter failed: {spec.name} - {exc}")
                 continue
             logger.info(f"Kafka topic config altered: {spec.name} ({sorted(drifted)})")
@@ -829,7 +843,7 @@ def update_topics(
                 try:
                     admin.widen_partitions(spec.name, total=spec.partitions)
                 except Exception as exc:
-                    result.failed.append((spec.name, str(exc)))
+                    result.failed.append((spec.name, BROKER_REFUSED))
                     logger.error(f"Kafka topic partition widening failed: {spec.name} - {exc}")
                     continue
                 logger.info(

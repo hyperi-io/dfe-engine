@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from scalo.logger import logger
 
 from dfe_engine.api.deps import CurrentUser, Settings, require_action
+from dfe_engine.api.errors import backend_failure
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.query.models import (
     QueryOptions,
@@ -198,11 +199,14 @@ def execute_view(
             detail={"code": "invalid_options", "message": str(exc)},
         )
     except ViewExecutionError as exc:
-        logger.error("View execution failed", label=label, error=str(exc))
-        raise HTTPException(
-            status_code=500,
-            detail={"code": "query_error", "message": str(exc)},
-        )
+        raise backend_failure(
+            500,
+            "query_error",
+            f"View '{label}' failed to execute; the engine log has ClickHouse's reason",
+            exc,
+            event="View execution failed",
+            label=label,
+        ) from exc
 
     meta = result.metadata
     return QueryResponse(
@@ -321,9 +325,11 @@ async def query_cost_leaderboard(
             database=settings.clickhouse.effective_data_database,
         )
     except Exception as exc:
-        logger.error("cost leaderboard query failed", error=str(exc))
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "not_available", "message": f"cost leaderboard unavailable: {exc}"},
-        )
+        raise backend_failure(
+            503,
+            "not_available",
+            "cost leaderboard unavailable; the engine log has the reason",
+            exc,
+            event="cost leaderboard query failed",
+        ) from exc
     return [CostLeaderboardRow(**row) for row in rows]

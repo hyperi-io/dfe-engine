@@ -6,6 +6,7 @@ import pytest
 
 from dfe_engine.kafka.contract import KafkaContractError
 from dfe_engine.kafka.topics import (
+    BROKER_UNREACHABLE,
     TopicAdmin,
     TopicSpec,
     admin_config,
@@ -217,7 +218,7 @@ class TestEnsureTopics:
             admin=_UnreachableAdmin(),
         )
         assert [name for name, _ in result.failed] == ["filebeat_land", "filebeat_load"]
-        assert "connection refused" in result.failed[0][1]
+        assert result.failed[0][1] == BROKER_UNREACHABLE
 
     def test_dry_run_creates_nothing(self):
         admin = _FakeAdmin()
@@ -406,7 +407,7 @@ class TestRemoveTopics:
         result = remove_topics(["filebeat_land"], admin=_UnreachableAdmin())
 
         assert [name for name, _ in result.failed] == ["filebeat_land"]
-        assert "connection refused" in result.failed[0][1]
+        assert result.failed[0][1] == BROKER_UNREACHABLE
 
     def test_dry_run_deletes_nothing(self):
         admin = _FakeAdmin(present=["t"])
@@ -471,7 +472,7 @@ class TestTopicStatus:
         result = topic_status([TopicSpec("filebeat_land", 3, 1)], admin=_UnreachableAdmin())
 
         assert not result.reachable
-        assert "connection refused" in result.error
+        assert result.error == BROKER_UNREACHABLE
         assert result.topics == []
 
     def test_it_carries_the_owning_source(self):
