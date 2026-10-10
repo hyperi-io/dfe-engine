@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from scalo.config import DirectoryConfigStore
 from scalo.logger import logger
 
-from dfe_engine.yaml_utils import yaml_dump
+from dfe_engine.yaml_utils import contained_yaml_file, yaml_dump
 
 if TYPE_CHECKING:
     from dfe_engine.gitcrud.routing import WriteOutcome
@@ -140,9 +140,15 @@ class HuntConfigRegistry:
         return list(self._require_store().list_tables())
 
     def _get_raw(self, name: str) -> dict[str, Any] | None:
-        """Raw stored doc for a hunt, or None when absent."""
+        """Raw stored doc for a hunt, or None when absent.
+
+        The store strips a leading ``/`` before it looks a name up, so a name whose
+        file would sit outside the directory is absent here, as it is to a write.
+        """
         if self._deploy is not None:
             return self._deploy.get(name)
+        if contained_yaml_file(self._hunts_directory, name) is None:
+            return None
         return self._require_store().get(name)
 
     def _put_raw(
@@ -161,7 +167,11 @@ class HuntConfigRegistry:
             return outcome
 
         store = self._require_store()
-        yaml_path = self._hunts_directory / f"{name}.yaml"
+        yaml_path = contained_yaml_file(self._hunts_directory, name)
+        if yaml_path is None:
+            raise HuntConfigRegistryError(
+                f"Hunt name {name!r} resolves outside the hunts directory"
+            )
         yaml_dump(doc, yaml_path)
         if store.is_git:
             store._git_commit(yaml_path, message, author=created_by)
@@ -178,8 +188,8 @@ class HuntConfigRegistry:
             return outcome is not None, outcome
 
         store = self._require_store()
-        yaml_path = self._hunts_directory / f"{name}.yaml"
-        if not yaml_path.exists():
+        yaml_path = contained_yaml_file(self._hunts_directory, name)
+        if yaml_path is None or not yaml_path.exists():
             return False, None
 
         if store.is_git and store._repo is not None:
