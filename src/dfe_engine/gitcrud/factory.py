@@ -43,6 +43,7 @@ def build_gitcrud(gs: GitopsSettings, metrics_manager: Any | None = None) -> Git
         author_email=gs.author_email,
         metrics=GitopsMetrics(metrics_manager),
         write=gs.write,
+        pack=gs.pack,
     )
     _seed_governance(repo)
     return GitCrud(repo)

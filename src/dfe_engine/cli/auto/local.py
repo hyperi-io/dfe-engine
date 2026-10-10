@@ -109,6 +109,7 @@ def _build_crud(repo: str | None) -> GitCrud:
         token=gs.token,
         author_name=gs.author_name,
         author_email=gs.author_email,
+        pack=gs.pack,
     )
     return GitCrud(grepo)
 
@@ -265,6 +266,7 @@ def _do_push(repo_path: str) -> None:
         author_name=gs.author_name,
         author_email=gs.author_email,
         write=gs.write,
+        pack=gs.pack,
     )
     repo.ensure()
     try:
@@ -304,6 +306,16 @@ def _maybe_push(repo_path: Path, *, push: bool | None, yes: bool) -> None:
         click.echo(f"committed locally; not pushed. {_UNPUSHED_WARNING}")
         return
     _do_push(str(repo_path))
+
+
+def _finish_write(crud: GitCrud, *, push: bool | None, yes: bool) -> None:
+    """Handle the post-write push, then consolidate the clone's packs if they are due.
+
+    No daemon is running and no request waits on this clone, so the CLI gives it the
+    consolidation the daemon's background task would.
+    """
+    _maybe_push(crud.repo_path, push=push, yes=yes)
+    crud.repo.consolidate_if_due()
 
 
 # --- shared option decorators ------------------------------------------------
@@ -582,7 +594,7 @@ def set_cmd(
     msg = _bg_message_for_class(crud, cls, name, f"set {path}", actor, reason)
     result = crud.set_key(cls, name, path, val, actor, message=msg)
     click.echo(f"committed {result.commit_sha or '(unchanged)'}")
-    _maybe_push(crud.repo_path, push=push, yes=yes)
+    _finish_write(crud, push=push, yes=yes)
 
 
 @local_group.command("unset")
@@ -613,7 +625,7 @@ def unset_cmd(
     msg = _bg_message_for_class(crud, cls, name, f"unset {path}", actor, reason)
     result = crud.delete_key(cls, name, path, actor, message=msg)
     click.echo(f"committed {result.commit_sha or '(unchanged)'}")
-    _maybe_push(crud.repo_path, push=push, yes=yes)
+    _finish_write(crud, push=push, yes=yes)
 
 
 @local_group.command("rm")
@@ -639,7 +651,7 @@ def rm_cmd(
     msg = _bg_message_for_class(crud, cls, name, "delete", actor, reason)
     result = crud.delete(cls, name, actor, message=msg)
     click.echo(f"committed {result.commit_sha or '(unchanged)'}")
-    _maybe_push(crud.repo_path, push=push, yes=yes)
+    _finish_write(crud, push=push, yes=yes)
 
 
 @local_group.command("revert")
@@ -702,7 +714,7 @@ def revert_cmd(
     msg = _break_glass_message("ops", short, f"revert {short}", actor, reason)
     result = crud.repo.publish(artifacts, msg, deletions=deletions)
     click.echo(f"committed {result.commit_sha or '(unchanged)'}")
-    _maybe_push(repo_path, push=push, yes=yes)
+    _finish_write(crud, push=push, yes=yes)
 
 
 def _blob_text(r, tree, rel: str) -> str:
@@ -782,7 +794,7 @@ def restore_cmd(
     msg = _bg_message_for_class(crud, cls, name, f"restore v{version}", actor, reason)
     result = crud.put(cls, name, after, actor, message=msg)
     click.echo(f"committed {result.commit_sha or '(unchanged)'}")
-    _maybe_push(crud.repo_path, push=push, yes=yes)
+    _finish_write(crud, push=push, yes=yes)
 
 
 @local_group.command("push")
