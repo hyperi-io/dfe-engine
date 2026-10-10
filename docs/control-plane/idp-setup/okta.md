@@ -16,28 +16,24 @@ You need an Okta administrator who can create app integrations and edit authoriz
 
 Okta puts no groups in its tokens until you add a `groups` claim. Once you do, the ID token carries the names of the user's groups that match your filter, and DFE reads them at sign-in. DFE does not call the Okta API for this. DFE reads groups only from the ID token, never from the userinfo endpoint, so the claim must always be in the ID token.
 
-Put the claim on Okta's default custom authorization server, named `default`, with the issuer `https://<your Okta domain>/oauth2/default`. A production Okta org has custom authorization servers only with API Access Management. Integrator Free Plan orgs have it. If your org does not, use the org authorization server instead.
+Put the claim on Okta's default custom authorization server, named `default`, with the issuer `https://<your Okta domain>/oauth2/default`. The org authorization server (issuer `https://<your Okta domain>`, no `/oauth2/...`) sends no groups claim in the ID token, so DFE sees no groups through it.
+
+A production Okta org has custom authorization servers only with API Access Management. Integrator Free Plan orgs have it. Without it, DFE's only other route is reading groups from the Okta API with an API token (see "Find the group names"), which this page does not set up.
 
 ## Set it up
 
 1. In the Admin Console go to **Applications and Resources > Applications** (**Applications > Applications** in older consoles) and select **Create App Integration**. If asked, choose the classic experience. Pick **OIDC - OpenID Connect** as the sign-in method and **Web Application** as the type. Select **Next**.
 2. Name the integration (for example `DFE`). Keep the **Authorization Code** grant type. Under **Sign-in redirect URIs**, put only the redirect URI from the operator. Under **Assignments**, pick **Limit access to selected groups** and choose the groups that use DFE, or **Allow everyone in your organization to access**. Select **Save**.
 3. Copy the **Client ID** from the app's settings, and the **Client secret** from its **Client Credentials** section.
-4. Add the groups claim on ONE authorization server, as below.
+4. Add the groups claim to the `default` authorization server, as below.
 
-### On the default custom authorization server
+### Add the groups claim to the `default` server
 
 Go to **Security > API**, open the **Authorization Servers** tab and select `default`.
 
 1. On the **Scopes** tab, look for a scope named `groups`. If there is none, select **Add Scope**, name it `groups`, leave user consent off and create it. DFE asks for this scope, and Okta fails a sign-in that asks for a scope the server does not define.
-2. On the **Claims** tab, select **Add Claim**. Set **Name** to `groups`. Set **Include in token type** to **ID Token** and **Always**. Set **Value type** to **Groups**, and **Filter** to **Matches regex** with a pattern for the groups DFE should see, such as `dfe-.*`. `.*` sends every group the user is in. Set **Include in** to **Any scope** and create the claim.
-3. On the **Access Policies** tab, check that an active policy applies to the DFE app, with an active rule that allows the **Authorization Code** grant for any scopes. If there is none, select **Add Policy**, assign it to the DFE app, then **Add Rule** with that grant. The Integrator Free Plan's `default` server ships with no policy.
-
-### On the org authorization server, without API Access Management
-
-Open the DFE app's **Sign On** tab and select **Edit** in the **OpenID Connect ID Token** section. Set **Group claim type** to **Filter**. Under **Group claims filter**, keep the name `groups`, pick **Matches regex** and enter your pattern. Save. The issuer is then `https://<your Okta domain>`.
-
-Okta's groups-claim guide says this server returns groups in the ID token on the authorization code flow DFE uses. Other Okta pages contradict it, so run the check below before you finish.
+2. On the **Claims** tab, select **Add Claim**. Set **Name** to `groups`. Set **Include in token type** to **ID Token** and **Always**. Set **Value type** to **Groups**, and **Filter** to **Matches regex** with a pattern for the groups DFE should see, such as `dfe-.*`. `.*` sends every group the user is in. Set **Include in** to **Any scope** and create the claim. With no scope condition the claim arrives whether or not the sign-in asks for `groups`.
+3. On the **Access Policies** tab, check that an active policy applies to the DFE app, with an active rule that allows the **Authorization Code** grant for any scopes. If there is none, select **Add Policy**, assign it to the DFE app (or all clients), then **Add Rule** with that grant. The Integrator Free Plan's `default` server ships with no policy.
 
 ## Send these to the operator
 
@@ -45,7 +41,7 @@ Okta's groups-claim guide says this server returns groups in the ID token on the
 |---|---|
 | Client ID | Step 3 |
 | Client secret | Step 3. Send it over a channel fit for a password, never plain email |
-| Issuer | `https://<your Okta domain>/oauth2/default`, or `https://<your Okta domain>` for the org authorization server |
+| Issuer | `https://<your Okta domain>/oauth2/default` |
 | Group names | One per group that should hold a DFE role, with the role it should get. See the next section |
 
 ## Find the group names
@@ -72,7 +68,7 @@ The page answers with JSON. `email` is the user, and `groups` lists the group na
 | DFE page: `OIDC login failed:` ending `User is not assigned to the client application.` | The user is not assigned to the app | Assign the user, or a group they are in |
 | DFE page: `OIDC login failed:` ending `One or more scopes are not configured for the authorization server resource.` | The `default` server has no `groups` scope | Add it on the **Scopes** tab, or ask the operator to stop requesting `groups` |
 | DFE page: `OIDC login failed:` ending `Policy evaluation failed for this request, please check the policy configurations.` | No active access policy and rule cover the app | Add or activate one on the **Access Policies** tab |
-| The check shows `"groups": []` | No claim, the claim is set to Userinfo instead of **Always**, the filter matches none of the user's groups, or the issuer names a different server from the one holding the claim | Recheck the claim on the server the issuer names |
+| The check shows `"groups": []` | No claim, the claim is set to Userinfo instead of **Always**, the filter matches none of the user's groups, or the issuer is the org server (`https://<your Okta domain>` with no `/oauth2/default`) | Recheck the claim on `default`, and send the operator the `/oauth2/default` issuer |
 | Signed in, but no DFE role | The names arrived but none is linked yet | Send the operator the names from the check |
 
 ## For the DFE operator
@@ -99,7 +95,6 @@ Link each DFE group by setting its `source_id` to a group name the admin sent: s
 - Create an OIDC app integration: <https://help.okta.com/en-us/content/topics/apps/apps_app_integration_wizard_oidc.htm>
 - Authorization servers and API Access Management: <https://developer.okta.com/docs/concepts/auth-servers/>
 - Scopes, claims and access policies: <https://developer.okta.com/docs/guides/customize-authz-server/main/>
-- Groups claim, both servers: <https://developer.okta.com/docs/guides/customize-tokens-groups-claim/main/>
-- Thin and fat ID tokens: <https://support.okta.com/help/s/article/attribute-claim-missing-from-id-token>
+- Groups claim: <https://developer.okta.com/docs/guides/customize-tokens-groups-claim/main/>
 - Redirect URI error: <https://support.okta.com/help/s/article/okta-error-400-bad-request-the-redirect-uri-parameter-must-be-a-login-redirect-uri-in-the-client-app-settings>
 - Access policy error: <https://support.okta.com/help/s/article/policy-evaluation-failed-for-this-request-when-logging-into-openid-connect-app-via-a-custom-authorization-server>

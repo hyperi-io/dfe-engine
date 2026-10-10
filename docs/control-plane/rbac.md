@@ -21,7 +21,7 @@
 
 ```mermaid
 flowchart TD
-    REQ[Incoming Request] --> OIDC{X-Oidc-Subject<br/>header?}
+    REQ[Incoming Request] --> OIDC{X-Oidc-Subject header<br/>and auth.trust_proxy_auth_headers?}
     OIDC -->|Yes| EXTRACT_OIDC[Extract user_id + groups<br/>from OIDC headers]
     EXTRACT_OIDC --> RESOLVE_OIDC[GroupStore resolves<br/>groups → roles]
     RESOLVE_OIDC --> CTX[Build AuthContext]
@@ -37,7 +37,7 @@ flowchart TD
     BIND --> RESOLVE_JWT["GroupStore resolves the account's<br/>groups -> roles + org_ids<br/>token claims ignored"]
     RESOLVE_JWT --> CTX
 
-    JWT -->|No| DISABLED{auth.enabled<br/>= false?}
+    JWT -->|No| DISABLED{auth.enabled = false<br/>and a dev DFE_ENV?}
     DISABLED -->|Yes| ROOT[Root context<br/>roles=admin<br/>user_id=dev]
     ROOT --> CTX
 
@@ -53,30 +53,32 @@ flowchart TD
 | Path | Use case | Credential storage | Token lifetime |
 |------|----------|-------------------|----------------|
 | OIDC headers | Production (Envoy Gateway fronted) | IdP (Entra, Google, etc.) | Session cookie (Envoy managed) |
-| API key | CI/CD, Terraform, scripts | `config/auth/api-keys/*.yaml` (SHA-384 hash) | `expires_at` if set, else long-lived (revoke by deleting file) |
+| API key | CI/CD, Terraform, scripts | `config/auth/api-keys/*.yaml` (SHA-384 hash) | `expires_at` if set, else `auth.api_key_default_ttl_days` from creation (default 90, `0` for no expiry). Revoke by deleting the file |
 | JWT Bearer | Console sessions, standalone, dev | Issued by `POST /api/v1/auth/login`, the OIDC login callback and `POST /api/v1/auth/refresh` | `api.jwt_expire_minutes` (`DFE_API_JWT_EXPIRE_MINUTES`, default 60) |
 | Disabled | Dev/test | N/A | N/A |
 
 A JWT carries identity, not authority. Its `roles`, `groups` and `org_ids` claims grant nothing: every request re-resolves them from the account the `sub` binds to, so a role or org taken away is gone from the next request. A `sub` that binds no account holds nothing -- an API-key subject, a deleted account -- and with auth enabled `POST /api/v1/auth/refresh` answers 401 for it, since each refresh issues a new expiry.
 
-OIDC headers injected by Envoy Gateway SecurityPolicy:
+OIDC headers injected by Envoy Gateway SecurityPolicy, read only when `auth.trust_proxy_auth_headers` (`DFE_AUTH_TRUST_PROXY_AUTH_HEADERS`) is true:
 
 | Header | Content |
 |--------|---------|
 | `X-Oidc-Subject` | User email or unique ID |
-| `X-Oidc-Groups` | Comma-separated OIDC group names |
+| `X-Oidc-Email` | User email, optional |
+| `X-Oidc-Groups` | Comma-separated OIDC group identifiers |
 
 ### 1.2 Deployment Modes
 
-Local auth is **always available**. OIDC is additive — headers are checked
-first when present, but JWT and API key paths remain active. No explicit
-mode toggle; OIDC detection is automatic based on header presence.
+Local auth is **always available**. OIDC headers are additive -- checked
+first when present and `auth.trust_proxy_auth_headers` is true, but JWT and
+API key paths remain active. With the flag off (the default) the engine ignores
+the headers and falls through to API key and JWT.
 
 | Mode | Setting | What's active | Use case |
 |------|---------|--------------|----------|
-| **Dev/test** | `auth.enabled=false` | All requests get root admin context | Local development |
-| **Standalone** | `auth.enabled=true` | JWT Bearer + API keys + local accounts | Docker, no external IdP |
-| **Production** | `auth.enabled=true` + Envoy | OIDC headers (precedence) + JWT + API keys | K8s with Envoy Gateway |
+| **Dev/test** | `auth.enabled=false` with a dev `DFE_ENV` | Requests with no credential get root admin context. Any other `DFE_ENV` refuses to start | Local development |
+| **Standalone** | `auth.enabled=true` (the default) | JWT Bearer + API keys + local accounts | Docker, no external IdP |
+| **Production** | `auth.enabled=true` + `auth.trust_proxy_auth_headers=true` + Envoy | OIDC headers (precedence) + JWT + API keys | K8s with Envoy Gateway |
 
 ### 1.3 OIDC Header Trust Model
 
@@ -123,7 +125,7 @@ flowchart LR
 | JWT signing key | Secrets backend at `api.jwt_key_path` (default `jwt/signing-key`), minted on first boot when absent | ECDSA private key, PEM (P-384 for the default ES384) | **NO** |
 | OIDC login session cookie key | `DFE_API_SESSION_SECRET`, else `DFE_API_JWT_SECRET` | Random, `DFE_API_JWT_SECRET` at least 32 bytes | **NO** |
 | CH connection passwords | Env var / K8s Secret | Plaintext | **NO** |
-| Role definitions | `auth/resources/roles.yaml` | Permission patterns | Yes |
+| Role definitions | `rbac/roles.yaml` beside the auth directory, seeded from `auth/resources/roles.yaml` on first boot | Permission patterns | Yes |
 | Group→role mapping | `groups/{name}.yaml` | Role list | Yes |
 
 #### Config Directory Layout
@@ -138,6 +140,7 @@ config/auth/
         soc-analysts.yaml
     api-keys/            # One YAML per API key
         ci-deploy.yaml
+    oidc-providers/      # One YAML per OIDC provider (see 4.2)
 ```
 
 Account filename = username. Group filename = group name. API key filename =
@@ -175,7 +178,9 @@ prefix short     long token (shown once, stored as SHA-384 hash)
 - Full key shown **once** at creation, never retrievable again
 - **Expiry** (`expires_at`, optional ISO-8601 stored as UTC): enforced on every
   verify, so a lapsed key stops authenticating with no sweeper running. The
-  file stays until revoked, and `list` reports `expired: true`
+  file stays until revoked, and `list` reports `expired: true`. A key created
+  through the API without one expires after `auth.api_key_default_ttl_days`
+  (default 90, `0` for no expiry)
 - **Revocation:** Delete the key's YAML file or call the revoke API
 
 ### 1.7 API Key Verification Flow
@@ -256,21 +261,23 @@ dfe-hyperdx decides on the `role` claim of the token it holds, so there a role t
 
 ### 2.2 Role Definitions
 
-Roles are defined in `src/dfe_engine/auth/resources/roles.yaml` (built-in,
-shipped with the package). Custom roles can be loaded from a separate YAML
-file via `RoleConfig.load(path)`.
+The built-in roles ship in `src/dfe_engine/auth/resources/roles.yaml`. On first
+boot the engine copies that file to `rbac/roles.yaml` beside the auth directory
+and loads roles from the copy. Custom roles are added to it through
+`/api/v1/auth/roles`.
 
-7 built-in roles, flat hierarchy (no inheritance):
+8 built-in roles, flat hierarchy (no inheritance):
 
 ```mermaid
 graph LR
     subgraph "Global Roles"
         ADMIN["admin<br/>permissions: *"]
-        DA["data_analyst<br/>hunt, query, source,<br/>fieldmap, alert,<br/>schema:read, transforms"]
+        DA["data_analyst<br/>hunt, query, source,<br/>fieldmap, alert, rule,<br/>schema, transforms"]
         DAV["data_analyst_viewer<br/>read-only subset of<br/>data_analyst"]
         DV["data_viewer<br/>query:execute,<br/>source:read,<br/>dashboard:read"]
         IA["infra_admin<br/>config, service,<br/>helm, deployment,<br/>argo"]
         IV["infra_viewer<br/>read-only subset of<br/>infra_admin"]
+        OP["dfe_operator<br/>invoke shipped actions,<br/>read governed state"]
     end
 
     subgraph "Scoped Roles"
@@ -285,20 +292,22 @@ graph LR
 
 | Domain | Actions | Scoped by service? |
 |--------|---------|---------------------|
-| `hunt` | `read`, `write`, `execute`, `*` | No |
+| `hunt` | `read`, `write`, `delete`, `execute`, `*` | No |
 | `query` | `read`, `execute`, `*` | No |
-| `source` | `read`, `write`, `*` | No |
-| `fieldmap` | `read`, `write`, `*` | No |
-| `alert` | `read`, `write`, `*` | No |
-| `schema` | `read`, `write`, `*` | No |
-| `dashboard` | `read`, `write`, `*` | No |
+| `source` | `read`, `write`, `delete`, `deploy`, `*` | No |
+| `fieldmap` | `read`, `write`, `delete`, `*` | No |
+| `alert` | `read`, `write`, `delete`, `*` | No |
+| `schema` | `read`, `write`, `delete`, `*` | No |
+| `dashboard` | `read`, `*` | No |
 | `config` | `read`, `write`, `*` | No |
-| `transforms` | `compile`, `test`, `*` | No |
-| `service` | `config:read`, `config:write`, `metrics:read`, `*` | Yes (`service:{name}:{action}`) |
+| `transform` | `compile`, `test`, `*` | No |
+| `service` | `read`, `write`, `delete`, `validate`, and per service `config:read`, `config:write`, `metrics:read`, `*` | The `config` and `metrics` actions (`service:{name}:{action}`) |
 | `helm` | `compile`, `execute_ddl`, `create_topics`, `*` | No |
 | `deployment` | `read`, `write`, `*` | No |
 | `org` | `read`, `write`, `*` | No |
 | `argo` | `{resource}:{action}` (open-ended) | No |
+
+The routes enforce more domains than this table lists (accounts, groups, API keys, roles, OIDC providers, governance, and others). The full catalogue is `src/dfe_engine/auth/rbac_scopes/scope_constants.py`.
 
 ### 2.4 Wildcard Permission Matching
 
@@ -325,6 +334,8 @@ def authorize(
     auth: AuthContext | None,
     action: str,
     resource: str = "",
+    *,
+    scope: Scope | None = None,
     enabled: bool = True,
     role_config: RoleConfig | None = None,
 ) -> AuthzResult:
@@ -334,7 +345,7 @@ Decision order:
 
 1. `enabled=False` → allow (dev/test)
 2. `auth=None` → root mode, allow
-3. Check `role_config.check_roles(auth.roles, action)` → first granting role
+3. For each of the caller's scoped grants (`auth.grants`, else `auth.roles` as system grants): allow when the grant's scope covers the requested scope and its role's permissions match the action. `scope=None` is a system-scope check
 4. Return `AuthzResult(allowed, reason)`
 
 ### 2.6 RBAC Enforcement in API
@@ -434,12 +445,19 @@ created_at: "2026-03-31T02:00:00Z"
 ```text
 POST   /api/v1/auth/login                           # JWT login
 POST   /api/v1/auth/refresh                          # Refresh JWT
+POST   /api/v1/auth/logout                           # End the session
 GET    /api/v1/auth/me                               # Current user info + permissions
 GET    /api/v1/auth/permissions                      # Current user's resolved permissions
+GET    /api/v1/auth/setup-status                     # First-login state (see 3.5)
+POST   /api/v1/auth/setup/retire-admin               # Retire the bootstrap admin
+GET    /api/v1/auth/oidc/{provider}/login            # OIDC sign-in (see 4)
+GET    /api/v1/auth/oidc/{provider}/callback         # OIDC callback, mints the engine JWT
 ```
 
-Account, group, and API key CRUD endpoints are available via the stores and
-CLI. The auth router currently exposes login/refresh/me/permissions.
+Account, group, API key, role and OIDC provider CRUD sit under
+`/api/v1/auth/accounts`, `/api/v1/auth/groups`, `/api/v1/auth/api-keys`,
+`/api/v1/auth/roles` and `/api/v1/auth/oidc-providers`. `openapi-spec/openapi.json`
+lists every route.
 
 ### 3.4 Bootstrap Defaults
 
@@ -511,9 +529,9 @@ deployment out of its own next boot. Either is a 422 naming the field.
 ```mermaid
 flowchart TD
     subgraph "OIDC Providers"
-        GOOGLE["Google Workspace<br/>Admin SDK groups.list"]
-        ENTRA["Microsoft Entra ID<br/>Graph API /groups"]
-        OKTA["Okta<br/>(stub — use token_claim)"]
+        GOOGLE["Google Workspace<br/>Cloud Identity as the user at login<br/>Admin SDK groups.list, optional"]
+        ENTRA["Microsoft Entra ID<br/>groups claim, Graph on overage<br/>Graph API /groups for sync"]
+        OKTA["Okta<br/>groups claim, or<br/>Groups API in api mode"]
         GENERIC["Generic OIDC<br/>(no admin API)"]
     end
 
@@ -536,7 +554,7 @@ flowchart TD
     subgraph "Group Resolution Modes"
         MANUAL["manual<br/>Membership managed<br/>in dfe-engine only"]
         CLAIM["token_claim<br/>Groups from OIDC<br/>token claim at login"]
-        API["api<br/>Groups fetched from<br/>provider API on schedule"]
+        API["api<br/>Groups from the provider API:<br/>scheduled sync, and at login<br/>with enrich_on_login"]
     end
 ```
 
@@ -575,8 +593,8 @@ environment, so an ESO-mounted variable keeps working.
 |---------|--------|-----------|------------|
 | Generic | Done | None | No (use `token_claim` mode) |
 | Google | Done | Cloud Identity as the user at login; Admin SDK `groups().list()` as an optional service account | Only with a service account |
-| Entra ID | Done | Graph API `/groups` | Yes — `$top=999` pagination |
-| Okta | Done | Groups API `/api/v1/groups` | Yes — `Link` header pagination |
+| Entra ID | Done | Graph `/me/transitiveMemberOf` with the user's token on a >200 group overage, falling back to app-only `/users/{oid}/transitiveMemberOf` when Graph refuses that token. Graph `/groups` for sync | Yes, api mode with app credentials -- `$top=999` pagination |
+| Okta | Done | Groups API `/api/v1/groups` with an API token, api mode only. `token_claim` calls nothing | Yes, api mode -- `Link` header pagination |
 
 All adapters are failsafe — credential or API failures return empty results
 rather than raising exceptions, so auth continues working even if group
@@ -719,17 +737,20 @@ Roles carry `argo:{resource}:{action}` permissions in `roles.yaml`, and the scop
 
 ## 9. Audit Logging
 
-Every authorisation decision is logged for compliance (SOC 2, GDPR) via
-structured OTel log events (`scalo.logger`).
+Logins, denied authorisation decisions and admin changes are logged for compliance (SOC 2, GDPR) via structured OTel log events (`scalo.logger`). An allowed decision is not logged.
 
 | Event | Log key | Level |
 |-------|---------|-------|
 | Login success | `auth.login.success` | info |
 | Login denied | `auth.login.denied` | warning |
+| Break-glass login | `auth.breakglass.login` | warning |
 | Permission denied | `auth.permission.denied` | warning |
-| Account change | `auth.account.{change}` | info |
-| Group change | `auth.group.{change}` | info |
-| API key change | `auth.api_key.{change}` | info |
+| Account change | `auth.account.{change}` -- a password rotation, ending sessions, retiring the bootstrap admin | info |
+| JIT provisioning | `auth.jit.{event}` -- account created, groups updated, login refused, team assigned, HyperDX invite, failure | info / warning |
+| Org change | `org.{change}` | info |
+| Resource change | `resource.{type}.{change}` -- OIDC providers, sources, fieldmaps and other config resources | info |
+
+Account create, update and delete, group CRUD, API key CRUD and role CRUD emit no audit event. `src/dfe_engine/auth/audit.py` defines `auth.group.{change}` and `auth.api_key.{change}`, and no route calls either.
 
 Events flow through the OTel pipeline → JSON → ClickHouse → HyperDX.
 No custom ClickHouse audit table — standard OTel log ingestion is used.
@@ -742,7 +763,9 @@ No custom ClickHouse audit table — standard OTel log ingestion is used.
 class AuthContext(BaseModel):
     org_id: str = "default"  # Primary tenant
     user_id: str  # Required unique identifier
+    email: str | None = None  # From the OIDC/JWT claim, for git author attribution
     roles: list[str]  # Resolved DFE roles
+    grants: list[ScopedGrant] = []  # Roles with the scope each was bound at
     groups: list[str] = []  # OIDC or local groups
     org_ids: list[str] = []  # For customer-scoped roles
     connection_id: str = ""  # Resolved CH connection name
@@ -760,21 +783,25 @@ the context.
 
 ```python
 class AuthSettings(BaseModel):
-    enabled: bool = False  # Off by default (dev/test)
-    auth_dir: str = ""  # Path to config/auth/ directory
-
-    oidc: OIDCSettings  # Nested OIDC config
-
-
-class OIDCSettings(BaseModel):
-    providers_dir: str = ""  # Path to OIDC provider config dir
-    sync_enabled: bool = True  # Enable background group sync
-    sync_on_startup: bool = True  # Sync providers at startup
+    enabled: bool = True  # Off needs a dev DFE_ENV, else the engine refuses to start
+    auth_dir: str = ""  # Path to config/auth/, OIDC providers in its oidc-providers/
+    trust_proxy_auth_headers: bool = False  # Read the X-Oidc-* headers (Path 1)
+    oidc_group_sync_enabled: bool = True  # Background sync of api-mode providers
+    oidc_group_sync_tick_seconds: int = 60  # How often the sync checks which providers are due
+    proxy_provider: str = "oidc"  # Provider name the header path stamps on accounts it provisions
+    source_provider_bindings: dict[str, str] = {}  # e.g. {"scim": "entra"}
+    api_key_default_ttl_days: int = 90  # 0 = keys created without expires_at never expire
 ```
 
 Environment variables: `DFE_AUTH_ENABLED`, `DFE_AUTH_DIR`,
-`DFE_AUTH_OIDC_PROVIDERS_DIR`, `DFE_AUTH_OIDC_SYNC_ENABLED`,
-`DFE_AUTH_OIDC_SYNC_ON_STARTUP`.
+`DFE_AUTH_TRUST_PROXY_AUTH_HEADERS`, `DFE_AUTH_PROXY_PROVIDER`,
+`DFE_AUTH_SOURCE_PROVIDER_BINDINGS` (a JSON object),
+`DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS`. The two `oidc_group_sync_*` fields are set
+in the config file only: no environment variable reaches them.
+`auth.oidc.providers_dir`, `auth.oidc.sync_enabled` and
+`auth.oidc.sync_on_startup` still parse (`DFE_AUTH_OIDC_PROVIDERS_DIR`,
+`DFE_AUTH_OIDC_SYNC_ENABLED`, `DFE_AUTH_OIDC_SYNC_ON_STARTUP`) but nothing reads
+them.
 
 ---
 
@@ -801,12 +828,12 @@ graph TD
                 GENERIC_A["generic.py"]
                 GOOGLE_A["google.py"]
                 ENTRA_A["entra.py"]
-                OKTA_A["okta.py (stub)"]
+                OKTA_A["okta.py"]
             end
         end
 
         subgraph "resources/"
-            ROLES_YAML["roles.yaml<br/>7 built-in roles"]
+            ROLES_YAML["roles.yaml<br/>8 built-in roles"]
         end
     end
 
@@ -864,12 +891,12 @@ Not pursued. An app's shape is data in `dfe-infra/apps.yaml`, served through
 
 | Scenario | Behaviour |
 |----------|-----------|
-| Multi-role user | Highest-privilege connection wins (precedence order) |
+| Multi-role user | A platform grant with `query:execute` reads as the platform user; otherwise the caller must resolve to exactly one org, or gets `403 no_single_org` (section 5.2) |
 | HyperDX unavailable | Non-fatal. Org CRUD succeeds. Sync retried in background |
-| ClickHouse unavailable | Degraded mode: API serves cached state, `/readyz` → 503, retry every 60s |
+| ClickHouse unavailable | `/readyz` reports NotReady while its ping fails. Liveness is untouched, so the pod is not restarted. The CH RBAC reconcile retries in the background (section 6.2) |
 | Unknown OIDC group | No matching group file → no roles resolved → default deny |
 | OIDC adapter failure | Failsafe: returns empty results, auth continues with available info |
-| Default password in use | Warning logged at startup |
+| Default password in use | Dev `DFE_ENV`: warning at startup and `default_credentials: true` on setup-status. Any other `DFE_ENV`: the engine refuses to start (section 3.5) |
 
 ---
 
@@ -881,7 +908,7 @@ Not pursued. An app's shape is data in `dfe-infra/apps.yaml`, served through
 - Dynamic K8s service discovery (future enhancement)
 - Envoy Gateway SecurityPolicy CRD generation (managed by dfe-infra)
 - ClickHouse cluster provisioning (managed by dfe-infra)
-- Role hierarchy / inheritance (flat roles sufficient for 7-role set)
+- Role hierarchy / inheritance (flat roles sufficient for 8-role set)
 
 ---
 
@@ -891,7 +918,7 @@ Not pursued. An app's shape is data in `dfe-infra/apps.yaml`, served through
 |------|-----|-----|
 | JWT library | `python-jose[cryptography]` | `PyJWT[crypto]` |
 | Auth model | `AuthContext.permissions` field | Removed — resolved from roles at auth time |
-| Role names | `admin`, `operator`, `viewer` | 7 granular roles in `roles.yaml` |
+| Role names | `admin`, `operator`, `viewer` | 8 granular roles in `roles.yaml` |
 | Role storage | `DEFAULT_ROLE_PERMISSIONS` constant | `auth/resources/roles.yaml` |
 | Account storage | Hardcoded dict in `LocalAuthProvider` | `config/auth/accounts/*.yaml` with full CRUD |
 | Group mapping | `AuthSettings.group_role_mapping` | `config/auth/groups/*.yaml` |
