@@ -259,7 +259,7 @@ class TestEnvOverrides:
     def test_api_cors_origins_override(self, monkeypatch):
         monkeypatch.setenv("DFE_API_CORS_ORIGINS", "http://a.com,http://b.com")
         settings = load_settings()
-        assert "http://a.com" in settings.api.cors_origins
+        assert settings.api.cors_origins == ["http://a.com", "http://b.com"]
 
     def test_api_key_default_ttl_is_ninety_days(self):
         assert load_settings().auth.api_key_default_ttl_days == 90

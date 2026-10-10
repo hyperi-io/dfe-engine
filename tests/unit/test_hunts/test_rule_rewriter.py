@@ -1,8 +1,17 @@
 """Tests for RuleRewriter — SQL parsing and time bound stripping."""
 
+import random
+import re
+import time
+
 import pytest
 
-from dfe_engine.hunts.rule_rewriter import ParsedRule, RuleRewriter
+from dfe_engine.hunts.rule_rewriter import (
+    TIME_PLACEHOLDER,
+    ParsedRule,
+    RuleRewriter,
+    strip_time_placeholder,
+)
 
 
 @pytest.fixture
@@ -331,3 +340,49 @@ class TestReadsTheStatement:
         assert result.source_table is None
         assert result.where_clause == ""
         assert result.warnings[0].startswith("Could not read the SQL: ")
+
+
+# The placeholder-conjunct grammar as a plain pattern: the reference for what is dropped.
+_REFERENCE_CONJUNCT = re.compile(
+    r"\{timestamp_condition\}\s+AND\s+|\s+AND\s+\{timestamp_condition\}", re.IGNORECASE
+)
+
+
+def _reference_strip(where: str) -> str:
+    return _REFERENCE_CONJUNCT.sub("", where).replace(TIME_PLACEHOLDER, "1").strip()
+
+
+class TestStripTimePlaceholder:
+    @pytest.mark.parametrize(
+        "where",
+        [
+            "{timestamp_condition} AND x = 1",
+            "x = 1 AND {timestamp_condition}",
+            "x = 1  and\t{timestamp_condition} AND y = 2",
+            "{timestamp_condition}",
+            "(x = 1 OR {timestamp_condition})",
+            "x = 1",
+        ],
+    )
+    def test_strips_as_the_reference_grammar_does(self, where):
+        assert strip_time_placeholder(where) == _reference_strip(where)
+
+    def test_strips_as_the_reference_grammar_does_on_random_text(self):
+        rng = random.Random(4701)
+        tokens = [TIME_PLACEHOLDER, " ", " ", "\t", "AND", "and", "x", "{", "\n"]
+        for _ in range(20_000):
+            where = "".join(rng.choices(tokens, k=rng.randint(0, 10)))
+            assert strip_time_placeholder(where) == _reference_strip(where), repr(where)
+
+    @pytest.mark.parametrize(
+        "where",
+        [
+            "a" + " " * 200_000 + "b",
+            "a" + " " * 100_000 + "AND" + " " * 100_000 + "b",
+        ],
+        ids=["run", "run-and-run"],
+    )
+    def test_a_long_whitespace_run_is_read_in_linear_time(self, where):
+        started = time.perf_counter()
+        strip_time_placeholder(where)
+        assert time.perf_counter() - started < 2.0

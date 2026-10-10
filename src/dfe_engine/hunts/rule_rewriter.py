@@ -37,8 +37,10 @@ from .hdx_sanitizer import HdxSanitizeError, split_time_window
 TIME_PLACEHOLDER = "{timestamp_condition}"
 """Time-bound placeholder a rule stored before #683 may still carry; the hunt window replaces it."""
 
+# The lookbehind starts the second form only at the first character of a whitespace
+# run, so a long run is read once rather than once from each of its characters.
 _TIME_PLACEHOLDER_CONJUNCT = re.compile(
-    r"\{timestamp_condition\}\s+AND\s+|\s+AND\s+\{timestamp_condition\}", re.IGNORECASE
+    r"\{timestamp_condition\}\s+AND\s+|(?<!\s)\s+AND\s+\{timestamp_condition\}", re.IGNORECASE
 )
 
 

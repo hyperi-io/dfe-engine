@@ -1,5 +1,9 @@
 """Tests for RuleCreationService — HyperDX-aware rule creation pipeline."""
 
+import random
+import re
+import time
+
 import pytest
 
 from dfe_engine.hunts.rule_creation_service import (
@@ -7,6 +11,7 @@ from dfe_engine.hunts.rule_creation_service import (
     CostEstimate,
     RuleCreateRequest,
     RuleCreationService,
+    _mask_quoted,
 )
 from dfe_engine.hunts.rule_guard import VolumeBand
 from dfe_engine.settings import DetectionGuardSettings, HuntsSettings
@@ -670,3 +675,60 @@ class TestSanitizeSummary:
         # A refusal also leaves the summary empty, so the clean result is checked first.
         assert result.sql_errors == []
         assert result.sanitize_summary == {}
+
+
+# The span grammar as a plain backtracking pattern: the reference for what is masked.
+_REFERENCE_QUOTED = re.compile(
+    r"'(?:[^'\\]|\\.|'')*'|`(?:[^`\\]|\\.|``)*`|\"(?:[^\"\\]|\\.|\"\")*\""
+)
+
+
+def _reference_mask(sql: str) -> str:
+    def blank(match: re.Match[str]) -> str:
+        quoted = match.group(0)
+        return quoted[0] + " " * (len(quoted) - 2) + quoted[-1]
+
+    return _REFERENCE_QUOTED.sub(blank, sql)
+
+
+class TestMaskQuoted:
+    """Literals are blanked before the keyword checks, so a word inside one is data."""
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT 'DROP' FROM db.t",
+            'SELECT `a``b` FROM "x""y"',
+            "WHERE x = 'it''s' AND y = 'a\\'b'",
+            "WHERE x = 'never closed",
+            "WHERE x = 'a''",
+            "WHERE x = 'a\\\nb' AND z = 'c'",
+            "WHERE x = '\\",
+            "",
+        ],
+    )
+    def test_blanks_as_the_reference_grammar_does(self, sql):
+        assert _mask_quoted(sql) == _reference_mask(sql)
+
+    def test_blanks_as_the_reference_grammar_does_on_random_text(self):
+        rng = random.Random(4601)
+        alphabet = ["'", "'", '"', "`", "\\", "\n", "a", " ", "("]
+        for _ in range(20_000):
+            sql = "".join(rng.choices(alphabet, k=rng.randint(0, 16)))
+            assert _mask_quoted(sql) == _reference_mask(sql), repr(sql)
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "'" + "\\'" * 100_000,
+            "`" + "\\`" * 100_000,
+            '"' + '\\"' * 100_000,
+            "'\"`" + "\\'\\\"\\`" * 50_000,
+            "'a''" + "x" * 200_000,
+        ],
+        ids=["single", "backtick", "double", "all-three", "doubled-then-unclosed"],
+    )
+    def test_an_unclosed_literal_is_read_in_linear_time(self, sql):
+        started = time.perf_counter()
+        _mask_quoted(sql)
+        assert time.perf_counter() - started < 2.0

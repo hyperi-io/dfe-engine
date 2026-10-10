@@ -32,6 +32,7 @@ Triggers use CEL expressions evaluated against {result_count, ...row_fields}:
 from __future__ import annotations
 
 import builtins
+import os
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,56 @@ from scalo.expression import (
 from scalo.logger import logger
 
 # -- Destination Registry ------------------------------------------
+
+
+class AlertDestinationNameError(ValueError):
+    """A destination name whose file would sit outside the destinations directory."""
+
+
+_NAME_REFUSED_CHARACTERS = ("/", "\\", "\x00")
+"""A separator would place the file outside the directory, and a NUL cannot name a file."""
+
+DESTINATION_NAME_RULE = "one file name: not empty, not '.' or '..', and no '/', '\\' or NUL"
+"""What a new destination name must be, worded for a refusal."""
+
+
+def is_destination_name(name: str) -> bool:
+    """Whether *name* can name a new destination, one file ``<directory>/<name>.yaml``.
+
+    Args:
+        name: The destination name, often straight off a request.
+
+    Returns:
+        True when *name* is a single file name, per :data:`DESTINATION_NAME_RULE`.
+    """
+    if not name or name in (".", ".."):
+        return False
+    return not any(c in name for c in _NAME_REFUSED_CHARACTERS)
+
+
+def _stored(store: Any, name: str) -> dict[str, Any] | None:
+    """The stored document for *name*; a name the store refuses to look up holds nothing."""
+    try:
+        return store.get(name)
+    except ValueError:
+        return None
+
+
+def _contained_file(directory: Path, name: str) -> Path | None:
+    """The YAML file *name* is kept in, or None when it would resolve outside *directory*.
+
+    Symlinks are followed, so a link inside the directory cannot carry a write out of it.
+    ``realpath`` with a ``startswith`` guard is the containment form CodeQL's
+    path-injection query recognises, so the check also reads as one to the scanner.
+    """
+    root = os.path.realpath(directory)
+    try:
+        target = os.path.realpath(os.path.join(root, f"{name}.yaml"))
+    except ValueError:
+        return None
+    if not target.startswith(root + os.sep):
+        return None
+    return Path(target)
 
 
 class AlertDestination(BaseModel):
@@ -106,14 +157,22 @@ class AlertDestinationRegistry:
         """Register a destination (overwrites if name exists).
 
         Persists to YAML when backed by DirectoryConfigStore.
+
+        Raises:
+            AlertDestinationNameError: The name's file would sit outside the directory.
         """
         if self._store is not None:
             from dfe_engine.yaml_utils import yaml_dump
 
+            yaml_path = _contained_file(Path(self._store._directory), destination.name)
+            if yaml_path is None:
+                raise AlertDestinationNameError(
+                    f"alert destination name {destination.name!r} resolves outside the "
+                    "destinations directory"
+                )
             # Store url/description/enabled/hunt_name -- name comes from the filename.
             # exclude_none drops hunt_name when unset so unowned destinations stay clean.
             data = destination.model_dump(exclude={"name"}, exclude_none=True)
-            yaml_path = Path(self._store._directory) / f"{destination.name}.yaml"
             yaml_dump(data, yaml_path)
             self._store._refresh_all()
         else:
@@ -122,7 +181,7 @@ class AlertDestinationRegistry:
     def get(self, name: str) -> AlertDestination:
         """Get a destination by name. Raises KeyError if not found."""
         if self._store is not None:
-            data = self._store.get(name)
+            data = _stored(self._store, name)
             if data is None:
                 raise KeyError(name)
             # Inject name from table key (filename) -- not stored inside YAML
@@ -143,8 +202,8 @@ class AlertDestinationRegistry:
     def remove(self, name: str) -> bool:
         """Remove a destination by name. Returns True if it existed."""
         if self._store is not None:
-            yaml_path = Path(self._store._directory) / f"{name}.yaml"
-            if yaml_path.exists():
+            yaml_path = _contained_file(Path(self._store._directory), name)
+            if yaml_path is not None and yaml_path.exists():
                 yaml_path.unlink()
                 # Clear stale cache entry (_refresh_all only picks up new/changed files)
                 with self._store._lock:
@@ -200,7 +259,7 @@ class AlertDestinationRegistry:
 
     def __contains__(self, name: str) -> bool:
         if self._store is not None:
-            return self._store.get(name) is not None
+            return _stored(self._store, name) is not None
         return name in self._memory
 
 
