@@ -317,6 +317,32 @@ class TestEnvOverrides:
         assert (throttle.username_failures, throttle.client_failures) == (3, 40)
         assert throttle.max_delay_seconds == 120
 
+    def test_oidc_group_sync_defaults(self):
+        auth = load_settings().auth
+        assert auth.oidc_group_sync_enabled is True
+        assert auth.oidc_group_sync_tick_seconds == 60
+
+    def test_oidc_group_sync_overrides(self, monkeypatch):
+        monkeypatch.setenv("DFE_AUTH_OIDC_GROUP_SYNC_ENABLED", "false")
+        monkeypatch.setenv("DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS", "15")
+        auth = load_settings().auth
+        assert auth.oidc_group_sync_enabled is False
+        assert auth.oidc_group_sync_tick_seconds == 15
+
+    def test_oidc_group_sync_tick_below_one_second_is_refused(self, monkeypatch):
+        monkeypatch.setenv("DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS", "0")
+        with pytest.raises(ValidationError):
+            load_settings()
+
+    def test_a_config_file_still_carrying_auth_oidc_loads(self, tmp_path):
+        # Older deployed files carry an auth.oidc block no field reads; they must still load.
+        target = tmp_path / "dfe.yaml"
+        target.write_text(
+            yaml_dump_string({"auth": {"oidc": {"providers_dir": "/x", "sync_enabled": False}}}),
+            encoding="utf-8",
+        )
+        assert load_settings(str(target)).auth.oidc_group_sync_enabled is True
+
     def test_api_elastic_converter_max_upload_override(self, monkeypatch):
         monkeypatch.setenv("DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES", "1048576")
         settings = load_settings()
@@ -1005,8 +1031,6 @@ class TestEverySettingIsRead:
         ("QueryViewSettings", "auto_bootstrap"),
         ("SamplerSettings", "default_mode"),
         ("HelmSettings", "environment_file"),
-        ("OIDCSettings", "sync_enabled"),
-        ("OIDCSettings", "sync_on_startup"),
         ("HyperDXSettings", "api_key_env"),
         ("DFESettings", "e2e_server"),
         # Found once the search stopped counting defaults.yaml as a reader. A

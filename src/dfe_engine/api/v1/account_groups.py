@@ -45,7 +45,7 @@ from dfe_engine.api.pagination import (
     apply_sort,
 )
 from dfe_engine.auth import AuthorizationError, Scope, ScopedGrant
-from dfe_engine.auth.audit import audit_permission_denied
+from dfe_engine.auth.audit import audit_group_change, audit_permission_denied
 from dfe_engine.auth.groups import Group, GroupExistsError, validate_group_scope
 from dfe_engine.auth.membership import groups_named
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -272,6 +272,12 @@ async def create_group(
         group.name,
         added=group.members,
     )
+    audit_group_change(
+        user.user_id,
+        group.name,
+        "created",
+        {"roles": group.roles, "scope": group.scope, "members": group.members},
+    )
     return _response(group)
 
 
@@ -345,8 +351,10 @@ async def update_group(
         roles_after = body.roles if body.roles is not None else existing.roles
         check_role_assignment(request, user, [*existing.roles, *roles_after], scope_of(existing))
     update_fields: dict[str, object] = {}
+    details: dict[str, object] = {}
     if body.roles is not None:
         update_fields["roles"] = body.roles
+        details["roles"] = body.roles
     if body.description is not None:
         update_fields["description"] = body.description
     if body.members is not None:
@@ -359,6 +367,8 @@ async def update_group(
         update_fields["members"] = deduped
         old_members = set(existing.members)
         new_members = set(deduped)
+        details["members_added"] = sorted(new_members - old_members)
+        details["members_removed"] = sorted(old_members - new_members)
         group = store.update(name, **update_fields)
         sync_account_groups_for_membership_change(
             account_store,
@@ -369,6 +379,9 @@ async def update_group(
     else:
         group = store.update(name, **update_fields)
     request_ch_rbac_reconcile(request.app.state)
+    audit_group_change(
+        user.user_id, group.name, "updated", {"fields": sorted(update_fields), **details}
+    )
     return _response(group)
 
 
@@ -402,6 +415,7 @@ async def add_member(
         name,
         added=[body.username],
     )
+    audit_group_change(user.user_id, name, "member_added", {"member": body.username})
     group = store.get(name)
     if group is None:  # deleted concurrently between the mutation and re-fetch
         raise HTTPException(
@@ -441,6 +455,7 @@ async def remove_member(
         name,
         removed=[username],
     )
+    audit_group_change(user.user_id, name, "member_removed", {"member": username})
     group = store.get(name)
     if group is None:  # deleted concurrently between the mutation and re-fetch
         raise HTTPException(
@@ -475,6 +490,7 @@ async def delete_group(
             detail={"code": "conflict", "message": str(exc)},
         ) from exc
     request_ch_rbac_reconcile(request.app.state)
+    audit_group_change(user.user_id, name, "deleted")
 
 
 # -- Attributes -----------------------------------------------
@@ -527,6 +543,7 @@ async def put_group_attributes(
             status_code=404,
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
         ) from exc
+    audit_group_change(user.user_id, name, "attributes_updated")
     return {"attributes": group.attributes}
 
 
@@ -575,4 +592,5 @@ async def put_group_sensitive_attributes(
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
         )
     request.app.state.group_sensitive_attributes.put(name, body.attributes)
+    audit_group_change(user.user_id, name, "sensitive_attributes_updated")
     return {"attributes": request.app.state.group_sensitive_attributes.get(name)}

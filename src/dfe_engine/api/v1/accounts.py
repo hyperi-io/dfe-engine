@@ -470,6 +470,7 @@ async def create_account(
         summary="create account",
         actor=user.user_id,
     )
+    audit_account_change(user.user_id, account.username, "created", {"groups": body.groups})
     return _account_response(request, account, group_store.list())
 
 
@@ -565,6 +566,7 @@ async def update_current_user_account(
         summary="update own account",
         actor=user.user_id,
     )
+    audit_account_change(user.user_id, account.username, "updated", {"fields": sorted(fields)})
     return _account_response(request, account, request.app.state.group_store.list())
 
 
@@ -640,6 +642,12 @@ async def update_account(
         summary="update account",
         actor=user.user_id,
     )
+    # Field names only for the contact fields: their values are personal data.
+    details: dict[str, object] = {"fields": sorted(update_fields)}
+    for name in ("groups", "enabled", "blocked"):
+        if name in update_fields:
+            details[name] = update_fields[name]
+    audit_account_change(user.user_id, account.username, "updated", details)
     return _account_response(request, account, group_store.list())
 
 
@@ -700,13 +708,15 @@ async def reset_current_user_password(
             },
         )
     throttle.succeeded(account.username)
-    return await _reset_stored_password(
+    result = await _reset_stored_password(
         request,
         settings,
         username=account.username,
         new_password=body.new_password,
         actor=user.user_id,
     )
+    audit_account_change(user.user_id, account.username, "password_changed")
+    return result
 
 
 @router.post(
@@ -733,13 +743,15 @@ async def reset_password(
     straight away (dev/solo) or is a pending review PR / CLI merge
     (production+team), or is a no-op file share.
     """
-    return await _reset_stored_password(
+    result = await _reset_stored_password(
         request,
         settings,
         username=username,
         new_password=body.new_password,
         actor=user.user_id,
     )
+    audit_account_change(user.user_id, username, "password_reset")
+    return result
 
 
 @router.post(
@@ -865,6 +877,7 @@ async def delete_account(
     # The store refuses the break-glass admin, the one account the deploy repo carries.
     store.delete(username)
     forget_member(group_store, username)
+    audit_account_change(user.user_id, username, "deleted")
 
 
 # -- Attributes -----------------------------------------------
@@ -908,6 +921,7 @@ async def put_account_attributes(
     store: AccountStore = request.app.state.account_store
     _require_account(store, username)
     account = store.set_attributes(username, body.attributes)
+    audit_account_change(user.user_id, username, "attributes_updated")
     return {"attributes": account.attributes}
 
 
@@ -949,4 +963,5 @@ async def put_account_sensitive_attributes(
     store: AccountStore = request.app.state.account_store
     _require_account(store, username)
     request.app.state.account_sensitive_attributes.put(username, body.attributes)
+    audit_account_change(user.user_id, username, "sensitive_attributes_updated")
     return {"attributes": request.app.state.account_sensitive_attributes.get(username)}
