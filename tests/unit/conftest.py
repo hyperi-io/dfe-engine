@@ -3,9 +3,12 @@
 Test-session guard: every bcrypt hash in this tree runs at the minimum cost.
 """
 
+import threading
+
 import bcrypt
 import pytest
 
+from dfe_engine.governance.ch.trigger import WORKER_THREAD_NAME
 from dfe_engine.yaml_health import YamlWriteMetrics, write_health
 
 # bcrypt's own floor -- gensalt() accepts 4-31, so this is not an arbitrary
@@ -32,6 +35,28 @@ def _fast_bcrypt(monkeypatch):
         bcrypt,
         "gensalt",
         lambda rounds=12, prefix=b"2b": _real_gensalt(_TEST_BCRYPT_ROUNDS, prefix),
+    )
+
+
+@pytest.fixture(autouse=True)
+def _no_reconcile_thread_outlives_its_test():
+    """Fail a test that leaves a CH RBAC reconcile thread running after it.
+
+    A trigger nobody closes retries a failed run on a back-off of up to five minutes,
+    and logs into whatever sink is left once pytest has closed its capture. The app
+    closes the triggers on its ``app.state`` at shutdown, so a leak is a test that
+    replaced one without closing it. Only threads this test started are counted, so
+    one leak fails one test.
+    """
+    before = set(threading.enumerate())
+    yield
+    started = [t for t in threading.enumerate() if t.name == WORKER_THREAD_NAME and t not in before]
+    for thread in started:
+        # A closed trigger's worker is already leaving.
+        thread.join(timeout=1.0)
+    leaked = [t for t in started if t.is_alive()]
+    assert not leaked, (
+        f"{len(leaked)} {WORKER_THREAD_NAME} thread(s) still running: close the trigger"
     )
 
 

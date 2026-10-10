@@ -18,8 +18,9 @@ import time
 
 import pytest
 
-from dfe_engine.governance.ch import ReconcileResult, ReconcileTrigger
+from dfe_engine.governance.ch import ReconcileResult
 from tests.support.loopback import CountingListener
+from tests.support.reconcile_trigger import swap_in_trigger
 
 _WAIT = 10.0
 _SCIM = "/api/v1/scim/v2"
@@ -47,13 +48,8 @@ class _Recorder:
 @pytest.fixture
 def reconciles(app, client):
     """The app's trigger, reconciling into a recorder; settles long enough for a burst."""
-    assert app.state.ch_rbac_reconcile is not None
-    # The startup run failed against the guard, so its retry is stood down first.
-    assert app.state.ch_rbac_reconcile.close(_WAIT)
     recorder = _Recorder()
-    app.state.ch_rbac_reconcile = ReconcileTrigger(
-        recorder, settle_seconds=1.0, retry_initial_seconds=0.2
-    )
+    swap_in_trigger(app, recorder, settle_seconds=1.0, retry_initial_seconds=0.2)
     return recorder
 
 
