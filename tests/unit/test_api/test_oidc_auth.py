@@ -444,6 +444,9 @@ class TestAJitFailureRefusesTheLogin:
         assert resp.json()["code"] == "service_unavailable"
         failed = [e for e in audit_events if e["event"] == "auth.jit.provision_failed"]
         assert [e["user_id"] for e in failed] == ["kim@example.com"]
+        # The class of the failure, not its text.
+        assert [e["error_type"] for e in failed] == ["AccountExistsError"]
+        assert "error" not in failed[0]
         assert not [e for e in audit_events if e["event"] == "auth.login.denied"]
 
     def test_a_login_whose_account_cannot_be_stamped_is_a_503_and_the_retry_signs_in(

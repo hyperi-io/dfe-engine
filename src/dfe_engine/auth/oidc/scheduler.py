@@ -16,7 +16,12 @@ from typing import TYPE_CHECKING, Any
 
 from scalo.logger import logger
 
-from dfe_engine.auth.oidc.sync import SyncMetrics, SyncOutcome, sync_provider
+from dfe_engine.auth.oidc.sync import (
+    NOT_CONFIGURED_MESSAGE,
+    SyncMetrics,
+    SyncOutcome,
+    sync_provider,
+)
 
 if TYPE_CHECKING:
     from dfe_engine.auth.groups import GroupStore
@@ -48,9 +53,11 @@ def sync_is_due(*, now: datetime, provider: OIDCProvider) -> bool:
 
 
 def sync_outcome(*, result: dict[str, Any]) -> SyncOutcome:
-    """How a ``sync_provider`` run ended: it failed, it left some groups unsynced, or it synced every group."""
+    """How a ``sync_provider`` run ended: it failed, had no credential, left some groups unsynced, or synced every group."""
     if result.get("error"):
         return "error"
+    if result.get("skipped") == NOT_CONFIGURED_MESSAGE:
+        return "not_configured"
     if result.get("groups_skipped"):
         return "partial"
     return "ok"

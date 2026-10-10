@@ -12,6 +12,7 @@ import pytest
 from scalo.logger import logger
 
 from dfe_engine.auth.oidc.adapters.google import GoogleAdapter
+from dfe_engine.auth.oidc.idp_errors import DirectoryNotConfiguredError
 from dfe_engine.auth.oidc.models import GroupInfo, GroupResolutionConfig, OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.rp import OidcRelyingParty
@@ -180,19 +181,18 @@ class TestResolveUserGroupsMissingCredentials:
 
 
 class TestListAllGroupsMissingCredentials:
-    async def test_returns_empty_list_when_no_credentials(self) -> None:
+    async def test_refuses_to_list_when_no_credentials(self) -> None:
         provider = _make_provider(service_account_json_env="")
         adapter = GoogleAdapter(provider)
-        result = await adapter.list_all_groups()
-        assert result == []
+        with pytest.raises(DirectoryNotConfiguredError):
+            await adapter.list_all_groups()
 
-    async def test_returns_empty_list_when_env_var_missing(self) -> None:
+    async def test_refuses_to_list_when_env_var_missing(self) -> None:
         os.environ.pop("DFE_MISSING_SA_JSON_DEF", None)
         provider = _make_provider(service_account_json_env="DFE_MISSING_SA_JSON_DEF")
         adapter = GoogleAdapter(provider)
-        result = await adapter.list_all_groups()
-        assert isinstance(result, list)
-        assert result == []
+        with pytest.raises(DirectoryNotConfiguredError):
+            await adapter.list_all_groups()
 
 
 # ---------------------------------------------------------------------------

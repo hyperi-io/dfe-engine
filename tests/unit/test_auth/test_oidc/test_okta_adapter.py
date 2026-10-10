@@ -8,7 +8,10 @@
 
 from __future__ import annotations
 
+import pytest
+
 from dfe_engine.auth.oidc.adapters.okta import OktaAdapter
+from dfe_engine.auth.oidc.idp_errors import DirectoryNotConfiguredError
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
 from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import SecretsSettings
@@ -47,6 +50,22 @@ class TestOktaAdapterTestConnection:
         ok, message = await adapter.test_connection()
         assert ok is False
         assert "OKTA_API_TOKEN" in message
+
+
+class TestOktaListAllGroupsNoCredentials:
+    async def test_refuses_to_list_without_a_domain(self):
+        adapter = OktaAdapter(_okta_provider(mode="api"))
+        with pytest.raises(DirectoryNotConfiguredError):
+            await adapter.list_all_groups()
+
+    async def test_refuses_to_list_without_a_token(self, monkeypatch):
+        provider = _okta_provider(mode="api")
+        provider.groups.okta_domain = "example.okta.com"
+        provider.groups.api_token_env = "OKTA_API_TOKEN"
+        monkeypatch.delenv("OKTA_API_TOKEN", raising=False)
+        adapter = OktaAdapter(provider)
+        with pytest.raises(DirectoryNotConfiguredError):
+            await adapter.list_all_groups()
 
 
 class TestOktaApiTokenResolution:

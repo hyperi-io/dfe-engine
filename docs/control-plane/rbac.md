@@ -642,6 +642,8 @@ One bad group never aborts the sync. A provider group whose email, name or id ma
 
 A listing that fails on any page, the first or the last, stops the sync before it writes a group. `last_sync_status` reads `error`, `sync_error` carries the provider's HTTP status, and the engine log carries its error code. The next run lists again from the start.
 
+An api-mode Entra, Okta or Google provider with no directory credential has nothing to list with. Its `last_sync_status` reads `not_configured`, `sync_error` says no credential is configured, and `POST /oidc-providers/{name}/sync` answers with the same text in `skipped`. The scheduled sync counts it as outcome `not_configured` and tries again after the provider's `sync_interval`, so adding the credential is picked up without a restart.
+
 ---
 
 ## 5. ClickHouse Tenant Isolation

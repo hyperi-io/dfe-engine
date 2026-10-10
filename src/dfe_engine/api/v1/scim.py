@@ -504,6 +504,9 @@ async def create_group(user: CurrentUser, request: Request) -> Response:
         group = store.create(name, roles=[], description="", members=members)
     except GroupExistsError:
         return scim_error(409, f"Group '{name}' already exists", "uniqueness")
+    except ValueError as exc:
+        # A displayName no group can have.
+        return scim_error(400, str(exc), "invalidValue")
     store.update(name, source_id=fields["source_id"], source_provider=fields["source_provider"])
     request_ch_rbac_reconcile(request.app.state)
     sync_account_groups_for_membership_change(account_store, name, added=group.members)

@@ -29,7 +29,11 @@ from typing import TYPE_CHECKING, Any, Literal
 from scalo.logger import logger
 
 from dfe_engine.auth.groups import GroupExistsError
-from dfe_engine.auth.oidc.idp_errors import describe_idp_error, idp_failure_message
+from dfe_engine.auth.oidc.idp_errors import (
+    DirectoryNotConfiguredError,
+    describe_idp_error,
+    idp_failure_message,
+)
 from dfe_engine.auth.store_names import VALID_NAME
 
 if TYPE_CHECKING:
@@ -41,8 +45,18 @@ if TYPE_CHECKING:
 SYNC_GROUPS_SKIPPED = "auth_oidc_sync_groups_skipped_total"
 SYNC_SCHEDULED_RUNS = "auth_oidc_sync_scheduled_runs_total"
 
-SyncOutcome = Literal["ok", "partial", "error"]
-"""How one sync run ended: every group synced, some left unsynced, or the run failed."""
+SyncOutcome = Literal["ok", "partial", "error", "not_configured"]
+"""How one sync run ended: every group synced, some left unsynced, the run failed, or the
+provider has no credential to read its directory with."""
+
+SYNC_NOT_CONFIGURED = "not_configured"
+"""The ``last_sync_status`` of a provider whose directory credential is not configured."""
+
+NOT_CONFIGURED_MESSAGE = (
+    "The directory credential is not configured, so no groups were synced; "
+    "configure it on the provider and sync again"
+)
+"""What a provider's ``sync_error`` and a sync's ``skipped`` say when there is no credential to list with."""
 
 SyncSkipReason = Literal["invalid_name", "stored_unloadable", "name_taken"]
 """Why the sync left a provider group unsynced.
@@ -148,7 +162,8 @@ async def sync_provider(
         - ``groups_skipped`` (int): groups left unsynced, one :data:`SyncSkipReason`
           each. Non-zero makes the provider's ``last_sync_status`` partial.
         - ``error`` (str | None): error message if the sync failed.
-        - ``skipped`` (str | None): reason string if the provider was skipped.
+        - ``skipped`` (str | None): reason string if the provider was skipped, including
+          :data:`NOT_CONFIGURED_MESSAGE` when it has no directory credential.
     """
     # Resolve provider config
     provider = provider_registry.get(provider_name)
@@ -199,6 +214,23 @@ async def sync_provider(
 
     try:
         remote_groups = await adapter.list_all_groups()
+    except DirectoryNotConfiguredError:
+        # The stamp keeps the scheduler from listing again until the next interval.
+        logger.info("OIDC group sync skipped -- no directory credential", provider=provider_name)
+        provider_registry.update(
+            provider_name,
+            last_sync_at=datetime.now(UTC).isoformat(),
+            last_sync_status=SYNC_NOT_CONFIGURED,
+            sync_error=NOT_CONFIGURED_MESSAGE,
+        )
+        return {
+            "created": 0,
+            "updated": 0,
+            "total": 0,
+            "groups_skipped": 0,
+            "error": None,
+            "skipped": NOT_CONFIGURED_MESSAGE,
+        }
     except Exception as exc:
         # The provider record and the API answer carry this, so the IdP's own text stays out.
         error_msg = idp_failure_message(exc, service="The directory API")

@@ -23,6 +23,8 @@ from __future__ import annotations
 
 from scalo.logger import logger
 
+from dfe_engine.auth.oidc.idp_errors import describe_idp_error
+
 
 def audit_login_success(
     user_id: str,
@@ -266,14 +268,19 @@ def audit_org_hyperdx_provisioned(org_name: str, team_id: str) -> None:
     logger.info("org.hyperdx.team_created", org_name=org_name, team_id=team_id)
 
 
-def audit_org_hyperdx_failed(org_name: str, error: str) -> None:
+def audit_org_hyperdx_failed(org_name: str, exc: BaseException | None = None) -> None:
     """Emit an audit event when HyperDX provisioning fails for an org.
+
+    The event carries the failure's class, HTTP status and error code, never its
+    text: the text names the request URL.
 
     Args:
         org_name: Name of the org that failed provisioning.
-        error: Error description.
+        exc: The failure the HyperDX call raised, or None when HyperDX answered
+            with no team.
     """
-    logger.warning("org.hyperdx.provision_failed", org_name=org_name, error=error)
+    failure = describe_idp_error(exc) if exc is not None else {"reason": "no_team"}
+    logger.warning("org.hyperdx.provision_failed", org_name=org_name, **failure)
 
 
 def audit_jit_account_created(
@@ -354,14 +361,18 @@ def audit_jit_hdx_invited(user_id: str, team_name: str) -> None:
     logger.info("auth.jit.hdx_invited", user_id=user_id, team_name=team_name)
 
 
-def audit_jit_failed(user_id: str, error: str) -> None:
+def audit_jit_failed(user_id: str, exc: BaseException) -> None:
     """Emit an audit event when JIT provisioning fails.
+
+    The event carries the failure's class and, where it has one, its HTTP status and
+    error code. The text of the exception is left out: it names the paths and URLs
+    the failed call touched.
 
     Args:
         user_id: Identity for which provisioning failed.
-        error: Error description.
+        exc: The failure provisioning raised.
     """
-    logger.warning("auth.jit.provision_failed", user_id=user_id, error=error)
+    logger.warning("auth.jit.provision_failed", user_id=user_id, **describe_idp_error(exc))
 
 
 def audit_resource_change(

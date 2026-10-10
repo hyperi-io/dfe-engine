@@ -37,6 +37,13 @@ def test_the_refusal_is_a_value_error_so_existing_handlers_see_it():
         validate_rule_name("../x")
 
 
+def test_a_name_of_128_characters_is_accepted_and_129_refused():
+    assert validate_rule_name("r" * 128) == "r" * 128
+
+    with pytest.raises(RuleNameError, match="at most 128"):
+        validate_rule_name("r" * 129)
+
+
 def test_a_symlink_pointing_outside_the_directory_is_refused(tmp_path: Path):
     rules = tmp_path / "rules"
     rules.mkdir()

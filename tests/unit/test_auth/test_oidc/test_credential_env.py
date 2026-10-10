@@ -136,6 +136,8 @@ class TestPathAndNameHelpers:
     def test_env_var_names_accepted(self, name):
         assert is_env_var_name(name) is True
 
-    @pytest.mark.parametrize("name", ["0oa15mxzztuHEzwr7698", "has-dash", "has space", ""])
+    @pytest.mark.parametrize(
+        "name", ["0oa15mxzztuHEzwr7698", "has-dash", "has space", "", "OKTA_CLIENT_ID\n"]
+    )
     def test_non_env_var_names_rejected(self, name):
         assert is_env_var_name(name) is False

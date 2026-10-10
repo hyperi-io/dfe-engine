@@ -431,6 +431,32 @@ class TestSyncProvider:
         assert "admin" not in me.json()["roles"]
         assert "dfe-admins" not in me.json()["groups"]
 
+    @pytest.mark.parametrize("provider_type", ["entra_id", "okta", "google"])
+    def test_a_provider_with_no_directory_credential_says_so(
+        self, client, app, admin_headers, provider_type
+    ):
+        from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+        from dfe_engine.auth.oidc.sync import NOT_CONFIGURED_MESSAGE
+
+        app.state.oidc_provider_registry.create(
+            "no-credential",
+            OIDCProvider(
+                type=provider_type,
+                enabled=True,
+                issuer="https://sso.example.com",
+                groups=GroupResolutionConfig(mode="api"),
+            ),
+        )
+
+        resp = client.post("/api/v1/auth/oidc-providers/no-credential/sync", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert (body["skipped"], body["error"], body["total"]) == (NOT_CONFIGURED_MESSAGE, None, 0)
+        shown = client.get("/api/v1/auth/oidc-providers/no-credential", headers=admin_headers)
+        assert shown.json()["last_sync_status"] == "not_configured"
+        assert shown.json()["sync_error"] == NOT_CONFIGURED_MESSAGE
+
     def test_the_interval_sync_runs_beside_the_api(self, app, client):
         # It waits a tick before its first run, so it never races the explicit syncs in these tests.
         assert app.state.oidc_group_sync.done() is False

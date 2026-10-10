@@ -31,7 +31,8 @@ from scalo.secrets.exceptions import SecretNotFoundError
 if TYPE_CHECKING:
     from dfe_engine.secrets import DfeSecrets
 
-_ENV_VAR_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# ``\Z``, not ``$``: ``$`` also matches before a trailing newline.
+_ENV_VAR_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z")
 
 
 def is_env_var_name(value: str) -> bool:
