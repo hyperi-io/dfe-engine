@@ -229,7 +229,7 @@ class GoogleAdapter(OIDCGroupAdapter):
                     provider=self._provider.issuer,
                     reason=_google_error_reason(exc.response),
                 )
-            except httpx.HTTPError as exc:
+            except (httpx.HTTPError, ValueError) as exc:
                 self._log_failure(exc=exc, method="searchTransitiveGroups")
                 return None
 
@@ -239,7 +239,7 @@ class GoogleAdapter(OIDCGroupAdapter):
                 )
             except httpx.HTTPStatusError as exc:
                 self._log_refusal(exc=exc, method="searchDirectGroups")
-            except httpx.HTTPError as exc:
+            except (httpx.HTTPError, ValueError) as exc:
                 self._log_failure(exc=exc, method="searchDirectGroups")
         return None
 
@@ -289,8 +289,8 @@ class GoogleAdapter(OIDCGroupAdapter):
             status=status,
         )
 
-    def _log_failure(self, *, exc: httpx.HTTPError, method: str) -> None:
-        """Log a Cloud Identity call that got no answer at all."""
+    def _log_failure(self, *, exc: httpx.HTTPError | ValueError, method: str) -> None:
+        """Log a Cloud Identity call that got no usable answer: no response, or a body that is not JSON."""
         logger.warning(
             "Google Cloud Identity group lookup failed",
             error=str(exc),

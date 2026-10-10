@@ -336,6 +336,11 @@ class TestCloudIdentityUserToken:
         adapter = _token_adapter(cloud_identity)
         assert await adapter._groups_with_user_token(email="alice@example.com") == []
 
+    async def test_a_non_json_answer_is_no_answer(self, cloud_identity):
+        cloud_identity.garble.add(TRANSITIVE)
+        adapter = _token_adapter(cloud_identity)
+        assert await adapter._groups_with_user_token(email="alice@example.com") is None
+
     async def test_a_refusal_is_no_answer(self, cloud_identity):
         cloud_identity.refuse[TRANSITIVE] = (401, {})
         adapter = _token_adapter(cloud_identity)

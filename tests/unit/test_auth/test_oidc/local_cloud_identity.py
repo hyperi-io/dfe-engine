@@ -47,6 +47,14 @@ def _handler_for(*, directory: LocalCloudIdentity) -> type[BaseHTTPRequestHandle
                     "params": params,
                 }
             )
+            if method in directory.garble:
+                encoded = b"<html>an intercepting proxy page</html>"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
+                return
             if method in directory.refuse:
                 status, body = directory.refuse[method]
                 self._reply(body=body, status=status)
@@ -69,12 +77,14 @@ class LocalCloudIdentity:
 
     ``pages`` maps a search method to its result pages, and every page but the
     last hands out a page token. ``refuse`` maps a method to the status and
-    Google error body it answers instead. ``requests`` records each search.
+    Google error body it answers instead. ``garble`` names methods that answer
+    200 with a body that is not JSON. ``requests`` records each search.
     """
 
     def __init__(self) -> None:
         self.pages: dict[str, list[list[dict[str, Any]]]] = {}
         self.refuse: dict[str, tuple[int, dict[str, Any]]] = {}
+        self.garble: set[str] = set()
         self.requests: list[dict[str, Any]] = []
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), _handler_for(directory=self))
         self._thread = threading.Thread(daemon=True, target=self._server.serve_forever)
