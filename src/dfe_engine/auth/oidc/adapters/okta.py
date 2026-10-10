@@ -14,22 +14,26 @@ this adapter lists and resolves groups using the Okta Management API
 (``SSWS`` token + ``okta_domain``).
 """
 
-from __future__ import annotations
-
 import re
 from typing import Any
 from urllib.parse import urlparse
 
 from scalo.logger import logger
 
-from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
-from dfe_engine.auth.oidc.credential_env import resolve_credential
-from dfe_engine.auth.oidc.idp_errors import (
+from dfe_engine.auth.oidc.adapters.base import (
+    DirectoryCredentialUnreadableError,
     DirectoryNotConfiguredError,
-    describe_idp_error,
-    idp_failure_message,
+    DirectoryPageError,
+    DirectoryPageLimitError,
+    OIDCGroupAdapter,
+)
+from dfe_engine.auth.oidc.credential_env import (
+    ResolvedCredential,
+    resolve_credential,
+    unreadable_credential_message,
 )
 from dfe_engine.auth.oidc.models import GroupInfo
+from dfe_engine.http_errors import describe_idp_error, idp_failure_message
 
 
 class OktaAdapter(OIDCGroupAdapter):
@@ -75,13 +79,18 @@ class OktaAdapter(OIDCGroupAdapter):
 
         Raises:
             DirectoryNotConfiguredError: The domain or the API token is not configured.
+            DirectoryCredentialUnreadableError: The API token's secret store did
+                not answer.
+            DirectoryPageError: A page Okta served was not a list of groups.
+            DirectoryPageLimitError: Okta still linked a next page at the page limit.
             Exception: Whatever the client raised on a page Okta did not serve.
                 A listing cut short is never returned: group sync would record
                 the groups read so far as the whole directory.
         """
         base, headers = self._api_base_and_headers()
         if base is None or headers is None:
-            raise DirectoryNotConfiguredError
+            unreadable = base is not None and self._api_token().unreadable
+            raise DirectoryCredentialUnreadableError if unreadable else DirectoryNotConfiguredError
 
         from scalo.http import AsyncHttpClient
 
@@ -89,16 +98,16 @@ class OktaAdapter(OIDCGroupAdapter):
         url: str | None = f"{base}/groups?limit=200"
 
         async with AsyncHttpClient() as client:
-            while url:
+            for _page in range(self.MAX_LISTING_PAGES):
                 response = await client.get(url, headers=headers)
                 data = response.json()
-
-                if isinstance(data, list):
-                    for item in data:
-                        groups.append(_group_info_from_okta(item))
+                if not isinstance(data, list):
+                    raise DirectoryPageError
+                groups.extend(_group_info_from_okta(item) for item in data)
                 url = _next_url_from_link_header(getattr(response, "headers", {}).get("link"))
-
-        return groups
+                if not url:
+                    return groups
+        raise DirectoryPageLimitError(self.MAX_LISTING_PAGES)
 
     async def test_connection(self) -> tuple[bool, str]:
         """Test directory connectivity (API mode) or report N/A for token_claim."""
@@ -113,6 +122,8 @@ class OktaAdapter(OIDCGroupAdapter):
         base, headers = self._api_base_and_headers()
         if base is None:
             return False, "Okta domain not configured (groups.okta_domain)"
+        if headers is None and self._api_token().unreadable:
+            return False, unreadable_credential_message(credential="Okta API token")
         if headers is None:
             env = self._provider.groups.api_token_env or "groups.api_token_env"
             return False, (
@@ -138,16 +149,20 @@ class OktaAdapter(OIDCGroupAdapter):
             )
             return False, idp_failure_message(exc, service="Okta Groups API")
 
+    def _api_token(self) -> ResolvedCredential:
+        """The Management API token: the secret store first, then the env var."""
+        return resolve_credential(
+            secret_path=self._provider.groups.api_token_path,
+            env_name=self._provider.groups.api_token_env,
+            secrets=self._secrets,
+        )
+
     def _api_base_and_headers(self) -> tuple[str | None, dict[str, str] | None]:
         base = _normalize_okta_api_base(self._provider.groups.okta_domain)
         if not base:
             return None, None
 
-        token = resolve_credential(
-            secret_path=self._provider.groups.api_token_path,
-            env_name=self._provider.groups.api_token_env,
-            secrets=self._secrets,
-        )
+        token = self._api_token().value
         if not token:
             return base, None
         return base, {"Authorization": f"SSWS {token}", "Accept": "application/json"}

@@ -52,7 +52,7 @@ from typing import Any
 
 from scalo.logger import logger
 
-from dfe_engine.auth.oidc.idp_errors import describe_idp_error
+from dfe_engine.http_errors import describe_idp_error
 
 # This is a non-fatal side channel called inside interactive API requests
 # (org create), so an unreachable fork must cost seconds, not the

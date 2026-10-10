@@ -30,7 +30,9 @@ def _handler_for(*, idp: LocalIdp) -> type[BaseHTTPRequestHandler]:
 
         def do_GET(self) -> None:
             """Serve the discovery document and the userinfo endpoint."""
-            if self.path == "/.well-known/openid-configuration":
+            if self.path == "/.well-known/openid-configuration" and idp.discovery_body is not None:
+                self._reply(body=idp.discovery_body, status=200)
+            elif self.path == "/.well-known/openid-configuration":
                 metadata = {"issuer": idp.base_url, "token_endpoint": f"{idp.base_url}/token"}
                 if idp.advertise_userinfo:
                     metadata["userinfo_endpoint"] = f"{idp.base_url}/userinfo"
@@ -47,10 +49,14 @@ def _handler_for(*, idp: LocalIdp) -> type[BaseHTTPRequestHandler]:
 
 
 class LocalIdp:
-    """An OIDC provider on 127.0.0.1 whose userinfo response each test configures."""
+    """An OIDC provider on 127.0.0.1 whose userinfo response each test configures.
+
+    ``discovery_body``, when set, is served with 200 in place of the discovery document.
+    """
 
     def __init__(self) -> None:
         self.advertise_userinfo = True
+        self.discovery_body: str | None = None
         self.userinfo_body = "{}"
         self.userinfo_status = 200
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), _handler_for(idp=self))

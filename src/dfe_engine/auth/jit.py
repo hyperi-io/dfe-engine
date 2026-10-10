@@ -25,9 +25,9 @@ from dfe_engine.auth.audit import (
 from dfe_engine.auth.groups import Group, GroupStore
 from dfe_engine.auth.membership import linked_groups, linked_providers
 from dfe_engine.auth.models import AuthenticationError, Scope, ScopedGrant, platform_grants
-from dfe_engine.auth.oidc.idp_errors import describe_idp_error
 from dfe_engine.auth.protected_accounts import resolve_floor
 from dfe_engine.auth.store_names import VALID_NAME
+from dfe_engine.http_errors import describe_idp_error
 
 # Platform teams, broadest first; only a role granted at SYSTEM scope earns one.
 _ROLE_TO_TEAM = {

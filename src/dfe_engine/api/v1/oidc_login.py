@@ -52,8 +52,8 @@ from dfe_engine.auth.jit import (
     JitIdentityCollisionError,
     JitSubjectUnusableError,
 )
-from dfe_engine.auth.oidc.idp_errors import describe_idp_error
 from dfe_engine.auth.sessions import session_claims, token_lifetime
+from dfe_engine.http_errors import describe_idp_error
 from dfe_engine.settings import DFESettings, is_dev_posture
 
 router = APIRouter(prefix="/auth/oidc", tags=["OIDC Login"])
@@ -283,8 +283,10 @@ async def oidc_callback(
                 detail={"code": exc.reason, "message": str(exc)},
             ) from exc
         except Exception as exc:
-            # A token minted with no account behind it cannot be disabled locally.
-            logger.exception("JIT provisioning failed", user_id=identity.subject)
+            # A token minted with no account behind it cannot be disabled locally; the text names store paths, so only its class is logged.
+            logger.error(
+                "JIT provisioning failed", user_id=identity.subject, **describe_idp_error(exc)
+            )
             audit_jit_failed(identity.subject, exc)
             raise HTTPException(
                 status_code=503,

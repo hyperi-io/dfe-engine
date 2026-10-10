@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from scalo.logger import logger
 
-from dfe_engine.auth.oidc.idp_errors import describe_idp_error
+from dfe_engine.http_errors import describe_idp_error
 
 
 def audit_login_success(

@@ -29,8 +29,11 @@ def _handler_for(*, okta: LocalOkta) -> type[BaseHTTPRequestHandler]:
                 return
             index = int(parse_qs(split.query).get("page", ["0"])[0])
             okta.pages_requested.append(index)
+            body: object
             if okta.fail_page == index:
                 status, body = okta.fail_status, okta.fail_body
+            elif okta.malformed_page == index:
+                status, body = 200, {"errorSummary": "not a page of groups"}
             else:
                 status, body = 200, okta.pages[index]
             encoded = json.dumps(body).encode("utf-8")
@@ -53,8 +56,9 @@ class LocalOkta:
 
     ``pages`` holds the group objects of each page, and every page but the last
     links the next in a ``Link`` header. ``fail_page`` is the index of a page that
-    answers ``fail_status`` and ``fail_body`` instead. ``pages_requested`` records
-    the index of each request.
+    answers ``fail_status`` and ``fail_body`` instead, and ``malformed_page`` the
+    index of one that answers 200 with an object rather than a list of groups.
+    ``pages_requested`` records the index of each request.
     """
 
     def __init__(self, *, pages: list[list[dict[str, Any]]]) -> None:
@@ -62,6 +66,7 @@ class LocalOkta:
         self.fail_page: int | None = None
         self.fail_status = 500
         self.fail_body: dict[str, Any] = {}
+        self.malformed_page: int | None = None
         self.pages_requested: list[int] = []
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), _handler_for(okta=self))
         self._thread = threading.Thread(daemon=True, target=self._server.serve_forever)

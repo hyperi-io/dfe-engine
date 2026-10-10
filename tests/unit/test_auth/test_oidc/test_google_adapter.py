@@ -7,16 +7,23 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 import os
+from typing import Any
 
 import pytest
 from scalo.logger import logger
 
+from dfe_engine.auth.oidc.adapters.base import (
+    DirectoryCredentialError,
+    DirectoryNotConfiguredError,
+    DirectoryPageLimitError,
+    NoDirectoryListingError,
+)
 from dfe_engine.auth.oidc.adapters.google import GoogleAdapter
-from dfe_engine.auth.oidc.idp_errors import DirectoryNotConfiguredError
 from dfe_engine.auth.oidc.models import GroupInfo, GroupResolutionConfig, OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.rp import OidcRelyingParty
 from tests.unit.test_auth.test_oidc.local_cloud_identity import LocalCloudIdentity
+from tests.unit.test_auth.test_oidc.unreachable_store import UnreachableSecretStore
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -181,10 +188,11 @@ class TestResolveUserGroupsMissingCredentials:
 
 
 class TestListAllGroupsMissingCredentials:
-    async def test_refuses_to_list_when_no_credentials(self) -> None:
+    async def test_no_service_account_has_no_directory_to_list(self) -> None:
+        """The default: each login reads its own groups, which is no fault to report."""
         provider = _make_provider(service_account_json_env="")
         adapter = GoogleAdapter(provider)
-        with pytest.raises(DirectoryNotConfiguredError):
+        with pytest.raises(NoDirectoryListingError):
             await adapter.list_all_groups()
 
     async def test_refuses_to_list_when_env_var_missing(self) -> None:
@@ -221,6 +229,102 @@ class TestConnection:
         success, message = await GoogleAdapter(_make_provider()).test_connection()
         assert success is False
         assert "service account" in message.lower()
+
+
+def _stored_service_account_provider() -> OIDCProvider:
+    """A Google provider whose service account JSON is held only in the secret store."""
+    return OIDCProvider(
+        type="google",
+        issuer="https://accounts.google.com",
+        groups=GroupResolutionConfig(
+            mode="api", service_account_json_path="oidc/acme/groups_service_account_json"
+        ),
+    )
+
+
+class TestSecretStoreDidNotAnswer:
+    """A service account whose secret store is down exists all the same: an error, not 'not configured'."""
+
+    async def test_the_listing_fails_as_an_error_and_the_login_lookup_still_answers(self):
+        adapter = GoogleAdapter(
+            _stored_service_account_provider(), secrets=UnreachableSecretStore()
+        )
+
+        with pytest.raises(DirectoryCredentialError):
+            await adapter.list_all_groups()
+        assert await adapter.resolve_user_groups("user@example.com") == []
+
+    async def test_the_connection_test_names_the_secret_store(self):
+        adapter = GoogleAdapter(
+            _stored_service_account_provider(), secrets=UnreachableSecretStore()
+        )
+
+        ok, message = await adapter.test_connection()
+
+        assert ok is False
+        assert "secret store did not answer" in message
+        assert "resolves to nothing" not in message
+
+
+class TestServiceAccountFailuresLogNoText:
+    """The parser's and google-auth's text can quote the service account, so only the class is logged."""
+
+    @pytest.mark.parametrize(
+        ("service_account", "event", "error_type"),
+        [
+            ("not-valid-json", "Could not parse service account JSON", "JSONDecodeError"),
+            (
+                '{"type": "service_account"}',
+                "Failed to build Google Admin SDK service",
+                "MalformedError",
+            ),
+        ],
+        ids=["unparseable", "does-not-build"],
+    )
+    def test_a_service_account_that_does_not_build_logs_its_class(
+        self, audit_events, monkeypatch, service_account, event, error_type
+    ):
+        monkeypatch.setenv("DFE_GOOGLE_SA_JSON", service_account)
+
+        assert GoogleAdapter(_make_provider())._get_service() is None
+
+        (line,) = [e for e in audit_events if e["event"] == event]
+        assert "error" not in line
+        assert line["error_type"] == error_type
+
+
+class _EndlessDirectory:
+    """A Directory API client whose group listing names a next page until ``pages`` have been served."""
+
+    def __init__(self, *, pages: int) -> None:
+        self.pages = pages
+        self.served = 0
+
+    def groups(self) -> _EndlessDirectory:
+        return self
+
+    def list(self, **_kwargs: Any) -> _EndlessDirectory:
+        return self
+
+    def execute(self) -> dict[str, Any]:
+        self.served += 1
+        page: dict[str, Any] = {
+            "groups": [{"id": f"g{self.served}", "name": f"group {self.served}"}]
+        }
+        if self.served < self.pages:
+            page["nextPageToken"] = str(self.served)
+        return page
+
+
+class TestDirectoryListingPageLimit:
+    def test_a_listing_still_paging_at_the_limit_is_abandoned(self):
+        adapter = GoogleAdapter(_make_provider())
+        adapter.MAX_LISTING_PAGES = 3
+        directory = _EndlessDirectory(pages=10)
+
+        with pytest.raises(DirectoryPageLimitError):
+            adapter._fetch_all_groups_sync(directory)
+        assert directory.served == 3
 
 
 # ---------------------------------------------------------------------------

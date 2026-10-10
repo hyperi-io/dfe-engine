@@ -34,7 +34,7 @@ from pydantic import BaseModel
 from scalo.logger import logger
 
 from dfe_engine.auth.oidc.credential_env import resolve_credential
-from dfe_engine.auth.oidc.idp_errors import describe_idp_error
+from dfe_engine.http_errors import describe_idp_error
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -257,12 +257,12 @@ class OidcRelyingParty:
                 value=provider.client_id,
                 env_name=provider.client_id_env,
                 secrets=secrets,
-            )
+            ).value
             client_secret = resolve_credential(
                 secret_path=provider.client_secret_path,
                 env_name=provider.client_secret_env,
                 secrets=secrets,
-            )
+            ).value
             self._oauth.register(
                 name=name,
                 # Authlib treats an unset credential as None, not as an empty string.

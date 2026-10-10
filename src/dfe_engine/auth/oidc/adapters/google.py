@@ -32,15 +32,21 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from scalo.logger import logger
 
-from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
-from dfe_engine.auth.oidc.credential_env import resolve_credential
-from dfe_engine.auth.oidc.idp_errors import (
+from dfe_engine.auth.oidc.adapters.base import (
     DirectoryCredentialError,
+    DirectoryCredentialUnreadableError,
     DirectoryNotConfiguredError,
-    describe_idp_error,
-    idp_failure_message,
+    DirectoryPageLimitError,
+    NoDirectoryListingError,
+    OIDCGroupAdapter,
+)
+from dfe_engine.auth.oidc.credential_env import (
+    ResolvedCredential,
+    resolve_credential,
+    unreadable_credential_message,
 )
 from dfe_engine.auth.oidc.models import GroupInfo, OIDCProvider
+from dfe_engine.http_errors import describe_idp_error, idp_failure_message
 
 if TYPE_CHECKING:
     from dfe_engine.secrets import DfeSecrets
@@ -138,16 +144,29 @@ class GoogleAdapter(OIDCGroupAdapter):
             List of GroupInfo.
 
         Raises:
-            DirectoryNotConfiguredError: No service account is configured.
+            NoDirectoryListingError: No service account is configured, which is the
+                default: each login reads its own groups with the user's token.
+            DirectoryNotConfiguredError: A service account is configured but
+                resolves to nothing.
+            DirectoryCredentialUnreadableError: The service account's secret store
+                did not answer.
             DirectoryCredentialError: A service account is configured but does not
                 build a client. ``_get_service`` logs why.
+            DirectoryPageLimitError: Google still handed out a page token at the
+                page limit.
             Exception: Whatever the Directory API client raised. A failed listing
                 is never returned as an empty one: group sync would record it as a
                 directory with no groups.
         """
         service = self._get_service()
         if service is None:
-            if not self._service_account_json():
+            groups = self._provider.groups
+            if not (groups.service_account_json_path) and not (groups.service_account_json_env):
+                raise NoDirectoryListingError
+            service_account = self._service_account_json()
+            if service_account.unreadable:
+                raise DirectoryCredentialUnreadableError
+            if not service_account.value:
                 raise DirectoryNotConfiguredError
             raise DirectoryCredentialError
 
@@ -168,7 +187,10 @@ class GoogleAdapter(OIDCGroupAdapter):
                 "from Cloud Identity with the user's own token, so there is no "
                 "directory credential to test"
             )
-        if not self._service_account_json():
+        service_account = self._service_account_json()
+        if service_account.unreadable:
+            return False, unreadable_credential_message(credential="Google service account JSON")
+        if not service_account.value:
             return False, (
                 "A service account is configured but resolves to nothing: send it as "
                 "'groups.service_account_json' to the provider API, or set the env var "
@@ -310,7 +332,7 @@ class GoogleAdapter(OIDCGroupAdapter):
 
         return [GroupInfo(id=g["id"], name=g["name"], email=g.get("email", "")) for g in raw]
 
-    def _service_account_json(self) -> str:
+    def _service_account_json(self) -> ResolvedCredential:
         """The service account JSON: the secret store first, then the env var."""
         return resolve_credential(
             secret_path=self._provider.groups.service_account_json_path,
@@ -325,7 +347,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             A googleapiclient Resource object, or None if no service account is
             configured or its JSON does not build credentials.
         """
-        raw_json = self._service_account_json()
+        raw_json = self._service_account_json().value
         if not raw_json:
             return None
 
@@ -335,7 +357,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             logger.warning(
                 "Could not parse service account JSON",
                 provider=self._provider.issuer,
-                error=str(exc),
+                **describe_idp_error(exc),
             )
             return None
 
@@ -362,7 +384,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             logger.warning(
                 "Failed to build Google Admin SDK service",
                 provider=self._provider.issuer,
-                error=str(exc),
+                **describe_idp_error(exc),
             )
             return None
 
@@ -378,12 +400,16 @@ class GoogleAdapter(OIDCGroupAdapter):
 
         Returns:
             List of raw group dicts from the API response.
+
+        Raises:
+            DirectoryPageLimitError: Google still handed out a page token at the
+                page limit.
         """
         groups: list[dict[str, Any]] = []
         domain = self._provider.groups.domain
         page_token: str | None = None
 
-        while True:
+        for _page in range(self.MAX_LISTING_PAGES):
             kwargs: dict[str, Any] = {"maxResults": 200}
             if domain:
                 kwargs["domain"] = domain
@@ -395,9 +421,8 @@ class GoogleAdapter(OIDCGroupAdapter):
 
             page_token = response.get("nextPageToken")
             if not page_token:
-                break
-
-        return groups
+                return groups
+        raise DirectoryPageLimitError(self.MAX_LISTING_PAGES)
 
     def _fetch_user_groups_sync(self, service: Any, user_key: str) -> list[dict[str, Any]]:
         """Fetch the groups a single user belongs to, handling pagination.

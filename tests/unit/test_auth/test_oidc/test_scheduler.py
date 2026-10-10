@@ -19,7 +19,7 @@ import pytest
 from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
-from dfe_engine.auth.oidc.scheduler import sync_is_due, sync_outcome
+from dfe_engine.auth.oidc.scheduler import sync_is_due
 from tests.unit.test_auth.factories import (
     make_group_store,
     make_oidc_provider,
@@ -29,9 +29,7 @@ from tests.unit.test_auth.factories import (
 from tests.unit.test_auth.test_oidc.scheduler_cases import (
     NOW,
     SYNC_IS_DUE_CASES,
-    SYNC_OUTCOME_CASES,
     SyncIsDueCase,
-    SyncOutcomeCase,
 )
 
 DIRECTORY_ENV = "DFE_TEST_SCHEDULER_DIRECTORY"
@@ -93,14 +91,6 @@ class TestSyncIsDue:
     )
     def test_matches_expected(self, case: SyncIsDueCase):
         assert sync_is_due(now=NOW, provider=case["provider"]) == case["expected_due"]
-
-
-class TestSyncOutcome:
-    @pytest.mark.parametrize(
-        "case", SYNC_OUTCOME_CASES, ids=[case["id"] for case in SYNC_OUTCOME_CASES]
-    )
-    def test_matches_expected(self, case: SyncOutcomeCase):
-        assert sync_outcome(result=case["result"]) == case["expected_outcome"]
 
 
 class TestOidcSyncScheduler:
@@ -219,3 +209,33 @@ class TestOidcSyncScheduler:
                 {},
                 {"mock-dir": "error"},
             )
+
+        async def test_a_failed_run_logs_the_failures_class_not_its_text(
+            self,
+            audit_events: list[dict],
+            broken_directory: None,
+            group_store: GroupStore,
+            registry: OIDCProviderRegistry,
+        ):
+            registry.create(name="mock-dir", provider=_mock_directory_provider())
+            scheduler = make_oidc_sync_scheduler(group_store=group_store, registry=registry)
+
+            await scheduler.run_once(now=NOW)
+
+            (line,) = [e for e in audit_events if e["event"] == "OIDC scheduled group sync failing"]
+            assert "error" not in line
+            assert line["error_type"]
+            assert str(group_store._dir) not in json.dumps(line, default=str)
+
+        async def test_a_google_provider_with_no_service_account_is_its_own_outcome(
+            self, group_store: GroupStore, registry: OIDCProviderRegistry
+        ):
+            google = make_oidc_provider(
+                type="google", groups={"enrich_on_login": True, "mode": "api"}
+            )
+            registry.create(name="google", provider=google)
+            scheduler = make_oidc_sync_scheduler(group_store=group_store, registry=registry)
+
+            outcomes = await scheduler.run_once(now=datetime.now(UTC))
+
+            assert outcomes == {"google": "user_token"}

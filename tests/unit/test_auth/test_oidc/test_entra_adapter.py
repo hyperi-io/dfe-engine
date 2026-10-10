@@ -18,14 +18,18 @@ Tests that require a live Entra / Microsoft Graph endpoint are marked
 
 import pytest
 
+from dfe_engine.auth.oidc.adapters.base import (
+    DirectoryCredentialError,
+    DirectoryNotConfiguredError,
+)
 from dfe_engine.auth.oidc.adapters.entra import EntraAdapter, graph_credentials
-from dfe_engine.auth.oidc.idp_errors import DirectoryNotConfiguredError
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
 from tests.unit.test_auth.test_oidc.entra_adapter_cases import (
     GRAPH_CREDENTIALS_CASES,
     GraphCredentialsCase,
 )
 from tests.unit.test_auth.test_oidc.local_graph import LocalGraph
+from tests.unit.test_auth.test_oidc.unreachable_store import UnreachableSecretStore
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -289,6 +293,61 @@ class TestTestConnectionCredentialState:
             "and valid; the engine log has the reason"
         )
         assert "not configured" not in message
+
+
+def _stored_secret_provider() -> OIDCProvider:
+    """An api-mode Entra provider whose client secret is held only in the secret store."""
+    return OIDCProvider(
+        type="entra_id",
+        issuer="https://login.microsoftonline.com/test-tenant/v2.0",
+        client_id="app-id",
+        groups=GroupResolutionConfig(
+            client_secret_path="oidc/acme/groups_client_secret",
+            mode="api",
+            tenant_id="test-tenant",
+        ),
+    )
+
+
+class TestSecretStoreDidNotAnswer:
+    """A client secret whose secret store is down exists all the same: an error, not 'not configured'."""
+
+    async def test_the_listing_fails_as_an_error_and_the_login_lookup_still_answers(self):
+        adapter = EntraAdapter(_stored_secret_provider(), secrets=UnreachableSecretStore())
+
+        with pytest.raises(DirectoryCredentialError):
+            await adapter.list_all_groups()
+        assert await adapter.resolve_user_groups("some-user-oid") == []
+
+    async def test_the_connection_test_names_the_secret_store(self):
+        adapter = EntraAdapter(_stored_secret_provider(), secrets=UnreachableSecretStore())
+
+        ok, message = await adapter.test_connection()
+
+        assert ok is False
+        assert "secret store did not answer" in message
+        assert "not configured" not in message
+
+
+class TestEntraUnreachable:
+    """A token request that got no answer blames the network, never the configured credential."""
+
+    async def test_the_connection_test_says_entra_could_not_be_reached_and_logins_still_answer(
+        self, entra_unreachable, audit_events, monkeypatch
+    ):
+        adapter = EntraAdapter(_make_provider())
+
+        for name in ("ENTRA_CLIENT_ID", "ENTRA_TENANT_ID", "ENTRA_CLIENT_SECRET"):
+            monkeypatch.setenv(name, "set")
+
+        ok, message = await adapter.test_connection()
+
+        assert ok is False
+        assert "could not be reached" in message
+        assert "could not use the configured credential" not in message
+        (line,) = [e for e in audit_events if e.get("operation") == "token"]
+        assert line["transport_failure"] == "connection_refused"
+        assert await adapter.resolve_user_groups("some-user-oid") == []
 
 
 # ---------------------------------------------------------------------------

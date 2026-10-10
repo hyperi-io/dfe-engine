@@ -687,6 +687,10 @@ def test_callback_refuses_a_login_the_account_store_cannot_record(client, app, a
     assert [e["error_type"] for e in failed] == ["AccountExistsError"]
     assert "error" not in failed[0]
     assert not [e for e in audit_events if e["event"] == "auth.login.denied"]
+    # No line, the operational one included, carries the exception or the store path it names.
+    logged = json.dumps(audit_events, default=str)
+    assert "Account already exists" not in logged
+    assert str(accounts_dir) not in logged
 
 
 CALLBACK_SENTINEL = "callback.sentinel.9c1e"
@@ -696,14 +700,16 @@ CALLBACK_SENTINEL = "callback.sentinel.9c1e"
     ("error", "reason"),
     [
         ("access_denied", "access_denied"),
-        (f"user {CALLBACK_SENTINEL} may not sign in", "OAuthError"),
+        ("login_required", "login_required"),
+        ("attacker_chosen.reason-1", "unrecognised"),
+        (f"user {CALLBACK_SENTINEL} may not sign in", "unrecognised"),
     ],
-    ids=["a-code", "prose-in-the-code-slot"],
+    ids=["a-code", "an-oidc-code", "a-code-the-caller-chose", "prose-in-the-code-slot"],
 )
 def test_a_refused_callback_records_the_oauth_code_never_the_description(
     client, app, audit_events, error, reason
 ):
-    """The callback's own query string reaches Authlib's error text, so only the code is kept."""
+    """The callback's own query string reaches Authlib's error, so only a code the specs define is kept."""
     app.state.oidc_provider_registry.create(
         "idp", OIDCProvider(type="generic", issuer="https://idp.example", client_id="c")
     )
@@ -721,4 +727,4 @@ def test_a_refused_callback_records_the_oauth_code_never_the_description(
     assert denied["reason"] == reason
     (failed,) = [e for e in audit_events if e["event"] == "OIDC callback failed"]
     assert failed["error_type"] == "OAuthError"
-    assert failed.get("code") == (error if reason == error else None)
+    assert failed["code"] == reason

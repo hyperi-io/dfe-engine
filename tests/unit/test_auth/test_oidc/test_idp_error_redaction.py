@@ -22,7 +22,7 @@ from typing import Any
 
 import httpx
 import pytest
-from authlib.integrations.base_client import OAuthError
+from authlib.integrations.base_client import MismatchingStateError, OAuthError
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from google.auth.credentials import AnonymousCredentials
@@ -34,15 +34,15 @@ from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.adapters.entra import EntraAdapter
 from dfe_engine.auth.oidc.adapters.google import GoogleAdapter
 from dfe_engine.auth.oidc.adapters.okta import OktaAdapter
-from dfe_engine.auth.oidc.idp_errors import (
-    describe_idp_error,
-    idp_failure_message,
-    provider_error_code,
-)
 from dfe_engine.auth.oidc.models import GroupInfo, GroupResolutionConfig, OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.rp import fill_from_userinfo_endpoint
 from dfe_engine.auth.oidc.sync import sync_provider
+from dfe_engine.http_errors import (
+    describe_idp_error,
+    idp_failure_message,
+    provider_error_code,
+)
 from tests.support.refusing_api import refusing_api
 from tests.unit.test_auth.factories import make_oauth_client
 from tests.unit.test_auth.test_oidc.local_cloud_identity import LocalCloudIdentity
@@ -174,6 +174,52 @@ class TestProviderErrorCode:
         error = OAuthError(error="access_denied", description=f"{SENTINEL} may not sign in")
 
         assert describe_idp_error(error) == {"code": "access_denied", "error_type": "OAuthError"}
+
+    @pytest.mark.parametrize(
+        ("exc", "code"),
+        [
+            (OAuthError(error="login_required"), "login_required"),
+            (OAuthError(error="invalid_grant"), "invalid_grant"),
+            (OAuthError(error="attacker_chosen.reason-1"), "unrecognised"),
+            (MismatchingStateError(), "mismatching_state"),
+            (OAuthError(description='Missing "state" parameter'), "oauth_error"),
+        ],
+        ids=[
+            "oidc-code",
+            "token-endpoint-code",
+            "caller-chosen",
+            "library-class",
+            "library-default",
+        ],
+    )
+    def test_an_oauth_code_outside_the_standards_is_unrecognised(
+        self, exc: OAuthError, code: str
+    ) -> None:
+        """A callback's caller chooses the code, so only the specs' codes and the library's own pass."""
+        assert describe_idp_error(exc)["code"] == code
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            json.JSONDecodeError("Expecting value", "<html>", 0),
+            RuntimeError(f"unexpected answer about {SENTINEL}"),
+        ],
+        ids=["body-not-json", "no-socket-error"],
+    )
+    def test_an_answer_that_arrived_is_not_called_unreachable(self, exc: BaseException) -> None:
+        message = idp_failure_message(exc, service="The issuer's discovery endpoint")
+
+        assert "could not be reached" not in message
+        assert message == (
+            "The issuer's discovery endpoint gave no usable answer; the engine log has the reason"
+        )
+
+    def test_a_failure_with_a_socket_error_under_it_is_unreachable(self) -> None:
+        exc = _caused_by(httpx.ConnectError("x"), ConnectionRefusedError())
+
+        message = idp_failure_message(exc, service="The directory API")
+
+        assert message == "The directory API could not be reached; the engine log has the reason"
 
 
 # ---------------------------------------------------------------------------
@@ -473,7 +519,8 @@ class TestGoogleTokenRefusalClass:
         message = idp_failure_message(exc, service="The directory API")
 
         assert ("could not use the configured credential" in message) is blames_credential
-        assert ("could not be reached" in message) is not blames_credential
+        # The token endpoint answered either way, so neither reads as unreachable.
+        assert "could not be reached" not in message
 
     def test_the_log_fields_carry_the_oauth_code_not_its_description(self) -> None:
         exc = RefreshError(f"invalid_grant: {SENTINEL}", TOKEN_REFUSED)
@@ -670,6 +717,106 @@ class TestSyncIncompleteListing:
         assert (line["status"], line["code"]) == (403, "forbidden")
 
 
+def _assert_unread_listing(
+    *, registry: OIDCProviderRegistry, result: dict, group_store: GroupStore, words: str
+) -> None:
+    """The sync failed with ``words`` in its error and stored no group from the listing."""
+    stored = registry.get("sso")
+    assert stored is not None
+    assert stored.last_sync_status == "error"
+    assert stored.sync_error == result["error"]
+    assert words in result["error"]
+    assert (result["created"], result["updated"], result["total"]) == (0, 0, 0)
+    assert group_store.list() == []
+
+
+def _numbered_okta_pages(count: int) -> list[list[dict[str, Any]]]:
+    """``count`` Okta pages of one group each."""
+    return [
+        [{"id": f"00g{index}", "profile": {"name": f"group-{index}"}}] for index in range(count)
+    ]
+
+
+class TestSyncUnreadableListing:
+    """A 200 page without the listing's shape, or a listing that never ends, is a failed sync."""
+
+    async def test_an_okta_page_that_is_not_a_list_is_a_failed_sync(self, tmp_path) -> None:
+        okta = LocalOkta(pages=_numbered_okta_pages(3))
+        okta.malformed_page = 1
+        okta.start()
+        registry = _sync_registry(tmp_path)
+        group_store = GroupStore(tmp_path / "groups")
+        try:
+            result = await sync_provider(
+                "sso", registry, group_store, adapter=_okta_adapter(okta.base_url)
+            )
+        finally:
+            okta.stop()
+
+        assert okta.pages_requested == [0, 1]
+        _assert_unread_listing(
+            registry=registry, result=result, group_store=group_store, words="not a list of groups"
+        )
+
+    async def test_a_graph_page_with_no_value_list_is_a_failed_sync(self, tmp_path) -> None:
+        graph = LocalGraph()
+        graph.refuse[TENANT] = (200, {"error": {"code": "not a page"}})
+        graph.start()
+        registry = _sync_registry(tmp_path)
+        group_store = GroupStore(tmp_path / "groups")
+        try:
+            result = await sync_provider(
+                "sso", registry, group_store, adapter=_entra_adapter(graph.base_url)
+            )
+        finally:
+            graph.stop()
+
+        _assert_unread_listing(
+            registry=registry, result=result, group_store=group_store, words="not a list of groups"
+        )
+
+    async def test_an_okta_listing_still_paging_at_the_limit_is_a_failed_sync(
+        self, tmp_path
+    ) -> None:
+        okta = LocalOkta(pages=_numbered_okta_pages(6))
+        okta.start()
+        adapter = _okta_adapter(okta.base_url)
+        adapter.MAX_LISTING_PAGES = 3
+        registry = _sync_registry(tmp_path)
+        group_store = GroupStore(tmp_path / "groups")
+        try:
+            result = await sync_provider("sso", registry, group_store, adapter=adapter)
+        finally:
+            okta.stop()
+
+        assert okta.pages_requested == [0, 1, 2]
+        _assert_unread_listing(
+            registry=registry, result=result, group_store=group_store, words="after 3"
+        )
+
+    async def test_a_graph_listing_still_paging_at_the_limit_is_a_failed_sync(
+        self, tmp_path
+    ) -> None:
+        graph = LocalGraph()
+        graph.pages[TENANT] = [
+            [{"id": f"g{index}", "displayName": f"g{index}"}] for index in range(6)
+        ]
+        graph.start()
+        adapter = _entra_adapter(graph.base_url)
+        adapter.MAX_LISTING_PAGES = 3
+        registry = _sync_registry(tmp_path)
+        group_store = GroupStore(tmp_path / "groups")
+        try:
+            result = await sync_provider("sso", registry, group_store, adapter=adapter)
+        finally:
+            graph.stop()
+
+        assert graph.principals == [TENANT, TENANT, TENANT]
+        _assert_unread_listing(
+            registry=registry, result=result, group_store=group_store, words="after 3"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Group sync: a credential that is set but gives no access is a failed sync
 # ---------------------------------------------------------------------------
@@ -726,6 +873,32 @@ class TestSyncCredentialGivesNoAccess:
 
         _assert_credential_failed_sync(
             audit_events=audit_events, group_store=group_store, registry=registry, result=result
+        )
+
+    async def test_an_entra_that_cannot_be_reached_blames_the_network_not_the_secret(
+        self, tmp_path, audit_events: list[dict], monkeypatch: pytest.MonkeyPatch, entra_unreachable
+    ) -> None:
+        monkeypatch.setenv("DFE_TEST_ENTRA_SECRET", "a-secret-entra-never-sees")
+        provider = OIDCProvider(
+            type="entra_id",
+            issuer="https://login.microsoftonline.com/test-tenant/v2.0",
+            client_id="app-id",
+            groups=GroupResolutionConfig(
+                mode="api", tenant_id="test-tenant", client_secret_env="DFE_TEST_ENTRA_SECRET"
+            ),
+        )
+        registry = _sync_registry(tmp_path)
+        group_store = GroupStore(tmp_path / "groups")
+
+        result = await sync_provider("sso", registry, group_store, adapter=EntraAdapter(provider))
+
+        stored = registry.get("sso")
+        assert stored is not None
+        assert stored.last_sync_status == "error"
+        assert "could not be reached" in result["error"]
+        assert "could not use the configured credential" not in result["error"]
+        assert failure_line(audit_events, "list_all_groups")["transport_failure"] == (
+            "connection_refused"
         )
 
     async def test_a_google_service_account_that_does_not_build_is_a_failed_sync(

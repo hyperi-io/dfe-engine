@@ -1,5 +1,6 @@
 """Tests for OIDC header authentication path in get_current_user()."""
 
+import json
 import shutil
 
 import pytest
@@ -448,6 +449,10 @@ class TestAJitFailureRefusesTheLogin:
         assert [e["error_type"] for e in failed] == ["AccountExistsError"]
         assert "error" not in failed[0]
         assert not [e for e in audit_events if e["event"] == "auth.login.denied"]
+        # No line, the operational one included, carries the exception or the store path it names.
+        logged = json.dumps(audit_events, default=str)
+        assert "Account already exists" not in logged
+        assert str(accounts_dir) not in logged
 
     def test_a_login_whose_account_cannot_be_stamped_is_a_503_and_the_retry_signs_in(
         self, client: TestClient, app, audit_events
