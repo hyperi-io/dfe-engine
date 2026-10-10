@@ -929,6 +929,42 @@ class TestResetOwnPassword:
         assert "not-the-password" not in wrong.text
         assert store.get("viewer").password_hash == before
 
+    def test_a_current_password_longer_than_bcrypt_takes_answers_as_a_wrong_one(
+        self, client, app, viewer_headers
+    ):
+        store = app.state.account_store
+        before = store.get("viewer").password_hash
+        new_password = secrets.token_urlsafe(16)
+
+        wrong = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"current_password": "not-the-password", "new_password": new_password},
+            headers=viewer_headers,
+        )
+        long = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"current_password": "x" * 73, "new_password": new_password},
+            headers=viewer_headers,
+        )
+
+        assert (long.status_code, long.json()) == (wrong.status_code, wrong.json())
+        assert long.json()["code"] == "invalid_current_password"
+        assert store.get("viewer").password_hash == before
+
+    def test_a_new_password_longer_than_bcrypt_takes_is_a_422(self, client, app, viewer_headers):
+        store = app.state.account_store
+        before = store.get("viewer").password_hash
+
+        resp = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"current_password": "test-viewer-pw", "new_password": "x" * 73},
+            headers=viewer_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert [error["field"] for error in resp.json()["errors"]] == ["new_password"]
+        assert store.get("viewer").password_hash == before
+
     def test_wrong_current_passwords_back_off(self, client, app, viewer_headers):
         store = app.state.account_store
         body = {"current_password": "not-the-password", "new_password": secrets.token_urlsafe(16)}
@@ -1083,6 +1119,20 @@ class TestResetPassword:
         assert resp.status_code == 409
         assert resp.json()["code"] == "external_account"
         assert not store.verify_password("sso-user", "should-not-apply")
+
+    def test_a_new_password_longer_than_bcrypt_takes_is_a_422(self, client, app, admin_headers):
+        store = app.state.account_store
+        before = store.get("viewer").password_hash
+
+        resp = client.post(
+            "/api/v1/auth/accounts/viewer/reset-password",
+            json={"new_password": "x" * 73},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert [error["field"] for error in resp.json()["errors"]] == ["new_password"]
+        assert store.get("viewer").password_hash == before
 
     def test_reset_password(self, client, admin_headers):
         client.post(

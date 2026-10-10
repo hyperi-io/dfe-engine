@@ -439,7 +439,7 @@ class AccountStore:
         account = self.get(username)
         if account is None:
             # Timing-safe rejection: still run bcrypt to prevent oracle attacks
-            bcrypt.checkpw(password.encode("utf-8"), _dummy_hash())
+            _checkpw(password, _dummy_hash())
             return False
 
         # An empty password never authenticates, and an account carrying the
@@ -447,12 +447,9 @@ class AccountStore:
         # bcrypt hash - reject both, timing-safely. Prevents an empty or
         # placeholder password from ever matching a stored account.
         if not password or not account.password_hash.startswith("$2"):
-            bcrypt.checkpw(password.encode("utf-8"), _dummy_hash())
+            _checkpw(password, _dummy_hash())
             return False
-        return bcrypt.checkpw(
-            password.encode("utf-8"),
-            account.password_hash.encode("utf-8"),
-        )
+        return _checkpw(password, account.password_hash.encode("utf-8"))
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -682,15 +679,12 @@ class DocuStoreAccountStore:
         """Timing-safe password check - identical semantics to the YAML store."""
         account = self.get(username)
         if account is None:
-            bcrypt.checkpw(password.encode("utf-8"), _dummy_hash())
+            _checkpw(password, _dummy_hash())
             return False
         if not password or not account.password_hash.startswith("$2"):
-            bcrypt.checkpw(password.encode("utf-8"), _dummy_hash())
+            _checkpw(password, _dummy_hash())
             return False
-        return bcrypt.checkpw(
-            password.encode("utf-8"),
-            account.password_hash.encode("utf-8"),
-        )
+        return _checkpw(password, account.password_hash.encode("utf-8"))
 
 
 # ------------------------------------------------------------------
@@ -859,7 +853,31 @@ def matches_digest(password: str, digest: str) -> bool:
     """Whether *digest* was made from *password*. An empty or non-bcrypt digest never matches."""
     if not password or not digest.startswith("$2"):
         return False
-    return bcrypt.checkpw(password.encode("utf-8"), digest.encode("utf-8"))
+    return _checkpw(password, digest.encode("utf-8"))
+
+
+def refuse_unhashable_password(password: str) -> str:
+    """Return *password* when bcrypt can hash it.
+
+    Raises:
+        ValueError: *password* is longer than :data:`BCRYPT_MAX_PASSWORD_BYTES` in UTF-8.
+    """
+    if len(password.encode("utf-8")) > BCRYPT_MAX_PASSWORD_BYTES:
+        raise ValueError(f"at most {BCRYPT_MAX_PASSWORD_BYTES} bytes, the most bcrypt hashes")
+    return password
+
+
+def _checkpw(password: str, digest: bytes) -> bool:
+    """Check *password* against *digest* with bcrypt, never raising for a long candidate.
+
+    bcrypt refuses more than 72 bytes rather than truncating, and the first 72 alone must
+    never authenticate, so a longer candidate is checked truncated for equal cost and fails.
+    """
+    candidate = password.encode("utf-8")
+    if len(candidate) > BCRYPT_MAX_PASSWORD_BYTES:
+        bcrypt.checkpw(candidate[:BCRYPT_MAX_PASSWORD_BYTES], digest)
+        return False
+    return bcrypt.checkpw(candidate, digest)
 
 
 def _now() -> str:

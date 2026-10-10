@@ -54,6 +54,7 @@ from dfe_engine.auth.accounts import (
     Account,
     AccountExistsError,
     matches_digest,
+    refuse_unhashable_password,
 )
 from dfe_engine.auth.attributes import check_attribute_depth
 from dfe_engine.auth.audit import audit_account_change, audit_login_denied
@@ -155,9 +156,7 @@ class CreateAccountRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def _within_the_hash_limit(cls, value: str) -> str:
-        if len(value.encode("utf-8")) > BCRYPT_MAX_PASSWORD_BYTES:
-            raise ValueError(f"at most {BCRYPT_MAX_PASSWORD_BYTES} bytes, the most bcrypt hashes")
-        return value
+        return refuse_unhashable_password(value)
 
 
 class UpdateAccountRequest(BaseModel):
@@ -180,8 +179,16 @@ class UpdateOwnAccountRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     new_password: str = Field(
         min_length=MIN_ADMIN_PASSWORD_LENGTH,
-        description=f"New plaintext password; at least {MIN_ADMIN_PASSWORD_LENGTH} characters",
+        description=(
+            f"New plaintext password; at least {MIN_ADMIN_PASSWORD_LENGTH} characters and "
+            f"at most {BCRYPT_MAX_PASSWORD_BYTES} bytes"
+        ),
     )
+
+    @field_validator("new_password")
+    @classmethod
+    def _within_the_hash_limit(cls, value: str) -> str:
+        return refuse_unhashable_password(value)
 
 
 class ChangeOwnPasswordRequest(ResetPasswordRequest):
