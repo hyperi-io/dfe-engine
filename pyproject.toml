@@ -208,7 +208,7 @@ markers = [
     "unit: Unit tests (no external dependencies)",
     "integration: Integration tests (require ClickHouse)",
     "e2e: End-to-end tests",
-    "live: Against a REAL system, never in CI: a deployed DFE (needs DFE_E2E_* env) or a Google Workspace (needs DFE_LIVE_GOOGLE_* env). Skipped without that env, and the full tier excludes it by name",
+    "live: Against a REAL system, never in CI: a deployed DFE (needs DFE_E2E_* env) or a Google Workspace (needs DFE_LIVE_GOOGLE_* env, or DFE_GOOGLE_SA_JSON and DFE_OIDC_GOOGLE_FIXTURE_USER for the service account path). Skipped without that env, and the full tier excludes it by name",
     "upstream: Validates the importer against LIVE external schema repos (elastic/beats etc.; network, CI-excluded)",
     "slow: Slow running tests",
     "smoke: Startup smoke tests (mandatory, every push)",
