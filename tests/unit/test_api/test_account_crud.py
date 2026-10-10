@@ -13,10 +13,19 @@ import secrets
 
 import pytest
 
+from dfe_engine.auth.accounts import Account, AccountStore
 from dfe_engine.auth.bootstrap import MIN_ADMIN_PASSWORD_LENGTH
 from tests.support.racing_stores import RacingAccountStore
 
 _PASSWORD = secrets.token_urlsafe(16)
+
+
+class _FaultingAccountStore(AccountStore):
+    """A real account store whose create fails with a ValueError that says nothing about the name."""
+
+    def create(self, username: str, password: str, **_fields: object) -> Account:
+        """Fail the create as a storage fault would."""
+        raise ValueError("store fault")
 
 
 def _short_password() -> str:
@@ -180,6 +189,18 @@ class TestCreateAccount:
         assert resp.status_code == 422, resp.text
         assert password not in resp.text
         assert app.state.account_store.get("long-pw") is None
+
+    def test_a_store_fault_is_not_answered_as_a_bad_request(self, app, client, admin_headers):
+        """Only the name rule makes a store refusal the caller's fault; anything else is the server's."""
+        app.state.account_store = _FaultingAccountStore(app.state.account_store._dir)
+
+        resp = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "fine-name", "password": _PASSWORD},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 500, resp.text
 
     def test_create_requires_admin(self, client, viewer_headers):
         resp = client.post(
@@ -908,6 +929,42 @@ class TestResetOwnPassword:
         assert "not-the-password" not in wrong.text
         assert store.get("viewer").password_hash == before
 
+    def test_a_current_password_longer_than_bcrypt_takes_answers_as_a_wrong_one(
+        self, client, app, viewer_headers
+    ):
+        store = app.state.account_store
+        before = store.get("viewer").password_hash
+        new_password = secrets.token_urlsafe(16)
+
+        wrong = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"current_password": "not-the-password", "new_password": new_password},
+            headers=viewer_headers,
+        )
+        long = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"current_password": "x" * 73, "new_password": new_password},
+            headers=viewer_headers,
+        )
+
+        assert (long.status_code, long.json()) == (wrong.status_code, wrong.json())
+        assert long.json()["code"] == "invalid_current_password"
+        assert store.get("viewer").password_hash == before
+
+    def test_a_new_password_longer_than_bcrypt_takes_is_a_422(self, client, app, viewer_headers):
+        store = app.state.account_store
+        before = store.get("viewer").password_hash
+
+        resp = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"current_password": "test-viewer-pw", "new_password": "x" * 73},
+            headers=viewer_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert [error["field"] for error in resp.json()["errors"]] == ["new_password"]
+        assert store.get("viewer").password_hash == before
+
     def test_wrong_current_passwords_back_off(self, client, app, viewer_headers):
         store = app.state.account_store
         body = {"current_password": "not-the-password", "new_password": secrets.token_urlsafe(16)}
@@ -1062,6 +1119,20 @@ class TestResetPassword:
         assert resp.status_code == 409
         assert resp.json()["code"] == "external_account"
         assert not store.verify_password("sso-user", "should-not-apply")
+
+    def test_a_new_password_longer_than_bcrypt_takes_is_a_422(self, client, app, admin_headers):
+        store = app.state.account_store
+        before = store.get("viewer").password_hash
+
+        resp = client.post(
+            "/api/v1/auth/accounts/viewer/reset-password",
+            json={"new_password": "x" * 73},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert [error["field"] for error in resp.json()["errors"]] == ["new_password"]
+        assert store.get("viewer").password_hash == before
 
     def test_reset_password(self, client, admin_headers):
         client.post(

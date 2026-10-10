@@ -26,8 +26,8 @@ from dfe_engine.auth.groups import Group, GroupStore
 from dfe_engine.auth.membership import linked_groups, linked_providers
 from dfe_engine.auth.models import AuthenticationError, Scope, ScopedGrant, platform_grants
 from dfe_engine.auth.protected_accounts import resolve_floor
-from dfe_engine.auth.store_names import VALID_NAME
 from dfe_engine.http_errors import describe_http_error
+from dfe_engine.names import VALID_NAME
 
 # Platform teams, broadest first; only a role granted at SYSTEM scope earns one.
 _ROLE_TO_TEAM = {

@@ -25196,7 +25196,7 @@
             "type": "string",
             "minLength": 12,
             "title": "New Password",
-            "description": "New plaintext password; at least 12 characters"
+            "description": "New plaintext password; at least 12 characters and at most 72 bytes"
           },
           "current_password": {
             "type": "string",
@@ -25907,6 +25907,8 @@
         "properties": {
           "name": {
             "type": "string",
+            "maxLength": 128,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$",
             "title": "Name",
             "description": "Unique human-readable key name"
           },
@@ -25947,6 +25949,8 @@
         "properties": {
           "username": {
             "type": "string",
+            "maxLength": 128,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$",
             "title": "Username",
             "description": "Unique account name"
           },
@@ -25954,7 +25958,7 @@
             "type": "string",
             "minLength": 12,
             "title": "Password",
-            "description": "Plaintext password (bcrypt-hashed before storage); at least 12 characters"
+            "description": "Plaintext password (bcrypt-hashed before storage); at least 12 characters and at most 72 bytes"
           },
           "email": {
             "type": "string",
@@ -26049,6 +26053,8 @@
         "properties": {
           "name": {
             "type": "string",
+            "maxLength": 128,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$",
             "title": "Name",
             "description": "Unique group name"
           },
@@ -26140,6 +26146,8 @@
         "properties": {
           "name": {
             "type": "string",
+            "maxLength": 128,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$",
             "title": "Name",
             "description": "Unique provider name (used as filename stem)"
           },
@@ -26258,6 +26266,8 @@
         "properties": {
           "name": {
             "type": "string",
+            "maxLength": 128,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$",
             "title": "Name",
             "description": "Unique role name"
           },
@@ -28208,6 +28218,8 @@
           },
           "name": {
             "type": "string",
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]{1,128}$",
             "title": "Name",
             "description": "Hunt file name (YAML stem); must be unique"
           }
@@ -30439,7 +30451,22 @@
             "default": ""
           },
           "last_sync_status": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "",
+                  "ok",
+                  "error",
+                  "not_configured",
+                  "user_token"
+                ]
+              },
+              {
+                "type": "string",
+                "pattern": "^partial: "
+              }
+            ],
             "title": "Last Sync Status",
             "default": ""
           },
@@ -32952,8 +32979,24 @@
             "title": "Last Sync At"
           },
           "last_sync_status": {
-            "type": "string",
-            "title": "Last Sync Status"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "",
+                  "ok",
+                  "error",
+                  "not_configured",
+                  "user_token"
+                ]
+              },
+              {
+                "type": "string",
+                "pattern": "^partial: "
+              }
+            ],
+            "title": "Last Sync Status",
+            "description": "How the last group sync ended: empty before the first, ok, error (sync_error says why), not_configured (no directory credential), user_token (each login reads its own groups, so there is no directory to sync), or 'partial: ' followed by how many groups were skipped and why."
           },
           "sync_error": {
             "type": "string",
@@ -33365,7 +33408,7 @@
             "type": "string",
             "minLength": 12,
             "title": "New Password",
-            "description": "New plaintext password; at least 12 characters"
+            "description": "New plaintext password; at least 12 characters and at most 72 bytes"
           }
         },
         "type": "object",
@@ -33901,6 +33944,8 @@
           },
           "name": {
             "type": "string",
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]{1,128}$",
             "title": "Name",
             "description": "Rule file name (YAML stem); must be unique"
           },
@@ -41104,7 +41149,7 @@
           "groups_skipped": {
             "type": "integer",
             "title": "Groups Skipped",
-            "description": "Provider groups left unsynced: an identifier that makes no valid group name, a name held by a stored group that does not load, or a name held by a stored group not linked to that provider group. Each is counted on auth_oidc_sync_groups_skipped_total{reason}.",
+            "description": "Provider groups left unsynced: an identifier that makes no valid group name, a name held by a stored group that does not load, a name held by a stored group not linked to that provider group, or no id to link a group by. Each is counted on auth_oidc_sync_groups_skipped_total{reason}.",
             "default": 0
           },
           "error": {
@@ -41141,7 +41186,7 @@
               "skipped"
             ],
             "title": "Status",
-            "description": "How the sync ended: ok, partial (some groups skipped), error (the listing failed or the secret store holding its credential did not answer), not_configured (no directory credential), user_token (no directory to sync, which is a Google provider's default and not a fault) or skipped (disabled or not in api mode). Key on this, never on the text of error or skipped."
+            "description": "How the sync ended: ok, partial (some groups skipped), error (the listing failed, or the secret store holding its credential did not answer or refused access), not_configured (no directory credential), user_token (no directory to sync, which is a Google provider's default and not a fault) or skipped (disabled or not in api mode). Key on this, never on the text of error or skipped."
           }
         },
         "type": "object",

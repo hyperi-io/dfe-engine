@@ -483,6 +483,21 @@ class TestSyncProvider:
         shown = client.get("/api/v1/auth/oidc-providers/google-default", headers=admin_headers)
         assert (shown.json()["last_sync_status"], shown.json()["sync_error"]) == ("user_token", "")
 
+    @pytest.mark.parametrize("model", ["ProviderResponse", "OIDCProviderSummary"])
+    def test_the_spec_publishes_every_last_sync_status(self, app, model):
+        """A client learns user_token and the rest from the spec, not from a running engine."""
+        from dfe_engine.auth.oidc.sync import SYNC_NOT_CONFIGURED, SYNC_USER_TOKEN
+
+        field = app.openapi()["components"]["schemas"][model]["properties"]["last_sync_status"]
+
+        fixed, partial = field["anyOf"]
+        assert fixed == {
+            "type": "string",
+            "enum": ["", "ok", "error", "not_configured", "user_token"],
+        }
+        assert {SYNC_NOT_CONFIGURED, SYNC_USER_TOKEN} <= set(fixed["enum"])
+        assert partial == {"type": "string", "pattern": "^partial: "}
+
     def test_the_interval_sync_runs_beside_the_api(self, app, client):
         # It waits a tick before its first run, so it never races the explicit syncs in these tests.
         assert app.state.oidc_group_sync.done() is False

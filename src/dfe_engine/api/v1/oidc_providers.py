@@ -44,11 +44,12 @@ from dfe_engine.api.pagination import (
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.oidc.credential_env import is_env_var_name, provider_secret_path
 from dfe_engine.auth.oidc.field_rules import FieldProblem, field_problems
+from dfe_engine.auth.oidc.models import SyncStatus
 from dfe_engine.auth.oidc.sync import SyncOutcome
 from dfe_engine.auth.rbac_scopes import scopes_dict
-from dfe_engine.auth.store_names import VALID_NAME
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
 from dfe_engine.http_errors import describe_http_error, http_failure_message
+from dfe_engine.names import StoreName
 
 if TYPE_CHECKING:
     from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
@@ -177,7 +178,8 @@ class GroupResolutionRequest(BaseModel):
 
 
 class CreateProviderRequest(BaseModel):
-    name: str = Field(description="Unique provider name (used as filename stem)")
+    # A filename stem and a secret-store path segment, refused before any secret is written.
+    name: StoreName = Field(description="Unique provider name (used as filename stem)")
     type: Literal["generic", "google", "entra_id", "okta"] = Field(
         description="Provider type: generic, google, entra_id, okta"
     )
@@ -199,20 +201,6 @@ class CreateProviderRequest(BaseModel):
     )
     scopes: list[str] | None = Field(default=None, description=_SCOPES_HELP)
     groups: GroupResolutionRequest = Field(default_factory=GroupResolutionRequest)
-
-    @field_validator("name")
-    @classmethod
-    def _safe_name(cls, value: str) -> str:
-        """The name becomes a filename stem and a secret-store path segment.
-
-        Refused here, before any secret is written, on the rule the registry keys on.
-        """
-        if not VALID_NAME.match(value):
-            raise ValueError(
-                "must start with a letter or digit, contain only letters, digits, "
-                "dot, underscore or hyphen, and be at most 128 characters"
-            )
-        return value
 
     @field_validator("client_id_env", "client_secret_env")
     @classmethod
@@ -298,7 +286,12 @@ class ProviderResponse(BaseModel):
     groups: GroupResolutionResponse
     created_at: str
     last_sync_at: str
-    last_sync_status: str
+    last_sync_status: SyncStatus = Field(
+        description="How the last group sync ended: empty before the first, ok, error "
+        "(sync_error says why), not_configured (no directory credential), user_token (each "
+        "login reads its own groups, so there is no directory to sync), or 'partial: ' "
+        "followed by how many groups were skipped and why.",
+    )
     sync_error: str
 
 
@@ -340,9 +333,9 @@ class SyncResponse(BaseModel):
     groups_skipped: int = Field(
         default=0,
         description="Provider groups left unsynced: an identifier that makes no valid group "
-        "name, a name held by a stored group that does not load, or a name held by a stored "
-        "group not linked to that provider group. Each is counted on "
-        "auth_oidc_sync_groups_skipped_total{reason}.",
+        "name, a name held by a stored group that does not load, a name held by a stored "
+        "group not linked to that provider group, or no id to link a group by. Each is "
+        "counted on auth_oidc_sync_groups_skipped_total{reason}.",
     )
     error: str | None
     skipped: str | None = Field(
@@ -354,7 +347,8 @@ class SyncResponse(BaseModel):
     )
     status: SyncOutcome = Field(
         description="How the sync ended: ok, partial (some groups skipped), error (the "
-        "listing failed or the secret store holding its credential did not answer), "
+        "listing failed, or the secret store holding its credential did not answer or "
+        "refused access), "
         "not_configured (no directory credential), user_token (no directory to sync, "
         "which is a Google provider's default and not a fault) or skipped (disabled or "
         "not in api mode). Key on this, never on the text of error or skipped.",

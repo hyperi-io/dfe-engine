@@ -29,6 +29,7 @@ from dfe_engine.auth.oidc.sync import (
     _safe_name,
     sync_provider,
 )
+from tests.unit.test_auth.test_oidc.refusing_store import PolicyRefusingSecretStore
 from tests.unit.test_auth.test_oidc.unreachable_store import UnreachableSecretStore
 
 # ---------------------------------------------------------------------------
@@ -516,6 +517,59 @@ class TestSyncOverAGroupWhoseIdentifierMakesNoName:
         assert _sync_skips(manager) == {"invalid_name": 1.0}
 
 
+class TestSyncRefusesAGroupWithNoId:
+    """Only the id links a stored group to a provider group, so a group with none syncs nowhere."""
+
+    NAMES = ("Night Shift", "Day Shift")
+
+    @classmethod
+    def _fake(cls, provider, tmp_path, monkeypatch):
+        return FakeAdapter(provider, [GroupInfo(id="", name=name, email="") for name in cls.NAMES])
+
+    @classmethod
+    def _okta(cls, provider, tmp_path, monkeypatch):
+        items = [{"profile": {"name": name, "description": ""}} for name in cls.NAMES]
+        return FakeAdapter(provider, [_group_info_from_okta(item) for item in items])
+
+    @classmethod
+    def _mock_directory(cls, provider, tmp_path, monkeypatch):
+        fixture = tmp_path / "directory.json"
+        groups = [{"name": name, "email": ""} for name in cls.NAMES]
+        fixture.write_text(json.dumps({"groups": groups}), encoding="utf-8")
+        monkeypatch.setenv("DFE_OIDC_MOCK_DIRECTORY", str(fixture))
+        return MockDirectoryAdapter(provider)
+
+    @pytest.mark.parametrize("directory", ["_fake", "_okta", "_mock_directory"])
+    async def test_each_is_skipped_counted_and_logged_once_by_count(
+        self, registries, api_provider, tmp_path, monkeypatch, audit_events, directory
+    ):
+        provider_registry, group_store = registries
+        provider_registry.create("test-sso", api_provider)
+        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+        adapter = getattr(self, directory)(api_provider, tmp_path, monkeypatch)
+
+        result = await sync_provider(
+            "test-sso",
+            provider_registry,
+            group_store,
+            adapter=adapter,
+            metrics=SyncMetrics(manager),
+        )
+
+        assert (result["created"], result["updated"], result["groups_skipped"]) == (0, 0, 2)
+        assert result["status"] == "partial"
+        assert group_store.list() == []
+        assert _sync_skips(manager) == {"no_id": 2.0}
+        assert provider_registry.get("test-sso").last_sync_status == (
+            "partial: 2 of 2 groups skipped, they carry no id to link them by"
+        )
+        (line,) = [
+            e for e in audit_events if e["event"] == "OIDC group sync skipped groups with no id"
+        ]
+        assert (line["count"], line["provider"]) == (2, "test-sso")
+        assert not [name for name in self.NAMES if name in json.dumps(audit_events, default=str)]
+
+
 class TestSyncUpdatesProviderStatus:
     async def test_last_sync_at_set_after_success(self, registries, api_provider):
         provider_registry, group_store = registries
@@ -805,6 +859,32 @@ class TestSyncWhenTheSecretStoreDidNotAnswer:
             if e["event"] == "OIDC credential unreadable from the secret store"
         ]
         assert len(unreadable) == 1
+
+
+class TestSyncWhenTheSecretStoreRefused:
+    """A store that answered and refused is a failed run that points at its policy, not its reachability."""
+
+    @_STORED_CREDENTIAL_PROVIDERS
+    async def test_the_run_is_an_error_that_names_the_refusal(
+        self, registries, provider_type, groups
+    ):
+        provider_registry, group_store = registries
+        provider = _stored_credential_provider(provider_type=provider_type, groups=groups)
+        provider_registry.create("stored", provider)
+
+        result = await sync_provider(
+            "stored", provider_registry, group_store, secrets=PolicyRefusingSecretStore()
+        )
+
+        stored = provider_registry.get("stored")
+        assert stored is not None
+        assert (result["status"], stored.last_sync_status) == ("error", "error")
+        assert result["error"] == (
+            "The secret store refused access to the directory credential, so check the "
+            "engine's secrets policy; the engine log has the reason"
+        )
+        assert stored.sync_error == result["error"]
+        assert group_store.list() == []
 
 
 class TestSyncUnknownProvider:

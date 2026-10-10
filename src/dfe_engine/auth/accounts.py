@@ -40,7 +40,8 @@ from pydantic import BaseModel, Field
 from scalo.logger import logger
 
 from dfe_engine.auth.protected_accounts import resolve_floor
-from dfe_engine.auth.store_names import VALID_NAME, store_key
+from dfe_engine.auth.store_names import store_key
+from dfe_engine.names import VALID_NAME, InvalidNameError
 from dfe_engine.yaml_utils import yaml_dump, yaml_dump_string, yaml_load
 
 if TYPE_CHECKING:
@@ -48,6 +49,9 @@ if TYPE_CHECKING:
 
 BCRYPT_ROUNDS = 12
 """The bcrypt cost every stored password hash is made at."""
+
+BCRYPT_MAX_PASSWORD_BYTES = 72
+"""The longest password, in UTF-8 bytes, bcrypt hashes; it refuses a longer one."""
 
 
 @cache
@@ -220,10 +224,11 @@ class AccountStore:
         Raises:
             AccountExistsError: An account is already stored under *username*,
                 including one another replica created at the same moment.
-            ValueError: *username* is not a name an account can have.
+            InvalidNameError: *username* is not a name an account can have.
+            ValueError: bcrypt refuses *password*.
         """
         if not VALID_NAME.match(username):
-            raise ValueError(f"Invalid account name: {username!r}")
+            raise InvalidNameError(f"Invalid account name: {username!r}")
         path = self._path(username)
         account = _new_account(
             username,
@@ -257,12 +262,12 @@ class AccountStore:
             The account as written.
 
         Raises:
-            ValueError: The username is not a safe filename stem.
+            InvalidNameError: The username is not a safe filename stem.
             ProtectedAccountError: The record would leave a recovery credential
                 unable to log in.
         """
         if not VALID_NAME.match(account.username):
-            raise ValueError(f"Invalid account name: {account.username!r}")
+            raise InvalidNameError(f"Invalid account name: {account.username!r}")
         if not allow_protected:
             self.protected.check_account_state(
                 account.username,
@@ -434,7 +439,7 @@ class AccountStore:
         account = self.get(username)
         if account is None:
             # Timing-safe rejection: still run bcrypt to prevent oracle attacks
-            bcrypt.checkpw(password.encode("utf-8"), _dummy_hash())
+            _checkpw(password, _dummy_hash())
             return False
 
         # An empty password never authenticates, and an account carrying the
@@ -442,12 +447,9 @@ class AccountStore:
         # bcrypt hash - reject both, timing-safely. Prevents an empty or
         # placeholder password from ever matching a stored account.
         if not password or not account.password_hash.startswith("$2"):
-            bcrypt.checkpw(password.encode("utf-8"), _dummy_hash())
+            _checkpw(password, _dummy_hash())
             return False
-        return bcrypt.checkpw(
-            password.encode("utf-8"),
-            account.password_hash.encode("utf-8"),
-        )
+        return _checkpw(password, account.password_hash.encode("utf-8"))
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -567,13 +569,13 @@ class DocuStoreAccountStore:
         name: str = "",
         change_required: bool = False,
     ) -> Account:
-        """Create a new account. Raises AccountExistsError if taken, ValueError if invalid.
+        """Create a new account. Raises AccountExistsError if taken, InvalidNameError if invalid.
 
         Taken includes by another replica at the same moment: the insert, not a prior
         lookup, decides.
         """
         if not VALID_NAME.match(username):
-            raise ValueError(f"Invalid account name: {username!r}")
+            raise InvalidNameError(f"Invalid account name: {username!r}")
         account = _new_account(
             username,
             password,
@@ -594,7 +596,7 @@ class DocuStoreAccountStore:
         reserved for the reconcile paths. Raises ProtectedAccountError otherwise.
         """
         if not VALID_NAME.match(account.username):
-            raise ValueError(f"Invalid account name: {account.username!r}")
+            raise InvalidNameError(f"Invalid account name: {account.username!r}")
         if not allow_protected:
             self.protected.check_account_state(
                 account.username,
@@ -677,15 +679,12 @@ class DocuStoreAccountStore:
         """Timing-safe password check - identical semantics to the YAML store."""
         account = self.get(username)
         if account is None:
-            bcrypt.checkpw(password.encode("utf-8"), _dummy_hash())
+            _checkpw(password, _dummy_hash())
             return False
         if not password or not account.password_hash.startswith("$2"):
-            bcrypt.checkpw(password.encode("utf-8"), _dummy_hash())
+            _checkpw(password, _dummy_hash())
             return False
-        return bcrypt.checkpw(
-            password.encode("utf-8"),
-            account.password_hash.encode("utf-8"),
-        )
+        return _checkpw(password, account.password_hash.encode("utf-8"))
 
 
 # ------------------------------------------------------------------
@@ -854,7 +853,31 @@ def matches_digest(password: str, digest: str) -> bool:
     """Whether *digest* was made from *password*. An empty or non-bcrypt digest never matches."""
     if not password or not digest.startswith("$2"):
         return False
-    return bcrypt.checkpw(password.encode("utf-8"), digest.encode("utf-8"))
+    return _checkpw(password, digest.encode("utf-8"))
+
+
+def refuse_unhashable_password(password: str) -> str:
+    """Return *password* when bcrypt can hash it.
+
+    Raises:
+        ValueError: *password* is longer than :data:`BCRYPT_MAX_PASSWORD_BYTES` in UTF-8.
+    """
+    if len(password.encode("utf-8")) > BCRYPT_MAX_PASSWORD_BYTES:
+        raise ValueError(f"at most {BCRYPT_MAX_PASSWORD_BYTES} bytes, the most bcrypt hashes")
+    return password
+
+
+def _checkpw(password: str, digest: bytes) -> bool:
+    """Check *password* against *digest* with bcrypt, never raising for a long candidate.
+
+    bcrypt refuses more than 72 bytes rather than truncating, and the first 72 alone must
+    never authenticate, so a longer candidate is checked truncated for equal cost and fails.
+    """
+    candidate = password.encode("utf-8")
+    if len(candidate) > BCRYPT_MAX_PASSWORD_BYTES:
+        bcrypt.checkpw(candidate[:BCRYPT_MAX_PASSWORD_BYTES], digest)
+        return False
+    return bcrypt.checkpw(candidate, digest)
 
 
 def _now() -> str:

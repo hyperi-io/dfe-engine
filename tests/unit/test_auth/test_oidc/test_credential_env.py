@@ -18,6 +18,11 @@ from dfe_engine.auth.oidc.credential_env import (
 )
 from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import SecretsSettings
+from tests.unit.test_auth.test_oidc.refusing_store import (
+    AppRoleRefusingSecretStore,
+    AppRoleUnreachableSecretStore,
+    PolicyRefusingSecretStore,
+)
 from tests.unit.test_auth.test_oidc.unreachable_store import (
     STORE_ADDRESS,
     UnreachableSecretStore,
@@ -108,6 +113,22 @@ class TestCredentialCheck:
         assert "secret store did not answer" in detail
         assert "nothing stored" not in detail
 
+    @pytest.mark.parametrize(
+        "store",
+        [PolicyRefusingSecretStore(), AppRoleRefusingSecretStore()],
+        ids=["policy-403", "approle-login"],
+    )
+    def test_a_store_that_refused_points_at_its_policy_not_its_reachability(self, store):
+        ok, detail = credential_check(
+            "client_secret", secret_path="oidc/acme/client_secret", secrets=store
+        )
+
+        assert ok is False
+        assert detail == (
+            "The secret store refused access to the client_secret at oidc/acme/client_secret, "
+            "so check the engine's secrets policy; the engine log has the reason"
+        )
+
 
 class TestResolveCredential:
     def test_store_wins_over_env(self, store, monkeypatch):
@@ -172,6 +193,30 @@ class TestResolveCredential:
     def test_a_store_holding_nothing_is_absent_not_unreadable(self, store):
         resolved = resolve_credential(secret_path="oidc/acme/client_secret", secrets=store)
         assert (resolved.value, resolved.unreadable) == ("", False)
+
+    @pytest.mark.parametrize(
+        ("store", "refused"),
+        [
+            (PolicyRefusingSecretStore(), True),
+            (AppRoleRefusingSecretStore(), True),
+            (AppRoleUnreachableSecretStore(), False),
+            (UnreachableSecretStore(), False),
+        ],
+        ids=["policy-403", "approle-refused", "approle-unreachable", "unreachable"],
+    )
+    def test_a_refusal_is_told_apart_from_a_store_that_did_not_answer(self, store, refused):
+        """An AppRole login that never reached the store is no refusal, though scalo raises the same class."""
+        resolved = resolve_credential(secret_path="oidc/acme/client_secret", secrets=store)
+        assert (resolved.value, resolved.unreadable, resolved.refused) == ("", True, refused)
+
+    def test_the_env_still_serves_when_the_store_refused(self, monkeypatch):
+        monkeypatch.setenv("OIDC_RP_SECRET", "from-env")
+        resolved = resolve_credential(
+            secret_path="oidc/acme/client_secret",
+            env_name="OIDC_RP_SECRET",
+            secrets=PolicyRefusingSecretStore(),
+        )
+        assert (resolved.value, resolved.unreadable, resolved.refused) == ("from-env", False, False)
 
     def test_the_repr_never_carries_the_value(self, store):
         store.put("oidc/acme/client_secret", "stored-value")
