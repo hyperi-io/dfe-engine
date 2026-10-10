@@ -1,13 +1,19 @@
-"""Rule names: what a hunt may reference, and the file each one names.
+"""Rule names: what a rule may be called, and the file each one names.
 
-A rule name becomes a file under the rules directory, so it carries the gitcrud
-resource-name contract, and every path built from one must resolve inside that
-directory.
+A rule is created, and a hunt references it, under letters, digits, ``_`` and ``-``.
+That is the charset of every rule id the engine generates (sigma bindings, HyperDX
+views). A rule file already on disk resolves under the wider gitcrud resource-name
+contract instead, so a hand-written file with a ``.`` in its name keeps running. Every
+path built from a name must resolve inside the rules directory.
 """
 
+import re
 from pathlib import Path
 
 from dfe_engine.gitcrud.commit_policy import CommitPolicyError, validate_name
+
+RULE_NAME = re.compile(r"[A-Za-z0-9_-]+")
+"""What a new rule, or a hunt's reference to one, may be called; matched with ``fullmatch``."""
 
 
 class RuleNameError(ValueError):
@@ -15,24 +21,20 @@ class RuleNameError(ValueError):
 
 
 def validate_rule_name(name: str) -> str:
-    """Return ``name`` when it is a valid rule name.
+    """Return ``name`` when a rule can be created, or referenced by a hunt, under it.
 
     Args:
-        name: The rule name as a hunt references it.
+        name: The rule name as the create endpoint or a hunt receives it.
 
     Returns:
         The name unchanged.
 
     Raises:
-        RuleNameError: The name is empty, contains ``..``, or has any character
-            outside letters, digits, ``.``, ``_`` and ``-``.
+        RuleNameError: The name is empty or has a character outside letters,
+            digits, ``_`` and ``-``.
     """
-    try:
-        validate_name(name)
-    except CommitPolicyError as exc:
-        raise RuleNameError(
-            f"rule name {name!r} must be letters, digits, '.', '_' or '-', without '..'"
-        ) from exc
+    if not RULE_NAME.fullmatch(name):
+        raise RuleNameError(f"rule name {name!r} must be letters, digits, '_' or '-'")
     return name
 
 
@@ -51,7 +53,12 @@ def rule_file(directory: str | Path, name: str, suffix: str) -> Path:
         RuleNameError: The name is invalid, or the path resolves outside the
             directory, through a symlink included.
     """
-    validate_rule_name(name)
+    try:
+        validate_name(name)
+    except CommitPolicyError as exc:
+        raise RuleNameError(
+            f"rule name {name!r} must be letters, digits, '.', '_' or '-', without '..'"
+        ) from exc
     base = Path(directory)
     path = base / f"{name}{suffix}"
     if not path.resolve().is_relative_to(base.resolve()):

@@ -37,14 +37,16 @@ from dfe_engine.schema.schema_ddl import unsafe_ident_reason
 # from the fieldmap package - keep the two in step if the column is ever renamed.
 JSON_COLUMN = "_json"
 
-_STANDARD_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+# ``\Z``, not ``$``: ``$`` also matches before a trailing newline.
+_STANDARD_RE = re.compile(r"^[a-z][a-z0-9_]*\Z")
 
 # A conservative allow-list for an operator-declared ClickHouse type used verbatim
 # in a CAST. Letters/digits/underscore plus the punctuation real CH types need -
 # parentheses (parametrised types), commas + spaces (Enum/DateTime args) and single
 # quotes (Enum member literals). It deliberately rejects anything that could break
-# out of the CAST expression (backticks, semicolons, ...).
-_CH_TYPE_RE = re.compile(r"^[A-Za-z0-9_(), ']+$")
+# out of the CAST expression (backticks, semicolons, ...). ``\Z``, not ``$``: ``$`` also
+# matches before a trailing newline.
+_CH_TYPE_RE = re.compile(r"^[A-Za-z0-9_(), ']+\Z")
 
 
 class RemapViewError(ValueError):
