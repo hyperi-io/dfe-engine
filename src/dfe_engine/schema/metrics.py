@@ -12,13 +12,12 @@ applied. Once the apply moved inside the engine's lifespan that record went with
 it, so the state, the duration and the schemas version are reported here and on
 ``GET /api/v1/system/schema``.
 
-The instruments are created through scalo's manager, which applies the ``dfe``
-namespace from the deployment contract, so they land as ``dfe_schema_*``. With no
-backend wired every record call returns without doing anything, which is the
-state the unit suite runs in.
+The daemon registers them on the metrics manager it already serves on ``/metrics``,
+so a pass builds no second manager or MeterProvider. They land as ``dfe_schema_*``
+whatever namespace that manager carries, the ``dfe`` coming from the deployment
+contract. With no manager every record call returns without doing anything, which
+is the state the unit suite runs in.
 """
-
-from __future__ import annotations
 
 from typing import Any
 
@@ -28,24 +27,48 @@ VERSION_INFO = "schema_version_info"
 REFUSED = "schema_objects_refused"
 
 
+def _registered_name(manager: Any, name: str) -> str:
+    """The name to give *manager* so the instrument lands as ``<contract prefix>_<name>``.
+
+    The manager prepends its own namespace, which on the daemon's carries no
+    contract prefix, so the prefix is added here unless the manager already adds it.
+    """
+    from dfe_engine.deployment_contract import engine_deployment_contract
+
+    prefix = engine_deployment_contract().metric_prefix
+    if manager.metric_prefix == prefix:
+        return name
+    return f"{prefix}_{name}"
+
+
 class SchemaMetrics:
-    """The phase's instruments, or a no-op set when no backend is wired."""
+    """The phase's instruments, or a no-op set when no backend is wired.
+
+    Args:
+        manager: a scalo ``MetricsManager``. ``None`` means no backend, and every
+            record call returns without doing anything.
+    """
 
     def __init__(self, manager: Any | None = None) -> None:
         self._manager = manager
         if manager is None:
             return
         self._state = manager.gauge(
-            BOOTSTRAP_STATE, "0 unknown, 1 converged, 2 failed, 3 running, 4 observed"
+            _registered_name(manager, BOOTSTRAP_STATE),
+            "0 unknown, 1 converged, 2 failed, 3 running, 4 observed",
         )
         self._duration = manager.gauge(
-            BOOTSTRAP_DURATION, "Seconds the last schema bootstrap pass took"
+            _registered_name(manager, BOOTSTRAP_DURATION),
+            "Seconds the last schema bootstrap pass took",
         )
         self._version = manager.gauge(
-            VERSION_INFO, "Always 1; the dfe-schemas release is the label", ["schemas_version"]
+            _registered_name(manager, VERSION_INFO),
+            "Always 1; the dfe-schemas release is the label",
+            ["schemas_version"],
         )
         self._refused = manager.gauge(
-            REFUSED, "Objects whose change the last pass declined as drift"
+            _registered_name(manager, REFUSED),
+            "Objects whose change the last pass declined as drift",
         )
 
     @property
@@ -67,10 +90,10 @@ class SchemaMetrics:
 
 
 def create(app_name: str = "dfe-engine") -> SchemaMetrics:
-    """Build the instrument set on scalo's metrics backend.
+    """Build the instrument set on a metrics manager of its own.
 
-    The namespace comes from the deployment contract rather than a literal, so
-    these carry the same ``dfe`` prefix as the rest of the product.
+    For a process that runs one pass and has no manager to share, such as the
+    ``dfe auto schema`` command. The daemon passes its own manager instead.
     """
     from scalo.metrics import create_metrics
 

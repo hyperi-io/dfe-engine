@@ -43,6 +43,7 @@ from dfe_engine.schema.plan import LEDGER_ID, LOCK_ID, SchemaPlan, SchemaPlanErr
 
 if TYPE_CHECKING:
     from dfe_engine.kafka.topics import TopicAdmin, TopicSpec
+    from dfe_engine.schema.metrics import SchemaMetrics
     from dfe_engine.settings import DFESettings
 
 DEAD_LETTER_TOPIC_KIND = "dlq"
@@ -426,6 +427,7 @@ def run_bootstrap(
     settings: DFESettings,
     wait_seconds: float | None = None,
     allow_drift: bool = False,
+    metrics: SchemaMetrics | None = None,
 ) -> SchemaBootstrapState:
     """Bring this deployment's ClickHouse and topic set to the pinned manifest.
 
@@ -433,6 +435,13 @@ def run_bootstrap(
     check read. Never raises: a failure is reported as state ``failed`` naming the
     stage that failed, with the cause in the engine log, so the pod stays up for an
     operator to find it.
+
+    Args:
+        settings: The deployment's settings.
+        wait_seconds: How long to wait for ClickHouse and the lease; ``None``
+            takes ``clickhouse.bootstrap_wait_seconds``.
+        allow_drift: Also apply the column type and TTL changes a pass refuses as drift.
+        metrics: Where the pass reports its outcome. ``None`` reports nothing.
     """
     ch = settings.clickhouse
     started = datetime.now(UTC)
@@ -448,7 +457,7 @@ def run_bootstrap(
         state.state = STATE_UNKNOWN
         state.error = "DFE_CLICKHOUSE_BOOTSTRAP_TABLES is off; the schema state is not known here"
         logger.warning(state.error)
-        _finish(state, started)
+        _finish(state, started, metrics)
         return state
 
     wait = ch.bootstrap_wait_seconds if wait_seconds is None else wait_seconds
@@ -478,13 +487,13 @@ def run_bootstrap(
         state.state = STATE_FAILED
         state.error = _failed_stage(exc)
         logger.error("schema bootstrap failed; the engine stays up and NotReady", error=str(exc))
-        _finish(state, started)
+        _finish(state, started, metrics)
         return state
     except Exception as exc:
         state.state = STATE_FAILED
         state.error = _failed_stage(exc)
         logger.exception("schema bootstrap failed; the engine stays up and NotReady")
-        _finish(state, started)
+        _finish(state, started, metrics)
         return state
 
     if report is not None:
@@ -521,12 +530,12 @@ def run_bootstrap(
         logger.error(
             "dead letters cannot be recorded; the engine stays up and NotReady", error=str(exc)
         )
-        _finish(state, started)
+        _finish(state, started, metrics)
         return state
 
     if state.state != STATE_OBSERVED:
         state.state = STATE_CONVERGED
-    _finish(state, started)
+    _finish(state, started, metrics)
     return state
 
 
@@ -574,20 +583,19 @@ def _table_absent(client: Any, plan: SchemaPlan) -> bool:
     return not rows
 
 
-def _finish(state: SchemaBootstrapState, started: datetime) -> None:
+def _finish(state: SchemaBootstrapState, started: datetime, metrics: SchemaMetrics | None) -> None:
     finished = datetime.now(UTC)
     state.finished_at = finished.isoformat()
     state.duration_seconds = (finished - started).total_seconds()
     _set_state(state)
-    _report_metrics(state)
+    if metrics is not None:
+        _report_metrics(state, metrics)
 
 
-def _report_metrics(state: SchemaBootstrapState) -> None:
-    """Push the pass's outcome. A missing metrics backend is not a failure."""
-    from dfe_engine.schema import metrics
-
+def _report_metrics(state: SchemaBootstrapState, metrics: SchemaMetrics) -> None:
+    """Push the pass's outcome. A metrics backend fault is not a failure."""
     try:
-        metrics.create().report(
+        metrics.report(
             state=state.gauge,
             duration_seconds=state.duration_seconds,
             schemas_version=state.schemas_version,

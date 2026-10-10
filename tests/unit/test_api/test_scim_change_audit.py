@@ -180,6 +180,113 @@ def test_a_membership_replace_records_who_joined_and_who_left(
     assert event["details"]["removed"] == ["viewer"]
 
 
+def _patch_members(client, admin, *operations: dict):
+    body = {"schemas": [PATCH_SCHEMA], "Operations": list(operations)}
+    return client.patch(f"{BASE}/Groups/{GROUP}", json=body, headers=admin)
+
+
+REPLACE_FORMS = {
+    "members-path": {"op": "replace", "path": "members", "value": [{"value": "operator"}]},
+    "path-less": {"op": "replace", "value": {"members": [{"value": "operator"}]}},
+}
+
+
+@pytest.mark.parametrize("operation", REPLACE_FORMS.values(), ids=REPLACE_FORMS.keys())
+def test_a_patch_replace_drops_every_member_not_in_the_new_set(
+    client, app, admin_headers, audit_events, operation
+):
+    _group(app, members=["viewer", "admin"])
+
+    resp = _patch_members(client, admin_headers, operation)
+
+    assert resp.status_code == 200, resp.text
+    assert app.state.group_store.get(GROUP).members == ["operator"]
+    assert GROUP not in app.state.account_store.get("viewer").groups
+    assert GROUP in app.state.account_store.get("operator").groups
+    (event,) = [e for e in audit_events if e["event"] == "auth.group.updated"]
+    assert event["details"]["added"] == ["operator"]
+    assert event["details"]["removed"] == ["admin", "viewer"]
+
+
+def test_a_patch_replace_keeping_a_member_lists_only_who_changed(
+    client, app, admin_headers, audit_events
+):
+    _group(app, members=["viewer", "admin"])
+    operation = {
+        "op": "replace",
+        "path": "members",
+        "value": [{"value": "viewer"}, {"value": "operator"}],
+    }
+
+    resp = _patch_members(client, admin_headers, operation)
+
+    assert resp.status_code == 200, resp.text
+    assert app.state.group_store.get(GROUP).members == ["viewer", "operator"]
+    (event,) = [e for e in audit_events if e["event"] == "auth.group.updated"]
+    assert event["details"]["added"] == ["operator"]
+    assert event["details"]["removed"] == ["admin"]
+
+
+def test_a_filtered_patch_replace_swaps_only_the_member_it_names(
+    client, app, admin_headers, audit_events
+):
+    _group(app, members=["viewer", "admin"])
+    operation = {
+        "op": "replace",
+        "path": 'members[value eq "viewer"]',
+        "value": {"value": "operator"},
+    }
+
+    resp = _patch_members(client, admin_headers, operation)
+
+    assert resp.status_code == 200, resp.text
+    assert app.state.group_store.get(GROUP).members == ["admin", "operator"]
+    (event,) = [e for e in audit_events if e["event"] == "auth.group.updated"]
+    assert (event["details"]["added"], event["details"]["removed"]) == (["operator"], ["viewer"])
+
+
+def test_a_filtered_patch_replace_of_a_non_member_is_refused_whole(
+    client, app, admin_headers, audit_events
+):
+    _group(app, members=["viewer"])
+    operations = (
+        {"op": "add", "path": "members", "value": [{"value": "admin"}]},
+        {"op": "replace", "path": 'members[value eq "operator"]', "value": {"value": "admin"}},
+    )
+
+    resp = _patch_members(client, admin_headers, *operations)
+
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["scimType"] == "noTarget"
+    assert app.state.group_store.get(GROUP).members == ["viewer"]
+    assert [e for e in audit_events if e["event"].startswith("auth.group.")] == []
+
+
+def test_a_path_less_replace_naming_no_members_leaves_them_alone(
+    client, app, admin_headers, audit_events
+):
+    _group(app, members=["viewer"])
+    operation = {"op": "replace", "value": {"id": GROUP, "displayName": GROUP}}
+
+    resp = _patch_members(client, admin_headers, operation)
+
+    assert resp.status_code == 200, resp.text
+    assert app.state.group_store.get(GROUP).members == ["viewer"]
+    assert [e for e in audit_events if e["event"].startswith("auth.group.")] == []
+
+
+def test_a_patch_adding_a_current_member_emits_no_event(client, app, admin_headers, audit_events):
+    _group(app, members=["viewer"])
+
+    resp = _patch_members(
+        client, admin_headers, {"op": "add", "path": "members", "value": [{"value": "viewer"}]}
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert app.state.group_store.get(GROUP).members == ["viewer"]
+    assert [e for e in audit_events if e["event"].startswith("auth.group.")] == []
+
+
 def test_a_patch_that_changes_nothing_emits_no_event(client, app, admin_headers, audit_events):
     _account(app)
     body = {

@@ -31,8 +31,6 @@ open (IdPs probe them before presenting a token). Responses use the SCIM
 media type and the SCIM error envelope.
 """
 
-from __future__ import annotations
-
 import re
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -588,35 +586,21 @@ async def patch_group(group_id: str, user: CurrentUser, request: Request) -> Res
     except Exception as exc:
         return _invalid_body("PatchOp", exc)
 
-    # Checked before any op applies, so a refusal leaves the membership as it was.
-    if _joining(patch) - set(group.members) or _leaving(patch, group.members):
-        check_role_assignment(request, user, group.roles, scope_of(group))
+    try:
+        members = _patched_members(patch, group.members)
+    except _NoTargetError as exc:
+        return scim_error(400, str(exc), "noTarget")
+    added = set(members) - set(group.members)
+    removed = set(group.members) - set(members)
 
-    added: set[str] = set()
-    removed: set[str] = set()
-    for op in patch.operations or []:
-        kind = _op_kind(op)
-        # op.path may be a typed ``Path`` object; coerce to a plain string.
-        path = str(op.path or "")
-        value = op.value
-        if kind in ("add", "replace") and path.lower().startswith("members"):
-            for username in _member_values(value):
-                store.add_member(group_id, username)
-                added.add(username)
-        elif kind == "remove" and path.lower().startswith("members"):
-            m = _MEMBER_FILTER_RE.search(path)
-            targets = [m.group(1)] if m else _member_values(value)
-            if not targets:  # remove with no filter -> clear membership
-                targets = list(store.get(group_id).members)
-            # The whole removal set is checked before any of it is applied, so a
-            # refusal cannot leave earlier members already detached.
-            store.protected.check_member_removal(group_id, targets)
-            for username in targets:
-                store.remove_member(group_id, username)
-                removed.add(username)
-
-    sync_account_groups_for_membership_change(account_store, group_id, added=added, removed=removed)
+    # Checked before anything is written, so a refusal leaves the membership as it was.
     if added or removed:
+        check_role_assignment(request, user, group.roles, scope_of(group))
+        # One write for the whole set; the store refuses it whole if it drops a recovery credential.
+        store.update(group_id, members=members)
+        sync_account_groups_for_membership_change(
+            account_store, group_id, added=added, removed=removed
+        )
         details = _audit_details(fields=["members"], added=sorted(added), removed=sorted(removed))
         audit_group_change(user.user_id, group_id, "updated", details)
     group = store.get(group_id)
@@ -661,26 +645,62 @@ def _op_kind(op) -> str:
     return getattr(op.op, "value", str(op.op)).lower()
 
 
-def _joining(patch) -> set[str]:
-    """Every username a group PatchOp adds or replaces into ``members``."""
-    joining: set[str] = set()
-    for op in patch.operations or []:
-        if _op_kind(op) in ("add", "replace") and str(op.path or "").lower().startswith("members"):
-            joining.update(_member_values(op.value))
-    return joining
+class _NoTargetError(ValueError):
+    """A ``replace`` whose value filter matched no current member (RFC 7644 section 3.5.2.3)."""
 
 
-def _leaving(patch, members: list[str]) -> set[str]:
-    """Every current member a group PatchOp removes; a remove naming no one clears the group."""
-    leaving: set[str] = set()
+def _targets_members(op) -> bool:
+    """Whether a group PatchOp operation acts on ``members``."""
+    # op.path may be a typed ``Path`` object; coerce to a plain string.
+    path = str(op.path or "")
+    if path:
+        return path.lower().startswith("members")
+    # A path-less add or replace names the attributes it sets in its value.
+    value = op.value
+    return _op_kind(op) in ("add", "replace") and isinstance(value, dict) and "members" in value
+
+
+def _appended(members: list[str], usernames: list[str]) -> list[str]:
+    """*members* with each of *usernames* not already in it appended, in order."""
+    result = list(members)
+    for username in usernames:
+        if username not in result:
+            result.append(username)
+    return result
+
+
+def _patched_members(patch, members: list[str]) -> list[str]:
+    """The member list a group PatchOp leaves, worked out before anything is written.
+
+    Per RFC 7644 section 3.5.2: ``add`` joins members, ``replace`` swaps the whole
+    set (or, under a ``members[value eq "x"]`` filter, only the member it names),
+    and ``remove`` drops the named members, or every member when it names none.
+
+    Raises:
+        _NoTargetError: A filtered ``replace`` names a user who is not a member.
+    """
+    result = list(members)
     for op in patch.operations or []:
-        path = str(op.path or "")
-        if _op_kind(op) != "remove" or not path.lower().startswith("members"):
+        if not _targets_members(op):
             continue
+        kind = _op_kind(op)
+        path = str(op.path or "")
         match = _MEMBER_FILTER_RE.search(path)
-        targets = [match.group(1)] if match else _member_values(op.value)
-        leaving.update(targets or members)
-    return leaving & set(members)
+        values = _member_values(op.value)
+        if kind == "add":
+            result = _appended(result, values)
+        elif kind == "replace":
+            if match is None:
+                result = _appended([], values)
+                continue
+            target = match.group(1)
+            if target not in result:
+                raise _NoTargetError(f"'{target}' is not a member of this group")
+            result = _appended([m for m in result if m != target], values)
+        elif kind == "remove":
+            targets = [match.group(1)] if match else values
+            result = [m for m in result if m not in targets] if targets else []
+    return result
 
 
 def _member_values(value) -> list[str]:
