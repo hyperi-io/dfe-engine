@@ -75,6 +75,7 @@ from dfe_engine.auth.scim_mapping import (
     scim_user_to_account_fields,
 )
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
+from dfe_engine.names import InvalidNameError, validate_store_name
 
 router = APIRouter(prefix="/scim/v2", tags=["SCIM"])
 
@@ -495,6 +496,10 @@ async def create_group(user: CurrentUser, request: Request) -> Response:
     account_store = request.app.state.account_store
     fields = scim_group_to_group_fields(inbound)
     name = str(fields["name"])
+    try:
+        validate_store_name(name)
+    except InvalidNameError as exc:
+        return scim_error(400, f"displayName: {exc}", "invalidValue")
     members = list(fields["members"])  # type: ignore[arg-type]
     taken = _refuse_taken_provider_id(store, str(fields["source_id"]), name)
     if taken is not None:
@@ -504,9 +509,6 @@ async def create_group(user: CurrentUser, request: Request) -> Response:
         group = store.create(name, roles=[], description="", members=members)
     except GroupExistsError:
         return scim_error(409, f"Group '{name}' already exists", "uniqueness")
-    except ValueError as exc:
-        # A displayName no group can have.
-        return scim_error(400, str(exc), "invalidValue")
     store.update(name, source_id=fields["source_id"], source_provider=fields["source_provider"])
     request_ch_rbac_reconcile(request.app.state)
     sync_account_groups_for_membership_change(account_store, name, added=group.members)

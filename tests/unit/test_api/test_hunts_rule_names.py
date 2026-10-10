@@ -1,14 +1,16 @@
 """A hunt write refuses a rule name that could leave the rules directory.
 
-A hunt may also reference only a name a rule can be created under.
+A hunt may also newly reference only a name a rule can be created under, and a hunt
+name is held to the same rule.
 """
 
 from pathlib import Path
 
 import pytest
 
+from dfe_engine.api.deps import get_hunt_config_registry
 from dfe_engine.api.v1.rules import RuleCreateRequest
-from dfe_engine.hunts.rule_names import validate_rule_name
+from dfe_engine.names import validate_rule_name
 
 _HUNT = {
     "display_name": "Certutil Abuse",
@@ -143,3 +145,72 @@ def test_a_rule_name_over_the_limit_is_refused_by_create_and_by_a_hunt(
     assert not (Path(api_settings.hunts.rules_dir) / f"{name}.yaml").exists()
     assert hunt.status_code == 422, hunt.text
     assert client.get("/api/v1/hunts/windows_hunt", headers=admin_headers).status_code == 404
+
+
+def _store_hunt_naming(rule: str) -> None:
+    """Store a hunt the way one written straight to the deploy repo holds it."""
+    get_hunt_config_registry().save(
+        "windows_hunt", {**_HUNT, "log_buffer": 60, "rules": [{"rule_name": rule}]}
+    )
+
+
+def test_a_hunt_already_naming_a_dotted_rule_is_edited_but_takes_no_new_one(client, admin_headers):
+    _store_hunt_naming("win.cert")
+
+    added = client.put(
+        "/api/v1/hunts/windows_hunt",
+        json={**_HUNT, "rules": ["win.cert", "lin.cert"]},
+        headers=admin_headers,
+    )
+    edited = client.put(
+        "/api/v1/hunts/windows_hunt",
+        json={**_HUNT, "cron": "*/10 * * * *", "rules": ["win.cert"]},
+        headers=admin_headers,
+    )
+
+    assert added.status_code == 422, added.text
+    assert edited.status_code == 200, edited.text
+    assert "lin.cert" in added.json()["message"]
+    stored = client.get("/api/v1/hunts/windows_hunt", headers=admin_headers).json()
+    assert stored["cron"] == "*/10 * * * *"
+    assert [entry["rule_name"] for entry in stored["rules"]] == ["win.cert"]
+
+
+def test_a_rule_made_from_a_long_saved_search_name_is_one_a_hunt_can_reference(
+    client, admin_headers
+):
+    body = {"raw_sql": _RULE["user_sql"], "saved_search_name": "S" * 200}
+
+    first = client.post("/api/v1/rules/from-hyperdx", json=body, headers=admin_headers)
+    second = client.post("/api/v1/rules/from-hyperdx", json=body, headers=admin_headers)
+    ids = [first.json()["id"], second.json()["id"]]
+    hunt = client.post(
+        "/api/v1/hunts",
+        json={"name": "windows_hunt", **_HUNT, "rules": ids},
+        headers=admin_headers,
+    )
+
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    assert ids == ["s" * _LIMIT, "s" * (_LIMIT - 2) + "-2"]
+    assert hunt.status_code == 201, hunt.text
+
+
+@pytest.mark.parametrize("length", [_LIMIT + 1, 300])
+def test_a_hunt_name_over_the_limit_is_a_422_and_saves_nothing(client, admin_headers, length):
+    at_limit = client.post(
+        "/api/v1/hunts",
+        json={"name": "h" * _LIMIT, **_HUNT, "rules": ["certutil"]},
+        headers=admin_headers,
+    )
+    over = client.post(
+        "/api/v1/hunts",
+        json={"name": "h" * length, **_HUNT, "rules": ["certutil"]},
+        headers=admin_headers,
+    )
+
+    assert at_limit.status_code == 201, at_limit.text
+    assert over.status_code == 422, over.text
+    assert over.json()["code"] == "validation_error"
+    listed = client.get("/api/v1/hunts", headers=admin_headers).json()
+    assert [row["name"] for row in listed["items"]] == ["h" * _LIMIT]
