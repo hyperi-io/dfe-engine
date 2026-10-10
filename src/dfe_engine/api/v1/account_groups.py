@@ -50,6 +50,7 @@ from dfe_engine.auth.groups import Group, GroupExistsError, validate_group_scope
 from dfe_engine.auth.membership import groups_named
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
+from dfe_engine.names import StoreName
 
 router = APIRouter(prefix="/groups", tags=["Groups"])
 
@@ -58,7 +59,7 @@ router = APIRouter(prefix="/groups", tags=["Groups"])
 
 
 class CreateGroupRequest(BaseModel):
-    name: str = Field(description="Unique group name")
+    name: StoreName = Field(description="Unique group name")
     roles: list[str] = Field(description="Roles assigned to all group members")
     description: str = Field("", description="Human-readable description")
     scope: str = Field(
@@ -265,12 +266,6 @@ async def create_group(
         raise HTTPException(
             status_code=409,
             detail={"code": "conflict", "message": f"Group '{body.name}' already exists"},
-        ) from exc
-    except ValueError as exc:
-        # The scope was checked above, so this is a name no group can have.
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": str(exc)},
         ) from exc
     request_ch_rbac_reconcile(request.app.state)
     sync_account_groups_for_membership_change(
