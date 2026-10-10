@@ -22,6 +22,7 @@ from scalo.health import HealthManager, create_health_router
 from scalo.logger import logger
 
 from dfe_engine import __version__
+from dfe_engine.fastapi_telemetry import FASTAPI_TELEMETRY
 from dfe_engine.settings import DFESettings, e2e_routes_enabled, is_dev_posture, load_settings
 
 
@@ -594,6 +595,7 @@ def create_app(
         docs_url="/docs" if docs and not e2e_docs else None,
         redoc_url="/redoc" if docs else None,
         openapi_tags=openapi_tags,
+        telemetry=FASTAPI_TELEMETRY,
     )
 
     app.state.settings = settings

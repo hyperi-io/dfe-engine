@@ -38,7 +38,6 @@ import re
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
-from scalo.logger import logger
 from scim2_models import (
     AuthenticationScheme,
     Bulk,
@@ -66,6 +65,7 @@ from dfe_engine.api.deps import CurrentUser, provider_bindings, require_action
 from dfe_engine.api.password_floor import FLOOR_MESSAGE, below_floor, count_floor_refusal
 from dfe_engine.api.v1.account_groups import check_group_changes, check_role_assignment, scope_of
 from dfe_engine.auth.accounts import AccountExistsError, discard_created
+from dfe_engine.auth.audit import audit_account_change, audit_group_change
 from dfe_engine.auth.groups import GroupExistsError
 from dfe_engine.auth.membership import forget_member, groups_held
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -184,6 +184,11 @@ def _page_params(request: Request) -> tuple[int, int]:
     except ValueError:
         count = 100
     return start_index, max(0, count)
+
+
+def _audit_details(**fields) -> dict:
+    """Audit-event details for a SCIM write, marked so an IdP push reads apart from an admin's."""
+    return {"via": "scim", **fields}
 
 
 def _refuse_taken_provider_id(store, source_id: str, name: str) -> JSONResponse | None:
@@ -312,7 +317,9 @@ async def create_user(user: CurrentUser, request: Request) -> Response:
         # Left unstamped, the account reads as a local one and the IdP's retry meets a 409.
         discard_created(store, created)
         raise
-    logger.info("SCIM user provisioned", username=username)
+    audit_account_change(
+        user.user_id, username, "created", _audit_details(enabled=bool(fields["enabled"]))
+    )
     account = store.get(username)
     scim_user = account_to_scim_user(
         account, groups=[], location=_location(request, "Users", username)
@@ -344,6 +351,8 @@ async def replace_user(user_id: str, user: CurrentUser, request: Request) -> Res
         enabled=fields["enabled"],
         external_id=fields["external_id"],
     )
+    details = _audit_details(fields=["enabled", "external_id"], enabled=bool(fields["enabled"]))
+    audit_account_change(user.user_id, user_id, "updated", details)
     account = store.get(user_id)
     groups = groups_held(account, group_store.list(), bindings=provider_bindings(request))
     scim_user = account_to_scim_user(
@@ -370,16 +379,22 @@ async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Respo
     except Exception as exc:
         return _invalid_body("PatchOp", exc)
 
+    enabled: bool | None = None
     for op in patch.operations or []:
         # op.path may be a typed ``Path`` object; coerce to a plain string.
         path = str(op.path or "").lower()
         value = op.value
         if path == "active":
-            store.update(user_id, enabled=bool(value))
+            enabled = bool(value)
+            store.update(user_id, enabled=enabled)
         elif path == "" and isinstance(value, dict) and "active" in value:
-            store.update(user_id, enabled=bool(value["active"]))
+            enabled = bool(value["active"])
+            store.update(user_id, enabled=enabled)
         # Other paths (userName is the immutable key; group membership is managed
         # on /Groups) are ignored - the record stays consistent either way.
+    if enabled is not None:
+        details = _audit_details(fields=["enabled"], enabled=enabled)
+        audit_account_change(user.user_id, user_id, "updated", details)
 
     account = store.get(user_id)
     groups = groups_held(account, group_store.list(), bindings=provider_bindings(request))
@@ -406,7 +421,7 @@ async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Resp
     check_group_changes(request, user, groups, held, ())
     store.delete(user_id)
     forget_member(group_store, user_id)
-    logger.info("SCIM user deleted", username=user_id)
+    audit_account_change(user.user_id, user_id, "deleted", _audit_details(groups=held))
     return Response(status_code=204)
 
 
@@ -494,8 +509,9 @@ async def create_group(user: CurrentUser, request: Request) -> Response:
     store.update(name, source_id=fields["source_id"], source_provider=fields["source_provider"])
     request_ch_rbac_reconcile(request.app.state)
     sync_account_groups_for_membership_change(account_store, name, added=group.members)
-    logger.info("SCIM group provisioned", group=name, members=len(group.members))
     group = store.get(name)
+    details = _audit_details(roles=group.roles, scope=group.scope, members=group.members)
+    audit_group_change(user.user_id, name, "created", details)
     return _scim_json(
         group_to_scim_group(group, location=_location(request, "Groups", name)), 201, request
     )
@@ -541,6 +557,10 @@ async def replace_group(group_id: str, user: CurrentUser, request: Request) -> R
     sync_account_groups_for_membership_change(
         account_store, group_id, added=new - old, removed=old - new
     )
+    details = _audit_details(
+        fields=["members", "source_id"], added=sorted(new - old), removed=sorted(old - new)
+    )
+    audit_group_change(user.user_id, group_id, "updated", details)
     group = store.get(group_id)
     return _scim_json(
         group_to_scim_group(group, location=_location(request, "Groups", group_id)), 200, request
@@ -596,6 +616,9 @@ async def patch_group(group_id: str, user: CurrentUser, request: Request) -> Res
                 removed.add(username)
 
     sync_account_groups_for_membership_change(account_store, group_id, added=added, removed=removed)
+    if added or removed:
+        details = _audit_details(fields=["members"], added=sorted(added), removed=sorted(removed))
+        audit_group_change(user.user_id, group_id, "updated", details)
     group = store.get(group_id)
     return _scim_json(
         group_to_scim_group(group, location=_location(request, "Groups", group_id)), 200, request
@@ -629,7 +652,7 @@ async def delete_group(group_id: str, user: CurrentUser, request: Request) -> Re
     sync_account_groups_for_membership_change(account_store, group_id, removed=members)
     store.delete(group_id)
     request_ch_rbac_reconcile(request.app.state)
-    logger.info("SCIM group deleted", group=group_id)
+    audit_group_change(user.user_id, group_id, "deleted", _audit_details(members=members))
     return Response(status_code=204)
 
 
