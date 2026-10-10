@@ -14,6 +14,9 @@ that refuses the call with :data:`SENTINEL` in its body, then checks the respons
 carries neither the sentinel nor the URL, while the engine log carries the status.
 """
 
+import json
+import socket
+
 import pytest
 from google.auth.credentials import AnonymousCredentials
 from googleapiclient.discovery import build
@@ -21,6 +24,7 @@ from googleapiclient.discovery import build
 from dfe_engine.auth.oidc.adapters.entra import EntraAdapter
 from dfe_engine.auth.oidc.adapters.google import GoogleAdapter
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+from tests.support.loopback import CountingListener
 from tests.support.refusing_api import refusing_api
 
 SENTINEL = "idp.sentinel.7f3a@example.com"
@@ -125,3 +129,42 @@ class TestVerifyLogin:
         assert SENTINEL_LOCAL_PART not in resp.text
         assert "HTTP 404" in discovery["detail"]
         assert _status_logged(audit_events, "discovery", 404)
+
+    @pytest.mark.parametrize("reachable_over", ["tls", "refused"])
+    def test_an_unreachable_issuer_logs_why_and_no_host_beyond_the_issuer(
+        self, app, client, admin_headers, audit_events, reachable_over
+    ):
+        """The answer stays constant, while the log names the socket-level cause by class."""
+        listener = CountingListener()
+        if reachable_over == "tls":
+            # The issuer is https and the listener drops the handshake: a TLS failure.
+            scheme, port, expected = "https", listener.port, "tls"
+        else:
+            scheme, expected = "http", "connection_refused"
+            with socket.socket() as spare:
+                spare.bind(("127.0.0.1", 0))
+                port = spare.getsockname()[1]
+        try:
+            app.state.oidc_provider_registry.create(
+                "vl-unreachable",
+                OIDCProvider(
+                    type="generic", issuer=f"{scheme}://127.0.0.1:{port}/{SENTINEL_LOCAL_PART}"
+                ),
+            )
+            resp = client.get(
+                "/api/v1/auth/oidc-providers/vl-unreachable/verify-login", headers=admin_headers
+            )
+        finally:
+            listener.close()
+
+        discovery = next(c for c in resp.json()["checks"] if c["name"] == "discovery")
+        assert discovery["ok"] is False
+        assert "could not be reached" in discovery["detail"]
+        assert SENTINEL_LOCAL_PART not in resp.text
+        (line,) = [e for e in audit_events if e.get("operation") == "discovery"]
+        assert line["transport_failure"] == expected
+        assert line["error_type"] == "ConnectError"
+        assert "status" not in line
+        logged = json.dumps(line, default=str)
+        assert "127.0.0.1" not in logged
+        assert SENTINEL_LOCAL_PART not in logged

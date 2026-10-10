@@ -79,8 +79,9 @@ def _group_from_relation(item: object) -> GroupInfo | None:
 class GoogleAdapter(OIDCGroupAdapter):
     """Google Workspace groups: Cloud Identity as the user, else the Directory API as a service account.
 
-    Every method fails closed: missing credentials or a refused call yield no
-    groups, never an exception.
+    Every method but ``list_all_groups`` fails closed: missing credentials or a
+    refused call yield no groups, never an exception. ``list_all_groups`` is not on
+    the login path and raises when the Directory API refuses it.
     """
 
     CLOUD_IDENTITY_BASE = "https://cloudidentity.googleapis.com/v1"
@@ -129,23 +130,18 @@ class GoogleAdapter(OIDCGroupAdapter):
 
         Returns:
             List of GroupInfo, or an empty list when no service account is
-            configured or the API call fails.
+            configured.
+
+        Raises:
+            Exception: Whatever the Directory API client raised. A failed listing
+                is never returned as an empty one: group sync would record it as a
+                directory with no groups.
         """
         service = self._get_service()
         if service is None:
             return []
 
-        try:
-            raw = await asyncio.to_thread(self._fetch_all_groups_sync, service)
-        except Exception as exc:
-            logger.warning(
-                "Google Admin SDK list_all_groups failed",
-                operation="list_all_groups",
-                provider=self._provider.issuer,
-                **describe_idp_error(exc),
-            )
-            return []
-
+        raw = await asyncio.to_thread(self._fetch_all_groups_sync, service)
         return [GroupInfo(id=g["id"], name=g["name"], email=g.get("email", "")) for g in raw]
 
     async def test_connection(self) -> tuple[bool, str]:

@@ -9,9 +9,12 @@
 """Tests for POST/GET/PUT/DELETE /api/v1/auth/oidc-providers endpoints."""
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+
+from tests.support.loopback import CountingListener
 
 
 def _provider_yaml(api_settings, name: str) -> Path:
@@ -462,12 +465,32 @@ class TestTestProvider:
         assert resp.status_code == 403
 
 
+@pytest.fixture
+def loopback_issuer() -> Iterator[str]:
+    """An issuer URL on a local listener that drops every connection.
+
+    verify-login always fetches the issuer's discovery document, so its tests point the
+    issuer here and dial 127.0.0.1 and nothing else.
+    """
+    listener = CountingListener()
+    try:
+        yield f"http://127.0.0.1:{listener.port}"
+    finally:
+        listener.close()
+
+
 class TestVerifyLoginConfig:
     """GET /api/v1/auth/oidc-providers/{name}/verify-login"""
 
-    def test_reports_missing_client_id(self, client, admin_headers):
+    def test_reports_missing_client_id(self, client, admin_headers, loopback_issuer):
         """An unset client_id env var is flagged, not silently passed."""
-        _create_provider(client, admin_headers, name="vl-missing", client_id_env="OIDC_UNSET_XYZ")
+        _create_provider(
+            client,
+            admin_headers,
+            name="vl-missing",
+            client_id_env="OIDC_UNSET_XYZ",
+            issuer=loopback_issuer,
+        )
         resp = client.get(
             "/api/v1/auth/oidc-providers/vl-missing/verify-login", headers=admin_headers
         )
@@ -477,7 +500,9 @@ class TestVerifyLoginConfig:
         client_id = next(c for c in data["checks"] if c["name"] == "client_id")
         assert client_id["ok"] is False
 
-    def test_reports_literal_client_id_as_misconfiguration(self, client, app, admin_headers):
+    def test_reports_literal_client_id_as_misconfiguration(
+        self, client, app, admin_headers, loopback_issuer
+    ):
         """YAML that stores the client id value instead of an env var name is flagged.
 
         The API refuses that shape now, so the only way in is a file written out
@@ -489,7 +514,7 @@ class TestVerifyLoginConfig:
             "vl-literal-id",
             OIDCProvider(
                 type="generic",
-                issuer="https://accounts.example.com",
+                issuer=loopback_issuer,
                 client_id_env="0oa15mxzztuHEzwr7698",
             ),
         )
@@ -502,9 +527,17 @@ class TestVerifyLoginConfig:
         assert "environment variable name" in client_id["detail"]
         assert "0oa" not in client_id["detail"]
 
-    def test_reports_a_stored_client_secret_as_present(self, client, admin_headers):
+    def test_reports_a_stored_client_secret_as_present(
+        self, client, admin_headers, loopback_issuer
+    ):
         """A secret written through the API satisfies the check without any env var."""
-        _create_provider(client, admin_headers, name="vl-stored", client_secret="rp-secret-value")
+        _create_provider(
+            client,
+            admin_headers,
+            name="vl-stored",
+            client_secret="rp-secret-value",
+            issuer=loopback_issuer,
+        )
         resp = client.get(
             "/api/v1/auth/oidc-providers/vl-stored/verify-login", headers=admin_headers
         )
@@ -513,10 +546,16 @@ class TestVerifyLoginConfig:
         assert check["ok"] is True
         assert "rp-secret-value" not in resp.text
 
-    def test_reports_present_client_id(self, client, admin_headers, monkeypatch):
+    def test_reports_present_client_id(self, client, admin_headers, monkeypatch, loopback_issuer):
         """A resolvable client_id env var passes its check (value never returned)."""
         monkeypatch.setenv("OIDC_PRESENT_ID", "some-client-id")
-        _create_provider(client, admin_headers, name="vl-present", client_id_env="OIDC_PRESENT_ID")
+        _create_provider(
+            client,
+            admin_headers,
+            name="vl-present",
+            client_id_env="OIDC_PRESENT_ID",
+            issuer=loopback_issuer,
+        )
         resp = client.get(
             "/api/v1/auth/oidc-providers/vl-present/verify-login", headers=admin_headers
         )
@@ -527,11 +566,9 @@ class TestVerifyLoginConfig:
         # The secret value must never appear in the response.
         assert "some-client-id" not in resp.text
 
-    def test_discovery_failure_is_reported_not_raised(self, client, admin_headers):
+    def test_discovery_failure_is_reported_not_raised(self, client, admin_headers, loopback_issuer):
         """An unreachable/invalid discovery URL yields ok=False, not a 500."""
-        _create_provider(
-            client, admin_headers, name="vl-baddisco", issuer="https://accounts.example.com"
-        )
+        _create_provider(client, admin_headers, name="vl-baddisco", issuer=loopback_issuer)
         resp = client.get(
             "/api/v1/auth/oidc-providers/vl-baddisco/verify-login", headers=admin_headers
         )

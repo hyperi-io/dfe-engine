@@ -18,6 +18,7 @@ Authlib network calls are mocked.
 
 import base64
 import hashlib
+import json
 import shutil
 import time
 from types import SimpleNamespace
@@ -683,3 +684,38 @@ def test_callback_refuses_a_login_the_account_store_cannot_record(client, app, a
     failed = [e for e in audit_events if e["event"] == "auth.jit.provision_failed"]
     assert [e["user_id"] for e in failed] == ["kim@example.com"]
     assert not [e for e in audit_events if e["event"] == "auth.login.denied"]
+
+
+CALLBACK_SENTINEL = "callback.sentinel.9c1e"
+
+
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [
+        ("access_denied", "access_denied"),
+        (f"user {CALLBACK_SENTINEL} may not sign in", "OAuthError"),
+    ],
+    ids=["a-code", "prose-in-the-code-slot"],
+)
+def test_a_refused_callback_records_the_oauth_code_never_the_description(
+    client, app, audit_events, error, reason
+):
+    """The callback's own query string reaches Authlib's error text, so only the code is kept."""
+    app.state.oidc_provider_registry.create(
+        "idp", OIDCProvider(type="generic", issuer="https://idp.example", client_id="c")
+    )
+    app.state.oidc_rp = _rp_with_known_idp(app.state.oidc_provider_registry, "idp")
+
+    resp = client.get(
+        "/api/v1/auth/oidc/idp/callback",
+        params={"error": error, "error_description": f"{CALLBACK_SENTINEL} is unknown"},
+        follow_redirects=False,
+    )
+
+    assert resp.status_code == 401, resp.text
+    assert CALLBACK_SENTINEL not in json.dumps(audit_events, default=str)
+    (denied,) = [e for e in audit_events if e["event"] == "auth.login.denied"]
+    assert denied["reason"] == reason
+    (failed,) = [e for e in audit_events if e["event"] == "OIDC callback failed"]
+    assert failed["error_type"] == "OAuthError"
+    assert failed.get("code") == (error if reason == error else None)

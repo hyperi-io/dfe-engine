@@ -25,6 +25,7 @@ from dfe_engine.auth.audit import (
 from dfe_engine.auth.groups import Group, GroupStore
 from dfe_engine.auth.membership import linked_groups, linked_providers
 from dfe_engine.auth.models import AuthenticationError, Scope, ScopedGrant, platform_grants
+from dfe_engine.auth.oidc.idp_errors import describe_idp_error
 from dfe_engine.auth.protected_accounts import resolve_floor
 from dfe_engine.auth.store_names import VALID_NAME
 
@@ -389,7 +390,7 @@ class JitProvisioner:
                 "JIT HyperDX invite failed",
                 user_id=user_id,
                 team_name=team_name,
-                error=str(exc),
+                **describe_idp_error(exc),
             )
             return
         if success:

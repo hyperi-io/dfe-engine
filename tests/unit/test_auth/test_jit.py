@@ -7,6 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 import asyncio
+import json
 from unittest.mock import patch
 
 import pytest
@@ -750,7 +751,7 @@ class TestEnsureAccountHdxInvite:
         account = jit.ensure_account("jane@corp.com", ["acme-viewers"], "entra")
         assert account is not None
 
-    def test_refused_invite_is_logged_and_not_audited(self, stores):
+    def test_refused_invite_is_logged_and_not_audited(self, stores, audit_events):
         accounts, groups = stores
 
         class _RefusingHdx:
@@ -760,33 +761,29 @@ class TestEnsureAccountHdxInvite:
         jit = JitProvisioner(
             account_store=accounts, group_store=groups, hyperdx_client=_RefusingHdx()
         )
-        with (
-            patch("dfe_engine.auth.jit.audit_jit_hdx_invited") as audited,
-            patch("dfe_engine.auth.jit.logger") as log,
-        ):
-            asyncio.run(jit._invite_to_hdx("jane@corp.com", "customer-acme"))
-        audited.assert_not_called()
-        log.warning.assert_called_once()
-        assert log.warning.call_args.kwargs["user_id"] == "jane@corp.com"
+        asyncio.run(jit._invite_to_hdx("jane@corp.com", "customer-acme"))
+        assert not [e for e in audit_events if e["event"] == "auth.jit.hdx_invited"]
+        (warned,) = [
+            e for e in audit_events if e["event"].startswith("JIT HyperDX invite not sent")
+        ]
+        assert warned["user_id"] == "jane@corp.com"
 
-    def test_failed_invite_is_logged_with_the_error_and_not_raised(self, stores):
+    def test_failed_invite_is_logged_by_its_class_and_not_raised(self, stores, audit_events):
         accounts, groups = stores
 
         class _BrokenHdx:
             async def invite_member(self, user_id):
-                raise ConnectionError("hyperdx unreachable")
+                raise ConnectionError("hyperdx.internal:8080 refused the invite")
 
         jit = JitProvisioner(
             account_store=accounts, group_store=groups, hyperdx_client=_BrokenHdx()
         )
-        with (
-            patch("dfe_engine.auth.jit.audit_jit_hdx_invited") as audited,
-            patch("dfe_engine.auth.jit.logger") as log,
-        ):
-            asyncio.run(jit._invite_to_hdx("jane@corp.com", "customer-acme"))
-        audited.assert_not_called()
-        log.warning.assert_called_once()
-        assert log.warning.call_args.kwargs["error"] == "hyperdx unreachable"
+        asyncio.run(jit._invite_to_hdx("jane@corp.com", "customer-acme"))
+        assert not [e for e in audit_events if e["event"] == "auth.jit.hdx_invited"]
+        (warned,) = [e for e in audit_events if e["event"] == "JIT HyperDX invite failed"]
+        assert warned["error_type"] == "ConnectionError"
+        assert warned["user_id"] == "jane@corp.com"
+        assert "hyperdx.internal" not in json.dumps(warned)
 
 
 class _RecordingHdx:
