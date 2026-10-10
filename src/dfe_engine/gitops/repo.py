@@ -39,7 +39,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar, cast
 
 from dulwich import porcelain
-from dulwich.errors import ChecksumMismatch, FileFormatException, NotTreeError
+from dulwich.errors import (
+    ChecksumMismatch,
+    FileFormatException,
+    NotTreeError,
+    ObjectFormatException,
+)
 from scalo.logger import logger
 from scalo.resilience import (
     CircuitBreaker,
@@ -82,8 +87,21 @@ _TRANSIENT_HTTP_STATUS = re.compile(r"unexpected http resp (?:408|429|5\d\d)\b")
 # could never be used.
 _BREAKER_PROBES = 1
 
-# A pack the disk refuses to take, or a loose object that will not read back.
-_PACK_FAILURES = (OSError, zlib.error, ChecksumMismatch, FileFormatException)
+# An object that does not read back, which is damage to the clone rather than a disk
+# refusing a write.
+_CORRUPT_OBJECT = (ChecksumMismatch, FileFormatException, ObjectFormatException, zlib.error)
+
+
+def _corruption_fields(exc: BaseException) -> dict[str, str]:
+    """Log fields for a corrupt object: the error, its reason, and the SHA where it has one.
+
+    dulwich's pack loop does not say which object it was reading, so only a checksum
+    mismatch names the object.
+    """
+    fields = {"error": type(exc).__name__, "reason": str(exc)}
+    if isinstance(exc, ChecksumMismatch):
+        fields["sha"] = exc.expected
+    return fields
 
 
 def _as_path_bytes(host_path: str | bytes) -> bytes:
@@ -335,6 +353,9 @@ class GitopsRepo:
         # Every commit past the threshold tries to pack, so a pack directory that
         # refuses writes is reported on the transition rather than once per commit.
         self._pack_failed = False
+        # ensure() can run once per request, so a config it cannot write is reported on
+        # the transition rather than once per call.
+        self._auto_gc_left_on = False
         # The open batch() block's writes.
         self._batch: _Batch | None = None
 
@@ -595,20 +616,39 @@ class GitopsRepo:
         caller waits under the locks. dulwich reads both from this file alone, so
         zeroing them here is the whole switch, and the engine packs on ``gitops.pack``
         instead. Written only when either differs, so a reused clone reads it once.
+
+        Best-effort: a config the clone cannot write, read-only or held by a stale
+        ``config.lock``, leaves dulwich's gc on and is warned once. Failing ``ensure()``
+        instead would leave the engine with no deploy repo at all.
         """
+        from dulwich.file import FileLocked
         from dulwich.repo import Repo
 
-        with Repo(str(self._path)) as repo:
-            config = repo.get_config()
-            try:
-                current = (config.get((b"gc",), b"auto"), config.get((b"gc",), b"autoPackLimit"))
-            except KeyError:
-                current = None
-            if current == (b"0", b"0"):
-                return
-            config.set((b"gc",), b"auto", b"0")
-            config.set((b"gc",), b"autoPackLimit", b"0")
-            config.write_to_path()
+        try:
+            with Repo(str(self._path)) as repo:
+                config = repo.get_config()
+                try:
+                    current = (
+                        config.get((b"gc",), b"auto"),
+                        config.get((b"gc",), b"autoPackLimit"),
+                    )
+                except KeyError:
+                    current = None
+                if current != (b"0", b"0"):
+                    config.set((b"gc",), b"auto", b"0")
+                    config.set((b"gc",), b"autoPackLimit", b"0")
+                    config.write_to_path()
+        except (OSError, FileLocked) as exc:
+            if not self._auto_gc_left_on:
+                self._auto_gc_left_on = True
+                logger.warning(
+                    "Could not switch dulwich's own gc off in the gitops clone's config: it "
+                    "stays on, so a write, refresh or push that reaches its limits pays for a "
+                    "full gc under the locks",
+                    error=type(exc).__name__,
+                )
+            return
+        self._auto_gc_left_on = False
 
     def remote_head(self) -> str | None:
         """The remote branch's head SHA, read without fetching a single object.
@@ -1333,8 +1373,10 @@ class GitopsRepo:
         dulwich's gc, which rewrites every object and is switched off in the clone.
         ``pack.loose_objects`` of 0 leaves them loose. Caller holds the tree lock.
 
-        Best-effort: a pack that cannot be written leaves the objects loose and the
-        commit goes ahead, because the write it is part of has not failed.
+        Best-effort, because the write this commit belongs to has not failed. A pack the
+        disk refuses leaves the objects loose and is warned once. A loose object that
+        does not read back is damage to the clone: it is an error every time, no loose
+        object is packed while it is there, and the commit still goes ahead.
         """
         from dulwich.repo import Repo
 
@@ -1347,7 +1389,7 @@ class GitopsRepo:
                 if store.count_loose_objects() < limit:
                     return
                 packed = store.pack_loose_objects()
-            except _PACK_FAILURES as exc:
+            except OSError as exc:
                 self._metrics.loose_pack("failed")
                 if not self._pack_failed:
                     self._pack_failed = True
@@ -1356,6 +1398,14 @@ class GitopsRepo:
                         "and commits go ahead",
                         error=type(exc).__name__,
                     )
+                return
+            except _CORRUPT_OBJECT as exc:
+                self._metrics.loose_pack("corrupt")
+                logger.error(
+                    "A loose object in the gitops clone is corrupt: no loose object is "
+                    "packed while it is there, and commits go ahead",
+                    **_corruption_fields(exc),
+                )
                 return
         self._metrics.loose_pack("packed")
         if self._pack_failed:
@@ -1371,11 +1421,16 @@ class GitopsRepo:
         write, a read's refresh or a push, where it rewrites every object the repo
         holds, so it is switched off and the engine calls this from a background task
         and after a CLI write instead. It takes both locks, so a write or a read waits
-        for it rather than racing it. The gc prunes objects unreachable for dulwich's
-        two-week grace period, which is what removes the commits a refused push or a
-        failed write left behind. ``pack.packs`` of 0 never consolidates.
+        for it rather than racing it. ``pack.packs`` of 0 never consolidates.
 
-        Best-effort: a gc that fails leaves the packs as they were for the next call.
+        The gc prunes unreachable objects best-effort only. dulwich ages an object by
+        the mtime of the file holding it, and every repack writes what it keeps into a
+        new file, so an unreachable object is pruned only by a consolidation two weeks
+        or more after the last repack that kept it.
+
+        Best-effort: a gc that fails leaves the packs as they were for the next call. A
+        disk that refuses it is a warning, and an object that does not read back is an
+        error, because that is damage to the clone.
 
         Returns:
             Whether the packs were consolidated.
@@ -1391,12 +1446,20 @@ class GitopsRepo:
                 if repo.object_store.count_pack_files() < limit:
                     return False
                 stats = garbage_collect(repo, auto=True)
-            except _PACK_FAILURES as exc:
+            except OSError as exc:
                 self._metrics.pack_consolidation("failed")
                 logger.warning(
                     "Could not consolidate the gitops clone's packs: they stay as they were "
                     "until the next check",
                     error=type(exc).__name__,
+                )
+                return False
+            except _CORRUPT_OBJECT as exc:
+                self._metrics.pack_consolidation("corrupt")
+                logger.error(
+                    "An object in the gitops clone is corrupt: its packs are not "
+                    "consolidated while it is there",
+                    **_corruption_fields(exc),
                 )
                 return False
         self._metrics.pack_consolidation("consolidated")

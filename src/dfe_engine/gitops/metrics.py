@@ -51,18 +51,22 @@ BreakerEvent = Literal["opened", "rejected", "closed"]
 - ``closed``: the forge answered a probe, so writes call it again.
 """
 
-PackOutcome = Literal["packed", "failed"]
+PackOutcome = Literal["packed", "failed", "corrupt"]
 """How packing the clone's loose objects before a commit ended.
 
 - ``packed``: the loose objects went into one new pack.
-- ``failed``: the pack could not be written, so they stay loose and the commit goes ahead.
+- ``failed``: the disk refused the pack, so they stay loose and the commit goes ahead.
+- ``corrupt``: a loose object did not read back, so none is packed while it is there,
+  and the commit goes ahead.
 """
 
-ConsolidationOutcome = Literal["consolidated", "failed"]
+ConsolidationOutcome = Literal["consolidated", "failed", "corrupt"]
 """How a background consolidation of the clone's packs into one ended.
 
-- ``consolidated``: one pack is left, and objects unreachable for two weeks are gone.
-- ``failed``: the gc raised, so the packs stay as they were until the next check.
+- ``consolidated``: one pack is left. Unreachable objects are pruned best-effort only,
+  because every repack resets the age they are pruned by.
+- ``failed``: the disk refused the gc, so the packs stay as they were until the next check.
+- ``corrupt``: an object did not read back, so the packs stay as they were while it is there.
 """
 
 

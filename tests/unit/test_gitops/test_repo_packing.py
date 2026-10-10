@@ -12,13 +12,14 @@ packs only the loose objects, which costs the same at any history length. Real g
 tempdirs, no mocks.
 """
 
-from collections.abc import Iterator
+import zlib
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 from dulwich import porcelain
 from dulwich.object_store import iter_tree_contents
-from dulwich.objects import Commit
+from dulwich.objects import Blob, Commit
 from dulwich.repo import Repo
 from prometheus_client.parser import text_string_to_metric_families
 from scalo.logger import logger
@@ -31,6 +32,16 @@ from dfe_engine.settings import GitopsPackSettings
 # Low enough that a few dozen one-file writes cross it, as thousands do at the default.
 _LOOSE_OBJECTS = 20
 _WRITES = 40
+
+# Each way a loose object stops reading back, from the bytes it held. dulwich raises
+# ObjectFormatException for the first and the last, EmptyFileException for the empty
+# file and zlib.error for content that was never zlib.
+_CORRUPTIONS: dict[str, Callable[[bytes], bytes]] = {
+    "cut to its zlib header": lambda data: data[:2],
+    "emptied": lambda data: b"",
+    "not zlib": lambda data: b"\x30not zlib data",
+    "an unknown type in its header": lambda data: zlib.compress(b"bogus 5\0hello"),
+}
 
 
 @pytest.fixture
@@ -141,3 +152,32 @@ def test_a_pack_directory_that_refuses_writes_does_not_fail_the_write(
     assert _sample(manager, LOOSE_PACKS, {"outcome": "failed"}) == 2
     warnings = [line for line in captured_logs if line.startswith("WARNING ") and "pack" in line]
     assert len(warnings) == 1
+
+
+@pytest.mark.parametrize("kind", sorted(_CORRUPTIONS))
+def test_a_corrupt_loose_object_is_an_error_every_time_and_commits_go_ahead(
+    tmp_path: Path, captured_logs: list[str], kind: str
+) -> None:
+    manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+    repo = _clone(tmp_path, 6, GitopsMetrics(manager))
+    repo.publish({"r.yaml": "n: 0\n"}, message="seed")
+    repo.publish({"r.yaml": "n: 1\n"}, message="seed2")
+    # The first r.yaml is in no tree HEAD reaches, so only packing reads it.
+    sha = Blob.from_string(b"n: 0\n").id.decode()
+    loose = repo.path / ".git" / "objects" / sha[:2] / sha[2:]
+    loose.chmod(0o644)
+    loose.write_bytes(_CORRUPTIONS[kind](loose.read_bytes()))
+
+    first = repo.publish({"a.yaml": "a: 1\n"}, message="write A")
+    second = repo.publish({"b.yaml": "b: 1\n"}, message="write B")
+
+    assert first.commit_sha is not None
+    assert second.commit_sha is not None
+    with Repo(str(repo.path)) as git:
+        messages = [entry.commit.message for entry in git.get_walker()]
+    assert messages == [b"write B", b"write A", b"seed2", b"seed"]
+    assert _sample(manager, LOOSE_PACKS, {"outcome": "corrupt"}) == 2
+    assert _sample(manager, LOOSE_PACKS, {"outcome": "failed"}) == 0
+    errors = [line for line in captured_logs if line.startswith("ERROR ") and "corrupt" in line]
+    assert len(errors) == 2
+    assert all("'reason':" in line for line in errors)

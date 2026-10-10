@@ -1643,9 +1643,13 @@ class GitopsPackSettings(BaseModel):
     the repo holds and would do so inside a write, a read's refresh or a push. The
     engine packs instead. A commit packs the loose objects once ``loose_objects`` of
     them have built up, which costs the same at any history length. A background task
-    checks every ``interval_seconds`` and consolidates the packs into one, pruning
-    objects unreachable for two weeks, once there are ``packs`` of them. A fetch that brings
-    objects adds a pack, and so does each loose-object pack. 0 switches either off.
+    checks every ``interval_seconds`` and consolidates the packs into one once there
+    are ``packs`` of them. A fetch that brings objects adds a pack, and so does each
+    loose-object pack. 0 switches either off.
+
+    Consolidation prunes unreachable objects best-effort only. dulwich ages an object
+    by the mtime of the file holding it, and every repack rewrites what it keeps, so
+    each repack starts an unreachable object's two-week grace period again.
 
     Environment variables:
     - DFE_GITOPS_PACK_LOOSE_OBJECTS -> gitops.pack.loose_objects
