@@ -101,9 +101,10 @@ def plan_cmd(as_json: bool) -> None:
 @click.option("--json", "as_json", is_flag=True, help="Emit the outcome as JSON.")
 def apply_cmd(allow_drift: bool, as_json: bool) -> None:
     """Run the boot phase by hand, under the same lease. Exits 2 on a refusal."""
+    from dfe_engine.schema import metrics
     from dfe_engine.schema.phase import run_bootstrap
 
-    state = run_bootstrap(settings=_settings(), allow_drift=allow_drift)
+    state = run_bootstrap(settings=_settings(), allow_drift=allow_drift, metrics=metrics.create())
     if as_json:
         click.echo(json.dumps(state.as_dict(), indent=2))
     else:

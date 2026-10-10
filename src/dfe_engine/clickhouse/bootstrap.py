@@ -30,6 +30,7 @@ from dfe_engine.schema.phase import SchemaBootstrapState, run_bootstrap
 from dfe_engine.settings import DFESettings, get_clickhouse_config
 
 if TYPE_CHECKING:
+    from dfe_engine.schema.metrics import SchemaMetrics
     from dfe_engine.source.models import Source
 
 
@@ -51,15 +52,19 @@ def _reconcile_sources(*, client: object, settings: DFESettings, sources: list[S
 
 
 def bootstrap_clickhouse(
-    *, settings: DFESettings, sources: list[Source] | None = None
+    *,
+    settings: DFESettings,
+    sources: list[Source] | None = None,
+    metrics: SchemaMetrics | None = None,
 ) -> SchemaBootstrapState:
     """Apply the manifest, then reconcile the deployed source tables' TTL.
 
     Returns the phase state. ``state.ready`` is what the readiness check reads,
     and ``state.converged`` is what says the objects exist -- a caller must not
-    report a core table as deployed unless that one is true.
+    report a core table as deployed unless that one is true. ``metrics`` is where
+    the phase reports its outcome; ``None`` reports nothing.
     """
-    state = run_bootstrap(settings=settings)
+    state = run_bootstrap(settings=settings, metrics=metrics)
     if not state.converged or not sources:
         return state
 
