@@ -4,6 +4,9 @@ Verifies that :func:`dfe_engine.deployment_contract.engine_deployment_contract`
 is well-formed and that scalo's generators emit valid Dockerfile-runtime,
 ArgoCD Application, container manifest, and Helm chart artefacts from it.
 
+The published thin chart is assembled from this contract at release time, so
+no chart is committed to compare against. The committed ``Dockerfile`` is.
+
 These tests are the dfe-engine analogue of dfe-loader's
 ``tests/integration/helm_contract.rs`` + ``tests/integration/deployment.rs``:
 they catch drift between the contract and committed artefacts before CI does.
@@ -238,11 +241,11 @@ class TestArtefactGeneration:
 
 
 class TestCommittedArtefactDrift:
-    """Committed Dockerfile / chart values must stay aligned with the contract.
+    """The committed Dockerfile must stay aligned with the contract.
 
-    These guard against the contract and the deployed artefacts silently
-    drifting apart. If you change the contract, regenerate artefacts and
-    commit them; if you tweak Dockerfile/chart by hand, update the contract.
+    This guards against the contract and the deployed image silently drifting
+    apart. If you change the contract, regenerate artefacts and commit them;
+    if you tweak the Dockerfile by hand, update the contract.
     """
 
     def test_committed_dockerfile_matches_contract(self) -> None:
@@ -250,16 +253,6 @@ class TestCommittedArtefactDrift:
 
         mismatches = validate_dockerfile(engine_deployment_contract(), PROJECT_ROOT / "Dockerfile")
         assert mismatches == [], f"committed Dockerfile drifted from contract: {mismatches}"
-
-    def test_committed_chart_matches_contract(self) -> None:
-        from scalo.deployment import validate_helm_values
-
-        mismatches = validate_helm_values(engine_deployment_contract(), PROJECT_ROOT / "chart")
-        assert mismatches == [], f"committed chart values drifted from contract: {mismatches}"
-
-    def test_committed_chart_yaml_name_matches_contract(self) -> None:
-        chart = yaml.safe_load((PROJECT_ROOT / "chart" / "Chart.yaml").read_text())
-        assert chart["name"] == engine_deployment_contract().app_name
 
 
 # ---------------------------------------------------------------------------

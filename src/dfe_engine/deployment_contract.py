@@ -10,9 +10,10 @@ paths, resources, OCI labels). Two consumers read it:
   Build job runs it, and the release assembles the thin Helm chart from that
   contract on the scalo-service library chart (``release.helm`` in
   ``.hyperi-ci.yaml``), so every field below reaches the deployed pod.
-- scalo's ``validate_dockerfile`` / ``validate_helm_values`` drift checks (see
-  ``tests/unit/test_deployment/test_contract.py``) keep the committed
-  ``Dockerfile`` and ``chart/`` aligned with it.
+- scalo's ``validate_dockerfile`` drift check (see
+  ``tests/unit/test_deployment/test_contract.py``) keeps the committed
+  ``Dockerfile`` aligned with it. The published chart is assembled from the
+  contract, so there is no committed chart to keep aligned.
 
 The :func:`engine_deployment_contract` factory is the single source of truth.
 ``DfeEngineApp.deployment_contract()`` returns it.
