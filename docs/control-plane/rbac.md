@@ -561,6 +561,8 @@ groups:
 
 A Google login reads the user's groups from Cloud Identity with that login's own token (scope `cloud-identity.groups.readonly`, Cloud Identity API enabled in the OAuth client's project). A group file links on `source_id`, the id after `groups/` in the group's resource name.
 
+The customer's IdP admin sets up their side from [idp-setup/google.md](idp-setup/google.md), [idp-setup/entra.md](idp-setup/entra.md) or [idp-setup/okta.md](idp-setup/okta.md), and sends back the client credentials, the issuer and the group identifiers each provider links on.
+
 Config holds a secret PATH into the `DfeSecrets` seam, or the NAME of an env var
 (`client_id_env`, `client_secret_env`, `service_account_json_env`) — never a
 secret value. Resolution reads the store first, so a credential sent to
