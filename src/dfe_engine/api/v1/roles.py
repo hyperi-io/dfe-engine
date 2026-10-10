@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search
+from dfe_engine.auth.audit import audit_role_change
 from dfe_engine.auth.rbac_scopes import casbin_scope_catalog, scopes_dict
 from dfe_engine.auth.role_store import Role, RoleStore
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
@@ -115,6 +116,11 @@ def _refresh_role_config(request: Request) -> None:
     request_ch_rbac_reconcile(request.app.state)
 
 
+def _grant_details(role: Role) -> dict[str, object]:
+    """What a role grants once written, for its audit event."""
+    return {"permissions": role.permissions, "scoped": role.scoped}
+
+
 def _role_in_use(request: Request, role_name: str) -> bool:
     from dfe_engine.auth.groups import GroupStore
 
@@ -183,6 +189,7 @@ async def create_role(
             detail={"code": "conflict", "message": str(exc)},
         ) from exc
     _refresh_role_config(request)
+    audit_role_change(user.user_id, role.name, "created", _grant_details(role))
     return _role_response(role)
 
 
@@ -263,6 +270,7 @@ async def update_role(
             detail={"code": "not_found", "message": f"Role '{name}' not found"},
         ) from None
     _refresh_role_config(request)
+    audit_role_change(user.user_id, role.name, "updated", _grant_details(role))
     return _role_response(role)
 
 
@@ -299,3 +307,4 @@ async def delete_role(
             detail={"code": "not_found", "message": f"Role '{name}' not found"},
         ) from None
     _refresh_role_config(request)
+    audit_role_change(user.user_id, name, "deleted")

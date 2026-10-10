@@ -18,7 +18,7 @@ roles:
       - "rule:*"
       - "schema:read"
       - "schema:write"
-      - "transforms:*"
+      - "transform:*"
       - "org:read"
   data_analyst_viewer:
     description: "Same scope as data_analyst, read-only"
@@ -85,7 +85,7 @@ roles:
       - "deployment:read"
       - "argo:applications:get"
       - "argo:projects:get"
-      - "service-surface:read"
+      - "service_surface:read"
       - "service:read"
       - "org:read"
   org_viewer:

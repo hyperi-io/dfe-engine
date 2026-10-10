@@ -36,7 +36,6 @@ API_ENFORCED_ACTIONS: frozenset[str] = frozenset(
     {
         "alert:read",
         "alert:write",
-        "config:read",
         "config:write",
         "deployment:read",
         "deployment:write",
@@ -50,15 +49,14 @@ API_ENFORCED_ACTIONS: frozenset[str] = frozenset(
         "org:write",
         "query:execute",
         "query:read",
-        "query:write",
         "raw_query:execute",
         "schema:delete",
         "schema:read",
         "schema:write",
         "source:read",
         "source:write",
-        "transforms:compile",
-        "transforms:test",
+        "transform:compile",
+        "transform:test",
     }
 )
 

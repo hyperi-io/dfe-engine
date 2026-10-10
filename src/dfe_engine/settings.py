@@ -1305,20 +1305,6 @@ class HelmSettings(BaseModel):
     environment_file: str = Field(default="", description="Path to environment config YAML")
 
 
-class OIDCSettings(BaseModel):
-    """OIDC provider settings.
-
-    Environment variables:
-    - DFE_AUTH_OIDC_PROVIDERS_DIR -> auth.oidc.providers_dir
-    - DFE_AUTH_OIDC_SYNC_ENABLED -> auth.oidc.sync_enabled
-    - DFE_AUTH_OIDC_SYNC_ON_STARTUP -> auth.oidc.sync_on_startup
-    """
-
-    providers_dir: str = Field(default="", description="OIDC provider config directory")
-    sync_enabled: bool = Field(default=True, description="Enable background group sync")
-    sync_on_startup: bool = Field(default=True, description="Sync on startup")
-
-
 class SeedAccount(BaseModel):
     """One named local account seeded + RECONCILED on every bootstrap.
 
@@ -1476,6 +1462,8 @@ class AuthSettings(BaseModel):
     - DFE_AUTH_ENABLED -> auth.enabled
     - DFE_AUTH_DIR -> auth.auth_dir
     - DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS -> auth.api_key_default_ttl_days
+    - DFE_AUTH_OIDC_GROUP_SYNC_ENABLED -> auth.oidc_group_sync_enabled
+    - DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS -> auth.oidc_group_sync_tick_seconds
     """
 
     enabled: bool = Field(
@@ -1546,7 +1534,6 @@ class AuthSettings(BaseModel):
             "DFE_AUTH_SOURCE_PROVIDER_BINDINGS, a JSON object."
         ),
     )
-    oidc: OIDCSettings = Field(default_factory=OIDCSettings)
     local: LocalAuthSettings = Field(default_factory=LocalAuthSettings)
     login_throttle: LoginThrottleSettings = Field(default_factory=LoginThrottleSettings)
     store_backend: str = Field(
@@ -2457,6 +2444,10 @@ def _get_env_overrides() -> dict:
         overrides["auth"]["proxy_provider"] = val
     if val := _get_env("DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS"):
         overrides["auth"]["api_key_default_ttl_days"] = int(val)
+    if val := _get_env("DFE_AUTH_OIDC_GROUP_SYNC_ENABLED"):
+        overrides["auth"]["oidc_group_sync_enabled"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS"):
+        overrides["auth"]["oidc_group_sync_tick_seconds"] = int(val)
     if val := _get_env("DFE_AUTH_SOURCE_PROVIDER_BINDINGS"):
         # A JSON object of {source_provider_stamp: oidc_provider_name}. Fail loudly
         # on malformed config: a dropped binding locks every bound user out at login.
@@ -2523,22 +2514,6 @@ def _get_env_overrides() -> dict:
         overrides["auth"].setdefault("login_throttle", {})["client_failures"] = int(val)
     if val := _get_env("DFE_AUTH_LOGIN_THROTTLE_MAX_DELAY_SECONDS"):
         overrides["auth"].setdefault("login_throttle", {})["max_delay_seconds"] = int(val)
-
-    # OIDC settings (nested under auth.oidc)
-    if val := _get_env("DFE_AUTH_OIDC_PROVIDERS_DIR"):
-        overrides["auth"].setdefault("oidc", {})["providers_dir"] = val
-    if val := _get_env("DFE_AUTH_OIDC_SYNC_ENABLED"):
-        overrides["auth"].setdefault("oidc", {})["sync_enabled"] = val.lower() in (
-            "true",
-            "1",
-            "yes",
-        )
-    if val := _get_env("DFE_AUTH_OIDC_SYNC_ON_STARTUP"):
-        overrides["auth"].setdefault("oidc", {})["sync_on_startup"] = val.lower() in (
-            "true",
-            "1",
-            "yes",
-        )
 
     # Central users+groups store backend (auto default; document nested under auth.accounts_store)
     if val := _get_env("DFE_AUTH_STORE_BACKEND"):
