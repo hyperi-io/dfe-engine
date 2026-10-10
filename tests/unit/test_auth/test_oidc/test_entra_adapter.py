@@ -21,6 +21,7 @@ from __future__ import annotations
 import pytest
 
 from dfe_engine.auth.oidc.adapters.entra import EntraAdapter, graph_credentials
+from dfe_engine.auth.oidc.idp_errors import DirectoryNotConfiguredError
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
 from tests.unit.test_auth.test_oidc.entra_adapter_cases import (
     GRAPH_CREDENTIALS_CASES,
@@ -186,23 +187,26 @@ class TestResolveUserGroupsNoCredentials:
 
 
 class TestListAllGroupsNoCredentials:
-    async def test_returns_empty_list_when_no_credentials(self, monkeypatch):
+    async def test_refuses_to_list_when_no_credentials(self, monkeypatch):
         monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
         monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
         monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
 
         adapter = EntraAdapter(_make_provider())
-        result = await adapter.list_all_groups()
-        assert result == []
+        with pytest.raises(DirectoryNotConfiguredError):
+            await adapter.list_all_groups()
 
-    async def test_return_type_is_list(self, monkeypatch):
-        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
+    @pytest.mark.parametrize(
+        "missing", ["ENTRA_CLIENT_ID", "ENTRA_TENANT_ID", "ENTRA_CLIENT_SECRET"]
+    )
+    async def test_refuses_to_list_when_one_credential_is_missing(self, monkeypatch, missing):
+        for name in ("ENTRA_CLIENT_ID", "ENTRA_TENANT_ID", "ENTRA_CLIENT_SECRET"):
+            monkeypatch.setenv(name, "set")
+        monkeypatch.delenv(missing)
 
         adapter = EntraAdapter(_make_provider())
-        result = await adapter.list_all_groups()
-        assert isinstance(result, list)
+        with pytest.raises(DirectoryNotConfiguredError):
+            await adapter.list_all_groups()
 
 
 # ---------------------------------------------------------------------------

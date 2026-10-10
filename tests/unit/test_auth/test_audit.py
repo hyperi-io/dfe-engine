@@ -13,8 +13,10 @@ function is called with the correct structured arguments. This is one of the
 explicit exceptions to the no-mocks policy for audit logging.
 """
 
+import json
 from unittest.mock import patch
 
+import httpx
 import pytest
 
 from dfe_engine.auth.audit import (
@@ -393,25 +395,41 @@ class TestAuditOrgHyperdxProvisioned:
         assert kwargs["team_id"] == "team-abc"
 
 
+def _refused(status: int, url: str) -> httpx.HTTPStatusError:
+    """The error an HTTP client raises for a ``status`` answer from ``url``."""
+    request = httpx.Request("GET", url)
+    return httpx.HTTPStatusError(
+        f"Client error '{status}' for url '{url}'",
+        request=request,
+        response=httpx.Response(status, request=request),
+    )
+
+
 class TestAuditOrgHyperdxFailed:
-    @patch("dfe_engine.auth.audit.logger")
-    def test_emits_warning_event(self, mock_logger):
-        audit_org_hyperdx_failed(org_name="acme", error="API error")
-        mock_logger.warning.assert_called_once()
-        mock_logger.info.assert_not_called()
+    def test_a_refused_call_records_its_class_and_status_not_its_text(self, audit_events):
+        audit_org_hyperdx_failed(
+            org_name="acme", exc=_refused(403, "http://hyperdx.internal/team?key=hdx-secret")
+        )
 
-    @patch("dfe_engine.auth.audit.logger")
-    def test_event_name(self, mock_logger):
-        audit_org_hyperdx_failed(org_name="acme", error="API error")
-        args, _ = mock_logger.warning.call_args
-        assert args[0] == "org.hyperdx.provision_failed"
+        (event,) = audit_events
+        assert event["event"] == "org.hyperdx.provision_failed"
+        assert (event["org_name"], event["error_type"], event["status"]) == (
+            "acme",
+            "HTTPStatusError",
+            403,
+        )
+        assert "error" not in event
+        assert "hdx-secret" not in json.dumps(audit_events)
 
-    @patch("dfe_engine.auth.audit.logger")
-    def test_structured_fields(self, mock_logger):
-        audit_org_hyperdx_failed(org_name="acme", error="403 Forbidden")
-        _, kwargs = mock_logger.warning.call_args
-        assert kwargs["org_name"] == "acme"
-        assert kwargs["error"] == "403 Forbidden"
+    def test_an_answer_with_no_team_says_so(self, audit_events):
+        audit_org_hyperdx_failed(org_name="acme")
+
+        (event,) = audit_events
+        assert (event["event"], event["org_name"], event["reason"]) == (
+            "org.hyperdx.provision_failed",
+            "acme",
+            "no_team",
+        )
 
 
 class TestAuditJitAccountCreated:
@@ -508,24 +526,20 @@ class TestAuditJitTeamAssigned:
 
 
 class TestAuditJitFailed:
-    @patch("dfe_engine.auth.audit.logger")
-    def test_emits_warning_event(self, mock_logger):
-        audit_jit_failed(user_id="alice", error="DB write failed")
-        mock_logger.warning.assert_called_once()
-        mock_logger.info.assert_not_called()
+    def test_a_failure_records_its_class_not_its_text(self, audit_events):
+        audit_jit_failed(user_id="alice", exc=OSError(13, "Permission denied", "/data/alice.yaml"))
 
-    @patch("dfe_engine.auth.audit.logger")
-    def test_event_name(self, mock_logger):
-        audit_jit_failed(user_id="alice", error="DB write failed")
-        args, _ = mock_logger.warning.call_args
-        assert args[0] == "auth.jit.provision_failed"
+        (event,) = audit_events
+        assert event["event"] == "auth.jit.provision_failed"
+        assert (event["user_id"], event["error_type"]) == ("alice", "PermissionError")
+        assert "error" not in event
+        assert "/data/alice.yaml" not in json.dumps(audit_events)
 
-    @patch("dfe_engine.auth.audit.logger")
-    def test_structured_fields(self, mock_logger):
-        audit_jit_failed(user_id="charlie", error="timeout after 5s")
-        _, kwargs = mock_logger.warning.call_args
-        assert kwargs["user_id"] == "charlie"
-        assert kwargs["error"] == "timeout after 5s"
+    def test_a_refused_http_call_adds_its_status(self, audit_events):
+        audit_jit_failed(user_id="charlie", exc=_refused(503, "http://hyperdx.internal/team"))
+
+        (event,) = audit_events
+        assert (event["error_type"], event["status"]) == ("HTTPStatusError", 503)
 
 
 class TestAuditResourceChange:

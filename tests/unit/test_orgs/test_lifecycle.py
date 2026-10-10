@@ -16,6 +16,9 @@ policies on _org_id), so the lifecycle manager no longer touches ClickHouse.
 
 from __future__ import annotations
 
+import json
+
+import httpx
 import pytest
 
 from dfe_engine.orgs.lifecycle import OrgLifecycleManager
@@ -39,6 +42,22 @@ class FakeFork:
     async def create_connection(self, *, name, host, username, password="", port=None):
         self.connections.append(name)
         return "conn-1"
+
+
+class RefusingFork(FakeFork):
+    """A fork whose team lookup is refused with the URL, key and all, in the error text."""
+
+    async def get_team(self):
+        request = httpx.Request("GET", "http://hyperdx.internal/api/team?key=hdx-secret")
+        response = httpx.Response(401, request=request)
+        raise httpx.HTTPStatusError(f"401 for {request.url}", request=request, response=response)
+
+
+class TeamlessFork(FakeFork):
+    """A fork that answers the team lookup with nothing."""
+
+    async def get_team(self):
+        return None
 
 
 @pytest.fixture
@@ -116,3 +135,30 @@ async def test_create_org_leaves_the_team_without_a_connection(registry):
 
     assert fork.connections == []
     assert org.hyperdx_team_id == "team-1"
+
+
+@pytest.mark.asyncio
+async def test_a_refused_team_lookup_is_audited_by_class_and_status(registry, audit_events):
+    manager = OrgLifecycleManager(registry, hyperdx_client=RefusingFork())
+
+    org = await manager.create_org("acme", admin_id="admin")
+
+    assert org.hyperdx_team_id == ""
+    (event,) = [e for e in audit_events if e["event"] == "org.hyperdx.provision_failed"]
+    assert (event["org_name"], event["error_type"], event["status"]) == (
+        "acme",
+        "HTTPStatusError",
+        401,
+    )
+    assert "error" not in event
+    assert "hdx-secret" not in json.dumps(audit_events)
+
+
+@pytest.mark.asyncio
+async def test_an_answer_with_no_team_is_audited_as_such(registry, audit_events):
+    manager = OrgLifecycleManager(registry, hyperdx_client=TeamlessFork())
+
+    await manager.create_org("acme", admin_id="admin")
+
+    (event,) = [e for e in audit_events if e["event"] == "org.hyperdx.provision_failed"]
+    assert (event["org_name"], event["reason"]) == ("acme", "no_team")

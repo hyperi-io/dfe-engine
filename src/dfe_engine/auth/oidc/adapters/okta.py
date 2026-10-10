@@ -24,7 +24,11 @@ from scalo.logger import logger
 
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.credential_env import resolve_credential
-from dfe_engine.auth.oidc.idp_errors import describe_idp_error, idp_failure_message
+from dfe_engine.auth.oidc.idp_errors import (
+    DirectoryNotConfiguredError,
+    describe_idp_error,
+    idp_failure_message,
+)
 from dfe_engine.auth.oidc.models import GroupInfo
 
 
@@ -67,16 +71,17 @@ class OktaAdapter(OIDCGroupAdapter):
         """List all Okta groups (paginated).
 
         Returns:
-            Every group, or an empty list when the domain or API token is not configured.
+            Every group.
 
         Raises:
+            DirectoryNotConfiguredError: The domain or the API token is not configured.
             Exception: Whatever the client raised on a page Okta did not serve.
                 A listing cut short is never returned: group sync would record
                 the groups read so far as the whole directory.
         """
         base, headers = self._api_base_and_headers()
         if base is None or headers is None:
-            return []
+            raise DirectoryNotConfiguredError
 
         from scalo.http import AsyncHttpClient
 

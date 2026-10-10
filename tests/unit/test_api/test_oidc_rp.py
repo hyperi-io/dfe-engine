@@ -683,6 +683,9 @@ def test_callback_refuses_a_login_the_account_store_cannot_record(client, app, a
     assert "access_token" not in resp.json()
     failed = [e for e in audit_events if e["event"] == "auth.jit.provision_failed"]
     assert [e["user_id"] for e in failed] == ["kim@example.com"]
+    # The class of the failure, not its text.
+    assert [e["error_type"] for e in failed] == ["AccountExistsError"]
+    assert "error" not in failed[0]
     assert not [e for e in audit_events if e["event"] == "auth.login.denied"]
 
 

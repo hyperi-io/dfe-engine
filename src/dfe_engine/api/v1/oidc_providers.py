@@ -344,6 +344,12 @@ class SyncResponse(BaseModel):
         "auth_oidc_sync_groups_skipped_total{reason}.",
     )
     error: str | None
+    skipped: str | None = Field(
+        default=None,
+        description="Why the sync did nothing, when it did not run: the provider is disabled, "
+        "is not in api mode, or has no directory credential configured. The provider's "
+        "last_sync_status reads not_configured in that last case.",
+    )
 
 
 class TestResponse(BaseModel):
@@ -838,6 +844,7 @@ async def sync_provider_groups(
         total=result["total"],
         groups_skipped=result["groups_skipped"],
         error=result.get("error"),
+        skipped=result.get("skipped"),
     )
 
 
