@@ -130,17 +130,21 @@ class TestVerifyLogin:
         assert "HTTP 404" in discovery["detail"]
         assert _status_logged(audit_events, "discovery", 404)
 
-    @pytest.mark.parametrize("reachable_over", ["tls", "refused"])
+    @pytest.mark.parametrize(
+        ("ends", "expected"),
+        [("eof", "tls"), ("reset", "connection_reset"), (None, "connection_refused")],
+        ids=["tls", "reset", "refused"],
+    )
     def test_an_unreachable_issuer_logs_why_and_no_host_beyond_the_issuer(
-        self, app, client, admin_headers, audit_events, reachable_over
+        self, app, client, admin_headers, audit_events, ends, expected
     ):
         """The answer stays constant, while the log names the socket-level cause by class."""
-        listener = CountingListener()
-        if reachable_over == "tls":
-            # The issuer is https and the listener drops the handshake: a TLS failure.
-            scheme, port, expected = "https", listener.port, "tls"
+        listener = CountingListener(after_first_bytes=ends) if ends else None
+        if listener is not None:
+            # The issuer is https and the listener ends the handshake after the ClientHello.
+            scheme, port = "https", listener.port
         else:
-            scheme, expected = "http", "connection_refused"
+            scheme = "http"
             with socket.socket() as spare:
                 spare.bind(("127.0.0.1", 0))
                 port = spare.getsockname()[1]
@@ -155,7 +159,8 @@ class TestVerifyLogin:
                 "/api/v1/auth/oidc-providers/vl-unreachable/verify-login", headers=admin_headers
             )
         finally:
-            listener.close()
+            if listener is not None:
+                listener.close()
 
         discovery = next(c for c in resp.json()["checks"] if c["name"] == "discovery")
         assert discovery["ok"] is False

@@ -35,6 +35,7 @@ from scalo.logger import logger
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.credential_env import resolve_credential
 from dfe_engine.auth.oidc.idp_errors import (
+    DirectoryCredentialError,
     DirectoryNotConfiguredError,
     describe_idp_error,
     idp_failure_message,
@@ -85,8 +86,8 @@ class GoogleAdapter(OIDCGroupAdapter):
 
     Every method but ``list_all_groups`` fails closed: missing credentials or a
     refused call yield no groups, never an exception. ``list_all_groups`` is not on
-    the login path and raises when no service account is configured and when the
-    Directory API refuses it.
+    the login path and raises when no service account is configured, when the one
+    configured does not build a client and when the Directory API refuses it.
     """
 
     CLOUD_IDENTITY_BASE = "https://cloudidentity.googleapis.com/v1"
@@ -134,11 +135,12 @@ class GoogleAdapter(OIDCGroupAdapter):
         instead.
 
         Returns:
-            List of GroupInfo, or an empty list when the service account is
-            configured but does not build a client.
+            List of GroupInfo.
 
         Raises:
             DirectoryNotConfiguredError: No service account is configured.
+            DirectoryCredentialError: A service account is configured but does not
+                build a client. ``_get_service`` logs why.
             Exception: Whatever the Directory API client raised. A failed listing
                 is never returned as an empty one: group sync would record it as a
                 directory with no groups.
@@ -147,7 +149,7 @@ class GoogleAdapter(OIDCGroupAdapter):
         if service is None:
             if not self._service_account_json():
                 raise DirectoryNotConfiguredError
-            return []
+            raise DirectoryCredentialError
 
         raw = await asyncio.to_thread(self._fetch_all_groups_sync, service)
         return [GroupInfo(id=g["id"], name=g["name"], email=g.get("email", "")) for g in raw]
