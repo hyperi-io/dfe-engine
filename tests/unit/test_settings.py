@@ -905,6 +905,25 @@ class TestGitopsMode:
         assert write.failure_threshold == 5
         assert write.reset_timeout == 90.0
 
+    def test_pack_thresholds_default_to_gits_own(self):
+        from dfe_engine.settings import GitopsSettings
+
+        pack = GitopsSettings().pack
+        assert pack.loose_objects == 6700
+        assert pack.packs == 50
+        assert pack.interval_seconds == 300.0
+
+    def test_pack_thresholds_come_from_the_environment(self, monkeypatch):
+        from dfe_engine.settings import GitopsSettings, _get_env_overrides
+
+        monkeypatch.setenv("DFE_GITOPS_PACK_LOOSE_OBJECTS", "1000")
+        monkeypatch.setenv("DFE_GITOPS_PACK_PACKS", "0")
+        monkeypatch.setenv("DFE_GITOPS_PACK_INTERVAL_SECONDS", "60.5")
+        pack = GitopsSettings(**_get_env_overrides()["gitops"]).pack
+        assert pack.loose_objects == 1000
+        assert pack.packs == 0
+        assert pack.interval_seconds == 60.5
+
     def test_write_timeout_is_longer_than_the_read_bound(self):
         from dfe_engine.gitops.repo import REMOTE_HEAD_TIMEOUT_SECONDS
         from dfe_engine.settings import GitopsWriteSettings
