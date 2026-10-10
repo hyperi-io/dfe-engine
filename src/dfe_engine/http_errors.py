@@ -228,7 +228,8 @@ def http_failure_message(exc: BaseException, *, service: str) -> str:
         A Google token refusal has no status, and its message says the configured
         credential gave no access. Any other failure with no status says the service
         could not be reached only when a socket error under it says so, because an
-        answer that arrived but could not be used is not an unreachable service.
+        answer that arrived but could not be used is not an unreachable service. A
+        429 says the service is throttling, never that it rejected the request.
     """
     if _is_google_token_refusal(exc):
         return credential_failure_message(service=service)
@@ -242,6 +243,8 @@ def http_failure_message(exc: BaseException, *, service: str) -> str:
             f"{service} refused the request (HTTP {status}): check the credential and the "
             "permissions granted to it; the engine log has the provider's error code"
         )
+    if status == 429:
+        return f"{service} is throttling requests (HTTP 429); retry shortly"
     if status >= 500:
         return f"{service} failed on the provider's side (HTTP {status}); retry shortly"
     return f"{service} rejected the request (HTTP {status}); the engine log has the provider's error code"

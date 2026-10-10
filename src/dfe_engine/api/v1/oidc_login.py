@@ -145,7 +145,10 @@ def _reload_rp_if_provider_known(request: Request, provider: str):
     try:
         known = registry.get(provider)
     except Exception as exc:  # malformed YAML on disk - not this request's problem
-        logger.warning("OIDC provider registry read failed", provider=provider, error=str(exc))
+        # The validation text quotes the file's values, so only the failure's class is logged.
+        logger.warning(
+            "OIDC provider registry read failed", provider=provider, **describe_http_error(exc)
+        )
         return None
     if known is None or not known.enabled:
         return None

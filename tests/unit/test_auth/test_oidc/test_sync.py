@@ -444,13 +444,17 @@ class TestSyncOverAGroupFileThatDoesNotLoad:
         finally:
             logger.remove(handler)
 
+        synced = group_store.get("ops-example.com")
+        provider = provider_registry.get("test-sso")
+        assert synced is not None
+        assert provider is not None
         assert result["error"] is None
         assert result["created"] == 1
-        assert group_store.get("ops-example.com").source_id == "g2"
+        assert synced.source_id == "g2"
         assert stored.read_text(encoding="utf-8") == self._BAD_SCOPE
         assert "OIDC group sync skipped a group whose stored copy does not load" in warnings
         assert result["groups_skipped"] == 1
-        assert provider_registry.get("test-sso").last_sync_status == (
+        assert provider.last_sync_status == (
             "partial: 1 of 2 groups skipped, their stored copy does not load"
         )
         skipped = [
@@ -728,37 +732,47 @@ class TestSyncWithNoDirectoryCredential:
         assert (stored.last_sync_status, stored.sync_error) == ("ok", "")
 
 
+_STORED_CREDENTIAL_PROVIDERS = pytest.mark.parametrize(
+    ("provider_type", "groups"),
+    [
+        (
+            "okta",
+            {"api_token_path": "oidc/acme/groups_api_token", "okta_domain": "example.okta.com"},
+        ),
+        (
+            "entra_id",
+            {
+                "client_secret_path": "oidc/acme/groups_client_secret",
+                "tenant_id": "test-tenant",
+            },
+        ),
+        ("google", {"service_account_json_path": "oidc/acme/groups_service_account_json"}),
+    ],
+    ids=["okta", "entra_id", "google"],
+)
+
+
+def _stored_credential_provider(*, provider_type: str, groups: dict[str, str]) -> OIDCProvider:
+    """An api-mode provider whose directory credential is held only in the secret store."""
+    return OIDCProvider.model_validate(
+        {
+            "client_id": "app-id",
+            "groups": {"mode": "api", **groups},
+            "issuer": "https://sso.example.com",
+            "type": provider_type,
+        }
+    )
+
+
 class TestSyncWhenTheSecretStoreDidNotAnswer:
     """A credential the store holds but did not hand over is a failed run, never 'not configured'."""
 
-    @pytest.mark.parametrize(
-        ("provider_type", "groups"),
-        [
-            (
-                "okta",
-                {"api_token_path": "oidc/acme/groups_api_token", "okta_domain": "example.okta.com"},
-            ),
-            (
-                "entra_id",
-                {
-                    "client_secret_path": "oidc/acme/groups_client_secret",
-                    "tenant_id": "test-tenant",
-                },
-            ),
-            ("google", {"service_account_json_path": "oidc/acme/groups_service_account_json"}),
-        ],
-        ids=["okta", "entra_id", "google"],
-    )
+    @_STORED_CREDENTIAL_PROVIDERS
     async def test_the_run_is_an_error_that_names_the_secret_store(
         self, registries, provider_type, groups
     ):
         provider_registry, group_store = registries
-        provider = OIDCProvider(
-            type=provider_type,
-            issuer="https://sso.example.com",
-            client_id="app-id",
-            groups=GroupResolutionConfig(mode="api", **groups),
-        )
+        provider = _stored_credential_provider(provider_type=provider_type, groups=groups)
         provider_registry.create("stored", provider)
 
         result = await sync_provider(
@@ -772,6 +786,25 @@ class TestSyncWhenTheSecretStoreDidNotAnswer:
         assert result["status"] == "error"
         assert stored.sync_error == result["error"]
         assert result["skipped"] is None
+
+    @_STORED_CREDENTIAL_PROVIDERS
+    async def test_one_sync_asks_the_store_once(
+        self, audit_events, registries, provider_type, groups
+    ):
+        provider_registry, group_store = registries
+        provider = _stored_credential_provider(provider_type=provider_type, groups=groups)
+        provider_registry.create("stored", provider)
+
+        await sync_provider(
+            "stored", provider_registry, group_store, secrets=UnreachableSecretStore()
+        )
+
+        unreadable = [
+            e
+            for e in audit_events
+            if e["event"] == "OIDC credential unreadable from the secret store"
+        ]
+        assert len(unreadable) == 1
 
 
 class TestSyncUnknownProvider:

@@ -26,6 +26,7 @@ link on that id, never on the group email, which an admin can rename.
 """
 
 import asyncio
+import functools
 import json
 from typing import TYPE_CHECKING, Any
 
@@ -58,9 +59,6 @@ _GROUP_RESOURCE_PREFIX = "groups/"
 
 # Every Google group carries this label, and Cloud Identity refuses a membership search with no label in its query.
 _GOOGLE_GROUP_LABEL = "cloudidentity.googleapis.com/groups.discussion_forum"
-
-# Pages read per search at most, so a server that keeps handing back a page token cannot hold a login.
-_MAX_PAGES = 50
 
 
 def _cel_string(value: str) -> str:
@@ -163,7 +161,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             groups = self._provider.groups
             if not (groups.service_account_json_path) and not (groups.service_account_json_env):
                 raise NoDirectoryListingError
-            service_account = self._service_account_json()
+            service_account = self._service_account_json
             if service_account.unreadable:
                 raise DirectoryCredentialUnreadableError
             if not service_account.value:
@@ -187,7 +185,7 @@ class GoogleAdapter(OIDCGroupAdapter):
                 "from Cloud Identity with the user's own token, so there is no "
                 "directory credential to test"
             )
-        service_account = self._service_account_json()
+        service_account = self._service_account_json
         if service_account.unreadable:
             return False, unreadable_credential_message(credential="Google service account JSON")
         if not service_account.value:
@@ -263,7 +261,7 @@ class GoogleAdapter(OIDCGroupAdapter):
         url = f"{self.CLOUD_IDENTITY_BASE}/groups/-/memberships:{method}"
         params = {"query": query}
         groups: list[GroupInfo] = []
-        for _page in range(_MAX_PAGES):
+        for _page in range(self.MAX_LOGIN_PAGES):
             response = await client.get(url, headers=headers, params=params)
             body = response.json()
             if not isinstance(body, dict):
@@ -277,7 +275,7 @@ class GoogleAdapter(OIDCGroupAdapter):
         logger.warning(
             "Google Cloud Identity: group search stopped at the page limit",
             method=method,
-            pages=_MAX_PAGES,
+            pages=self.MAX_LOGIN_PAGES,
             provider=self._provider.issuer,
         )
         return groups
@@ -332,8 +330,13 @@ class GoogleAdapter(OIDCGroupAdapter):
 
         return [GroupInfo(id=g["id"], name=g["name"], email=g.get("email", "")) for g in raw]
 
+    @functools.cached_property
     def _service_account_json(self) -> ResolvedCredential:
-        """The service account JSON: the secret store first, then the env var."""
+        """The service account JSON: the secret store first, then the env var.
+
+        Resolved once per adapter, which serves one sync, one connection test or one
+        login, so an unreachable store is asked and logged once.
+        """
         return resolve_credential(
             secret_path=self._provider.groups.service_account_json_path,
             env_name=self._provider.groups.service_account_json_env,
@@ -347,7 +350,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             A googleapiclient Resource object, or None if no service account is
             configured or its JSON does not build credentials.
         """
-        raw_json = self._service_account_json().value
+        raw_json = self._service_account_json.value
         if not raw_json:
             return None
 
@@ -437,11 +440,16 @@ class GoogleAdapter(OIDCGroupAdapter):
 
         Returns:
             List of raw group dicts the user is a member of.
+
+        Raises:
+            DirectoryPageLimitError: Google still handed out a page token at
+                :attr:`MAX_LOGIN_PAGES`, which the caller treats as any other
+                failed lookup.
         """
         groups: list[dict[str, Any]] = []
         page_token: str | None = None
 
-        while True:
+        for _page in range(self.MAX_LOGIN_PAGES):
             kwargs: dict[str, Any] = {"userKey": user_key, "maxResults": 200}
             if page_token:
                 kwargs["pageToken"] = page_token
@@ -451,9 +459,8 @@ class GoogleAdapter(OIDCGroupAdapter):
 
             page_token = response.get("nextPageToken")
             if not page_token:
-                break
-
-        return groups
+                return groups
+        raise DirectoryPageLimitError(self.MAX_LOGIN_PAGES)
 
     def _probe_sync(self, service: Any) -> None:
         """Perform a minimal API call to verify connectivity.

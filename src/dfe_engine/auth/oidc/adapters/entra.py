@@ -23,11 +23,14 @@ Usage::
     groups = await adapter.list_all_groups()
 """
 
+import functools
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import msal
+import requests
+from requests.adapters import HTTPAdapter
 from scalo.logger import logger
 
 from dfe_engine.auth.oidc.adapters.base import (
@@ -109,6 +112,37 @@ def graph_credentials(*, provider: OIDCProvider, secrets: DfeSecrets | None) -> 
             env_name=groups.tenant_id_env, secrets=secrets, value=groups.tenant_id
         ).value,
     )
+
+
+class _EntraHttpClient:
+    """The HTTP client MSAL reaches Entra through, raising for a throttled or failing answer.
+
+    MSAL parses any token answer under 500 as the token response and keeps no status,
+    so a 429 would come back as an error body that reads like a refused credential. A
+    429 or a 5xx raises ``requests.HTTPError`` here instead, carrying the response.
+    """
+
+    def __init__(self, session: requests.Session) -> None:
+        """Send through ``session``."""
+        self._session = session
+
+    def get(self, url: str, **kwargs: Any) -> requests.Response:
+        """GET ``url``, raising for a 429 or a 5xx."""
+        return self._checked(self._session.get(url, **kwargs))
+
+    def post(self, url: str, **kwargs: Any) -> requests.Response:
+        """POST to ``url``, raising for a 429 or a 5xx."""
+        return self._checked(self._session.post(url, **kwargs))
+
+    def close(self) -> None:
+        """Close the session."""
+        self._session.close()
+
+    @staticmethod
+    def _checked(response: requests.Response) -> requests.Response:
+        if response.status_code == 429 or response.status_code >= 500:
+            response.raise_for_status()
+        return response
 
 
 class EntraAdapter(OIDCGroupAdapter):
@@ -196,13 +230,16 @@ class EntraAdapter(OIDCGroupAdapter):
         return groups or []
 
     async def _page_groups(self, url: str, token: str) -> list[GroupInfo] | None:
-        """Every page of one transitiveMemberOf listing, or None when Graph did not answer."""
+        """Every page of one transitiveMemberOf listing, or None when Graph did not answer.
+
+        A listing still paging at :attr:`MAX_LOGIN_PAGES` is no answer either.
+        """
         from scalo.http import AsyncHttpClient
 
         groups: list[GroupInfo] = []
         headers = {"Authorization": f"Bearer {token}"}
         async with AsyncHttpClient() as client:
-            while url:
+            for _page in range(self.MAX_LOGIN_PAGES):
                 try:
                     response = await client.get(url, headers=headers)
                     data = response.json()
@@ -229,7 +266,15 @@ class EntraAdapter(OIDCGroupAdapter):
                     if isinstance(item, dict) and item.get("id")
                 )
                 url = data.get("@odata.nextLink", "")
-        return groups
+                if not url:
+                    return groups
+        logger.warning(
+            "Entra resolve_user_groups: Graph still linked a next page at the page limit",
+            operation="resolve_user_groups",
+            pages=self.MAX_LOGIN_PAGES,
+            provider=self._provider.issuer,
+        )
+        return None
 
     async def list_all_groups(self) -> list[GroupInfo]:
         """List all groups in the tenant via Graph API.
@@ -256,7 +301,7 @@ class EntraAdapter(OIDCGroupAdapter):
         """
         token = self._get_token()
         if token is None:
-            credentials = graph_credentials(provider=self._provider, secrets=self._secrets)
+            credentials = self._graph_credentials
             if credentials.configured:
                 raise DirectoryCredentialError
             if credentials.secret_unreadable:
@@ -266,6 +311,7 @@ class EntraAdapter(OIDCGroupAdapter):
         from scalo.http import AsyncHttpClient
 
         groups: list[GroupInfo] = []
+        unidentified = 0
         headers = {"Authorization": f"Bearer {token}"}
         url = (
             f"{self.GRAPH_BASE}/groups"
@@ -278,17 +324,27 @@ class EntraAdapter(OIDCGroupAdapter):
                 data = response.json()
                 if not isinstance(data, dict) or not isinstance(data.get("value"), list):
                     raise DirectoryPageError
-                groups.extend(
-                    GroupInfo(
-                        id=item.get("id", ""),
-                        name=item.get("displayName") or "",
-                        email=item.get("mail", "") or "",
-                        description=item.get("description", "") or "",
+                for item in data["value"]:
+                    # A group with no id can never be linked, so it is not handed to the sync.
+                    if not item.get("id"):
+                        unidentified += 1
+                        continue
+                    groups.append(
+                        GroupInfo(
+                            id=item["id"],
+                            name=item.get("displayName") or "",
+                            email=item.get("mail", "") or "",
+                            description=item.get("description", "") or "",
+                        )
                     )
-                    for item in data["value"]
-                )
                 url = data.get("@odata.nextLink")
                 if not url:
+                    if unidentified:
+                        logger.warning(
+                            "Entra list_all_groups skipped groups with no id",
+                            count=unidentified,
+                            provider=self._provider.issuer,
+                        )
                     return groups
         raise DirectoryPageLimitError(self.MAX_LISTING_PAGES)
 
@@ -315,7 +371,7 @@ class EntraAdapter(OIDCGroupAdapter):
             )
             return False, http_failure_message(exc, service="Entra ID")
         if token is None:
-            credentials = graph_credentials(provider=self._provider, secrets=self._secrets)
+            credentials = self._graph_credentials
             if credentials.configured:
                 return False, credential_failure_message(service="Graph API")
             if credentials.secret_unreadable:
@@ -350,6 +406,24 @@ class EntraAdapter(OIDCGroupAdapter):
     # Internal helpers
     # ------------------------------------------------------------------
 
+    @functools.cached_property
+    def _graph_credentials(self) -> GraphCredentials:
+        """The Graph credentials, resolved once per adapter.
+
+        An adapter serves one sync, one connection test or one login, so an
+        unreachable secret store is asked and logged once.
+        """
+        return graph_credentials(provider=self._provider, secrets=self._secrets)
+
+    def _msal_http_client(self) -> _EntraHttpClient:
+        """A fresh client for one token request, retrying once as MSAL's own default client does.
+
+        The Entra authority is always https, so only https gets the retrying adapter.
+        """
+        session = requests.Session()
+        session.mount("https://", HTTPAdapter(max_retries=1))
+        return _EntraHttpClient(session)
+
     def _get_token(self) -> str | None:
         """Acquire an OAuth2 access token via MSAL client credentials flow.
 
@@ -360,12 +434,12 @@ class EntraAdapter(OIDCGroupAdapter):
             refuses the credentials or the tenant.
 
         Raises:
-            Exception: Whatever MSAL raised when Entra could not be reached or
-                failed on its side: a ``requests`` error for no answer, a
-                ``MsalServiceError`` for a 5xx, a ``JSONDecodeError`` for a token
-                answer that is not JSON.
+            Exception: Whatever was raised when Entra could not be reached, throttled
+                the request or failed on its side: a ``requests`` connection error
+                for no answer, ``requests.HTTPError`` for a 429 or a 5xx, a
+                ``JSONDecodeError`` for a token answer that is not JSON.
         """
-        credentials = graph_credentials(provider=self._provider, secrets=self._secrets)
+        credentials = self._graph_credentials
         if not credentials.configured:
             return None
 
@@ -375,6 +449,7 @@ class EntraAdapter(OIDCGroupAdapter):
                 authority=authority,
                 client_credential=credentials.client_secret,
                 client_id=credentials.client_id,
+                http_client=self._msal_http_client(),
             )
             result = app.acquire_token_for_client(scopes=[self._GRAPH_SCOPE])
         except json.JSONDecodeError:

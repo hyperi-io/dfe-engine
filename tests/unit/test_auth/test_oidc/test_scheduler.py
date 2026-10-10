@@ -111,6 +111,42 @@ class TestOidcSyncScheduler:
             await task
         assert ran is True
 
+    async def test_a_failing_tick_logs_the_failures_class_not_its_text(
+        self,
+        audit_events: list[dict],
+        group_store: GroupStore,
+        registry: OIDCProviderRegistry,
+        tmp_path: Path,
+    ):
+        """The validation text quotes the provider file's values, and a traceback would carry it too."""
+
+        def failed() -> bool:
+            return any(
+                e["event"].startswith("OIDC scheduled group sync tick failed") for e in audit_events
+            )
+
+        (tmp_path / "oidc-providers" / "broken.yaml").write_text(
+            "type: sentinel-type-7731\n", encoding="utf-8"
+        )
+        scheduler = make_oidc_sync_scheduler(
+            group_store=group_store, registry=registry, tick_seconds=0.01
+        )
+        task = asyncio.create_task(scheduler.run_forever())
+        logged = await _wait_for(condition=failed)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert logged is True
+        (line,) = [
+            e
+            for e in audit_events
+            if e["event"].startswith("OIDC scheduled group sync tick failed")
+        ]
+        assert "exception" not in line
+        assert line["error_type"] == "ValidationError"
+        assert "sentinel-type-7731" not in json.dumps(audit_events, default=str)
+
     async def test_run_forever_survives_a_failing_tick(
         self,
         directory: None,

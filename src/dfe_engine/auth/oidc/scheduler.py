@@ -121,9 +121,13 @@ class OidcSyncScheduler:
         while True:
             try:
                 await self.run_once(now=datetime.now(UTC))
-            except Exception:
+            except Exception as exc:
                 if not (self._tick_failing):
-                    logger.exception("OIDC scheduled group sync tick failed; retrying every tick")
+                    # A provider file's validation text quotes its values, so neither it nor a traceback is logged.
+                    logger.error(
+                        "OIDC scheduled group sync tick failed; retrying every tick",
+                        **describe_http_error(exc),
+                    )
                 self._tick_failing = True
             else:
                 if self._tick_failing:

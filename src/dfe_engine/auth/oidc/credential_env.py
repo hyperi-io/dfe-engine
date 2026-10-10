@@ -121,18 +121,23 @@ def credential_check(
     """Return (ok, detail) for a configured credential, never echoing its value.
 
     Misconfigured YAML often puts the secret itself where the env var NAME
-    belongs; that shape is named in the detail so an operator can act on it.
+    belongs; that shape is named in the detail so an operator can act on it. A
+    secret store that did not answer is named too, unless the env var serves the
+    credential, as it does for a login.
     """
     if value:
         return True, f"{label} is set"
-    if _from_store(secret_path, secrets).value:
+    stored = _from_store(secret_path, secrets)
+    if stored.value:
         return True, f"{label} resolved from the secret store at {secret_path}"
+    if env_name and os.environ.get(env_name):
+        return True, f"{env_name} is set"
+    if stored.unreadable:
+        return False, unreadable_credential_message(credential=f"{label} at {secret_path}")
     if not env_name:
         if secret_path:
             return False, f"nothing stored at {secret_path} and no env var configured"
         return False, "no env var configured"
-    if os.environ.get(env_name):
-        return True, f"{env_name} is set"
     if not is_env_var_name(env_name):
         return (
             False,

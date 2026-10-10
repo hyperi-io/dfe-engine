@@ -75,6 +75,39 @@ class TestCredentialCheck:
         assert ok is False
         assert "nothing stored at oidc/acme/client_secret" in detail
 
+    def test_a_store_that_did_not_answer_is_named_and_the_env_still_serves(self, monkeypatch):
+        """The check reports the outage; a login falls through to the env var, so the check does too."""
+        monkeypatch.delenv("OIDC_RP_SECRET", raising=False)
+
+        ok, detail = credential_check(
+            "client_secret",
+            secret_path="oidc/acme/client_secret",
+            env_name="OIDC_RP_SECRET",
+            secrets=UnreachableSecretStore(),
+        )
+        monkeypatch.setenv("OIDC_RP_SECRET", "from-env")
+        served, _detail = credential_check(
+            "client_secret",
+            secret_path="oidc/acme/client_secret",
+            env_name="OIDC_RP_SECRET",
+            secrets=UnreachableSecretStore(),
+        )
+
+        assert ok is False
+        assert "secret store did not answer" in detail
+        assert "oidc/acme/client_secret" in detail
+        assert "unset or empty" not in detail
+        assert served is True
+
+    def test_a_store_that_did_not_answer_with_no_env_var_is_named(self):
+        ok, detail = credential_check(
+            "client_secret", secret_path="oidc/acme/client_secret", secrets=UnreachableSecretStore()
+        )
+
+        assert ok is False
+        assert "secret store did not answer" in detail
+        assert "nothing stored" not in detail
+
 
 class TestResolveCredential:
     def test_store_wins_over_env(self, store, monkeypatch):

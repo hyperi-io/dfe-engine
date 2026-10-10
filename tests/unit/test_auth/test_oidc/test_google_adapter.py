@@ -327,6 +327,31 @@ class TestDirectoryListingPageLimit:
         assert directory.served == 3
 
 
+class _EndlessDirectoryGoogle(GoogleAdapter):
+    """Google whose service account reads a Directory API that keeps naming a next page."""
+
+    def __init__(self, provider: OIDCProvider, *, directory: _EndlessDirectory) -> None:
+        super().__init__(provider)
+        self._directory = directory
+
+    def _get_service(self) -> Any | None:
+        return self._directory
+
+
+class TestLoginLookupPageLimit:
+    async def test_a_user_lookup_still_paging_at_the_limit_is_default_deny(self, audit_events):
+        directory = _EndlessDirectory(pages=10)
+        adapter = _EndlessDirectoryGoogle(_make_provider(), directory=directory)
+        adapter.MAX_LOGIN_PAGES = 3
+
+        groups = await adapter.resolve_user_groups("user@example.com")
+
+        assert groups == []
+        assert directory.served == 3
+        (line,) = [e for e in audit_events if e.get("operation") == "resolve_user_groups"]
+        assert line["error_type"] == "DirectoryPageLimitError"
+
+
 # ---------------------------------------------------------------------------
 # GroupInfo model used by adapter
 # ---------------------------------------------------------------------------

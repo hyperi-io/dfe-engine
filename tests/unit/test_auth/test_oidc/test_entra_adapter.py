@@ -16,14 +16,23 @@ Tests that require a live Entra / Microsoft Graph endpoint are marked
 ``@pytest.mark.skip(reason="Needs Entra sandbox")``.
 """
 
-import pytest
+import json
+from typing import Any
 
+import pytest
+import requests
+from requests.adapters import BaseAdapter
+
+from dfe_engine.auth.groups import GroupStore
+from dfe_engine.auth.oidc.adapters import entra as entra_module
 from dfe_engine.auth.oidc.adapters.base import (
     DirectoryCredentialError,
     DirectoryNotConfiguredError,
 )
 from dfe_engine.auth.oidc.adapters.entra import EntraAdapter, graph_credentials
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+from dfe_engine.auth.oidc.sync import sync_provider
 from tests.unit.test_auth.test_oidc.entra_adapter_cases import (
     GRAPH_CREDENTIALS_CASES,
     GraphCredentialsCase,
@@ -348,6 +357,123 @@ class TestEntraUnreachable:
         (line,) = [e for e in audit_events if e.get("operation") == "token"]
         assert line["transport_failure"] == "connection_refused"
         assert await adapter.resolve_user_groups("some-user-oid") == []
+
+
+_DISCOVERY_SUFFIX = "/v2.0/.well-known/openid-configuration"
+
+
+class _CannedEntra(BaseAdapter):
+    """A requests transport standing in for Entra: discovery answers, the token request gets ``token_status``.
+
+    MSAL reaches login.microsoftonline.com over https, which a loopback server cannot
+    serve, so the answer is canned at the transport that MSAL's own HTTP client uses.
+    """
+
+    def __init__(self, *, token_status: int) -> None:
+        super().__init__()
+        self.token_status = token_status
+        self.urls: list[str] = []
+
+    def send(
+        self,
+        request: requests.PreparedRequest,
+        stream: bool = False,
+        timeout: Any = None,
+        verify: bool | str = True,
+        cert: Any = None,
+        proxies: Any = None,
+    ) -> requests.Response:
+        """Answer ``request`` from the canned settings, recording its URL."""
+        url = request.url or ""
+        self.urls.append(url)
+        response = requests.Response()
+        response.request = request
+        response.url = url
+        if url.endswith(_DISCOVERY_SUFFIX):
+            tenant_root = url.removesuffix(_DISCOVERY_SUFFIX)
+            body: dict[str, str] = {
+                "authorization_endpoint": f"{tenant_root}/oauth2/v2.0/authorize",
+                "issuer": f"{tenant_root}/v2.0",
+                "token_endpoint": f"{tenant_root}/oauth2/v2.0/token",
+            }
+            response.status_code = 200
+        else:
+            body = {"error": "temporarily_unavailable", "error_description": "throttled"}
+            response.status_code = self.token_status
+            response.headers["Retry-After"] = "1"
+        response.headers["Content-Type"] = "application/json"
+        response._content = json.dumps(body).encode("utf-8")
+        return response
+
+    def close(self) -> None:
+        """Hold nothing to release."""
+
+    @property
+    def token_requests(self) -> int:
+        """How many requests went to the token endpoint."""
+        return sum(url.endswith("/oauth2/v2.0/token") for url in self.urls)
+
+
+class _CannedEntraAdapter(EntraAdapter):
+    """Entra whose MSAL client talks through a canned transport."""
+
+    def __init__(self, provider: OIDCProvider, *, transport: _CannedEntra) -> None:
+        super().__init__(provider)
+        self._transport = transport
+
+    def _msal_http_client(self) -> Any:
+        session = requests.Session()
+        session.mount("https://", self._transport)
+        return entra_module._EntraHttpClient(session)
+
+
+class TestEntraThrottlesOrFails:
+    """A 429 or a 5xx from Entra is a transient failure, never a refused credential."""
+
+    @pytest.mark.parametrize(
+        ("status", "words"),
+        [
+            (429, "Entra ID is throttling requests (HTTP 429)"),
+            (503, "Entra ID failed on the provider's side (HTTP 503)"),
+        ],
+        ids=["throttled", "failing"],
+    )
+    async def test_the_connection_test_names_the_status_not_the_credential(
+        self, entra_unreachable, monkeypatch, status, words
+    ):
+        for name in ("ENTRA_CLIENT_ID", "ENTRA_TENANT_ID", "ENTRA_CLIENT_SECRET"):
+            monkeypatch.setenv(name, "set")
+        transport = _CannedEntra(token_status=status)
+
+        ok, message = await _CannedEntraAdapter(
+            _make_provider(), transport=transport
+        ).test_connection()
+
+        assert transport.token_requests == 1
+        assert ok is False
+        assert words in message
+        assert "could not use the configured credential" not in message
+
+    async def test_a_throttled_sync_is_a_failed_run_that_says_so(
+        self, entra_unreachable, monkeypatch, tmp_path
+    ):
+        for name in ("ENTRA_CLIENT_ID", "ENTRA_TENANT_ID", "ENTRA_CLIENT_SECRET"):
+            monkeypatch.setenv(name, "set")
+        registry = OIDCProviderRegistry(tmp_path / "oidc")
+        registry.create("entra", _make_provider())
+        transport = _CannedEntra(token_status=429)
+        adapter = _CannedEntraAdapter(_make_provider(), transport=transport)
+
+        result = await sync_provider(
+            "entra", registry, GroupStore(tmp_path / "groups"), adapter=adapter
+        )
+
+        stored = registry.get("entra")
+        assert stored is not None
+        assert transport.token_requests == 1
+        assert (result["status"], stored.last_sync_status) == ("error", "error")
+        assert "throttling requests (HTTP 429)" in result["error"]
+        assert "could not use the configured credential" not in result["error"]
 
 
 # ---------------------------------------------------------------------------

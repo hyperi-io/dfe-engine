@@ -84,6 +84,9 @@ class OIDCGroupAdapter(ABC):
     # Pages a directory listing reads at most, so a provider that keeps linking a next page cannot hold the sync: 200,000 Okta or Google groups, 999,000 Graph groups.
     MAX_LISTING_PAGES = 1000
 
+    # Pages one login's group lookup reads at most, so a provider that keeps linking a next page cannot hold a login: 10,000 Okta or Google groups, 49,950 Graph groups.
+    MAX_LOGIN_PAGES = 50
+
     def __init__(self, provider: OIDCProvider, *, secrets: DfeSecrets | None = None) -> None:
         self._provider = provider
         # The directory-API credential resolves through this seam before the env.

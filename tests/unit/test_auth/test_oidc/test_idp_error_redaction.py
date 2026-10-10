@@ -214,6 +214,15 @@ class TestProviderErrorCode:
             "The issuer's discovery endpoint gave no usable answer; the engine log has the reason"
         )
 
+    def test_a_429_is_throttling_not_a_rejection(self) -> None:
+        request = httpx.Request("GET", "https://graph.example/v1.0/groups")
+        response = httpx.Response(429, json={"error": {"code": "TooManyRequests"}}, request=request)
+        exc = httpx.HTTPStatusError("429", request=request, response=response)
+
+        message = http_failure_message(exc, service="Graph API")
+
+        assert message == "Graph API is throttling requests (HTTP 429); retry shortly"
+
     def test_a_failure_with_a_socket_error_under_it_is_unreachable(self) -> None:
         exc = _caused_by(httpx.ConnectError("x"), ConnectionRefusedError())
 
@@ -815,6 +824,77 @@ class TestSyncUnreadableListing:
         _assert_unread_listing(
             registry=registry, result=result, group_store=group_store, words="after 3"
         )
+
+
+class TestSyncSkipsAGroupWithNoId:
+    """A group with no id can never be linked, so it is not stored at all."""
+
+    async def test_a_graph_group_with_no_id_is_skipped_and_logged_without_its_name(
+        self, tmp_path, audit_events: list[dict]
+    ) -> None:
+        graph = LocalGraph()
+        graph.pages[TENANT] = [
+            [{"displayName": "Unlinked Sentinel Group"}, {"id": "g1", "displayName": "Engineers"}]
+        ]
+        graph.start()
+        registry = _sync_registry(tmp_path)
+        group_store = GroupStore(tmp_path / "groups")
+        try:
+            result = await sync_provider(
+                "sso", registry, group_store, adapter=_entra_adapter(graph.base_url)
+            )
+        finally:
+            graph.stop()
+
+        assert [group.name for group in group_store.list()] == ["engineers"]
+        assert (result["created"], result["status"]) == (1, "ok")
+        (line,) = [
+            e
+            for e in audit_events
+            if e["event"] == "Entra list_all_groups skipped groups with no id"
+        ]
+        assert line["count"] == 1
+        assert "Unlinked Sentinel" not in logged(audit_events)
+
+
+class TestLoginLookupPageLimit:
+    """A user lookup still paging at the limit is the login path's failure, never an endless wait."""
+
+    async def test_an_okta_user_lookup_still_paging_at_the_limit_is_default_deny(
+        self, audit_events: list[dict]
+    ) -> None:
+        okta = LocalOkta(pages=_numbered_okta_pages(6))
+        okta.start()
+        adapter = _okta_adapter(okta.base_url)
+        adapter.MAX_LOGIN_PAGES = 3
+        try:
+            groups = await adapter.resolve_user_groups("00u1")
+        finally:
+            okta.stop()
+
+        assert groups == []
+        assert okta.pages_requested == [0, 1, 2]
+        line = failure_line(audit_events, "resolve_user_groups")
+        assert line["error_type"] == "DirectoryPageLimitError"
+
+    async def test_a_graph_user_lookup_still_paging_at_the_limit_is_default_deny(
+        self, audit_events: list[dict]
+    ) -> None:
+        graph = LocalGraph()
+        graph.pages["users/u1"] = [
+            [{"id": f"g{index}", "displayName": f"g{index}"}] for index in range(6)
+        ]
+        graph.start()
+        adapter = _entra_adapter(graph.base_url)
+        adapter.MAX_LOGIN_PAGES = 3
+        try:
+            groups = await adapter.resolve_user_groups("u1")
+        finally:
+            graph.stop()
+
+        assert groups == []
+        assert graph.principals == ["users/u1", "users/u1", "users/u1"]
+        assert failure_line(audit_events, "resolve_user_groups")["pages"] == 3
 
 
 # ---------------------------------------------------------------------------

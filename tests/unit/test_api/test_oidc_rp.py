@@ -693,6 +693,20 @@ def test_callback_refuses_a_login_the_account_store_cannot_record(client, app, a
     assert str(accounts_dir) not in logged
 
 
+def test_a_provider_file_that_does_not_load_is_logged_by_class_not_text(client, app, audit_events):
+    """The validation text quotes the file's values, so only the failure's class reaches the log."""
+    registry = app.state.oidc_provider_registry
+    registry._path("broken-idp").write_text("type: sentinel-type-4411\n", encoding="utf-8")
+
+    resp = client.get("/api/v1/auth/oidc/broken-idp/login", follow_redirects=False)
+
+    assert resp.status_code == 404, resp.text
+    (line,) = [e for e in audit_events if e["event"] == "OIDC provider registry read failed"]
+    assert "error" not in line
+    assert line["error_type"] == "ValidationError"
+    assert "sentinel-type-4411" not in json.dumps(audit_events, default=str)
+
+
 CALLBACK_SENTINEL = "callback.sentinel.9c1e"
 
 

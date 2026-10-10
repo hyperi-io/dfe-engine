@@ -22,9 +22,10 @@ def _handler_for(*, okta: LocalOkta) -> type[BaseHTTPRequestHandler]:
 
     class _Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            """Answer one page of ``/groups``, linking the next page in a ``Link`` header."""
+            """Answer one page of ``/groups`` or ``/users/<id>/groups``, linking the next in a ``Link`` header."""
             split = urlsplit(self.path)
-            if split.path != "/groups":
+            user_listing = split.path.startswith("/users/") and split.path.endswith("/groups")
+            if split.path != "/groups" and not user_listing:
                 self.send_error(404)
                 return
             index = int(parse_qs(split.query).get("page", ["0"])[0])
@@ -41,7 +42,8 @@ def _handler_for(*, okta: LocalOkta) -> type[BaseHTTPRequestHandler]:
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(encoded)))
             if status == 200 and index + 1 < len(okta.pages):
-                self.send_header("Link", f'<{okta.base_url}/groups?page={index + 1}>; rel="next"')
+                next_page = f"{okta.base_url}{split.path}?page={index + 1}"
+                self.send_header("Link", f'<{next_page}>; rel="next"')
             self.end_headers()
             self.wfile.write(encoded)
 
@@ -52,7 +54,7 @@ def _handler_for(*, okta: LocalOkta) -> type[BaseHTTPRequestHandler]:
 
 
 class LocalOkta:
-    """An Okta Management API stand-in on 127.0.0.1 serving ``/groups`` in pages.
+    """An Okta Management API stand-in on 127.0.0.1 serving ``/groups`` and ``/users/<id>/groups`` in pages.
 
     ``pages`` holds the group objects of each page, and every page but the last
     links the next in a ``Link`` header. ``fail_page`` is the index of a page that
