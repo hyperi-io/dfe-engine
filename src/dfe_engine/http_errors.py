@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         http_errors.py
-#  Purpose:      Describe an identity provider failure without the URL or the user it names
+#  Purpose:      Describe a failed remote API call without the URL or the user it names
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -185,11 +185,11 @@ def provider_error_code(body: object) -> str:
     return ";".join(dict.fromkeys(codes))
 
 
-def describe_idp_error(exc: BaseException) -> dict[str, object]:
-    """The log fields for a failed IdP call: never its text, its URL or its response body.
+def describe_http_error(exc: BaseException) -> dict[str, object]:
+    """The log fields for a failed remote API call: never its text, its URL or its response body.
 
     Args:
-        exc: The failure the IdP client raised.
+        exc: The failure the API client raised.
 
     Returns:
         ``error_type`` always, ``status`` when the provider answered, ``code`` when
@@ -216,11 +216,11 @@ def credential_failure_message(*, service: str) -> str:
     )
 
 
-def idp_failure_message(exc: BaseException, *, service: str) -> str:
-    """What an API caller is told about a failed IdP call: its status class, never the provider's text.
+def http_failure_message(exc: BaseException, *, service: str) -> str:
+    """What an API caller is told about a failed remote API call: its status class, never the provider's text.
 
     Args:
-        exc: The failure the IdP client raised.
+        exc: The failure the API client raised.
         service: The API the call went to, as the caller knows it.
 
     Returns:

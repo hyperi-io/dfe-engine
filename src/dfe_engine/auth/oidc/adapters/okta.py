@@ -33,7 +33,7 @@ from dfe_engine.auth.oidc.credential_env import (
     unreadable_credential_message,
 )
 from dfe_engine.auth.oidc.models import GroupInfo
-from dfe_engine.http_errors import describe_idp_error, idp_failure_message
+from dfe_engine.http_errors import describe_http_error, http_failure_message
 
 
 class OktaAdapter(OIDCGroupAdapter):
@@ -67,7 +67,7 @@ class OktaAdapter(OIDCGroupAdapter):
                 "Okta resolve_user_groups failed -- default deny",
                 operation="resolve_user_groups",
                 provider=self._provider.issuer,
-                **describe_idp_error(exc),
+                **describe_http_error(exc),
             )
             return []
 
@@ -145,9 +145,9 @@ class OktaAdapter(OIDCGroupAdapter):
                 "Okta test_connection failed",
                 operation="test_connection",
                 provider=self._provider.issuer,
-                **describe_idp_error(exc),
+                **describe_http_error(exc),
             )
-            return False, idp_failure_message(exc, service="Okta Groups API")
+            return False, http_failure_message(exc, service="Okta Groups API")
 
     def _api_token(self) -> ResolvedCredential:
         """The Management API token: the secret store first, then the env var."""

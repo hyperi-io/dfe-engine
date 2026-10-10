@@ -53,7 +53,7 @@ from dfe_engine.auth.jit import (
     JitSubjectUnusableError,
 )
 from dfe_engine.auth.sessions import session_claims, token_lifetime
-from dfe_engine.http_errors import describe_idp_error
+from dfe_engine.http_errors import describe_http_error
 from dfe_engine.settings import DFESettings, is_dev_posture
 
 router = APIRouter(prefix="/auth/oidc", tags=["OIDC Login"])
@@ -238,7 +238,7 @@ async def oidc_callback(
     except Exception as exc:
         # Bad code, failed id_token validation, nonce/state mismatch, etc. Authlib's text
         # repeats the callback's error_description query parameter, which any caller can set.
-        failure = describe_idp_error(exc)
+        failure = describe_http_error(exc)
         logger.warning("OIDC callback failed", provider=provider, **failure)
         # A refused credential is an audit event, not just an operational log line.
         reason = str(failure.get("code") or failure["error_type"])
@@ -285,7 +285,7 @@ async def oidc_callback(
         except Exception as exc:
             # A token minted with no account behind it cannot be disabled locally; the text names store paths, so only its class is logged.
             logger.error(
-                "JIT provisioning failed", user_id=identity.subject, **describe_idp_error(exc)
+                "JIT provisioning failed", user_id=identity.subject, **describe_http_error(exc)
             )
             audit_jit_failed(identity.subject, exc)
             raise HTTPException(

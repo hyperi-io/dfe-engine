@@ -46,8 +46,8 @@ from dfe_engine.auth.oidc.credential_env import (
 from dfe_engine.auth.oidc.models import GroupInfo
 from dfe_engine.http_errors import (
     credential_failure_message,
-    describe_idp_error,
-    idp_failure_message,
+    describe_http_error,
+    http_failure_message,
     provider_error_code,
 )
 
@@ -181,7 +181,7 @@ class EntraAdapter(OIDCGroupAdapter):
                 "Entra resolve_user_groups: token request failed -- returning empty list",
                 operation="token",
                 provider=self._provider.issuer,
-                **describe_idp_error(exc),
+                **describe_http_error(exc),
             )
             return []
         if token is None:
@@ -211,7 +211,7 @@ class EntraAdapter(OIDCGroupAdapter):
                         "Entra resolve_user_groups: API call failed",
                         operation="resolve_user_groups",
                         provider=self._provider.issuer,
-                        **describe_idp_error(exc),
+                        **describe_http_error(exc),
                     )
                     return None
                 if not isinstance(data, dict):
@@ -311,9 +311,9 @@ class EntraAdapter(OIDCGroupAdapter):
                 "Entra test_connection: token request failed",
                 operation="token",
                 provider=self._provider.issuer,
-                **describe_idp_error(exc),
+                **describe_http_error(exc),
             )
-            return False, idp_failure_message(exc, service="Entra ID")
+            return False, http_failure_message(exc, service="Entra ID")
         if token is None:
             credentials = graph_credentials(provider=self._provider, secrets=self._secrets)
             if credentials.configured:
@@ -342,9 +342,9 @@ class EntraAdapter(OIDCGroupAdapter):
                     "Entra test_connection: Graph API call failed",
                     operation="test_connection",
                     provider=self._provider.issuer,
-                    **describe_idp_error(exc),
+                    **describe_http_error(exc),
                 )
-                return (False, idp_failure_message(exc, service="Graph API"))
+                return (False, http_failure_message(exc, service="Graph API"))
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -387,7 +387,7 @@ class EntraAdapter(OIDCGroupAdapter):
                 operation="token",
                 provider=self._provider.issuer,
                 tenant_id=credentials.tenant_id,
-                **describe_idp_error(exc),
+                **describe_http_error(exc),
             )
             return None
 

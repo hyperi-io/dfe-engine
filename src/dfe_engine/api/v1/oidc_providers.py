@@ -48,7 +48,7 @@ from dfe_engine.auth.oidc.sync import SyncOutcome
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.store_names import VALID_NAME
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
-from dfe_engine.http_errors import describe_idp_error, idp_failure_message
+from dfe_engine.http_errors import describe_http_error, http_failure_message
 
 if TYPE_CHECKING:
     from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
@@ -956,9 +956,9 @@ async def verify_login_config(
                 "OIDC verify-login: discovery failed",
                 operation="discovery",
                 provider=name,
-                **describe_idp_error(exc),
+                **describe_http_error(exc),
             )
-            detail = idp_failure_message(exc, service="The issuer's discovery endpoint")
+            detail = http_failure_message(exc, service="The issuer's discovery endpoint")
             checks.append(LoginConfigCheck(name="discovery", ok=False, detail=detail))
 
     return LoginConfigResponse(ok=all(c.ok for c in checks), checks=checks)

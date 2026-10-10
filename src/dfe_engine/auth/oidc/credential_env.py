@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 from scalo.logger import logger
 from scalo.secrets.exceptions import SecretNotFoundError
 
-from dfe_engine.http_errors import describe_idp_error
+from dfe_engine.http_errors import describe_http_error
 
 if TYPE_CHECKING:
     from dfe_engine.secrets import DfeSecrets
@@ -81,7 +81,7 @@ def _from_store(secret_path: str, secrets: DfeSecrets | None) -> ResolvedCredent
         logger.warning(
             "OIDC credential unreadable from the secret store",
             secret_path=secret_path,
-            **describe_idp_error(exc),
+            **describe_http_error(exc),
         )
         return ResolvedCredential(unreadable=True)
 

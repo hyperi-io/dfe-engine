@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from scalo.logger import logger
 
 from dfe_engine.auth.oidc.sync import SyncMetrics, SyncOutcome, sync_provider
-from dfe_engine.http_errors import describe_idp_error
+from dfe_engine.http_errors import describe_http_error
 
 if TYPE_CHECKING:
     from dfe_engine.auth.groups import GroupStore
@@ -106,7 +106,7 @@ class OidcSyncScheduler:
             )
         except Exception as exc:
             # One provider's failure must not stop the others; its class is logged, never its text.
-            return "error", describe_idp_error(exc)
+            return "error", describe_http_error(exc)
         if result.get("created") and self._on_groups_created is not None:
             self._on_groups_created()
         # The sync's own error message names no user or URL, so it is safe to log.

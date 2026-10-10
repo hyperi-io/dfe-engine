@@ -46,7 +46,7 @@ from dfe_engine.auth.oidc.credential_env import (
     unreadable_credential_message,
 )
 from dfe_engine.auth.oidc.models import GroupInfo, OIDCProvider
-from dfe_engine.http_errors import describe_idp_error, idp_failure_message
+from dfe_engine.http_errors import describe_http_error, http_failure_message
 
 if TYPE_CHECKING:
     from dfe_engine.secrets import DfeSecrets
@@ -208,9 +208,9 @@ class GoogleAdapter(OIDCGroupAdapter):
                 "Google Admin SDK test_connection failed",
                 operation="test_connection",
                 provider=self._provider.issuer,
-                **describe_idp_error(exc),
+                **describe_http_error(exc),
             )
-            return False, idp_failure_message(exc, service="Google Admin SDK")
+            return False, http_failure_message(exc, service="Google Admin SDK")
 
     # ------------------------------------------------------------------
     # Cloud Identity, as the user
@@ -240,7 +240,7 @@ class GoogleAdapter(OIDCGroupAdapter):
                     "Google Cloud Identity: transitive group search refused, reading direct groups",
                     operation="searchTransitiveGroups",
                     provider=self._provider.issuer,
-                    **describe_idp_error(exc),
+                    **describe_http_error(exc),
                 )
             except (httpx.HTTPError, ValueError) as exc:
                 self._log_failure(exc=exc, method="searchTransitiveGroups")
@@ -297,7 +297,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             message,
             operation=method,
             provider=self._provider.issuer,
-            **describe_idp_error(exc),
+            **describe_http_error(exc),
         )
 
     def _log_failure(self, *, exc: httpx.HTTPError | ValueError, method: str) -> None:
@@ -306,7 +306,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             "Google Cloud Identity group lookup failed",
             operation=method,
             provider=self._provider.issuer,
-            **describe_idp_error(exc),
+            **describe_http_error(exc),
         )
 
     # ------------------------------------------------------------------
@@ -326,7 +326,7 @@ class GoogleAdapter(OIDCGroupAdapter):
                 "Google Admin SDK resolve_user_groups failed -- default deny",
                 operation="resolve_user_groups",
                 provider=self._provider.issuer,
-                **describe_idp_error(exc),
+                **describe_http_error(exc),
             )
             return []
 
@@ -357,7 +357,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             logger.warning(
                 "Could not parse service account JSON",
                 provider=self._provider.issuer,
-                **describe_idp_error(exc),
+                **describe_http_error(exc),
             )
             return None
 
@@ -384,7 +384,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             logger.warning(
                 "Failed to build Google Admin SDK service",
                 provider=self._provider.issuer,
-                **describe_idp_error(exc),
+                **describe_http_error(exc),
             )
             return None
 

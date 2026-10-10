@@ -39,8 +39,8 @@ from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.rp import fill_from_userinfo_endpoint
 from dfe_engine.auth.oidc.sync import sync_provider
 from dfe_engine.http_errors import (
-    describe_idp_error,
-    idp_failure_message,
+    describe_http_error,
+    http_failure_message,
     provider_error_code,
 )
 from tests.support.refusing_api import refusing_api
@@ -130,7 +130,7 @@ class TestProviderErrorCode:
         assert provider_error_code(body) == expected
 
     def test_a_failure_with_no_answer_is_named_by_its_class(self) -> None:
-        assert describe_idp_error(ConnectionError(f"cannot reach {SENTINEL}")) == {
+        assert describe_http_error(ConnectionError(f"cannot reach {SENTINEL}")) == {
             "error_type": "ConnectionError"
         }
 
@@ -158,7 +158,7 @@ class TestProviderErrorCode:
     def test_a_failure_with_no_answer_says_why_by_the_socket_error_class(
         self, exc: BaseException, expected: str
     ) -> None:
-        assert describe_idp_error(exc) == {
+        assert describe_http_error(exc) == {
             "error_type": type(exc).__name__,
             "transport_failure": expected,
         }
@@ -167,13 +167,13 @@ class TestProviderErrorCode:
         """The class decides: a message that mentions DNS, TLS or a timeout says nothing."""
         message = f"dns lookup of {SENTINEL} failed: tls handshake timed out, connection refused"
 
-        assert describe_idp_error(ConnectionError(message)) == {"error_type": "ConnectionError"}
+        assert describe_http_error(ConnectionError(message)) == {"error_type": "ConnectionError"}
 
     def test_an_oauth_error_yields_its_code_and_not_its_description(self) -> None:
         """Authlib builds the error from the callback's query string, so the description is the caller's."""
         error = OAuthError(error="access_denied", description=f"{SENTINEL} may not sign in")
 
-        assert describe_idp_error(error) == {"code": "access_denied", "error_type": "OAuthError"}
+        assert describe_http_error(error) == {"code": "access_denied", "error_type": "OAuthError"}
 
     @pytest.mark.parametrize(
         ("exc", "code"),
@@ -196,7 +196,7 @@ class TestProviderErrorCode:
         self, exc: OAuthError, code: str
     ) -> None:
         """A callback's caller chooses the code, so only the specs' codes and the library's own pass."""
-        assert describe_idp_error(exc)["code"] == code
+        assert describe_http_error(exc)["code"] == code
 
     @pytest.mark.parametrize(
         "exc",
@@ -207,7 +207,7 @@ class TestProviderErrorCode:
         ids=["body-not-json", "no-socket-error"],
     )
     def test_an_answer_that_arrived_is_not_called_unreachable(self, exc: BaseException) -> None:
-        message = idp_failure_message(exc, service="The issuer's discovery endpoint")
+        message = http_failure_message(exc, service="The issuer's discovery endpoint")
 
         assert "could not be reached" not in message
         assert message == (
@@ -217,7 +217,7 @@ class TestProviderErrorCode:
     def test_a_failure_with_a_socket_error_under_it_is_unreachable(self) -> None:
         exc = _caused_by(httpx.ConnectError("x"), ConnectionRefusedError())
 
-        message = idp_failure_message(exc, service="The directory API")
+        message = http_failure_message(exc, service="The directory API")
 
         assert message == "The directory API could not be reached; the engine log has the reason"
 
@@ -516,7 +516,7 @@ class TestGoogleTokenRefusalClass:
     def test_only_a_refusal_the_provider_will_repeat_blames_the_credential(
         self, exc: RefreshError, blames_credential: bool
     ) -> None:
-        message = idp_failure_message(exc, service="The directory API")
+        message = http_failure_message(exc, service="The directory API")
 
         assert ("could not use the configured credential" in message) is blames_credential
         # The token endpoint answered either way, so neither reads as unreachable.
@@ -525,10 +525,10 @@ class TestGoogleTokenRefusalClass:
     def test_the_log_fields_carry_the_oauth_code_not_its_description(self) -> None:
         exc = RefreshError(f"invalid_grant: {SENTINEL}", TOKEN_REFUSED)
 
-        assert describe_idp_error(exc) == {"error_type": "RefreshError", "code": "invalid_grant"}
+        assert describe_http_error(exc) == {"error_type": "RefreshError", "code": "invalid_grant"}
 
     def test_an_answer_that_is_not_json_yields_no_code(self) -> None:
-        assert describe_idp_error(RefreshError("an HTML page from a proxy")) == {
+        assert describe_http_error(RefreshError("an HTML page from a proxy")) == {
             "error_type": "RefreshError"
         }
 

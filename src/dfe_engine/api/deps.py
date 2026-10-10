@@ -40,7 +40,7 @@ from dfe_engine.auth.models import platform_caller
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.auth.sessions import session_ended
 from dfe_engine.gitcrud.retention import effective_settings
-from dfe_engine.http_errors import describe_idp_error
+from dfe_engine.http_errors import describe_http_error
 from dfe_engine.orgs.tenant_scope import tenant_ids_for
 from dfe_engine.settings import DFESettings, is_dev_posture
 
@@ -632,7 +632,7 @@ async def get_current_user(request: Request) -> AuthContext:
             except Exception as exc:
                 # A session with no account behind it cannot be disabled locally; the text names store paths, so only its class is logged.
                 logger.error(
-                    "JIT provisioning failed", user_id=oidc_subject, **describe_idp_error(exc)
+                    "JIT provisioning failed", user_id=oidc_subject, **describe_http_error(exc)
                 )
                 audit_jit_failed(oidc_subject, exc)
                 raise HTTPException(

@@ -42,8 +42,8 @@ from dfe_engine.auth.oidc.credential_env import unreadable_credential_message
 from dfe_engine.auth.store_names import VALID_NAME
 from dfe_engine.http_errors import (
     credential_failure_message,
-    describe_idp_error,
-    idp_failure_message,
+    describe_http_error,
+    http_failure_message,
 )
 
 if TYPE_CHECKING:
@@ -106,7 +106,7 @@ def _listing_failure_message(exc: BaseException) -> str:
                 "the engine log has the reason"
             )
         case _:
-            return idp_failure_message(exc, service=_DIRECTORY_API)
+            return http_failure_message(exc, service=_DIRECTORY_API)
 
 
 SyncSkipReason = Literal["invalid_name", "stored_unloadable", "name_taken"]
@@ -314,7 +314,7 @@ async def sync_provider(
             "OIDC group sync failed",
             operation="list_all_groups",
             provider=provider_name,
-            **describe_idp_error(exc),
+            **describe_http_error(exc),
         )
         provider_registry.update(
             provider_name,
