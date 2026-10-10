@@ -478,6 +478,7 @@ class TestScimGroups:
 
         assert resp.status_code == 400, resp.text
         assert resp.json()["scimType"] == "invalidValue"
+        assert resp.json()["detail"].startswith("displayName: name ")
         assert sorted(g.name for g in app.state.group_store.list()) == before
 
     def test_create_duplicate_group_returns_409(self, client, admin_headers):

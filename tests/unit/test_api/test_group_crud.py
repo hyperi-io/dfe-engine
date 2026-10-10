@@ -72,6 +72,7 @@ class TestCreateGroup:
 
         assert resp.status_code == 422, resp.text
         assert resp.json()["code"] == "validation_error"
+        assert [error["field"] for error in resp.json()["errors"]] == ["name"]
         assert sorted(g.name for g in app.state.group_store.list()) == before
 
     def test_a_taken_name_is_still_a_409(self, client, admin_headers):
