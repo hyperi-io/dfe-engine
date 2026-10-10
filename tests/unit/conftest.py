@@ -4,6 +4,7 @@ Test-session guard: every bcrypt hash in this tree runs at the minimum cost.
 """
 
 import threading
+import traceback
 from collections.abc import Iterator
 
 import bcrypt
@@ -85,14 +86,19 @@ def _fresh_write_health():
 def audit_events() -> Iterator[list[dict]]:
     """Every event the engine logs while the test runs, from a real sink on its logger.
 
-    Each entry is the event name under ``event`` plus the structured fields it carried.
-    The sink takes every level, so a test that asserts a value is absent reads the
-    debug lines too.
+    Each entry is the event name under ``event`` plus the structured fields it carried,
+    and, for a line logged with an exception, that exception and its chain formatted
+    under ``exception``. The sink takes every level, so a test that asserts a value is
+    absent reads the debug lines and the exception text too.
     """
     events: list[dict] = []
 
     def record(message) -> None:
-        events.append({"event": message.record["message"], **message.record["extra"]})
+        entry = {"event": message.record["message"], **message.record["extra"]}
+        exception = message.record["exception"]
+        if exception is not None and exception.value is not None:
+            entry["exception"] = "".join(traceback.format_exception(exception.value))
+        events.append(entry)
 
     handler = logger.add(record, level="DEBUG", format="{message}")
     try:

@@ -44,10 +44,11 @@ from dfe_engine.api.pagination import (
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.oidc.credential_env import is_env_var_name, provider_secret_path
 from dfe_engine.auth.oidc.field_rules import FieldProblem, field_problems
-from dfe_engine.auth.oidc.idp_errors import describe_idp_error, idp_failure_message
+from dfe_engine.auth.oidc.sync import SyncOutcome
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.store_names import VALID_NAME
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
+from dfe_engine.http_errors import describe_http_error, http_failure_message
 
 if TYPE_CHECKING:
     from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
@@ -347,8 +348,16 @@ class SyncResponse(BaseModel):
     skipped: str | None = Field(
         default=None,
         description="Why the sync did nothing, when it did not run: the provider is disabled, "
-        "is not in api mode, or has no directory credential configured. The provider's "
-        "last_sync_status reads not_configured in that last case.",
+        "is not in api mode, has no directory credential configured, or reads each login's "
+        "groups with the user's own token and has no directory to sync. The provider's "
+        "last_sync_status reads not_configured and user_token in those last two cases.",
+    )
+    status: SyncOutcome = Field(
+        description="How the sync ended: ok, partial (some groups skipped), error (the "
+        "listing failed or the secret store holding its credential did not answer), "
+        "not_configured (no directory credential), user_token (no directory to sync, "
+        "which is a Google provider's default and not a fault) or skipped (disabled or "
+        "not in api mode). Key on this, never on the text of error or skipped.",
     )
 
 
@@ -845,6 +854,7 @@ async def sync_provider_groups(
         groups_skipped=result["groups_skipped"],
         error=result.get("error"),
         skipped=result.get("skipped"),
+        status=result["status"],
     )
 
 
@@ -946,9 +956,9 @@ async def verify_login_config(
                 "OIDC verify-login: discovery failed",
                 operation="discovery",
                 provider=name,
-                **describe_idp_error(exc),
+                **describe_http_error(exc),
             )
-            detail = idp_failure_message(exc, service="The issuer's discovery endpoint")
+            detail = http_failure_message(exc, service="The issuer's discovery endpoint")
             checks.append(LoginConfigCheck(name="discovery", ok=False, detail=detail))
 
     return LoginConfigResponse(ok=all(c.ok for c in checks), checks=checks)

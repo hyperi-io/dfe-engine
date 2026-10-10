@@ -26,21 +26,28 @@ link on that id, never on the group email, which an admin can rename.
 """
 
 import asyncio
+import functools
 import json
 from typing import TYPE_CHECKING, Any
 
 import httpx
 from scalo.logger import logger
 
-from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
-from dfe_engine.auth.oidc.credential_env import resolve_credential
-from dfe_engine.auth.oidc.idp_errors import (
+from dfe_engine.auth.oidc.adapters.base import (
     DirectoryCredentialError,
+    DirectoryCredentialUnreadableError,
     DirectoryNotConfiguredError,
-    describe_idp_error,
-    idp_failure_message,
+    DirectoryPageLimitError,
+    NoDirectoryListingError,
+    OIDCGroupAdapter,
+)
+from dfe_engine.auth.oidc.credential_env import (
+    ResolvedCredential,
+    resolve_credential,
+    unreadable_credential_message,
 )
 from dfe_engine.auth.oidc.models import GroupInfo, OIDCProvider
+from dfe_engine.http_errors import describe_http_error, http_failure_message
 
 if TYPE_CHECKING:
     from dfe_engine.secrets import DfeSecrets
@@ -52,9 +59,6 @@ _GROUP_RESOURCE_PREFIX = "groups/"
 
 # Every Google group carries this label, and Cloud Identity refuses a membership search with no label in its query.
 _GOOGLE_GROUP_LABEL = "cloudidentity.googleapis.com/groups.discussion_forum"
-
-# Pages read per search at most, so a server that keeps handing back a page token cannot hold a login.
-_MAX_PAGES = 50
 
 
 def _cel_string(value: str) -> str:
@@ -138,16 +142,29 @@ class GoogleAdapter(OIDCGroupAdapter):
             List of GroupInfo.
 
         Raises:
-            DirectoryNotConfiguredError: No service account is configured.
+            NoDirectoryListingError: No service account is configured, which is the
+                default: each login reads its own groups with the user's token.
+            DirectoryNotConfiguredError: A service account is configured but
+                resolves to nothing.
+            DirectoryCredentialUnreadableError: The service account's secret store
+                did not answer.
             DirectoryCredentialError: A service account is configured but does not
                 build a client. ``_get_service`` logs why.
+            DirectoryPageLimitError: Google still handed out a page token at the
+                page limit.
             Exception: Whatever the Directory API client raised. A failed listing
                 is never returned as an empty one: group sync would record it as a
                 directory with no groups.
         """
         service = self._get_service()
         if service is None:
-            if not self._service_account_json():
+            groups = self._provider.groups
+            if not (groups.service_account_json_path) and not (groups.service_account_json_env):
+                raise NoDirectoryListingError
+            service_account = self._service_account_json
+            if service_account.unreadable:
+                raise DirectoryCredentialUnreadableError
+            if not service_account.value:
                 raise DirectoryNotConfiguredError
             raise DirectoryCredentialError
 
@@ -168,7 +185,10 @@ class GoogleAdapter(OIDCGroupAdapter):
                 "from Cloud Identity with the user's own token, so there is no "
                 "directory credential to test"
             )
-        if not self._service_account_json():
+        service_account = self._service_account_json
+        if service_account.unreadable:
+            return False, unreadable_credential_message(credential="Google service account JSON")
+        if not service_account.value:
             return False, (
                 "A service account is configured but resolves to nothing: send it as "
                 "'groups.service_account_json' to the provider API, or set the env var "
@@ -186,9 +206,9 @@ class GoogleAdapter(OIDCGroupAdapter):
                 "Google Admin SDK test_connection failed",
                 operation="test_connection",
                 provider=self._provider.issuer,
-                **describe_idp_error(exc),
+                **describe_http_error(exc),
             )
-            return False, idp_failure_message(exc, service="Google Admin SDK")
+            return False, http_failure_message(exc, service="Google Admin SDK")
 
     # ------------------------------------------------------------------
     # Cloud Identity, as the user
@@ -218,7 +238,7 @@ class GoogleAdapter(OIDCGroupAdapter):
                     "Google Cloud Identity: transitive group search refused, reading direct groups",
                     operation="searchTransitiveGroups",
                     provider=self._provider.issuer,
-                    **describe_idp_error(exc),
+                    **describe_http_error(exc),
                 )
             except (httpx.HTTPError, ValueError) as exc:
                 self._log_failure(exc=exc, method="searchTransitiveGroups")
@@ -241,7 +261,7 @@ class GoogleAdapter(OIDCGroupAdapter):
         url = f"{self.CLOUD_IDENTITY_BASE}/groups/-/memberships:{method}"
         params = {"query": query}
         groups: list[GroupInfo] = []
-        for _page in range(_MAX_PAGES):
+        for _page in range(self.MAX_LOGIN_PAGES):
             response = await client.get(url, headers=headers, params=params)
             body = response.json()
             if not isinstance(body, dict):
@@ -255,7 +275,7 @@ class GoogleAdapter(OIDCGroupAdapter):
         logger.warning(
             "Google Cloud Identity: group search stopped at the page limit",
             method=method,
-            pages=_MAX_PAGES,
+            pages=self.MAX_LOGIN_PAGES,
             provider=self._provider.issuer,
         )
         return groups
@@ -275,7 +295,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             message,
             operation=method,
             provider=self._provider.issuer,
-            **describe_idp_error(exc),
+            **describe_http_error(exc),
         )
 
     def _log_failure(self, *, exc: httpx.HTTPError | ValueError, method: str) -> None:
@@ -284,7 +304,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             "Google Cloud Identity group lookup failed",
             operation=method,
             provider=self._provider.issuer,
-            **describe_idp_error(exc),
+            **describe_http_error(exc),
         )
 
     # ------------------------------------------------------------------
@@ -304,14 +324,19 @@ class GoogleAdapter(OIDCGroupAdapter):
                 "Google Admin SDK resolve_user_groups failed -- default deny",
                 operation="resolve_user_groups",
                 provider=self._provider.issuer,
-                **describe_idp_error(exc),
+                **describe_http_error(exc),
             )
             return []
 
         return [GroupInfo(id=g["id"], name=g["name"], email=g.get("email", "")) for g in raw]
 
-    def _service_account_json(self) -> str:
-        """The service account JSON: the secret store first, then the env var."""
+    @functools.cached_property
+    def _service_account_json(self) -> ResolvedCredential:
+        """The service account JSON: the secret store first, then the env var.
+
+        Resolved once per adapter, which serves one sync, one connection test or one
+        login, so an unreachable store is asked and logged once.
+        """
         return resolve_credential(
             secret_path=self._provider.groups.service_account_json_path,
             env_name=self._provider.groups.service_account_json_env,
@@ -325,7 +350,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             A googleapiclient Resource object, or None if no service account is
             configured or its JSON does not build credentials.
         """
-        raw_json = self._service_account_json()
+        raw_json = self._service_account_json.value
         if not raw_json:
             return None
 
@@ -335,7 +360,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             logger.warning(
                 "Could not parse service account JSON",
                 provider=self._provider.issuer,
-                error=str(exc),
+                **describe_http_error(exc),
             )
             return None
 
@@ -362,7 +387,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             logger.warning(
                 "Failed to build Google Admin SDK service",
                 provider=self._provider.issuer,
-                error=str(exc),
+                **describe_http_error(exc),
             )
             return None
 
@@ -378,12 +403,16 @@ class GoogleAdapter(OIDCGroupAdapter):
 
         Returns:
             List of raw group dicts from the API response.
+
+        Raises:
+            DirectoryPageLimitError: Google still handed out a page token at the
+                page limit.
         """
         groups: list[dict[str, Any]] = []
         domain = self._provider.groups.domain
         page_token: str | None = None
 
-        while True:
+        for _page in range(self.MAX_LISTING_PAGES):
             kwargs: dict[str, Any] = {"maxResults": 200}
             if domain:
                 kwargs["domain"] = domain
@@ -395,9 +424,8 @@ class GoogleAdapter(OIDCGroupAdapter):
 
             page_token = response.get("nextPageToken")
             if not page_token:
-                break
-
-        return groups
+                return groups
+        raise DirectoryPageLimitError(self.MAX_LISTING_PAGES)
 
     def _fetch_user_groups_sync(self, service: Any, user_key: str) -> list[dict[str, Any]]:
         """Fetch the groups a single user belongs to, handling pagination.
@@ -412,11 +440,16 @@ class GoogleAdapter(OIDCGroupAdapter):
 
         Returns:
             List of raw group dicts the user is a member of.
+
+        Raises:
+            DirectoryPageLimitError: Google still handed out a page token at
+                :attr:`MAX_LOGIN_PAGES`, which the caller treats as any other
+                failed lookup.
         """
         groups: list[dict[str, Any]] = []
         page_token: str | None = None
 
-        while True:
+        for _page in range(self.MAX_LOGIN_PAGES):
             kwargs: dict[str, Any] = {"userKey": user_key, "maxResults": 200}
             if page_token:
                 kwargs["pageToken"] = page_token
@@ -426,9 +459,8 @@ class GoogleAdapter(OIDCGroupAdapter):
 
             page_token = response.get("nextPageToken")
             if not page_token:
-                break
-
-        return groups
+                return groups
+        raise DirectoryPageLimitError(self.MAX_LOGIN_PAGES)
 
     def _probe_sync(self, service: Any) -> None:
         """Perform a minimal API call to verify connectivity.

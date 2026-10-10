@@ -12,8 +12,6 @@ Each provider type (generic, google, entra_id, okta) implements this ABC.
 All methods are async to allow network calls without blocking the event loop.
 """
 
-from __future__ import annotations
-
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
@@ -22,12 +20,72 @@ if TYPE_CHECKING:
     from dfe_engine.secrets import DfeSecrets
 
 
+class DirectoryNotConfiguredError(Exception):
+    """A provider's directory cannot be listed because no credential for it is configured.
+
+    An adapter raises this from ``list_all_groups`` instead of returning an empty list,
+    so group sync can tell a directory it never read from one that has no groups.
+    """
+
+
+class DirectoryCredentialError(Exception):
+    """A provider's directory credential is configured but gives no access to its directory.
+
+    An adapter raises this from ``list_all_groups`` when Entra issues no token for the
+    configured client secret, or the configured Google service account JSON does not
+    build a client. Group sync records the run as failed, never as a directory with no groups.
+    """
+
+
+class DirectoryCredentialUnreadableError(DirectoryCredentialError):
+    """A provider's directory credential is configured, but the secret store holding it did not answer.
+
+    The credential may be sound, so group sync records a failed run that names the
+    secret store rather than the credential.
+    """
+
+
+class NoDirectoryListingError(Exception):
+    """The provider has no directory listing to sync: each login reads that user's groups with their own token.
+
+    A Google provider with no service account works this way by default, so group
+    sync records it as its own state, neither a failure nor a missing credential.
+    """
+
+
+class DirectoryPageError(Exception):
+    """A directory answered a listing page without the listing's shape.
+
+    The page holds no groups the adapter can read, so the listing cannot be trusted
+    to be the whole directory.
+    """
+
+
+class DirectoryPageLimitError(Exception):
+    """A directory listing ran past the page limit without reaching its last page.
+
+    Attributes:
+        pages: The page limit the listing reached.
+    """
+
+    def __init__(self, pages: int) -> None:
+        """Record the page limit the listing reached."""
+        super().__init__(pages)
+        self.pages = pages
+
+
 class OIDCGroupAdapter(ABC):
     """Abstract OIDC group adapter.
 
     Concrete implementations resolve group membership and enumerate groups
     from a specific identity provider.
     """
+
+    # Pages a directory listing reads at most, so a provider that keeps linking a next page cannot hold the sync: 200,000 Okta or Google groups, 999,000 Graph groups.
+    MAX_LISTING_PAGES = 1000
+
+    # Pages one login's group lookup reads at most, so a provider that keeps linking a next page cannot hold a login: 10,000 Okta or Google groups, 49,950 Graph groups.
+    MAX_LOGIN_PAGES = 50
 
     def __init__(self, provider: OIDCProvider, *, secrets: DfeSecrets | None = None) -> None:
         self._provider = provider
@@ -45,11 +103,17 @@ class OIDCGroupAdapter(ABC):
             provider does not support group enumeration via API.
 
         Raises:
+            NoDirectoryListingError: The provider reads each login's groups with
+                the user's own token and has no directory to list.
             DirectoryNotConfiguredError: The provider has no credential to
                 enumerate with.  Group sync reports that as its own state, never
                 as a directory with no groups.
+            DirectoryCredentialUnreadableError: The credential is configured but
+                the secret store holding it did not answer.  A failed run.
             DirectoryCredentialError: The credential is configured but gives no
                 access to the directory.  Group sync reports that as a failed run.
+            DirectoryPageError: A page arrived without the listing's shape.
+            DirectoryPageLimitError: The listing ran past :attr:`MAX_LISTING_PAGES`.
             Exception: Whatever the provider's API produced when a listing failed,
                 on any page. An empty or short list never means a failed one,
                 because group sync records what it is given as the whole directory.

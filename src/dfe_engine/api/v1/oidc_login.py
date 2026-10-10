@@ -52,8 +52,8 @@ from dfe_engine.auth.jit import (
     JitIdentityCollisionError,
     JitSubjectUnusableError,
 )
-from dfe_engine.auth.oidc.idp_errors import describe_idp_error
 from dfe_engine.auth.sessions import session_claims, token_lifetime
+from dfe_engine.http_errors import describe_http_error
 from dfe_engine.settings import DFESettings, is_dev_posture
 
 router = APIRouter(prefix="/auth/oidc", tags=["OIDC Login"])
@@ -145,7 +145,10 @@ def _reload_rp_if_provider_known(request: Request, provider: str):
     try:
         known = registry.get(provider)
     except Exception as exc:  # malformed YAML on disk - not this request's problem
-        logger.warning("OIDC provider registry read failed", provider=provider, error=str(exc))
+        # The validation text quotes the file's values, so only the failure's class is logged.
+        logger.warning(
+            "OIDC provider registry read failed", provider=provider, **describe_http_error(exc)
+        )
         return None
     if known is None or not known.enabled:
         return None
@@ -238,7 +241,7 @@ async def oidc_callback(
     except Exception as exc:
         # Bad code, failed id_token validation, nonce/state mismatch, etc. Authlib's text
         # repeats the callback's error_description query parameter, which any caller can set.
-        failure = describe_idp_error(exc)
+        failure = describe_http_error(exc)
         logger.warning("OIDC callback failed", provider=provider, **failure)
         # A refused credential is an audit event, not just an operational log line.
         reason = str(failure.get("code") or failure["error_type"])
@@ -283,8 +286,10 @@ async def oidc_callback(
                 detail={"code": exc.reason, "message": str(exc)},
             ) from exc
         except Exception as exc:
-            # A token minted with no account behind it cannot be disabled locally.
-            logger.exception("JIT provisioning failed", user_id=identity.subject)
+            # A token minted with no account behind it cannot be disabled locally; the text names store paths, so only its class is logged.
+            logger.error(
+                "JIT provisioning failed", user_id=identity.subject, **describe_http_error(exc)
+            )
             audit_jit_failed(identity.subject, exc)
             raise HTTPException(
                 status_code=503,

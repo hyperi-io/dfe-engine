@@ -6,15 +6,17 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
-
 import pytest
 
+from dfe_engine.auth.oidc.adapters.base import (
+    DirectoryCredentialError,
+    DirectoryNotConfiguredError,
+)
 from dfe_engine.auth.oidc.adapters.okta import OktaAdapter
-from dfe_engine.auth.oidc.idp_errors import DirectoryNotConfiguredError
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
 from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import SecretsSettings
+from tests.unit.test_auth.test_oidc.unreachable_store import UnreachableSecretStore
 
 
 def _okta_provider(*, mode: str = "token_claim") -> OIDCProvider:
@@ -66,6 +68,35 @@ class TestOktaListAllGroupsNoCredentials:
         adapter = OktaAdapter(provider)
         with pytest.raises(DirectoryNotConfiguredError):
             await adapter.list_all_groups()
+
+
+class TestOktaSecretStoreDidNotAnswer:
+    """A token whose secret store is down exists all the same, so it is an error, not 'not configured'."""
+
+    @staticmethod
+    def _adapter(monkeypatch) -> OktaAdapter:
+        monkeypatch.delenv("OKTA_API_TOKEN", raising=False)
+        provider = _okta_provider(mode="api")
+        provider.groups.okta_domain = "example.okta.com"
+        provider.groups.api_token_path = "oidc/acme/groups_api_token"
+        provider.groups.api_token_env = "OKTA_API_TOKEN"
+        return OktaAdapter(provider, secrets=UnreachableSecretStore())
+
+    async def test_the_listing_fails_as_an_error_and_the_login_lookup_still_answers(
+        self, monkeypatch
+    ):
+        adapter = self._adapter(monkeypatch)
+
+        with pytest.raises(DirectoryCredentialError):
+            await adapter.list_all_groups()
+        assert await adapter.resolve_user_groups("00u1") == []
+
+    async def test_the_connection_test_names_the_secret_store(self, monkeypatch):
+        ok, message = await self._adapter(monkeypatch).test_connection()
+
+        assert ok is False
+        assert "secret store did not answer" in message
+        assert "not configured" not in message
 
 
 class TestOktaApiTokenResolution:

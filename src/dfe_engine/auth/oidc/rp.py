@@ -34,7 +34,7 @@ from pydantic import BaseModel
 from scalo.logger import logger
 
 from dfe_engine.auth.oidc.credential_env import resolve_credential
-from dfe_engine.auth.oidc.idp_errors import describe_idp_error
+from dfe_engine.http_errors import describe_http_error
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -221,7 +221,7 @@ async def fill_from_userinfo_endpoint(
             "OIDC RP: userinfo claims not used",
             issuer=issuer,
             operation="userinfo",
-            **describe_idp_error(exc),
+            **describe_http_error(exc),
         )
         return claims
 
@@ -257,12 +257,12 @@ class OidcRelyingParty:
                 value=provider.client_id,
                 env_name=provider.client_id_env,
                 secrets=secrets,
-            )
+            ).value
             client_secret = resolve_credential(
                 secret_path=provider.client_secret_path,
                 env_name=provider.client_secret_env,
                 secrets=secrets,
-            )
+            ).value
             self._oauth.register(
                 name=name,
                 # Authlib treats an unset credential as None, not as an empty string.
@@ -398,7 +398,7 @@ class OidcRelyingParty:
                 "OIDC RP: directory group enrichment failed",
                 operation="resolve_user_groups",
                 provider=provider.issuer,
-                **describe_idp_error(exc),
+                **describe_http_error(exc),
             )
             return identity
         group_ids = [g.id for g in fetched if g.id]

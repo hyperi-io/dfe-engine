@@ -390,6 +390,7 @@ class TestSyncProvider:
 
         assert resp.status_code == 200, resp.text
         assert (resp.json()["created"], resp.json()["groups_skipped"]) == (1, 1)
+        assert resp.json()["status"] == "partial"
 
     def test_an_idp_group_cannot_take_the_seeded_admins_by_name(
         self, client, app, admin_headers, tmp_path, monkeypatch
@@ -431,7 +432,7 @@ class TestSyncProvider:
         assert "admin" not in me.json()["roles"]
         assert "dfe-admins" not in me.json()["groups"]
 
-    @pytest.mark.parametrize("provider_type", ["entra_id", "okta", "google"])
+    @pytest.mark.parametrize("provider_type", ["entra_id", "okta"])
     def test_a_provider_with_no_directory_credential_says_so(
         self, client, app, admin_headers, provider_type
     ):
@@ -453,9 +454,34 @@ class TestSyncProvider:
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert (body["skipped"], body["error"], body["total"]) == (NOT_CONFIGURED_MESSAGE, None, 0)
+        assert body["status"] == "not_configured"
         shown = client.get("/api/v1/auth/oidc-providers/no-credential", headers=admin_headers)
         assert shown.json()["last_sync_status"] == "not_configured"
         assert shown.json()["sync_error"] == NOT_CONFIGURED_MESSAGE
+
+    def test_a_google_provider_with_no_service_account_reports_no_error(
+        self, client, app, admin_headers
+    ):
+        """The default Google setup reads each login's groups with the user's token."""
+        from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+
+        app.state.oidc_provider_registry.create(
+            "google-default",
+            OIDCProvider(
+                type="google",
+                enabled=True,
+                issuer="https://accounts.google.com",
+                groups=GroupResolutionConfig(enrich_on_login=True, mode="api"),
+            ),
+        )
+
+        resp = client.post("/api/v1/auth/oidc-providers/google-default/sync", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert (body["status"], body["error"], body["total"]) == ("user_token", None, 0)
+        shown = client.get("/api/v1/auth/oidc-providers/google-default", headers=admin_headers)
+        assert (shown.json()["last_sync_status"], shown.json()["sync_error"]) == ("user_token", "")
 
     def test_the_interval_sync_runs_beside_the_api(self, app, client):
         # It waits a tick before its first run, so it never races the explicit syncs in these tests.
