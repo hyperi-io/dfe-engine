@@ -155,6 +155,17 @@ def compute_drops(
     return drops
 
 
+_STATEMENT_HEAD_CHARS = 60
+
+
+def _statement_head(stmt: str) -> str:
+    """The start of ``stmt``, cut before any ``IDENTIFIED`` clause so no password hash shows."""
+    head = stmt.split(" IDENTIFIED ", 1)[0]
+    if len(head) <= _STATEMENT_HEAD_CHARS:
+        return head
+    return f"{head[:_STATEMENT_HEAD_CHARS]}..."
+
+
 class ChRbacReconciler:
     """Reconcile the gitops CH-RBAC config into real ClickHouse objects.
 
@@ -301,6 +312,9 @@ class ChRbacReconciler:
 
         A lost connection is not a bad statement: it raises, so the run reads as
         failed and is retried, rather than as a partial run nobody runs again.
+
+        ClickHouse's error text goes to the log only. ``result.errors`` reaches API
+        callers, so it names the statement up to any password hash and nothing more.
         """
         for stmt in stmts:
             try:
@@ -308,7 +322,9 @@ class ChRbacReconciler:
             except Exception as exc:  # a bad statement must not abort the rest
                 if is_connection_error(exc):
                     raise
-                result.errors.append(f"{stmt[:60]}...: {exc}")
+                head = _statement_head(stmt)
+                logger.warning("CH RBAC statement failed", statement=head, error=str(exc))
+                result.errors.append(f"{head} failed; the engine log has ClickHouse's reason")
 
     # ---- pure render -----------------------------------------------------
 
