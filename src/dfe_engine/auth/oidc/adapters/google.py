@@ -34,6 +34,7 @@ from scalo.logger import logger
 
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.credential_env import resolve_credential
+from dfe_engine.auth.oidc.idp_errors import describe_idp_error, idp_failure_message
 from dfe_engine.auth.oidc.models import GroupInfo, OIDCProvider
 
 if TYPE_CHECKING:
@@ -73,25 +74,6 @@ def _group_from_relation(item: object) -> GroupInfo | None:
         id=group_id,
         name=str(item.get("displayName") or email or group_id),
     )
-
-
-def _google_error_reason(response: httpx.Response) -> str:
-    """Google's own account of a refused call: its status, the reasons in its details and its message."""
-    try:
-        body = response.json()
-    except ValueError:
-        return response.text[:200]
-    error = body.get("error") if isinstance(body, dict) else None
-    if not isinstance(error, dict):
-        return response.text[:200]
-    details = error.get("details") or []
-    reasons = [
-        str(detail["reason"])
-        for detail in details
-        if isinstance(detail, dict) and detail.get("reason")
-    ]
-    parts = [str(error.get("status") or ""), *reasons, str(error.get("message") or "")]
-    return "; ".join(part for part in parts if part)
 
 
 class GoogleAdapter(OIDCGroupAdapter):
@@ -158,8 +140,9 @@ class GoogleAdapter(OIDCGroupAdapter):
         except Exception as exc:
             logger.warning(
                 "Google Admin SDK list_all_groups failed",
+                operation="list_all_groups",
                 provider=self._provider.issuer,
-                error=str(exc),
+                **describe_idp_error(exc),
             )
             return []
 
@@ -195,10 +178,11 @@ class GoogleAdapter(OIDCGroupAdapter):
         except Exception as exc:
             logger.warning(
                 "Google Admin SDK test_connection failed",
+                operation="test_connection",
                 provider=self._provider.issuer,
-                error=str(exc),
+                **describe_idp_error(exc),
             )
-            return False, str(exc)
+            return False, idp_failure_message(exc, service="Google Admin SDK")
 
     # ------------------------------------------------------------------
     # Cloud Identity, as the user
@@ -226,8 +210,9 @@ class GoogleAdapter(OIDCGroupAdapter):
                     return None
                 logger.info(
                     "Google Cloud Identity: transitive group search refused, reading direct groups",
+                    operation="searchTransitiveGroups",
                     provider=self._provider.issuer,
-                    reason=_google_error_reason(exc.response),
+                    **describe_idp_error(exc),
                 )
             except (httpx.HTTPError, ValueError) as exc:
                 self._log_failure(exc=exc, method="searchTransitiveGroups")
@@ -270,32 +255,30 @@ class GoogleAdapter(OIDCGroupAdapter):
         return groups
 
     def _log_refusal(self, *, exc: httpx.HTTPStatusError, method: str) -> None:
-        """Log a refused Cloud Identity call with Google's reason."""
-        status = exc.response.status_code
-        if status == 403:
+        """Log a refused Cloud Identity call with Google's error code."""
+        if exc.response.status_code == 403:
             message = (
                 "Google Cloud Identity refused the user-token group lookup (403): the "
                 "Cloud Identity API is disabled in the OAuth client's project, the login "
                 "did not grant cloud-identity.groups.readonly, or the organisation "
-                "blocks it -- the reason says which"
+                "blocks it -- the code says which"
             )
         else:
             message = "Google Cloud Identity refused the user-token group lookup"
         logger.warning(
             message,
-            method=method,
+            operation=method,
             provider=self._provider.issuer,
-            reason=_google_error_reason(exc.response),
-            status=status,
+            **describe_idp_error(exc),
         )
 
     def _log_failure(self, *, exc: httpx.HTTPError | ValueError, method: str) -> None:
         """Log a Cloud Identity call that got no usable answer: no response, or a body that is not JSON."""
         logger.warning(
             "Google Cloud Identity group lookup failed",
-            error=str(exc),
-            method=method,
+            operation=method,
             provider=self._provider.issuer,
+            **describe_idp_error(exc),
         )
 
     # ------------------------------------------------------------------
@@ -313,8 +296,9 @@ class GoogleAdapter(OIDCGroupAdapter):
         except Exception as exc:
             logger.warning(
                 "Google Admin SDK resolve_user_groups failed -- default deny",
+                operation="resolve_user_groups",
                 provider=self._provider.issuer,
-                error=str(exc),
+                **describe_idp_error(exc),
             )
             return []
 

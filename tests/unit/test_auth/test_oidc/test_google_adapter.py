@@ -302,7 +302,7 @@ class TestCloudIdentityUserToken:
         assert [group.id for group in groups] == [VIEWERS_ID]
         assert cloud_identity.methods == [TRANSITIVE, DIRECT]
 
-    async def test_a_refused_direct_search_denies_and_logs_googles_reason(self, cloud_identity):
+    async def test_a_refused_direct_search_denies_and_logs_googles_code(self, cloud_identity):
         cloud_identity.refuse[TRANSITIVE] = (403, SCOPE_REFUSED)
         cloud_identity.refuse[DIRECT] = (403, SCOPE_REFUSED)
         warnings: list[dict[str, object]] = []
@@ -313,9 +313,8 @@ class TestCloudIdentityUserToken:
             logger.remove(handler)
 
         assert groups == []
-        assert [(w.get("status"), w.get("method")) for w in warnings] == [(403, DIRECT)]
-        assert "ACCESS_TOKEN_SCOPE_INSUFFICIENT" in str(warnings[0]["reason"])
-        assert "PERMISSION_DENIED" in str(warnings[0]["reason"])
+        assert [(w.get("status"), w.get("operation")) for w in warnings] == [(403, DIRECT)]
+        assert warnings[0]["code"] == "PERMISSION_DENIED;ACCESS_TOKEN_SCOPE_INSUFFICIENT"
 
     async def test_a_rejected_token_does_not_try_the_direct_search(self, cloud_identity):
         cloud_identity.refuse[TRANSITIVE] = (401, {"error": {"status": "UNAUTHENTICATED"}})

@@ -613,7 +613,10 @@ class TestSyncHandlesAdapterError:
             "test-sso", provider_registry, group_store, adapter=error_adapter
         )
 
-        assert result["error"] == "connection refused"
+        assert (
+            result["error"]
+            == "The directory API could not be reached; the engine log has the reason"
+        )
         assert result["skipped"] is None
         assert result["created"] == 0
         assert result["total"] == 0
@@ -628,7 +631,9 @@ class TestSyncHandlesAdapterError:
         updated_provider = provider_registry.get("test-sso")
         assert updated_provider is not None
         assert updated_provider.last_sync_status == "error"
-        assert updated_provider.sync_error == "connection refused"
+        assert updated_provider.sync_error == (
+            "The directory API could not be reached; the engine log has the reason"
+        )
         assert updated_provider.last_sync_at != ""
 
     async def test_adapter_error_does_not_create_groups(self, registries, api_provider):
