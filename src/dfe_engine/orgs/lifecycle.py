@@ -147,7 +147,7 @@ class OrgLifecycleManager:
         try:
             team = await self._hdx.get_team()
         except Exception as exc:
-            audit_org_hyperdx_failed(org_name=org.name, error=str(exc))
+            audit_org_hyperdx_failed(org_name=org.name, exc=exc)
             return org
 
         team_id = str(team.get("_id", "")) if team else ""
@@ -155,5 +155,5 @@ class OrgLifecycleManager:
             audit_org_hyperdx_provisioned(org_name=org.name, team_id=team_id)
             return self._registry.update(org.name, hyperdx_team_id=team_id)
 
-        audit_org_hyperdx_failed(org_name=org.name, error="get_team returned no team")
+        audit_org_hyperdx_failed(org_name=org.name)
         return org

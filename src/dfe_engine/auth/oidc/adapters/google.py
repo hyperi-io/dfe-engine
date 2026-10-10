@@ -34,7 +34,11 @@ from scalo.logger import logger
 
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.credential_env import resolve_credential
-from dfe_engine.auth.oidc.idp_errors import describe_idp_error, idp_failure_message
+from dfe_engine.auth.oidc.idp_errors import (
+    DirectoryNotConfiguredError,
+    describe_idp_error,
+    idp_failure_message,
+)
 from dfe_engine.auth.oidc.models import GroupInfo, OIDCProvider
 
 if TYPE_CHECKING:
@@ -81,7 +85,8 @@ class GoogleAdapter(OIDCGroupAdapter):
 
     Every method but ``list_all_groups`` fails closed: missing credentials or a
     refused call yield no groups, never an exception. ``list_all_groups`` is not on
-    the login path and raises when the Directory API refuses it.
+    the login path and raises when no service account is configured and when the
+    Directory API refuses it.
     """
 
     CLOUD_IDENTITY_BASE = "https://cloudidentity.googleapis.com/v1"
@@ -129,16 +134,19 @@ class GoogleAdapter(OIDCGroupAdapter):
         instead.
 
         Returns:
-            List of GroupInfo, or an empty list when no service account is
-            configured.
+            List of GroupInfo, or an empty list when the service account is
+            configured but does not build a client.
 
         Raises:
+            DirectoryNotConfiguredError: No service account is configured.
             Exception: Whatever the Directory API client raised. A failed listing
                 is never returned as an empty one: group sync would record it as a
                 directory with no groups.
         """
         service = self._get_service()
         if service is None:
+            if not self._service_account_json():
+                raise DirectoryNotConfiguredError
             return []
 
         raw = await asyncio.to_thread(self._fetch_all_groups_sync, service)

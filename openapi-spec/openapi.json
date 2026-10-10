@@ -41117,6 +41117,18 @@
               }
             ],
             "title": "Error"
+          },
+          "skipped": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skipped",
+            "description": "Why the sync did nothing, when it did not run: the provider is disabled, is not in api mode, or has no directory credential configured. The provider's last_sync_status reads not_configured in that last case."
           }
         },
         "type": "object",

@@ -60,6 +60,29 @@ class TestCreateGroup:
         assert resp.status_code == 409
         assert resp.json()["code"] == "conflict"
 
+    @pytest.mark.parametrize("name", ["../evil", "with space", "a" * 129, "trailing\n", ""])
+    def test_a_name_no_group_can_have_is_a_422(self, app, client, admin_headers, name):
+        before = sorted(g.name for g in app.state.group_store.list())
+
+        resp = client.post(
+            "/api/v1/auth/groups",
+            json={"name": name, "roles": ["data_viewer"], "members": ["admin"]},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["code"] == "validation_error"
+        assert sorted(g.name for g in app.state.group_store.list()) == before
+
+    def test_a_taken_name_is_still_a_409(self, client, admin_headers):
+        """GroupExistsError is a ValueError, so the 422 mapping must not swallow it."""
+        body = {"name": "taken-name", "roles": ["data_viewer"]}
+        client.post("/api/v1/auth/groups", json=body, headers=admin_headers)
+
+        resp = client.post("/api/v1/auth/groups", json=body, headers=admin_headers)
+
+        assert resp.status_code == 409, resp.text
+
     def test_create_requires_admin(self, client, viewer_headers):
         resp = client.post(
             "/api/v1/auth/groups",

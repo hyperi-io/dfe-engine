@@ -266,6 +266,12 @@ async def create_group(
             status_code=409,
             detail={"code": "conflict", "message": f"Group '{body.name}' already exists"},
         ) from exc
+    except ValueError as exc:
+        # The scope was checked above, so this is a name no group can have.
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
     request_ch_rbac_reconcile(request.app.state)
     sync_account_groups_for_membership_change(
         account_store,

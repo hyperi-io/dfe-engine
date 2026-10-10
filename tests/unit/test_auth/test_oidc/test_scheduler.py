@@ -11,7 +11,7 @@
 import asyncio
 import json
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -179,6 +179,30 @@ class TestOidcSyncScheduler:
             outcomes = await scheduler.run_once(now=NOW)
 
             assert (outcomes, group_store.get(name="operators")) == ({}, None)
+
+        async def test_a_provider_with_no_credential_waits_out_its_interval(
+            self, group_store: GroupStore, registry: OIDCProviderRegistry
+        ):
+            unconfigured = make_oidc_provider(
+                type="okta", groups={"mode": "api", "okta_domain": "example.okta.com"}
+            )
+            registry.create(name="no-token", provider=unconfigured)
+            scheduler = make_oidc_sync_scheduler(group_store=group_store, registry=registry)
+            # The sync stamps last_sync_at from the real clock, so the ticks count from it.
+            start = datetime.now(UTC)
+
+            first = await scheduler.run_once(now=start)
+            next_tick = await scheduler.run_once(now=start + timedelta(minutes=1))
+            next_interval = await scheduler.run_once(now=start + timedelta(hours=2))
+
+            stored = registry.get("no-token")
+            assert stored is not None
+            assert (first, next_tick, next_interval) == (
+                {"no-token": "not_configured"},
+                {},
+                {"no-token": "not_configured"},
+            )
+            assert stored.last_sync_status == "not_configured"
 
         async def test_holds_a_failed_provider_back_for_its_interval(
             self, broken_directory: None, group_store: GroupStore, registry: OIDCProviderRegistry

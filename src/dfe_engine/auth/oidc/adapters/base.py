@@ -42,10 +42,12 @@ class OIDCGroupAdapter(ABC):
 
         Returns:
             List of GroupInfo records.  Returns an empty list when the
-            provider does not support group enumeration via API, or has no
-            credential to enumerate with.
+            provider does not support group enumeration via API.
 
         Raises:
+            DirectoryNotConfiguredError: The provider has no credential to
+                enumerate with.  Group sync reports that as its own state, never
+                as a directory with no groups.
             Exception: Whatever the provider's API produced when a listing failed,
                 on any page. An empty or short list never means a failed one,
                 because group sync records what it is given as the whole directory.

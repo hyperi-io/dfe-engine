@@ -21,7 +21,13 @@ from dfe_engine.auth.oidc.adapters.mock import MockDirectoryAdapter
 from dfe_engine.auth.oidc.adapters.okta import _group_info_from_okta
 from dfe_engine.auth.oidc.models import GroupInfo, GroupResolutionConfig, OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
-from dfe_engine.auth.oidc.sync import SYNC_GROUPS_SKIPPED, SyncMetrics, _safe_name, sync_provider
+from dfe_engine.auth.oidc.sync import (
+    NOT_CONFIGURED_MESSAGE,
+    SYNC_GROUPS_SKIPPED,
+    SyncMetrics,
+    _safe_name,
+    sync_provider,
+)
 
 # ---------------------------------------------------------------------------
 # Fake adapter — dependency injection, not mocking
@@ -644,6 +650,53 @@ class TestSyncHandlesAdapterError:
         await sync_provider("test-sso", provider_registry, group_store, adapter=error_adapter)
 
         assert group_store.list() == []
+
+
+class TestSyncWithNoDirectoryCredential:
+    """An api-mode provider with nothing to list with is not 'ok, 0 groups'."""
+
+    @pytest.mark.parametrize("provider_type", ["entra_id", "okta", "google"])
+    async def test_reports_not_configured_in_the_result_and_on_the_provider(
+        self, registries, provider_type
+    ):
+        provider_registry, group_store = registries
+        provider = OIDCProvider(
+            type=provider_type,
+            enabled=True,
+            issuer="https://sso.example.com",
+            groups=GroupResolutionConfig(mode="api"),
+        )
+        provider_registry.create("no-credential", provider)
+
+        result = await sync_provider("no-credential", provider_registry, group_store)
+
+        assert result["skipped"] == NOT_CONFIGURED_MESSAGE
+        assert result["error"] is None
+        assert (result["created"], result["updated"], result["total"]) == (0, 0, 0)
+        stored = provider_registry.get("no-credential")
+        assert stored is not None
+        assert stored.last_sync_status == "not_configured"
+        assert stored.sync_error == NOT_CONFIGURED_MESSAGE
+        assert stored.last_sync_at != ""
+        assert group_store.list() == []
+
+    async def test_a_later_sync_with_a_credential_clears_the_state(self, registries, api_provider):
+        provider_registry, group_store = registries
+        unconfigured = OIDCProvider(
+            type="okta",
+            enabled=True,
+            issuer="https://sso.example.com",
+            groups=GroupResolutionConfig(mode="api"),
+        )
+        provider_registry.create("test-sso", unconfigured)
+        await sync_provider("test-sso", provider_registry, group_store)
+
+        adapter = FakeAdapter(api_provider, [GroupInfo(id="g1", name="admins")])
+        await sync_provider("test-sso", provider_registry, group_store, adapter=adapter)
+
+        stored = provider_registry.get("test-sso")
+        assert stored is not None
+        assert (stored.last_sync_status, stored.sync_error) == ("ok", "")
 
 
 class TestSyncUnknownProvider:

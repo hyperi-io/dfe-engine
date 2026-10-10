@@ -466,6 +466,20 @@ class TestScimGroups:
         # membership mirrored onto the account
         assert "scim-team" in app.state.account_store.get("gm-1").groups
 
+    @pytest.mark.parametrize("name", ["../evil", "with space", "a" * 129, "trailing\n"])
+    def test_a_displayname_no_group_can_have_is_a_400(self, app, client, admin_headers, name):
+        before = sorted(g.name for g in app.state.group_store.list())
+
+        resp = client.post(
+            f"{BASE}/Groups",
+            json={"schemas": [GROUP_SCHEMA], "displayName": name},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["scimType"] == "invalidValue"
+        assert sorted(g.name for g in app.state.group_store.list()) == before
+
     def test_create_duplicate_group_returns_409(self, client, admin_headers):
         payload = {"schemas": [GROUP_SCHEMA], "displayName": "dup-group"}
         client.post(f"{BASE}/Groups", json=payload, headers=admin_headers)
