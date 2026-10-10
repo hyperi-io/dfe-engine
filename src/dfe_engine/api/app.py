@@ -118,7 +118,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         deployed_candidates = []
     # The admin's default TTL override, so the boot renders what the console set.
     ttl_settings = effective_settings(settings, gitcrud)
-    schema_state = bootstrap_clickhouse(settings=ttl_settings, sources=deployed_candidates)
+    schema_state = bootstrap_clickhouse(
+        settings=ttl_settings, sources=deployed_candidates, metrics=app.state.schema_metrics
+    )
     tables_bootstrapped = schema_state.converged
 
     # After the bootstrap, which is what makes the landing table exist: the seed records the source as deployed, and that must not be claimed before it is true.
@@ -595,7 +597,8 @@ def create_app(
         docs_url="/docs" if docs and not e2e_docs else None,
         redoc_url="/redoc" if docs else None,
         openapi_tags=openapi_tags,
-        telemetry=FASTAPI_TELEMETRY,
+        # The request histogram is scalo's middleware below; FastAPI's own would count each twice.
+        telemetry={**FASTAPI_TELEMETRY, "metrics": False},
     )
 
     app.state.settings = settings
@@ -608,10 +611,12 @@ def create_app(
     from dfe_engine.api.e2e.seed.metrics import SeedMetrics
     from dfe_engine.api.metrics import ApiMetrics
     from dfe_engine.auth.oidc.sync import SyncMetrics
+    from dfe_engine.schema.metrics import SchemaMetrics
     from dfe_engine.yaml_health import YamlWriteMetrics, write_health
 
     app.state.metrics_manager = metrics_manager
     app.state.api_metrics = ApiMetrics(metrics_manager)
+    app.state.schema_metrics = SchemaMetrics(metrics_manager)
 
     from dfe_engine.auth.login_throttle import LoginThrottle
 
