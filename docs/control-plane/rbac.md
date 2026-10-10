@@ -640,6 +640,8 @@ Linking an IdP group to the stored group that holds its name is an admin's act. 
 
 One bad group never aborts the sync. A provider group whose email, name or id makes no valid group name, whose name is held by a stored group that does not load, or whose name is held by a stored group not linked to it, is skipped and counted on `auth_oidc_sync_groups_skipped_total{reason}` (`invalid_name`, `stored_unloadable`, `name_taken`), and the provider's `last_sync_status` reads `partial` with each reason.
 
+A listing that fails on any page, the first or the last, stops the sync before it writes a group. `last_sync_status` reads `error`, `sync_error` carries the provider's HTTP status, and the engine log carries its error code. The next run lists again from the start.
+
 ---
 
 ## 5. ClickHouse Tenant Isolation

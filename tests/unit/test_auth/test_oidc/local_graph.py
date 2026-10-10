@@ -1,12 +1,12 @@
 #  Project:      dfe-engine
 #  File:         tests/unit/test_auth/test_oidc/local_graph.py
-#  Purpose:      Local HTTP server answering Microsoft Graph transitiveMemberOf listings
+#  Purpose:      Local HTTP server answering Microsoft Graph group listings
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Local HTTP server answering Microsoft Graph transitiveMemberOf listings."""
+"""Local HTTP server answering Microsoft Graph group listings."""
 
 import json
 import threading
@@ -17,6 +17,8 @@ from urllib.parse import urlsplit
 from tests.support.loopback import stop_server
 
 _LISTING = "/transitiveMemberOf/microsoft.graph.group"
+# The tenant-wide listing is keyed in ``pages`` and ``fail_page`` as this principal.
+TENANT = "groups"
 
 
 def _handler_for(*, graph: LocalGraph) -> type[BaseHTTPRequestHandler]:
@@ -33,10 +35,13 @@ def _handler_for(*, graph: LocalGraph) -> type[BaseHTTPRequestHandler]:
             self.wfile.write(encoded)
 
         def do_GET(self) -> None:
-            """Answer one page of a listing for ``/me`` or ``/users/{id}``."""
+            """Answer one page of a listing for ``/me``, ``/users/{id}`` or the tenant's ``/groups``."""
             split = urlsplit(self.path)
             principal, _, rest = split.path.removeprefix("/").partition(_LISTING)
-            if not split.path.endswith(_LISTING) or rest:
+            suffix = _LISTING
+            if split.path == f"/{TENANT}":
+                principal, suffix = TENANT, ""
+            elif not split.path.endswith(_LISTING) or rest:
                 self._reply(body={}, status=404)
                 return
             graph.requests.append(
@@ -67,7 +72,7 @@ def _handler_for(*, graph: LocalGraph) -> type[BaseHTTPRequestHandler]:
                 ]
             page: dict[str, Any] = {"value": value}
             if index + 1 < len(pages):
-                page["@odata.nextLink"] = f"{graph.base_url}/{principal}{_LISTING}?page={index + 1}"
+                page["@odata.nextLink"] = f"{graph.base_url}/{principal}{suffix}?page={index + 1}"
             self._reply(body=page, status=200)
 
         def log_message(self, format: str, *args: object) -> None:
@@ -79,8 +84,8 @@ def _handler_for(*, graph: LocalGraph) -> type[BaseHTTPRequestHandler]:
 class LocalGraph:
     """A Microsoft Graph stand-in on 127.0.0.1 whose listings each test sets.
 
-    ``pages`` maps a principal path (``me`` or ``users/<oid>``) to its result
-    pages, and every page but the last hands out an ``@odata.nextLink``.
+    ``pages`` maps a principal path (``me``, ``users/<oid>`` or :data:`TENANT`) to its
+    result pages, and every page but the last hands out an ``@odata.nextLink``.
     ``refuse`` maps a principal to the status and Graph error body it answers
     instead. ``limited`` names principals answered the way Graph answers a token
     that may not read the groups: each object with only its id, the rest null.

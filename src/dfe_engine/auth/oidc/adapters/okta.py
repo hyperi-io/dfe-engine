@@ -64,7 +64,16 @@ class OktaAdapter(OIDCGroupAdapter):
             return []
 
     async def list_all_groups(self) -> list[GroupInfo]:
-        """List all Okta groups (paginated)."""
+        """List all Okta groups (paginated).
+
+        Returns:
+            Every group, or an empty list when the domain or API token is not configured.
+
+        Raises:
+            Exception: Whatever the client raised on a page Okta did not serve.
+                A listing cut short is never returned: group sync would record
+                the groups read so far as the whole directory.
+        """
         base, headers = self._api_base_and_headers()
         if base is None or headers is None:
             return []
@@ -76,17 +85,8 @@ class OktaAdapter(OIDCGroupAdapter):
 
         async with AsyncHttpClient() as client:
             while url:
-                try:
-                    response = await client.get(url, headers=headers)
-                    data = response.json()
-                except Exception as exc:
-                    logger.warning(
-                        "Okta list_all_groups: API call failed",
-                        operation="list_all_groups",
-                        provider=self._provider.issuer,
-                        **describe_idp_error(exc),
-                    )
-                    break
+                response = await client.get(url, headers=headers)
+                data = response.json()
 
                 if isinstance(data, list):
                     for item in data:

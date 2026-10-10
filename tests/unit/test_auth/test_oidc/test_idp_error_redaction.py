@@ -16,14 +16,15 @@ while the status and the provider's code are present.
 """
 
 import json
-from collections.abc import Iterator
+import socket
+import ssl
 from typing import Any
 
 import httpx
 import pytest
+from authlib.integrations.base_client import OAuthError
 from google.auth.credentials import AnonymousCredentials
 from googleapiclient.discovery import build
-from scalo.logger import logger
 
 from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
@@ -38,27 +39,13 @@ from dfe_engine.auth.oidc.sync import sync_provider
 from tests.support.refusing_api import refusing_api
 from tests.unit.test_auth.factories import make_oauth_client
 from tests.unit.test_auth.test_oidc.local_cloud_identity import LocalCloudIdentity
-from tests.unit.test_auth.test_oidc.local_graph import LocalGraph
+from tests.unit.test_auth.test_oidc.local_graph import TENANT, LocalGraph
 from tests.unit.test_auth.test_oidc.local_idp import LocalIdp
+from tests.unit.test_auth.test_oidc.local_okta import LocalOkta
 
 SENTINEL = "idp.sentinel.7f3a@example.com"
 # The local part survives every encoding a URL or a repr gives the address, so it is what must not appear.
 SENTINEL_LOCAL_PART = "idp.sentinel.7f3a"
-
-
-@pytest.fixture
-def engine_log() -> Iterator[list[dict]]:
-    """Every line the engine's logger writes while the test runs: its message plus its fields."""
-    lines: list[dict] = []
-
-    def record(message) -> None:
-        lines.append({"event": message.record["message"], **message.record["extra"]})
-
-    handler = logger.add(record, level="DEBUG", format="{message}")
-    try:
-        yield lines
-    finally:
-        logger.remove(handler)
 
 
 def assert_no_sentinel(text: str) -> None:
@@ -75,6 +62,12 @@ def failure_line(lines: list[dict], operation: str) -> dict:
 def logged(lines: list[dict]) -> str:
     """Every captured line as one string, for a substring check."""
     return json.dumps(lines, default=str)
+
+
+def _caused_by(outer: BaseException, cause: BaseException) -> BaseException:
+    """``outer`` raised from ``cause``, the shape an HTTP client gives a socket error."""
+    outer.__cause__ = cause
+    return outer
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +125,38 @@ class TestProviderErrorCode:
             "error_type": "ConnectionError"
         }
 
+    @pytest.mark.parametrize(
+        ("exc", "expected"),
+        [
+            (_caused_by(httpx.ConnectError("x"), socket.gaierror(-2, "unknown name")), "dns"),
+            (_caused_by(httpx.ConnectError("x"), ssl.SSLCertVerificationError("bad")), "tls"),
+            (_caused_by(httpx.ConnectError("x"), ConnectionRefusedError()), "connection_refused"),
+            (_caused_by(httpx.ConnectError("x"), TimeoutError()), "timeout"),
+            (httpx.ConnectTimeout("x"), "timeout"),
+            (httpx.PoolTimeout("x"), "timeout"),
+        ],
+        ids=["dns", "tls", "refused", "socket-timeout", "connect-timeout", "pool-timeout"],
+    )
+    def test_a_failure_with_no_answer_says_why_by_the_socket_error_class(
+        self, exc: BaseException, expected: str
+    ) -> None:
+        assert describe_idp_error(exc) == {
+            "error_type": type(exc).__name__,
+            "transport_failure": expected,
+        }
+
+    def test_a_cause_named_only_in_the_message_is_not_read(self) -> None:
+        """The class decides: a message that mentions DNS, TLS or a timeout says nothing."""
+        message = f"dns lookup of {SENTINEL} failed: tls handshake timed out, connection refused"
+
+        assert describe_idp_error(ConnectionError(message)) == {"error_type": "ConnectionError"}
+
+    def test_an_oauth_error_yields_its_code_and_not_its_description(self) -> None:
+        """Authlib builds the error from the callback's query string, so the description is the caller's."""
+        error = OAuthError(error="access_denied", description=f"{SENTINEL} may not sign in")
+
+        assert describe_idp_error(error) == {"code": "access_denied", "error_type": "OAuthError"}
+
 
 # ---------------------------------------------------------------------------
 # Entra: Graph /users/<id> answers 404
@@ -167,7 +192,7 @@ def _entra_adapter(base_url: str) -> EntraAdapter:
 
 class TestEntra:
     async def test_a_refused_user_lookup_logs_the_status_and_code_not_the_user(
-        self, engine_log: list[dict]
+        self, audit_events: list[dict]
     ) -> None:
         graph = LocalGraph()
         graph.refuse[f"users/{SENTINEL}"] = (404, GRAPH_NOT_FOUND)
@@ -179,8 +204,8 @@ class TestEntra:
 
         assert groups == []
         assert graph.principals == [f"users/{SENTINEL}"]
-        assert_no_sentinel(logged(engine_log))
-        line = failure_line(engine_log, "resolve_user_groups")
+        assert_no_sentinel(logged(audit_events))
+        line = failure_line(audit_events, "resolve_user_groups")
         assert (line["status"], line["code"], line["error_type"]) == (
             404,
             "Request_ResourceNotFound",
@@ -188,7 +213,7 @@ class TestEntra:
         )
 
     async def test_a_refused_connection_test_answers_without_the_providers_text(
-        self, engine_log: list[dict]
+        self, audit_events: list[dict]
     ) -> None:
         refusal = {"error": {"code": "Authorization_RequestDenied", "message": SENTINEL}}
         with refusing_api(403, refusal) as server:
@@ -196,10 +221,10 @@ class TestEntra:
 
         assert ok is False
         assert server.base_url not in message
-        assert server.base_url not in logged(engine_log)
+        assert server.base_url not in logged(audit_events)
         assert_no_sentinel(message)
         assert "HTTP 403" in message
-        line = failure_line(engine_log, "test_connection")
+        line = failure_line(audit_events, "test_connection")
         assert (line["status"], line["code"]) == (403, "Authorization_RequestDenied")
 
 
@@ -239,15 +264,15 @@ def _okta_adapter(base_url: str) -> OktaAdapter:
 
 class TestOkta:
     async def test_a_refused_user_lookup_logs_the_status_and_code_not_the_user(
-        self, engine_log: list[dict]
+        self, audit_events: list[dict]
     ) -> None:
         with refusing_api(404, OKTA_NOT_FOUND) as server:
             groups = await _okta_adapter(server.base_url).resolve_user_groups(SENTINEL)
 
         assert groups == []
         assert server.paths == [f"/users/{SENTINEL}/groups?limit=200"]
-        assert_no_sentinel(logged(engine_log))
-        line = failure_line(engine_log, "resolve_user_groups")
+        assert_no_sentinel(logged(audit_events))
+        line = failure_line(audit_events, "resolve_user_groups")
         assert (line["status"], line["code"], line["error_type"]) == (
             404,
             "E0000007",
@@ -255,7 +280,7 @@ class TestOkta:
         )
 
     async def test_a_refused_connection_test_answers_without_the_providers_text(
-        self, engine_log: list[dict]
+        self, audit_events: list[dict]
     ) -> None:
         with refusing_api(403, {"errorCode": "E0000006", "errorSummary": SENTINEL}) as server:
             ok, message = await _okta_adapter(server.base_url).test_connection()
@@ -264,7 +289,7 @@ class TestOkta:
         assert server.base_url not in message
         assert_no_sentinel(message)
         assert "HTTP 403" in message
-        line = failure_line(engine_log, "test_connection")
+        line = failure_line(audit_events, "test_connection")
         assert (line["status"], line["code"]) == (403, "E0000006")
 
 
@@ -310,7 +335,7 @@ def _directory_adapter(base_url: str) -> GoogleAdapter:
 
 class TestGoogleDirectory:
     async def test_a_refused_user_lookup_logs_the_status_and_code_not_the_user(
-        self, engine_log: list[dict]
+        self, audit_events: list[dict]
     ) -> None:
         with refusing_api(404, DIRECTORY_NOT_FOUND) as server:
             groups = await _directory_adapter(server.base_url).resolve_user_groups(SENTINEL)
@@ -318,12 +343,12 @@ class TestGoogleDirectory:
         assert groups == []
         # googleapiclient percent-encodes the address, a form the log scrubber does not recognise.
         assert "userKey=idp.sentinel.7f3a%40example.com" in server.paths[0]
-        assert_no_sentinel(logged(engine_log))
-        line = failure_line(engine_log, "resolve_user_groups")
+        assert_no_sentinel(logged(audit_events))
+        line = failure_line(audit_events, "resolve_user_groups")
         assert (line["status"], line["code"], line["error_type"]) == (404, "notFound", "HttpError")
 
     async def test_a_refused_connection_test_answers_without_the_providers_text(
-        self, engine_log: list[dict], monkeypatch: pytest.MonkeyPatch
+        self, audit_events: list[dict], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("DFE_TEST_IDP_SA_JSON", '{"type": "service_account"}')
         refusal = {
@@ -340,13 +365,13 @@ class TestGoogleDirectory:
         assert server.base_url not in message
         assert_no_sentinel(message)
         assert "HTTP 403" in message
-        line = failure_line(engine_log, "test_connection")
+        line = failure_line(audit_events, "test_connection")
         assert (line["status"], line["code"]) == (403, "forbidden")
 
 
 class TestGoogleCloudIdentity:
     async def test_a_refused_search_logs_googles_code_not_its_message(
-        self, engine_log: list[dict]
+        self, audit_events: list[dict]
     ) -> None:
         refusal = {
             "error": {
@@ -371,8 +396,8 @@ class TestGoogleCloudIdentity:
             server.stop()
 
         assert groups == []
-        assert_no_sentinel(logged(engine_log))
-        line = failure_line(engine_log, "searchDirectGroups")
+        assert_no_sentinel(logged(audit_events))
+        line = failure_line(audit_events, "searchDirectGroups")
         assert (line["status"], line["code"]) == (
             403,
             "PERMISSION_DENIED;ACCESS_TOKEN_SCOPE_INSUFFICIENT",
@@ -403,7 +428,7 @@ class _RaisingDirectory(OIDCGroupAdapter):
 
 class TestSync:
     async def test_a_failed_listing_records_no_provider_text(
-        self, tmp_path, engine_log: list[dict]
+        self, tmp_path, audit_events: list[dict]
     ) -> None:
         provider = OIDCProvider(
             type="generic",
@@ -421,11 +446,111 @@ class TestSync:
         stored = registry.get("sso")
         assert stored is not None
         assert_no_sentinel(result["error"])
-        assert_no_sentinel(logged(engine_log))
+        assert_no_sentinel(logged(audit_events))
         assert stored.sync_error == result["error"]
         assert "HTTP 403" in result["error"]
-        line = failure_line(engine_log, "list_all_groups")
+        line = failure_line(audit_events, "list_all_groups")
         assert (line["status"], line["code"]) == (403, "E0000006")
+
+
+# ---------------------------------------------------------------------------
+# Group sync: a listing that fails is a failed sync, whichever page it fails on
+# ---------------------------------------------------------------------------
+
+
+def _sync_registry(tmp_path) -> OIDCProviderRegistry:
+    """A registry holding the api-mode provider ``sso``, which the tests sync with an injected adapter."""
+    registry = OIDCProviderRegistry(tmp_path / "oidc")
+    registry.create(
+        "sso",
+        OIDCProvider(
+            type="generic",
+            issuer="https://sso.example.com",
+            groups=GroupResolutionConfig(mode="api"),
+        ),
+    )
+    return registry
+
+
+def _assert_failed_sync(
+    *, registry: OIDCProviderRegistry, result: dict, group_store: GroupStore, status: int
+) -> None:
+    """The sync reported ``status`` as an error and stored no group from the failed listing."""
+    stored = registry.get("sso")
+    assert stored is not None
+    assert stored.last_sync_status == "error"
+    assert stored.sync_error == result["error"]
+    assert f"HTTP {status}" in result["error"]
+    assert (result["created"], result["updated"], result["total"]) == (0, 0, 0)
+    assert group_store.list() == []
+
+
+class TestSyncIncompleteListing:
+    async def test_a_graph_listing_that_fails_on_page_two_is_a_failed_sync(
+        self, tmp_path, audit_events: list[dict]
+    ) -> None:
+        graph = LocalGraph()
+        graph.pages[TENANT] = [
+            [{"id": "g1", "displayName": "Engineers", "mail": "eng@example.com"}],
+            [{"id": "g2", "displayName": "Analysts", "mail": "analysts@example.com"}],
+        ]
+        graph.fail_page[TENANT] = 1
+        graph.start()
+        registry = _sync_registry(tmp_path)
+        group_store = GroupStore(tmp_path / "groups")
+        try:
+            result = await sync_provider(
+                "sso", registry, group_store, adapter=_entra_adapter(graph.base_url)
+            )
+        finally:
+            graph.stop()
+
+        assert graph.principals == [TENANT, TENANT]
+        _assert_failed_sync(registry=registry, result=result, group_store=group_store, status=400)
+        line = failure_line(audit_events, "list_all_groups")
+        assert (line["status"], line["code"]) == (400, "BadRequest")
+
+    async def test_an_okta_listing_that_fails_on_page_two_is_a_failed_sync(
+        self, tmp_path, audit_events: list[dict]
+    ) -> None:
+        okta = LocalOkta(
+            pages=[
+                [{"id": "00g1", "profile": {"name": "Engineers", "email": "eng@example.com"}}],
+                [{"id": "00g2", "profile": {"name": "Analysts", "email": "analysts@example.com"}}],
+            ]
+        )
+        okta.fail_page = 1
+        okta.fail_status = 403
+        okta.fail_body = {"errorCode": "E0000006", "errorSummary": "You do not have permission"}
+        okta.start()
+        registry = _sync_registry(tmp_path)
+        group_store = GroupStore(tmp_path / "groups")
+        try:
+            result = await sync_provider(
+                "sso", registry, group_store, adapter=_okta_adapter(okta.base_url)
+            )
+        finally:
+            okta.stop()
+
+        assert okta.pages_requested == [0, 1]
+        _assert_failed_sync(registry=registry, result=result, group_store=group_store, status=403)
+        line = failure_line(audit_events, "list_all_groups")
+        assert (line["status"], line["code"]) == (403, "E0000006")
+
+    async def test_a_refused_directory_listing_is_a_failed_sync_not_an_empty_directory(
+        self, tmp_path, audit_events: list[dict]
+    ) -> None:
+        refusal = {"error": {"code": 403, "errors": [{"reason": "forbidden"}], "message": "no"}}
+        registry = _sync_registry(tmp_path)
+        group_store = GroupStore(tmp_path / "groups")
+        with refusing_api(403, refusal) as server:
+            result = await sync_provider(
+                "sso", registry, group_store, adapter=_directory_adapter(server.base_url)
+            )
+
+        _assert_failed_sync(registry=registry, result=result, group_store=group_store, status=403)
+        line = failure_line(audit_events, "list_all_groups")
+        assert (line["status"], line["code"]) == (403, "forbidden")
 
 
 # ---------------------------------------------------------------------------
@@ -435,7 +560,7 @@ class TestSync:
 
 class TestUserinfo:
     async def test_a_refused_userinfo_call_logs_its_status_not_the_url(
-        self, local_idp: LocalIdp, engine_log: list[dict]
+        self, local_idp: LocalIdp, audit_events: list[dict]
     ) -> None:
         local_idp.userinfo_status = 401
         local_idp.userinfo_body = json.dumps(
@@ -451,7 +576,7 @@ class TestUserinfo:
         )
 
         assert filled == claims
-        assert f"{local_idp.base_url}/userinfo" not in logged(engine_log)
-        assert_no_sentinel(logged(engine_log))
-        line = failure_line(engine_log, "userinfo")
+        assert f"{local_idp.base_url}/userinfo" not in logged(audit_events)
+        assert_no_sentinel(logged(audit_events))
+        line = failure_line(audit_events, "userinfo")
         assert (line["status"], line["code"]) == (401, "invalid_token")
