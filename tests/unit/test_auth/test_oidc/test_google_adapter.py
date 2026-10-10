@@ -156,36 +156,6 @@ class TestGetServiceMissingCredentials:
 
 
 # ---------------------------------------------------------------------------
-# resolve_groups — missing credentials (unfriendly fallback)
-# ---------------------------------------------------------------------------
-
-
-class TestResolveGroupsMissingCredentials:
-    async def test_returns_identity_map_when_no_credentials(self) -> None:
-        # Service account env var not configured — should return {id: id} fallback
-        provider = _make_provider(service_account_json_env="")
-        adapter = GoogleAdapter(provider)
-        result = await adapter.resolve_groups(["group-a@example.com", "group-b@example.com"])
-        assert result == {
-            "group-a@example.com": "group-a@example.com",
-            "group-b@example.com": "group-b@example.com",
-        }
-
-    async def test_returns_empty_dict_for_empty_input(self) -> None:
-        provider = _make_provider(service_account_json_env="")
-        adapter = GoogleAdapter(provider)
-        result = await adapter.resolve_groups([])
-        assert result == {}
-
-    async def test_returns_identity_map_when_env_var_missing(self) -> None:
-        os.environ.pop("DFE_MISSING_SA_JSON_ABC", None)
-        provider = _make_provider(service_account_json_env="DFE_MISSING_SA_JSON_ABC")
-        adapter = GoogleAdapter(provider)
-        result = await adapter.resolve_groups(["id1", "id2"])
-        assert result == {"id1": "id1", "id2": "id2"}
-
-
-# ---------------------------------------------------------------------------
 # resolve_user_groups (login enrichment) — missing credentials
 # ---------------------------------------------------------------------------
 

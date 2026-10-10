@@ -339,9 +339,6 @@ class _Directory(OIDCGroupAdapter):
         super().__init__(provider)
         self._groups = groups
 
-    async def resolve_groups(self, subject: str) -> list[GroupInfo]:
-        return []
-
     async def list_all_groups(self) -> list[GroupInfo]:
         return self._groups
 

@@ -98,7 +98,7 @@ class GoogleAdapter(OIDCGroupAdapter):
     """Google Workspace groups: Cloud Identity as the user, else the Directory API as a service account.
 
     Every method fails closed: missing credentials or a refused call yield no
-    groups (or the identity fallback for ``resolve_groups``), never an exception.
+    groups, never an exception.
     """
 
     CLOUD_IDENTITY_BASE = "https://cloudidentity.googleapis.com/v1"
@@ -117,42 +117,6 @@ class GoogleAdapter(OIDCGroupAdapter):
     # ------------------------------------------------------------------
     # Public async interface
     # ------------------------------------------------------------------
-
-    async def resolve_groups(self, group_ids: list[str]) -> dict[str, str]:
-        """Resolve Google group IDs or emails to display names through the service account.
-
-        Args:
-            group_ids: Group email addresses or unique IDs.
-
-        Returns:
-            Mapping of {group_id: display_name}. Falls back to {id: id} for any
-            group that could not be resolved, and for all groups when no service
-            account is configured or the API call fails.
-        """
-        if not group_ids:
-            return {}
-
-        service = self._get_service()
-        if service is None:
-            return {g: g for g in group_ids}
-
-        try:
-            all_groups = await asyncio.to_thread(self._fetch_all_groups_sync, service)
-        except Exception as exc:
-            logger.warning(
-                "Google Admin SDK group fetch failed -- using identity fallback",
-                provider=self._provider.issuer,
-                error=str(exc),
-            )
-            return {g: g for g in group_ids}
-
-        lookup: dict[str, str] = {}
-        for group in all_groups:
-            lookup[group["id"]] = group["name"]
-            if group.get("email"):
-                lookup[group["email"]] = group["name"]
-
-        return {g: lookup.get(g, g) for g in group_ids}
 
     async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo]:
         """Return the groups the user with email *directory_id* belongs to.

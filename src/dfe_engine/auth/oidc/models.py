@@ -42,6 +42,9 @@ _DEFAULT_SCOPES: dict[_ProviderType, str] = {
     "okta": "openid email profile groups",
 }
 
+# The scopes field's default before it followed the type, sorted; every provider saved then stores it.
+_LEGACY_DEFAULT_SCOPES = ("email", "groups", "openid", "profile")
+
 
 class GroupResolutionConfig(BaseModel):
     """Configuration for how group membership is resolved from a provider.
@@ -193,8 +196,15 @@ class OIDCProvider(BaseModel):
 
     @model_validator(mode="after")
     def _fill_default_scopes(self) -> Self:
-        """Give a provider with no scopes configured the ones its type needs."""
-        if not self.scopes.strip():
+        """Give a provider with no scopes configured the ones its type needs.
+
+        A google provider still holding the old field default never had its
+        scopes set by an operator, and Google refuses that set, so it counts as
+        unset too.
+        """
+        stored = self.scopes.split()
+        legacy_google = self.type == "google" and tuple(sorted(stored)) == _LEGACY_DEFAULT_SCOPES
+        if not stored or legacy_google:
             self.scopes = _DEFAULT_SCOPES[self.type]
         return self
 
@@ -208,8 +218,8 @@ class GroupInfo(BaseModel):
     """A group record fetched from a provider's API.
 
     Used as the return type of ``OIDCGroupAdapter.list_all_groups`` and
-    ``OIDCGroupAdapter.resolve_groups``.  The ``id`` is provider-specific
-    (e.g. Google group key, Entra ID object ID, Okta group ID).
+    ``OIDCGroupAdapter.resolve_user_groups``.  The ``id`` is provider-specific
+    (e.g. Google group id, Entra ID object ID, Okta group ID).
     """
 
     id: str

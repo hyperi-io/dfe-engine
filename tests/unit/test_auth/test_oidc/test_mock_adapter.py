@@ -68,10 +68,6 @@ async def test_mock_loads_groups_and_members(tmp_path, monkeypatch):
     resolved = await adapter.resolve_user_groups("user-oid")
     assert sorted(g.id for g in resolved) == ["g-admins", "g-viewers"]
 
-    # resolve_groups (the ABC contract) is the same subject->groups lookup.
-    via_abc = await adapter.resolve_groups("user-oid")
-    assert {g.id for g in via_abc} == {"g-admins", "g-viewers"}
-
     ok, msg = await adapter.test_connection()
     assert ok is True
     assert "2 group" in msg

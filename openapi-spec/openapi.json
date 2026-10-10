@@ -26209,7 +26209,7 @@
               }
             ],
             "title": "Scopes",
-            "description": "OAuth scopes requested at login, one scope per entry; must include openid. Omit for the provider type's default: openid email profile, plus groups for generic and okta, and https://www.googleapis.com/auth/cloud-identity.groups.readonly for google, which reads each user's groups with their own token. Google and Entra ID fail a login that asks for groups."
+            "description": "OAuth scopes requested at login, one scope per entry; must include openid. One space-separated string is accepted too, and a blank one is no override. Omit for the provider type's default: openid email profile, plus groups for generic and okta, and https://www.googleapis.com/auth/cloud-identity.groups.readonly for google, which reads each user's groups with their own token. Google and Entra ID fail a login that asks for groups."
           },
           "groups": {
             "$ref": "#/components/schemas/GroupResolutionRequest"
@@ -39909,7 +39909,7 @@
               }
             ],
             "title": "Scopes",
-            "description": "Replace the OAuth scopes requested at login, one scope per entry; must include openid."
+            "description": "Replace the OAuth scopes requested at login, one scope per entry; must include openid. One space-separated string is accepted too, and a blank one leaves the scopes as they are."
           },
           "groups": {
             "anyOf": [

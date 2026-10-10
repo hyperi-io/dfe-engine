@@ -20,7 +20,6 @@ Usage::
 
     adapter = EntraAdapter(provider, secrets=store)
     groups = await adapter.list_all_groups()
-    display_names = await adapter.resolve_groups(group_ids)
 """
 
 from dataclasses import dataclass
@@ -90,55 +89,6 @@ class EntraAdapter(OIDCGroupAdapter):
     # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
-
-    async def resolve_groups(self, group_ids: list[str]) -> dict[str, str]:
-        """Resolve Entra group GUIDs to display names via Graph API.
-
-        Fetches each group individually using ``GET /v1.0/groups/{id}``.
-        For groups that cannot be resolved the original GUID is used as the
-        display name (unfriendly fallback).
-
-        Args:
-            group_ids: List of Entra group object IDs (GUIDs).
-
-        Returns:
-            Mapping of group ID -> display name.  Falls back to
-            ``{id: id}`` when credentials are missing or the API fails.
-        """
-        if not group_ids:
-            return {}
-
-        token = self._get_token()
-        if token is None:
-            logger.warning(
-                "Entra resolve_groups: no token available -- returning unfriendly fallback",
-                provider=self._provider.issuer,
-                group_count=len(group_ids),
-            )
-            return {gid: gid for gid in group_ids}
-
-        from scalo.http import AsyncHttpClient
-
-        result: dict[str, str] = {}
-        headers = {"Authorization": f"Bearer {token}"}
-
-        async with AsyncHttpClient() as client:
-            for gid in group_ids:
-                url = f"{self.GRAPH_BASE}/groups/{gid}?$select=displayName,mail"
-                try:
-                    response = await client.get(url, headers=headers)
-                    data = response.json()
-                    display_name = data.get("displayName") or gid
-                    result[gid] = display_name
-                except Exception as exc:
-                    logger.warning(
-                        "Entra resolve_groups: failed to resolve group",
-                        group_id=gid,
-                        error=str(exc),
-                    )
-                    result[gid] = gid
-
-        return result
 
     async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo]:
         """Enumerate a user's group memberships via Graph transitiveMemberOf.

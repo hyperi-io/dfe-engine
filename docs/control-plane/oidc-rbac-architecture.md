@@ -144,7 +144,7 @@ ONLY place the remaining quirks live:
 `auth/oidc/adapters/`: `generic` (token_claim/manual, no API), `google` (Cloud
 Identity Groups API with the user's own login token; the Admin SDK Directory API
 as an optional service account), `entra` (Microsoft Graph), `okta` (Groups API). Contract:
-`resolve_groups`, `list_all_groups`, `test_connection`. All are failsafe -
+`list_all_groups`, `resolve_user_groups`, `test_connection`. All are failsafe -
 credential/API failure returns empty rather than raising, so auth keeps working
 if group resolution degrades.
 

@@ -765,7 +765,8 @@ class TestScopes:
             (["openid", "email profile"], "scopes"),
             (["openid", 'gr"oups'], "scopes"),
             (["openid", 5], "scopes.1"),
-            ("openid email profile", "scopes"),
+            ("email profile", "scopes"),
+            ({"openid": True}, "scopes"),
         ],
         ids=[
             "no-openid",
@@ -773,7 +774,8 @@ class TestScopes:
             "two-scopes-in-one-entry",
             "quote",
             "not-a-string",
-            "not-a-list",
+            "string-without-openid",
+            "neither-a-list-nor-a-string",
         ],
     )
     def test_create_refuses_a_bad_override_and_writes_nothing(
@@ -807,6 +809,47 @@ class TestScopes:
             headers=admin_headers,
         )
         assert app.state.oidc_provider_registry.get("keep-scopes").scopes == "openid email"
+
+    def test_a_space_separated_string_is_taken_as_the_scopes(self, client, app, admin_headers):
+        resp = _create_provider(
+            client,
+            admin_headers,
+            name="str-scopes",
+            type="okta",
+            scopes="openid  email offline_access",
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["scopes"] == ["openid", "email", "offline_access"]
+        assert app.state.oidc_provider_registry.get("str-scopes").scopes == (
+            "openid email offline_access"
+        )
+
+    def test_a_form_can_send_the_stored_scopes_string_back(self, client, app, admin_headers):
+        # The setup status serves the provider model, whose scopes are one string.
+        _create_provider(client, admin_headers, name="round-trip", scopes=["openid", "email"])
+        stored = app.state.oidc_provider_registry.get("round-trip").scopes
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/round-trip",
+            json={"display_name": "Renamed", "scopes": stored},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["scopes"] == ["openid", "email"]
+
+    def test_a_blank_string_is_no_override(self, client, app, admin_headers):
+        resp = _create_provider(client, admin_headers, name="blank-scopes", scopes="  ")
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["scopes"] == ["openid", "email", "profile", "groups"]
+        client.put(
+            "/api/v1/auth/oidc-providers/blank-scopes",
+            json={"scopes": "openid email"},
+            headers=admin_headers,
+        )
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/blank-scopes", json={"scopes": ""}, headers=admin_headers
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["scopes"] == ["openid", "email"]
 
     def test_update_refuses_scopes_without_openid(self, client, app, admin_headers):
         _create_provider(client, admin_headers, name="upd-bad-scopes")

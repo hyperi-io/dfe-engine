@@ -132,6 +132,13 @@ class TestOIDCProviderScopes:
     def test_blank_scopes_take_the_type_default(self, blank):
         assert OIDCProvider(type="google", scopes=blank).scopes == GOOGLE_SCOPES
 
+    def test_only_a_google_provider_holding_the_old_default_is_repaired(self):
+        # Every provider saved before defaults followed the type stored the old default.
+        stored = {"issuer": "https://x", "scopes": "groups profile openid email"}
+        google = OIDCProvider.model_validate({**stored, "type": "google"})
+        entra = OIDCProvider.model_validate({**stored, "type": "entra_id"})
+        assert (google.scopes, entra.scopes) == (GOOGLE_SCOPES, "groups profile openid email")
+
     def test_configured_scopes_are_kept(self):
         provider = OIDCProvider(type="google", scopes="openid email")
         assert provider.scopes == "openid email"

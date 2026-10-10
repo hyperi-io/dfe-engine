@@ -65,9 +65,10 @@ _TENANT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}\Z")
 _SCOPE_TOKEN = re.compile(r"[\x21\x23-\x5B\x5D-\x7E]+\Z")
 
 _SCOPES_HELP = (
-    "OAuth scopes requested at login, one scope per entry; must include openid. Omit "
-    "for the provider type's default: openid email profile, plus groups for generic "
-    "and okta, and https://www.googleapis.com/auth/cloud-identity.groups.readonly for "
+    "OAuth scopes requested at login, one scope per entry; must include openid. One "
+    "space-separated string is accepted too, and a blank one is no override. Omit for "
+    "the provider type's default: openid email profile, plus groups for generic and "
+    "okta, and https://www.googleapis.com/auth/cloud-identity.groups.readonly for "
     "google, which reads each user's groups with their own token. Google and Entra ID "
     "fail a login that asks for groups."
 )
@@ -84,6 +85,17 @@ def _reject_non_env_name(value: str) -> str:
     """Refuse a credential pasted where an env var NAME belongs."""
     if value and not is_env_var_name(value):
         raise ValueError(_ENV_NAME_HELP)
+    return value
+
+
+def _scopes_from_string(value: object) -> object:
+    """A space-separated scope string as its list of scopes, or None when blank; anything else unchanged.
+
+    The provider model and the setup status carry scopes as one string, so a form
+    filled from either sends that shape back.
+    """
+    if isinstance(value, str):
+        return value.split() or None
     return value
 
 
@@ -204,6 +216,11 @@ class CreateProviderRequest(BaseModel):
     def _env_name_only(cls, value: str) -> str:
         return _reject_non_env_name(value)
 
+    @field_validator("scopes", mode="before")
+    @classmethod
+    def _scopes_as_list(cls, value: object) -> object:
+        return _scopes_from_string(value)
+
     @field_validator("scopes")
     @classmethod
     def _scopes_shape(cls, value: list[str] | None) -> list[str] | None:
@@ -224,7 +241,8 @@ class UpdateProviderRequest(BaseModel):
     scopes: list[str] | None = Field(
         None,
         description="Replace the OAuth scopes requested at login, one scope per entry; "
-        "must include openid.",
+        "must include openid. One space-separated string is accepted too, and a blank "
+        "one leaves the scopes as they are.",
     )
     groups: GroupResolutionRequest | None = Field(None, description="Group resolution config")
 
@@ -232,6 +250,11 @@ class UpdateProviderRequest(BaseModel):
     @classmethod
     def _env_name_only(cls, value: str | None) -> str | None:
         return value if value is None else _reject_non_env_name(value)
+
+    @field_validator("scopes", mode="before")
+    @classmethod
+    def _scopes_as_list(cls, value: object) -> object:
+        return _scopes_from_string(value)
 
     @field_validator("scopes")
     @classmethod
