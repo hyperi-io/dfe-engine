@@ -149,7 +149,7 @@ async def test_outsider_resolves_none_of_the_expected_group_ids() -> None:
     groups, warnings = await _resolve(_setting(OUTSIDER_VAR))
 
     # A refused lookup also returns [], so an empty answer only counts when Cloud Identity gave one.
-    refusals = [(warning.get("method"), warning.get("status")) for warning in warnings]
+    refusals = [(warning.get("operation"), warning.get("status")) for warning in warnings]
     assert not refusals, f"Cloud Identity gave the outsider no answer: {refusals}"
     resolved = {group.id for group in groups}
     leaked = [position for position, group_id in enumerate(expected, 1) if group_id in resolved]
