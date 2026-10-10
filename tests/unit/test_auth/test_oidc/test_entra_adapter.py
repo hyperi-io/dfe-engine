@@ -26,6 +26,7 @@ from tests.unit.test_auth.test_oidc.entra_adapter_cases import (
     GRAPH_CREDENTIALS_CASES,
     GraphCredentialsCase,
 )
+from tests.unit.test_auth.test_oidc.local_graph import LocalGraph
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -280,3 +281,106 @@ class TestEntraAdapterLive:
         success, message = await adapter.test_connection()
         assert success is True
         assert message
+
+
+# ---------------------------------------------------------------------------
+# Overage: the user's own token first, then the app credentials
+# ---------------------------------------------------------------------------
+
+OID = "00000000-0000-4000-8000-0000000000aa"
+ADMINS = {"id": "11111111-0000-4000-8000-000000000001", "displayName": "dfe-admins"}
+VIEWERS = {"id": "11111111-0000-4000-8000-000000000002", "displayName": "dfe-viewers"}
+USER_TOKEN = "user-token"
+SCOPE_REFUSED = {
+    "error": {"code": "Authorization_RequestDenied", "message": "Insufficient privileges"}
+}
+
+
+@pytest.fixture
+def graph():
+    server = LocalGraph()
+    server.start()
+    yield server
+    server.stop()
+
+
+def _overage_adapter(
+    server: LocalGraph, *, token: str = USER_TOKEN, app_token: str | None = None
+) -> EntraAdapter:
+    """An Entra adapter reading Graph at *server*; *app_token* stands in for the client-credentials token."""
+    adapter = EntraAdapter(_make_provider(), access_token=token)
+    adapter.GRAPH_BASE = server.base_url
+    adapter._get_token = lambda: app_token  # type: ignore[method-assign]
+    return adapter
+
+
+class TestOverageUserToken:
+    async def test_the_users_own_token_reads_their_groups(self, graph):
+        graph.pages["me"] = [[ADMINS, VIEWERS]]
+        groups = await _overage_adapter(graph).resolve_user_groups(OID)
+
+        assert [g.name for g in groups] == ["dfe-admins", "dfe-viewers"]
+        assert graph.principals == ["me"]
+        assert graph.requests[0]["authorization"] == "Bearer user-token"
+
+    async def test_a_refused_user_token_falls_back_to_the_app_credentials(self, graph):
+        graph.refuse["me"] = (403, SCOPE_REFUSED)
+        graph.pages[f"users/{OID}"] = [[VIEWERS]]
+        groups = await _overage_adapter(graph, app_token="app-token").resolve_user_groups(OID)
+
+        assert [g.name for g in groups] == ["dfe-viewers"]
+        assert graph.principals == ["me", f"users/{OID}"]
+        assert graph.requests[1]["authorization"] == "Bearer app-token"
+
+    async def test_no_groups_for_the_user_is_the_answer(self, graph):
+        groups = await _overage_adapter(graph, app_token="app-token").resolve_user_groups(OID)
+
+        assert groups == []
+        assert graph.principals == ["me"]
+
+    async def test_without_a_user_token_the_app_credentials_answer(self, graph):
+        graph.pages[f"users/{OID}"] = [[ADMINS]]
+        groups = await _overage_adapter(graph, token="", app_token="app-token").resolve_user_groups(
+            OID
+        )
+
+        assert [g.name for g in groups] == ["dfe-admins"]
+        assert graph.principals == [f"users/{OID}"]
+
+    async def test_refused_everywhere_is_default_deny(self, graph):
+        graph.refuse["me"] = (403, SCOPE_REFUSED)
+        graph.refuse[f"users/{OID}"] = (403, SCOPE_REFUSED)
+        assert await _overage_adapter(graph, app_token="app-token").resolve_user_groups(OID) == []
+
+    async def test_every_page_is_read(self, graph):
+        graph.pages["me"] = [[ADMINS], [VIEWERS]]
+        groups = await _overage_adapter(graph).resolve_user_groups(OID)
+
+        assert [g.name for g in groups] == ["dfe-admins", "dfe-viewers"]
+        assert graph.principals == ["me", "me"]
+
+    def test_the_factory_hands_entra_the_login_token(self):
+        from dfe_engine.auth.oidc.adapters import get_adapter
+
+        adapter = get_adapter(_make_provider(), access_token="login-token")
+        assert isinstance(adapter, EntraAdapter)
+        assert adapter._access_token == "login-token"
+
+    async def test_groups_the_token_may_not_read_still_resolve_by_id(self, graph):
+        """Graph answers a User.Read token with each group's id and every other property null."""
+        graph.pages["me"] = [[ADMINS, VIEWERS]]
+        graph.limited.add("me")
+        groups = await _overage_adapter(graph, app_token="app-token").resolve_user_groups(OID)
+
+        assert [g.id for g in groups] == [ADMINS["id"], VIEWERS["id"]]
+        assert [g.name for g in groups] == ["", ""]
+        assert graph.principals == ["me"]
+
+    async def test_a_failure_partway_through_is_no_answer_not_a_partial_one(self, graph):
+        graph.pages["me"] = [[ADMINS], [VIEWERS]]
+        graph.fail_page["me"] = 1
+        graph.pages[f"users/{OID}"] = [[ADMINS, VIEWERS]]
+        groups = await _overage_adapter(graph, app_token="app-token").resolve_user_groups(OID)
+
+        assert [g.name for g in groups] == ["dfe-admins", "dfe-viewers"]
+        assert graph.principals == ["me", "me", f"users/{OID}"]
