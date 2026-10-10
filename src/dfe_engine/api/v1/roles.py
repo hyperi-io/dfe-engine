@@ -21,13 +21,14 @@ All endpoints require admin role (org:write).
 from typing import Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search
 from dfe_engine.auth.audit import audit_role_change
 from dfe_engine.auth.rbac_scopes import casbin_scope_catalog, scopes_dict
 from dfe_engine.auth.role_store import Role, RoleStore
+from dfe_engine.auth.store_names import VALID_NAME
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
 
 RoleResourceTypeQuery = Literal["core", "custom"]
@@ -42,6 +43,21 @@ class CreateRoleRequest(BaseModel):
     description: str = Field("", description="Human-readable description")
     permissions: list[str] = Field(description="Casbin-style permission patterns")
     scoped: bool = Field(False, description="When true, role is org-scoped at query time")
+
+    @field_validator("name")
+    @classmethod
+    def _addressable_name(cls, value: str) -> str:
+        """The name is a URL path segment (``/auth/roles/{name}``) and a ``roles.yaml`` key.
+
+        Held to the rule groups, accounts and API keys are, so every role the create
+        endpoint accepts is one the get, update and delete routes can reach.
+        """
+        if not VALID_NAME.match(value):
+            raise ValueError(
+                "must start with a letter or digit, contain only letters, digits, "
+                "dot, underscore or hyphen, and be at most 128 characters"
+            )
+        return value
 
 
 class UpdateRoleRequest(BaseModel):

@@ -729,6 +729,15 @@ class TestWritingCustomEnv:
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == "invalid_env_name"
 
+    def test_an_environment_name_ending_in_a_line_break_is_refused(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        resp = _write(client, admin_headers, {"extraEnv.KEY\n": "no"})
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "invalid_env_name"
+
     def test_a_value_carrying_a_line_break_is_refused(self, client, app, admin_headers, tmp_path):
         _wire(app, tmp_path)
         _deploy(client, admin_headers)

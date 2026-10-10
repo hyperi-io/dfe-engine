@@ -55,7 +55,8 @@ from dfe_engine.hunts.hunt_config_registry import (
 from dfe_engine.hunts.rule_names import validate_rule_name
 from dfe_engine.hunts.validator import HuntValidator
 
-_HUNT_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+# ``\Z``, not ``$``: ``$`` also matches before a trailing newline.
+_HUNT_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+\Z")
 
 
 def _rules_from_stored(rules: Any) -> list[dict[str, Any]]:

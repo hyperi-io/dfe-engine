@@ -27,9 +27,8 @@ from dfe_engine.git_identity import git_author
 from dfe_engine.hunts.hunt_config_registry import default_display_name
 from dfe_engine.hunts.rule_creation_service import CostEstimate
 from dfe_engine.hunts.rule_guard import source_label
+from dfe_engine.hunts.rule_names import validate_rule_name
 from dfe_engine.hunts.rule_registry import RuleNotFoundError
-
-_RULE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 router = APIRouter(prefix="/rules", tags=["Rules"], dependencies=[WRITE_TURN])
 
@@ -99,11 +98,7 @@ class RuleCreateRequest(_RuleWriteFields):
     @field_validator("name")
     @classmethod
     def _validate_rule_name(cls, v: str) -> str:
-        if not _RULE_NAME_PATTERN.match(v):
-            raise ValueError(
-                f"Rule name '{v}' must match /^[a-zA-Z0-9_-]+$/ (letters, digits, _, -)"
-            )
-        return v
+        return validate_rule_name(v)
 
 
 class RuleUpdateRequest(_RuleWriteFields):

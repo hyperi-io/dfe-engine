@@ -1,6 +1,12 @@
-"""A hunt write refuses a rule name that could leave the rules directory."""
+"""A hunt write refuses a rule name that could leave the rules directory.
+
+A hunt may also reference only a name a rule can be created under.
+"""
 
 import pytest
+
+from dfe_engine.api.v1.rules import RuleCreateRequest
+from dfe_engine.hunts.rule_names import validate_rule_name
 
 _HUNT = {
     "display_name": "Certutil Abuse",
@@ -45,12 +51,50 @@ def test_update_refuses_the_rule_name_and_keeps_the_stored_rules(client, admin_h
     assert [entry["rule_name"] for entry in stored["rules"]] == ["certutil"]
 
 
-def test_a_dotted_rule_name_is_accepted(client, admin_headers):
+def test_a_dotted_rule_name_is_refused_because_no_rule_can_be_created_under_it(
+    client, admin_headers
+):
     resp = client.post(
         "/api/v1/hunts",
         json={"name": "windows_hunt", **_HUNT, "rules": ["win.cert"]},
         headers=admin_headers,
     )
 
-    assert resp.status_code == 201, resp.text
-    assert [entry["rule_name"] for entry in resp.json()["rules"]] == ["win.cert"]
+    assert resp.status_code == 422, resp.text
+    assert client.get("/api/v1/hunts/windows_hunt", headers=admin_headers).status_code == 404
+
+
+def _accepted(check) -> bool:
+    try:
+        check()
+    except ValueError:
+        return False
+    return True
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "certutil",
+        "win_cert-01",
+        "sigma_windows-audit_0f1e2d3c",
+        "win.cert",
+        ".hidden",
+        "trailing.",
+        "-",
+        "_",
+        "has space",
+        "line\n",
+        "caf\u00e9",
+        "",
+        "..",
+        "a/b",
+    ],
+)
+def test_a_hunt_reference_and_rule_create_accept_the_same_names(name):
+    creatable = _accepted(
+        lambda: RuleCreateRequest(name=name, user_sql="SELECT 1 FROM dfe.main WHERE a = 1")
+    )
+    referencable = _accepted(lambda: validate_rule_name(name))
+
+    assert referencable == creatable

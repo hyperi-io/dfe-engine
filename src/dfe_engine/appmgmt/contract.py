@@ -54,11 +54,12 @@ SECRET_MARKERS = ("x-scalo-secret", "x-dfe-secret")  # noqa: S105, RUF100 - sche
 scalo writes ``x-scalo-secret``; an app built on an older scalo writes ``x-dfe-secret``.
 """
 
-ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
+ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]*\Z")
 """What a key under ``extraEnv`` may be called.
 
 The whole point of the block is a name no contract declares, so the name is all
-there is to check; the value is never judged against the app's schema.
+there is to check; the value is never judged against the app's schema. ``\\Z``, not ``$``:
+``$`` also matches before a trailing newline.
 """
 
 _NAME_WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")

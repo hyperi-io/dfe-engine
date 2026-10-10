@@ -17,7 +17,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+# ``\Z``, not ``$``: ``$`` also matches before a trailing newline.
+_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*\Z")
 
 KNOWN_STANDARDS = frozenset({"sigma", "ecs", "cim", "ocsf"})
 

@@ -131,6 +131,15 @@ def test_injection_param_rejected_and_failsafe():
     assert client.calls == []
 
 
+def test_a_param_ending_in_a_newline_is_rejected_like_any_other_malformed_one():
+    client = _FakeClient(rows=[[42]])
+    shim = QueryShim(DFESettings(env="test"), client_factory=lambda: client)
+
+    assert shim.run("pressure", {"service": "dfe-receiver\n"}) == 0
+    assert client.calls == []
+    assert shim.run("pressure", {"service": "dfe-receiver"}) == 42
+
+
 def test_backlog_uses_due_query():
     client = _FakeClient(rows=[[7]])
     shim = _shim(client)
