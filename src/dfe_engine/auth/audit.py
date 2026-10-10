@@ -122,19 +122,24 @@ def audit_account_change(
     admin_id: str,
     target_user: str,
     change: str,
+    details: dict | None = None,
 ) -> None:
-    """Emit an audit event for a local account create/update/delete.
+    """Emit an audit event for a local account change.
 
     Args:
-        admin_id: Identity of the admin performing the change.
+        admin_id: Identity of the caller making the change; the account's own
+            identity when the owner changes it.
         target_user: Username of the affected account.
-        change: One of ``"created"``, ``"updated"``, ``"deleted"``.
+        change: What happened, e.g. ``"created"``, ``"updated"``, ``"deleted"``,
+            ``"password_reset"``.
+        details: Optional structured details. Never a password or a hash.
     """
     logger.info(
         f"auth.account.{change}",
         admin_id=admin_id,
         target_user=target_user,
         change=change,
+        details=details,
     )
 
 
@@ -142,19 +147,23 @@ def audit_group_change(
     admin_id: str,
     group_name: str,
     change: str,
+    details: dict | None = None,
 ) -> None:
-    """Emit an audit event for a group create/update/delete.
+    """Emit an audit event for a group change.
 
     Args:
         admin_id: Identity of the admin performing the change.
         group_name: Name of the affected group.
-        change: One of ``"created"``, ``"updated"``, ``"deleted"``.
+        change: What happened, e.g. ``"created"``, ``"updated"``, ``"deleted"``,
+            ``"member_added"``.
+        details: Optional structured details, e.g. the roles or member involved.
     """
     logger.info(
         f"auth.group.{change}",
         admin_id=admin_id,
         group_name=group_name,
         change=change,
+        details=details,
     )
 
 
@@ -163,14 +172,16 @@ def audit_api_key_change(
     key_name: str,
     short_token: str,
     change: str,
+    details: dict | None = None,
 ) -> None:
     """Emit an audit event for an API key create/revoke.
 
     Args:
         admin_id: Identity of the admin performing the change.
         key_name: Human-readable name of the API key.
-        short_token: First 16 characters of the token for correlation (safe to log).
+        short_token: The key's public lookup token, never the secret half of the key.
         change: One of ``"created"``, ``"revoked"``.
+        details: Optional structured details. Never the full key or its hash.
     """
     logger.info(
         f"auth.api_key.{change}",
@@ -178,6 +189,30 @@ def audit_api_key_change(
         key_name=key_name,
         short_token=short_token,
         change=change,
+        details=details,
+    )
+
+
+def audit_role_change(
+    admin_id: str,
+    role_name: str,
+    change: str,
+    details: dict | None = None,
+) -> None:
+    """Emit an audit event for an RBAC role create/update/delete.
+
+    Args:
+        admin_id: Identity of the admin performing the change.
+        role_name: Name of the affected role.
+        change: One of ``"created"``, ``"updated"``, ``"deleted"``.
+        details: Optional structured details, e.g. the permissions the role now grants.
+    """
+    logger.info(
+        f"auth.role.{change}",
+        admin_id=admin_id,
+        role_name=role_name,
+        change=change,
+        details=details,
     )
 
 

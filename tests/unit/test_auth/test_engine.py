@@ -95,7 +95,8 @@ class TestDataAnalystRole:
             "alert:write",
             "schema:read",
             "schema:write",
-            "transforms:execute",
+            "transform:compile",
+            "transform:test",
         ],
     )
     def test_data_analyst_allowed_actions(self, action: str):

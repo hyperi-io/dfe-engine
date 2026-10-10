@@ -266,13 +266,15 @@ boot the engine copies that file to `rbac/roles.yaml` beside the auth directory
 and loads roles from the copy. Custom roles are added to it through
 `/api/v1/auth/roles`.
 
+The copy is never rewritten once it exists, and the API refuses edits to a built-in role. A built-in grant changed in a later engine release therefore reaches an existing deployment only when `rbac/roles.yaml` is edited by hand.
+
 8 built-in roles, flat hierarchy (no inheritance):
 
 ```mermaid
 graph LR
     subgraph "Global Roles"
         ADMIN["admin<br/>permissions: *"]
-        DA["data_analyst<br/>hunt, query, source,<br/>fieldmap, alert, rule,<br/>schema, transforms"]
+        DA["data_analyst<br/>hunt, query, source,<br/>fieldmap, alert, rule,<br/>schema, transform"]
         DAV["data_analyst_viewer<br/>read-only subset of<br/>data_analyst"]
         DV["data_viewer<br/>query:execute,<br/>source:read,<br/>dashboard:read"]
         IA["infra_admin<br/>config, service,<br/>helm, deployment,<br/>argo"]
@@ -745,12 +747,15 @@ Logins, denied authorisation decisions and admin changes are logged for complian
 | Login denied | `auth.login.denied` | warning |
 | Break-glass login | `auth.breakglass.login` | warning |
 | Permission denied | `auth.permission.denied` | warning |
-| Account change | `auth.account.{change}` -- a password rotation, ending sessions, retiring the bootstrap admin | info |
+| Account change | `auth.account.{change}` -- `created`, `updated`, `deleted`, `password_reset`, `password_changed` (the owner's own), `attributes_updated`, `sensitive_attributes_updated`, a password rotation, ending sessions, retiring the bootstrap admin | info |
+| Group change | `auth.group.{change}` -- `created`, `updated`, `deleted`, `member_added`, `member_removed`, `attributes_updated`, `sensitive_attributes_updated` | info |
+| API key change | `auth.api_key.{change}` -- `created`, `revoked` | info |
+| Role change | `auth.role.{change}` -- `created`, `updated`, `deleted` | info |
 | JIT provisioning | `auth.jit.{event}` -- account created, groups updated, login refused, team assigned, HyperDX invite, failure | info / warning |
 | Org change | `org.{change}` | info |
 | Resource change | `resource.{type}.{change}` -- OIDC providers, sources, fieldmaps and other config resources | info |
 
-Account create, update and delete, group CRUD, API key CRUD and role CRUD emit no audit event. `src/dfe_engine/auth/audit.py` defines `auth.group.{change}` and `auth.api_key.{change}`, and no route calls either.
+Every account, group, API key and role write through `/api/v1/auth` emits one event naming the actor (`admin_id`), the change and the target. Its `details` carry the roles, groups, members or permissions the write set, and the names of contact fields changed, never their values. No event carries a password, a hash, an attribute value or an API key's secret half.
 
 Events flow through the OTel pipeline → JSON → ClickHouse → HyperDX.
 No custom ClickHouse audit table — standard OTel log ingestion is used.
@@ -796,12 +801,9 @@ class AuthSettings(BaseModel):
 Environment variables: `DFE_AUTH_ENABLED`, `DFE_AUTH_DIR`,
 `DFE_AUTH_TRUST_PROXY_AUTH_HEADERS`, `DFE_AUTH_PROXY_PROVIDER`,
 `DFE_AUTH_SOURCE_PROVIDER_BINDINGS` (a JSON object),
-`DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS`. The two `oidc_group_sync_*` fields are set
-in the config file only: no environment variable reaches them.
-`auth.oidc.providers_dir`, `auth.oidc.sync_enabled` and
-`auth.oidc.sync_on_startup` still parse (`DFE_AUTH_OIDC_PROVIDERS_DIR`,
-`DFE_AUTH_OIDC_SYNC_ENABLED`, `DFE_AUTH_OIDC_SYNC_ON_STARTUP`) but nothing reads
-them.
+`DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS`, `DFE_AUTH_OIDC_GROUP_SYNC_ENABLED`,
+`DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS`. OIDC provider files always live in the
+auth directory's `oidc-providers/`.
 
 ---
 
