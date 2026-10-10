@@ -68,12 +68,19 @@ def _make_provider(
     )
 
 
-def _relation(group_id: str, name: str) -> dict[str, object]:
-    """One Cloud Identity membership search result, as the API returns it."""
+GROUP_LABEL = "cloudidentity.googleapis.com/groups.discussion_forum"
+
+
+def _relation(
+    group_id: str, name: str, *, labels: dict[str, str] | None = None
+) -> dict[str, object]:
+    """One Cloud Identity membership search result, as the API returns it: a group's carries its label."""
     return {
+        "description": "",
         "displayName": name,
         "group": f"groups/{group_id}",
         "groupKey": {"id": f"{name}@example.com"},
+        "labels": {GROUP_LABEL: ""} if labels is None else labels,
         "membership": f"groups/{group_id}/memberships/112233",
         "roles": [{"name": "MEMBER"}],
     }
@@ -449,6 +456,31 @@ class TestCloudIdentityUserToken:
 
         assert [group.id for group in groups] == [VIEWERS_ID]
         assert cloud_identity.methods == [TRANSITIVE, DIRECT]
+
+    async def test_the_direct_fallback_asks_by_member_and_keeps_only_groups(self, cloud_identity):
+        """Google refuses a direct search that filters on labels, so the label is checked here."""
+        cloud_identity.refuse[TRANSITIVE] = (403, SCOPE_REFUSED)
+        cloud_identity.pages[DIRECT] = [
+            [
+                _relation(ADMINS_ID, "dfe-admins"),
+                _relation(NESTED_PARENT_ID, "not-a-group", labels={}),
+                {
+                    key: value
+                    for key, value in _relation("05nolabel", "x").items()
+                    if key != "labels"
+                },
+                _relation(VIEWERS_ID, "dfe-viewers"),
+            ]
+        ]
+
+        groups = await _token_adapter(cloud_identity).resolve_user_groups("alice@example.com")
+
+        assert [group.id for group in groups] == [ADMINS_ID, VIEWERS_ID]
+        direct = cloud_identity.requests[1]
+        assert (direct["method"], direct["params"]["query"]) == (
+            DIRECT,
+            "member_key_id == 'alice@example.com'",
+        )
 
     async def test_a_refused_direct_search_denies_and_logs_googles_code(self, cloud_identity):
         cloud_identity.refuse[TRANSITIVE] = (403, SCOPE_REFUSED)

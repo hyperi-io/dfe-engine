@@ -18,6 +18,19 @@ from tests.support.loopback import stop_server
 
 _SEARCH_PATH = "/groups/-/memberships:"
 
+_DIRECT = "searchDirectGroups"
+
+_LABELS_CLAUSE = " in labels"
+
+# Google's answer to a direct search whose query names a label.
+_INVALID_ARGUMENT = {
+    "error": {
+        "code": 400,
+        "message": "Request contains an invalid argument.",
+        "status": "INVALID_ARGUMENT",
+    }
+}
+
 
 def _handler_for(*, directory: LocalCloudIdentity) -> type[BaseHTTPRequestHandler]:
     """Build a request handler class that answers from the settings of ``directory``."""
@@ -59,6 +72,10 @@ def _handler_for(*, directory: LocalCloudIdentity) -> type[BaseHTTPRequestHandle
                 status, body = directory.refuse[method]
                 self._reply(body=body, status=status)
                 return
+            # Google refuses a direct search whose query filters on labels.
+            if method == _DIRECT and _LABELS_CLAUSE in params.get("query", ""):
+                self._reply(body=_INVALID_ARGUMENT, status=400)
+                return
             pages = directory.pages.get(method) or [[]]
             index = int(params.get("pageToken") or 0)
             page: dict[str, Any] = {"memberships": pages[index]}
@@ -78,7 +95,8 @@ class LocalCloudIdentity:
     ``pages`` maps a search method to its result pages, and every page but the
     last hands out a page token. ``refuse`` maps a method to the status and
     Google error body it answers instead. ``garble`` names methods that answer
-    200 with a body that is not JSON. ``requests`` records each search.
+    200 with a body that is not JSON. ``requests`` records each search. A direct
+    search whose query filters on labels answers 400, as Google does.
     """
 
     def __init__(self) -> None:
