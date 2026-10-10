@@ -849,7 +849,7 @@ class TestSyncUnreadableListing:
 class TestSyncSkipsAGroupWithNoId:
     """A group with no id can never be linked, so it is not stored at all."""
 
-    async def test_a_graph_group_with_no_id_is_skipped_and_logged_without_its_name(
+    async def test_a_graph_group_with_no_id_is_counted_by_the_sync_like_any_provider_s(
         self, tmp_path, audit_events: list[dict]
     ) -> None:
         graph = LocalGraph()
@@ -867,13 +867,18 @@ class TestSyncSkipsAGroupWithNoId:
             graph.stop()
 
         assert [group.name for group in group_store.list()] == ["engineers"]
-        assert (result["created"], result["status"]) == (1, "ok")
-        (line,) = [
-            e
-            for e in audit_events
-            if e["event"] == "Entra list_all_groups skipped groups with no id"
-        ]
-        assert line["count"] == 1
+        assert (result["created"], result["groups_skipped"], result["status"]) == (
+            1,
+            1,
+            "partial",
+        )
+        stored = registry.get("sso")
+        assert stored is not None
+        assert stored.last_sync_status == (
+            "partial: 1 of 2 groups skipped, they carry no id to link them by"
+        )
+        (line,) = [e for e in audit_events if "no id" in e["event"]]
+        assert (line["event"], line["count"]) == ("OIDC group sync skipped groups with no id", 1)
         assert "Unlinked Sentinel" not in logged(audit_events)
 
 

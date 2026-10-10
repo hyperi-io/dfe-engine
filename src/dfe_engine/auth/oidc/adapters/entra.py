@@ -325,7 +325,6 @@ class EntraAdapter(OIDCGroupAdapter):
         from scalo.http import AsyncHttpClient
 
         groups: list[GroupInfo] = []
-        unidentified = 0
         headers = {"Authorization": f"Bearer {token}"}
         url = (
             f"{self.GRAPH_BASE}/groups"
@@ -338,27 +337,18 @@ class EntraAdapter(OIDCGroupAdapter):
                 data = response.json()
                 if not isinstance(data, dict) or not isinstance(data.get("value"), list):
                     raise DirectoryPageError
-                for item in data["value"]:
-                    # A group with no id can never be linked, so it is not handed to the sync.
-                    if not item.get("id"):
-                        unidentified += 1
-                        continue
-                    groups.append(
-                        GroupInfo(
-                            id=item["id"],
-                            name=item.get("displayName") or "",
-                            email=item.get("mail", "") or "",
-                            description=item.get("description", "") or "",
-                        )
+                # A group with no id goes to the sync too, which counts it as no_id like every provider's.
+                groups.extend(
+                    GroupInfo(
+                        id=item.get("id") or "",
+                        name=item.get("displayName") or "",
+                        email=item.get("mail", "") or "",
+                        description=item.get("description", "") or "",
                     )
+                    for item in data["value"]
+                )
                 url = data.get("@odata.nextLink")
                 if not url:
-                    if unidentified:
-                        logger.warning(
-                            "Entra list_all_groups skipped groups with no id",
-                            count=unidentified,
-                            provider=self._provider.issuer,
-                        )
                     return groups
         raise DirectoryPageLimitError(self.MAX_LISTING_PAGES)
 
