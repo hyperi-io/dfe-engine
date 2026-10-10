@@ -31,6 +31,11 @@ from scalo.logger import logger
 
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.credential_env import resolve_credential
+from dfe_engine.auth.oidc.idp_errors import (
+    describe_idp_error,
+    idp_failure_message,
+    provider_error_code,
+)
 from dfe_engine.auth.oidc.models import GroupInfo
 
 if TYPE_CHECKING:
@@ -160,8 +165,9 @@ class EntraAdapter(OIDCGroupAdapter):
                 except Exception as exc:
                     logger.warning(
                         "Entra resolve_user_groups: API call failed",
+                        operation="resolve_user_groups",
                         provider=self._provider.issuer,
-                        error=str(exc),
+                        **describe_idp_error(exc),
                     )
                     return None
                 if not isinstance(data, dict):
@@ -216,8 +222,9 @@ class EntraAdapter(OIDCGroupAdapter):
                 except Exception as exc:
                     logger.warning(
                         "Entra list_all_groups: API call failed",
-                        url=url,
-                        error=str(exc),
+                        operation="list_all_groups",
+                        provider=self._provider.issuer,
+                        **describe_idp_error(exc),
                     )
                     break
 
@@ -266,9 +273,11 @@ class EntraAdapter(OIDCGroupAdapter):
             except Exception as exc:
                 logger.warning(
                     "Entra test_connection: Graph API call failed",
-                    error=str(exc),
+                    operation="test_connection",
+                    provider=self._provider.issuer,
+                    **describe_idp_error(exc),
                 )
-                return (False, f"Graph API connection failed: {exc}")
+                return (False, idp_failure_message(exc, service="Graph API"))
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -301,17 +310,24 @@ class EntraAdapter(OIDCGroupAdapter):
         except Exception as exc:
             logger.warning(
                 "Entra _get_token: MSAL token acquisition failed",
+                operation="token",
+                provider=self._provider.issuer,
                 tenant_id=credentials.tenant_id,
-                error=str(exc),
+                **describe_idp_error(exc),
             )
             return None
 
         token = result.get("access_token")
         if not token:
-            error_desc = result.get("error_description", result.get("error", "unknown"))
+            # The AADSTS numbers say what Entra refused; its description is prose and stays out.
+            error_codes = [c for c in result.get("error_codes") or [] if isinstance(c, int)]
             logger.warning(
                 "Entra _get_token: no access_token in MSAL response",
-                error=error_desc,
+                code=provider_error_code(result) or "unknown",
+                error_codes=error_codes,
+                operation="token",
+                provider=self._provider.issuer,
+                tenant_id=credentials.tenant_id,
             )
             return None
 
