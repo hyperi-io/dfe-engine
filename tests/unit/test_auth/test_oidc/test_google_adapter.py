@@ -351,6 +351,25 @@ class TestLoginLookupPageLimit:
         (line,) = [e for e in audit_events if e.get("operation") == "resolve_user_groups"]
         assert line["error_type"] == "DirectoryPageLimitError"
 
+    async def test_a_user_token_search_still_paging_at_the_limit_is_default_deny(
+        self, cloud_identity, audit_events
+    ):
+        """The pages read so far are not the user's groups, as Okta's and Entra's lookups hold."""
+        cloud_identity.pages[TRANSITIVE] = [[_relation(f"0{n}group", f"g{n}")] for n in range(6)]
+        adapter = _token_adapter(cloud_identity)
+        adapter.MAX_LOGIN_PAGES = 3
+
+        groups = await adapter.resolve_user_groups("alice@example.com")
+
+        assert groups == []
+        assert cloud_identity.methods == [TRANSITIVE] * 3
+        (line,) = [
+            e
+            for e in audit_events
+            if e["event"] == "Google Cloud Identity: group search stopped at the page limit"
+        ]
+        assert (line["method"], line["pages"]) == (TRANSITIVE, 3)
+
 
 # ---------------------------------------------------------------------------
 # GroupInfo model used by adapter
@@ -474,12 +493,12 @@ class TestCloudIdentityUserToken:
         adapter = _token_adapter(cloud_identity)
         assert await adapter._groups_with_user_token(email="alice@example.com") is None
 
-    async def test_stops_at_the_page_limit(self, cloud_identity):
+    async def test_stops_at_the_page_limit_and_answers_nothing(self, cloud_identity):
         cloud_identity.pages[TRANSITIVE] = [
             [_relation(f"0{index:014d}", f"g{index}")] for index in range(60)
         ]
         groups = await _token_adapter(cloud_identity).resolve_user_groups("alice@example.com")
-        assert (len(groups), len(cloud_identity.requests)) == (50, 50)
+        assert (groups, len(cloud_identity.requests)) == ([], 50)
 
     async def test_without_a_token_nothing_is_asked(self, cloud_identity):
         groups = await _token_adapter(cloud_identity, token="").resolve_user_groups(

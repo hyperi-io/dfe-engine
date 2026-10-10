@@ -15,7 +15,8 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 from scalo.logger import logger
 
 from dfe_engine.auth.protected_accounts import resolve_floor
-from dfe_engine.auth.store_names import VALID_NAME, store_key
+from dfe_engine.auth.store_names import store_key
+from dfe_engine.names import VALID_NAME
 from dfe_engine.orgs.models import ORG_NAME_PATTERN
 from dfe_engine.yaml_utils import YAMLError, yaml_dump, yaml_load
 

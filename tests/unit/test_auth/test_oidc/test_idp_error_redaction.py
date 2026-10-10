@@ -683,6 +683,26 @@ class TestSyncIncompleteListing:
         line = failure_line(audit_events, "list_all_groups")
         assert (line["status"], line["code"]) == (400, "BadRequest")
 
+    async def test_a_throttled_graph_listing_names_the_directory_api(self, tmp_path) -> None:
+        """The token came back, so the 429 is the directory's, unlike one from Entra's token endpoint."""
+        graph = LocalGraph()
+        graph.refuse[TENANT] = (429, {"error": {"code": "TooManyRequests"}})
+        graph.start()
+        registry = _sync_registry(tmp_path)
+        group_store = GroupStore(tmp_path / "groups")
+        try:
+            result = await sync_provider(
+                "sso", registry, group_store, adapter=_entra_adapter(graph.base_url)
+            )
+        finally:
+            graph.stop()
+
+        assert graph.principals == [TENANT]
+        assert (
+            result["error"] == "The directory API is throttling requests (HTTP 429); retry shortly"
+        )
+        _assert_failed_sync(registry=registry, result=result, group_store=group_store, status=429)
+
     async def test_an_okta_listing_that_fails_on_page_two_is_a_failed_sync(
         self, tmp_path, audit_events: list[dict]
     ) -> None:

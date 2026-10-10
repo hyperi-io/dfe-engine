@@ -29,8 +29,7 @@ Lookup strategy: filename is the key name; short_token is stored inside
 the YAML for cross-file lookup during verify()/revoke().
 """
 
-from __future__ import annotations
-
+import builtins
 import hashlib
 import hmac
 import secrets
@@ -39,7 +38,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from dfe_engine.auth.store_names import VALID_NAME, store_key
+from dfe_engine.auth.store_names import store_key
+from dfe_engine.names import VALID_NAME
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 _KEY_PREFIX = "dfe_ak"
@@ -118,7 +118,7 @@ class APIKeyStore:
         self,
         name: str,
         *,
-        groups: list[str] | None = None,
+        groups: builtins.list[str] | None = None,
         description: str = "",
         expires_at: str | None = None,
     ) -> tuple[APIKey, str]:
@@ -187,7 +187,7 @@ class APIKeyStore:
             return None
         return self._load_key(key_file)
 
-    def list(self) -> list[APIKey]:
+    def list(self) -> builtins.list[APIKey]:
         """Return all stored keys sorted by name."""
         keys = [self._load_key(f) for f in sorted(self._keys_dir.glob("*.yaml"))]
         return keys

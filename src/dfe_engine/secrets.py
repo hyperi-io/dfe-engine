@@ -17,8 +17,6 @@ k8s (external-first), ``aws`` / ``gcp`` / ``azure`` for cloud (deferred).
 The engine never imports a backend SDK - scalo owns that (see docs/deployment/backing-services.md).
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import Any
 
@@ -91,8 +89,9 @@ class DfeSecrets:
 
 def _to_scalo_config(cfg: SecretsSettings) -> dict[str, Any]:
     """Map DFE SecretsSettings -> scalo.secrets from_config dict (file needs none)."""
-    # Minted secrets rotate, so no stale read cache.
-    scfg: dict[str, Any] = {"cache": {"enabled": False}}
+    # The memory cache ignores enabled and holds a read for ttl_secs, so 0 sends every read
+    # to the store: a rotation or an outage shows on the next read, not an hour later.
+    scfg: dict[str, Any] = {"cache": {"enabled": False, "ttl_secs": 0}}
     if cfg.provider in ("openbao", "vault"):
         # AppRole in prod (role_id in config; the secret_id is itself a secret and
         # comes from the VAULT_SECRET_ID env, injected by ESO/infra - never config).

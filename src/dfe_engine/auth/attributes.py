@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from dfe_engine.auth.store_names import VALID_NAME
+from dfe_engine.names import VALID_NAME
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 if TYPE_CHECKING:

@@ -21,8 +21,6 @@ from now, and none only when that setting is 0. Once it passes, the key stops
 authenticating but stays listed (``expired: true``) until it is revoked.
 """
 
-from __future__ import annotations
-
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -40,6 +38,7 @@ from dfe_engine.api.v1.account_groups import check_role_assignment, scope_of
 from dfe_engine.auth.audit import audit_api_key_change
 from dfe_engine.auth.membership import groups_named
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.names import StoreName
 
 if TYPE_CHECKING:
     from dfe_engine.auth.api_keys import APIKey
@@ -51,7 +50,7 @@ router = APIRouter(prefix="/api-keys", tags=["API Keys"])
 
 
 class CreateAPIKeyRequest(BaseModel):
-    name: str = Field(description="Unique human-readable key name")
+    name: StoreName = Field(description="Unique human-readable key name")
     groups: list[str] = Field(default_factory=list, description="RBAC group memberships")
     description: str = Field("", description="Optional description")
     expires_at: str | None = Field(

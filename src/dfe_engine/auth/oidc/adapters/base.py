@@ -38,11 +38,37 @@ class DirectoryCredentialError(Exception):
 
 
 class DirectoryCredentialUnreadableError(DirectoryCredentialError):
-    """A provider's directory credential is configured, but the secret store holding it did not answer.
+    """A provider's directory credential is configured, but its secret store gave nothing back.
 
     The credential may be sound, so group sync records a failed run that names the
     secret store rather than the credential.
+
+    Attributes:
+        refused: The store answered and refused the engine access, rather than not
+            answering, so the fix is its policy and not its reachability.
     """
+
+    def __init__(self, *, refused: bool = False) -> None:
+        """Record whether the store refused access."""
+        super().__init__()
+        self.refused = refused
+
+
+class DirectoryTokenRequestError(Exception):
+    """The provider's token endpoint gave no directory token: not reached, throttling or failing.
+
+    Raised from the HTTP client's own error, which the adapter logs with its status. Group
+    sync names the token endpoint, not the directory API, so an operator looks at the
+    right service.
+
+    Attributes:
+        service: The token endpoint's owner as an operator knows it, such as ``Entra ID``.
+    """
+
+    def __init__(self, service: str) -> None:
+        """Record which service's token endpoint failed."""
+        super().__init__(service)
+        self.service = service
 
 
 class NoDirectoryListingError(Exception):
@@ -109,7 +135,9 @@ class OIDCGroupAdapter(ABC):
                 enumerate with.  Group sync reports that as its own state, never
                 as a directory with no groups.
             DirectoryCredentialUnreadableError: The credential is configured but
-                the secret store holding it did not answer.  A failed run.
+                the secret store holding it did not answer or refused.  A failed run.
+            DirectoryTokenRequestError: The provider's token endpoint was not reached,
+                throttled the request or failed.  A failed run.
             DirectoryCredentialError: The credential is configured but gives no
                 access to the directory.  Group sync reports that as a failed run.
             DirectoryPageError: A page arrived without the listing's shape.

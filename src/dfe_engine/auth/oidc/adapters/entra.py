@@ -39,6 +39,7 @@ from dfe_engine.auth.oidc.adapters.base import (
     DirectoryNotConfiguredError,
     DirectoryPageError,
     DirectoryPageLimitError,
+    DirectoryTokenRequestError,
     OIDCGroupAdapter,
 )
 from dfe_engine.auth.oidc.credential_env import (
@@ -68,13 +69,15 @@ class GraphCredentials:
         client_secret: The directory client secret, else the login client secret.
         tenant_id: The Entra tenant.
         secret_unreadable: No client secret resolved and the secret store, asked
-            for one, did not answer.
+            for one, gave nothing back.
+        secret_refused: Of an unreadable secret: the store refused the engine access.
     """
 
     client_id: str
     client_secret: str
     tenant_id: str
     secret_unreadable: bool = False
+    secret_refused: bool = False
 
     @property
     def configured(self) -> bool:
@@ -108,6 +111,7 @@ def graph_credentials(*, provider: OIDCProvider, secrets: DfeSecrets | None) -> 
         client_secret=client_secret,
         secret_unreadable=not client_secret
         and (directory_secret.unreadable or login_secret.unreadable),
+        secret_refused=not client_secret and (directory_secret.refused or login_secret.refused),
         tenant_id=resolve_credential(
             env_name=groups.tenant_id_env, secrets=secrets, value=groups.tenant_id
         ).value,
@@ -289,23 +293,33 @@ class EntraAdapter(OIDCGroupAdapter):
             DirectoryNotConfiguredError: The tenant id, client id or client
                 secret is not configured.
             DirectoryCredentialUnreadableError: No client secret resolved because
-                the secret store did not answer.
+                the secret store did not answer or refused.
             DirectoryCredentialError: The credentials are set but Entra issues
                 no token for them. ``_get_token`` logs why.
+            DirectoryTokenRequestError: Entra's token endpoint could not be reached,
+                throttled the request or failed. Logged here with its status.
             DirectoryPageError: A page Graph served carried no ``value`` list.
             DirectoryPageLimitError: Graph still linked a next page at the page limit.
-            Exception: Whatever MSAL raised when Entra could not be reached or
-                failed, and whatever the client raised on a page Graph did not
-                serve. A listing cut short is never returned: group sync would
-                record the groups read so far as the whole tenant.
+            Exception: Whatever the client raised on a page Graph did not serve. A
+                listing cut short is never returned: group sync would record the
+                groups read so far as the whole tenant.
         """
-        token = self._get_token()
+        try:
+            token = self._get_token()
+        except Exception as exc:
+            logger.warning(
+                "Entra list_all_groups: token request failed",
+                operation="token",
+                provider=self._provider.issuer,
+                **describe_http_error(exc),
+            )
+            raise DirectoryTokenRequestError("Entra ID") from exc
         if token is None:
             credentials = self._graph_credentials
             if credentials.configured:
                 raise DirectoryCredentialError
             if credentials.secret_unreadable:
-                raise DirectoryCredentialUnreadableError
+                raise DirectoryCredentialUnreadableError(refused=credentials.secret_refused)
             raise DirectoryNotConfiguredError
 
         from scalo.http import AsyncHttpClient
@@ -375,7 +389,9 @@ class EntraAdapter(OIDCGroupAdapter):
             if credentials.configured:
                 return False, credential_failure_message(service="Graph API")
             if credentials.secret_unreadable:
-                return False, unreadable_credential_message(credential="Entra client secret")
+                return False, unreadable_credential_message(
+                    credential="Entra client secret", refused=credentials.secret_refused
+                )
             return (
                 False,
                 "Entra credentials not configured - set groups.tenant_id, the client id "

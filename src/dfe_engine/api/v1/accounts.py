@@ -49,7 +49,12 @@ from dfe_engine.api.v1.account_groups import check_group_changes
 from dfe_engine.api.v1.auth import throttled
 from dfe_engine.auth import account_durability
 from dfe_engine.auth.account_durability import AccountGitState
-from dfe_engine.auth.accounts import Account, AccountExistsError, matches_digest
+from dfe_engine.auth.accounts import (
+    BCRYPT_MAX_PASSWORD_BYTES,
+    Account,
+    AccountExistsError,
+    matches_digest,
+)
 from dfe_engine.auth.attributes import check_attribute_depth
 from dfe_engine.auth.audit import audit_account_change, audit_login_denied
 from dfe_engine.auth.bootstrap import (
@@ -61,6 +66,7 @@ from dfe_engine.auth.groups import Group
 from dfe_engine.auth.login_throttle import LoginThrottle
 from dfe_engine.auth.membership import forget_member, groups_held
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.names import InvalidNameError, StoreName
 
 router = APIRouter(prefix="/accounts", tags=["Accounts"])
 
@@ -132,18 +138,26 @@ class CreateAccountRequest(BaseModel):
     deployment that cannot get into its own console.
     """
 
-    username: str = Field(description="Unique account name")
+    username: StoreName = Field(description="Unique account name")
     password: str = Field(
         min_length=MIN_ADMIN_PASSWORD_LENGTH,
         description=(
             "Plaintext password (bcrypt-hashed before storage); at least "
-            f"{MIN_ADMIN_PASSWORD_LENGTH} characters"
+            f"{MIN_ADMIN_PASSWORD_LENGTH} characters and at most "
+            f"{BCRYPT_MAX_PASSWORD_BYTES} bytes"
         ),
     )
     email: str = Field(default="", description="Contact email")
     groups: list[str] = Field(default_factory=list, description="Group memberships")
     phone: str = Field(default="", description="Contact phone")
     name: str = Field(default="", description="Display name")
+
+    @field_validator("password")
+    @classmethod
+    def _within_the_hash_limit(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > BCRYPT_MAX_PASSWORD_BYTES:
+            raise ValueError(f"at most {BCRYPT_MAX_PASSWORD_BYTES} bytes, the most bcrypt hashes")
+        return value
 
 
 class UpdateAccountRequest(BaseModel):
@@ -451,8 +465,7 @@ async def create_account(
         )
     except AccountExistsError as exc:
         raise conflict from exc
-    except ValueError as exc:
-        # A name no account can have, or a password the hash refuses.
+    except InvalidNameError as exc:
         raise HTTPException(
             status_code=422,
             detail={"code": "validation_error", "message": str(exc)},

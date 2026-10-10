@@ -147,7 +147,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             DirectoryNotConfiguredError: A service account is configured but
                 resolves to nothing.
             DirectoryCredentialUnreadableError: The service account's secret store
-                did not answer.
+                did not answer or refused.
             DirectoryCredentialError: A service account is configured but does not
                 build a client. ``_get_service`` logs why.
             DirectoryPageLimitError: Google still handed out a page token at the
@@ -163,7 +163,7 @@ class GoogleAdapter(OIDCGroupAdapter):
                 raise NoDirectoryListingError
             service_account = self._service_account_json
             if service_account.unreadable:
-                raise DirectoryCredentialUnreadableError
+                raise DirectoryCredentialUnreadableError(refused=service_account.refused)
             if not service_account.value:
                 raise DirectoryNotConfiguredError
             raise DirectoryCredentialError
@@ -187,7 +187,9 @@ class GoogleAdapter(OIDCGroupAdapter):
             )
         service_account = self._service_account_json
         if service_account.unreadable:
-            return False, unreadable_credential_message(credential="Google service account JSON")
+            return False, unreadable_credential_message(
+                credential="Google service account JSON", refused=service_account.refused
+            )
         if not service_account.value:
             return False, (
                 "A service account is configured but resolves to nothing: send it as "
@@ -256,8 +258,12 @@ class GoogleAdapter(OIDCGroupAdapter):
 
     async def _search(
         self, client: Any, *, headers: dict[str, str], method: str, query: str
-    ) -> list[GroupInfo]:
-        """Every page of one Cloud Identity membership search, as groups keyed by directory id."""
+    ) -> list[GroupInfo] | None:
+        """Every page of one Cloud Identity membership search, as groups keyed by directory id.
+
+        None when the search is still paging at :attr:`MAX_LOGIN_PAGES`: the pages read so far
+        are not the user's groups, so they are no answer.
+        """
         url = f"{self.CLOUD_IDENTITY_BASE}/groups/-/memberships:{method}"
         params = {"query": query}
         groups: list[GroupInfo] = []
@@ -278,7 +284,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             pages=self.MAX_LOGIN_PAGES,
             provider=self._provider.issuer,
         )
-        return groups
+        return None
 
     def _log_refusal(self, *, exc: httpx.HTTPStatusError, method: str) -> None:
         """Log a refused Cloud Identity call with Google's error code."""

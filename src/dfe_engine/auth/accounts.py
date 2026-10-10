@@ -40,7 +40,8 @@ from pydantic import BaseModel, Field
 from scalo.logger import logger
 
 from dfe_engine.auth.protected_accounts import resolve_floor
-from dfe_engine.auth.store_names import VALID_NAME, store_key
+from dfe_engine.auth.store_names import store_key
+from dfe_engine.names import VALID_NAME, InvalidNameError
 from dfe_engine.yaml_utils import yaml_dump, yaml_dump_string, yaml_load
 
 if TYPE_CHECKING:
@@ -48,6 +49,9 @@ if TYPE_CHECKING:
 
 BCRYPT_ROUNDS = 12
 """The bcrypt cost every stored password hash is made at."""
+
+BCRYPT_MAX_PASSWORD_BYTES = 72
+"""The longest password, in UTF-8 bytes, bcrypt hashes; it refuses a longer one."""
 
 
 @cache
@@ -220,10 +224,11 @@ class AccountStore:
         Raises:
             AccountExistsError: An account is already stored under *username*,
                 including one another replica created at the same moment.
-            ValueError: *username* is not a name an account can have.
+            InvalidNameError: *username* is not a name an account can have.
+            ValueError: bcrypt refuses *password*.
         """
         if not VALID_NAME.match(username):
-            raise ValueError(f"Invalid account name: {username!r}")
+            raise InvalidNameError(f"Invalid account name: {username!r}")
         path = self._path(username)
         account = _new_account(
             username,
@@ -257,12 +262,12 @@ class AccountStore:
             The account as written.
 
         Raises:
-            ValueError: The username is not a safe filename stem.
+            InvalidNameError: The username is not a safe filename stem.
             ProtectedAccountError: The record would leave a recovery credential
                 unable to log in.
         """
         if not VALID_NAME.match(account.username):
-            raise ValueError(f"Invalid account name: {account.username!r}")
+            raise InvalidNameError(f"Invalid account name: {account.username!r}")
         if not allow_protected:
             self.protected.check_account_state(
                 account.username,
@@ -567,13 +572,13 @@ class DocuStoreAccountStore:
         name: str = "",
         change_required: bool = False,
     ) -> Account:
-        """Create a new account. Raises AccountExistsError if taken, ValueError if invalid.
+        """Create a new account. Raises AccountExistsError if taken, InvalidNameError if invalid.
 
         Taken includes by another replica at the same moment: the insert, not a prior
         lookup, decides.
         """
         if not VALID_NAME.match(username):
-            raise ValueError(f"Invalid account name: {username!r}")
+            raise InvalidNameError(f"Invalid account name: {username!r}")
         account = _new_account(
             username,
             password,
@@ -594,7 +599,7 @@ class DocuStoreAccountStore:
         reserved for the reconcile paths. Raises ProtectedAccountError otherwise.
         """
         if not VALID_NAME.match(account.username):
-            raise ValueError(f"Invalid account name: {account.username!r}")
+            raise InvalidNameError(f"Invalid account name: {account.username!r}")
         if not allow_protected:
             self.protected.check_account_state(
                 account.username,
