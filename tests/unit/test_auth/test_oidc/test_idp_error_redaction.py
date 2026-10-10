@@ -133,11 +133,20 @@ class TestProviderErrorCode:
             (_caused_by(httpx.ConnectError("x"), socket.gaierror(-2, "unknown name")), "dns"),
             (_caused_by(httpx.ConnectError("x"), ssl.SSLCertVerificationError("bad")), "tls"),
             (_caused_by(httpx.ConnectError("x"), ConnectionRefusedError()), "connection_refused"),
+            (_caused_by(httpx.ConnectError("x"), ConnectionResetError()), "connection_reset"),
             (_caused_by(httpx.ConnectError("x"), TimeoutError()), "timeout"),
             (httpx.ConnectTimeout("x"), "timeout"),
             (httpx.PoolTimeout("x"), "timeout"),
         ],
-        ids=["dns", "tls", "refused", "socket-timeout", "connect-timeout", "pool-timeout"],
+        ids=[
+            "dns",
+            "tls",
+            "refused",
+            "reset",
+            "socket-timeout",
+            "connect-timeout",
+            "pool-timeout",
+        ],
     )
     def test_a_failure_with_no_answer_says_why_by_the_socket_error_class(
         self, exc: BaseException, expected: str
@@ -553,6 +562,106 @@ class TestSyncIncompleteListing:
         _assert_failed_sync(registry=registry, result=result, group_store=group_store, status=403)
         line = failure_line(audit_events, "list_all_groups")
         assert (line["status"], line["code"]) == (403, "forbidden")
+
+
+# ---------------------------------------------------------------------------
+# Group sync: a credential that is set but gives no access is a failed sync
+# ---------------------------------------------------------------------------
+
+
+class _NoTokenEntra(EntraAdapter):
+    """Entra whose token request returns no token, as it does for a client secret Entra refuses.
+
+    MSAL pins an https authority at login.microsoftonline.com, so the token endpoint
+    cannot be a loopback server. ``_get_token`` is the seam where its answer arrives.
+    """
+
+    def _get_token(self) -> str | None:
+        return None
+
+
+def _assert_credential_failed_sync(
+    *,
+    audit_events: list[dict],
+    group_store: GroupStore,
+    registry: OIDCProviderRegistry,
+    result: dict,
+) -> None:
+    """The sync recorded a failed run that blames the credential, and stored no group."""
+    stored = registry.get("sso")
+    assert stored is not None
+    assert stored.last_sync_status == "error"
+    assert stored.sync_error == result["error"]
+    assert "could not use the configured credential" in result["error"]
+    assert result["skipped"] is None
+    assert (result["created"], result["updated"], result["total"]) == (0, 0, 0)
+    assert group_store.list() == []
+    assert failure_line(audit_events, "list_all_groups")["error_type"] == "DirectoryCredentialError"
+
+
+class TestSyncCredentialGivesNoAccess:
+    async def test_an_entra_secret_that_gets_no_token_is_a_failed_sync(
+        self, tmp_path, audit_events: list[dict], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DFE_TEST_ENTRA_SECRET", "a-secret-entra-refuses")
+        provider = OIDCProvider(
+            type="entra_id",
+            issuer="https://login.microsoftonline.com/test-tenant/v2.0",
+            client_id="app-id",
+            groups=GroupResolutionConfig(
+                mode="api", tenant_id="test-tenant", client_secret_env="DFE_TEST_ENTRA_SECRET"
+            ),
+        )
+        registry = _sync_registry(tmp_path)
+        group_store = GroupStore(tmp_path / "groups")
+
+        result = await sync_provider("sso", registry, group_store, adapter=_NoTokenEntra(provider))
+
+        _assert_credential_failed_sync(
+            audit_events=audit_events, group_store=group_store, registry=registry, result=result
+        )
+
+    async def test_a_google_service_account_that_does_not_build_is_a_failed_sync(
+        self, tmp_path, audit_events: list[dict], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DFE_TEST_IDP_SA_JSON", '{"type": "service_account"}')
+        provider = OIDCProvider(
+            type="google",
+            issuer="https://accounts.google.com",
+            groups=GroupResolutionConfig(
+                mode="api", service_account_json_env="DFE_TEST_IDP_SA_JSON"
+            ),
+        )
+        registry = _sync_registry(tmp_path)
+        group_store = GroupStore(tmp_path / "groups")
+
+        result = await sync_provider("sso", registry, group_store, adapter=GoogleAdapter(provider))
+
+        _assert_credential_failed_sync(
+            audit_events=audit_events, group_store=group_store, registry=registry, result=result
+        )
+
+    async def test_an_okta_token_the_directory_refuses_is_a_failed_sync(
+        self, tmp_path, audit_events: list[dict]
+    ) -> None:
+        okta = LocalOkta(pages=[[]])
+        okta.fail_page = 0
+        okta.fail_status = 401
+        okta.fail_body = {"errorCode": "E0000011", "errorSummary": "Invalid token provided"}
+        okta.start()
+        registry = _sync_registry(tmp_path)
+        group_store = GroupStore(tmp_path / "groups")
+        try:
+            result = await sync_provider(
+                "sso", registry, group_store, adapter=_okta_adapter(okta.base_url)
+            )
+        finally:
+            okta.stop()
+
+        assert okta.pages_requested == [0]
+        _assert_failed_sync(registry=registry, result=result, group_store=group_store, status=401)
+        line = failure_line(audit_events, "list_all_groups")
+        assert (line["status"], line["code"]) == (401, "E0000011")
 
 
 # ---------------------------------------------------------------------------

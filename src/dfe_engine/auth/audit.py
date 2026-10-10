@@ -248,16 +248,6 @@ def audit_org_ch_provisioned(org_name: str, ch_user: str, databases: list[str]) 
     logger.info("org.ch.user_created", org_name=org_name, ch_user=ch_user, databases=databases)
 
 
-def audit_org_ch_failed(org_name: str, error: str) -> None:
-    """Emit an audit event when ClickHouse provisioning fails for an org.
-
-    Args:
-        org_name: Name of the org that failed provisioning.
-        error: Error description.
-    """
-    logger.warning("org.ch.provision_failed", org_name=org_name, error=error)
-
-
 def audit_org_hyperdx_provisioned(org_name: str, team_id: str) -> None:
     """Emit an audit event when a HyperDX team is created for an org.
 

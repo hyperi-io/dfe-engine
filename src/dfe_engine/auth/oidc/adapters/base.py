@@ -48,6 +48,8 @@ class OIDCGroupAdapter(ABC):
             DirectoryNotConfiguredError: The provider has no credential to
                 enumerate with.  Group sync reports that as its own state, never
                 as a directory with no groups.
+            DirectoryCredentialError: The credential is configured but gives no
+                access to the directory.  Group sync reports that as a failed run.
             Exception: Whatever the provider's API produced when a listing failed,
                 on any page. An empty or short list never means a failed one,
                 because group sync records what it is given as the whole directory.
