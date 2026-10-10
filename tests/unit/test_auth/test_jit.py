@@ -7,8 +7,9 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 import asyncio
+import gc
 import json
-from unittest.mock import patch
+import warnings
 
 import pytest
 
@@ -24,8 +25,12 @@ from dfe_engine.auth.jit import (
 )
 from dfe_engine.auth.models import AuthenticationError
 from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
+from dfe_engine.hyperdx.client import HyperDXClient
 from tests.support.failing_stores import StampFailingAccountStore
+from tests.support.loopback import CountingListener
 from tests.support.racing_stores import RacingAccountStore
+
+NO_LOOP_EVENT = "JIT HyperDX invite skipped - no running event loop"
 
 
 @pytest.fixture
@@ -38,6 +43,20 @@ def stores(tmp_path):
     groups.create("dfe-admins", roles=["admin"], source_id="dfe-admins")
     groups.create("dfe-analysts", roles=["data_analyst"], source_id="dfe-analysts")
     return accounts, groups
+
+
+def refusals(events: list[dict]) -> list[tuple[str, str, str]]:
+    """The (subject, provider, reason) of each login the provisioner audited as refused."""
+    return [
+        (e["user_id"], e["source_provider"], e["reason"])
+        for e in events
+        if e["event"] == "auth.jit.login_refused"
+    ]
+
+
+def created_org_ids(events: list[dict]) -> list[list[str]]:
+    """The org ids each account the provisioner audited as created was assigned to."""
+    return [e["org_ids"] for e in events if e["event"] == "auth.jit.account_created"]
 
 
 def external_account(store: AccountStore, username: str, provider: str, groups: list[str]):
@@ -257,18 +276,17 @@ class TestCrossIdentityRefusal:
         assert accounts.get(username).groups == ["acme-viewers"]
 
     @pytest.mark.parametrize("subject", ["apikey:ci", "apikey:"])
-    def test_a_subject_in_the_api_key_namespace_is_refused(self, stores, subject):
+    def test_a_subject_in_the_api_key_namespace_is_refused(self, stores, audit_events, subject):
         """A session subject there takes an API key's groups, so an IdP must never mint one."""
         accounts, groups = stores
         jit = JitProvisioner(account_store=accounts, group_store=groups)
 
-        with patch("dfe_engine.auth.jit.audit_jit_login_refused") as audited:
-            with pytest.raises(JitIdentityCollisionError) as refused:
-                jit.ensure_account(subject, ["dfe-admins"], "entra")
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account(subject, ["dfe-admins"], "entra")
 
         assert refused.value.reason == "api_key_subject"
         assert accounts.list() == []
-        audited.assert_called_once_with(subject, "entra", "api_key_subject")
+        assert refusals(audit_events) == [(subject, "entra", "api_key_subject")]
 
     def test_a_subject_that_is_the_providers_own_raw_name_reconciles_that_account(self, stores):
         """The session binds the raw-named account, so a stem-named shadow would be a second."""
@@ -347,17 +365,16 @@ class TestCrossIdentityRefusal:
         assert "jane" not in message
         assert refused.value.reason not in message
 
-    def test_the_refusal_is_audited(self, stores):
+    def test_the_refusal_is_audited(self, stores, audit_events):
         """A silent refusal is a security event nobody sees."""
         accounts, groups = stores
         accounts.create("jane-corp-com", "localpass", groups=["acme-viewers"])
         jit = JitProvisioner(account_store=accounts, group_store=groups)
 
-        with patch("dfe_engine.auth.jit.audit_jit_login_refused") as audited:
-            with pytest.raises(JitIdentityCollisionError):
-                jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
+        with pytest.raises(JitIdentityCollisionError):
+            jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
 
-        audited.assert_called_once_with("jane@corp.com", "entra", "local_account")
+        assert refusals(audit_events) == [("jane@corp.com", "entra", "local_account")]
 
 
 class TestOneStemTwoSubjects:
@@ -367,17 +384,16 @@ class TestOneStemTwoSubjects:
     SECOND = "alice-smith@corp"
     STEM = "alice-smith-corp"
 
-    def test_a_second_subject_on_the_stem_is_refused(self, stores):
+    def test_a_second_subject_on_the_stem_is_refused(self, stores, audit_events):
         accounts, groups = stores
         jit = JitProvisioner(account_store=accounts, group_store=groups)
         jit.ensure_account(self.FIRST, ["acme-viewers"], "entra", email="alice.smith@corp")
 
-        with patch("dfe_engine.auth.jit.audit_jit_login_refused") as audited:
-            with pytest.raises(JitIdentityCollisionError) as refused:
-                jit.ensure_account(self.SECOND, ["dfe-admins"], "entra", email="alice-smith@corp")
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account(self.SECOND, ["dfe-admins"], "entra", email="alice-smith@corp")
 
         assert refused.value.reason == "subject_mismatch"
-        audited.assert_called_once_with(self.SECOND, "entra", "subject_mismatch")
+        assert refusals(audit_events) == [(self.SECOND, "entra", "subject_mismatch")]
         stored = accounts.get(self.STEM)
         assert stored.groups == ["acme-viewers"]
         assert stored.email == "alice.smith@corp"
@@ -631,16 +647,15 @@ class TestSourceProviderBinding:
         assert refused.value.reason == "protected_account"
         assert accounts.get(protected).groups == []
 
-    def test_the_refusal_is_audited(self, stores):
+    def test_the_refusal_is_audited(self, stores, audit_events):
         accounts, groups = stores
         scim_account(accounts, "jane-corp-com")
         jit = JitProvisioner(account_store=accounts, group_store=groups)
 
-        with patch("dfe_engine.auth.jit.audit_jit_login_refused") as audited:
-            with pytest.raises(JitIdentityCollisionError):
-                jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
+        with pytest.raises(JitIdentityCollisionError):
+            jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
 
-        audited.assert_called_once_with("jane@corp.com", "entra", "provider_mismatch")
+        assert refusals(audit_events) == [("jane@corp.com", "entra", "provider_mismatch")]
 
 
 class TestRecoveryCredentialFloor:
@@ -664,17 +679,16 @@ class TestRecoveryCredentialFloor:
         assert stored.last_login_at == ""
 
     @pytest.mark.parametrize("protected", ["admin", BREAKGLASS_USERNAME])
-    def test_a_recovery_name_is_never_created(self, stores, protected):
+    def test_a_recovery_name_is_never_created(self, stores, audit_events, protected):
         """Refused before the store is read, so the name cannot be squatted either."""
         accounts, groups = stores
         jit = JitProvisioner(account_store=accounts, group_store=groups)
 
-        with patch("dfe_engine.auth.jit.audit_jit_login_refused") as audited:
-            with pytest.raises(JitIdentityCollisionError):
-                jit.ensure_account(protected, ["dfe-admins"], "entra")
+        with pytest.raises(JitIdentityCollisionError):
+            jit.ensure_account(protected, ["dfe-admins"], "entra")
 
         assert accounts.get(protected) is None
-        audited.assert_called_once_with(protected, "entra", "protected_account")
+        assert refusals(audit_events) == [(protected, "entra", "protected_account")]
 
     def test_the_floor_holds_even_when_the_provider_matches(self, stores):
         """Independent of the identity guard: a mis-seeded external admin is still refused."""
@@ -700,18 +714,19 @@ class TestRecoveryCredentialFloor:
         assert accounts.get("operator").groups == ["dfe-admins"]
 
     @pytest.mark.parametrize("admin_name", ["ops_admin", "Ops.Admin"])
-    def test_the_floor_follows_a_renamed_admin_whose_name_sanitises_away(self, stores, admin_name):
+    def test_the_floor_follows_a_renamed_admin_whose_name_sanitises_away(
+        self, stores, audit_events, admin_name
+    ):
         """The session looks up the raw name first, so the floor holds the raw form too."""
         accounts, groups = stores
         jit = JitProvisioner(account_store=accounts, group_store=groups, admin_name=admin_name)
 
-        with patch("dfe_engine.auth.jit.audit_jit_login_refused") as audited:
-            with pytest.raises(JitIdentityCollisionError) as refused:
-                jit.ensure_account(admin_name, ["dfe-admins"], "entra")
+        with pytest.raises(JitIdentityCollisionError) as refused:
+            jit.ensure_account(admin_name, ["dfe-admins"], "entra")
 
         assert refused.value.reason == "protected_account"
         assert accounts.get(jit.sanitise_username(admin_name)) is None
-        audited.assert_called_once_with(admin_name, "entra", "protected_account")
+        assert refusals(audit_events) == [(admin_name, "entra", "protected_account")]
 
     @pytest.mark.parametrize("subject", ["ADMIN", "_admin_", ".admin.", "admin!"])
     def test_a_subject_that_sanitises_onto_a_recovery_name_is_refused(self, stores, subject):
@@ -815,30 +830,30 @@ class TestHdxInviteScheduling:
         await asyncio.gather(*jit._invite_tasks)
         assert hdx.invited == ["jane@corp.com"]
 
-    def test_no_running_loop_logs_and_leaves_no_coroutine(self, stores):
+    def test_no_running_loop_logs_and_leaves_no_coroutine(self, stores, audit_events):
         """Off a loop the invite cannot run, so say whose it was."""
         accounts, groups = stores
-        jit = JitProvisioner(
-            account_store=accounts,
-            group_store=groups,
-            hyperdx_client=_RecordingHdx(),
-        )
+        hyperdx = CountingListener()
+        try:
+            client = HyperDXClient(base_url=f"http://127.0.0.1:{hyperdx.port}", api_key="k")
+            jit = JitProvisioner(account_store=accounts, group_store=groups, hyperdx_client=client)
 
-        with (
-            patch.object(JitProvisioner, "_invite_to_hdx") as never_built,
-            patch("dfe_engine.auth.jit.logger") as mock_logger,
-        ):
-            account = jit.ensure_account("jane@corp.com", ["acme-viewers"], "entra")
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                account = jit.ensure_account("jane@corp.com", ["acme-viewers"], "entra")
+                # A coroutine built and dropped warns when it is collected.
+                gc.collect()
+        finally:
+            hyperdx.close()
 
-        # Not called means the coroutine was never constructed, so none is left
-        # un-awaited for the garbage collector to complain about.
-        never_built.assert_not_called()
+        assert [str(w.message) for w in caught if "never awaited" in str(w.message)] == []
+        assert hyperdx.connections == 0
         assert jit._invite_tasks == set()
         assert account is not None
 
-        warning = mock_logger.warning.call_args
-        assert warning.kwargs["user_id"] == "jane@corp.com"
-        assert warning.kwargs["team_name"] == "customer-acme"
+        (skipped,) = [e for e in audit_events if e["event"] == NO_LOOP_EVENT]
+        assert skipped["user_id"] == "jane@corp.com"
+        assert skipped["team_name"] == "customer-acme"
 
 
 class TestResolveHyperdxTeam:
@@ -922,27 +937,25 @@ class TestResolveHyperdxTeam:
 
 
 class TestOrgIdsFromGroupGuids:
-    def test_org_ids_resolve_through_the_source_id(self, stores):
+    def test_org_ids_resolve_through_the_source_id(self, stores, audit_events):
         accounts, groups = stores
         groups.update("acme-viewers", source_id="7b1d0f3e-0000-4000-8000-000000000001")
         jit = JitProvisioner(account_store=accounts, group_store=groups)
 
-        with patch("dfe_engine.auth.jit.audit_jit_account_created") as audit:
-            jit.ensure_account("guid-123", ["7b1d0f3e-0000-4000-8000-000000000001"], "entra")
+        jit.ensure_account("guid-123", ["7b1d0f3e-0000-4000-8000-000000000001"], "entra")
 
-        assert audit.call_args.args[3] == ["acme"]
+        assert created_org_ids(audit_events) == [["acme"]]
 
-    def test_an_org_scoped_group_without_org_ids_audits_its_owning_org(self, stores):
+    def test_an_org_scoped_group_without_org_ids_audits_its_owning_org(self, stores, audit_events):
         accounts, groups = stores
         groups.create(
             "globex-viewers", roles=["org_viewer"], scope="org:globex", source_id="globex-viewers"
         )
         jit = JitProvisioner(account_store=accounts, group_store=groups)
 
-        with patch("dfe_engine.auth.jit.audit_jit_account_created") as audit:
-            jit.ensure_account("guid-123", ["globex-viewers"], "entra")
+        jit.ensure_account("guid-123", ["globex-viewers"], "entra")
 
-        assert audit.call_args.args[3] == ["globex"]
+        assert created_org_ids(audit_events) == [["globex"]]
 
 
 class VanishedRaceAccountStore(AccountStore):

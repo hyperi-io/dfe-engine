@@ -285,7 +285,7 @@ async def oidc_callback(
         except Exception as exc:
             # A token minted with no account behind it cannot be disabled locally.
             logger.exception("JIT provisioning failed", user_id=identity.subject)
-            audit_jit_failed(identity.subject, repr(exc))
+            audit_jit_failed(identity.subject, exc)
             raise HTTPException(
                 status_code=503,
                 detail={

@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, TypedDict
 
 from dfe_engine.auth.oidc.models import OIDCProvider
-from dfe_engine.auth.oidc.sync import SyncOutcome
+from dfe_engine.auth.oidc.sync import NOT_CONFIGURED_MESSAGE, SyncOutcome
 from tests.unit.test_auth.factories import make_oidc_provider
 
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
@@ -95,6 +95,17 @@ SYNC_OUTCOME_CASES: list[SyncOutcomeCase] = [
         "id": "some_groups_skipped",
         "expected_outcome": "partial",
         "result": {"created": 1, "error": None, "groups_skipped": 1, "updated": 0},
+    },
+    {
+        "id": "no_directory_credential",
+        "expected_outcome": "not_configured",
+        "result": {
+            "created": 0,
+            "error": None,
+            "groups_skipped": 0,
+            "skipped": NOT_CONFIGURED_MESSAGE,
+            "updated": 0,
+        },
     },
     {
         "id": "the_run_failed",

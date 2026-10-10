@@ -32,6 +32,7 @@ from scalo.logger import logger
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.credential_env import resolve_credential
 from dfe_engine.auth.oidc.idp_errors import (
+    DirectoryNotConfiguredError,
     describe_idp_error,
     idp_failure_message,
     provider_error_code,
@@ -50,6 +51,11 @@ class GraphCredentials:
     client_id: str
     client_secret: str
     tenant_id: str
+
+    @property
+    def configured(self) -> bool:
+        """Whether all three are set, which is what a token request needs."""
+        return bool(self.tenant_id and self.client_id and self.client_secret)
 
 
 def graph_credentials(*, provider: OIDCProvider, secrets: DfeSecrets | None) -> GraphCredentials:
@@ -86,7 +92,8 @@ class EntraAdapter(OIDCGroupAdapter):
     credentials or API errors log a warning and return an unfriendly fallback
     rather than propagating exceptions.  This keeps authentication working even
     when the group resolution API is unreachable.  ``list_all_groups`` is not on
-    the login path and raises when Graph fails mid-listing.
+    the login path and raises when the credentials are not configured and when
+    Graph fails mid-listing.
     """
 
     GRAPH_BASE = "https://graph.microsoft.com/v1.0"
@@ -195,16 +202,21 @@ class EntraAdapter(OIDCGroupAdapter):
         following ``@odata.nextLink`` until all pages are consumed.
 
         Returns:
-            List of GroupInfo objects.  Returns an empty list when credentials
-            are missing.
+            List of GroupInfo objects.  Returns an empty list when the
+            credentials are set but Entra issues no token for them.
 
         Raises:
+            DirectoryNotConfiguredError: The tenant id, client id or client
+                secret is not configured.
             Exception: Whatever the client raised on a page Graph did not serve.
                 A listing cut short is never returned: group sync would record
                 the groups read so far as the whole tenant.
         """
         token = self._get_token()
         if token is None:
+            credentials = graph_credentials(provider=self._provider, secrets=self._secrets)
+            if not credentials.configured:
+                raise DirectoryNotConfiguredError
             logger.warning(
                 "Entra list_all_groups: no token available -- returning empty list",
                 provider=self._provider.issuer,
@@ -289,11 +301,7 @@ class EntraAdapter(OIDCGroupAdapter):
             Access token string, or None if credentials are unavailable.
         """
         credentials = graph_credentials(provider=self._provider, secrets=self._secrets)
-        if (
-            not (credentials.tenant_id)
-            or not (credentials.client_id)
-            or not (credentials.client_secret)
-        ):
+        if not credentials.configured:
             return None
 
         authority = f"https://login.microsoftonline.com/{credentials.tenant_id}"

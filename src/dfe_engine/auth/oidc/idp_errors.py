@@ -24,7 +24,16 @@ import socket
 import ssl
 
 # A provider error code is a short token; anything longer in a code slot may be prose naming the user.
-_CODE = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")
+# ``\Z``, not ``$``: ``$`` also matches before a trailing newline.
+_CODE = re.compile(r"^[A-Za-z0-9_.\-]{1,64}\Z")
+
+
+class DirectoryNotConfiguredError(Exception):
+    """A provider's directory cannot be listed because no credential for it is configured.
+
+    An adapter raises this from ``list_all_groups`` instead of returning an empty list,
+    so group sync can tell a directory it never read from one that has no groups.
+    """
 
 
 def _google_http_error_status(exc: BaseException) -> tuple[int | None, object]:
