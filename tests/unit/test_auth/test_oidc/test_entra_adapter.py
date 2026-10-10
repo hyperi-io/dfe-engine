@@ -16,8 +16,6 @@ Tests that require a live Entra / Microsoft Graph endpoint are marked
 ``@pytest.mark.skip(reason="Needs Entra sandbox")``.
 """
 
-from __future__ import annotations
-
 import pytest
 
 from dfe_engine.auth.oidc.adapters.entra import EntraAdapter, graph_credentials
@@ -256,6 +254,41 @@ class TestTestConnectionNoCredentials:
             keyword in message.lower()
             for keyword in ("credential", "token", "configure", "missing", "env")
         )
+
+
+class TestTestConnectionCredentialState:
+    """A credential nobody set and one Entra will not issue a token for are different faults."""
+
+    @pytest.mark.parametrize(
+        "missing", ["ENTRA_CLIENT_ID", "ENTRA_TENANT_ID", "ENTRA_CLIENT_SECRET"]
+    )
+    async def test_a_credential_that_is_not_set_reads_as_not_configured(self, monkeypatch, missing):
+        for name in ("ENTRA_CLIENT_ID", "ENTRA_TENANT_ID", "ENTRA_CLIENT_SECRET"):
+            monkeypatch.setenv(name, "set")
+        monkeypatch.delenv(missing)
+
+        success, message = await EntraAdapter(_make_provider()).test_connection()
+
+        assert success is False
+        assert "not configured" in message
+        assert "could not use the configured credential" not in message
+
+    async def test_a_credential_that_is_set_but_gets_no_token_reads_as_unusable(self, monkeypatch):
+        for name in ("ENTRA_CLIENT_ID", "ENTRA_TENANT_ID", "ENTRA_CLIENT_SECRET"):
+            monkeypatch.setenv(name, "set")
+        adapter = EntraAdapter(_make_provider())
+        # MSAL pins an https authority at login.microsoftonline.com, so Entra's refusal
+        # cannot come from a loopback server: it arrives as the token call returning None.
+        adapter._get_token = lambda: None  # type: ignore[method-assign]
+
+        success, message = await adapter.test_connection()
+
+        assert success is False
+        assert message == (
+            "Graph API could not use the configured credential: check it is current "
+            "and valid; the engine log has the reason"
+        )
+        assert "not configured" not in message
 
 
 # ---------------------------------------------------------------------------

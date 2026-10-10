@@ -237,17 +237,6 @@ def audit_org_change(
     )
 
 
-def audit_org_ch_provisioned(org_name: str, ch_user: str, databases: list[str]) -> None:
-    """Emit an audit event when a ClickHouse user is created for an org.
-
-    Args:
-        org_name: Name of the org being provisioned.
-        ch_user: ClickHouse username created.
-        databases: List of databases the user was granted access to.
-    """
-    logger.info("org.ch.user_created", org_name=org_name, ch_user=ch_user, databases=databases)
-
-
 def audit_org_hyperdx_provisioned(org_name: str, team_id: str) -> None:
     """Emit an audit event when a HyperDX team is created for an org.
 

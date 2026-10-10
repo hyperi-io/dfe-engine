@@ -29,7 +29,6 @@ from dfe_engine.auth.audit import (
     audit_jit_team_assigned,
     audit_login_denied,
     audit_login_success,
-    audit_org_ch_provisioned,
     audit_org_change,
     audit_org_hyperdx_failed,
     audit_org_hyperdx_provisioned,
@@ -328,29 +327,6 @@ class TestAuditOrgChange:
         audit_org_change(admin_id="admin", org_name="acme", change="deleted")
         _, kwargs = mock_logger.info.call_args
         assert kwargs["details"] is None
-
-
-class TestAuditOrgChProvisioned:
-    @patch("dfe_engine.auth.audit.logger")
-    def test_emits_info_event(self, mock_logger):
-        audit_org_ch_provisioned(org_name="acme", ch_user="acme_ro", databases=["acme_db"])
-        mock_logger.info.assert_called_once()
-
-    @patch("dfe_engine.auth.audit.logger")
-    def test_event_name(self, mock_logger):
-        audit_org_ch_provisioned(org_name="acme", ch_user="acme_ro", databases=["acme_db"])
-        args, _ = mock_logger.info.call_args
-        assert args[0] == "org.ch.user_created"
-
-    @patch("dfe_engine.auth.audit.logger")
-    def test_structured_fields(self, mock_logger):
-        audit_org_ch_provisioned(
-            org_name="acme", ch_user="acme_ro", databases=["acme_db", "shared"]
-        )
-        _, kwargs = mock_logger.info.call_args
-        assert kwargs["org_name"] == "acme"
-        assert kwargs["ch_user"] == "acme_ro"
-        assert kwargs["databases"] == ["acme_db", "shared"]
 
 
 class TestAuditOrgHyperdxProvisioned:

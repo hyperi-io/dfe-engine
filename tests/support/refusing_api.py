@@ -32,6 +32,11 @@ def _handler_for(*, api: LocalRefusingApi) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(encoded)
 
+        def do_POST(self) -> None:
+            """Read the request body, then refuse as a GET does: a token endpoint is a POST."""
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            self.do_GET()
+
         def log_message(self, format: str, *args: object) -> None:
             """Keep request logging out of the test output."""
 
@@ -39,7 +44,7 @@ def _handler_for(*, api: LocalRefusingApi) -> type[BaseHTTPRequestHandler]:
 
 
 class LocalRefusingApi:
-    """An identity provider API stand-in on 127.0.0.1 that answers every GET with one refusal.
+    """An identity provider API stand-in on 127.0.0.1 that answers every GET and POST with one refusal.
 
     ``status`` and ``body`` are the answer. ``paths`` records the path and query of
     each request as the client sent it.

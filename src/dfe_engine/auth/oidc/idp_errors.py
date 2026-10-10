@@ -45,18 +45,39 @@ class DirectoryCredentialError(Exception):
     """
 
 
-def _google_http_error_status(exc: BaseException) -> tuple[int | None, object]:
-    """The status and parsed body of a googleapiclient ``HttpError``, else ``(None, None)``."""
+def _google_error_status(exc: BaseException) -> tuple[int | None, object]:
+    """The status and parsed body of a Google client's error, else ``(None, None)``.
+
+    A googleapiclient ``HttpError`` carries both. A google-auth ``RefreshError`` has no
+    status and keeps the token endpoint's parsed answer as its second argument.
+    """
     try:
+        from google.auth.exceptions import RefreshError  # type: ignore[import-untyped]
         from googleapiclient.errors import HttpError  # type: ignore[import-untyped]
     except ImportError:
         return None, None
+    if isinstance(exc, RefreshError):
+        return None, exc.args[1] if len(exc.args) > 1 else None
     if not isinstance(exc, HttpError):
         return None, None
     try:
         return exc.status_code, json.loads(exc.content)
     except ValueError:
         return exc.status_code, None
+
+
+def _is_google_token_refusal(exc: BaseException) -> bool:
+    """Whether Google's token endpoint refused the service account, rather than failing itself.
+
+    google-auth raises ``RefreshError`` for every answer but 200, and marks the ones a
+    retry may clear (a 5xx, ``temporarily_unavailable``) ``retryable``. Those are the
+    provider failing, not the credential being refused.
+    """
+    try:
+        from google.auth.exceptions import RefreshError  # type: ignore[import-untyped]
+    except ImportError:
+        return False
+    return isinstance(exc, RefreshError) and not exc.retryable
 
 
 def _status_and_body(exc: BaseException) -> tuple[int | None, object]:
@@ -77,7 +98,7 @@ def _status_and_body(exc: BaseException) -> tuple[int | None, object]:
     oauth_error = getattr(exc, "error", None)
     if isinstance(oauth_error, str):
         return None, {"error": oauth_error}
-    return _google_http_error_status(exc)
+    return _google_error_status(exc)
 
 
 def _transport_failure(exc: BaseException) -> str:
@@ -162,6 +183,14 @@ def describe_idp_error(exc: BaseException) -> dict[str, object]:
     return fields
 
 
+def credential_failure_message(*, service: str) -> str:
+    """What an API caller is told when ``service`` gives no access to the configured credential."""
+    return (
+        f"{service} could not use the configured credential: check it is current "
+        "and valid; the engine log has the reason"
+    )
+
+
 def idp_failure_message(exc: BaseException, *, service: str) -> str:
     """What an API caller is told about a failed IdP call: its status class, never the provider's text.
 
@@ -171,14 +200,12 @@ def idp_failure_message(exc: BaseException, *, service: str) -> str:
 
     Returns:
         A message naming ``service`` and the HTTP status, pointing at the engine log.
-        A :class:`DirectoryCredentialError` has no status, and its message says the
-        configured credential gave no access, not that the service was unreachable.
+        A :class:`DirectoryCredentialError` and a Google token refusal have no status,
+        and their message says the configured credential gave no access, not that the
+        service was unreachable.
     """
-    if isinstance(exc, DirectoryCredentialError):
-        return (
-            f"{service} could not use the configured credential: check it is current "
-            "and valid; the engine log has the reason"
-        )
+    if isinstance(exc, DirectoryCredentialError) or _is_google_token_refusal(exc):
+        return credential_failure_message(service=service)
     status, _body = _status_and_body(exc)
     if status is None:
         return f"{service} could not be reached; the engine log has the reason"
