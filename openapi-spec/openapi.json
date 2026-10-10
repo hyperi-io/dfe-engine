@@ -26196,6 +26196,21 @@
             "description": "Env var name for the RP client secret used in the auth-code exchange",
             "default": ""
           },
+          "scopes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scopes",
+            "description": "OAuth scopes requested at login, one scope per entry; must include openid. One space-separated string is accepted too, and a blank one is no override. Omit for the provider type's default: openid email profile, plus groups for generic and okta, and https://www.googleapis.com/auth/cloud-identity.groups.readonly for google, which reads each user's groups with their own token. Google and Entra ID fail a login that asks for groups."
+          },
           "groups": {
             "$ref": "#/components/schemas/GroupResolutionRequest"
           }
@@ -27739,11 +27754,6 @@
             "title": "Service Account Json Path",
             "default": ""
           },
-          "admin_email": {
-            "type": "string",
-            "title": "Admin Email",
-            "default": ""
-          },
           "domain": {
             "type": "string",
             "title": "Domain",
@@ -27824,7 +27834,7 @@
           "service_account_json": {
             "type": "string",
             "title": "Service Account Json",
-            "description": "Google service account JSON. Write-only: it goes to the secret store and only its path is kept in config.",
+            "description": "Optional Google service account JSON, for the group sync and for logins whose own token cannot read their groups. It acts as itself, so the org's admin must assign it a groups admin role. Write-only: it goes to the secret store and only its path is kept in config.",
             "default": ""
           },
           "service_account_json_env": {
@@ -27833,16 +27843,10 @@
             "description": "Env var for Google SA JSON",
             "default": ""
           },
-          "admin_email": {
-            "type": "string",
-            "title": "Admin Email",
-            "description": "Google Workspace admin email",
-            "default": ""
-          },
           "domain": {
             "type": "string",
             "title": "Domain",
-            "description": "Google Workspace domain",
+            "description": "Google Workspace domain the service account syncs",
             "default": ""
           },
           "tenant_id": {
@@ -27917,10 +27921,6 @@
             "type": "string",
             "title": "Service Account Json Path"
           },
-          "admin_email": {
-            "type": "string",
-            "title": "Admin Email"
-          },
           "domain": {
             "type": "string",
             "title": "Domain"
@@ -27962,7 +27962,6 @@
           "enrich_on_login",
           "service_account_json_env",
           "service_account_json_path",
-          "admin_email",
           "domain",
           "tenant_id",
           "tenant_id_env",
@@ -30424,7 +30423,7 @@
           "scopes": {
             "type": "string",
             "title": "Scopes",
-            "default": "openid email profile groups"
+            "default": ""
           },
           "groups": {
             "$ref": "#/components/schemas/GroupResolutionConfig"
@@ -32933,6 +32932,14 @@
             "type": "string",
             "title": "Client Secret Path"
           },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes",
+            "description": "OAuth scopes requested at login"
+          },
           "groups": {
             "$ref": "#/components/schemas/GroupResolutionResponse"
           },
@@ -32964,6 +32971,7 @@
           "client_id_env",
           "client_secret_env",
           "client_secret_path",
+          "scopes",
           "groups",
           "created_at",
           "last_sync_at",
@@ -39887,6 +39895,21 @@
             ],
             "title": "Client Secret Env",
             "description": "Env var name for the RP client secret"
+          },
+          "scopes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scopes",
+            "description": "Replace the OAuth scopes requested at login, one scope per entry; must include openid. One space-separated string is accepted too, and a blank one leaves the scopes as they are."
           },
           "groups": {
             "anyOf": [

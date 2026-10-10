@@ -217,6 +217,31 @@ async def test_the_authorization_url_carries_an_s256_challenge_of_the_kept_verif
     assert len(rv["code_verifier"]) >= 43
 
 
+@pytest.mark.parametrize(
+    ("provider_type", "scope"),
+    [
+        (
+            "google",
+            "openid email profile https://www.googleapis.com/auth/cloud-identity.groups.readonly",
+        ),
+        ("generic", "openid email profile groups"),
+    ],
+)
+async def test_the_authorization_url_asks_for_the_type_default_scopes(
+    tmp_path, provider_type, scope
+):
+    """Google refuses a ``groups`` scope and reads groups with Cloud Identity, so it asks for that instead."""
+    registry = OIDCProviderRegistry(tmp_path / "oidc-providers")
+    registry.create(
+        "idp", OIDCProvider(type=provider_type, issuer="https://idp.example", client_id="c")
+    )
+    client = _registered_client(_rp_with_known_idp(registry, "idp"), "idp")
+
+    rv = await client.create_authorization_url("https://dfe.example/api/v1/auth/oidc/idp/callback")
+
+    assert parse_qs(urlsplit(rv["url"]).query)["scope"] == [scope]
+
+
 def test_the_login_route_hands_out_a_pkce_authorization_url(client, app):
     app.state.oidc_provider_registry.create(
         "pkce-idp", OIDCProvider(type="generic", issuer="https://idp.example", client_id="c")

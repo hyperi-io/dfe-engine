@@ -30,36 +30,6 @@ from dfe_engine.auth.oidc.models import GroupInfo
 class OktaAdapter(OIDCGroupAdapter):
     """Okta Groups API adapter."""
 
-    async def resolve_groups(self, group_ids: list[str]) -> dict[str, str]:
-        """Resolve Okta group IDs to display names."""
-        if not group_ids:
-            return {}
-
-        base, headers = self._api_base_and_headers()
-        if base is None or headers is None:
-            return {gid: gid for gid in group_ids}
-
-        from scalo.http import AsyncHttpClient
-
-        result: dict[str, str] = {}
-        async with AsyncHttpClient() as client:
-            for gid in group_ids:
-                url = f"{base}/groups/{gid}"
-                try:
-                    response = await client.get(url, headers=headers)
-                    data = response.json()
-                    profile = data.get("profile") or {}
-                    name = profile.get("name") or profile.get("description") or gid
-                    result[gid] = name
-                except Exception as exc:
-                    logger.warning(
-                        "Okta resolve_groups: failed to resolve group",
-                        group_id=gid,
-                        error=str(exc),
-                    )
-                    result[gid] = gid
-        return result
-
     async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo]:
         """List groups for a user (Okta user id or login)."""
         if not directory_id:

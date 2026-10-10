@@ -21,23 +21,6 @@ def _generic_provider() -> OIDCProvider:
     )
 
 
-class TestGenericAdapterResolveGroups:
-    async def test_resolve_groups_returns_empty_list(self):
-        adapter = GenericAdapter(_generic_provider())
-        result = await adapter.resolve_groups("user@example.com")
-        assert result == []
-
-    async def test_resolve_groups_with_empty_subject(self):
-        adapter = GenericAdapter(_generic_provider())
-        result = await adapter.resolve_groups("")
-        assert result == []
-
-    async def test_resolve_groups_returns_list_type(self):
-        adapter = GenericAdapter(_generic_provider())
-        result = await adapter.resolve_groups("any-subject")
-        assert isinstance(result, list)
-
-
 class TestGenericAdapterListAllGroups:
     async def test_list_all_groups_returns_empty_list(self):
         adapter = GenericAdapter(_generic_provider())
