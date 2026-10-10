@@ -26,7 +26,6 @@ def _make_google_provider() -> OIDCProvider:
         groups=GroupResolutionConfig(
             mode="api",
             service_account_json_env="GOOGLE_SA_JSON",
-            admin_email="admin@example.com",
             domain="example.com",
         ),
     )

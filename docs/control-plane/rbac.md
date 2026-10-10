@@ -554,11 +554,12 @@ groups:
   mode: "api"            # manual | token_claim | api (google: api only)
   sync_interval: 3600
   enrich_on_login: true  # required for google: its tokens carry no groups
-  # Google-specific
+  # Google, optional: a service account holding a groups admin role, for sync
   service_account_json_path: "oidc/google-workspace/groups_service_account_json"
-  admin_email: "admin@example.com"
   domain: "example.com"
 ```
+
+A Google login reads the user's groups from Cloud Identity with that login's own token (scope `cloud-identity.groups.readonly`, Cloud Identity API enabled in the OAuth client's project). A group file links on `source_id`, the id after `groups/` in the group's resource name.
 
 Config holds a secret PATH into the `DfeSecrets` seam, or the NAME of an env var
 (`client_id_env`, `client_secret_env`, `service_account_json_env`) — never a
@@ -571,7 +572,7 @@ environment, so an ESO-mounted variable keeps working.
 | Adapter | Status | Admin API | Group sync |
 |---------|--------|-----------|------------|
 | Generic | Done | None | No (use `token_claim` mode) |
-| Google | Done | Admin SDK `groups().list()` | Yes — full pagination |
+| Google | Done | Cloud Identity as the user at login; Admin SDK `groups().list()` as an optional service account | Only with a service account |
 | Entra ID | Done | Graph API `/groups` | Yes — `$top=999` pagination |
 | Okta | Done | Groups API `/api/v1/groups` | Yes — `Link` header pagination |
 

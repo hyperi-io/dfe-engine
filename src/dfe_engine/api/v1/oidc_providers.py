@@ -67,8 +67,9 @@ _SCOPE_TOKEN = re.compile(r"[\x21\x23-\x5B\x5D-\x7E]+\Z")
 _SCOPES_HELP = (
     "OAuth scopes requested at login, one scope per entry; must include openid. Omit "
     "for the provider type's default: openid email profile, plus groups for generic "
-    "and okta. Google and Entra ID deliver groups without a scope and fail a login "
-    "that asks for one."
+    "and okta, and https://www.googleapis.com/auth/cloud-identity.groups.readonly for "
+    "google, which reads each user's groups with their own token. Google and Entra ID "
+    "fail a login that asks for groups."
 )
 
 # Each directory secret a groups block can carry: its request field, its secret-store field and the config field that keeps the path.
@@ -114,12 +115,13 @@ class GroupResolutionRequest(BaseModel):
     )
     service_account_json: str = Field(
         default="",
-        description="Google service account JSON. Write-only: it goes to the secret "
-        "store and only its path is kept in config.",
+        description="Optional Google service account JSON, for the group sync and for "
+        "logins whose own token cannot read their groups. It acts as itself, so the "
+        "org's admin must assign it a groups admin role. Write-only: it goes to the "
+        "secret store and only its path is kept in config.",
     )
     service_account_json_env: str = Field(default="", description="Env var for Google SA JSON")
-    admin_email: str = Field(default="", description="Google Workspace admin email")
-    domain: str = Field(default="", description="Google Workspace domain")
+    domain: str = Field(default="", description="Google Workspace domain the service account syncs")
     tenant_id: str = Field(
         default="", description="Entra ID tenant ID. Not a secret, so it is stored in config."
     )
@@ -244,7 +246,6 @@ class GroupResolutionResponse(BaseModel):
     enrich_on_login: bool
     service_account_json_env: str
     service_account_json_path: str
-    admin_email: str
     domain: str
     tenant_id: str
     tenant_id_env: str
@@ -371,7 +372,6 @@ def _provider_to_response(name: str, provider: OIDCProvider) -> ProviderResponse
             enrich_on_login=p.groups.enrich_on_login,
             service_account_json_env=p.groups.service_account_json_env,
             service_account_json_path=p.groups.service_account_json_path,
-            admin_email=p.groups.admin_email,
             domain=p.groups.domain,
             tenant_id=p.groups.tenant_id,
             tenant_id_env=p.groups.tenant_id_env,

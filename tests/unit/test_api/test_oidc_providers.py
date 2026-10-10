@@ -713,11 +713,9 @@ class TestCredentialsGoToTheSecretStore:
         assert not app.state.dfe_secrets.exists("oidc/gone/client_secret")
 
 
-_GOOGLE = {
-    "type": "google",
-    "issuer": "https://accounts.google.com",
-    "groups": {"admin_email": "admin@acme.com", "mode": "api", "service_account_json_env": "SA"},
-}
+# No service account and no admin: a Google provider logs in on the user's own token.
+_GOOGLE = {"type": "google", "issuer": "https://accounts.google.com", "groups": {"mode": "api"}}
+_CLOUD_IDENTITY_SCOPE = "https://www.googleapis.com/auth/cloud-identity.groups.readonly"
 
 
 class TestScopes:
@@ -726,7 +724,7 @@ class TestScopes:
     @pytest.mark.parametrize(
         ("overrides", "expected"),
         [
-            (_GOOGLE, ["openid", "email", "profile"]),
+            (_GOOGLE, ["openid", "email", "profile", _CLOUD_IDENTITY_SCOPE]),
             ({"type": "entra_id"}, ["openid", "email", "profile"]),
             ({"type": "generic"}, ["openid", "email", "profile", "groups"]),
             ({"type": "okta"}, ["openid", "email", "profile", "groups"]),
@@ -743,7 +741,7 @@ class TestScopes:
     def test_google_reaches_the_rp_without_a_groups_scope(self, client, app, admin_headers):
         _create_provider(client, admin_headers, name="gws", **_GOOGLE)
         registered = app.state.oidc_rp._oauth.create_client("gws")
-        assert registered.client_kwargs["scope"] == "openid email profile"
+        assert registered.client_kwargs["scope"] == f"openid email profile {_CLOUD_IDENTITY_SCOPE}"
 
     def test_create_takes_an_override(self, client, app, admin_headers):
         resp = _create_provider(
@@ -1032,14 +1030,17 @@ class TestProviderFieldRules:
             name="gws",
             type="google",
             issuer="https://accounts.google.com",
-            groups={
-                "admin_email": "admin@acme.com",
-                "mode": "api",
-                "service_account_json_env": "GOOGLE_SA_JSON",
-            },
+            groups={"mode": "api", "service_account_json_env": "GOOGLE_SA_JSON"},
         )
         assert resp.status_code == 201, resp.text
         assert resp.json()["groups"]["enrich_on_login"] is True
+
+    def test_google_needs_no_service_account_and_names_no_admin(self, client, app, admin_headers):
+        resp = _create_provider(client, admin_headers, name="gws-bare", **_GOOGLE)
+        assert resp.status_code == 201, resp.text
+        assert "admin_email" not in resp.json()["groups"]
+        stored = app.state.oidc_provider_registry.get("gws-bare").groups
+        assert (stored.service_account_json_path, stored.service_account_json_env) == ("", "")
 
     def test_an_update_is_not_refused_for_an_issuer_it_cannot_set(self, client, app, admin_headers):
         from dfe_engine.auth.oidc.models import OIDCProvider

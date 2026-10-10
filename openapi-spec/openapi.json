@@ -26209,7 +26209,7 @@
               }
             ],
             "title": "Scopes",
-            "description": "OAuth scopes requested at login, one scope per entry; must include openid. Omit for the provider type's default: openid email profile, plus groups for generic and okta. Google and Entra ID deliver groups without a scope and fail a login that asks for one."
+            "description": "OAuth scopes requested at login, one scope per entry; must include openid. Omit for the provider type's default: openid email profile, plus groups for generic and okta, and https://www.googleapis.com/auth/cloud-identity.groups.readonly for google, which reads each user's groups with their own token. Google and Entra ID fail a login that asks for groups."
           },
           "groups": {
             "$ref": "#/components/schemas/GroupResolutionRequest"
@@ -27754,11 +27754,6 @@
             "title": "Service Account Json Path",
             "default": ""
           },
-          "admin_email": {
-            "type": "string",
-            "title": "Admin Email",
-            "default": ""
-          },
           "domain": {
             "type": "string",
             "title": "Domain",
@@ -27839,7 +27834,7 @@
           "service_account_json": {
             "type": "string",
             "title": "Service Account Json",
-            "description": "Google service account JSON. Write-only: it goes to the secret store and only its path is kept in config.",
+            "description": "Optional Google service account JSON, for the group sync and for logins whose own token cannot read their groups. It acts as itself, so the org's admin must assign it a groups admin role. Write-only: it goes to the secret store and only its path is kept in config.",
             "default": ""
           },
           "service_account_json_env": {
@@ -27848,16 +27843,10 @@
             "description": "Env var for Google SA JSON",
             "default": ""
           },
-          "admin_email": {
-            "type": "string",
-            "title": "Admin Email",
-            "description": "Google Workspace admin email",
-            "default": ""
-          },
           "domain": {
             "type": "string",
             "title": "Domain",
-            "description": "Google Workspace domain",
+            "description": "Google Workspace domain the service account syncs",
             "default": ""
           },
           "tenant_id": {
@@ -27932,10 +27921,6 @@
             "type": "string",
             "title": "Service Account Json Path"
           },
-          "admin_email": {
-            "type": "string",
-            "title": "Admin Email"
-          },
           "domain": {
             "type": "string",
             "title": "Domain"
@@ -27977,7 +27962,6 @@
           "enrich_on_login",
           "service_account_json_env",
           "service_account_json_path",
-          "admin_email",
           "domain",
           "tenant_id",
           "tenant_id_env",

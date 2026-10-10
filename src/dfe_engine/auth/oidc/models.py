@@ -13,7 +13,7 @@ is the filename stem and is NOT stored inside the YAML body.
 
 Supported provider types:
     generic   -- Any OIDC-compliant IdP; groups resolved from token claims only.
-    google    -- Google Workspace; supports admin SDK group enumeration.
+    google    -- Google Workspace; each login's groups read from Cloud Identity with the user's token.
     entra_id  -- Microsoft Entra ID (Azure AD); supports Graph API group sync.
     okta      -- Okta; supports API-based group resolution.
 
@@ -34,11 +34,11 @@ from pydantic import BaseModel, Field, model_validator
 _GroupResolutionMode = Literal["manual", "token_claim", "api"]
 _ProviderType = Literal["generic", "google", "entra_id", "okta"]
 
-# Google and Entra deliver groups outside any scope and fail a login that asks for `groups`; dex and Okta emit the groups claim only when it is requested.
+# Google and Entra fail a login that asks for `groups`; Google's groups are read with the login's own Cloud Identity scope, and dex and Okta emit the groups claim only when it is requested.
 _DEFAULT_SCOPES: dict[_ProviderType, str] = {
     "entra_id": "openid email profile",
     "generic": "openid email profile groups",
-    "google": "openid email profile",
+    "google": "openid email profile https://www.googleapis.com/auth/cloud-identity.groups.readonly",
     "okta": "openid email profile groups",
 }
 
@@ -65,8 +65,8 @@ class GroupResolutionConfig(BaseModel):
 
     Needed by providers that do NOT put group membership in the token at all -
     Google Workspace is the case: its id_token carries no groups claim, so the
-    only way to know a user's groups is to ask the Directory API for them at
-    login. When set (with ``mode == "api"``) the RP calls the adapter's
+    only way to know a user's groups is to ask its directory for them at login,
+    with the user's own token. When set (with ``mode == "api"``) the RP calls the adapter's
     ``resolve_user_groups`` and the directory result is authoritative. Entra's
     >200 overage is handled automatically without this flag (the token's overage
     marker triggers the same enrichment); a provider that reliably delivers
@@ -90,18 +90,15 @@ class GroupResolutionConfig(BaseModel):
     is still named indirectly via an env var to match the rest of this config and
     to keep absolute test paths out of committed YAML."""
 
-    # -- Google Workspace (api mode) --
+    # -- Google Workspace (api mode): an optional service account; logins need none --
     service_account_json_env: str = ""
     """Env var name holding the Google service account JSON credentials."""
 
     service_account_json_path: str = ""
     """DfeSecrets path holding the Google service account JSON - a path, never the JSON."""
 
-    admin_email: str = ""
-    """Google Workspace admin email used for domain-wide delegation."""
-
     domain: str = ""
-    """Google Workspace primary domain (e.g. 'example.com')."""
+    """Google Workspace primary domain (e.g. 'example.com') the service account syncs and probes."""
 
     # -- Microsoft Entra ID (api mode and the >200 group overage lookup) --
     tenant_id: str = ""
@@ -176,7 +173,8 @@ class OIDCProvider(BaseModel):
     """Space-separated OAuth scopes requested at login. ``openid`` is mandatory.
 
     Left empty, it is filled with the provider type's default on load: ``openid
-    email profile``, plus ``groups`` for ``generic`` and ``okta``."""
+    email profile``, plus ``groups`` for ``generic`` and ``okta``, and the Cloud
+    Identity groups read scope for ``google``."""
 
     groups: GroupResolutionConfig = Field(default_factory=GroupResolutionConfig)
     """Group resolution configuration for this provider."""

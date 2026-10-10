@@ -103,12 +103,23 @@ FIELD_PROBLEMS_CASES: list[FieldProblemsCase] = [
         "sent_group_fields": frozenset({"client_secret_env", "tenant_id"}),
     },
     {
-        "id": "google_api",
+        "id": "google_api_needs_no_service_account",
+        "expected_problems": [],
+        "provider": make_oidc_provider(
+            client_id="c",
+            groups={"enrich_on_login": True, "mode": "api"},
+            issuer="https://accounts.google.com",
+            type="google",
+        ),
+        "sent_group_fields": frozenset({"enrich_on_login"}),
+    },
+    {
+        "id": "google_api_with_a_service_account",
         "expected_problems": [],
         "provider": make_oidc_provider(
             client_id="c",
             groups={
-                "admin_email": "admin@acme.com",
+                "domain": "acme.com",
                 "enrich_on_login": True,
                 "mode": "api",
                 "service_account_json_path": "oidc/google/groups_service_account_json",
@@ -116,7 +127,7 @@ FIELD_PROBLEMS_CASES: list[FieldProblemsCase] = [
             issuer="https://accounts.google.com",
             type="google",
         ),
-        "sent_group_fields": frozenset({"admin_email", "enrich_on_login", "service_account_json"}),
+        "sent_group_fields": frozenset({"domain", "enrich_on_login", "service_account_json"}),
     },
     {
         "id": "missing_issuer",
@@ -161,11 +172,11 @@ FIELD_PROBLEMS_CASES: list[FieldProblemsCase] = [
         ],
         "provider": make_oidc_provider(
             client_id="c",
-            groups={"admin_email": "admin@acme.com"},
+            groups={"domain": "acme.com"},
             issuer="https://accounts.google.com",
             type="google",
         ),
-        "sent_group_fields": frozenset({"admin_email"}),
+        "sent_group_fields": frozenset({"domain"}),
     },
     {
         "id": "okta_api_without_domain_or_token",
@@ -204,18 +215,8 @@ FIELD_PROBLEMS_CASES: list[FieldProblemsCase] = [
         "sent_group_fields": frozenset(),
     },
     {
-        "id": "google_api_without_account_admin_or_enrichment",
+        "id": "google_api_without_enrichment",
         "expected_problems": [
-            make_field_problem(
-                code="missing",
-                field="groups.service_account_json",
-                message="required for a 'google' provider in 'api' mode: send service_account_json or service_account_json_env",
-            ),
-            make_field_problem(
-                code="missing",
-                field="groups.admin_email",
-                message="required for a 'google' provider in 'api' mode",
-            ),
             make_field_problem(
                 code="not_allowed",
                 field="groups.enrich_on_login",
@@ -312,7 +313,6 @@ FIELD_PROBLEMS_CASES: list[FieldProblemsCase] = [
                 message="not used by an 'okta' provider in 'api' mode",
             )
             for field in (
-                "admin_email",
                 "domain",
                 "service_account_json",
                 "service_account_json_env",
@@ -325,7 +325,6 @@ FIELD_PROBLEMS_CASES: list[FieldProblemsCase] = [
         ),
         "sent_group_fields": frozenset(
             {
-                "admin_email",
                 "api_token_env",
                 "domain",
                 "okta_domain",
