@@ -18,8 +18,10 @@ import time
 
 import pytest
 
-from dfe_engine.governance.ch import ReconcileResult, ReconcileTrigger
+from dfe_engine.governance.ch import ReconcileResult
+from dfe_engine.governance.ch.trigger import WORKER_THREAD_NAME
 from tests.support.loopback import CountingListener
+from tests.support.reconcile_trigger import swap_in_trigger
 
 _WAIT = 10.0
 _SCIM = "/api/v1/scim/v2"
@@ -47,13 +49,8 @@ class _Recorder:
 @pytest.fixture
 def reconciles(app, client):
     """The app's trigger, reconciling into a recorder; settles long enough for a burst."""
-    assert app.state.ch_rbac_reconcile is not None
-    # The startup run failed against the guard, so its retry is stood down first.
-    assert app.state.ch_rbac_reconcile.close(_WAIT)
     recorder = _Recorder()
-    app.state.ch_rbac_reconcile = ReconcileTrigger(
-        recorder, settle_seconds=1.0, retry_initial_seconds=0.2
-    )
+    swap_in_trigger(app, recorder, settle_seconds=1.0, retry_initial_seconds=0.2)
     return recorder
 
 
@@ -264,6 +261,45 @@ def test_tenant_isolation_off_wires_no_change_trigger(api_settings, monkeypatch)
     try:
         with TestClient(application, raise_server_exceptions=False):
             assert getattr(application.state, "ch_rbac_reconcile", None) is None
+    finally:
+        _registries.clear()
+
+
+def _workers_since(before: set[threading.Thread]) -> list[threading.Thread]:
+    """The reconcile threads started since ``before`` that are still running."""
+    return [
+        t
+        for t in threading.enumerate()
+        if t.name == WORKER_THREAD_NAME and t not in before and t.is_alive()
+    ]
+
+
+def _workers_gone_since(before: set[threading.Thread]) -> bool:
+    """Whether every reconcile thread started since ``before`` has left, given a moment."""
+    for thread in _workers_since(before):
+        thread.join(timeout=2.0)
+    return not _workers_since(before)
+
+
+def test_shutdown_leaves_no_reconcile_thread_even_after_the_trigger_was_swapped(api_settings):
+    """The failed startup run leaves a retry, the swap stands it down, shutdown stops the rest."""
+    from fastapi.testclient import TestClient
+
+    from dfe_engine.api.app import create_app
+    from dfe_engine.api.deps import _registries
+
+    before = set(threading.enumerate())
+    application = create_app(settings=api_settings)
+    try:
+        with TestClient(application, raise_server_exceptions=False):
+            assert _workers_since(before), "the failed startup run left no retry waiting"
+
+            swapped = swap_in_trigger(application, _Recorder(), settle_seconds=_WAIT * 6)
+            assert _workers_gone_since(before), "the swap left the startup retry running"
+
+            swapped.request()
+            assert _workers_since(before), "the request started no worker"
+        assert _workers_gone_since(before), "shutdown left a reconcile thread running"
     finally:
         _registries.clear()
 

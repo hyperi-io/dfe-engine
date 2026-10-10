@@ -21,6 +21,8 @@ is the state the unit suite runs in.
 
 from typing import Any
 
+from scalo.logger import logger
+
 BOOTSTRAP_STATE = "schema_bootstrap_state"
 BOOTSTRAP_DURATION = "schema_bootstrap_duration_seconds"
 VERSION_INFO = "schema_version_info"
@@ -94,14 +96,25 @@ def create(app_name: str = "dfe-engine") -> SchemaMetrics:
 
     For a process that runs one pass and has no manager to share, such as the
     ``dfe auto schema`` command. The daemon passes its own manager instead.
+
+    Metrics are best effort: a fault building the manager is logged and the pass runs
+    with the no-op set, so it still applies the schema.
     """
     from scalo.metrics import create_metrics
 
     from dfe_engine.deployment_contract import engine_deployment_contract
 
-    return SchemaMetrics(
-        create_metrics(app_name, metric_prefix=engine_deployment_contract().metric_prefix)
-    )
+    try:
+        # One pass serves no scrape, so the Prometheus backend needs no update thread.
+        manager = create_metrics(
+            app_name,
+            enable_auto_update=False,
+            metric_prefix=engine_deployment_contract().metric_prefix,
+        )
+        return SchemaMetrics(manager)
+    except Exception as exc:
+        logger.warning("schema metrics unavailable; the pass runs without them", error=str(exc))
+        return SchemaMetrics()
 
 
 __all__ = [
