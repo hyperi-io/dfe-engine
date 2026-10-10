@@ -30,7 +30,8 @@ import re
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
+import zlib
+from collections.abc import Callable, Generator, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -38,6 +39,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar, cast
 
 from dulwich import porcelain
+from dulwich.errors import ChecksumMismatch, FileFormatException, NotTreeError
 from scalo.logger import logger
 from scalo.resilience import (
     CircuitBreaker,
@@ -49,7 +51,7 @@ from scalo.resilience import (
 )
 
 from ..backoff import jittered_sleep
-from ..settings import GitopsWriteSettings
+from ..settings import GitopsPackSettings, GitopsWriteSettings
 from .dulwich_auth import RedactingErrStream, redact_credentials, scrub_remote_credentials
 from .metrics import GitopsMetrics, WriteOp
 
@@ -79,6 +81,9 @@ _TRANSIENT_HTTP_STATUS = re.compile(r"unexpected http resp (?:408|429|5\d\d)\b")
 # Writes already run one at a time under the writer lock, so a second probe slot
 # could never be used.
 _BREAKER_PROBES = 1
+
+# A pack the disk refuses to take, or a loose object that will not read back.
+_PACK_FAILURES = (OSError, zlib.error, ChecksumMismatch, FileFormatException)
 
 
 def _as_path_bytes(host_path: str | bytes) -> bytes:
@@ -257,7 +262,9 @@ class GitopsRepo:
     ``{path: content}`` artifact map, stages, commits only on change, and pushes
     when ``push`` is set and a remote is configured. ``write`` bounds and retries
     the fetch and push a write makes, and sets when its breaker opens; None takes
-    the ``gitops.write`` defaults.
+    the ``gitops.write`` defaults. ``pack`` sets when a commit packs the loose
+    objects and when :meth:`consolidate_if_due` consolidates the packs, and None
+    takes the ``gitops.pack`` defaults.
     """
 
     def __init__(
@@ -273,6 +280,7 @@ class GitopsRepo:
         author_email: str = "dfe-engine@hyperi.io",
         metrics: GitopsMetrics | None = None,
         write: GitopsWriteSettings | None = None,
+        pack: GitopsPackSettings | None = None,
     ) -> None:
         self._path = Path(local_path)
         self._repo_url = repo_url
@@ -283,6 +291,7 @@ class GitopsRepo:
         self._author = f"{author_name} <{author_email}>".encode()
         self._metrics = metrics or GitopsMetrics()
         self._write = write if write is not None else GitopsWriteSettings()
+        self._pack = pack if pack is not None else GitopsPackSettings()
         # No pooled client to rebuild: every dulwich op builds its own, so a retry
         # only backs off.
         self._write_resilience = ReconnectingResilience(
@@ -323,6 +332,9 @@ class GitopsRepo:
         # A refresh runs on every read, so an unreachable remote is reported on the
         # transition rather than once per read.
         self._refresh_failed = False
+        # Every commit past the threshold tries to pack, so a pack directory that
+        # refuses writes is reported on the transition rather than once per commit.
+        self._pack_failed = False
         # The open batch() block's writes.
         self._batch: _Batch | None = None
 
@@ -556,21 +568,47 @@ class GitopsRepo:
             )
 
     def ensure(self) -> Path:
-        """Make the working tree present: clone, reuse, or init."""
+        """Make the working tree present: clone, reuse, or init.
+
+        Every path ends with dulwich's own gc switched off in the clone's config.
+        """
         if (self._path / ".git").exists():
             # A clone that died between writing .git/config and its own scrub would
             # otherwise leave the token on disk for the life of the working tree.
             self._scrub_remote()
-            return self._path
-        if self._repo_url:
+        elif self._repo_url:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             logger.info("Cloning gitops deploy repo", repo_url=self._repo_url)
             self._remote_op(self._clone)
             self._scrub_remote()
-            return self._path
-        self._path.mkdir(parents=True, exist_ok=True)
-        porcelain.init(str(self._path))
+        else:
+            self._path.mkdir(parents=True, exist_ok=True)
+            porcelain.init(str(self._path))
+        self._switch_off_auto_gc()
         return self._path
+
+    def _switch_off_auto_gc(self) -> None:
+        """Zero ``gc.auto`` and ``gc.autoPackLimit`` in the clone's own config.
+
+        dulwich runs a full gc inside any commit, fetch or push that finds either
+        limit reached, and that gc rewrites every object the repo holds while the
+        caller waits under the locks. dulwich reads both from this file alone, so
+        zeroing them here is the whole switch, and the engine packs on ``gitops.pack``
+        instead. Written only when either differs, so a reused clone reads it once.
+        """
+        from dulwich.repo import Repo
+
+        with Repo(str(self._path)) as repo:
+            config = repo.get_config()
+            try:
+                current = (config.get((b"gc",), b"auto"), config.get((b"gc",), b"autoPackLimit"))
+            except KeyError:
+                current = None
+            if current == (b"0", b"0"):
+                return
+            config.set((b"gc",), b"auto", b"0")
+            config.set((b"gc",), b"autoPackLimit", b"0")
+            config.write_to_path()
 
     def remote_head(self) -> str | None:
         """The remote branch's head SHA, read without fetching a single object.
@@ -638,7 +676,6 @@ class GitopsRepo:
         entry.
         """
         from dulwich.client import get_transport_and_path
-        from dulwich.gc import maybe_auto_gc
         from dulwich.repo import Repo
 
         url = self._authed_url()
@@ -650,11 +687,7 @@ class GitopsRepo:
             client, host_path = get_transport_and_path(
                 url, config=config, pool_manager=self._bounded_pool(config, timeout)
             )
-            result = client.fetch(_as_path_bytes(host_path), repo, progress=errstream.write)
-            # porcelain.fetch ends on this, and a clone that lives as long as the pod
-            # would otherwise accumulate loose objects fetch after fetch.
-            maybe_auto_gc(repo)
-            return result
+            return client.fetch(_as_path_bytes(host_path), repo, progress=errstream.write)
 
     def _send_pack(
         self, refspec: bytes, errstream: RedactingErrStream, *, timeout: float
@@ -909,7 +942,7 @@ class GitopsRepo:
                     yield
                 except BaseException:
                     batch, self._batch = self._batch, None
-                    self._discard_staged(batch)
+                    self._discard_staged(batch.artifacts)
                     self._metrics.batch("discarded")
                     raise
                 batch, self._batch = self._batch, None
@@ -933,7 +966,8 @@ class GitopsRepo:
         with self._lock:
             if not self._has_staged():
                 return PublishResult(changed=False)
-            sha = self._commit(batch.commit_message())
+            with self._discarding_on_failure(batch.artifacts):
+                sha = self._commit(batch.commit_message())
             self._pushing = self._pushes()
         written = sorted([*batch.artifacts, *batch.deletions])
         return self._push_tracked(
@@ -945,19 +979,63 @@ class GitopsRepo:
         staged = porcelain.status(str(self._path)).staged
         return bool(staged["add"] or staged["modify"] or staged["delete"])
 
-    def _discard_staged(self, batch: _Batch) -> None:
-        """Put the tree and index back on HEAD, dropping what a batch staged."""
+    def _discard_staged(self, written: Iterable[str]) -> None:
+        """Put the tree and index back on HEAD, dropping what a write or a batch wrote.
+
+        ``written`` is every path the write or batch wrote. A reset leaves a file it
+        never got as far as staging in the tree, untracked, and a reader of the
+        working tree would load it as committed config, so any of them HEAD does not
+        hold is deleted.
+        """
+        from dulwich.object_store import tree_lookup_path
+        from dulwich.objectspec import parse_tree
+        from dulwich.repo import Repo
+
         head = self.head_revision()
         if head is not None:
             porcelain.reset(str(self._path), "hard", head.encode())
-            return
-        # An empty repo has no commit to reset onto, and nothing the batch wrote was
-        # there before it.
-        for rel in batch.artifacts:
-            target = self._path / rel
-            if target.exists():
-                porcelain.remove(str(self._path), paths=[str(target)], cached=True)
+        with Repo(str(self._path)) as repo:
+            if head is None:
+                # An empty repo has no commit to reset onto, and everything staged in
+                # it came from this write or batch.
+                index = repo.open_index()
+                index.clear()
+                index.write()
+                tree = None
+            else:
+                tree = parse_tree(repo, head.encode()).id
+            for rel in written:
+                target = self._path / rel
+                if not target.is_file():
+                    continue
+                if tree is not None:
+                    try:
+                        tree_lookup_path(repo.get_object, tree, rel.encode())
+                        continue
+                    except KeyError, NotTreeError:
+                        pass
                 target.unlink()
+
+    @contextmanager
+    def _discarding_on_failure(self, written: Iterable[str]) -> Generator[None]:
+        """Drop what the block staged when it raises, then re-raise.
+
+        A write that fails between staging and its commit otherwise leaves the index
+        ahead of HEAD, and the next write on this clone commits that change under its
+        own message and author -- and pushes it. Caller holds the tree lock.
+        """
+        try:
+            yield
+        except BaseException:
+            try:
+                self._discard_staged(written)
+            except Exception as exc:
+                logger.error(
+                    "Could not drop a failed gitops write's staged changes: the next "
+                    "write on this clone commits them too",
+                    error=type(exc).__name__,
+                )
+            raise
 
     def _split_batch(self) -> None:
         """Land what the open batch holds, and open a fresh one for the rest of the block."""
@@ -978,8 +1056,9 @@ class GitopsRepo:
         """Stage one write into the open batch, whose commit waits for the block to end."""
         batch = cast("_Batch", self._batch)
         changed = self._differs(artifacts, deletions)
-        written = self._stage(artifacts, deletions)
+        # Recorded first, so a write that fails part way is discarded with the batch.
         batch.record(artifacts, list(deletions or []))
+        written = self._stage(artifacts, deletions)
         if changed:
             batch.subjects.append(message.split("\n", 1)[0])
         return PublishResult(changed=changed, files=written)
@@ -1230,10 +1309,11 @@ class GitopsRepo:
 
         Returns the commit SHA (None when nothing was staged) and the paths touched.
         """
-        written = self._stage(artifacts, deletions)
-        if not self._has_staged():
-            return None, written
-        return self._commit(message), written
+        with self._discarding_on_failure(artifacts):
+            written = self._stage(artifacts, deletions)
+            if not self._has_staged():
+                return None, written
+            return self._commit(message), written
 
     def _commit(self, message: str) -> str:
         """Commit the index as it stands and return the new commit's SHA."""
@@ -1247,28 +1327,86 @@ class GitopsRepo:
         return sha.decode() if isinstance(sha, bytes) else str(sha)
 
     def _pack_loose_objects(self) -> None:
-        """Pack the clone's loose objects once they reach half of ``gc.auto``.
+        """Pack the clone's loose objects once ``pack.loose_objects`` have built up.
 
-        dulwich runs its own gc inside a commit that leaves ``gc.auto`` loose objects,
-        and that gc rewrites every object the repo holds, so its cost grows with the
-        history and one write pays it under both locks. Packing the loose objects alone
-        costs the same at any history length and keeps the count short of dulwich's gc.
-        ``gc.auto`` of 0 leaves them loose, as it does for dulwich. Caller holds the
-        tree lock.
+        Packing the loose objects alone costs the same at any history length, unlike
+        dulwich's gc, which rewrites every object and is switched off in the clone.
+        ``pack.loose_objects`` of 0 leaves them loose. Caller holds the tree lock.
+
+        Best-effort: a pack that cannot be written leaves the objects loose and the
+        commit goes ahead, because the write it is part of has not failed.
         """
-        from dulwich.gc import DEFAULT_GC_AUTO
         from dulwich.repo import Repo
 
+        limit = self._pack.loose_objects
+        if limit <= 0:
+            return
         with Repo(str(self._path)) as repo:
-            try:
-                gc_auto = int(repo.get_config().get(b"gc", b"auto"))
-            except KeyError:
-                gc_auto = DEFAULT_GC_AUTO
             store = repo.object_store
-            if gc_auto <= 0 or store.count_loose_objects() < gc_auto // 2:
+            try:
+                if store.count_loose_objects() < limit:
+                    return
+                packed = store.pack_loose_objects()
+            except _PACK_FAILURES as exc:
+                self._metrics.loose_pack("failed")
+                if not self._pack_failed:
+                    self._pack_failed = True
+                    logger.warning(
+                        "Could not pack the gitops clone's loose objects: they stay loose "
+                        "and commits go ahead",
+                        error=type(exc).__name__,
+                    )
                 return
-            packed = store.pack_loose_objects()
+        self._metrics.loose_pack("packed")
+        if self._pack_failed:
+            self._pack_failed = False
+            logger.info("Packing the gitops clone's loose objects works again")
         logger.info("Packed the gitops clone's loose objects", objects=packed)
+
+    def consolidate_if_due(self) -> bool:
+        """Consolidate the clone's packs into one once ``pack.packs`` have built up.
+
+        Every fetch that brings objects and every loose-object pack adds a pack, and a
+        lookup searches them one by one. dulwich's gc would consolidate them inside a
+        write, a read's refresh or a push, where it rewrites every object the repo
+        holds, so it is switched off and the engine calls this from a background task
+        and after a CLI write instead. It takes both locks, so a write or a read waits
+        for it rather than racing it. The gc prunes objects unreachable for dulwich's
+        two-week grace period, which is what removes the commits a refused push or a
+        failed write left behind. ``pack.packs`` of 0 never consolidates.
+
+        Best-effort: a gc that fails leaves the packs as they were for the next call.
+
+        Returns:
+            Whether the packs were consolidated.
+        """
+        from dulwich.gc import garbage_collect
+        from dulwich.repo import Repo
+
+        limit = self._pack.packs
+        if limit <= 0:
+            return False
+        with self._write_lock, self._lock, Repo(str(self._path)) as repo:
+            try:
+                if repo.object_store.count_pack_files() < limit:
+                    return False
+                stats = garbage_collect(repo, auto=True)
+            except _PACK_FAILURES as exc:
+                self._metrics.pack_consolidation("failed")
+                logger.warning(
+                    "Could not consolidate the gitops clone's packs: they stay as they were "
+                    "until the next check",
+                    error=type(exc).__name__,
+                )
+                return False
+        self._metrics.pack_consolidation("consolidated")
+        logger.info(
+            "Consolidated the gitops clone's packs",
+            packs_before=stats.packs_before,
+            packs_after=stats.packs_after,
+            pruned_objects=len(stats.pruned_objects),
+        )
+        return True
 
     def _push_refspec(self, refspec: bytes) -> None:
         """Push one refspec as a compare-and-swap, credentials never logged.

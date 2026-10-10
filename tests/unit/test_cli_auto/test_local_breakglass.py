@@ -531,5 +531,31 @@ def test_push_refuses_a_moved_remote_and_keeps_the_commits(
         assert r.head() == break_glass
 
 
+def _pack_count(repo: Path) -> int:
+    with Repo(str(repo)) as r:
+        return r.object_store.count_pack_files()
+
+
+def test_a_write_consolidates_the_clones_packs_once_they_are_due(repo: Path, monkeypatch):
+    """No daemon runs the background consolidation, so the write that commits does it."""
+    monkeypatch.setenv("DFE_GITOPS_PACK_PACKS", "3")
+    reset_settings()
+    for i in range(4):
+        extra = repo / f"extra-{i}.yaml"
+        extra.write_text(f"n: {i}\n")
+        porcelain.add(str(repo), paths=[str(extra)])
+        porcelain.commit(
+            str(repo), message=f"extra {i}".encode(), author=b"t <t@t>", committer=b"t <t@t>"
+        )
+        with Repo(str(repo)) as r:
+            r.object_store.pack_loose_objects()
+    assert _pack_count(repo) == 4
+
+    _break_glass_set(repo, "0")
+
+    assert _pack_count(repo) == 1
+    assert "receiver-default" in _head_message(repo)
+
+
 def test_ch_cloud_is_mounted():
     assert "ch-cloud" in local_group.commands

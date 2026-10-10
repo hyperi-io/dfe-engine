@@ -20,6 +20,8 @@ from typing import Any, Literal
 BATCHES = "gitops_batches_total"
 WRITE_RETRIES = "gitops_write_retries_total"
 WRITE_BREAKER = "gitops_write_breaker_total"
+LOOSE_PACKS = "gitops_loose_packs_total"
+PACK_CONSOLIDATIONS = "gitops_pack_consolidations_total"
 
 BatchOutcome = Literal["committed", "unchanged", "split", "discarded", "failed"]
 """How a batch ended.
@@ -49,6 +51,20 @@ BreakerEvent = Literal["opened", "rejected", "closed"]
 - ``closed``: the forge answered a probe, so writes call it again.
 """
 
+PackOutcome = Literal["packed", "failed"]
+"""How packing the clone's loose objects before a commit ended.
+
+- ``packed``: the loose objects went into one new pack.
+- ``failed``: the pack could not be written, so they stay loose and the commit goes ahead.
+"""
+
+ConsolidationOutcome = Literal["consolidated", "failed"]
+"""How a background consolidation of the clone's packs into one ended.
+
+- ``consolidated``: one pack is left, and objects unreachable for two weeks are gone.
+- ``failed``: the gc raised, so the packs stay as they were until the next check.
+"""
+
 
 class GitopsMetrics:
     """The clone's instruments, or a no-op set when no backend is wired.
@@ -76,6 +92,16 @@ class GitopsMetrics:
             "calling the forge",
             ["event"],
         )
+        self._loose_packs = manager.counter(
+            LOOSE_PACKS,
+            "Packs of the deploy-repo clone's loose objects made before a commit, by outcome",
+            ["outcome"],
+        )
+        self._pack_consolidations = manager.counter(
+            PACK_CONSOLIDATIONS,
+            "Background consolidations of the deploy-repo clone's packs into one, by outcome",
+            ["outcome"],
+        )
 
     @property
     def enabled(self) -> bool:
@@ -100,14 +126,30 @@ class GitopsMetrics:
             return
         self._write_breaker.labels(event=event).inc()
 
+    def loose_pack(self, outcome: PackOutcome) -> None:
+        """Record one attempt to pack the clone's loose objects before a commit."""
+        if self._manager is None:
+            return
+        self._loose_packs.labels(outcome=outcome).inc()
+
+    def pack_consolidation(self, outcome: ConsolidationOutcome) -> None:
+        """Record one background consolidation of the clone's packs."""
+        if self._manager is None:
+            return
+        self._pack_consolidations.labels(outcome=outcome).inc()
+
 
 __all__ = [
     "BATCHES",
+    "LOOSE_PACKS",
+    "PACK_CONSOLIDATIONS",
     "WRITE_BREAKER",
     "WRITE_RETRIES",
     "BatchOutcome",
     "BreakerEvent",
+    "ConsolidationOutcome",
     "GitopsMetrics",
+    "PackOutcome",
     "RetryOutcome",
     "WriteOp",
 ]

@@ -1636,6 +1636,42 @@ class GitopsWriteSettings(BaseModel):
     )
 
 
+class GitopsPackSettings(BaseModel):
+    """When the deploy-repo clone packs its objects, and how often it checks.
+
+    dulwich's own gc is switched off in the clone, because it rewrites every object
+    the repo holds and would do so inside a write, a read's refresh or a push. The
+    engine packs instead. A commit packs the loose objects once ``loose_objects`` of
+    them have built up, which costs the same at any history length. A background task
+    checks every ``interval_seconds`` and consolidates the packs into one, pruning
+    objects unreachable for two weeks, once there are ``packs`` of them. A fetch that brings
+    objects adds a pack, and so does each loose-object pack. 0 switches either off.
+
+    Environment variables:
+    - DFE_GITOPS_PACK_LOOSE_OBJECTS -> gitops.pack.loose_objects
+    - DFE_GITOPS_PACK_PACKS -> gitops.pack.packs
+    - DFE_GITOPS_PACK_INTERVAL_SECONDS -> gitops.pack.interval_seconds
+    """
+
+    # git's own gc.auto default.
+    loose_objects: int = Field(
+        default=6700,
+        ge=0,
+        description="Loose objects that make a commit pack them first. 0 leaves them loose.",
+    )
+    # git's own gc.autoPackLimit default.
+    packs: int = Field(
+        default=50,
+        ge=0,
+        description="Packs that make the background check consolidate them. 0 never does.",
+    )
+    interval_seconds: float = Field(
+        default=300.0,
+        gt=0.0,
+        description="How often the background check counts the clone's packs, seconds.",
+    )
+
+
 class GitopsSettings(BaseModel):
     """Deploy-specific gitops repo the engine renders artifacts into.
 
@@ -1656,6 +1692,7 @@ class GitopsSettings(BaseModel):
     - DFE_GITOPS_FORGE_PROVIDER -> gitops.forge_provider (review-PR seam)
     - DFE_GITOPS_FORGE_API_BASE -> gitops.forge_api_base
     - DFE_GITOPS_WRITE_* -> gitops.write (see GitopsWriteSettings)
+    - DFE_GITOPS_PACK_* -> gitops.pack (see GitopsPackSettings)
     """
 
     enabled: bool = Field(default=False, description="Enable gitops publishing")
@@ -1692,6 +1729,7 @@ class GitopsSettings(BaseModel):
         ),
     )
     write: GitopsWriteSettings = Field(default_factory=GitopsWriteSettings)
+    pack: GitopsPackSettings = Field(default_factory=GitopsPackSettings)
 
 
 # Known placeholder JWT secret - fine for local dev, REJECTED in a production
@@ -2566,6 +2604,12 @@ def _get_env_overrides() -> dict:
         overrides["gitops"].setdefault("write", {})["failure_threshold"] = int(val)
     if val := _get_env("DFE_GITOPS_WRITE_RESET_TIMEOUT"):
         overrides["gitops"].setdefault("write", {})["reset_timeout"] = float(val)
+    if val := _get_env("DFE_GITOPS_PACK_LOOSE_OBJECTS"):
+        overrides["gitops"].setdefault("pack", {})["loose_objects"] = int(val)
+    if val := _get_env("DFE_GITOPS_PACK_PACKS"):
+        overrides["gitops"].setdefault("pack", {})["packs"] = int(val)
+    if val := _get_env("DFE_GITOPS_PACK_INTERVAL_SECONDS"):
+        overrides["gitops"].setdefault("pack", {})["interval_seconds"] = float(val)
 
     # API settings
     if val := _get_env("DFE_API_HOST"):
