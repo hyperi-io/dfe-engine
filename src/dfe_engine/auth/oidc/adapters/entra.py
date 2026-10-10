@@ -8,9 +8,10 @@
 
 """Microsoft Entra ID (Azure AD) OIDC group adapter.
 
-Resolves group GUIDs to display names via the Microsoft Graph API.
-Requires an Entra app registration with the ``Group.Read.All`` application
-permission and admin consent granted.
+Resolves a user's groups and group GUIDs to display names via the Microsoft
+Graph API: with the user's own login token where it can, otherwise with the
+app registration's own credentials and its admin-consented application
+permission.
 
 Credentials resolve through :func:`graph_credentials`. If any credential is missing the adapter fails open: all methods return unfriendly fallbacks rather than raising.
 
@@ -85,6 +86,18 @@ class EntraAdapter(OIDCGroupAdapter):
     GRAPH_BASE = "https://graph.microsoft.com/v1.0"
     _GRAPH_SCOPE = "https://graph.microsoft.com/.default"
     _PAGE_SIZE = 999  # Maximum $top value accepted by Graph API
+    _GROUP_QUERY = f"transitiveMemberOf/microsoft.graph.group?$select=id,displayName,mail,description&$top={_PAGE_SIZE}"
+
+    def __init__(
+        self,
+        provider: OIDCProvider,
+        *,
+        access_token: str = "",
+        secrets: DfeSecrets | None = None,
+    ) -> None:
+        """Keep the login's access token, which Graph reads the user's own groups with."""
+        super().__init__(provider, secrets=secrets)
+        self._access_token = access_token
 
     # ------------------------------------------------------------------
     # Public interface
@@ -96,9 +109,14 @@ class EntraAdapter(OIDCGroupAdapter):
         This is the >200 group OVERAGE path: when a user is in too many groups,
         Entra drops the ``groups`` array from the id_token and emits a
         ``_claim_names`` pointer instead, so the RP must fetch the membership
-        itself. Pages ``GET /users/{id}/transitiveMemberOf/microsoft.graph.group``
-        (the OData cast returns groups only, never directory roles), following
-        ``@odata.nextLink``.
+        itself. The OData cast returns groups only, never directory roles, and
+        every ``@odata.nextLink`` page is followed.
+
+        The user's own login token asks ``/me`` first. Graph answers that with
+        User.Read; without GroupMember.Read.All each group carries only its id,
+        which is all role resolution needs. A token Graph refuses falls through
+        to the app-only credentials, which ask ``/users/{directory_id}``. A user
+        token that answers with no groups is the answer and does not fall through.
 
         ``directory_id`` MUST be the Entra object id (the ``oid`` claim), not the
         pairwise ``sub`` - Graph keys ``/users/{id}`` on the object id.
@@ -109,6 +127,13 @@ class EntraAdapter(OIDCGroupAdapter):
         if not directory_id:
             return []
 
+        if self._access_token:
+            groups = await self._page_groups(
+                f"{self.GRAPH_BASE}/me/{self._GROUP_QUERY}", self._access_token
+            )
+            if groups is not None:
+                return groups
+
         token = self._get_token()
         if token is None:
             logger.warning(
@@ -116,16 +141,17 @@ class EntraAdapter(OIDCGroupAdapter):
                 provider=self._provider.issuer,
             )
             return []
+        groups = await self._page_groups(
+            f"{self.GRAPH_BASE}/users/{directory_id}/{self._GROUP_QUERY}", token
+        )
+        return groups or []
 
+    async def _page_groups(self, url: str, token: str) -> list[GroupInfo] | None:
+        """Every page of one transitiveMemberOf listing, or None when Graph did not answer."""
         from scalo.http import AsyncHttpClient
 
         groups: list[GroupInfo] = []
         headers = {"Authorization": f"Bearer {token}"}
-        url = (
-            f"{self.GRAPH_BASE}/users/{directory_id}/transitiveMemberOf/microsoft.graph.group"
-            f"?$select=id,displayName,mail,description&$top={self._PAGE_SIZE}"
-        )
-
         async with AsyncHttpClient() as client:
             while url:
                 try:
@@ -134,23 +160,25 @@ class EntraAdapter(OIDCGroupAdapter):
                 except Exception as exc:
                     logger.warning(
                         "Entra resolve_user_groups: API call failed",
-                        directory_id=directory_id,
+                        provider=self._provider.issuer,
                         error=str(exc),
                     )
-                    break
-
-                for item in data.get("value", []):
-                    groups.append(
-                        GroupInfo(
-                            id=item.get("id", ""),
-                            name=item.get("displayName", ""),
-                            email=item.get("mail", "") or "",
-                            description=item.get("description", "") or "",
-                        )
+                    return None
+                if not isinstance(data, dict):
+                    return None
+                # A token that may not read a group still gets it, with only the id set and
+                # every other property null; the id is all role resolution keys on.
+                groups.extend(
+                    GroupInfo(
+                        id=str(item["id"]),
+                        name=item.get("displayName") or "",
+                        email=item.get("mail") or "",
+                        description=item.get("description") or "",
                     )
-
+                    for item in data.get("value") or []
+                    if isinstance(item, dict) and item.get("id")
+                )
                 url = data.get("@odata.nextLink", "")
-
         return groups
 
     async def list_all_groups(self) -> list[GroupInfo]:
@@ -197,7 +225,7 @@ class EntraAdapter(OIDCGroupAdapter):
                     groups.append(
                         GroupInfo(
                             id=item.get("id", ""),
-                            name=item.get("displayName", ""),
+                            name=item.get("displayName") or "",
                             email=item.get("mail", "") or "",
                             description=item.get("description", "") or "",
                         )
