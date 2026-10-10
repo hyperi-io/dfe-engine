@@ -34,6 +34,7 @@ from dfe_engine.api.deps import (
     is_action_allowed,
     require_action,
 )
+from dfe_engine.api.errors import backend_failure
 from dfe_engine.api.pagination import (
     PaginatedResponse,
     PaginationParams,
@@ -201,9 +202,13 @@ async def available_org_ids(
     try:
         org_ids = discover_available_org_ids(ch, database=database, limit=limit)
     except OrgIdDiscoveryError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "discovery_failed", "message": str(exc)},
+        raise backend_failure(
+            503,
+            "discovery_failed",
+            f"the tenant ids in {database} could not be read; the engine log has "
+            "ClickHouse's reason",
+            exc,
+            event="tenant id discovery failed",
         ) from exc
     return AvailableOrgIdsResponse(database=database, org_ids=org_ids)
 

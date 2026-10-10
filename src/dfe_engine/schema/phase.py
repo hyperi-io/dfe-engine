@@ -15,8 +15,9 @@ object, release the lease, create the declared topics, and confirm the dead-lett
 topics are on the broker.
 
 Two things make it a GATE rather than the best-effort pass it replaces. A failure
-leaves the engine UP and NotReady with the cause on the status route, because a
-silent failure and a success look identical to every app downstream. And
+leaves the engine UP and NotReady, with the stage that failed on the status route
+and the cause in the engine log, because a silent failure and a success look
+identical to every app downstream. And
 ClickHouse or the broker merely not being up yet is not a failure: the phase
 retries for a bounded window first, which is what a stack whose datastore starts
 in the same wave needs.
@@ -68,6 +69,24 @@ _STATE_GAUGE = {
     STATE_RUNNING: 3,
     STATE_OBSERVED: 4,
 }
+
+# The state is served to every signed-in caller, so a backend's own error text stays
+# in the log and the state names only the stage that failed.
+_FAILED_STAGES: tuple[tuple[type[Exception], str], ...] = (
+    (ManifestApplyError, "ClickHouse refused or did not answer the manifest apply"),
+    (SchemaPlanError, "the schema manifest could not be planned"),
+    (SchemaLockError, "the schema lock could not be read or written"),
+    (LedgerError, "the migration ledger could not be read or written"),
+)
+_SEE_LOG = "the engine log has the cause"
+
+
+def _failed_stage(exc: Exception) -> str:
+    """The status route's account of a failed pass: the stage, never the backend's text."""
+    for kind, stage in _FAILED_STAGES:
+        if isinstance(exc, kind):
+            return f"{stage}; {_SEE_LOG}"
+    return f"unexpected failure; {_SEE_LOG}"
 
 
 @dataclass
@@ -411,8 +430,9 @@ def run_bootstrap(
     """Bring this deployment's ClickHouse and topic set to the pinned manifest.
 
     Returns the state, which is also what the status route and the readiness
-    check read. Never raises: a failure is reported as state ``failed`` with the
-    cause, so the pod stays up for an operator to read it off the API.
+    check read. Never raises: a failure is reported as state ``failed`` naming the
+    stage that failed, with the cause in the engine log, so the pod stays up for an
+    operator to find it.
     """
     ch = settings.clickhouse
     started = datetime.now(UTC)
@@ -456,13 +476,13 @@ def run_bootstrap(
         )
     except (ManifestApplyError, SchemaPlanError, SchemaLockError, LedgerError) as exc:
         state.state = STATE_FAILED
-        state.error = str(exc)
+        state.error = _failed_stage(exc)
         logger.error("schema bootstrap failed; the engine stays up and NotReady", error=str(exc))
         _finish(state, started)
         return state
     except Exception as exc:
         state.state = STATE_FAILED
-        state.error = f"unexpected failure: {exc}"
+        state.error = _failed_stage(exc)
         logger.exception("schema bootstrap failed; the engine stays up and NotReady")
         _finish(state, started)
         return state
@@ -490,7 +510,7 @@ def run_bootstrap(
             plan, settings
         )
     except Exception as exc:  # a broker fault must not take the ClickHouse apply with it
-        state.topics_skipped = f"topic bootstrap failed: {exc}"
+        state.topics_skipped = f"topic bootstrap failed; {_SEE_LOG}"
         logger.warning("bootstrap topics not created", error=str(exc))
 
     try:

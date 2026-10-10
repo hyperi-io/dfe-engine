@@ -13,7 +13,7 @@ import json
 
 import pytest
 
-from dfe_engine.api.task_manager import TaskManager, TaskStatus
+from dfe_engine.api.task_manager import TASK_FAILED_MESSAGE, TaskManager, TaskStatus
 
 
 @pytest.fixture
@@ -63,17 +63,35 @@ class TestTaskSubmitAndGet:
         json.dumps(result.model_dump(mode="json"))
 
     @pytest.mark.asyncio
-    async def test_task_failure_records_error(self, manager: TaskManager):
+    async def test_a_reportable_failure_keeps_its_message(self, manager: TaskManager):
         async def fail(*, task):
             raise ValueError("boom")
 
-        info = manager.submit("test:fail", fail)
+        info = manager.submit("test:fail", fail, reportable=(ValueError,))
         await asyncio.sleep(0.1)
 
         result = manager.get(info.id)
         assert result is not None
         assert result.status == TaskStatus.FAILED
-        assert "boom" in result.error
+        assert result.error == "boom"
+        assert result.message == "Failed: boom"
+
+    @pytest.mark.asyncio
+    async def test_any_other_failure_reads_generic_and_goes_to_the_log(
+        self, manager: TaskManager, audit_events: list[dict]
+    ):
+        async def fail(*, task):
+            raise RuntimeError("ALTER USER x IDENTIFIED WITH sha256_hash BY 'deadbeef'")
+
+        info = manager.submit("test:fail", fail, reportable=(ValueError,))
+        await asyncio.sleep(0.1)
+
+        result = manager.get(info.id)
+        assert result is not None
+        assert result.status == TaskStatus.FAILED
+        assert result.error == TASK_FAILED_MESSAGE
+        assert "IDENTIFIED" not in result.message
+        assert any("deadbeef" in str(event.get("error", "")) for event in audit_events)
 
     @pytest.mark.asyncio
     async def test_task_cancellation(self, manager: TaskManager):

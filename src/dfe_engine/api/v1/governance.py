@@ -24,9 +24,9 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
-from scalo.logger import logger
 
 from dfe_engine.api.deps import CurrentUser, live_role_config, require_action
+from dfe_engine.api.errors import backend_failure
 from dfe_engine.api.review import apply_review_headers
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import contract
@@ -446,10 +446,12 @@ def reconcile_ch_rbac_endpoint(user: CurrentUser, request: Request) -> dict[str,
     try:
         admin_client = ch_admin_client(settings)
     except Exception as exc:
-        logger.warning("CH RBAC reconcile: ClickHouse unreachable", error=str(exc))
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "clickhouse_unavailable", "message": _CH_UNAVAILABLE},
+        raise backend_failure(
+            503,
+            "clickhouse_unavailable",
+            _CH_UNAVAILABLE,
+            exc,
+            event="CH RBAC reconcile: ClickHouse unreachable",
         ) from exc
 
     try:
@@ -463,10 +465,12 @@ def reconcile_ch_rbac_endpoint(user: CurrentUser, request: Request) -> dict[str,
     except Exception as exc:
         if not is_connection_error(exc):
             raise
-        logger.warning("CH RBAC reconcile: ClickHouse connection lost", error=str(exc))
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "clickhouse_unavailable", "message": _CH_UNAVAILABLE},
+        raise backend_failure(
+            503,
+            "clickhouse_unavailable",
+            _CH_UNAVAILABLE,
+            exc,
+            event="CH RBAC reconcile: ClickHouse connection lost",
         ) from exc
     # A full run covers every identity, so a startup retry still waiting stands down.
     note_ch_rbac_reconciled(request.app.state)

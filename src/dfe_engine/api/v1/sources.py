@@ -57,10 +57,12 @@ from dfe_engine.api.errors import (
     ErrorResponse,
     SourceCreateConflictResponse,
     SourceWriteConflictResponse,
+    backend_failure,
+    hide_backend_text,
     raise_exchange_http,
 )
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
-from dfe_engine.api.v1.apps import commit_overlay, remove_overlay
+from dfe_engine.api.v1.apps import commit_overlay, metrics_unavailable, remove_overlay
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import (
     LOADER_COMPILER,
@@ -115,6 +117,20 @@ from dfe_engine.source.registry import (
 from dfe_engine.transport import SourceTransport
 
 router = APIRouter(prefix="/sources", tags=["Sources"], dependencies=[WRITE_TURN])
+
+_CH_UNREADABLE = "ClickHouse could not be read; the engine log has the reason"
+
+
+def _ch_unreadable(exc: Exception, source: str) -> HTTPException:
+    """The 503 for a deploy or plan that could not read ClickHouse's state."""
+    return backend_failure(
+        503,
+        "clickhouse_unavailable",
+        _CH_UNREADABLE,
+        exc,
+        event="source deploy: ClickHouse unreadable",
+        source=source,
+    )
 
 
 def _raise_save_validation_http(exc: SourceValidationError) -> NoReturn:
@@ -304,8 +320,13 @@ def _reconcile_apps(request: Request, user: Any, registry: Any) -> AppsSync:
         logger.warning(f"apps not reconciled with the sources: {detail}")
         return AppsSync(changes=done, error=str(detail), restart_required=_one_per_app(hints))
     except Exception as exc:
-        logger.warning(f"apps not reconciled with the sources: {exc}")
-        return AppsSync(changes=done, error=str(exc), restart_required=_one_per_app(hints))
+        # Anything but an HTTPException can be the deploy repo's own text.
+        error = hide_backend_text(
+            "the deploy repo could not be brought into step; the engine log has the reason",
+            exc,
+            event="apps not reconciled with the sources",
+        )
+        return AppsSync(changes=done, error=error, restart_required=_one_per_app(hints))
     # Re-rendered even when the reconcile wrote nothing: a source deploy changes
     # the loader's table map through the same overlay the plan found in step.
     hints += appconfig.render_and_report(gc, settings)
@@ -335,8 +356,12 @@ async def _sync_hyperdx_source(
             columns=columns,
         )
     except Exception as exc:
-        logger.warning(f"HyperDX not pointed at source '{source.source}': {exc}")
-        return None, str(exc)
+        return None, hide_backend_text(
+            "Search did not accept the source; the engine log has the reason",
+            exc,
+            event="HyperDX not pointed at the source",
+            source=source.source,
+        )
     if teams is None:
         return None, "Search did not accept the source; see the engine log"
     return len(teams), None
@@ -1257,10 +1282,7 @@ def plan_source_deploy(
             ch_client=ch_client,
         )
     except SchemaApplyError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "clickhouse_unavailable", "message": str(exc)},
-        ) from exc
+        raise _ch_unreadable(exc, name) from exc
     plan = plan_from_build(
         result,
         version=version_id,
@@ -1515,7 +1537,9 @@ def _dry_run_ttl_change(
     try:
         live = live_tables(get_interactive_clickhouse_client(settings), db).get(source.table_name)
     except SchemaApplyError as exc:
-        return None, str(exc)
+        return None, hide_backend_text(
+            _CH_UNREADABLE, exc, event="dry run: live table unreadable", source=source.source
+        )
     if live is None:
         return None, None
     change = ttl_change_for_table(builder, source, version_id, result, db=db, live=live.ttl)
@@ -1572,10 +1596,7 @@ def _apply_source_schema(
                 get_clickhouse_config(settings)
             ).get_clickhouse_client()
         except Exception as exc:
-            raise HTTPException(
-                status_code=503,
-                detail={"code": "clickhouse_unavailable", "message": str(exc)},
-            ) from exc
+            raise _ch_unreadable(exc, name) from exc
         resolver = EngineResolver(client=ch, topology_setting=settings.clickhouse.topology)
 
     builder = SchemaBuilderV2(
@@ -1645,10 +1666,7 @@ def _apply_source_schema(
             ch_client=ch,
         )
     except SchemaApplyError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "clickhouse_unavailable", "message": str(exc)},
-        ) from exc
+        raise _ch_unreadable(exc, name) from exc
     applied = 0
     try:
         # Through the applier on the sensed resolver: a bare CREATE DATABASE lands
@@ -1660,12 +1678,15 @@ def _apply_source_schema(
             execute_ddl(ch, stmt)
             applied += 1
     except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "code": "ddl_apply_error",
-                "message": f"ClickHouse rejected DDL after {applied} statement(s): {exc}",
-            },
+        raise backend_failure(
+            502,
+            "ddl_apply_error",
+            f"ClickHouse rejected DDL after {applied} statement(s); the engine log has "
+            "ClickHouse's reason",
+            exc,
+            event="source deploy: ClickHouse rejected DDL",
+            source=name,
+            applied=applied,
         ) from exc
 
     # The tier grant is database-wide, so the new table is readable the moment it
@@ -1762,9 +1783,7 @@ def get_source_signals(
             client, settings.clickhouse.effective_data_database
         ).source_signals(table, loaders)
     except MetricsUnavailableError as exc:
-        raise HTTPException(
-            status_code=503, detail={"code": "metrics_unavailable", "message": str(exc)}
-        ) from exc
+        raise metrics_unavailable(exc) from exc
     return SourceSignalsResponse(
         source=source.source,
         table=table,
@@ -2054,7 +2073,18 @@ def _apply_bulk(
                 registry.save_source(updated, created_by=git_author(user))
             succeeded.append(name)
         except Exception as e:
-            failed.append({"source": name, "code": _failure_code(e), "error": str(e)})
+            code = _failure_code(e)
+            # A refusal the registry composed is the caller's to read; anything else may be
+            # the deploy repo's own text.
+            error = str(e)
+            if code == "internal_error":
+                error = hide_backend_text(
+                    "the source could not be written; the engine log has the reason",
+                    e,
+                    event="bulk source action failed",
+                    source=name,
+                )
+            failed.append({"source": name, "code": code, "error": error})
     return succeeded, failed, deleted
 
 

@@ -419,6 +419,16 @@ class TestViewExecutorKeyset:
         with pytest.raises(ViewRequestError, match="does not parse as its column's type"):
             _run_page(QueryOptions(order_by="n", after_key="x"), error=mismatch)
 
+    def test_the_request_error_carries_none_of_clickhouses_text(self):
+        """A ViewRequestError's message reaches the caller; ClickHouse's text does not."""
+        mismatch = Exception(
+            "Code: 53. TYPE_MISMATCH near ALTER USER u IDENTIFIED WITH sha256_hash BY 'c0ffee'"
+        )
+        with pytest.raises(ViewRequestError) as raised:
+            _run_page(QueryOptions(order_by="n", after_key="x"), error=mismatch)
+        assert "IDENTIFIED" not in str(raised.value)
+        assert "c0ffee" not in str(raised.value)
+
     def test_a_type_mismatch_without_a_cursor_stays_an_execution_error(self):
         mismatch = Exception("Code: 53. DB::Exception: TYPE_MISMATCH")
         with pytest.raises(ViewExecutionError) as raised:

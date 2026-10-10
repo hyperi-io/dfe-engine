@@ -320,7 +320,8 @@ class TestRouterHelpers:
         )
 
         assert teams is None
-        assert "connection refused" in error
+        assert "Search did not accept the source" in error
+        assert "connection refused" not in error
 
     async def test_deployment_without_hyperdx_reports_nothing(self):
         teams, error = await _sync_hyperdx_source(

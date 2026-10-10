@@ -239,10 +239,14 @@ async def oidc_callback(
         logger.warning("OIDC callback failed", provider=provider, error=str(exc))
         # A refused credential is an audit event, not just an operational log line.
         audit_login_denied("unknown", "oidc", _get_client_ip(request), str(exc))
+        # The IdP's own answer stays in the log: this route takes unauthenticated callers.
         raise HTTPException(
             status_code=401,
-            detail={"code": "unauthorized", "message": f"OIDC login failed: {exc}"},
-        )
+            detail={
+                "code": "unauthorized",
+                "message": "OIDC login failed; the engine log has the reason",
+            },
+        ) from exc
 
     if not identity.subject:
         audit_login_denied("unknown", "oidc", _get_client_ip(request), "no_subject")
