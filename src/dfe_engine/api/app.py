@@ -523,6 +523,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             scheduler.run_forever(), name="oidc-group-sync"
         )
 
+    # dulwich's gc is off in the deploy-repo clone, so its packs are consolidated here.
+    if gitcrud is not None:
+        from dfe_engine.gitops.consolidation import consolidate_forever
+
+        app.state.gitops_consolidation = asyncio.create_task(
+            consolidate_forever(gitcrud.repo, settings.gitops.pack.interval_seconds),
+            name="gitops-consolidation",
+        )
+
     health.set_started()
     health.set_ready()
     logger.info(f"DFE Engine API started (port={settings.api.port})")
@@ -533,6 +542,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # A sync writes group files and asks for a reconcile, so it stops before both close.
         oidc_group_sync.cancel()
         await asyncio.gather(oidc_group_sync, return_exceptions=True)
+    gitops_consolidation = getattr(app.state, "gitops_consolidation", None)
+    if gitops_consolidation is not None:
+        gitops_consolidation.cancel()
+        await asyncio.gather(gitops_consolidation, return_exceptions=True)
     from dfe_engine.governance.ch import TRIGGER_ATTRIBUTES
 
     for attribute in TRIGGER_ATTRIBUTES:
