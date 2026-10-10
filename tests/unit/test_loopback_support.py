@@ -22,6 +22,7 @@ from wsgiref.simple_server import WSGIServer, make_server
 
 import pytest
 
+from tests.support import loopback
 from tests.support.loopback import CountingListener, stop_server
 
 _WAIT = 10.0
@@ -144,6 +145,49 @@ def test_a_holding_listener_keeps_each_connection_open_until_it_is_closed() -> N
     client.settimeout(_WAIT)
     assert client.recv(1) == b""
     client.close()
+
+
+def test_a_listener_waiting_for_the_first_write_ends_every_connection_with_an_eof() -> None:
+    """Whether the client writes before the listener acts, the client reads an EOF and no reset."""
+    listener = CountingListener(after_first_bytes="eof")
+    try:
+        for _ in range(25):
+            with socket.create_connection(("127.0.0.1", listener.port), timeout=_WAIT) as client:
+                client.sendall(b"client hello")
+                assert client.recv(1) == b""
+        assert _until(lambda: listener.connections == 25)
+    finally:
+        listener.close()
+
+
+def test_a_listener_waiting_for_the_first_write_can_end_every_connection_with_a_reset() -> None:
+    listener = CountingListener(after_first_bytes="reset")
+    try:
+        for _ in range(25):
+            with socket.create_connection(("127.0.0.1", listener.port), timeout=_WAIT) as client:
+                client.sendall(b"client hello")
+                with pytest.raises(ConnectionResetError):
+                    client.recv(1)
+    finally:
+        listener.close()
+
+
+def test_a_listener_still_waiting_for_a_first_write_is_closed_within_the_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(loopback, "_FIRST_BYTES_SECONDS", 0.2)
+    listener = CountingListener(after_first_bytes="eof")
+    silent = socket.create_connection(("127.0.0.1", listener.port), timeout=_WAIT)
+    try:
+        assert _until(lambda: listener.connections == 1)
+
+        started = time.monotonic()
+        listener.close()
+
+        assert time.monotonic() - started < _BOUND
+        assert silent.recv(1) == b"", "the listener should have closed its end"
+    finally:
+        silent.close()
 
 
 def test_closing_a_listener_does_not_wait_out_its_accept_thread() -> None:

@@ -29,7 +29,6 @@ from dfe_engine.auth.audit import (
     audit_jit_team_assigned,
     audit_login_denied,
     audit_login_success,
-    audit_org_ch_failed,
     audit_org_ch_provisioned,
     audit_org_change,
     audit_org_hyperdx_failed,
@@ -352,27 +351,6 @@ class TestAuditOrgChProvisioned:
         assert kwargs["org_name"] == "acme"
         assert kwargs["ch_user"] == "acme_ro"
         assert kwargs["databases"] == ["acme_db", "shared"]
-
-
-class TestAuditOrgChFailed:
-    @patch("dfe_engine.auth.audit.logger")
-    def test_emits_warning_event(self, mock_logger):
-        audit_org_ch_failed(org_name="acme", error="connection refused")
-        mock_logger.warning.assert_called_once()
-        mock_logger.info.assert_not_called()
-
-    @patch("dfe_engine.auth.audit.logger")
-    def test_event_name(self, mock_logger):
-        audit_org_ch_failed(org_name="acme", error="connection refused")
-        args, _ = mock_logger.warning.call_args
-        assert args[0] == "org.ch.provision_failed"
-
-    @patch("dfe_engine.auth.audit.logger")
-    def test_structured_fields(self, mock_logger):
-        audit_org_ch_failed(org_name="acme", error="timeout")
-        _, kwargs = mock_logger.warning.call_args
-        assert kwargs["org_name"] == "acme"
-        assert kwargs["error"] == "timeout"
 
 
 class TestAuditOrgHyperdxProvisioned:

@@ -15,10 +15,17 @@ when it cannot.
 
 import contextlib
 import socket
+import struct
 import threading
 from socketserver import TCPServer
+from typing import Literal
 
 _JOIN_SECONDS = 5.0
+_FIRST_BYTES_SECONDS = 2.0
+_READ_BYTES = 65536
+
+type EndOfConnection = Literal["eof", "reset"]
+"""How a listener ends a connection once the client has written: a clean EOF, or a reset."""
 
 
 def wake_accept(listener: socket.socket) -> None:
@@ -33,16 +40,47 @@ def wake_accept(listener: socket.socket) -> None:
         listener.shutdown(socket.SHUT_RDWR)
 
 
+def _end_after_first_bytes(conn: socket.socket, how: EndOfConnection) -> None:
+    """Wait for the client's first write, end ``conn`` the way ``how`` says, then close it.
+
+    ``"eof"`` shuts the write side and reads until the client hangs up, so nothing is
+    left unread for the close to answer with a reset. ``"reset"`` closes with a zero
+    linger, which sends a reset in place of a FIN. A client that never writes, or that
+    has gone, ends the wait at ``_FIRST_BYTES_SECONDS``.
+    """
+    conn.settimeout(_FIRST_BYTES_SECONDS)
+    try:
+        with contextlib.suppress(OSError):
+            conn.recv(_READ_BYTES)
+            if how == "reset":
+                conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+            else:
+                conn.shutdown(socket.SHUT_WR)
+                while conn.recv(_READ_BYTES):
+                    pass
+    finally:
+        conn.close()
+
+
 class CountingListener:
     """A loopback listener that accepts every connection and counts it.
 
     By default each connection is closed at once, so a client that dials fails fast.
     With ``hold=True`` each stays open and unanswered until ``close``, so a client
     waits on it until its own timeout.
+
+    Closing at once races a client that writes first, as a TLS client does with its
+    ClientHello. A close that finds the write already queued answers with a reset,
+    and one that lands before it with a clean EOF. ``after_first_bytes`` removes the
+    race: each connection waits for the client's first write, then ends as ``"eof"``
+    or ``"reset"`` says, every time.
     """
 
-    def __init__(self, *, hold: bool = False) -> None:
+    def __init__(
+        self, *, hold: bool = False, after_first_bytes: EndOfConnection | None = None
+    ) -> None:
         self._hold = hold
+        self._after_first_bytes = after_first_bytes
         self._listener = socket.socket()
         self._listener.bind(("127.0.0.1", 0))
         self._listener.listen(16)
@@ -72,8 +110,12 @@ class CountingListener:
                 self._connections += 1
                 if self._hold:
                     self._held.append(conn)
-            if not self._hold:
+            if self._hold:
+                continue
+            if self._after_first_bytes is None:
                 conn.close()
+            else:
+                _end_after_first_bytes(conn, self._after_first_bytes)
 
     def close(self) -> None:
         wake_accept(self._listener)

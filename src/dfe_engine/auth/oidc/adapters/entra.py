@@ -32,6 +32,7 @@ from scalo.logger import logger
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.credential_env import resolve_credential
 from dfe_engine.auth.oidc.idp_errors import (
+    DirectoryCredentialError,
     DirectoryNotConfiguredError,
     describe_idp_error,
     idp_failure_message,
@@ -92,8 +93,8 @@ class EntraAdapter(OIDCGroupAdapter):
     credentials or API errors log a warning and return an unfriendly fallback
     rather than propagating exceptions.  This keeps authentication working even
     when the group resolution API is unreachable.  ``list_all_groups`` is not on
-    the login path and raises when the credentials are not configured and when
-    Graph fails mid-listing.
+    the login path and raises when the credentials are not configured, when Entra
+    issues no token for them and when Graph fails mid-listing.
     """
 
     GRAPH_BASE = "https://graph.microsoft.com/v1.0"
@@ -202,12 +203,13 @@ class EntraAdapter(OIDCGroupAdapter):
         following ``@odata.nextLink`` until all pages are consumed.
 
         Returns:
-            List of GroupInfo objects.  Returns an empty list when the
-            credentials are set but Entra issues no token for them.
+            List of GroupInfo objects.
 
         Raises:
             DirectoryNotConfiguredError: The tenant id, client id or client
                 secret is not configured.
+            DirectoryCredentialError: The credentials are set but Entra issues
+                no token for them. ``_get_token`` logs why.
             Exception: Whatever the client raised on a page Graph did not serve.
                 A listing cut short is never returned: group sync would record
                 the groups read so far as the whole tenant.
@@ -217,11 +219,7 @@ class EntraAdapter(OIDCGroupAdapter):
             credentials = graph_credentials(provider=self._provider, secrets=self._secrets)
             if not credentials.configured:
                 raise DirectoryNotConfiguredError
-            logger.warning(
-                "Entra list_all_groups: no token available -- returning empty list",
-                provider=self._provider.issuer,
-            )
-            return []
+            raise DirectoryCredentialError
 
         from scalo.http import AsyncHttpClient
 

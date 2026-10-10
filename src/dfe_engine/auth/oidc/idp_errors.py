@@ -36,6 +36,15 @@ class DirectoryNotConfiguredError(Exception):
     """
 
 
+class DirectoryCredentialError(Exception):
+    """A provider's directory credential is configured but gives no access to its directory.
+
+    An adapter raises this from ``list_all_groups`` when Entra issues no token for the
+    configured client secret, or the configured Google service account JSON does not
+    build a client. Group sync records the run as failed, never as a directory with no groups.
+    """
+
+
 def _google_http_error_status(exc: BaseException) -> tuple[int | None, object]:
     """The status and parsed body of a googleapiclient ``HttpError``, else ``(None, None)``."""
     try:
@@ -72,8 +81,9 @@ def _status_and_body(exc: BaseException) -> tuple[int | None, object]:
 
 
 def _transport_failure(exc: BaseException) -> str:
-    """Why a call that got no answer failed: ``dns``, ``tls``, ``connection_refused`` or ``timeout``, else empty.
+    """Why a call that got no answer failed, else empty.
 
+    One of ``dns``, ``tls``, ``connection_refused``, ``connection_reset`` or ``timeout``.
     The HTTP client wraps the socket's error in its own, so the class that says which
     is somewhere down the cause chain. It is read from the classes there, never from
     any message, because the message names the host.
@@ -88,6 +98,9 @@ def _transport_failure(exc: BaseException) -> str:
             return "dns"
         if isinstance(link, ConnectionRefusedError):
             return "connection_refused"
+        # A reset is not an SSLError: mid-handshake it points at a TLS mismatch or a middlebox, so it gets its own class.
+        if isinstance(link, ConnectionResetError):
+            return "connection_reset"
         # httpx and httpcore name their timeouts TimeoutException; the pool timeout has no socket error under it.
         if isinstance(link, TimeoutError) or any(
             cls.__name__ == "TimeoutException" for cls in type(link).__mro__
@@ -135,7 +148,8 @@ def describe_idp_error(exc: BaseException) -> dict[str, object]:
     Returns:
         ``error_type`` always, ``status`` when the provider answered, ``code`` when
         its answer carried an error code, and ``transport_failure`` (``dns``, ``tls``,
-        ``connection_refused`` or ``timeout``) when the call never got an answer.
+        ``connection_refused``, ``connection_reset`` or ``timeout``) when the call never
+        got an answer.
     """
     fields: dict[str, object] = {"error_type": type(exc).__name__}
     status, body = _status_and_body(exc)
@@ -157,7 +171,14 @@ def idp_failure_message(exc: BaseException, *, service: str) -> str:
 
     Returns:
         A message naming ``service`` and the HTTP status, pointing at the engine log.
+        A :class:`DirectoryCredentialError` has no status, and its message says the
+        configured credential gave no access, not that the service was unreachable.
     """
+    if isinstance(exc, DirectoryCredentialError):
+        return (
+            f"{service} could not use the configured credential: check it is current "
+            "and valid; the engine log has the reason"
+        )
     status, _body = _status_and_body(exc)
     if status is None:
         return f"{service} could not be reached; the engine log has the reason"
