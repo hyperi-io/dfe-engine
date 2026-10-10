@@ -26,7 +26,9 @@ if TYPE_CHECKING:
     from dfe_engine.secrets import DfeSecrets
 
 
-def get_adapter(provider: OIDCProvider, *, secrets: DfeSecrets | None = None) -> OIDCGroupAdapter:
+def get_adapter(
+    provider: OIDCProvider, *, access_token: str = "", secrets: DfeSecrets | None = None
+) -> OIDCGroupAdapter:
     """Return the appropriate OIDCGroupAdapter for *provider*.
 
     Imports are lazy inside each branch so that optional provider-specific
@@ -35,6 +37,9 @@ def get_adapter(provider: OIDCProvider, *, secrets: DfeSecrets | None = None) ->
 
     Args:
         provider: The OIDCProvider configuration instance.
+        access_token: The user's access token from the login being enriched.
+            Only Google takes it: its directory answers the user about their own
+            groups, where the others read with a credential of their own.
         secrets: The DfeSecrets seam the directory credential resolves through,
             ahead of the env var named in the provider config.
 
@@ -60,7 +65,7 @@ def get_adapter(provider: OIDCProvider, *, secrets: DfeSecrets | None = None) ->
         case "google":
             from dfe_engine.auth.oidc.adapters.google import GoogleAdapter
 
-            return GoogleAdapter(provider, secrets=secrets)
+            return GoogleAdapter(provider, access_token=access_token, secrets=secrets)
         case "entra_id":
             from dfe_engine.auth.oidc.adapters.entra import EntraAdapter
 

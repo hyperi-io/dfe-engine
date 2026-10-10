@@ -18,8 +18,6 @@ Tests that require a live Entra / Microsoft Graph endpoint are marked
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from dfe_engine.auth.oidc.adapters.entra import EntraAdapter, graph_credentials
@@ -160,51 +158,6 @@ class TestGetTokenMissingCredentials:
 
 
 # ---------------------------------------------------------------------------
-# resolve_groups — unfriendly fallback when no credentials
-# ---------------------------------------------------------------------------
-
-
-class TestResolveGroupsNoCredentials:
-    async def test_returns_dict_with_ids_as_keys_and_values(self, monkeypatch):
-        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
-
-        adapter = EntraAdapter(_make_provider())
-        result = await adapter.resolve_groups(["group-1", "group-2"])
-        assert result == {"group-1": "group-1", "group-2": "group-2"}
-
-    async def test_returns_empty_dict_for_empty_input(self, monkeypatch):
-        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
-
-        adapter = EntraAdapter(_make_provider())
-        result = await adapter.resolve_groups([])
-        assert result == {}
-
-    async def test_return_type_is_dict(self, monkeypatch):
-        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
-
-        adapter = EntraAdapter(_make_provider())
-        result = await adapter.resolve_groups(["any-group-id"])
-        assert isinstance(result, dict)
-
-    async def test_single_group_id_in_fallback(self, monkeypatch):
-        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
-
-        adapter = EntraAdapter(_make_provider())
-        result = await adapter.resolve_groups(["aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"])
-        assert result == {
-            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-        }
-
-
-# ---------------------------------------------------------------------------
 # resolve_user_groups (the >200 overage enrichment) — empty when no credentials
 # ---------------------------------------------------------------------------
 
@@ -307,15 +260,6 @@ class TestTestConnectionNoCredentials:
 
 @pytest.mark.skip(reason="Needs Entra sandbox")
 class TestEntraAdapterLive:
-    async def test_resolve_groups_returns_display_names(self):
-        """Verify group GUIDs are resolved to display names via Graph API."""
-        provider = _make_provider()
-        adapter = EntraAdapter(provider)
-        group_ids = [os.environ["TEST_ENTRA_GROUP_ID"]]
-        result = await adapter.resolve_groups(group_ids)
-        assert group_ids[0] in result
-        assert result[group_ids[0]] != group_ids[0]
-
     async def test_list_all_groups_returns_group_info_objects(self):
         """Verify list_all_groups returns GroupInfo with id and name."""
         from dfe_engine.auth.oidc.models import GroupInfo

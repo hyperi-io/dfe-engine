@@ -62,8 +62,7 @@ class MockDirectoryAdapter(OIDCGroupAdapter):
 
     Implements the full adapter contract from a static file: ``list_all_groups``
     (bulk sync), ``resolve_user_groups`` (the overage / per-user enrichment
-    call), ``resolve_groups`` (the ABC's subject->groups lookup), and a
-    ``test_connection`` that reports the loaded fixture size.
+    call), and a ``test_connection`` that reports the loaded fixture size.
     """
 
     def __init__(self, provider: OIDCProvider, *, secrets: DfeSecrets | None = None) -> None:
@@ -119,10 +118,6 @@ class MockDirectoryAdapter(OIDCGroupAdapter):
             # as an id-only record, matching the live adapters' unfriendly fallback.
             out.append(self._by_id.get(gid) or GroupInfo(id=gid, name=gid))
         return out
-
-    async def resolve_groups(self, subject: str) -> list[GroupInfo]:
-        """ABC contract: the groups ``subject`` belongs to (by directory id)."""
-        return self._groups_for(subject)
 
     async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo]:
         """The overage / enrichment call: this user's group memberships."""

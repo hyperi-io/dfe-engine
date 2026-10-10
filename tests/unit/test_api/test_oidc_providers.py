@@ -713,6 +713,157 @@ class TestCredentialsGoToTheSecretStore:
         assert not app.state.dfe_secrets.exists("oidc/gone/client_secret")
 
 
+# No service account and no admin: a Google provider logs in on the user's own token.
+_GOOGLE = {"type": "google", "issuer": "https://accounts.google.com", "groups": {"mode": "api"}}
+_CLOUD_IDENTITY_SCOPE = "https://www.googleapis.com/auth/cloud-identity.groups.readonly"
+
+
+class TestScopes:
+    """The scopes a provider asks its IdP for: a per-type default, or a validated override."""
+
+    @pytest.mark.parametrize(
+        ("overrides", "expected"),
+        [
+            (_GOOGLE, ["openid", "email", "profile", _CLOUD_IDENTITY_SCOPE]),
+            ({"type": "entra_id"}, ["openid", "email", "profile"]),
+            ({"type": "generic"}, ["openid", "email", "profile", "groups"]),
+            ({"type": "okta"}, ["openid", "email", "profile", "groups"]),
+        ],
+        ids=["google", "entra_id", "generic", "okta"],
+    )
+    def test_create_uses_the_type_default(self, client, app, admin_headers, overrides, expected):
+        resp = _create_provider(client, admin_headers, name="scoped", **overrides)
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["scopes"] == expected
+        stored = app.state.oidc_provider_registry.get("scoped")
+        assert stored.scopes == " ".join(expected)
+
+    def test_google_reaches_the_rp_without_a_groups_scope(self, client, app, admin_headers):
+        _create_provider(client, admin_headers, name="gws", **_GOOGLE)
+        registered = app.state.oidc_rp._oauth.create_client("gws")
+        assert registered.client_kwargs["scope"] == f"openid email profile {_CLOUD_IDENTITY_SCOPE}"
+
+    def test_create_takes_an_override(self, client, app, admin_headers):
+        resp = _create_provider(
+            client,
+            admin_headers,
+            name="custom",
+            type="okta",
+            scopes=["openid", "email", "offline_access", "email"],
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["scopes"] == ["openid", "email", "offline_access"]
+        assert app.state.oidc_provider_registry.get("custom").scopes == (
+            "openid email offline_access"
+        )
+
+    @pytest.mark.parametrize(
+        ("scopes", "field"),
+        [
+            (["email", "profile"], "scopes"),
+            ([], "scopes"),
+            (["openid", "email profile"], "scopes"),
+            (["openid", 'gr"oups'], "scopes"),
+            (["openid", 5], "scopes.1"),
+            ("email profile", "scopes"),
+            ({"openid": True}, "scopes"),
+        ],
+        ids=[
+            "no-openid",
+            "empty",
+            "two-scopes-in-one-entry",
+            "quote",
+            "not-a-string",
+            "string-without-openid",
+            "neither-a-list-nor-a-string",
+        ],
+    )
+    def test_create_refuses_a_bad_override_and_writes_nothing(
+        self, client, admin_headers, api_settings, scopes, field
+    ):
+        written = Path(api_settings.auth.auth_dir) / "oidc-providers"
+        before = sorted(written.rglob("*"))
+        resp = _create_provider(client, admin_headers, name="bad-scopes", scopes=scopes)
+        assert resp.status_code == 422, resp.text
+        assert _field_errors(resp) == [field]
+        assert sorted(written.rglob("*")) == before
+
+    def test_update_replaces_the_scopes(self, client, app, admin_headers):
+        _create_provider(client, admin_headers, name="upd-scopes", **_GOOGLE)
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/upd-scopes",
+            json={"scopes": ["openid", "email"]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["scopes"] == ["openid", "email"]
+        assert app.state.oidc_provider_registry.get("upd-scopes").scopes == "openid email"
+        registered = app.state.oidc_rp._oauth.create_client("upd-scopes")
+        assert registered.client_kwargs["scope"] == "openid email"
+
+    def test_an_update_without_scopes_keeps_them(self, client, app, admin_headers):
+        _create_provider(client, admin_headers, name="keep-scopes", scopes=["openid", "email"])
+        client.put(
+            "/api/v1/auth/oidc-providers/keep-scopes",
+            json={"display_name": "Renamed"},
+            headers=admin_headers,
+        )
+        assert app.state.oidc_provider_registry.get("keep-scopes").scopes == "openid email"
+
+    def test_a_space_separated_string_is_taken_as_the_scopes(self, client, app, admin_headers):
+        resp = _create_provider(
+            client,
+            admin_headers,
+            name="str-scopes",
+            type="okta",
+            scopes="openid  email offline_access",
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["scopes"] == ["openid", "email", "offline_access"]
+        assert app.state.oidc_provider_registry.get("str-scopes").scopes == (
+            "openid email offline_access"
+        )
+
+    def test_a_form_can_send_the_stored_scopes_string_back(self, client, app, admin_headers):
+        # The setup status serves the provider model, whose scopes are one string.
+        _create_provider(client, admin_headers, name="round-trip", scopes=["openid", "email"])
+        stored = app.state.oidc_provider_registry.get("round-trip").scopes
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/round-trip",
+            json={"display_name": "Renamed", "scopes": stored},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["scopes"] == ["openid", "email"]
+
+    def test_a_blank_string_is_no_override(self, client, app, admin_headers):
+        resp = _create_provider(client, admin_headers, name="blank-scopes", scopes="  ")
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["scopes"] == ["openid", "email", "profile", "groups"]
+        client.put(
+            "/api/v1/auth/oidc-providers/blank-scopes",
+            json={"scopes": "openid email"},
+            headers=admin_headers,
+        )
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/blank-scopes", json={"scopes": ""}, headers=admin_headers
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["scopes"] == ["openid", "email"]
+
+    def test_update_refuses_scopes_without_openid(self, client, app, admin_headers):
+        _create_provider(client, admin_headers, name="upd-bad-scopes")
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/upd-bad-scopes",
+            json={"scopes": ["email", "profile", "groups"]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422, resp.text
+        assert _field_errors(resp) == ["scopes"]
+        stored = app.state.oidc_provider_registry.get("upd-bad-scopes")
+        assert stored.scopes == "openid email profile groups"
+
+
 class TestEnvNameFieldsRejectPastedSecrets:
     """A ``*_env`` field takes the NAME of an env var; anything else is a 422.
 
@@ -922,14 +1073,17 @@ class TestProviderFieldRules:
             name="gws",
             type="google",
             issuer="https://accounts.google.com",
-            groups={
-                "admin_email": "admin@acme.com",
-                "mode": "api",
-                "service_account_json_env": "GOOGLE_SA_JSON",
-            },
+            groups={"mode": "api", "service_account_json_env": "GOOGLE_SA_JSON"},
         )
         assert resp.status_code == 201, resp.text
         assert resp.json()["groups"]["enrich_on_login"] is True
+
+    def test_google_needs_no_service_account_and_names_no_admin(self, client, app, admin_headers):
+        resp = _create_provider(client, admin_headers, name="gws-bare", **_GOOGLE)
+        assert resp.status_code == 201, resp.text
+        assert "admin_email" not in resp.json()["groups"]
+        stored = app.state.oidc_provider_registry.get("gws-bare").groups
+        assert (stored.service_account_json_path, stored.service_account_json_env) == ("", "")
 
     def test_an_update_is_not_refused_for_an_issuer_it_cannot_set(self, client, app, admin_headers):
         from dfe_engine.auth.oidc.models import OIDCProvider

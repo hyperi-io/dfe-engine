@@ -35,19 +35,6 @@ class OIDCGroupAdapter(ABC):
         self._secrets = secrets
 
     @abstractmethod
-    async def resolve_groups(self, subject: str) -> list[GroupInfo]:
-        """Return the groups that *subject* (OIDC sub claim) belongs to.
-
-        Args:
-            subject: The OIDC subject identifier for the authenticating user.
-
-        Returns:
-            List of GroupInfo records for the user's group memberships.
-            Returns an empty list when the user belongs to no groups or when
-            group resolution is not supported.
-        """
-
-    @abstractmethod
     async def list_all_groups(self) -> list[GroupInfo]:
         """Return all groups available in the provider.
 
