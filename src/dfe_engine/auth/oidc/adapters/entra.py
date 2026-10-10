@@ -34,6 +34,7 @@ from dfe_engine.auth.oidc.credential_env import resolve_credential
 from dfe_engine.auth.oidc.idp_errors import (
     DirectoryCredentialError,
     DirectoryNotConfiguredError,
+    credential_failure_message,
     describe_idp_error,
     idp_failure_message,
     provider_error_code,
@@ -256,10 +257,15 @@ class EntraAdapter(OIDCGroupAdapter):
         network access without fetching a full result set.
 
         Returns:
-            ``(True, message)`` on success, ``(False, message)`` on failure.
+            ``(True, message)`` on success, ``(False, message)`` on failure. A
+            credential that is not set and one Entra issues no token for read
+            differently, as they do in group sync.
         """
         token = self._get_token()
         if token is None:
+            credentials = graph_credentials(provider=self._provider, secrets=self._secrets)
+            if credentials.configured:
+                return False, credential_failure_message(service="Graph API")
             return (
                 False,
                 "Entra credentials not configured - set groups.tenant_id, the client id "

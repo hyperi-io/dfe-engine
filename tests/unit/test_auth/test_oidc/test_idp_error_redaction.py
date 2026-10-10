@@ -23,7 +23,10 @@ from typing import Any
 import httpx
 import pytest
 from authlib.integrations.base_client import OAuthError
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from google.auth.credentials import AnonymousCredentials
+from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build
 
 from dfe_engine.auth.groups import GroupStore
@@ -31,7 +34,11 @@ from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.adapters.entra import EntraAdapter
 from dfe_engine.auth.oidc.adapters.google import GoogleAdapter
 from dfe_engine.auth.oidc.adapters.okta import OktaAdapter
-from dfe_engine.auth.oidc.idp_errors import describe_idp_error, provider_error_code
+from dfe_engine.auth.oidc.idp_errors import (
+    describe_idp_error,
+    idp_failure_message,
+    provider_error_code,
+)
 from dfe_engine.auth.oidc.models import GroupInfo, GroupResolutionConfig, OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.rp import fill_from_userinfo_endpoint
@@ -344,6 +351,43 @@ def _directory_adapter(base_url: str) -> GoogleAdapter:
     return _LocalDirectoryGoogle(provider, base_url=base_url)
 
 
+TOKEN_REFUSED = {
+    "error": "invalid_grant",
+    "error_description": f"Invalid JWT Signature for {SENTINEL}",
+}
+
+
+@pytest.fixture(scope="module")
+def service_account_pem() -> str:
+    """A throwaway RSA key in the PEM form a service account JSON carries."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    return key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode("ascii")
+
+
+def _token_refusing_adapter(
+    *, monkeypatch: pytest.MonkeyPatch, pem: str, token_uri: str
+) -> GoogleAdapter:
+    """A Google adapter whose own service account client posts its token request to ``token_uri``."""
+    service_account = {
+        "client_email": "dfe-test@example-project.iam.gserviceaccount.com",
+        "private_key": pem,
+        "private_key_id": "0123456789abcdef",
+        "token_uri": token_uri,
+        "type": "service_account",
+    }
+    monkeypatch.setenv("DFE_TEST_IDP_SA_JSON", json.dumps(service_account))
+    provider = OIDCProvider(
+        type="google",
+        issuer="https://accounts.google.com",
+        groups=GroupResolutionConfig(mode="api", service_account_json_env="DFE_TEST_IDP_SA_JSON"),
+    )
+    return GoogleAdapter(provider)
+
+
 class TestGoogleDirectory:
     async def test_a_refused_user_lookup_logs_the_status_and_code_not_the_user(
         self, audit_events: list[dict]
@@ -378,6 +422,68 @@ class TestGoogleDirectory:
         assert "HTTP 403" in message
         line = failure_line(audit_events, "test_connection")
         assert (line["status"], line["code"]) == (403, "forbidden")
+
+    async def test_a_token_refusal_blames_the_credential_not_the_network(
+        self,
+        audit_events: list[dict],
+        monkeypatch: pytest.MonkeyPatch,
+        service_account_pem: str,
+    ) -> None:
+        with refusing_api(400, TOKEN_REFUSED) as token_endpoint:
+            adapter = _token_refusing_adapter(
+                monkeypatch=monkeypatch,
+                pem=service_account_pem,
+                token_uri=f"{token_endpoint.base_url}/token",
+            )
+            ok, message = await adapter.test_connection()
+
+        assert token_endpoint.paths == ["/token"]
+        assert ok is False
+        assert "could not use the configured credential" in message
+        assert "could not be reached" not in message
+        assert token_endpoint.base_url not in message
+        assert_no_sentinel(message)
+        assert_no_sentinel(logged(audit_events))
+        line = failure_line(audit_events, "test_connection")
+        assert (line["error_type"], line["code"]) == ("RefreshError", "invalid_grant")
+
+
+class TestGoogleTokenRefusalClass:
+    """Which ``RefreshError`` google-auth raises is a refusal of the credential, and what it logs."""
+
+    @pytest.mark.parametrize(
+        ("exc", "blames_credential"),
+        [
+            pytest.param(
+                RefreshError("invalid_grant: x", TOKEN_REFUSED, retryable=False),
+                True,
+                id="refused",
+            ),
+            pytest.param(RefreshError("an HTML page from a proxy"), True, id="no-json-answer"),
+            pytest.param(
+                RefreshError("server_error: x", {"error": "server_error"}, retryable=True),
+                False,
+                id="provider-failing-retryable",
+            ),
+        ],
+    )
+    def test_only_a_refusal_the_provider_will_repeat_blames_the_credential(
+        self, exc: RefreshError, blames_credential: bool
+    ) -> None:
+        message = idp_failure_message(exc, service="The directory API")
+
+        assert ("could not use the configured credential" in message) is blames_credential
+        assert ("could not be reached" in message) is not blames_credential
+
+    def test_the_log_fields_carry_the_oauth_code_not_its_description(self) -> None:
+        exc = RefreshError(f"invalid_grant: {SENTINEL}", TOKEN_REFUSED)
+
+        assert describe_idp_error(exc) == {"error_type": "RefreshError", "code": "invalid_grant"}
+
+    def test_an_answer_that_is_not_json_yields_no_code(self) -> None:
+        assert describe_idp_error(RefreshError("an HTML page from a proxy")) == {
+            "error_type": "RefreshError"
+        }
 
 
 class TestGoogleCloudIdentity:
@@ -586,6 +692,7 @@ def _assert_credential_failed_sync(
     group_store: GroupStore,
     registry: OIDCProviderRegistry,
     result: dict,
+    error_type: str = "DirectoryCredentialError",
 ) -> None:
     """The sync recorded a failed run that blames the credential, and stored no group."""
     stored = registry.get("sso")
@@ -596,7 +703,7 @@ def _assert_credential_failed_sync(
     assert result["skipped"] is None
     assert (result["created"], result["updated"], result["total"]) == (0, 0, 0)
     assert group_store.list() == []
-    assert failure_line(audit_events, "list_all_groups")["error_type"] == "DirectoryCredentialError"
+    assert failure_line(audit_events, "list_all_groups")["error_type"] == error_type
 
 
 class TestSyncCredentialGivesNoAccess:
@@ -640,6 +747,36 @@ class TestSyncCredentialGivesNoAccess:
         _assert_credential_failed_sync(
             audit_events=audit_events, group_store=group_store, registry=registry, result=result
         )
+
+    async def test_a_google_token_request_google_refuses_is_a_failed_sync(
+        self,
+        tmp_path,
+        audit_events: list[dict],
+        monkeypatch: pytest.MonkeyPatch,
+        service_account_pem: str,
+    ) -> None:
+        registry = _sync_registry(tmp_path)
+        group_store = GroupStore(tmp_path / "groups")
+        with refusing_api(400, TOKEN_REFUSED) as token_endpoint:
+            adapter = _token_refusing_adapter(
+                monkeypatch=monkeypatch,
+                pem=service_account_pem,
+                token_uri=f"{token_endpoint.base_url}/token",
+            )
+            result = await sync_provider("sso", registry, group_store, adapter=adapter)
+
+        assert token_endpoint.paths == ["/token"]
+        _assert_credential_failed_sync(
+            audit_events=audit_events,
+            error_type="RefreshError",
+            group_store=group_store,
+            registry=registry,
+            result=result,
+        )
+        assert failure_line(audit_events, "list_all_groups")["code"] == "invalid_grant"
+        assert token_endpoint.base_url not in result["error"]
+        assert_no_sentinel(result["error"])
+        assert_no_sentinel(logged(audit_events))
 
     async def test_an_okta_token_the_directory_refuses_is_a_failed_sync(
         self, tmp_path, audit_events: list[dict]
