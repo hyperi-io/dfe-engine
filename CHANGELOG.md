@@ -3,6 +3,15 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.20](https://github.com/hyperi-io/dfe-engine/compare/v1.22.19...v1.22.20) (2026-10-10)
+
+### Bug Fixes
+
+* blame a refused Google or Entra credential ([#804](https://github.com/hyperi-io/dfe-engine/issues/804)) ([8928833](https://github.com/hyperi-io/dfe-engine/commit/892883323fc773fe1a0fe6b0e25c354716b77731))
+* close the leftovers from the name validation and IdP error work ([#801](https://github.com/hyperi-io/dfe-engine/issues/801)) ([b7c6f2a](https://github.com/hyperi-io/dfe-engine/commit/b7c6f2a34a577f78724c2af974e57fd5857482c8))
+* fail a group sync whose credential is set but gives no access, and settle the TLS reset flake ([#803](https://github.com/hyperi-io/dfe-engine/issues/803)) ([a072831](https://github.com/hyperi-io/dfe-engine/commit/a07283103840853be75a1f19e89049ea135a2b43))
+* keep dulwich's full repack off the write path ([#802](https://github.com/hyperi-io/dfe-engine/issues/802)) ([1646b90](https://github.com/hyperi-io/dfe-engine/commit/1646b908d7391dbb3d09bad7c46241a33558f9f0))
+
 ## [1.22.19](https://github.com/hyperi-io/dfe-engine/compare/v1.22.18...v1.22.19) (2026-10-10)
 
 ### Bug Fixes
