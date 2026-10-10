@@ -45,6 +45,9 @@ _DEFAULT_SCOPES: dict[_ProviderType, str] = {
 # The scopes field's default before it followed the type, sorted; every provider saved then stores it.
 _LEGACY_DEFAULT_SCOPES = ("email", "groups", "openid", "profile")
 
+# okta and generic still default to that set, so only these types fail a login on it.
+_LEGACY_REPAIRED_TYPES = frozenset({"entra_id", "google"})
+
 
 class GroupResolutionConfig(BaseModel):
     """Configuration for how group membership is resolved from a provider.
@@ -198,13 +201,15 @@ class OIDCProvider(BaseModel):
     def _fill_default_scopes(self) -> Self:
         """Give a provider with no scopes configured the ones its type needs.
 
-        A google provider still holding the old field default never had its
-        scopes set by an operator, and Google refuses that set, so it counts as
-        unset too.
+        A google or entra_id provider still holding the old field default never
+        had its scopes set by an operator, and both IdPs fail a login that asks
+        for its ``groups`` scope, so it counts as unset too.
         """
         stored = self.scopes.split()
-        legacy_google = self.type == "google" and tuple(sorted(stored)) == _LEGACY_DEFAULT_SCOPES
-        if not stored or legacy_google:
+        legacy = (
+            self.type in _LEGACY_REPAIRED_TYPES and tuple(sorted(stored)) == _LEGACY_DEFAULT_SCOPES
+        )
+        if not stored or legacy:
             self.scopes = _DEFAULT_SCOPES[self.type]
         return self
 
