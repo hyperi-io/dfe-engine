@@ -988,7 +988,7 @@ def get_source_version(
         )
 
     store = SourceDeploymentStore.from_settings(get_settings())
-    deploy_doc = store.load_deploy_document(name)
+    deploy_doc = store.load_deploy_document(source.source)
     version_ids = sorted(source.versions.keys())
     prev_deployed = previous_deployed_version_ids(source, deploy_doc)
     snap = source.versions[version]

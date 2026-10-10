@@ -13,6 +13,9 @@ as a plausible-looking list nobody checks.
 """
 
 import json
+import random
+import re
+import time
 from pathlib import Path
 
 import pytest
@@ -1863,3 +1866,72 @@ class TestCredentialsNamedByWhatHoldsThem:
             # Nothing says these name a Secret's keys, so they are judged as secret keys.
             "jwt": {"secretKeys": contract.REDACTED},
         }
+
+
+class TestTheMountIsReadByTheManifestName:
+    """The directory read is the manifest's name for the app, never a caller's string."""
+
+    @pytest.mark.parametrize("form", ["dotted", "through-an-app", "absolute"])
+    def test_a_name_the_manifest_does_not_declare_reads_nothing(self, tmp_path, form):
+        root = tmp_path / "contracts"
+        (root / "dfe-loader").mkdir(parents=True)
+        planted = tmp_path / "outside"
+        planted.mkdir()
+        (planted / contract.SCHEMA_FILE).write_text(json.dumps({"type": "object"}))
+        service = {
+            "dotted": "../outside",
+            "through-an-app": "dfe-loader/../../outside",
+            "absolute": str(planted),
+        }[form]
+
+        found = contract.load_contract(service, root)
+
+        assert found.available is False
+        assert found.source == contract.ContractSource.ABSENT
+
+
+# The password grammar as a plain backtracking pattern: the reference for what is masked.
+_REFERENCE_URL_PASSWORD = re.compile(r"([A-Za-z][A-Za-z0-9+.\-]*://[^\s:/@]*:)([^\s/]+)(?=@)")
+
+
+def _reference_shown(text: str) -> str:
+    return _REFERENCE_URL_PASSWORD.sub(rf"\1{contract.REDACTED}", text)
+
+
+class TestUrlPasswordMasking:
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "postgres://user:pw-4501@db.example:5432/dfe",
+            "1http://user:pw-4502@host",
+            "-x+y.z://u:p:q@h@i/x",
+            "dsn=kafka://svc:pw-4503@b1,b2 other://a:b@c",
+            "http://user@host",
+            "a://:@",
+            "no url in this text",
+            "",
+        ],
+    )
+    def test_masks_as_the_reference_grammar_does(self, text):
+        assert contract._shown_text(text) == _reference_shown(text)
+
+    def test_masks_as_the_reference_grammar_does_on_random_text(self):
+        rng = random.Random(4504)
+        alphabet = ["a", "B", "1", "+", ".", "-", ":", "/", "/", "@", " ", "x", ","]
+        for _ in range(20_000):
+            text = "".join(rng.choices(alphabet, k=rng.randint(0, 20)))
+            assert contract._shown_text(text) == _reference_shown(text), repr(text)
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "A" * 200_000 + " a://x",
+            "a://:" + "A" * 200_000,
+            "1a" * 100_000 + " b://x",
+        ],
+        ids=["letter-run", "after-userinfo", "mixed-run"],
+    )
+    def test_a_long_value_is_read_in_linear_time(self, text):
+        started = time.perf_counter()
+        contract._shown_text(text)
+        assert time.perf_counter() - started < 2.0

@@ -181,17 +181,69 @@ _FORBIDDEN_KEYWORDS_RE = re.compile(
 )
 
 # String literals and quoted identifiers, with ClickHouse's doubled-quote and backslash escapes.
-_QUOTED_RE = re.compile(r"'(?:[^'\\]|\\.|'')*'|`(?:[^`\\]|\\.|``)*`|\"(?:[^\"\\]|\\.|\"\")*\"")
+_QUOTES = "'`\""
+_QUOTE_OPENERS = re.compile(r"['`\"]")
+_QUOTE_STOPS = {quote: re.compile(rf"[{quote}\\]") for quote in _QUOTES}
 
 
-def _blank_inside(match: re.Match[str]) -> str:
-    quoted = match.group(0)
-    return quoted[0] + " " * (len(quoted) - 2) + quoted[-1]
+def _quoted_span_end(sql: str, start: int) -> tuple[int | None, int]:
+    r"""Where the span opened at ``start`` closes, and the index reading it stopped at.
+
+    Reads as ``'(?:[^'\\]|\\.|'')*'`` reads, for each of the three quotes: a backslash
+    escapes the next character unless that is a line break, a doubled quote stands for
+    one, and a span with no lone closing quote ends at its last doubled one. The first
+    value is the index after the closing quote, or None when the span never closes.
+    """
+    quote = sql[start]
+    stops = _QUOTE_STOPS[quote]
+    length = len(sql)
+    last_doubled: int | None = None
+    stopped = length
+    pos = start + 1
+    while (found := stops.search(sql, pos)) is not None:
+        at = found.start()
+        if sql[at] == "\\":
+            if at + 1 < length and sql[at + 1] != "\n":
+                pos = at + 2
+                continue
+            stopped = at
+            break
+        if at + 1 < length and sql[at + 1] == quote:
+            last_doubled = at
+            pos = at + 2
+            continue
+        return at + 1, at
+    return (None if last_doubled is None else last_doubled + 1), stopped
 
 
 def _mask_quoted(sql: str) -> str:
-    """Blank the inside of every quoted span, keeping each character's position."""
-    return _QUOTED_RE.sub(_blank_inside, sql)
+    """Blank the inside of every quoted span, keeping each character's position.
+
+    One pass over the text. A span that never closes stopped reading where nothing of
+    its kind could close any more, so an opener of that kind before that point is
+    skipped rather than read to the same end again.
+    """
+    pieces: list[str] = []
+    copied = 0
+    unclosed_until = dict.fromkeys(_QUOTES, -1)
+    pos = 0
+    while (found := _QUOTE_OPENERS.search(sql, pos)) is not None:
+        start = found.start()
+        quote = sql[start]
+        if start <= unclosed_until[quote]:
+            pos = start + 1
+            continue
+        close, stopped = _quoted_span_end(sql, start)
+        if close is None:
+            unclosed_until[quote] = stopped
+            pos = start + 1
+            continue
+        pieces.append(sql[copied : start + 1])
+        pieces.append(" " * (close - start - 2))
+        pieces.append(sql[close - 1])
+        copied = pos = close
+    pieces.append(sql[copied:])
+    return "".join(pieces)
 
 
 _EXPLAIN_PREFIX = "EXPLAIN AST "

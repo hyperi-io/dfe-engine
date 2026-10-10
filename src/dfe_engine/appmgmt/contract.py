@@ -254,10 +254,15 @@ scalo's own mask, so an operator sees one spelling for a hidden value wherever i
 is shown.
 """
 
-_URL_PASSWORD = re.compile(r"([A-Za-z][A-Za-z0-9+.\-]*://[^\s:/@]*:)([^\s/]+)(?=@)")
+_URL_PASSWORD = re.compile(
+    r"((?<![A-Za-z0-9+.\-])[0-9+.\-]*[A-Za-z][A-Za-z0-9+.\-]*://[^\s:/@]*:)([^\s/]+)(?=@)"
+)
 """The password in a URL's ``user:password@`` userinfo.
 
 It runs to the last ``@`` before the path, so a password holding one is masked whole.
+A match starts only where a run of scheme characters starts, so a long run is read
+once rather than once from each letter in it; the characters before the scheme's
+first letter stay in the first group, which the substitution writes back unchanged.
 """
 
 IDENTITY_KEYS = ("id", "name")
@@ -417,12 +422,17 @@ def load_contract(service: str, root: Path | str | None = None) -> AppContract:
     schema, is a deployment whose emit step has not run or does not cover this
     app. That answers ``available: false`` rather than failing: the mount is
     dfe-infra's half of the wiring and every other route still works without it.
+
+    An app the manifest does not declare has no contract, and the directory read is
+    the manifest's own name for the app, never the string a caller passed.
     """
     absent = AppContract(service=service, available=False, source=ContractSource.ABSENT)
     base = contract_root(root)
-    if base is None:
+    app = APP_CATALOGUE.get(service)
+    if base is None or app is None:
         return absent
-    schema_file = base / service / SCHEMA_FILE
+    directory = base / app.service
+    schema_file = directory / SCHEMA_FILE
     if not schema_file.is_file():
         return absent
 
@@ -430,7 +440,7 @@ def load_contract(service: str, root: Path | str | None = None) -> AppContract:
     if not isinstance(schema, dict):
         raise ContractError(f"app config schema {schema_file} is not a mapping")
 
-    capabilities_file = base / service / CAPABILITIES_FILE
+    capabilities_file = directory / CAPABILITIES_FILE
     capabilities: list[Any] = []
     if capabilities_file.is_file():
         raw = _read_json(capabilities_file, what="app capability catalogue")
@@ -439,7 +449,7 @@ def load_contract(service: str, root: Path | str | None = None) -> AppContract:
         capabilities = raw
 
     pinned_ref = None
-    source_file = base / service / SOURCE_FILE
+    source_file = directory / SOURCE_FILE
     if source_file.is_file():
         emitted = _read_json(source_file, what="app contract source")
         if isinstance(emitted, dict):

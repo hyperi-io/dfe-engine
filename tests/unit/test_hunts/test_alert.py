@@ -7,6 +7,7 @@ import pytest
 from dfe_engine.hunts.alert import (
     AlertConfig,
     AlertDestination,
+    AlertDestinationNameError,
     AlertDestinationRegistry,
     AlertDispatcher,
     AlertTrigger,
@@ -612,3 +613,53 @@ class TestAlertDestinationRegistryFileBacked:
         r.add(AlertDestination(name="s", url="slack://new"))
         assert r.resolve("s") == "slack://new"
         assert len(r) == 1
+
+
+class TestAlertDestinationNameContainment:
+    """A destination is kept as ``<directory>/<name>.yaml``, and that file stays inside it."""
+
+    @pytest.mark.parametrize("name", ["../escape", "nested/../../escape", "nul\x00byte"])
+    def test_add_refuses_a_name_whose_file_leaves_the_directory(self, tmp_path, name):
+        r = AlertDestinationRegistry(directory=str(tmp_path / "dests"))
+        with pytest.raises(AlertDestinationNameError):
+            r.add(AlertDestination(name=name, url="slack://x"))
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["dests"]
+        assert list((tmp_path / "dests").iterdir()) == []
+
+    def test_add_refuses_an_absolute_name_and_writes_nothing_outside(self, tmp_path):
+        outside = tmp_path / "outside" / "escape"
+        r = AlertDestinationRegistry(directory=str(tmp_path / "dests"))
+        with pytest.raises(AlertDestinationNameError):
+            r.add(AlertDestination(name=str(outside), url="slack://x"))
+        assert not (tmp_path / "outside").exists()
+
+    def test_add_refuses_a_symlink_that_points_out_of_the_directory(self, tmp_path):
+        dests = tmp_path / "dests"
+        r = AlertDestinationRegistry(directory=str(dests))
+        (tmp_path / "elsewhere").mkdir()
+        (dests / "linked").symlink_to(tmp_path / "elsewhere")
+        with pytest.raises(AlertDestinationNameError):
+            r.add(AlertDestination(name="linked/escape", url="slack://x"))
+        assert list((tmp_path / "elsewhere").iterdir()) == []
+
+    def test_a_name_inside_a_subdirectory_still_stores_and_resolves(self, tmp_path):
+        """A destination stored under a subdirectory stays readable and removable."""
+        r = AlertDestinationRegistry(directory=str(tmp_path / "dests"))
+        r.add(AlertDestination(name="team/slack", url="slack://team"))
+        assert r.resolve("team/slack") == "slack://team"
+        assert r.remove("team/slack") is True
+
+    @pytest.mark.parametrize("form", ["absolute", "dotted"])
+    def test_a_name_outside_the_directory_is_found_nowhere_and_removes_nothing(
+        self, tmp_path, form
+    ):
+        planted = tmp_path / "planted.yaml"
+        planted.write_text("url: slack://kept\n")
+        r = AlertDestinationRegistry(directory=str(tmp_path / "dests"))
+        name = str(tmp_path / "planted") if form == "absolute" else "../planted"
+        assert name not in r
+        with pytest.raises(KeyError):
+            r.get(name)
+        assert r.resolve(name) is None
+        assert r.remove(name) is False
+        assert planted.exists()

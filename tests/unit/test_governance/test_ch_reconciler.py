@@ -15,9 +15,12 @@ diff, both of which are pure functions.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterator
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
+from scalo.logger import logger
 
 from dfe_engine.governance.ch.models import ChServiceRole, ChTier, GroupChBinding
 from dfe_engine.governance.ch.reconciler import (
@@ -32,6 +35,17 @@ from dfe_engine.settings import SecretsSettings
 
 def _org(name: str, ids: list[str]) -> SimpleNamespace:
     return SimpleNamespace(name=name, org_ids=ids)
+
+
+@contextmanager
+def captured_logs() -> Iterator[list[str]]:
+    """Lines scalo's logger emits inside the block, with the fields bound to each."""
+    lines: list[str] = []
+    sink_id = logger.add(lines.append, level="DEBUG", format="{level} {message} {extra}")
+    try:
+        yield lines
+    finally:
+        logger.remove(sink_id)
 
 
 class _FakeAdminClient:
@@ -315,19 +329,42 @@ class TestReconcileServiceRoles:
         class _Refuses(_FakeAdminClient):
             def command(self, stmt: str) -> None:
                 if stmt.startswith("GRANT SELECT"):
-                    raise RuntimeError("refused")
+                    raise RuntimeError("Code: 497. DB::Exception: refused (version 25.8.1.1)")
                 super().command(stmt)
 
         client = _Refuses()
+        with captured_logs() as lines:
+            result = ChRbacReconciler(
+                client, secrets_store=self._store(tmp_path), database="dfe"
+            ).reconcile_service_roles(
+                [ChServiceRole(name="query_reader", mint_user=True, grants=["SELECT ON {db}.*"])]
+            )
+
+        assert len(result.errors) == 1
+        assert result.errors[0].startswith("GRANT SELECT ON dfe.* TO `dfe_query_reader_role`")
+        assert "refused" not in result.errors[0]
+        assert any("refused" in line and "GRANT SELECT" in line for line in lines)
+        assert "GRANT `dfe_query_reader_role` TO `dfe_query_reader`" in client.executed
+
+    def test_a_failing_user_statement_never_reports_its_password_hash(self, tmp_path):
+        """``result.errors`` reaches API callers, and a CREATE USER carries the hash."""
+
+        class _RefusesUsers(_FakeAdminClient):
+            def command(self, stmt: str) -> None:
+                if "IDENTIFIED" in stmt:
+                    raise RuntimeError(f"Syntax error near: {stmt}")
+                super().command(stmt)
+
+        store = self._store(tmp_path)
         result = ChRbacReconciler(
-            client, secrets_store=self._store(tmp_path), database="dfe"
+            _RefusesUsers(), secrets_store=store, database="dfe"
         ).reconcile_service_roles(
             [ChServiceRole(name="query_reader", mint_user=True, grants=["SELECT ON {db}.*"])]
         )
 
-        assert len(result.errors) == 1
-        assert "refused" in result.errors[0]
-        assert "GRANT `dfe_query_reader_role` TO `dfe_query_reader`" in client.executed
+        digest = hashlib.sha256(store.get("ch/service/query_reader").encode()).hexdigest()
+        assert result.errors
+        assert all("IDENTIFIED" not in error and digest not in error for error in result.errors)
 
     def test_a_lost_connection_fails_the_run_rather_than_reading_as_partial(self, tmp_path):
         """A partial run is never retried, so an outage recorded as one leaves the users unmade."""
