@@ -279,9 +279,10 @@ class GoogleAdapter(OIDCGroupAdapter):
     ) -> list[GroupInfo] | None:
         """Every page of one Cloud Identity membership search, as groups keyed by directory id.
 
-        None when the search is still paging at :attr:`MAX_LOGIN_PAGES`: the pages read so far
-        are not the user's groups, so they are no answer. ``groups_only`` keeps only the
-        results that carry the Google group label, for a query that could not filter on it.
+        None when a page is not a JSON object, or the search is still paging at
+        :attr:`MAX_LOGIN_PAGES`: the pages read so far are not the user's groups, so they are
+        no answer. ``groups_only`` keeps only the results that carry the Google group label,
+        for a query that could not filter on it.
         """
         url = f"{self.CLOUD_IDENTITY_BASE}/groups/-/memberships:{method}"
         params = {"query": query}
@@ -290,7 +291,13 @@ class GoogleAdapter(OIDCGroupAdapter):
             response = await client.get(url, headers=headers, params=params)
             body = response.json()
             if not isinstance(body, dict):
-                return groups
+                logger.warning(
+                    "Google Cloud Identity: a group search page was not a JSON object",
+                    method=method,
+                    provider=self._provider.issuer,
+                    type=type(body).__name__,
+                )
+                return None
             relations = body.get("memberships") or []
             if groups_only:
                 relations = [item for item in relations if _is_google_group(item)]

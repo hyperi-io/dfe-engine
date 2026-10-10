@@ -520,6 +520,19 @@ class TestCloudIdentityUserToken:
         adapter = _token_adapter(cloud_identity)
         assert await adapter._groups_with_user_token(email="alice@example.com") is None
 
+    async def test_a_page_that_is_not_a_json_object_is_no_answer(self, cloud_identity):
+        """The pages before it are not the user's groups, so login is default deny."""
+        cloud_identity.pages[TRANSITIVE] = [
+            [_relation(ADMINS_ID, "dfe-admins")],
+            [_relation(VIEWERS_ID, "dfe-viewers")],
+        ]
+        cloud_identity.non_object_page[TRANSITIVE] = 1
+
+        groups = await _token_adapter(cloud_identity).resolve_user_groups("alice@example.com")
+
+        assert groups == []
+        assert cloud_identity.methods == [TRANSITIVE, TRANSITIVE]
+
     async def test_a_refusal_is_no_answer(self, cloud_identity):
         cloud_identity.refuse[TRANSITIVE] = (401, {})
         adapter = _token_adapter(cloud_identity)

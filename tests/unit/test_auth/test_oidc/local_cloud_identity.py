@@ -36,7 +36,7 @@ def _handler_for(*, directory: LocalCloudIdentity) -> type[BaseHTTPRequestHandle
     """Build a request handler class that answers from the settings of ``directory``."""
 
     class _Handler(BaseHTTPRequestHandler):
-        def _reply(self, *, body: dict[str, Any], status: int) -> None:
+        def _reply(self, *, body: object, status: int) -> None:
             """Send ``body`` as JSON with ``status``."""
             encoded = json.dumps(body).encode("utf-8")
             self.send_response(status)
@@ -78,6 +78,9 @@ def _handler_for(*, directory: LocalCloudIdentity) -> type[BaseHTTPRequestHandle
                 return
             pages = directory.pages.get(method) or [[]]
             index = int(params.get("pageToken") or 0)
+            if directory.non_object_page.get(method) == index:
+                self._reply(body=["not", "an", "object"], status=200)
+                return
             page: dict[str, Any] = {"memberships": pages[index]}
             if index + 1 < len(pages):
                 page["nextPageToken"] = str(index + 1)
@@ -95,14 +98,17 @@ class LocalCloudIdentity:
     ``pages`` maps a search method to its result pages, and every page but the
     last hands out a page token. ``refuse`` maps a method to the status and
     Google error body it answers instead. ``garble`` names methods that answer
-    200 with a body that is not JSON. ``requests`` records each search. A direct
-    search whose query filters on labels answers 400, as Google does.
+    200 with a body that is not JSON, and ``non_object_page`` maps a method to the
+    page index that answers 200 with a JSON array. ``requests`` records each
+    search. A direct search whose query filters on labels answers 400, as Google
+    does.
     """
 
     def __init__(self) -> None:
         self.pages: dict[str, list[list[dict[str, Any]]]] = {}
         self.refuse: dict[str, tuple[int, dict[str, Any]]] = {}
         self.garble: set[str] = set()
+        self.non_object_page: dict[str, int] = {}
         self.requests: list[dict[str, Any]] = []
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), _handler_for(directory=self))
         self._thread = threading.Thread(daemon=True, target=self._server.serve_forever)
