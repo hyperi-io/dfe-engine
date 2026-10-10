@@ -33,7 +33,7 @@ from .reconciler import ReconcileResult
 RECONCILES = "ch_rbac_reconciles_total"
 RETRIES = "ch_rbac_reconcile_retries_total"
 
-# The name of the worker thread, which a leak check finds it by.
+# The worker thread's name, which a test reads to see whether one is still running.
 WORKER_THREAD_NAME = "ch-rbac-reconcile"
 
 ReconcileOutcome = Literal["ok", "partial", "failed"]
