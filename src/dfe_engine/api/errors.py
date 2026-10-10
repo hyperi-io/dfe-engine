@@ -126,6 +126,71 @@ class ErrorCode:
     UNRESOLVED_REFERENCE = "unresolved_reference"
 
 
+SERVICE_UNAVAILABLE_MESSAGE = "Backing service is unreachable, retry shortly"
+GITOPS_UNAVAILABLE_MESSAGE = "The deploy repo is unreachable, retry after the Retry-After interval"
+
+
+def hide_backend_text(message: str, exc: BaseException, *, event: str, **fields: Any) -> str:
+    """Log ``exc``'s text under ``event`` and return ``message`` for the caller in its place.
+
+    A backend's own error text can carry statement fragments, user names and password
+    hashes, so it reaches the engine log and never a response.
+
+    Args:
+        message: What the caller is told instead.
+        exc: The backend failure whose text is logged.
+        event: The log line's message.
+        **fields: Further structured fields for the log line.
+
+    Returns:
+        ``message``, unchanged.
+    """
+    logger.warning(event, error=str(exc), **fields)
+    return message
+
+
+def backend_failure(
+    status_code: int, code: str, message: str, exc: BaseException, *, event: str, **fields: Any
+) -> HTTPException:
+    """The HTTPException a route raises for a backend failure, its text logged instead of sent.
+
+    Args:
+        status_code: The HTTP status to answer.
+        code: The machine-readable error code.
+        message: What the caller is told.
+        exc: The backend failure whose text is logged.
+        event: The log line's message.
+        **fields: Further structured fields for the log line.
+
+    Returns:
+        The exception to raise, chained from ``exc`` by the caller.
+    """
+    return HTTPException(
+        status_code=status_code,
+        detail={"code": code, "message": hide_backend_text(message, exc, event=event, **fields)},
+    )
+
+
+def engine_message(exc: BaseException, fallback: str, *, event: str, **fields: Any) -> str:
+    """``exc``'s own message when the engine wrote it, else ``fallback`` with its text logged.
+
+    The error types this serves are raised ``from`` a backend exception whenever they
+    carry that backend's text, and with no cause when the engine composed the message.
+
+    Args:
+        exc: The error a route is about to report.
+        fallback: What the caller is told when ``exc`` carries a backend's text.
+        event: The log line's message.
+        **fields: Further structured fields for the log line.
+
+    Returns:
+        The message that is safe to send.
+    """
+    if exc.__cause__ is None:
+        return str(exc)
+    return hide_backend_text(fallback, exc, event=event, **fields)
+
+
 def raise_exchange_http(exc: Exception) -> NoReturn:
     """Map an import/export failure to its HTTP answer.
 
@@ -243,9 +308,18 @@ def install_exception_handlers(app: FastAPI) -> None:
     from scalo.resilience import ServiceUnavailable
 
     @app.exception_handler(ServiceUnavailable)
-    async def service_unavailable_handler(_request: Request, exc: ServiceUnavailable):
+    async def service_unavailable_handler(request: Request, exc: ServiceUnavailable):
         waking = bool(getattr(exc, "waking", False))
-        message = "Backing service is warming up, retry shortly" if waking else str(exc)
+        if waking:
+            message = "Backing service is warming up, retry shortly"
+        else:
+            # scalo's message ends with the backend's last error, verbatim.
+            message = hide_backend_text(
+                SERVICE_UNAVAILABLE_MESSAGE,
+                exc,
+                event="backing service unavailable",
+                path=request.url.path,
+            )
         body = ErrorResponse(
             code=ErrorCode.SERVICE_UNAVAILABLE,
             message=message,
@@ -258,10 +332,15 @@ def install_exception_handlers(app: FastAPI) -> None:
     from dfe_engine.gitops.repo import GitopsUnavailableError
 
     @app.exception_handler(GitopsUnavailableError)
-    async def gitops_unavailable_handler(_request: Request, exc: GitopsUnavailableError):
+    async def gitops_unavailable_handler(request: Request, exc: GitopsUnavailableError):
         body = ErrorResponse(
             code=ErrorCode.SERVICE_UNAVAILABLE,
-            message=str(exc),
+            message=hide_backend_text(
+                GITOPS_UNAVAILABLE_MESSAGE,
+                exc,
+                event="deploy repo unavailable",
+                path=request.url.path,
+            ),
             context={"service": "gitops", "remote": exc.remote},
         )
         return JSONResponse(

@@ -8581,7 +8581,7 @@
           "System"
         ],
         "summary": "Get Schema Status",
-        "description": "What the last schema bootstrap pass did, object by object.\n\nThis is the operator's record of the schema apply, replacing the completed\nArgoCD Job the engine took over from. ``state`` is what readiness follows:\nconverged or observed is ready, failed leaves the pod up and NotReady with\nthe cause here.",
+        "description": "What the last schema bootstrap pass did, object by object.\n\nThis is the operator's record of the schema apply, replacing the completed\nArgoCD Job the engine took over from. ``state`` is what readiness follows:\nconverged or observed is ready, failed leaves the pod up and NotReady with\nthe stage that failed here and the cause in the engine log.",
         "operationId": "get_schema_status_api_v1_system_schema_get",
         "responses": {
           "200": {
@@ -35628,7 +35628,7 @@
           "error": {
             "type": "string",
             "title": "Error",
-            "description": "Why the pass failed; empty when it did not."
+            "description": "The stage that failed, its cause in the engine log; empty when none did."
           },
           "counts": {
             "additionalProperties": {
@@ -39342,7 +39342,7 @@
           "error"
         ],
         "title": "TopicFailure",
-        "description": "One topic the broker would not do the thing to, and what it said."
+        "description": "One topic the broker would not do the thing to; the broker's own text is in the log."
       },
       "TopicRemoveResponse": {
         "properties": {

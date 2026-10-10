@@ -21,9 +21,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.errors import backend_failure
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/discovery", tags=["discovery"])
+
+_QUERY_FAILED = "The ClickHouse metadata query failed; the engine log has ClickHouse's reason"
+
+
+def _query_failed(exc: Exception) -> HTTPException:
+    return backend_failure(500, "query_error", _QUERY_FAILED, exc, event="discovery query failed")
 
 
 # -- Response models -----------------------------------------
@@ -75,13 +82,13 @@ def _get_ch_client(request: Request):
         # Discovery is an admin-level cross-database listing, so it reads over "default".
         return conn_registry.get_client("default")
     except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "connection_error",
-                "message": f"Cannot connect to ClickHouse: {exc}",
-            },
-        )
+        raise backend_failure(
+            503,
+            "connection_error",
+            "Cannot connect to ClickHouse; the engine log has the reason",
+            exc,
+            event="discovery: ClickHouse connection failed",
+        ) from exc
 
 
 # -- Endpoints -----------------------------------------------
@@ -107,7 +114,7 @@ async def list_databases(
             if row[0] not in ("system", "information_schema", "INFORMATION_SCHEMA")
         ]
     except Exception as exc:
-        raise HTTPException(status_code=500, detail={"code": "query_error", "message": str(exc)})
+        raise _query_failed(exc) from exc
 
 
 @router.get(
@@ -149,7 +156,7 @@ async def list_tables(
             for row in result.result_rows
         ]
     except Exception as exc:
-        raise HTTPException(status_code=500, detail={"code": "query_error", "message": str(exc)})
+        raise _query_failed(exc) from exc
 
 
 @router.get(
@@ -195,4 +202,4 @@ async def list_columns(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail={"code": "query_error", "message": str(exc)})
+        raise _query_failed(exc) from exc

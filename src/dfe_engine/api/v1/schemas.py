@@ -29,7 +29,7 @@ from dfe_engine.api.deps import (
     require_action,
     ttl_settings,
 )
-from dfe_engine.api.errors import ErrorResponse, raise_exchange_http
+from dfe_engine.api.errors import ErrorResponse, engine_message, raise_exchange_http
 from dfe_engine.api.pagination import (
     PaginatedResponse,
     PaginationParams,
@@ -1654,6 +1654,20 @@ def _discovery_target(source, ver, schema_registry, *, version_id: str, ch=None,
     return landing, match_rule, []
 
 
+def _promotion_refused(exc: Exception, code: str, source_name: str) -> HTTPException:
+    """The 422 for a JSON-path read: the engine's refusal as written, ClickHouse's text logged."""
+    message = engine_message(
+        exc,
+        "ClickHouse could not read the source's JSON paths; the engine log has the reason",
+        event="JSON path read failed",
+        source=source_name,
+    )
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail={"code": code, "message": message},
+    )
+
+
 def _held_read_refused(exc: Exception) -> HTTPException:
     """The 403 for a row read that cannot be held to the caller's orgs."""
     return HTTPException(
@@ -1775,10 +1789,7 @@ async def discover_json_paths(
     except JsonPromotionScopeError as exc:
         raise _held_read_refused(exc) from exc
     except JsonPromotionError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "discovery_failed", "message": str(exc)},
-        ) from exc
+        raise _promotion_refused(exc, "discovery_failed", source_name) from exc
 
     return JsonPathsResponse(
         source_name=source_name,
@@ -1873,10 +1884,7 @@ async def sample_source_rows(
     except JsonPromotionScopeError as exc:
         raise _held_read_refused(exc) from exc
     except JsonPromotionError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "sample_failed", "message": str(exc)},
-        ) from exc
+        raise _promotion_refused(exc, "sample_failed", source_name) from exc
 
     promoted = [
         SampleRowsResponse.PromotedJsonField(**item)
@@ -2009,10 +2017,7 @@ async def promote_field(
         except JsonPromotionScopeError as exc:
             raise _held_read_refused(exc) from exc
         except JsonPromotionError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={"code": "discovery_failed", "message": str(exc)},
-            ) from exc
+            raise _promotion_refused(exc, "discovery_failed", source_name) from exc
         path_types = {d.path: d.types for d in discovered}
 
     outcomes = build_promotion_columns(

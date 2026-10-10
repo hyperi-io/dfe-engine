@@ -65,7 +65,7 @@ from dfe_engine.api.deps import (
     get_source_registry,
     require_action,
 )
-from dfe_engine.api.errors import ErrorResponse
+from dfe_engine.api.errors import ErrorResponse, backend_failure
 from dfe_engine.api.v1.app_contracts import read_contract
 from dfe_engine.api.v1.helm import conflict_error
 from dfe_engine.api.v1.sampler import check_sample_scope, sample_org_scope
@@ -2149,6 +2149,17 @@ def _reader(request: Request, client: Any) -> OperationalReader:
     return OperationalReader(client, settings.clickhouse.effective_data_database)
 
 
+def metrics_unavailable(exc: MetricsUnavailableError) -> HTTPException:
+    """The 503 for an otel read ClickHouse refused, its text logged rather than sent."""
+    return backend_failure(
+        503,
+        "metrics_unavailable",
+        "the telemetry tables could not be read; the engine log has ClickHouse's reason",
+        exc,
+        event="otel query failed",
+    )
+
+
 @router.get("/{service}/{instance}/status")
 def get_status(
     service: str, instance: str, user: CurrentUser, request: Request, client: ClickHouseClient
@@ -2159,9 +2170,7 @@ def get_status(
     try:
         status = _reader(request, client).status(app.telemetry_name)
     except MetricsUnavailableError as exc:
-        raise HTTPException(
-            503, detail={"code": "metrics_unavailable", "message": str(exc)}
-        ) from exc
+        raise metrics_unavailable(exc) from exc
     return StatusResponse(
         telemetry_name=status.telemetry_name,
         reporting=status.reporting,
@@ -2181,9 +2190,7 @@ def get_metrics(
     try:
         found = _reader(request, client).metrics(app.telemetry_name)
     except MetricsUnavailableError as exc:
-        raise HTTPException(
-            503, detail={"code": "metrics_unavailable", "message": str(exc)}
-        ) from exc
+        raise metrics_unavailable(exc) from exc
     return MetricsResponse(
         telemetry_name=found.telemetry_name,
         window_seconds=found.window_seconds,
@@ -2217,9 +2224,7 @@ def get_resource_series(
             app.telemetry_name, window_seconds=window, bucket_seconds=bucket
         )
     except MetricsUnavailableError as exc:
-        raise HTTPException(
-            503, detail={"code": "metrics_unavailable", "message": str(exc)}
-        ) from exc
+        raise metrics_unavailable(exc) from exc
     return ResourceSeriesResponse(
         telemetry_name=app.telemetry_name,
         window_seconds=window,

@@ -30,7 +30,7 @@ from dfe_engine.api.deps import (
     get_interactive_clickhouse_client,
     require_action,
 )
-from dfe_engine.api.errors import ErrorResponse
+from dfe_engine.api.errors import ErrorResponse, backend_failure, engine_message
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import DeployTarget, appconfig, routing
@@ -84,6 +84,28 @@ def _gitcrud(request: Request) -> GitCrud:
             detail={"code": "not_configured", "message": "gitops is not enabled"},
         )
     return gc
+
+
+def _ttl_reconcile_failed(exc: Exception) -> HTTPException:
+    """The 502 for a stored TTL override that ClickHouse did not take."""
+    return backend_failure(
+        502,
+        "reconcile_failed",
+        "override stored; applying it to ClickHouse failed, and the engine log has "
+        "ClickHouse's reason. Sending the same value again applies it",
+        exc,
+        event="default TTL stored but not applied",
+    )
+
+
+def _cloud_error(exc: Exception) -> HTTPException:
+    """The 502 for a ClickHouse Cloud management-API failure."""
+    message = engine_message(
+        exc,
+        "the ClickHouse Cloud management API call failed; the engine log has the reason",
+        event="ClickHouse Cloud management API call failed",
+    )
+    return HTTPException(status_code=502, detail={"code": "cloud_error", "message": message})
 
 
 # -- Response models ------------------------------------------
@@ -156,7 +178,9 @@ class SchemaStatusResponse(BaseModel):
     started_at: str
     finished_at: str
     duration_seconds: float
-    error: str = Field(description="Why the pass failed; empty when it did not.")
+    error: str = Field(
+        description="The stage that failed, its cause in the engine log; empty when none did."
+    )
     counts: dict[str, int] = Field(default_factory=dict, description="One count per action")
     objects: list[SchemaObjectStatus] = Field(default_factory=list)
     refused: list[str] = Field(
@@ -395,7 +419,7 @@ async def get_schema_status(user: CurrentUser, settings: Settings) -> SchemaStat
     This is the operator's record of the schema apply, replacing the completed
     ArgoCD Job the engine took over from. ``state`` is what readiness follows:
     converged or observed is ready, failed leaves the pod up and NotReady with
-    the cause here.
+    the stage that failed here and the cause in the engine log.
     """
     from dfe_engine.schema.phase import current_state
 
@@ -591,13 +615,7 @@ def put_retention(
         )
     # The override is committed by now, so any ClickHouse failure has to say so rather than 500.
     except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "code": "reconcile_failed",
-                "message": f"override stored; applying it to ClickHouse failed: {exc}",
-            },
-        ) from exc
+        raise _ttl_reconcile_failed(exc) from exc
     if outcome.sources_skipped:
         logger.warning(
             "default TTL: sources left to their next deploy", count=outcome.sources_skipped
@@ -825,13 +843,7 @@ def patch_defaults(
                 sources=sources.get_all_sources(),
             )
         except Exception as exc:
-            raise HTTPException(
-                status_code=502,
-                detail={
-                    "code": "reconcile_failed",
-                    "message": f"override stored; applying it to ClickHouse failed: {exc}",
-                },
-            ) from exc
+            raise _ttl_reconcile_failed(exc) from exc
         if outcome.sources_skipped:
             logger.warning(
                 "default TTL: sources left to their next deploy", count=outcome.sources_skipped
@@ -1105,12 +1117,12 @@ def _deployed_tables(settings: Any, sources: list[Source]) -> dict[str, LiveTabl
     try:
         return live_tables(get_interactive_clickhouse_client(settings), database)
     except SchemaApplyError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "clickhouse_unavailable",
-                "message": f"the deployed tables could not be read: {exc}",
-            },
+        raise backend_failure(
+            503,
+            "clickhouse_unavailable",
+            "the deployed tables could not be read; the engine log has ClickHouse's reason",
+            exc,
+            event="default drift: deployed tables unreadable",
         ) from exc
 
 
@@ -1209,9 +1221,7 @@ def _cloud_state(settings) -> CloudServiceStateResponse:
     try:
         st = CloudService(cloud).status()
     except CloudServiceError as exc:
-        raise HTTPException(
-            status_code=502, detail={"code": "cloud_error", "message": str(exc)}
-        ) from exc
+        raise _cloud_error(exc) from exc
     return CloudServiceStateResponse(
         configured=True, id=st.id, name=st.name, state=st.state, is_running=st.is_running
     )
@@ -1246,9 +1256,7 @@ def clickhouse_cloud_start(user: CurrentUser, settings: Settings):
     try:
         st = CloudService(cloud).start()
     except CloudServiceError as exc:
-        raise HTTPException(
-            status_code=502, detail={"code": "cloud_error", "message": str(exc)}
-        ) from exc
+        raise _cloud_error(exc) from exc
     return CloudServiceStateResponse(
         configured=True, id=st.id, name=st.name, state=st.state, is_running=st.is_running
     )
@@ -1273,9 +1281,7 @@ def clickhouse_cloud_stop(user: CurrentUser, settings: Settings):
     try:
         st = CloudService(cloud).stop()
     except CloudServiceError as exc:
-        raise HTTPException(
-            status_code=502, detail={"code": "cloud_error", "message": str(exc)}
-        ) from exc
+        raise _cloud_error(exc) from exc
     return CloudServiceStateResponse(
         configured=True, id=st.id, name=st.name, state=st.state, is_running=st.is_running
     )

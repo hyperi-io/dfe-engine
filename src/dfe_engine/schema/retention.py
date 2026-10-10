@@ -56,6 +56,9 @@ LiveStatus = Literal["altered", "unchanged", "not_deployed", "failed"]
 # A table's engine is fixed when it is created; changing it means copying the data out.
 ENGINE_NEEDS_REBUILD = "needs a table rebuild; applies to new tables only"
 
+# An outcome's reason reaches API callers, so ClickHouse's own text stays in the log.
+CLICKHOUSE_REFUSED = "ClickHouse could not be read or refused the change; the engine log has why"
+
 # What one source's table can refuse: the build, its types, its DDL or the server.
 _TABLE_ERRORS = (
     SchemaApplyError,
@@ -341,7 +344,7 @@ def _apply_deployed(
                 source=source.source,
                 status="failed",
                 table=f"{database}.{source.table_name}",
-                reason=str(exc),
+                reason=CLICKHOUSE_REFUSED,
             )
             for source in sources
         ]
@@ -362,9 +365,9 @@ def _apply_one(tables: SourceTables, source: Source, live: LiveTable | None) -> 
         kept = tables.header_nullability_kept(source, source.current, applied.columns)
     except _TABLE_ERRORS as exc:
         logger.warning(f"{target}: table defaults not applied: {exc}")
-        return SourceLiveOutcome(
-            source=source.source, status="failed", table=target, reason=str(exc)
-        )
+        # The build, type and DDL errors are about the source's own schema; the server's is not.
+        reason = CLICKHOUSE_REFUSED if isinstance(exc, SchemaApplyError) else str(exc)
+        return SourceLiveOutcome(source=source.source, status="failed", table=target, reason=reason)
     not_applied: list[FieldNotApplied] = []
     if applied.change.ttl_skipped:
         not_applied.append(FieldNotApplied("ttl_days", applied.change.ttl_skipped))
