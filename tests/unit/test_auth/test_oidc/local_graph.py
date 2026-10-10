@@ -46,11 +46,26 @@ def _handler_for(*, graph: LocalGraph) -> type[BaseHTTPRequestHandler]:
                 status, body = graph.refuse[principal]
                 self._reply(body=body, status=status)
                 return
-            pages = graph.pages.get(principal) or [[]]
             index = int(
                 dict(p.split("=", 1) for p in split.query.split("&") if "=" in p).get("page", 0)
             )
-            page: dict[str, Any] = {"value": pages[index]}
+            if graph.fail_page.get(principal) == index:
+                self._reply(body={"error": {"code": "BadRequest"}}, status=400)
+                return
+            pages = graph.pages.get(principal) or [[]]
+            value = pages[index]
+            if principal in graph.limited:
+                value = [
+                    {
+                        "@odata.type": "#microsoft.graph.group",
+                        "id": item["id"],
+                        "displayName": None,
+                        "mail": None,
+                        "description": None,
+                    }
+                    for item in value
+                ]
+            page: dict[str, Any] = {"value": value}
             if index + 1 < len(pages):
                 page["@odata.nextLink"] = f"{graph.base_url}/{principal}{_LISTING}?page={index + 1}"
             self._reply(body=page, status=200)
@@ -67,12 +82,17 @@ class LocalGraph:
     ``pages`` maps a principal path (``me`` or ``users/<oid>``) to its result
     pages, and every page but the last hands out an ``@odata.nextLink``.
     ``refuse`` maps a principal to the status and Graph error body it answers
-    instead. ``requests`` records the principal and Authorization of each call.
+    instead. ``limited`` names principals answered the way Graph answers a token
+    that may not read the groups: each object with only its id, the rest null.
+    ``fail_page`` maps a principal to the page index that answers 400.
+    ``requests`` records the principal and Authorization of each call.
     """
 
     def __init__(self) -> None:
         self.pages: dict[str, list[list[dict[str, Any]]]] = {}
         self.refuse: dict[str, tuple[int, dict[str, Any]]] = {}
+        self.limited: set[str] = set()
+        self.fail_page: dict[str, int] = {}
         self.requests: list[dict[str, Any]] = []
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), _handler_for(graph=self))
         self._thread = threading.Thread(daemon=True, target=self._server.serve_forever)

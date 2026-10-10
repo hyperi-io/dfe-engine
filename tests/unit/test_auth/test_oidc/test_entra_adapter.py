@@ -365,3 +365,22 @@ class TestOverageUserToken:
         adapter = get_adapter(_make_provider(), access_token="login-token")
         assert isinstance(adapter, EntraAdapter)
         assert adapter._access_token == "login-token"
+
+    async def test_groups_the_token_may_not_read_still_resolve_by_id(self, graph):
+        """Graph answers a User.Read token with each group's id and every other property null."""
+        graph.pages["me"] = [[ADMINS, VIEWERS]]
+        graph.limited.add("me")
+        groups = await _overage_adapter(graph, app_token="app-token").resolve_user_groups(OID)
+
+        assert [g.id for g in groups] == [ADMINS["id"], VIEWERS["id"]]
+        assert [g.name for g in groups] == ["", ""]
+        assert graph.principals == ["me"]
+
+    async def test_a_failure_partway_through_is_no_answer_not_a_partial_one(self, graph):
+        graph.pages["me"] = [[ADMINS], [VIEWERS]]
+        graph.fail_page["me"] = 1
+        graph.pages[f"users/{OID}"] = [[ADMINS, VIEWERS]]
+        groups = await _overage_adapter(graph, app_token="app-token").resolve_user_groups(OID)
+
+        assert [g.name for g in groups] == ["dfe-admins", "dfe-viewers"]
+        assert graph.principals == ["me", "me", f"users/{OID}"]

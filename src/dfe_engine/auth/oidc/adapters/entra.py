@@ -8,9 +8,10 @@
 
 """Microsoft Entra ID (Azure AD) OIDC group adapter.
 
-Resolves group GUIDs to display names via the Microsoft Graph API.
-Requires an Entra app registration with the ``Group.Read.All`` application
-permission and admin consent granted.
+Resolves a user's groups and group GUIDs to display names via the Microsoft
+Graph API: with the user's own login token where it can, otherwise with the
+app registration's own credentials and its admin-consented application
+permission.
 
 Credentials resolve through :func:`graph_credentials`. If any credential is missing the adapter fails open: all methods return unfriendly fallbacks rather than raising.
 
@@ -111,11 +112,11 @@ class EntraAdapter(OIDCGroupAdapter):
         itself. The OData cast returns groups only, never directory roles, and
         every ``@odata.nextLink`` page is followed.
 
-        The user's own login token asks ``/me`` first, which needs only the
-        delegated GroupMember.Read.All the login was consented for. A token
-        Graph refuses -- one issued without that scope -- falls through to the
-        app-only credentials, which ask ``/users/{directory_id}``. A user token
-        that answers with no groups is the answer and does not fall through.
+        The user's own login token asks ``/me`` first. Graph answers that with
+        User.Read; without GroupMember.Read.All each group carries only its id,
+        which is all role resolution needs. A token Graph refuses falls through
+        to the app-only credentials, which ask ``/users/{directory_id}``. A user
+        token that answers with no groups is the answer and does not fall through.
 
         ``directory_id`` MUST be the Entra object id (the ``oid`` claim), not the
         pairwise ``sub`` - Graph keys ``/users/{id}`` on the object id.
@@ -165,15 +166,18 @@ class EntraAdapter(OIDCGroupAdapter):
                     return None
                 if not isinstance(data, dict):
                     return None
-                for item in data.get("value", []):
-                    groups.append(
-                        GroupInfo(
-                            id=item.get("id", ""),
-                            name=item.get("displayName", ""),
-                            email=item.get("mail", "") or "",
-                            description=item.get("description", "") or "",
-                        )
+                # A token that may not read a group still gets it, with only the id set and
+                # every other property null; the id is all role resolution keys on.
+                groups.extend(
+                    GroupInfo(
+                        id=str(item["id"]),
+                        name=item.get("displayName") or "",
+                        email=item.get("mail") or "",
+                        description=item.get("description") or "",
                     )
+                    for item in data.get("value") or []
+                    if isinstance(item, dict) and item.get("id")
+                )
                 url = data.get("@odata.nextLink", "")
         return groups
 
@@ -221,7 +225,7 @@ class EntraAdapter(OIDCGroupAdapter):
                     groups.append(
                         GroupInfo(
                             id=item.get("id", ""),
-                            name=item.get("displayName", ""),
+                            name=item.get("displayName") or "",
                             email=item.get("mail", "") or "",
                             description=item.get("description", "") or "",
                         )
