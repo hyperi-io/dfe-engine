@@ -314,7 +314,12 @@ class TestALoginThatWouldHoldNoRole:
         assert stored.groups == ["unlinked-group"]
         assert groups_held(stored, groups.list(), bindings={}) == []
         assert (stored.last_login_at, stored.email) == (before.last_login_at, before.email)
+        assert stored.session_marker() != before.session_marker()
         assert refusals(audit_events) == [("jane@corp.com", "entra", "no_role_granted")]
+        ended = [e for e in audit_events if e["event"] == "auth.account.sessions_ended"]
+        assert [(e["target_user"], e["details"]) for e in ended] == [
+            ("jane-corp-com", {"reason": "no_role_granted"})
+        ]
 
     def test_an_operator_membership_with_a_role_keeps_an_existing_account_in(self, stores):
         """No role is granted to an account directly; a membership an operator adds is the nearest."""

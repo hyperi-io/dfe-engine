@@ -657,19 +657,30 @@ def test_callback_refuses_an_identity_whose_groups_link_no_role(client, app, aud
     assert "stub@example.test" not in logged
 
 
-def test_callback_refusal_takes_the_roles_from_a_token_already_issued(client, app):
-    """A session resolves its roles from the account, so recording the IdP's groups ends them."""
+@pytest.mark.parametrize("change", ["idp-drops-the-group", "group-loses-its-role"])
+def test_callback_refusal_ends_the_sessions_of_the_account(client, app, change):
+    """A token issued before the refusal must not read, or renew into, a session for it."""
     app.state.oidc_rp = _GroupsOidcRp(["g1"])
     token = client.get("/api/v1/auth/oidc/stub/callback").json()["access_token"]
     bearer = {"Authorization": f"Bearer {token}"}
     assert client.get("/api/v1/auth/me", headers=bearer).json()["roles"] == ["data_viewer"]
 
-    app.state.oidc_rp = _GroupsOidcRp(["left-the-team"])
+    if change == "idp-drops-the-group":
+        app.state.oidc_rp = _GroupsOidcRp(["left-the-team"])
+    else:
+        app.state.group_store.update("stub-viewers", roles=[])
     refused = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)
 
     assert refused.status_code == 401, refused.text
-    assert app.state.account_store.get("stub-user").groups == ["left-the-team"]
-    assert client.get("/api/v1/auth/me", headers=bearer).json()["roles"] == []
+    assert refused.json()["code"] == "no_role_granted"
+    for method, path in [
+        ("GET", "/api/v1/auth/me"),
+        ("POST", "/api/v1/auth/refresh"),
+        ("GET", "/api/v1/auth/accounts/me"),
+    ]:
+        resp = client.request(method, path, headers=bearer)
+        assert resp.status_code == 401, (path, resp.text)
+        assert resp.json()["code"] == "session_ended", path
 
 
 def test_callback_refuses_an_idp_asserting_the_local_admin(client, app):

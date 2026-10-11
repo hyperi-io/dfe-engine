@@ -22,6 +22,7 @@ from scalo.logger import logger
 
 from dfe_engine.auth.accounts import Account, AccountStore, discard_created
 from dfe_engine.auth.audit import (
+    audit_account_change,
     audit_jit_account_created,
     audit_jit_groups_updated,
     audit_jit_hdx_invited,
@@ -181,8 +182,9 @@ class JitProvisioner:
                 Nothing is written.
             JitNoRoleError: No group the account would hold carries a role. A
                 first login leaves no account. An existing account records the
-                groups its IdP now asserts, so tokens already issued for it lose
-                their roles too, and nothing else is written.
+                groups its IdP now asserts and has every session ended, as a
+                logout ends them, so no token issued for it reads or refreshes a
+                session. Nothing else is written.
             Exception: Any other error is the store failing to record the login,
                 never a refusal of the identity. A first login leaves no account.
         """
@@ -209,8 +211,10 @@ class JitProvisioner:
                 audit_jit_groups_updated(user_id, added, removed)
             if not self._holds_a_role(key, oidc_groups, source_provider):
                 if updates:
-                    # Issued tokens resolve roles from the stored groups, so they lose them too.
                     self._accounts.update(key, groups=oidc_groups)
+                # A token issued before the refusal must neither read nor refresh a session.
+                self._accounts.end_sessions(key)
+                audit_account_change(user_id, key, "sessions_ended", {"reason": "no_role_granted"})
                 self._refuse_without_role(user_id, source_provider)
             updates.update(last_login_at=now, oidc_id=source_provider, subject=user_id)
             if wanted_email and existing.email != wanted_email:
