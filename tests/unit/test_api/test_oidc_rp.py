@@ -683,6 +683,104 @@ def test_callback_refusal_ends_the_sessions_of_the_account(client, app, change):
         assert resp.json()["code"] == "session_ended", path
 
 
+CONSOLE_RETURN = "/login/oidc?callbackUrl=%2Fsources&login_nonce=n1"
+
+
+def _start_browser_login(client) -> None:
+    """Start a login the way the console does, with a return_to to hand back to."""
+    # The session cookie is Secure outside dev posture, so the round trip runs over https.
+    login = client.get(
+        "https://testserver/api/v1/auth/oidc/stub/login",
+        params={"redirect": "false", "return_to": CONSOLE_RETURN},
+    )
+    assert login.status_code == 200, login.text
+
+
+def _break_the_account_store(app) -> None:
+    accounts_dir = app.state.account_store._dir
+    shutil.rmtree(accounts_dir)
+    accounts_dir.write_text("")
+
+
+@pytest.mark.parametrize(
+    ("refusal", "code"),
+    [
+        ("no-role", "no_role_granted"),
+        ("disabled", "account_disabled"),
+        ("blocked", "account_blocked"),
+        ("local-admin", "unauthorized"),
+        ("store-down", "service_unavailable"),
+    ],
+)
+def test_a_refused_browser_login_returns_to_the_console_with_the_code(
+    client, app, audit_events, refusal, code
+):
+    """A browser must never land on the callback's JSON, so the refusal goes back to return_to."""
+    store = app.state.account_store
+    if refusal == "no-role":
+        app.state.oidc_rp = _GroupsOidcRp(["unlinked-team"])
+    elif refusal in ("disabled", "blocked"):
+        app.state.oidc_rp = _SubjectOidcRp("stub-user")
+        store.create("stub-user", "", groups=["dfe-viewers"])
+        flag = {"enabled": False} if refusal == "disabled" else {"blocked": True}
+        store.update("stub-user", external=True, source_provider="stub", **flag)
+    elif refusal == "local-admin":
+        app.state.oidc_rp = _SubjectOidcRp("admin")
+    else:
+        app.state.oidc_rp = _SubjectOidcRp("kim@example.com")
+        _break_the_account_store(app)
+    _start_browser_login(client)
+
+    resp = client.get("https://testserver/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+
+    assert resp.status_code == 303, resp.text
+    path, _, fragment = resp.headers["location"].partition("#")
+    assert path == CONSOLE_RETURN
+    assert parse_qs(fragment) == {"error": [code], "provider": ["stub"]}
+    assert oidc_login.TOKEN_COOKIE not in resp.cookies
+    assert not [e for e in audit_events if e["event"] == "auth.login.success"]
+    if refusal == "no-role":
+        assert store.get("stub-user") is None
+        denied = [e for e in audit_events if e["event"] == "auth.login.denied"]
+        assert [e["reason"] for e in denied] == ["no_role_granted"]
+
+
+def test_a_refused_browser_login_spends_its_return_to(client, app):
+    """The hand-back is one-shot whether the login is admitted or refused."""
+    app.state.oidc_rp = _GroupsOidcRp(["unlinked-team"])
+    _start_browser_login(client)
+
+    first = client.get("https://testserver/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+    again = client.get("https://testserver/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+
+    assert first.status_code == 303
+    assert again.status_code == 401
+    assert again.json()["code"] == "no_role_granted"
+
+
+def test_a_failed_idp_exchange_returns_to_the_console_with_no_reason(client, app, audit_events):
+    """The IdP's own error text never reaches the fragment, only the engine's code."""
+    app.state.oidc_provider_registry.create(
+        "stub", OIDCProvider(type="generic", issuer="https://idp.example", client_id="c")
+    )
+    app.state.oidc_rp = _rp_with_known_idp(app.state.oidc_provider_registry, "stub")
+    _start_browser_login(client)
+
+    resp = client.get(
+        "https://testserver/api/v1/auth/oidc/stub/callback",
+        params={"error": "access_denied", "error_description": f"{CALLBACK_SENTINEL} said no"},
+        follow_redirects=False,
+    )
+
+    assert resp.status_code == 303, resp.text
+    path, _, fragment = resp.headers["location"].partition("#")
+    assert path == CONSOLE_RETURN
+    assert parse_qs(fragment) == {"error": ["unauthorized"], "provider": ["stub"]}
+    assert CALLBACK_SENTINEL not in resp.headers["location"]
+    (denied,) = [e for e in audit_events if e["event"] == "auth.login.denied"]
+    assert denied["reason"] == "access_denied"
+
+
 def test_callback_refuses_an_idp_asserting_the_local_admin(client, app):
     """dfe-engine#419: the refusal is a 401, never a logged warning plus a token."""
     app.state.oidc_rp = _SubjectOidcRp("admin")
@@ -770,8 +868,7 @@ def test_callback_refuses_a_subject_that_names_no_account(client, app, audit_eve
 
 def test_callback_refuses_a_login_the_account_store_cannot_record(client, app, audit_events):
     accounts_dir = app.state.account_store._dir
-    shutil.rmtree(accounts_dir)
-    accounts_dir.write_text("")
+    _break_the_account_store(app)
     app.state.oidc_rp = _SubjectOidcRp("kim@example.com")
 
     resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)

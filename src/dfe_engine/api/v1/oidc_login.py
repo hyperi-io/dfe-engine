@@ -15,8 +15,9 @@ GET /api/v1/auth/oidc/{provider}/callback  -> exchange code, RE-MINT engine toke
 
 A browser client (the console) passes ``return_to`` on login; the callback then
 303s to it with the engine token in the URL fragment, which never leaves the
-browser. ``return_to`` must be a relative path or an origin the API already
-trusts for CORS, so a crafted login link cannot send the token elsewhere.
+browser, or with the refusal's code there when it refuses the login. ``return_to``
+must be a relative path or an origin the API already trusts for CORS, so a crafted
+login link cannot send the token elsewhere.
 
 The engine is the RP and the SINGLE token issuer: on callback it validates the
 IdP id_token (via Authlib), extracts sub/email/groups, then mints its OWN ES384
@@ -30,7 +31,7 @@ or disabled providers return 404.
 
 import time
 from datetime import timedelta
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -56,6 +57,9 @@ from dfe_engine.auth.jit import (
 from dfe_engine.auth.sessions import session_claims, token_lifetime
 from dfe_engine.http_errors import describe_http_error
 from dfe_engine.settings import DFESettings, is_dev_posture
+
+if TYPE_CHECKING:
+    from dfe_engine.auth.oidc.rp import OidcRelyingParty
 
 router = APIRouter(prefix="/auth/oidc", tags=["OIDC Login"])
 
@@ -197,7 +201,8 @@ async def oidc_login(
     return_to: str | None = Query(
         None,
         description="Where the callback sends the browser after login, with the engine "
-        "token in the URL fragment (#access_token=...&token_type=bearer&provider=...). "
+        "token in the URL fragment (#access_token=...&token_type=bearer&provider=...), "
+        "or the refusal's code (#error=<code>&provider=...) when the login is refused. "
         "A relative path, or an absolute URL on this API's origin or a CORS-allowed "
         "origin. Omit to have the callback answer with JSON instead.",
     ),
@@ -219,6 +224,19 @@ async def oidc_login(
     return await rp.login_redirect(provider, request, redirect_uri)
 
 
+def _hand_back_refusal(return_to: str, provider: str, exc: HTTPException) -> RedirectResponse:
+    """303 a refused browser login to ``return_to`` with the refusal's code in the URL fragment.
+
+    The code is one the engine wrote, never the IdP's text, and the fragment
+    reaches no server and no log line. No token or cookie goes with it.
+    """
+    code = exc.detail.get("code") if isinstance(exc.detail, dict) else None
+    fragment = urlencode(
+        {"error": code if isinstance(code, str) else "unauthorized", "provider": provider}
+    )
+    return RedirectResponse(f"{return_to}#{fragment}", status_code=303)
+
+
 @router.get(
     "/{provider}/callback",
     name="oidc_callback",
@@ -226,17 +244,38 @@ async def oidc_login(
     responses={
         303: {
             "description": "Login started with return_to: redirect there with the engine "
-            "token in the URL fragment."
+            "token in the URL fragment, or with the refusal's code "
+            "(#error=<code>&provider=...) when the login is refused."
         }
     },
 )
 async def oidc_callback(
     provider: str, request: Request, settings: Settings
 ) -> JSONResponse | RedirectResponse:
-    """Complete the OIDC flow and re-mint the engine token (single issuer)."""
+    """Complete the OIDC flow and re-mint the engine token (single issuer).
+
+    A login started with ``return_to`` returns there refused as well as admitted,
+    so a browser never lands on this route's JSON error. Without ``return_to`` a
+    refusal answers JSON with its status, as any API error does.
+    """
     rp = _rp_or_404(request, provider)
     return_to = request.session.pop(_RETURN_TO_SESSION_KEY, None)
+    try:
+        return await _complete_login(provider, request, settings, rp, return_to)
+    except HTTPException as exc:
+        if not return_to:
+            raise
+        return _hand_back_refusal(return_to, provider, exc)
 
+
+async def _complete_login(
+    provider: str,
+    request: Request,
+    settings: DFESettings,
+    rp: OidcRelyingParty,
+    return_to: str | None,
+) -> JSONResponse | RedirectResponse:
+    """Exchange the IdP code, admit the identity and mint its token; a refusal raises HTTPException."""
     try:
         identity = await rp.handle_callback(provider, request)
     except Exception as exc:
