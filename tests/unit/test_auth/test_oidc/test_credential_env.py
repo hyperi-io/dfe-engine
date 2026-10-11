@@ -261,6 +261,16 @@ class TestResolveCredential:
 
         assert (resolved.value, resolved.unreadable, resolved.refused) == ("", True, refused)
 
+    def test_an_approle_login_never_sent_is_not_a_refusal(self, monkeypatch, openbao_login):
+        """No secret id means scalo raises before any request, though this store would refuse."""
+        monkeypatch.delenv("VAULT_SECRET_ID", raising=False)
+        _LoginHandler.status = 403
+        store = build_secrets(SecretsSettings(provider="openbao", addr=openbao_login, role="dfe"))
+
+        resolved = resolve_credential(secret_path="oidc/acme/client_secret", secrets=store)
+
+        assert (resolved.value, resolved.unreadable, resolved.refused) == ("", True, False)
+
     def test_an_approle_login_with_no_listener_is_not_a_refusal(self, monkeypatch):
         monkeypatch.setenv("VAULT_SECRET_ID", "approle-secret-id")
         with socket.socket() as probe:

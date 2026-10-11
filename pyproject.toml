@@ -33,7 +33,7 @@ dependencies = [
     #            library chart validates the published thin chart against.
     # >=2.31.4:  secrets: enabled=False disables every cache tier, and an OpenBao
     #            login that is rate limited, redirected or unreachable raises
-    #            ProviderError, so AuthenticationError means the store refused.
+    #            ProviderError rather than AuthenticationError.
     # >=2.31.5:  a retried HTTP error keeps the socket error under it, which
     #            http_errors.describe_http_error reads as transport_failure.
     # Upper bound: <3 is the API-stability boundary. An unbounded `>=` is invisible

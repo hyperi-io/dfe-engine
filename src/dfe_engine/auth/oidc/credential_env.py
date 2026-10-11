@@ -78,10 +78,16 @@ def unreadable_credential_message(*, credential: str, refused: bool = False) -> 
 def _refused(exc: BaseException) -> bool:
     """Whether the store answered and refused, rather than not answering.
 
-    scalo raises ``AuthenticationError`` only for a login the store answered with a 4xx
-    other than 429; a rate limit, redirect, 5xx or unreachable store is a plain ``ProviderError``.
+    A permission error is the store's answer to a read. scalo also raises
+    ``AuthenticationError`` for a login it never sent (no secret id, no token), so one
+    counts only when the store's HTTP answer is its cause.
     """
-    return isinstance(exc, (SecretPermissionError, AuthenticationError))
+    if isinstance(exc, SecretPermissionError):
+        return True
+    answer = getattr(exc.__cause__, "response", None)
+    return isinstance(exc, AuthenticationError) and isinstance(
+        getattr(answer, "status_code", None), int
+    )
 
 
 def is_env_var_name(value: str) -> bool:
