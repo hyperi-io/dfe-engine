@@ -182,7 +182,7 @@ class OperationalReader:
         return list(rows or [])
 
     def status(self, telemetry_name: str) -> AppStatus:
-        """Whether the instance is reporting telemetry, and its replica count."""
+        """Whether the instance is reporting telemetry, and since when."""
         service = self._safe_identifier(telemetry_name)
         rows = self._run("liveness", {"service": service})
         # The row count decides it: max() over no matching rows answers the epoch,
