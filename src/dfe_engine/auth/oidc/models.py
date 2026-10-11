@@ -255,12 +255,13 @@ class GroupInfo(BaseModel):
     """A group record fetched from a provider's API.
 
     Used as the return type of ``OIDCGroupAdapter.list_all_groups`` and
-    ``OIDCGroupAdapter.resolve_user_groups``.  The ``id`` is provider-specific
-    (e.g. Google group id, Entra ID object ID, Okta group ID).
+    ``OIDCGroupAdapter.resolve_user_groups``.  The ``id`` is the identifier the
+    provider's sign-ins assert for the group, which a stored group links on
+    (Google group id, Entra ID object ID, Okta group name).
     """
 
     id: str
-    """Provider-specific group identifier."""
+    """The identifier a sign-in through the provider asserts for the group."""
 
     name: str
     """Display name of the group."""

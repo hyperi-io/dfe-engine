@@ -33,7 +33,6 @@ from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.adapters.entra import EntraAdapter
 from dfe_engine.auth.oidc.adapters.google import GoogleAdapter
-from dfe_engine.auth.oidc.adapters.okta import OktaAdapter
 from dfe_engine.auth.oidc.models import GroupInfo, GroupResolutionConfig, OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.rp import fill_from_userinfo_endpoint
@@ -48,7 +47,7 @@ from tests.unit.test_auth.factories import make_oauth_client
 from tests.unit.test_auth.test_oidc.local_cloud_identity import LocalCloudIdentity
 from tests.unit.test_auth.test_oidc.local_graph import TENANT, LocalGraph
 from tests.unit.test_auth.test_oidc.local_idp import LocalIdp
-from tests.unit.test_auth.test_oidc.local_okta import LocalOkta
+from tests.unit.test_auth.test_oidc.local_okta import LocalOkta, okta_adapter
 
 SENTINEL = "idp.sentinel.7f3a@example.com"
 # The local part survives every encoding a URL or a repr gives the address, so it is what must not appear.
@@ -314,33 +313,12 @@ OKTA_NOT_FOUND = {
 }
 
 
-class _PlainHttpOkta(OktaAdapter):
-    """Okta whose Management API is a plain-http stand-in; the adapter builds only https origins."""
-
-    def __init__(self, provider: OIDCProvider, *, base_url: str) -> None:
-        super().__init__(provider)
-        self._base_url = base_url
-
-    def _api_base_and_headers(self) -> tuple[str | None, dict[str, str] | None]:
-        return self._base_url, {"Accept": "application/json", "Authorization": "SSWS test-token"}
-
-
-def _okta_adapter(base_url: str) -> OktaAdapter:
-    """An api-mode Okta adapter whose Management API is at ``base_url``."""
-    provider = OIDCProvider(
-        type="okta",
-        issuer="https://example.okta.com",
-        groups=GroupResolutionConfig(mode="api", okta_domain="example.okta.com"),
-    )
-    return _PlainHttpOkta(provider, base_url=base_url)
-
-
 class TestOkta:
     async def test_a_refused_user_lookup_logs_the_status_and_code_not_the_user(
         self, audit_events: list[dict]
     ) -> None:
         with refusing_api(404, OKTA_NOT_FOUND) as server:
-            groups = await _okta_adapter(server.base_url).resolve_user_groups(SENTINEL)
+            groups = await okta_adapter(server.base_url).resolve_user_groups(SENTINEL)
 
         assert groups == []
         assert server.paths == [f"/users/{SENTINEL}/groups?limit=200"]
@@ -356,7 +334,7 @@ class TestOkta:
         self, audit_events: list[dict]
     ) -> None:
         with refusing_api(403, {"errorCode": "E0000006", "errorSummary": SENTINEL}) as server:
-            ok, message = await _okta_adapter(server.base_url).test_connection()
+            ok, message = await okta_adapter(server.base_url).test_connection()
 
         assert ok is False
         assert server.base_url not in message
@@ -720,7 +698,7 @@ class TestSyncIncompleteListing:
         group_store = GroupStore(tmp_path / "groups")
         try:
             result = await sync_provider(
-                "sso", registry, group_store, adapter=_okta_adapter(okta.base_url)
+                "sso", registry, group_store, adapter=okta_adapter(okta.base_url)
             )
         finally:
             okta.stop()
@@ -777,7 +755,7 @@ class TestSyncUnreadableListing:
         group_store = GroupStore(tmp_path / "groups")
         try:
             result = await sync_provider(
-                "sso", registry, group_store, adapter=_okta_adapter(okta.base_url)
+                "sso", registry, group_store, adapter=okta_adapter(okta.base_url)
             )
         finally:
             okta.stop()
@@ -809,7 +787,7 @@ class TestSyncUnreadableListing:
     ) -> None:
         okta = LocalOkta(pages=_numbered_okta_pages(6))
         okta.start()
-        adapter = _okta_adapter(okta.base_url)
+        adapter = okta_adapter(okta.base_url)
         adapter.MAX_LISTING_PAGES = 3
         registry = _sync_registry(tmp_path)
         group_store = GroupStore(tmp_path / "groups")
@@ -890,7 +868,7 @@ class TestLoginLookupPageLimit:
     ) -> None:
         okta = LocalOkta(pages=_numbered_okta_pages(6))
         okta.start()
-        adapter = _okta_adapter(okta.base_url)
+        adapter = okta_adapter(okta.base_url)
         adapter.MAX_LOGIN_PAGES = 3
         try:
             groups = await adapter.resolve_user_groups("00u1")
@@ -1068,7 +1046,7 @@ class TestSyncCredentialGivesNoAccess:
         group_store = GroupStore(tmp_path / "groups")
         try:
             result = await sync_provider(
-                "sso", registry, group_store, adapter=_okta_adapter(okta.base_url)
+                "sso", registry, group_store, adapter=okta_adapter(okta.base_url)
             )
         finally:
             okta.stop()

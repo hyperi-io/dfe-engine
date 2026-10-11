@@ -59,7 +59,7 @@ Two optional extras, only if the operator asks:
 
 ## Find the group ids
 
-DFE links an Entra group on its object id, a GUID. Renaming the group does not break the link. Go to **Entra ID > Groups > All groups**, open the group and copy its **Object ID** from the **Overview** or **Properties** page. The check below also lists the ids of every group the signed-in user is in.
+DFE links an Entra group on its object id, a GUID. Renaming the group does not break the link. Go to **Entra ID > Groups > All groups**, open the group and copy its **Object ID** from the **Overview** or **Properties** page. Once one of the user's groups is linked, the check below also lists the ids of every group they are in.
 
 ## Check it worked
 
@@ -69,7 +69,7 @@ Once the operator confirms the provider is in place, open this URL in a private 
 https://<your DFE console host>/api/v1/auth/oidc/<provider-name>/login
 ```
 
-The page answers with JSON. `email` is the user, and `groups` lists their group object ids. The JSON also holds an `access_token`: it is a live DFE session, so do not paste it anywhere.
+The page answers with JSON. `email` is the user, and `groups` lists their group object ids. The JSON also holds an `access_token`: it is a live DFE session, so do not paste it anywhere. A user in no linked group is refused, and DFE keeps no account for them.
 
 ## Common failures
 
@@ -80,8 +80,7 @@ The page answers with JSON. `email` is the user, and `groups` lists their group 
 | DFE page: `OIDC login failed: invalid_client: AADSTS7000215 ...` | DFE holds the **Secret ID**, or a mistyped value | Send the secret's **Value** |
 | DFE page: `OIDC login failed: invalid_client: AADSTS7000222 ...` | The client secret expired | Create a new secret and send its value |
 | Microsoft page: `AADSTS50105` | The enterprise application requires assignment and this user is not assigned | Assign the user, or a group they are in, to the application |
-| The check shows `"groups": []` | No groups claim, or the user is in no security group | Redo step 5, and check the user's memberships |
-| Signed in, but no DFE role | The groups arrived but none is linked yet | Send the operator the ids from the check |
+| DFE page: `OIDC login refused: no DFE group with a role is linked to your identity provider groups.` | None of the user's groups is linked yet, or no groups arrived: no groups claim, or the user is in no security group | Send the operator the ids from "Find the group ids". If they are linked, redo step 5 and check the user's memberships |
 
 ## For the DFE operator
 

@@ -17,9 +17,10 @@ enrichment call) runs offline and reproducibly.
 
 It is selected by ``GroupResolutionConfig.directory_backend == "mock"``. The
 fixture path comes from the env var named in ``mock_directory_env`` (default
-``DFE_OIDC_MOCK_DIRECTORY``). Everything fails open: a missing or malformed
-fixture yields an empty directory, so a broken test rig reads as "no groups"
-(default deny) rather than a crash mid-login.
+``DFE_OIDC_MOCK_DIRECTORY``). A sign-in's lookup fails open: a missing or
+malformed fixture yields no groups (default deny) rather than a crash mid-login.
+The listing does not, as the live adapters' does not, so group sync never
+records a fixture it could not read as a directory with no groups.
 
 Fixture shape (JSON)::
 
@@ -40,8 +41,6 @@ group *ids* that user belongs to, mirroring exactly what the live Graph
 ``transitiveMemberOf`` call would return.
 """
 
-from __future__ import annotations
-
 import json
 import os
 from pathlib import Path
@@ -49,7 +48,11 @@ from typing import TYPE_CHECKING
 
 from scalo.logger import logger
 
-from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
+from dfe_engine.auth.oidc.adapters.base import (
+    DirectoryCredentialError,
+    DirectoryNotConfiguredError,
+    OIDCGroupAdapter,
+)
 from dfe_engine.auth.oidc.models import GroupInfo
 
 if TYPE_CHECKING:
@@ -71,19 +74,21 @@ class MockDirectoryAdapter(OIDCGroupAdapter):
         self._by_id: dict[str, GroupInfo] = {}
         self._members: dict[str, list[str]] = {}
         self._load_error: str = ""
+        self._fixture_named = False
         self._load()
 
     def _load(self) -> None:
         """Read the fixture named by the provider's ``mock_directory_env``.
 
-        Fail-open: any problem leaves an empty directory and records the reason
-        for ``test_connection`` to surface, but never raises.
+        Any problem leaves an empty directory and records the reason for
+        ``test_connection`` and ``list_all_groups`` to surface, but never raises.
         """
         env_name = self._provider.groups.mock_directory_env or "DFE_OIDC_MOCK_DIRECTORY"
         path_str = os.environ.get(env_name)
         if not path_str:
             self._load_error = f"env var {env_name} not set"
             return
+        self._fixture_named = True
         path = Path(path_str)
         if not path.is_file():
             self._load_error = f"fixture not found at {path}"
@@ -124,7 +129,16 @@ class MockDirectoryAdapter(OIDCGroupAdapter):
         return self._groups_for(directory_id)
 
     async def list_all_groups(self) -> list[GroupInfo]:
-        """Every group in the fixture (the bulk-sync source)."""
+        """Every group in the fixture (the bulk-sync source).
+
+        Raises:
+            DirectoryNotConfiguredError: No fixture is named.
+            DirectoryCredentialError: The named fixture is missing or unreadable.
+        """
+        if self._load_error and not self._fixture_named:
+            raise DirectoryNotConfiguredError
+        if self._load_error:
+            raise DirectoryCredentialError
         return list(self._groups)
 
     async def test_connection(self) -> tuple[bool, str]:

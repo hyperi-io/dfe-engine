@@ -50,6 +50,7 @@ from dfe_engine.auth.audit import audit_jit_failed, audit_login_denied, audit_lo
 from dfe_engine.auth.jit import (
     JitAccountUnavailableError,
     JitIdentityCollisionError,
+    JitNoRoleError,
     JitSubjectUnusableError,
 )
 from dfe_engine.auth.sessions import session_claims, token_lifetime
@@ -279,7 +280,7 @@ async def oidc_callback(
                 status_code=401,
                 detail={"code": "unauthorized", "message": str(exc)},
             ) from exc
-        except JitAccountUnavailableError as exc:
+        except (JitAccountUnavailableError, JitNoRoleError) as exc:
             audit_login_denied(identity.subject, "oidc", _get_client_ip(request), exc.reason)
             raise HTTPException(
                 status_code=401,
