@@ -53,6 +53,17 @@ def test_two_tests_wanting_one_service_do_not_collide():
     assert _container_name("test_a", "clickhouse") != _container_name("test_b", "clickhouse")
 
 
+def test_same_named_tests_in_two_modules_do_not_collide():
+    """Two modules may define a test of the same name, so the name carries the node id.
+
+    ``test_text_override_is_a_hard_error`` exists in both RBAC modules; named from
+    ``request.node.name`` the two collided whenever xdist ran them together.
+    """
+    isolation = "tests/integration/test_ch_rbac_isolation.py::test_text_override_is_a_hard_error"
+    reconcile = "tests/integration/test_ch_rbac_reconcile.py::test_text_override_is_a_hard_error"
+    assert _container_name(isolation, "clickhouse") != _container_name(reconcile, "clickhouse")
+
+
 def test_container_name_is_a_legal_docker_name():
     """Docker only accepts ``[a-zA-Z0-9][a-zA-Z0-9_.-]*``.
 
@@ -200,7 +211,7 @@ def test_a_started_container_carries_the_name_and_labels(ch_params, request):
     if tier == "cluster":
         pytest.skip("resolved tier is 'cluster', so no container was started")
 
-    expected = _container_name(request.node.name, "clickhouse")
+    expected = _container_name(request.node.nodeid, "clickhouse")
 
     def inspect(fmt: str) -> str | None:
         out = subprocess.run(
