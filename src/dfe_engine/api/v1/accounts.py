@@ -222,13 +222,16 @@ class RotatePasswordRequest(BaseModel):
         min_length=MIN_ADMIN_PASSWORD_LENGTH,
         description=(
             "New plaintext password to write to the store; at least "
-            f"{MIN_ADMIN_PASSWORD_LENGTH} characters and never the shipped default"
+            f"{MIN_ADMIN_PASSWORD_LENGTH} characters, at most {BCRYPT_MAX_PASSWORD_BYTES} "
+            "bytes, and never the shipped default"
         ),
     )
 
     @field_validator("new_password")
     @classmethod
     def _refuse_default_credentials(cls, value: str) -> str:
+        # The boot reconcile bcrypt-hashes this value, so a longer one could never be issued.
+        refuse_unhashable_password(value)
         if default_credentials_in_use(value):
             raise ValueError(
                 "the shipped default admin password -- the engine refuses to start "

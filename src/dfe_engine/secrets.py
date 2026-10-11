@@ -89,9 +89,8 @@ class DfeSecrets:
 
 def _to_scalo_config(cfg: SecretsSettings) -> dict[str, Any]:
     """Map DFE SecretsSettings -> scalo.secrets from_config dict (file needs none)."""
-    # The memory cache ignores enabled and holds a read for ttl_secs, so 0 sends every read
-    # to the store: a rotation or an outage shows on the next read, not an hour later.
-    scfg: dict[str, Any] = {"cache": {"enabled": False, "ttl_secs": 0}}
+    # Every read goes to the store, so a rotation or an outage shows on the next read.
+    scfg: dict[str, Any] = {"cache": {"enabled": False}}
     if cfg.provider in ("openbao", "vault"):
         # AppRole in prod (role_id in config; the secret_id is itself a secret and
         # comes from the VAULT_SECRET_ID env, injected by ESO/infra - never config).

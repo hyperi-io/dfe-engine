@@ -31,6 +31,11 @@ dependencies = [
     #            imports.
     # >=2.31.3:  deployment contract schema 4, the version the scalo-service
     #            library chart validates the published thin chart against.
+    # >=2.31.4:  secrets: enabled=False disables every cache tier, and an OpenBao
+    #            login that is rate limited, redirected or unreachable raises
+    #            ProviderError, so AuthenticationError means the store refused.
+    # >=2.31.5:  a retried HTTP error keeps the socket error under it, which
+    #            http_errors.describe_http_error reads as transport_failure.
     # Upper bound: <3 is the API-stability boundary. An unbounded `>=` is invisible
     # to Renovate -- the constraint is satisfied by every future release, so no PR
     # is ever raised and the version moves silently in the lock.
@@ -42,7 +47,7 @@ dependencies = [
     # /metrics 404s, and self-monitoring (one of the two default E2E acceptance tests)
     # goes green while reporting nothing. [opentelemetry] is no longer a separate
     # extra: [metrics] carries the SDK.
-    "scalo[expression,http,metrics]>=2.31.3,<3",
+    "scalo[expression,http,metrics]>=2.31.5,<3",
     # The DFE schema trees as package data under dfe_schemas/data/, replacing
     # the `schemas` git submodule. schema_loader resolves them through
     # importlib.resources; the Dockerfile bakes its seed from the installed
