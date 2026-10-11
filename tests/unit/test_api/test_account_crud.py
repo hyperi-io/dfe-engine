@@ -631,7 +631,7 @@ class TestTheGroupsAnAccountShows:
         self, client, app, admin_headers
     ):
         guid = "7b1d0f3e-0000-4000-8000-000000000003"
-        app.state.group_store.update("dfe-analysts", source_id=guid)
+        app.state.group_store.update("dfe-analysts", source_provider="entra", source_id=guid)
         app.state.account_store.create("jane-corp-com", "", groups=[guid, "dfe-admins"])
         app.state.account_store.update("jane-corp-com", external=True, source_provider="entra")
 

@@ -432,6 +432,43 @@ class TestSyncProvider:
         assert me.status_code == 401, me.text
         assert me.json()["code"] == "no_role_granted"
 
+    def test_a_scim_group_bound_to_the_provider_is_synced(
+        self, client, app, admin_headers, tmp_path, monkeypatch
+    ):
+        """A deployment binding scim to this provider runs both against one identity source."""
+        from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+        from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
+
+        directory = tmp_path / "directory.json"
+        group = {"id": "g-soc", "name": "SOC Team", "email": "", "description": "From Entra"}
+        directory.write_text(json.dumps({"groups": [group]}), encoding="utf-8")
+        monkeypatch.setenv("DFE_TEST_SYNC_DIRECTORY", str(directory))
+        app.state.settings.auth.source_provider_bindings = {SCIM_SOURCE_PROVIDER: "entra"}
+        app.state.oidc_provider_registry.create(
+            "entra",
+            OIDCProvider(
+                type="entra_id",
+                enabled=True,
+                issuer="https://login.example.com/tenant/v2.0",
+                groups=GroupResolutionConfig(
+                    mode="api",
+                    directory_backend="mock",
+                    mock_directory_env="DFE_TEST_SYNC_DIRECTORY",
+                ),
+            ),
+        )
+        app.state.group_store.create(
+            "soc-team", ["data_analyst"], source_provider=SCIM_SOURCE_PROVIDER, source_id="g-soc"
+        )
+
+        resp = client.post("/api/v1/auth/oidc-providers/entra/sync", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert (body["updated"], body["groups_skipped"], body["status"]) == (1, 0, "ok")
+        stored = app.state.group_store.get("soc-team")
+        assert (stored.source_provider, stored.description) == (SCIM_SOURCE_PROVIDER, "From Entra")
+
     @pytest.mark.parametrize("provider_type", ["entra_id", "okta"])
     def test_a_provider_with_no_directory_credential_says_so(
         self, client, app, admin_headers, provider_type

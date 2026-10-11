@@ -8,13 +8,12 @@
 
 """Tests for POST/GET/PUT/DELETE /api/v1/auth/groups endpoints."""
 
-from __future__ import annotations
-
 import secrets
 
 import pytest
 
 from dfe_engine.api.deps import create_access_token
+from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
 
 
 class TestCreateGroup:
@@ -276,7 +275,7 @@ class TestTakingARoleOffAGroupNeedsIt:
     """A role taken off a group is taken from every member, the recovery credentials included."""
 
     def test_admin_cannot_be_taken_off_the_admin_group(self, client, app, operator_headers):
-        app.state.group_store.update("dfe-admins", source_id="dfe-admins")
+        app.state.group_store.update("dfe-admins", source_provider="oidc", source_id="dfe-admins")
         resp = client.put(
             "/api/v1/auth/groups/dfe-admins",
             json={"roles": ["infra_admin"]},
@@ -573,7 +572,7 @@ class TestScimLeavesAndProviderIdsNeedTheGroupsRoles:
         self, client, app, operator_headers, current
     ):
         """An IdP login naming the new id would resolve to dfe-admins, and to admin."""
-        app.state.group_store.update("dfe-admins", source_id=current)
+        app.state.group_store.update("dfe-admins", source_provider="oidc", source_id=current)
         members = app.state.group_store.get("dfe-admins").members
 
         resp = client.put(
@@ -599,6 +598,41 @@ class TestScimLeavesAndProviderIdsNeedTheGroupsRoles:
 
         assert resp.status_code == 200, resp.text
         assert app.state.group_store.get("dfe-admins").source_id == "entra-admins-guid"
+
+    def test_a_provider_id_scim_sets_links_for_scim_alone(self, client, app, admin_headers):
+        """A provider id SCIM writes names SCIM, so an unbound provider asserting it gets nothing."""
+        members = app.state.group_store.get("dfe-admins").members
+
+        resp = client.put(
+            f"{self.SCIM}/dfe-admins",
+            json=_scim_admins_body(members, external_id="entra-admins-guid"),
+            headers=admin_headers,
+        )
+        idp = {"X-Oidc-Subject": "mallory@corp", "X-Oidc-Groups": "entra-admins-guid"}
+
+        assert resp.status_code == 200, resp.text
+        stored = app.state.group_store.get("dfe-admins")
+        assert (stored.source_provider, stored.source_id) == (
+            SCIM_SOURCE_PROVIDER,
+            "entra-admins-guid",
+        )
+        assert client.get("/api/v1/auth/me", headers=idp).status_code == 401
+
+    def test_a_scim_put_keeps_the_provider_a_group_is_linked_to(self, client, app, admin_headers):
+        app.state.group_store.update(
+            "dfe-admins", source_provider="entra", source_id="entra-admins-guid"
+        )
+        members = app.state.group_store.get("dfe-admins").members
+
+        resp = client.put(
+            f"{self.SCIM}/dfe-admins",
+            json=_scim_admins_body(members, external_id="entra-admins-guid-2"),
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        stored = app.state.group_store.get("dfe-admins")
+        assert (stored.source_provider, stored.source_id) == ("entra", "entra-admins-guid-2")
 
     def test_admin_still_removes_a_member_through_scim(
         self, client, app, admin_headers, viewer_is_admin
@@ -635,8 +669,10 @@ class TestAProviderIdNamesOneGroup:
 
     @pytest.fixture(autouse=True)
     def admins_carry_a_provider_id(self, app, client) -> None:
-        """Depends on ``client``, whose lifespan builds the stores."""
-        app.state.group_store.update("dfe-admins", source_id="entra-admins-guid")
+        """Depends on ``client``, whose lifespan builds the stores; IDP signs in as the gateway."""
+        app.state.group_store.update(
+            "dfe-admins", source_provider="oidc", source_id="entra-admins-guid"
+        )
 
     @pytest.mark.parametrize("caller", ["operator_headers", "admin_headers"])
     def test_a_post_cannot_take_another_groups_provider_id(self, client, app, request, caller):
@@ -676,7 +712,9 @@ class TestAProviderIdNamesOneGroup:
 
     def test_a_group_resending_its_own_provider_id_is_accepted(self, client, app, operator_headers):
         app.state.group_store.create("sec-team", [], members=[])
-        app.state.group_store.update("sec-team", source_id="entra-sec-guid")
+        app.state.group_store.update(
+            "sec-team", source_provider=SCIM_SOURCE_PROVIDER, source_id="entra-sec-guid"
+        )
 
         resp = client.put(
             f"{self.SCIM}/sec-team",

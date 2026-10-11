@@ -8,9 +8,7 @@
 
 """Factories for auth unit test inputs."""
 
-from __future__ import annotations
-
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -76,6 +74,7 @@ def make_oidc_provider_registry(*, directory: Path) -> OIDCProviderRegistry:
 
 def make_oidc_sync_scheduler(
     *,
+    bindings: Mapping[str, str] | None = None,
     group_store: GroupStore,
     on_groups_created: Callable[[], None] | None = None,
     registry: OIDCProviderRegistry,
@@ -83,6 +82,7 @@ def make_oidc_sync_scheduler(
 ) -> OidcSyncScheduler:
     """Build an auth.oidc.scheduler.OidcSyncScheduler with no metrics backend and no secret store."""
     return OidcSyncScheduler(
+        bindings=bindings if bindings is not None else {},
         group_store=group_store,
         metrics=None,
         on_groups_created=on_groups_created,

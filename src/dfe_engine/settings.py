@@ -1557,6 +1557,19 @@ class AuthSettings(BaseModel):
         ),
     )
 
+    @field_validator("source_provider_bindings")
+    @classmethod
+    def _refuse_binding_chains(cls, bindings: dict[str, str]) -> dict[str, str]:
+        # A binding joins a stamp to one provider, so a target that is itself a stamp joins names no one bound.
+        chained = sorted(stamp for stamp, target in bindings.items() if target in bindings)
+        if chained:
+            links = ", ".join(f"{stamp} -> {bindings[stamp]}" for stamp in chained)
+            raise ValueError(
+                f"source_provider_bindings may not chain: {links} binds to a name that is "
+                "itself bound; bind each stamp straight to its OIDC provider"
+            )
+        return bindings
+
 
 class HyperDXSettings(BaseModel):
     """HyperDX integration settings.

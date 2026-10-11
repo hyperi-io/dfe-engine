@@ -9,9 +9,9 @@
 import builtins
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Self
 
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from scalo.logger import logger
 
 from dfe_engine.auth.protected_accounts import resolve_floor
@@ -36,6 +36,15 @@ SkipReason = Literal["unreadable", "not_a_mapping", "invalid"]
 - ``invalid``: no Group can be made from the fields, a bad scope for one.
 """
 
+GROUPS_UNLINKED = "auth_groups_unlinked_total"
+
+UnlinkReason = Literal["no_provider"]
+"""Why a stored group was loaded with its provider link dropped.
+
+- ``no_provider``: it carries a ``source_id`` and no ``source_provider``, so the id
+  would answer every provider that asserts it.
+"""
+
 
 class GroupExistsError(ValueError):
     """A group is already stored under the name, whether or not it loads."""
@@ -58,6 +67,11 @@ class GroupMetrics:
             "Stored groups skipped as not a valid group, counted each time one starts failing",
             ["reason"],
         )
+        self._unlinked = manager.counter(
+            GROUPS_UNLINKED,
+            "Stored groups loaded with their provider link dropped, counted each time one starts",
+            ["reason"],
+        )
 
     def skipped(self, reason: SkipReason) -> None:
         """Record a stored group that has started failing to load."""
@@ -65,13 +79,42 @@ class GroupMetrics:
             return
         self._skipped.labels(reason=reason).inc()
 
+    def unlinked(self, reason: UnlinkReason) -> None:
+        """Record a stored group that has started loading with its provider link dropped."""
+        if self._manager is None:
+            return
+        self._unlinked.labels(reason=reason).inc()
+
 
 class _Skips:
-    """The stored groups skipped as not valid, each reported once until it loads again."""
+    """The stored groups skipped or loaded unlinked, each reported once until it loads clean."""
 
     def __init__(self, metrics: GroupMetrics | None) -> None:
         self._names: set[str] = set()
+        self._unlinked: set[str] = set()
         self._metrics = metrics if metrics is not None else GroupMetrics()
+
+    def unlink(self, document: dict, name: str, **where: str) -> dict:
+        """*document* with a ``source_id`` that names no ``source_provider`` dropped, reported once.
+
+        Earlier docs had operators link a group by ``source_id`` alone. Refusing the
+        whole group would take its members' roles with it, the recovery credentials'
+        among them, so it loads unlinked: no login reaches it through that id.
+        """
+        if not document.get("source_id") or document.get("source_provider"):
+            self._unlinked.discard(name)
+            return document
+        document.pop("source_id")
+        if name not in self._unlinked:
+            self._unlinked.add(name)
+            self._metrics.unlinked("no_provider")
+            logger.warning(
+                "stored group loaded unlinked: its source_id names no source_provider",
+                group=name,
+                reason="no_provider",
+                **where,
+            )
+        return document
 
     def skip(self, name: str, reason: SkipReason, error: str, **where: str) -> None:
         """Warn about and count the group stored as *name*, unless it is already skipped."""
@@ -104,6 +147,30 @@ def validate_group_scope(scope: str) -> str:
     raise ValueError(f"Group scope must be 'system' or 'org:<name>', got '{scope}'")
 
 
+def check_provider_link(source_provider: str, source_id: str) -> None:
+    """Refuse a provider group id that names no provider.
+
+    A login links a group only through the provider its ``source_provider`` names,
+    so an id with no provider would link nothing, and an unscoped one would answer
+    every provider that asserts the id.
+
+    Raises:
+        ValueError: ``source_id`` is set and ``source_provider`` is empty.
+    """
+    if source_id and not source_provider:
+        raise ValueError(
+            "source_provider is required when source_id is set: name the identity "
+            "provider whose group the id is"
+        )
+
+
+def _check_updated_link(group: Group, fields: dict[str, object]) -> None:
+    """:func:`check_provider_link` on the link *group* would carry after an update of *fields*."""
+    provider = fields.get("source_provider", group.source_provider)
+    source_id = fields.get("source_id", group.source_id)
+    check_provider_link(str(provider), str(source_id))
+
+
 class Group(BaseModel):
     """A named group with roles and member usernames."""
 
@@ -116,9 +183,9 @@ class Group(BaseModel):
     ``org:<name>`` (exists only inside that org - invisible outside it, and its
     roles bind at that org's scope only, never system-wide)."""
     source_provider: str = ""
-    """Name of the OIDC provider that owns this group (empty for manually managed groups)."""
+    """Name of the identity provider this group is linked to (empty for an unlinked group)."""
     source_id: str = ""
-    """Provider-specific group identifier (e.g. Google group key, Entra object ID)."""
+    """That provider's id for the group (Google group key, Entra object ID); needs a provider."""
     org_ids: list[str] = Field(default_factory=list)
     """Organisation IDs this group has access to (empty means no org-scoped access)."""
     attributes: dict[str, Any] = Field(default_factory=dict)
@@ -132,6 +199,11 @@ class Group(BaseModel):
     @classmethod
     def _check_scope(cls, value: str) -> str:
         return validate_group_scope(value)
+
+    @model_validator(mode="after")
+    def _check_provider_link(self) -> Self:
+        check_provider_link(self.source_provider, self.source_id)
+        return self
 
     @property
     def scope_org(self) -> str:
@@ -194,7 +266,8 @@ class GroupStore:
         """The group in *path*, or None when there is none or it is not a valid group.
 
         An invalid file is skipped, not raised, so it cannot take down role resolution
-        for every session. Its members lose that group's roles until it is fixed.
+        for every session. Its members lose that group's roles until it is fixed. A
+        file whose ``source_id`` names no provider loads unlinked (:meth:`_Skips.unlink`).
         """
         try:
             data = yaml_load(path)
@@ -212,6 +285,7 @@ class GroupStore:
             return None
         # Name is derived from filename, not stored in the file
         data["name"] = path.stem
+        data = self._skips.unlink(data, path.stem, path=str(path))
         try:
             group = Group.model_validate(data)
         except ValidationError as exc:
@@ -295,10 +369,10 @@ class GroupStore:
     def by_source_id(self) -> dict[str, Group]:
         """Return groups keyed by their provider ``source_id``.
 
-        Only groups that carry a non-empty ``source_id`` appear. Used to resolve
-        a token that carries opaque provider identifiers (Entra object GUIDs,
-        Google group keys) rather than group names - the sync stores the id on
-        the group file, and this is how login looks it back up.
+        Only groups that carry a non-empty ``source_id`` appear. Used where an
+        identifier may be a provider id rather than a group name, as an API key's
+        groups may be. An IdP login links through
+        :func:`~dfe_engine.auth.membership.linked_groups`, which also checks the provider.
 
         When two groups share a source_id (a misconfiguration) the
         last-by-sorted-name wins; that is deterministic rather than correct, and
@@ -329,16 +403,18 @@ class GroupStore:
 
         Raises:
             KeyError: If the group does not exist.
-            ValueError: If ``scope`` is not ``system`` / ``org:<name>``.
+            ValueError: If ``scope`` is not ``system`` / ``org:<name>``, or the group
+                would carry a ``source_id`` with no ``source_provider``.
             ProtectedAccountError: The update drops a recovery credential from the
                 admin-role group, or takes the admin role off it system-wide.
         """
         group = self._read(name)
         if group is None:
             raise KeyError(f"Group '{name}' not found")
+        # model_copy(update=...) skips validators - check explicitly.
         if "scope" in fields:
-            # model_copy(update=...) skips validators - check explicitly.
             validate_group_scope(str(fields["scope"]))
+        _check_updated_link(group, fields)
         if not allow_protected:
             self.protected.check_group_update(name, fields)
             if "members" in fields:
@@ -473,13 +549,24 @@ class DocuStoreGroupStore:
     ) -> None:
         self._collection = collection
         self._skips = _Skips(metrics)
-        self._c = store.typed(collection, Group, key="name", on_invalid=self._skip_invalid)
+        self._c = store.typed(
+            collection,
+            Group,
+            key="name",
+            on_invalid=self._skip_invalid,
+            prepare=self._unlink_unscoped,
+        )
         self.protected = resolve_floor(admin_name)
 
     def _skip_invalid(self, document: dict, exc: ValidationError) -> None:
         """Leave out a stored document no Group can be made from, as the YAML store does."""
         name = str(document.get("name", ""))
         self._skips.skip(name, "invalid", str(exc), collection=self._collection)
+
+    def _unlink_unscoped(self, document: dict) -> dict:
+        """Load a document whose ``source_id`` names no provider unlinked, as the YAML store does."""
+        name = str(document.get("name", ""))
+        return self._skips.unlink(document, name, collection=self._collection)
 
     def create(
         self,
@@ -552,20 +639,23 @@ class DocuStoreGroupStore:
         return index
 
     def update(self, name: str, *, allow_protected: bool = False, **fields: object) -> Group:
-        """Update permitted fields on a group. Raises KeyError if missing, ValueError on bad scope.
+        """Update permitted fields on a group. Raises KeyError if missing.
 
         Accepted keyword arguments: ``roles``, ``description``, ``members``,
         ``org_ids``, ``scope``, ``source_provider``, ``source_id``. Any other is
-        ignored. ``allow_protected`` replaces the admin-role group's members with a
-        list that drops a recovery credential, or changes its roles or scope;
-        reserved for the reconcile paths. Raises ProtectedAccountError otherwise.
+        ignored. Raises ValueError on a bad scope, or when the group would carry a
+        ``source_id`` with no ``source_provider``. ``allow_protected`` replaces the
+        admin-role group's members with a list that drops a recovery credential, or
+        changes its roles or scope; reserved for the reconcile paths. Raises
+        ProtectedAccountError otherwise.
         """
         group = self.get(name)
         if group is None:
             raise KeyError(f"Group '{name}' not found")
+        # model_copy(update=...) skips validators - check explicitly.
         if "scope" in fields:
-            # model_copy(update=...) skips validators - check explicitly.
             validate_group_scope(str(fields["scope"]))
+        _check_updated_link(group, fields)
         if not allow_protected:
             self.protected.check_group_update(name, fields)
             if "members" in fields:
