@@ -23,6 +23,7 @@ from types import SimpleNamespace
 import dfe_schemas
 import pytest
 from fastapi.testclient import TestClient
+from scalo.logger import logger
 
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries, create_access_token
@@ -54,6 +55,7 @@ DEFAULTS = "/api/v1/system/defaults"
 APPLY = "/api/v1/system/defaults/apply"
 DRIFT = "/api/v1/system/defaults/drift"
 REBUILD = "needs a table rebuild; applies to new tables only"
+REFUSED = "ClickHouse could not be read or refused the change; the engine log has why"
 
 
 def _settings(tmp_path: Path, ch_params: dict, database: str) -> DFESettings:
@@ -330,14 +332,26 @@ def test_one_table_clickhouse_refuses_does_not_hide_the_others(ch_client, stack)
     ch_client.command(f"CREATE VIEW `{db}`.`syslog-bad` AS SELECT 1 AS x")
     _patch(stack, {"ttl_days": 91})
 
-    body = _apply(stack, "syslog-bad", "syslog-good")
+    captured: list = []
+    handler_id = logger.add(captured.append, level="WARNING")
+    try:
+        body = _apply(stack, "syslog-bad", "syslog-good")
+    finally:
+        logger.remove(handler_id)
 
     assert _live_ttl_days(ch_client, db, "syslog-good") == 91
     assert body["updated"] == ["syslog-bad", "syslog-good"]
     bad, good = body["live"]
     assert bad["source"] == "syslog-bad"
     assert bad["status"] == "failed"
-    assert "ClickHouse rejected" in bad["reason"]
+    assert bad["reason"] == REFUSED
+    # The reason is the same for a failed read, so the log shows ClickHouse refused a statement.
+    refusals = [
+        m.record["message"] for m in captured if "table defaults not applied" in m.record["message"]
+    ]
+    assert len(refusals) == 1, refusals
+    assert refusals[0].startswith(f"{db}.syslog-bad: table defaults not applied: ")
+    assert f"ClickHouse rejected: ALTER TABLE `{db}`.`syslog-bad`" in refusals[0]
     assert good["source"] == "syslog-good"
     assert good["status"] == "altered"
     assert good["ttl"] == "90 -> 91"
