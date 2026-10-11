@@ -8,6 +8,7 @@
 
 """Secret stores whose every read is refused, each the way scalo's OpenBao provider raises it."""
 
+import httpx
 from scalo.secrets.exceptions import AuthenticationError, SecretPermissionError
 
 from dfe_engine.secrets import DfeSecrets
@@ -31,19 +32,8 @@ class AppRoleRefusingSecretStore(DfeSecrets):
         """Hold no backend: every read fails before one would be used."""
 
     def get(self, path: str) -> str:
-        """Refuse the login."""
-        raise AuthenticationError("openbao", "AppRole auth failed: 400")
-
-
-class AppRoleUnreachableSecretStore(DfeSecrets):
-    """A store whose AppRole login never reaches it, raised as scalo raises it: inside the socket error."""
-
-    def __init__(self) -> None:
-        """Hold no backend: every read fails before one would be used."""
-
-    def get(self, path: str) -> str:
-        """Fail the login as unreachable."""
-        try:
-            raise ConnectionRefusedError(111, "Connection refused")
-        except ConnectionRefusedError as exc:
-            raise AuthenticationError("openbao", f"AppRole auth failed: {exc}")
+        """Refuse the login from the store's 400, as scalo raises it."""
+        request = httpx.Request("POST", "http://openbao.invalid/v1/auth/approle/login")
+        answer = httpx.Response(400, request=request)
+        refusal = httpx.HTTPStatusError("400 Bad Request", request=request, response=answer)
+        raise AuthenticationError("openbao", "approle login refused: HTTP 400") from refusal

@@ -1266,6 +1266,44 @@ class TestRotatePassword:
         assert resp.status_code == 422, resp.text
         assert "default admin password" in resp.json()["errors"][0]["message"]
 
+    @pytest.mark.parametrize(
+        ("password", "status"),
+        [("x" * 72, 200), ("x" * 73, 422), ("é" * 37, 422)],
+        ids=["72-bytes", "73-bytes", "74-bytes-in-37-chars"],
+    )
+    def test_a_password_longer_than_bcrypt_takes_never_reaches_the_store(
+        self, app, client, admin_headers, password, status
+    ):
+        """The boot reconcile bcrypt-hashes the rotated value, so a longer one is an unbootable store write."""
+        from scalo.secrets.exceptions import SecretNotFoundError
+
+        from dfe_engine.secrets import build_secrets
+
+        settings = app.state.settings
+        settings.auth.local.admin_password_secret_path = "auth/admin-password"
+        store = build_secrets(settings.secrets)
+
+        def stored() -> str | None:
+            try:
+                return store.get("auth/admin-password")
+            except SecretNotFoundError:
+                return None
+
+        before = stored()
+        resp = client.post(
+            "/api/v1/auth/accounts/admin/rotate-password",
+            json={"new_password": password},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == status, resp.text
+        if status == 200:
+            assert stored() == password
+            return
+        assert [error["field"] for error in resp.json()["errors"]] == ["new_password"]
+        assert password not in resp.text
+        assert stored() == before
+
     def test_rotate_requires_admin(self, client, viewer_headers):
         resp = client.post(
             "/api/v1/auth/accounts/admin/rotate-password",

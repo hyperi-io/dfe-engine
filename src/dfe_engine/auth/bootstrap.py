@@ -42,7 +42,13 @@ from typing import TYPE_CHECKING
 
 from scalo.logger import logger
 
-from dfe_engine.auth.accounts import Account, AccountStore, DocuStoreAccountStore, matches_digest
+from dfe_engine.auth.accounts import (
+    Account,
+    AccountStore,
+    DocuStoreAccountStore,
+    matches_digest,
+    refuse_unhashable_password,
+)
 from dfe_engine.auth.api_keys import APIKeyStore
 from dfe_engine.auth.groups import DocuStoreGroupStore, GroupMetrics, GroupStore
 from dfe_engine.auth.role_store import RoleStore
@@ -65,7 +71,11 @@ _ADMIN_GROUP = "dfe-admins"
 
 
 class DefaultCredentialsError(RuntimeError):
-    """The admin password is unset or the shipped default in a production posture."""
+    """A configured password the engine will not start on.
+
+    The admin password unset or the shipped default in a production posture, or an
+    admin or seed account password longer than bcrypt hashes.
+    """
 
 
 def admin_account_name(override: str = "") -> str:
@@ -176,6 +186,32 @@ def require_admin_password(admin_password: str, environment: str, *, retired: bo
         "password your deployment minted (dfe-docker: make init; kubernetes: the "
         "engine Secret), or set DFE_ENV to dev/development/local/test/ci"
     )
+
+
+def require_hashable_passwords(admin_password: str, seed_accounts: list[SeedAccount]) -> None:
+    """Refuse to start on a configured password bcrypt cannot hash.
+
+    The boot reconcile hashes the admin password and every seed account's, and bcrypt
+    refuses more than 72 bytes, so a longer one would stop the reconcile partway
+    without saying which setting caused it.
+
+    Raises:
+        DefaultCredentialsError: a configured password over the limit, naming its setting
+            and never its value.
+    """
+    configured = [("DFE_AUTH_LOCAL_ADMIN_PASSWORD", admin_password)]
+    configured += [
+        (f"auth.local.seed_accounts[{seed.username}].password", seed.password)
+        for seed in seed_accounts
+    ]
+    for setting, password in configured:
+        try:
+            refuse_unhashable_password(password)
+        except ValueError as exc:
+            raise DefaultCredentialsError(
+                f"{setting} must be {exc}: the boot reconcile hashes it, so a longer one "
+                "can never be issued; set a shorter one"
+            ) from None
 
 
 # Default group definitions: name -> (roles, description)

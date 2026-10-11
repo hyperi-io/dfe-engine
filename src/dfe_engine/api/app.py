@@ -266,12 +266,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Refuse to start on the shipped admin password outside a dev posture, unless
     # the operator has retired the admin -- then an absent password is the point.
     from dfe_engine.auth import admin_retirement
-    from dfe_engine.auth.bootstrap import require_admin_password
+    from dfe_engine.auth.bootstrap import require_admin_password, require_hashable_passwords
 
     require_admin_password(
         settings.auth.local.admin_password,
         settings.env,
         retired=admin_retirement.is_retired(gitcrud),
+    )
+    require_hashable_passwords(
+        settings.auth.local.admin_password, settings.auth.local.seed_accounts
     )
 
     account_store, group_store, api_key_store, role_store, role_config = bootstrap_auth(

@@ -33773,7 +33773,7 @@
             "type": "string",
             "minLength": 12,
             "title": "New Password",
-            "description": "New plaintext password to write to the store; at least 12 characters and never the shipped default"
+            "description": "New plaintext password to write to the store; at least 12 characters, at most 72 bytes, and never the shipped default"
           }
         },
         "type": "object",
