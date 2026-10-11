@@ -20,6 +20,7 @@ per call, and an honest error when the database cannot answer.
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -363,9 +364,14 @@ def _last_increase(series: Sequence[tuple[float, float, float]]) -> float | None
 
 
 def _epoch(value: Any) -> float | None:
-    """Coerce a ClickHouse DateTime or numeric to a POSIX timestamp."""
+    """Coerce a ClickHouse DateTime or numeric to a POSIX timestamp.
+
+    clickhouse-connect returns naive datetimes in UTC, so a naive value is read as
+    UTC rather than the host's local time.
+    """
     if value is None:
         return None
-    if hasattr(value, "timestamp"):
-        return float(value.timestamp())
+    if isinstance(value, datetime):
+        aware = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return aware.timestamp()
     return float(value)
