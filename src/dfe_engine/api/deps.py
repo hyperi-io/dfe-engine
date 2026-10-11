@@ -10,7 +10,7 @@ per-request via ``Depends()``.  Authentication checks four paths in order:
 4. Auth disabled -- dev/test default, root context
 """
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from datetime import timedelta
 from typing import TYPE_CHECKING, Annotated, Any, NamedTuple
 
@@ -36,7 +36,7 @@ from dfe_engine.auth.jit import (
     JitNoRoleError,
     JitSubjectUnusableError,
 )
-from dfe_engine.auth.membership import groups_held
+from dfe_engine.auth.membership import groups_held, groups_held_by
 from dfe_engine.auth.models import platform_caller
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.auth.sessions import session_ended
@@ -390,11 +390,7 @@ def _resolve_group_grants(
     caller's org memberships (the owning org of each org-scoped group, plus each
     group's org_ids list).
     """
-    roles: set[str] = set()
-    org_ids: set[str] = set()
-    matched: set[str] = set()
-    grants: list[ScopedGrant] = []
-    seen_grants: set[tuple[str, str]] = set()
+    found: list[Group] = []
     # The source_id index is built only when a name misses, so name-only lookups pay nothing for it.
     source_index: dict[str, Group] | None = None
     for group_name in groups:
@@ -403,8 +399,23 @@ def _resolve_group_grants(
             if source_index is None:
                 source_index = group_store.by_source_id()
             group = source_index.get(group_name)
-        if group is None:
-            continue
+        if group is not None:
+            found.append(group)
+    return _grants_of(found)
+
+
+def _grants_of(groups: Iterable[Group]) -> GroupResolution:
+    """The roles, org memberships and scoped grants *groups* carry, and their names.
+
+    A system group's roles bind at system scope; an org-scoped group's roles bind at
+    that org's scope only, and the group's owning org and ``org_ids`` are its orgs.
+    """
+    roles: set[str] = set()
+    org_ids: set[str] = set()
+    matched: set[str] = set()
+    grants: list[ScopedGrant] = []
+    seen_grants: set[tuple[str, str]] = set()
+    for group in groups:
         matched.add(group.name)
         scope_org = group.scope_org
         scope = Scope(type="org", id=scope_org) if scope_org else Scope()
@@ -473,18 +484,30 @@ def provider_bindings(request: Request) -> dict[str, str]:
     return settings.auth.source_provider_bindings if settings is not None else {}
 
 
-def resolve_live_grants_for_user(request: Request, user_id: str) -> GroupResolution:
+def resolve_live_grants_for_user(
+    request: Request, user_id: str, *, groups: Sequence[Group] | None = None
+) -> GroupResolution:
     """Resolve roles/org_ids/grants from the bound account's groups, never a token claim.
 
     The account is the one :func:`account_for_session_subject` binds, so a subject that
-    binds none, an API-key subject among them, resolves to nothing.
+    binds none, an API-key subject among them, resolves to nothing. The resolution's
+    ``groups`` are the ones the account holds (:func:`groups_held`). *groups* is every
+    stored group when the caller has listed them for this request; otherwise they are
+    listed here, once.
     """
     group_store: GroupStore | None = getattr(request.app.state, "group_store", None)
     account = bound_account(request, user_id)
     if group_store is None or account is None:
         return GroupResolution([], [], [], [])
-    held = groups_held(account, group_store.list(), bindings=provider_bindings(request))
-    return _resolve_group_grants(held, group_store)
+    listed = group_store.list() if groups is None else groups
+    held = groups_held_by(
+        account.username,
+        account.groups,
+        account.source_provider,
+        listed,
+        bindings=provider_bindings(request),
+    )
+    return _grants_of(held)
 
 
 def resolve_live_groups_for_user(request: Request, user_id: str) -> list[str]:
@@ -592,6 +615,9 @@ async def get_current_user(request: Request) -> AuthContext:
         if _proxy_provider_is_manual(request=request, settings=settings):
             # A manual provider's membership is managed in the engine, so the gateway's groups grant nothing.
             asserted = []
+        group_store: GroupStore | None = getattr(request.app.state, "group_store", None)
+        # Each listing reads every group file, so the login check and the roles share one.
+        listed = group_store.list() if group_store is not None else None
 
         # JIT provisioning -- create shadow account on first OIDC login
         jit = getattr(request.app.state, "jit_provisioner", None)
@@ -605,6 +631,7 @@ async def get_current_user(request: Request) -> AuthContext:
                     asserted,
                     settings.auth.proxy_provider,
                     email=oidc_email or "",
+                    groups=listed,
                 )
             except (JitIdentityCollisionError, JitSubjectUnusableError) as exc:
                 # Ordered before the catch-all: a refused identity is a 401, not a 503.
@@ -637,15 +664,14 @@ async def get_current_user(request: Request) -> AuthContext:
 
         require_local_account_enabled(request, oidc_subject)
         # The token path's resolution, so a member an operator added by hand holds the group here too.
-        live = resolve_live_grants_for_user(request, oidc_subject)
-        live_groups = resolve_live_groups_for_user(request, oidc_subject)
-        logger.debug("OIDC auth", user_id=oidc_subject, groups=live_groups, roles=live.roles)
+        live = resolve_live_grants_for_user(request, oidc_subject, groups=listed)
+        logger.debug("OIDC auth", user_id=oidc_subject, groups=live.groups, roles=live.roles)
         return AuthContext(
             user_id=oidc_subject,
             email=oidc_email,
             roles=live.roles,
             grants=live.grants,
-            groups=live_groups,
+            groups=live.groups,
             org_ids=live.org_ids,
             request_id=request_id,
             client_ip=client_ip,
@@ -740,7 +766,6 @@ async def get_current_user(request: Request) -> AuthContext:
             )
         # The token's roles, groups and org_ids claims grant nothing; the bound account decides.
         live = resolve_live_grants_for_user(request, jwt_user_id)
-        live_groups = resolve_live_groups_for_user(request, jwt_user_id)
         return AuthContext(
             org_id=payload.get("org_id", "default"),
             user_id=jwt_user_id,
@@ -748,7 +773,7 @@ async def get_current_user(request: Request) -> AuthContext:
             roles=live.roles,
             grants=live.grants,
             org_ids=live.org_ids,
-            groups=live_groups,
+            groups=live.groups,
             request_id=request_id,
             client_ip=client_ip,
             user_agent=user_agent,

@@ -284,6 +284,12 @@ class GroupStore:
             self._skips.skip(path.name, "not_a_mapping", error, path=str(path))
             return None
         # Name is derived from filename, not stored in the file
+        try:
+            store_key(path.stem)
+        except KeyError:
+            error = "the filename is not a valid group name"
+            self._skips.skip(path.name, "invalid", error, path=str(path))
+            return None
         data["name"] = path.stem
         data = self._skips.unlink(data, path.stem, path=str(path))
         try:
