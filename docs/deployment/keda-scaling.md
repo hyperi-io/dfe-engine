@@ -12,8 +12,10 @@ in the stack.
 scaler (~70% utilisation, metrics-server) as its DEFAULT trigger - zero
 extra code, zero upstream risk.
 
-**scalo ScalingPressure is OPT-IN per app** (`keda.pressure.enabled`), read
-via the owned, fail-safe `dfe-keda-shim` (folded into the dfe-engine chart,
+**scalo ScalingPressure is OPT-IN per app**: an app's dfe-infra values carry
+the `pressure-trigger` trigger fragment, and `keda.pressure.*` sets its target,
+shim address and reported service. KEDA takes the higher of it and the CPU
+trigger. It is read via the owned, fail-safe `dfe-keda-shim` (folded into the dfe-engine chart,
 runs the engine container image as `dfe-keda-shim run`) rather than any
 Prometheus/Kedify path. The signal is read from the OTel pipeline's
 ClickHouse table (`otel_metrics_gauge`). Full fail-safe mechanics:
@@ -22,7 +24,7 @@ ClickHouse table (`otel_metrics_gauge`). Full fail-safe mechanics:
 ```mermaid
 flowchart LR
     ms["metrics-server\n(pod CPU)"] -->|utilization| cpuTrig["cpu trigger\nDEFAULT, ~70%"]
-    subgraph shimPath["opt-in per app: keda.pressure.enabled"]
+    subgraph shimPath["opt-in per app: pressure-trigger fragment"]
         direction LR
         gauge[("dfe.otel_metrics_gauge\n*_scaling_pressure")] --> shim["dfe-keda-shim\nGET /keda/pressure?service=X"]
     end
