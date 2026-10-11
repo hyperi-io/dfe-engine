@@ -64,8 +64,8 @@ from dfe_engine.api.password_floor import FLOOR_MESSAGE, below_floor, count_floo
 from dfe_engine.api.v1.account_groups import check_group_changes, check_role_assignment, scope_of
 from dfe_engine.auth.accounts import AccountExistsError, discard_created
 from dfe_engine.auth.audit import audit_account_change, audit_group_change
-from dfe_engine.auth.groups import GroupExistsError
-from dfe_engine.auth.membership import forget_member, groups_held
+from dfe_engine.auth.groups import Group, GroupExistsError
+from dfe_engine.auth.membership import forget_member, groups_held, linked_providers
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.scim_mapping import (
     account_to_scim_user,
@@ -203,6 +203,19 @@ def _refuse_taken_provider_id(store, source_id: str, name: str) -> JSONResponse 
             409, f"externalId '{source_id}' is already another group's provider id", "uniqueness"
         )
     return None
+
+
+def _scim_may_move_link(group: Group, stamp: str, request: Request) -> bool:
+    """Whether a SCIM write stamped *stamp* may set, change or clear *group*'s provider id.
+
+    An unlinked group takes SCIM's stamp with the id. A linked one moves only when its
+    provider is SCIM's own stamp or one ``auth.source_provider_bindings`` joins to it,
+    the providers a SCIM account's membership resolves through
+    (:func:`~dfe_engine.auth.membership.linked_providers`).
+    """
+    if not group.source_provider:
+        return True
+    return group.source_provider in linked_providers([stamp], provider_bindings(request))
 
 
 # -- /Users ---------------------------------------------------
@@ -545,10 +558,18 @@ async def replace_group(group_id: str, user: CurrentUser, request: Request) -> R
     new_members = list(fields["members"])  # type: ignore[arg-type]
     old = set(existing.members)
     new = set(new_members)
+    moves_link = fields["source_id"] != existing.source_id
     # An IdP login resolves a group by its provider id, so moving the id moves the roles.
-    if old != new or fields["source_id"] != existing.source_id:
+    if old != new or moves_link:
         check_role_assignment(request, user, existing.roles, scope_of(existing))
-    if fields["source_id"] != existing.source_id:
+    if moves_link:
+        if not _scim_may_move_link(existing, str(fields["source_provider"]), request):
+            return scim_error(
+                400,
+                "externalId cannot change: the group is linked through an identity "
+                "provider SCIM is not bound to",
+                "mutability",
+            )
         taken = _refuse_taken_provider_id(store, str(fields["source_id"]), group_id)
         if taken is not None:
             return taken

@@ -15,6 +15,7 @@ route refuses.
 
 import asyncio
 import re
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import NoReturn
 
@@ -166,12 +167,15 @@ class JitProvisioner:
         source_provider: str,
         email: str = "",
         name: str = "",
+        groups: Sequence[Group] | None = None,
     ) -> Account:
         """Create or update shadow account. Non-fatal on HyperDX failures.
 
         ``email`` is the IdP-asserted address (OIDC ``email`` claim / ``X-Oidc-Email``)
         and ``name`` the IdP-asserted display name. Each is written on first create
-        and reconciled on later logins when present.
+        and reconciled on later logins when present. ``groups`` is every stored group
+        when the caller has listed them for this request; otherwise the login lists
+        them once, since each listing reads every group file.
 
         Raises:
             JitIdentityCollisionError: The asserted subject is in the API-key
@@ -209,7 +213,8 @@ class JitProvisioner:
                 removed = [g for g in existing.groups if g not in oidc_groups]
                 updates["groups"] = oidc_groups
                 audit_jit_groups_updated(user_id, added, removed)
-            if not self._holds_a_role(key, oidc_groups, existing.source_provider):
+            listed = self._groups.list() if groups is None else groups
+            if not self._holds_a_role(key, oidc_groups, existing.source_provider, listed):
                 if updates:
                     self._accounts.update(key, groups=oidc_groups)
                 # A token issued before the refusal must neither read nor refresh a session.
@@ -224,8 +229,9 @@ class JitProvisioner:
             self._accounts.update(key, **updates)
             return self._accounts.get(key)
 
+        listed = self._groups.list() if groups is None else groups
         # The race branch below reconciles an account under this name, so this covers it too.
-        if not self._holds_a_role(safe_name, oidc_groups, source_provider):
+        if not self._holds_a_role(safe_name, oidc_groups, source_provider, listed):
             self._refuse_without_role(user_id, source_provider)
 
         # First login -- create shadow account
@@ -273,12 +279,12 @@ class JitProvisioner:
             discard_created(self._accounts, created)
             raise
 
-        _, org_ids = self._resolve_grants(oidc_groups, source_provider)
+        _, org_ids = self._resolve_grants(oidc_groups, source_provider, listed)
 
         audit_jit_account_created(user_id, source_provider, oidc_groups, org_ids)
 
         # HyperDX team assignment
-        team = self.resolve_hyperdx_team(oidc_groups, source_provider)
+        team = self.resolve_hyperdx_team(oidc_groups, source_provider, groups=listed)
         if team:
             audit_jit_team_assigned(user_id, team, "broadest-wins")
 
@@ -385,7 +391,9 @@ class JitProvisioner:
         audit_jit_login_refused(user_id, source_provider, reason)
         raise JitAccountUnavailableError(user_id, reason)
 
-    def _holds_a_role(self, username: str, oidc_groups: list[str], stamp: str) -> bool:
+    def _holds_a_role(
+        self, username: str, oidc_groups: list[str], stamp: str, groups: Sequence[Group]
+    ) -> bool:
         """Whether the account *username*, stamped *stamp*, holds a role after this login.
 
         An account has no role of its own: its session's roles come from the groups
@@ -393,11 +401,9 @@ class JitProvisioner:
         answers for. A SCIM account adopted through a binding is stamped ``scim``,
         not the provider signing in, so the check takes the stamp the account
         carries. A linked group carrying no role, as the group sync creates them,
-        grants nothing, so it admits nothing either.
+        grants nothing, so it admits nothing either. *groups* is every stored group.
         """
-        held = groups_held_by(
-            username, oidc_groups, stamp, self._groups.list(), bindings=self._bindings
-        )
+        held = groups_held_by(username, oidc_groups, stamp, groups, bindings=self._bindings)
         return any(group.roles for group in held)
 
     @staticmethod
@@ -410,27 +416,30 @@ class JitProvisioner:
         audit_jit_login_refused(user_id, source_provider, "no_role_granted")
         raise JitNoRoleError(user_id, source_provider)
 
-    def _linked(self, oidc_groups: list[str], source_provider: str) -> list[Group]:
+    def _linked(
+        self, oidc_groups: list[str], source_provider: str, groups: Sequence[Group]
+    ) -> list[Group]:
         """The stored groups the token's identifiers are linked to for *source_provider*.
 
         The lookup the session's roles resolve through (``membership.groups_held``), so
         org_ids and the HyperDX team cannot see a different group set from the roles.
+        *groups* is every stored group.
         """
         providers = linked_providers([source_provider], self._bindings)
-        return linked_groups(oidc_groups, self._groups.list(), providers)
+        return linked_groups(oidc_groups, groups, providers)
 
     def _resolve_grants(
-        self, oidc_groups: list[str], source_provider: str
+        self, oidc_groups: list[str], source_provider: str, groups: Sequence[Group]
     ) -> tuple[list[ScopedGrant], list[str]]:
         """The scoped grants and org ids the token's groups carry.
 
         Roles bind where ``api/deps.py`` binds them: an org-scoped group's at that
         org's scope, a system group's system-wide. A group's orgs are its
-        ``org_ids``, else the org that owns it.
+        ``org_ids``, else the org that owns it. *groups* is every stored group.
         """
         grants: list[ScopedGrant] = []
         org_ids: list[str] = []
-        for group in self._linked(oidc_groups, source_provider):
+        for group in self._linked(oidc_groups, source_provider, groups):
             scope = Scope(type="org", id=group.scope_org) if group.scope_org else Scope()
             grants.extend(ScopedGrant(role=role, scope=scope) for role in group.roles)
             if group.org_ids:
@@ -439,16 +448,24 @@ class JitProvisioner:
                 org_ids.append(group.scope_org)
         return grants, org_ids
 
-    def resolve_hyperdx_team(self, oidc_groups: list[str], source_provider: str) -> str:
+    def resolve_hyperdx_team(
+        self,
+        oidc_groups: list[str],
+        source_provider: str,
+        *,
+        groups: Sequence[Group] | None = None,
+    ) -> str:
         """Determine the HyperDX team: a platform team, else the caller's org team.
 
         A platform team goes only to a grant ``platform_grants`` keeps, broadest first,
         which is the filter the CH group bindings and the HyperDX connection read share.
         An org-scoped group's roles cover its org alone, so its member gets that org's
         team whatever roles the group holds. Only groups linked to *source_provider*
-        count (:func:`~dfe_engine.auth.membership.linked_groups`).
+        count (:func:`~dfe_engine.auth.membership.linked_groups`). ``groups`` is every
+        stored group when the caller has listed them; otherwise they are listed here.
         """
-        grants, org_ids = self._resolve_grants(oidc_groups, source_provider)
+        listed = self._groups.list() if groups is None else groups
+        grants, org_ids = self._resolve_grants(oidc_groups, source_provider, listed)
         platform_roles = {grant.role for grant in platform_grants(grants)}
         for role, team in _ROLE_TO_TEAM.items():
             if role in platform_roles:

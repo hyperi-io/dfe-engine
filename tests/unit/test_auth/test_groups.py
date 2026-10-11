@@ -614,3 +614,19 @@ class TestGroupSourceProvider:
         assert group.source_provider == ""
         assert group.source_id == ""
         assert group.roles == ["viewer"]
+
+    def test_a_file_whose_name_is_not_a_group_name_grants_nothing(self, tmp_path):
+        """list() skips a hand-placed file get() cannot address, so neither grants its roles."""
+        from dfe_engine.yaml_utils import yaml_dump
+
+        groups_dir = tmp_path / "groups"
+        groups_dir.mkdir()
+        yaml_dump(
+            {"roles": ["admin"], "members": ["alice"]},
+            groups_dir / "Bad Group.yaml",
+        )
+        store = GroupStore(groups_dir)
+        store.create("viewers", roles=["viewer"], members=["alice"])
+
+        assert [group.name for group in store.list()] == ["viewers"]
+        assert store.resolve_roles_for_member("alice") == ["viewer"]

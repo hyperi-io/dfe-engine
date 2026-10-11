@@ -19,6 +19,23 @@ def _link(app, *names: str) -> None:
         app.state.group_store.update(name, source_provider=provider, source_id=name)
 
 
+class CountingGroupStore(GroupStore):
+    """The YAML group store, counting the listings and lookups made of it."""
+
+    def __init__(self, groups_dir) -> None:
+        super().__init__(groups_dir)
+        self.lists = 0
+        self.gets = 0
+
+    def list(self):
+        self.lists += 1
+        return super().list()
+
+    def get(self, name):
+        self.gets += 1
+        return super().get(name)
+
+
 def _assert_refused_without_role(resp, app, stem: str) -> None:
     """The proxied identity holds no role, so it is refused and no account is made for it."""
     assert resp.status_code == 401, resp.text
@@ -474,6 +491,45 @@ class TestOidcAuthentication:
         assert resp.status_code == 401
         assert resp.json()["message"] == "Account blocked"
         assert store.get("locked-sso-example-com").last_login_at == ""
+
+
+class TestOneRequestReadsTheGroupsOnce:
+    """Each listing reads every group file, so a request lists the groups once and looks none up."""
+
+    @pytest.fixture
+    def counting(self, app, client) -> CountingGroupStore:
+        """The app's group store and its JIT provisioner, both reading through one counting store."""
+        store = CountingGroupStore(app.state.group_store._dir)
+        app.state.group_store = store
+        app.state.jit_provisioner = JitProvisioner(
+            account_store=app.state.account_store,
+            group_store=store,
+            source_provider_bindings=app.state.settings.auth.source_provider_bindings,
+        )
+        return store
+
+    @pytest.mark.parametrize("returning", [False, True], ids=["first-sign-in", "returning"])
+    def test_a_gateway_request(self, client: TestClient, app, counting, returning):
+        _link(app, "dfe-admins")
+        headers = {"X-Oidc-Subject": "ruth@example.com", "X-Oidc-Groups": "dfe-admins"}
+        if returning:
+            assert client.get("/api/v1/auth/permissions", headers=headers).status_code == 200
+        counting.lists = counting.gets = 0
+
+        resp = client.get("/api/v1/auth/permissions", headers=headers)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["roles"] == ["admin"]
+        assert (counting.lists, counting.gets) == (1, 0)
+
+    def test_a_token_request(self, client: TestClient, counting, admin_headers):
+        counting.lists = counting.gets = 0
+
+        resp = client.get("/api/v1/auth/permissions", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["roles"] == ["admin"]
+        assert (counting.lists, counting.gets) == (1, 0)
 
 
 class TestAJitFailureRefusesTheLogin:

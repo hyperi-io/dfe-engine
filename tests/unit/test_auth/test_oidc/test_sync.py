@@ -16,6 +16,7 @@ from scalo.metrics import create_metrics
 from dfe_engine.api.deps import _resolve_roles_from_groups
 from dfe_engine.auth.bootstrap import bootstrap_auth
 from dfe_engine.auth.groups import GROUPS_SKIPPED, GroupMetrics, GroupStore
+from dfe_engine.auth.membership import linked_groups, linked_providers
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.adapters.mock import MockDirectoryAdapter
 from dfe_engine.auth.oidc.adapters.okta import _group_info_from_okta
@@ -258,6 +259,47 @@ class TestSyncUpdatesTheGroupsLinkedToIt:
 
         assert (again["created"], again["updated"], again["groups_skipped"]) == (0, 2, 0)
         assert provider_registry.get("test-sso").last_sync_status == "ok"
+
+    @pytest.mark.parametrize(
+        ("stamp", "bindings"),
+        [
+            pytest.param("test-sso", {}, id="own"),
+            pytest.param(SCIM_SOURCE_PROVIDER, {SCIM_SOURCE_PROVIDER: "test-sso"}, id="bound"),
+        ],
+    )
+    async def test_a_renamed_directory_group_updates_the_group_linked_to_it(
+        self, registries, api_provider, stamp, bindings
+    ):
+        """A group with no email is keyed on its name, so a rename must not make a second group."""
+        provider_registry, group_store = registries
+        provider_registry.create("test-sso", api_provider)
+        group_store.create(
+            "soc-team",
+            roles=["data_analyst"],
+            description="Old",
+            source_provider=stamp,
+            source_id="g-soc",
+        )
+        renamed = [
+            GroupInfo(id="g-soc", name="Security Operations", email="", description="Renamed")
+        ]
+
+        result = await sync_provider(
+            "test-sso",
+            provider_registry,
+            group_store,
+            adapter=FakeAdapter(api_provider, renamed),
+            bindings=bindings,
+        )
+
+        assert (result["created"], result["updated"], result["groups_skipped"]) == (0, 1, 0)
+        assert group_store.get("security-operations") is None
+        stored = group_store.get("soc-team")
+        assert (stored.source_provider, stored.source_id) == (stamp, "g-soc")
+        assert (stored.roles, stored.description) == (["data_analyst"], "Renamed")
+        providers = linked_providers(["test-sso"], bindings)
+        linked = linked_groups(["g-soc"], group_store.list(), providers)
+        assert [group.name for group in linked] == ["soc-team"]
 
 
 class TestSyncNeverTakesAGroupNoAdminLinked:

@@ -219,7 +219,9 @@ async def sync_provider(
     *group_store*.  A stored group linked to the provider group (its
     ``source_id`` is the group's id and its ``source_provider`` this provider,
     or one *bindings* joins to it) has its description updated, and keeps its
-    roles and its stamp.  A stored group of the same name with no such link is
+    name, roles and stamp.  It is found by that link whatever its name, so a
+    group the directory renamed is updated, not created a second time.
+    Otherwise the group's name decides: a stored group of that name with no link is
     left untouched and counted as ``name_taken``: linking one is an admin's act.
     One carrying the id under any other provider is left untouched too, counted
     as ``provider_mismatch``, so a sync never moves a group between providers.
@@ -367,6 +369,11 @@ async def sync_provider(
 
     metrics = metrics if metrics is not None else SyncMetrics()
     own_stamps = linked_providers([provider_name], bindings or {})
+    # A directory rename changes the name a group is keyed on, never its id, so the link finds it.
+    linked_by_id: dict[str, list[str]] = {}
+    for stored in group_store.list():
+        if stored.source_id and stored.source_provider in own_stamps:
+            linked_by_id.setdefault(stored.source_id, []).append(stored.name)
     created = 0
     updated = 0
     skips: dict[SyncSkipReason, int] = dict.fromkeys(_SKIP_STATUS, 0)
@@ -376,6 +383,12 @@ async def sync_provider(
         if not group_info.id:
             metrics.skipped("no_id")
             skips["no_id"] += 1
+            continue
+        linked_names = linked_by_id.get(group_info.id)
+        if linked_names:
+            for linked_name in linked_names:
+                group_store.update(linked_name, description=group_info.description)
+            updated += 1
             continue
         # Determine a stable filename-safe group name.
         # Prefer email (most stable for Google/Entra), fall back to name, then id.
@@ -411,6 +424,7 @@ async def sync_provider(
                 metrics.skipped("stored_unloadable")
                 skips["stored_unloadable"] += 1
                 continue
+            linked_by_id[group_info.id] = [group_name]
             created += 1
             continue
 
