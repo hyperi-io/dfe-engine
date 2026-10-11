@@ -3,6 +3,21 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.28](https://github.com/hyperi-io/dfe-engine/compare/v1.22.27...v1.22.28) (2026-10-11)
+
+### Bug Fixes
+
+* assert the logged cause of redacted CH errors ([#819](https://github.com/hyperi-io/dfe-engine/issues/819)) ([09d7ac1](https://github.com/hyperi-io/dfe-engine/commit/09d7ac18906acceed7e05ba4681a51ad9a4aa0a7))
+* clear vulture and override warnings, correct component comments ([#817](https://github.com/hyperi-io/dfe-engine/issues/817)) ([c3d82b6](https://github.com/hyperi-io/dfe-engine/commit/c3d82b614fa1d2c501ca2ad15f5d69038ab6d124))
+* describe how an app opts into the pressure trigger ([#818](https://github.com/hyperi-io/dfe-engine/issues/818)) ([176c689](https://github.com/hyperi-io/dfe-engine/commit/176c6891b5a2c6e3d44a3524645a645f8544f61f))
+* make the observability doc match the telemetry templates ([#822](https://github.com/hyperi-io/dfe-engine/issues/822)) ([455af76](https://github.com/hyperi-io/dfe-engine/commit/455af765a7fda5f29d7c6b83164b10d8b006a34c))
+* move to scalo 2.31.8 ([#826](https://github.com/hyperi-io/dfe-engine/issues/826)) ([0f35c82](https://github.com/hyperi-io/dfe-engine/commit/0f35c82c9a8654a3555134dac6a6b9f01cccc20e))
+* name integration containers by node id ([#820](https://github.com/hyperi-io/dfe-engine/issues/820)) ([014aaa7](https://github.com/hyperi-io/dfe-engine/commit/014aaa7ad43d1dd9cdf393dc598b94eced379734))
+* name the telemetry template that sets the OTLP endpoint ([#821](https://github.com/hyperi-io/dfe-engine/issues/821)) ([91eea74](https://github.com/hyperi-io/dfe-engine/commit/91eea744b6b65e03cf57cfeb048ad50755dcfab0))
+* refuse a blob in an object directory the clone does not use ([#824](https://github.com/hyperi-io/dfe-engine/issues/824)) ([989bd73](https://github.com/hyperi-io/dfe-engine/commit/989bd736dcde6fb7fd34094a99e33d05654213f2))
+* refuse a return_to carrying a backslash or control character ([#825](https://github.com/hyperi-io/dfe-engine/issues/825)) ([0dd127b](https://github.com/hyperi-io/dfe-engine/commit/0dd127b1ed2b837bdd56efc2cd3263b7c1481a28))
+* send a refused browser sign-in back to the console ([#823](https://github.com/hyperi-io/dfe-engine/issues/823)) ([0c53509](https://github.com/hyperi-io/dfe-engine/commit/0c53509b62754f4b8b8ad63c7ac510446faf574c)), closes [hyperi-io/dfe-ui#488](https://github.com/hyperi-io/dfe-ui/issues/488)
+
 ## [1.22.27](https://github.com/hyperi-io/dfe-engine/compare/v1.22.26...v1.22.27) (2026-10-11)
 
 ### Bug Fixes
