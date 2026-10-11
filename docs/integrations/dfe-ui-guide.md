@@ -67,7 +67,8 @@ nothing.
 
 ## 5. How it deploys - and why it currently does NOT work
 
-There IS a `Dockerfile` (dfe-ui) and a Helm chart (`dfe-infra/helm/charts/dfe-ui`),
+There IS a `Dockerfile` (dfe-ui) and a Helm chart, published at
+`oci://ghcr.io/hyperi-io/charts/dfe-ui` and rendered from dfe-ui's deployment contract,
 but a deploy will not come up. The concrete blockers:
 
 1. **No health endpoints.** The chart's liveness/readiness probes hit
