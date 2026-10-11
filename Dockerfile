@@ -16,7 +16,7 @@
 # ends so glibc(runtime) >= glibc(builder); pinned so neither tag can float and
 # invert that relationship silently. Re-resolve digests on a bump; Renovate
 # maintains them.
-ARG BUILDER_IMAGE=ghcr.io/astral-sh/uv:python3.14-trixie-slim@sha256:63018e7b676ef735eee4da4f9c2e7b5f5e3851fa023745d78ce91d1a099a35fd
+ARG BUILDER_IMAGE=ghcr.io/astral-sh/uv:python3.14-trixie-slim@sha256:8e70ac2e85d09a5bb7ef09753b80671a60a71c8d24f195e4890d71e03865e36d
 FROM ${BUILDER_IMAGE} AS builder
 
 WORKDIR /app
@@ -65,7 +65,7 @@ RUN /app/.venv/bin/python -c \
 # `FROM <base>` by substring, so ARG-parameterising the runtime base needs a
 # scalo-py change (hyperi-io/scalo-py#4) -- tracked, not worked around by deleting
 # the drift test.
-FROM python:3.14-slim@sha256:caaf356f40667c496d405780745b9ac25771c189a51dfcc42430d531ea09f8a2 AS runtime
+FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS runtime
 
 # Static OCI labels (from contract)
 LABEL org.opencontainers.image.title="dfe-engine"
