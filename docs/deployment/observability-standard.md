@@ -14,8 +14,9 @@ A deployer changes the backend in ONE place, never per-component.
 
 This is the existing telemetry seam, made a hard standard:
 `telemetry.mode` = `hyperdx-direct` (default) | `receiver` | `external` |
-`prometheus`. Components read the destination from the `dfe-common.otelEndpoint`
-helper; nothing talks to HyperDX directly by default.
+`prometheus`. Every app's `OTEL_EXPORTER_OTLP_ENDPOINT` comes from dfe-infra's
+`telemetry.otlpEndpointTemplate`, which resolves `telemetry.mode`; a deployment's
+`otel.endpoint` overrides it. Nothing talks to HyperDX directly by default.
 
 ### Destination modes (ONE config switch)
 
@@ -47,7 +48,7 @@ component is unchanged.
 ## 1. Single destination (the seam)
 
 - `OTEL_EXPORTER_OTLP_ENDPOINT` for EVERY component = the in-cluster otel-collector
-  gateway (via `dfe-common.otelEndpoint`). Not HyperDX directly.
+  gateway (via dfe-infra's `telemetry.otlpEndpointTemplate`). Not HyperDX directly.
 - The gateway exports OTLP to HyperDX (+ Prometheus for metrics). Swapping the
   backend is one chart value, not N component changes.
 - Already built at the infra layer: the otel-collector daemonset (filelog +
@@ -92,9 +93,10 @@ The watermark still advances and the run still records as `completed`, so the sa
 
 ## 5. Defaults
 
-- ON by default in every chart via `dfe-common` helpers (`otelEndpoint`,
-  `prometheusAnnotations`). The whole stack is self-observing out of the box, into
-  one place.
+- ON by default for every app: dfe-infra's telemetry template sets the OTLP endpoint
+  and scalo-service adds the Prometheus scrape annotations
+  (`telemetry.prometheus.scrape`). The whole stack is self-observing out of the box,
+  into one place.
 
 ## 6. dfe-ui / dev-logger (the current gap)
 
