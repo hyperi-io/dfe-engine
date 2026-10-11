@@ -46,29 +46,29 @@ queries:
       window_seconds: 300
     timeout_seconds: 10
 
-  # Counters as a per-second rate for the instance as a whole. The fleet total is
-  # summed per timestamp first, then differenced across the window, because a pushed
-  # row names no pod until the app runs scalo-rs#331 (service.instance.id on the
-  # resource), so replicas cannot be told apart and differencing one pod's counter
-  # against another's would report the gap between them as traffic.
-  # The sum lines replicas up only where they export in the same second, because
-  # TimeUnix has one-second precision.
-  # A pod restart resets its counter, which under-reports until the window rolls
-  # past it, so this is an operational estimate rather than an exact count.
+  # Counters as a per-second rate for the instance as a whole, summed from each
+  # series' own rate so pods exporting in different seconds are never subtracted from
+  # one another. A series is keyed as latest_gauges keys it; replicas pushing without
+  # a pod id share one, and the alternation between their counters counts as traffic.
+  # A reading below the one before it is a restart and counts from zero, and a series
+  # with one reading in the window spans no time and adds nothing.
   counter_rates:
     database: otel
     sql: >
-      SELECT
-        MetricName,
-        (argMax(total, ts) - argMin(total, ts))
-          / greatest(1, dateDiff('second', min(ts), max(ts))) AS value
+      SELECT MetricName, sum(if(span_seconds > 0, increase / span_seconds, 0)) AS value
       FROM (
-        SELECT MetricName, TimeUnix AS ts, sum(Value) AS total
+        SELECT
+          MetricName,
+          arraySort(groupArray((TimeUnix, Value))) AS points,
+          arrayMap(point -> point.2, points) AS readings,
+          arraySum(arrayMap((diff, reading) -> if(diff < 0, reading, diff),
+                            arrayDifference(readings), readings)) AS increase,
+          dateDiff('second', min(TimeUnix), max(TimeUnix)) AS span_seconds
         FROM __DB__.otel_metrics_sum
         WHERE ServiceName = {service:String}
           AND MetricName IN {names:Array(String)}
           AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
-        GROUP BY MetricName, ts
+        GROUP BY MetricName, cityHash64(Attributes), ResourceAttributes['service.instance.id']
       )
       GROUP BY MetricName
     params: [service]
@@ -132,25 +132,36 @@ queries:
       bucket_seconds: 60
     timeout_seconds: 20
 
-  # Per-timestamp fleet totals of the loader's per-table counter, for the ONE
-  # table a source's records land in. `loader_messages_by_table_total` carries the
-  # table as an OTel attribute (dfe-loader src/metrics/mod.rs:217), and the loader
-  # is the only stage counting a record against a table.
-  # The fleet is summed per timestamp for the reason counter_rates gives, and the
-  # rate and the last increase are differenced by the caller rather than in SQL.
+  # The loader's per-table counter, one row per series, for the ONE table a
+  # source's records land in. `loader_messages_by_table_total` carries the table as
+  # an OTel attribute (dfe-loader src/metrics/mod.rs:217), and the loader is the
+  # only stage counting a record against a table.
+  # Each series is differenced as counter_rates does it, with ServiceName in the key
+  # because several loader instances can answer, and the caller sums the series.
+  # last_increase is the epoch second of the series' latest rise, 0 if it never rose.
   # ServiceName is bound to the deployed loader instances so the query still hits
   # the metrics tables' ORDER BY prefix (ServiceName, MetricName, ...).
   source_landing_counter:
     database: otel
     sql: >
-      SELECT TimeUnix AS ts, sum(Value) AS total
-      FROM __DB__.otel_metrics_sum
-      WHERE ServiceName IN {services:Array(String)}
-        AND MetricName = 'loader_messages_by_table_total'
-        AND Attributes['table'] = {table:String}
-        AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
-      GROUP BY ts
-      ORDER BY ts
+      SELECT increase, span_seconds, last_increase
+      FROM (
+        SELECT
+          arraySort(groupArray((TimeUnix, Value))) AS points,
+          arrayMap(point -> point.2, points) AS readings,
+          arrayMap((diff, reading) -> if(diff < 0, reading, diff),
+                   arrayDifference(readings), readings) AS increments,
+          arraySum(increments) AS increase,
+          dateDiff('second', min(TimeUnix), max(TimeUnix)) AS span_seconds,
+          arrayMax(arrayMap((point, step) -> if(step > 0, toUnixTimestamp(point.1), 0),
+                            points, increments)) AS last_increase
+        FROM __DB__.otel_metrics_sum
+        WHERE ServiceName IN {services:Array(String)}
+          AND MetricName = 'loader_messages_by_table_total'
+          AND Attributes['table'] = {table:String}
+          AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
+        GROUP BY ServiceName, cityHash64(Attributes), ResourceAttributes['service.instance.id']
+      )
     params: [services, table]
     binds:
       window_seconds: 300
