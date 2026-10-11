@@ -55,7 +55,7 @@ def _start_server(status: int = 201, response: dict | None = None) -> _Server:
     payload = response if response is not None else {"number": 7, "html_url": "http://forge/pr/7"}
 
     class Handler(BaseHTTPRequestHandler):
-        def log_message(self, *args):  # silence
+        def log_message(self, format: str, *args: object) -> None:
             return
 
         def do_POST(self):

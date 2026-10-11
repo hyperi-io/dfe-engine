@@ -221,8 +221,8 @@ class TestInstanceCountFollowsMultiplicity:
         assert allowed is True
 
     def test_a_per_config_overlay_carries_the_instance_in_its_component(self):
-        # dfe-common.fullname is {project}-{component} with no instance of its own,
-        # so the component is the only thing keeping two deployments' names apart.
+        # dfe-extras names its objects {project}-{component}, so the component must
+        # carry the instance or two deployments' objects collide.
         alpha = instances.instance_of(FETCHER, "alpha")
         beta = instances.instance_of(FETCHER, "beta")
         alpha_doc = instances.initial_overlay(alpha)

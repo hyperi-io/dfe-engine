@@ -143,7 +143,7 @@ class ChQueryClient(Protocol):
         """Run a SELECT and return a result carrying ``result_rows``."""
         ...
 
-    def command(self, cmd: str, *args: Any, **kwargs: Any) -> Any:
+    def command(self, cmd: str, *args: Any, **kwargs: Any) -> Any:  # noqa: V107
         """Run a statement as sent, with no FORMAT clause appended."""
         ...
 
