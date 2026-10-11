@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.24](https://github.com/hyperi-io/dfe-engine/compare/v1.22.23...v1.22.24) (2026-10-11)
+
+### Bug Fixes
+
+* admit an OIDC login only with a linked role ([#812](https://github.com/hyperi-io/dfe-engine/issues/812)) ([ac2b595](https://github.com/hyperi-io/dfe-engine/commit/ac2b5957b8538de5a0a4116c4a16b8cce72ba88b))
+
 ## [1.22.23](https://github.com/hyperi-io/dfe-engine/compare/v1.22.22...v1.22.23) (2026-10-11)
 
 ### Bug Fixes
