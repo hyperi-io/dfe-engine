@@ -63,7 +63,6 @@ class TestSeedDefaultInstances:
             doc = instances.read_overlay(crud, app)
             assert get_path(doc, "deploy.service") == service
             assert get_path(doc, "deploy.instance") == seed_instances.SEED_INSTANCE
-            assert get_path(doc, "otelServiceName") == app.telemetry_name
 
     def test_only_single_deployment_apps_are_seeded(self, crud):
         seeded = seed_instances.seed_default_instances(crud, _settings())

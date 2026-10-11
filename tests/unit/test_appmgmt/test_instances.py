@@ -35,8 +35,8 @@ def test_telemetry_name_distinguishes_instances_of_one_app():
 
 
 def test_a_stack_wide_app_reports_its_bare_name():
-    # Its chart hard-codes OTEL_SERVICE_NAME to the service and ignores
-    # otelServiceName, so a "-default" suffix names something nothing reports.
+    # The thin chart reports a stack-wide app by its chart name, so a "-default"
+    # suffix names something nothing reports.
     app = instances.instance_of("dfe-loader", "default")
 
     assert app.telemetry_name == "dfe-loader"
@@ -86,9 +86,8 @@ def test_initial_overlay_carries_what_the_appset_needs(crud):
     doc = instances.initial_overlay(app)
     # Without the deploy block the ApplicationSet produces no Application at all.
     assert doc["deploy"] == {"service": VRL, "instance": "edge"}
-    # The chart's own dial. `env` is a string there (the deployment environment)
-    # feeding labels and the namespace, so a map would render an invalid label.
-    assert doc["otelServiceName"] == "dfe-transform-vrl-edge"
+    # The thin chart's OTel dial, which tells this instance's telemetry from another's.
+    assert doc["otel"] == {"serviceName": "dfe-transform-vrl-edge"}
 
 
 def test_initial_overlay_applies_caller_values_as_dot_paths():

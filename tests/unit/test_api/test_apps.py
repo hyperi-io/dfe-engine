@@ -290,9 +290,9 @@ class TestLifecycle:
 
         doc = gc.get("helmvars", f"{VRL}-edge-values")
         assert doc["deploy"] == {"service": VRL, "instance": "edge"}
-        # The chart's own top-level dial. `env` there is a string (the deployment
-        # environment) feeding labels and the namespace, so it must stay untouched.
-        assert doc["otelServiceName"] == f"{VRL}-edge"
+        # The thin chart's OTel dial. `env` is the deployment environment string
+        # dfe-extras puts in its labels, so it must stay untouched.
+        assert doc["otel"] == {"serviceName": f"{VRL}-edge"}
         assert "env" not in doc
 
         listed = client.get("/api/v1/apps", headers=admin_headers)

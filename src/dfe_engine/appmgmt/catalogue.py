@@ -11,10 +11,8 @@ The per-app facts are DATA, read from the ``apps.yaml`` manifest whose source of
 truth is dfe-infra, so adding or changing an app is an edit there rather than a
 change here. Everything generic stays as module constants.
 
-The scaling dials are deliberately NOT per-app: every dfe-infra chart routes KEDA
-through the shared ``dfe-common.scaledobject`` helper, so one set of key paths covers
-all of them. The app-repo charts use different names for the same dials, but Argo
-deploys the dfe-infra family, so those names are the ones that reach a cluster.
+The scaling dials are deliberately NOT per-app: every app's thin chart is assembled on
+the scalo-service library chart, so one set of key paths covers all of them.
 """
 
 from dataclasses import dataclass, field
@@ -44,8 +42,8 @@ different thing from a listener on the usual number.
 MESH_INSTANCE = "instance"
 MESH_NAMESPACE = "mesh_namespace"
 
-# dfe-infra chart key paths. Uniform across every chart because they all call the
-# same KEDA library template - see helm/library/dfe-common/templates/_keda.tpl.
+# Thin-chart key paths, uniform because scalo-service's _keda.tpl, _replicas.tpl and
+# _resources.tpl read them for every app.
 REPLICA_COUNT_PATH = "replicaCount"
 CPU_REQUEST_PATH = "resources.requests.cpu"
 MEMORY_REQUEST_PATH = "resources.requests.memory"
@@ -75,17 +73,13 @@ DEPLOY_INSTANCE_PATH = "deploy.instance"
 # app carries its instance here to keep each deployment's objects distinct.
 FULLNAME_OVERRIDE_PATH = "fullnameOverride"
 
-# The same stem as the dfe-common charts read it, `{project}-{component}`, written
-# beside FULLNAME_OVERRIDE_PATH so either chart family renders the same names.
+# dfe-extras names its objects `{project}-{component}` beside the thin chart's, so the
+# component must equal FULLNAME_OVERRIDE_PATH less PROJECT_PREFIX.
 DFE_COMMON_COMPONENT_PATH = "component"
 
 # The OTel service.name, without which scalo reports the binary name and two
 # instances of one app are indistinguishable in the otel database.
 OTEL_SERVICE_NAME_PATH = "otel.serviceName"
-
-# The same name as the dfe-common charts read it; never under `env`, a string in
-# those charts whose value lands in every object's labels.
-DFE_COMMON_OTEL_SERVICE_NAME_PATH = "otelServiceName"
 
 
 class Multiplicity(StrEnum):

@@ -688,7 +688,6 @@ class TestResetKeepsTheDeployersPools:
         assert "keda" not in doc
         assert "resources" not in doc
         # The job wrote no OTel name, so the reset does not invent one.
-        assert "otelServiceName" not in doc
         assert "otel" not in doc
 
     def test_the_routing_is_recompiled_without_the_seeded_sources(self, k8s_client):
