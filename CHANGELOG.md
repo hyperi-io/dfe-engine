@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.22](https://github.com/hyperi-io/dfe-engine/compare/v1.22.21...v1.22.22) (2026-10-11)
+
+### Bug Fixes
+
+* refuse an unbootable admin password rotation ([#810](https://github.com/hyperi-io/dfe-engine/issues/810)) ([0d2e603](https://github.com/hyperi-io/dfe-engine/commit/0d2e60328d020c17a085c3abf79b9fd9ccb3c9c3))
+
 ## [1.22.21](https://github.com/hyperi-io/dfe-engine/compare/v1.22.20...v1.22.21) (2026-10-11)
 
 ### Bug Fixes
