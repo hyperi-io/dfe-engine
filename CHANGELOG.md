@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.27](https://github.com/hyperi-io/dfe-engine/compare/v1.22.26...v1.22.27) (2026-10-11)
+
+### Bug Fixes
+
+* stop writing otelServiceName to app overlays ([#816](https://github.com/hyperi-io/dfe-engine/issues/816)) ([78156aa](https://github.com/hyperi-io/dfe-engine/commit/78156aaab36682c45eeff091d188b68b8d755f12))
+
 ## [1.22.26](https://github.com/hyperi-io/dfe-engine/compare/v1.22.25...v1.22.26) (2026-10-11)
 
 ### Bug Fixes
