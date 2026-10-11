@@ -31,7 +31,7 @@ or disabled providers return 404.
 
 import time
 from datetime import timedelta
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, NoReturn
 from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -91,14 +91,22 @@ def validate_return_to(return_to: str, request_origin: str, trusted_origins: lis
     A relative path must start with a single ``/`` (``//host`` is scheme-relative
     and would leave the origin). An absolute URL must be http(s) on the API's own
     origin or on one of the configured CORS origins, which already name the
-    browser clients allowed to talk to this API.
+    browser clients allowed to talk to this API. A backslash, tab, CR or LF is
+    refused anywhere, because a browser reads ``\\`` as ``/`` and drops the others,
+    which turns ``/\\host`` or ``/<tab>/host`` into ``//host``.
     """
+    if any(char in return_to for char in "\\\t\r\n"):
+        _refuse_return_to()
     if return_to.startswith("/") and not return_to.startswith("//"):
         return return_to
     parts = urlsplit(return_to)
     allowed = {request_origin.lower(), *(o.lower() for o in trusted_origins)}
     if parts.scheme in ("http", "https") and parts.netloc and _origin(return_to) in allowed:
         return return_to
+    _refuse_return_to()
+
+
+def _refuse_return_to() -> NoReturn:
     raise HTTPException(
         status_code=400,
         detail={

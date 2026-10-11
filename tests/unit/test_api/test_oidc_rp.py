@@ -427,6 +427,11 @@ def test_validate_return_to_rejects_other_origins():
     origin = "https://dfe.example"
     for bad in (
         "//evil.example/steal",
+        "/\\evil.example/steal",
+        "/\t/evil.example/steal",
+        "/\n/evil.example/steal",
+        "/login\\..\\..\\evil",
+        "https://dfe.example\\@evil.example/",
         "https://evil.example/steal",
         "javascript:alert(1)",
         "http://localhost:3001/login/oidc",
