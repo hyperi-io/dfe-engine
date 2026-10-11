@@ -32,6 +32,9 @@ T = TypeVar("T", bound=BaseModel)
 type OnInvalid = Callable[[dict, ValidationError], None]
 """Called with a stored document no model can be made from, and the error."""
 
+type Prepare = Callable[[dict], dict]
+"""Called with each stored document before validation; returns the document to validate."""
+
 
 class DocuStore:
     """A sync connection to one document-store database, shared across consumers.
@@ -57,13 +60,17 @@ class DocuStore:
         *,
         key: str,
         on_invalid: OnInvalid | None = None,
+        prepare: Prepare | None = None,
     ) -> DocumentCollection[T]:
         """A typed pydantic collection on ``name``, keyed on the unique field ``key``.
 
         ``on_invalid`` opts in to skipping a stored document no ``model`` can be made
-        from; without it such a document raises ``ValidationError``.
+        from; without it such a document raises ``ValidationError``. ``prepare``
+        rewrites each stored document before it is validated.
         """
-        return DocumentCollection(self._db[name], model, key=key, on_invalid=on_invalid)
+        return DocumentCollection(
+            self._db[name], model, key=key, on_invalid=on_invalid, prepare=prepare
+        )
 
     def ping(self) -> None:
         """Round-trip the server; raises on failure. Use for a readiness check."""
@@ -88,7 +95,8 @@ class DocumentCollection(Generic[T]):
 
     A document no ``model`` can be made from raises ``ValidationError`` on read,
     unless ``on_invalid`` is given: then it is called with the document and the
-    error, and the document reads as absent.
+    error, and the document reads as absent. ``prepare``, when given, rewrites each
+    document before it is validated.
     """
 
     def __init__(
@@ -98,11 +106,13 @@ class DocumentCollection(Generic[T]):
         *,
         key: str,
         on_invalid: OnInvalid | None = None,
+        prepare: Prepare | None = None,
     ) -> None:
         self._c = collection
         self._model = model
         self._key = key
         self._on_invalid = on_invalid
+        self._prepare = prepare
         # Idempotent; enforces one document per key value.
         self._c.create_index([(key, ASCENDING)], unique=True)
 
@@ -142,6 +152,8 @@ class DocumentCollection(Generic[T]):
         if doc is None:
             return None
         doc.pop("_id", None)
+        if self._prepare is not None:
+            doc = self._prepare(doc)
         if self._on_invalid is None:
             return self._model.model_validate(doc)
         try:

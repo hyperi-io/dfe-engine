@@ -30,7 +30,7 @@ from dfe_engine.auth.audit import (
     audit_jit_team_assigned,
 )
 from dfe_engine.auth.groups import Group, GroupStore
-from dfe_engine.auth.membership import linked_groups, linked_providers
+from dfe_engine.auth.membership import groups_held_by, linked_groups, linked_providers
 from dfe_engine.auth.models import AuthenticationError, Scope, ScopedGrant, platform_grants
 from dfe_engine.auth.protected_accounts import resolve_floor
 from dfe_engine.http_errors import describe_http_error
@@ -209,7 +209,7 @@ class JitProvisioner:
                 removed = [g for g in existing.groups if g not in oidc_groups]
                 updates["groups"] = oidc_groups
                 audit_jit_groups_updated(user_id, added, removed)
-            if not self._holds_a_role(key, oidc_groups, source_provider):
+            if not self._holds_a_role(key, oidc_groups, existing.source_provider):
                 if updates:
                     self._accounts.update(key, groups=oidc_groups)
                 # A token issued before the refusal must neither read nor refresh a session.
@@ -385,20 +385,20 @@ class JitProvisioner:
         audit_jit_login_refused(user_id, source_provider, reason)
         raise JitAccountUnavailableError(user_id, reason)
 
-    def _holds_a_role(self, username: str, oidc_groups: list[str], source_provider: str) -> bool:
-        """Whether the account stored under *username* would hold a role after this login.
+    def _holds_a_role(self, username: str, oidc_groups: list[str], stamp: str) -> bool:
+        """Whether the account *username*, stamped *stamp*, holds a role after this login.
 
         An account has no role of its own: its session's roles come from the groups
-        ``membership.groups_held`` names, which are the groups the IdP's identifiers
-        are linked to for *source_provider* and the groups whose members list the
-        account. A linked group carrying no role, as the group sync creates them,
+        ``membership.groups_held`` names, through the providers its own stamp
+        answers for. A SCIM account adopted through a binding is stamped ``scim``,
+        not the provider signing in, so the check takes the stamp the account
+        carries. A linked group carrying no role, as the group sync creates them,
         grants nothing, so it admits nothing either.
         """
-        listed = self._groups.list()
-        providers = linked_providers([source_provider], self._bindings)
-        linked = linked_groups(oidc_groups, listed, providers)
-        assigned = [group for group in listed if username in group.members]
-        return any(group.roles for group in [*linked, *assigned])
+        held = groups_held_by(
+            username, oidc_groups, stamp, self._groups.list(), bindings=self._bindings
+        )
+        return any(group.roles for group in held)
 
     @staticmethod
     def _refuse_without_role(user_id: str, source_provider: str) -> NoReturn:

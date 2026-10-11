@@ -18,8 +18,6 @@ log events are emitted and from where, the same exception to the no-mocks
 policy that tests/unit/test_auth/test_audit.py already takes.
 """
 
-from __future__ import annotations
-
 from unittest.mock import patch
 
 import pytest
@@ -92,7 +90,7 @@ class TestCredentialExchangeWritesTheEvent:
 
     def test_oidc_callback_writes_one_event(self, client: TestClient, app):
         app.state.oidc_rp = _CallbackRp()
-        app.state.group_store.update("dfe-admins", source_id="dfe-admins")
+        app.state.group_store.update("dfe-admins", source_provider="stub", source_id="dfe-admins")
 
         with patch(AUDIT_LOGGER) as mock_logger:
             resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)
@@ -132,7 +130,7 @@ class TestTokenValidationWritesNothing:
 
     def test_oidc_header_request_writes_no_event(self, client: TestClient, app):
         """Envoy authenticated the user upstream - the engine mints nothing here."""
-        app.state.group_store.update("dfe-admins", source_id="dfe-admins")
+        app.state.group_store.update("dfe-admins", source_provider="oidc", source_id="dfe-admins")
         with patch(AUDIT_LOGGER) as mock_logger:
             resp = client.get(
                 "/api/v1/auth/me",

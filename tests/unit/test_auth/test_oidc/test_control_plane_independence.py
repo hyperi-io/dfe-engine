@@ -16,8 +16,6 @@ If dfe-engine is down, Envoy Gateway keeps doing OIDC (static K8s CRD),
 and existing group YAML files on disk still resolve roles correctly.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 
 import pytest
@@ -198,7 +196,7 @@ class TestAuthWithoutProviderRegistry:
         assert oidc_registry.list() == []
 
         # dfe-admins group is seeded by bootstrap_auth; linked to the name the IdP sends
-        app.state.group_store.update("dfe-admins", source_id="dfe-admins")
+        app.state.group_store.update("dfe-admins", source_provider="oidc", source_id="dfe-admins")
         response = client.get(
             "/api/v1/auth/me",
             headers={
@@ -465,7 +463,7 @@ class TestAuthFlowWithNoExternalDependencies:
         it to the identifier the IdP sends, that identifier in X-Oidc-Groups
         must resolve to admin role and grant access.
         """
-        app.state.group_store.update("dfe-admins", source_id="dfe-admins")
+        app.state.group_store.update("dfe-admins", source_provider="oidc", source_id="dfe-admins")
         # Step 1: authenticate via OIDC headers (simulating Envoy forwarding)
         me_response = client.get(
             "/api/v1/auth/me",

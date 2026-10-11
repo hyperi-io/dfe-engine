@@ -2,8 +2,8 @@
 # dfe-ui: how it works, how it deploys, how it talks to the engine
 
 Written for someone who is NOT a front-end developer. It explains the moving
-parts in plain terms, what is currently broken for deployment, and where we are
-taking it - especially under the Governed Ops model.
+parts in plain terms, how it deploys, and where we are taking it - especially
+under the Governed Ops model.
 
 ## 1. The one-paragraph mental model
 
@@ -65,25 +65,29 @@ postMessage handshake. The engine does NOT tell the UI where HyperDX is - the
 deployment does. `NEXT_PUBLIC_HYPERDX_URL` is read by nothing and setting it does
 nothing.
 
-## 5. How it deploys - and why it currently does NOT work
+## 5. How it deploys
 
-There IS a `Dockerfile` (dfe-ui) and a Helm chart, published at
-`oci://ghcr.io/hyperi-io/charts/dfe-ui` and rendered from dfe-ui's deployment contract,
-but a deploy will not come up. The concrete blockers:
+Every dfe-ui release publishes the image `ghcr.io/hyperi-io/dfe-ui` and the Helm chart
+`oci://ghcr.io/hyperi-io/charts/dfe-ui` at the same version (1.7.12 as of 2026-10-11).
+hyperi-ci renders the chart from dfe-ui's committed deployment contract,
+`deploy/contract.json`.
 
-1. **No health endpoints.** The chart's liveness/readiness probes hit
-   `/livez` and `/readyz`, which the app does not implement -> the pod
-   never becomes Ready. (Fix: add two tiny Next.js route handlers.)
-2. **NEXTAUTH_SECRET not wired.** The chart names a secret but the Deployment never
-   mounts it -> JWT signing fails, logins break. (Fix: inject it as env from the
-   Secret.)
-3. **Image not published yet** to `ghcr.io/hyperi-io/dfe-ui` (CI publishes on
-   release; not live yet).
-4. **The big one - config is baked in at build time.** Anything named
-   `NEXT_PUBLIC_*` (the API URL, the HyperDX URL) is **frozen into the JavaScript
-   when the image is built**. That means one image only works for one environment,
-   and setting those env vars on the running pod does nothing. This breaks
-   "build once, deploy anywhere". (Fix: see section 7.)
+- **Health.** `src/core/health.ts` serves scalo's probe contract on the app's one
+  port, 3000: `/livez` answers 200 while the process runs, and `/readyz` answers 200
+  until the pod is told to drain. Neither checks the engine, so an engine outage does
+  not pull the UI from its Service. The startup probe reuses `/livez`. Both paths
+  bypass the auth middleware (`src/proxy.ts`), so a probe never reads a login redirect
+  as success.
+- **NEXTAUTH_SECRET.** The contract declares it as a required secret (group
+  `nextauth`, key `secret`), so the chart injects it into the pod's environment.
+- **Engine address.** The image is built with `NEXT_PUBLIC_API_URL` empty, so the
+  browser calls the engine on its own origin, and the server side reads
+  `INTERNAL_API_URL` at request time. One image serves every environment.
+- **HyperDX address.** `HYPERDX_URL`, or `HYPERDX_PORT` on the UI's own host, is read
+  at request time (section 4).
+
+The `NEXT_PUBLIC_*` values left are the session refresh timings and a display suffix.
+Next.js still inlines those at build, so changing one needs a rebuild.
 
 ## 6. The config problem, explained simply
 
@@ -91,7 +95,8 @@ A Next.js quirk: public config (`NEXT_PUBLIC_*`) is **replaced with literal text
 inside the compiled JavaScript at build time**. So you cannot change the API URL or
 HyperDX URL of an already-built image - they are no longer variables, just baked-in
 strings. Building a different image per environment is the anti-pattern everyone
-warns against. The fix is to make the UI read its config **at runtime** instead.
+warns against, which is why dfe-ui reads its engine and HyperDX addresses at runtime
+(section 5).
 
 ## 7. Where we take it (the fixes + improvements)
 
@@ -99,22 +104,18 @@ Two tracks. Track A makes it deploy; Track B makes it better under Governed Ops.
 Detailed tasks live in `docs/superpowers/plans/2026-06-30-governed-ops-api.md`
 (Phase 4).
 
-### Track A - make it deploy (small, mechanical)
+### Track A - make it deploy
 
-- Add `/livez` + `/readyz` route handlers.
-- Mount `NEXTAUTH_SECRET` from the K8s Secret; add image-pull secret.
-- Publish the image to ghcr.
-- Switch off build-time `NEXT_PUBLIC_*` for the API/HyperDX URLs (next item).
+Landed: health routes, `NEXTAUTH_SECRET` from the Secret, the published image and
+chart, and runtime engine and HyperDX addresses (section 5).
 
-### Track B - runtime config via a Governed Ops bootstrap endpoint (the keystone)
+### Track B - runtime config from the engine
 
-Add an engine endpoint `GET /api/v1/config/client` that returns, at runtime, what
-the UI needs: the API base (same-origin), the HyperDX URL + whether it is enabled,
-feature flags, and auth settings. The UI fetches this on startup instead of baking
-it in. Result: **one image, every environment**, and - crucially - that client
-config is itself **gitops-driven** (it comes from the engine reading YAML in git),
-so it fits Governed Ops exactly. This single change fixes the deploy blocker AND
-the multi-env story.
+The engine serves `GET /api/v1/config/client`: the API base (same origin), the
+HyperDX URL and whether it is enabled, feature flags and the auth mode. dfe-ui shows
+it on the System Management page but still takes its HyperDX address from its own
+environment (section 4). Reading that address from the engine leaves one place to
+set it.
 
 ### Track B - the UI becomes a Governed Ops window
 

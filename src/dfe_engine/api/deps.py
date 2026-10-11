@@ -36,7 +36,7 @@ from dfe_engine.auth.jit import (
     JitNoRoleError,
     JitSubjectUnusableError,
 )
-from dfe_engine.auth.membership import groups_held, linked_groups, linked_providers
+from dfe_engine.auth.membership import groups_held
 from dfe_engine.auth.models import platform_caller
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.auth.sessions import session_ended
@@ -586,21 +586,12 @@ async def get_current_user(request: Request) -> AuthContext:
     # is off we ignore them (fail closed) and fall through to API-key / JWT.
     oidc_subject = request.headers.get("X-Oidc-Subject")
     if oidc_subject and settings.auth.trust_proxy_auth_headers:
-        group_store: GroupStore = request.app.state.group_store
         oidc_email = request.headers.get("X-Oidc-Email") or None
         raw_groups = request.headers.get("X-Oidc-Groups", "")
         asserted = [g.strip() for g in raw_groups.split(",") if g.strip()]
         if _proxy_provider_is_manual(request=request, settings=settings):
             # A manual provider's membership is managed in the engine, so the gateway's groups grant nothing.
             asserted = []
-        providers = linked_providers(
-            [settings.auth.proxy_provider], settings.auth.source_provider_bindings
-        )
-        # Names of the groups the assertion is linked to; a name the IdP sends links nothing.
-        groups = sorted(g.name for g in linked_groups(asserted, group_store.list(), providers))
-        resolution = _resolve_group_grants(groups, group_store)
-        roles, org_ids = resolution.roles, resolution.org_ids
-        logger.debug("OIDC auth", user_id=oidc_subject, groups=groups, roles=roles)
 
         # JIT provisioning -- create shadow account on first OIDC login
         jit = getattr(request.app.state, "jit_provisioner", None)
@@ -645,13 +636,17 @@ async def get_current_user(request: Request) -> AuthContext:
                 ) from exc
 
         require_local_account_enabled(request, oidc_subject)
+        # The token path's resolution, so a member an operator added by hand holds the group here too.
+        live = resolve_live_grants_for_user(request, oidc_subject)
+        live_groups = resolve_live_groups_for_user(request, oidc_subject)
+        logger.debug("OIDC auth", user_id=oidc_subject, groups=live_groups, roles=live.roles)
         return AuthContext(
             user_id=oidc_subject,
             email=oidc_email,
-            roles=roles,
-            grants=resolution.grants,
-            groups=groups,
-            org_ids=org_ids,
+            roles=live.roles,
+            grants=live.grants,
+            groups=live_groups,
+            org_ids=live.org_ids,
             request_id=request_id,
             client_ip=client_ip,
             user_agent=user_agent,

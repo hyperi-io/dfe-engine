@@ -8,8 +8,6 @@
 
 """E2E tests for JIT provisioning — shadow account creation on OIDC login."""
 
-from __future__ import annotations
-
 import secrets
 
 import pytest
@@ -61,9 +59,14 @@ def jit_settings(tmp_path):
 def jit_client(jit_settings):
     app = create_app(settings=jit_settings)
     with TestClient(app, raise_server_exceptions=False) as client:
-        # A group with org_ids, linked to the name the proxy asserts for it
+        # A group with org_ids, linked for the gateway's provider to the name it asserts
         group_store = app.state.group_store
-        group_store.create("test-org-viewers", roles=["org_viewer"], source_id="test-org-viewers")
+        group_store.create(
+            "test-org-viewers",
+            roles=["org_viewer"],
+            source_provider=jit_settings.auth.proxy_provider,
+            source_id="test-org-viewers",
+        )
         group_store.update("test-org-viewers", org_ids=["test-org"])
         yield client
     _registries.clear()

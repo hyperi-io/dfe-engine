@@ -52,7 +52,7 @@ def _attributes(header: str) -> set[str]:
 @pytest.fixture
 def stub_rp(app) -> None:
     app.state.oidc_rp = _CallbackRp()
-    app.state.group_store.update("dfe-admins", source_id="dfe-admins")
+    app.state.group_store.update("dfe-admins", source_provider="stub", source_id="dfe-admins")
 
 
 @pytest.fixture

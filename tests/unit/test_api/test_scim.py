@@ -17,8 +17,6 @@ Covers:
   - discovery endpoints (ServiceProviderConfig / ResourceTypes / Schemas)
 """
 
-from __future__ import annotations
-
 import secrets
 
 import pytest
@@ -78,7 +76,9 @@ class TestMapperRoundTrips:
         assert fields["enabled"] is True
 
     def test_group_to_scim_to_fields(self):
-        group = Group(name="engineers", members=["alice", "bob"], source_id="g-7")
+        group = Group(
+            name="engineers", members=["alice", "bob"], source_provider="scim", source_id="g-7"
+        )
         scim_group = group_to_scim_group(group)
         assert scim_group.display_name == "engineers"
         assert scim_group.id == "engineers"

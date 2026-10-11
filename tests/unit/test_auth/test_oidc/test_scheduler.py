@@ -275,3 +275,26 @@ class TestOidcSyncScheduler:
             outcomes = await scheduler.run_once(now=datetime.now(UTC))
 
             assert outcomes == {"google": "user_token"}
+
+        async def test_a_scim_group_bound_to_the_provider_is_synced(
+            self,
+            group_store: GroupStore,
+            monkeypatch: pytest.MonkeyPatch,
+            registry: OIDCProviderRegistry,
+            tmp_path: Path,
+        ):
+            groups = [{"description": "From the directory", "id": "g-ops", "name": "operators"}]
+            _write_directory(groups=groups, monkeypatch=monkeypatch, tmp_path=tmp_path)
+            group_store.create(
+                "operators", roles=["data_analyst"], source_provider="scim", source_id="g-ops"
+            )
+            registry.create(name="mock-dir", provider=_mock_directory_provider())
+            scheduler = make_oidc_sync_scheduler(
+                bindings={"scim": "mock-dir"}, group_store=group_store, registry=registry
+            )
+
+            outcomes = await scheduler.run_once(now=NOW)
+
+            stored = group_store.get("operators")
+            assert outcomes == {"mock-dir": "ok"}
+            assert (stored.source_provider, stored.description) == ("scim", "From the directory")

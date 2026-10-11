@@ -305,6 +305,31 @@ class TestBreakGlassHash:
         # Break-glass keeps its own first-login rules: it is never issued a forced change.
         assert store.get(breakglass.USERNAME).password_change_required is False
 
+    def test_an_admin_group_linked_by_id_alone_still_boots_both_recovery_credentials(
+        self, tmp_path: Path, crud
+    ):
+        """Earlier docs told operators to link dfe-admins this way, so the boot must survive it."""
+        groups_dir = tmp_path / "auth" / "groups"
+        groups_dir.mkdir(parents=True)
+        (groups_dir / "dfe-admins.yaml").write_text(
+            "roles: [admin]\nmembers: [admin, breakglass]\nsource_id: Admins\n", encoding="utf-8"
+        )
+        (groups_dir / "dfe-viewers.yaml").write_text(
+            "roles: [data_viewer]\nmembers: []\n", encoding="utf-8"
+        )
+
+        store, groups, *_ = bootstrap_auth(
+            tmp_path / "auth",
+            default_admin_password=MINTED_ADMIN,
+            gitcrud=crud,
+            breakglass_password=MINTED_BREAKGLASS,
+        )
+
+        assert groups.resolve_roles_for_member("admin") == ["admin"]
+        assert groups.resolve_roles_for_member(breakglass.USERNAME) == ["admin"]
+        assert "dfe-admins" in store.get("admin").groups
+        assert groups.get("dfe-admins").source_id == ""
+
     def test_break_glass_email_is_backfilled_when_missing(self, tmp_path: Path, crud):
         store, *_ = bootstrap_auth(
             tmp_path / "auth",
@@ -578,7 +603,7 @@ class TestAnotherAdminExists:
     ):
         """An IdP-owned account holds the groups its assertion is linked to, as a session does."""
         store, groups = self._stores(tmp_path, crud)
-        groups.update("dfe-admins", source_id="dfe-admins")
+        groups.update("dfe-admins", source_provider="entra", source_id="dfe-admins")
         store.create("jane-corp-com", "", groups=["dfe-admins"])
         store.update("jane-corp-com", external=True, source_provider="entra")
 
@@ -590,7 +615,7 @@ class TestAnotherAdminExists:
         """Entra asserts object GUIDs, which the sync records as the group's source_id."""
         store, groups = self._stores(tmp_path, crud)
         guid = "7b1d0f3e-0000-4000-8000-000000000002"
-        groups.update("dfe-admins", source_id=guid)
+        groups.update("dfe-admins", source_provider="entra", source_id=guid)
         store.create("jane-corp-com", "", groups=[guid])
         store.update("jane-corp-com", external=True, source_provider="entra")
 
@@ -602,7 +627,7 @@ class TestAnotherAdminExists:
         """Login takes the group the asserted id is linked to, so the session holds admin."""
         store, groups = self._stores(tmp_path, crud)
         groups.create("entra-analysts", roles=["data_analyst"])
-        groups.update("dfe-admins", source_id="entra-analysts")
+        groups.update("dfe-admins", source_provider="entra", source_id="entra-analysts")
         store.create("jane-corp-com", "", groups=["entra-analysts"])
         store.update("jane-corp-com", external=True, source_provider="entra")
 

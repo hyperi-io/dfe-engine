@@ -256,7 +256,9 @@ class TestAProxiedIdentity:
         store = client.app.state.account_store
         admin_before = store.get(name)
         # A login holding no role is refused, so the asserted group links one here.
-        client.app.state.group_store.create("idp-viewers", ["data_viewer"], source_id="dfe-admins")
+        client.app.state.group_store.create(
+            "idp-viewers", ["data_viewer"], source_provider="oidc", source_id="dfe-admins"
+        )
 
         own = client.get("/api/v1/auth/accounts/me", headers=_proxied(subject))
 
