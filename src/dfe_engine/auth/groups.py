@@ -36,6 +36,15 @@ SkipReason = Literal["unreadable", "not_a_mapping", "invalid"]
 - ``invalid``: no Group can be made from the fields, a bad scope for one.
 """
 
+GROUPS_UNLINKED = "auth_groups_unlinked_total"
+
+UnlinkReason = Literal["no_provider"]
+"""Why a stored group was loaded with its provider link dropped.
+
+- ``no_provider``: it carries a ``source_id`` and no ``source_provider``, so the id
+  would answer every provider that asserts it.
+"""
+
 
 class GroupExistsError(ValueError):
     """A group is already stored under the name, whether or not it loads."""
@@ -58,6 +67,11 @@ class GroupMetrics:
             "Stored groups skipped as not a valid group, counted each time one starts failing",
             ["reason"],
         )
+        self._unlinked = manager.counter(
+            GROUPS_UNLINKED,
+            "Stored groups loaded with their provider link dropped, counted each time one starts",
+            ["reason"],
+        )
 
     def skipped(self, reason: SkipReason) -> None:
         """Record a stored group that has started failing to load."""
@@ -65,13 +79,42 @@ class GroupMetrics:
             return
         self._skipped.labels(reason=reason).inc()
 
+    def unlinked(self, reason: UnlinkReason) -> None:
+        """Record a stored group that has started loading with its provider link dropped."""
+        if self._manager is None:
+            return
+        self._unlinked.labels(reason=reason).inc()
+
 
 class _Skips:
-    """The stored groups skipped as not valid, each reported once until it loads again."""
+    """The stored groups skipped or loaded unlinked, each reported once until it loads clean."""
 
     def __init__(self, metrics: GroupMetrics | None) -> None:
         self._names: set[str] = set()
+        self._unlinked: set[str] = set()
         self._metrics = metrics if metrics is not None else GroupMetrics()
+
+    def unlink(self, document: dict, name: str, **where: str) -> dict:
+        """*document* with a ``source_id`` that names no ``source_provider`` dropped, reported once.
+
+        Earlier docs had operators link a group by ``source_id`` alone. Refusing the
+        whole group would take its members' roles with it, the recovery credentials'
+        among them, so it loads unlinked: no login reaches it through that id.
+        """
+        if not document.get("source_id") or document.get("source_provider"):
+            self._unlinked.discard(name)
+            return document
+        document.pop("source_id")
+        if name not in self._unlinked:
+            self._unlinked.add(name)
+            self._metrics.unlinked("no_provider")
+            logger.warning(
+                "stored group loaded unlinked: its source_id names no source_provider",
+                group=name,
+                reason="no_provider",
+                **where,
+            )
+        return document
 
     def skip(self, name: str, reason: SkipReason, error: str, **where: str) -> None:
         """Warn about and count the group stored as *name*, unless it is already skipped."""
@@ -223,7 +266,8 @@ class GroupStore:
         """The group in *path*, or None when there is none or it is not a valid group.
 
         An invalid file is skipped, not raised, so it cannot take down role resolution
-        for every session. Its members lose that group's roles until it is fixed.
+        for every session. Its members lose that group's roles until it is fixed. A
+        file whose ``source_id`` names no provider loads unlinked (:meth:`_Skips.unlink`).
         """
         try:
             data = yaml_load(path)
@@ -241,6 +285,7 @@ class GroupStore:
             return None
         # Name is derived from filename, not stored in the file
         data["name"] = path.stem
+        data = self._skips.unlink(data, path.stem, path=str(path))
         try:
             group = Group.model_validate(data)
         except ValidationError as exc:
@@ -504,13 +549,24 @@ class DocuStoreGroupStore:
     ) -> None:
         self._collection = collection
         self._skips = _Skips(metrics)
-        self._c = store.typed(collection, Group, key="name", on_invalid=self._skip_invalid)
+        self._c = store.typed(
+            collection,
+            Group,
+            key="name",
+            on_invalid=self._skip_invalid,
+            prepare=self._unlink_unscoped,
+        )
         self.protected = resolve_floor(admin_name)
 
     def _skip_invalid(self, document: dict, exc: ValidationError) -> None:
         """Leave out a stored document no Group can be made from, as the YAML store does."""
         name = str(document.get("name", ""))
         self._skips.skip(name, "invalid", str(exc), collection=self._collection)
+
+    def _unlink_unscoped(self, document: dict) -> dict:
+        """Load a document whose ``source_id`` names no provider unlinked, as the YAML store does."""
+        name = str(document.get("name", ""))
+        return self._skips.unlink(document, name, collection=self._collection)
 
     def create(
         self,

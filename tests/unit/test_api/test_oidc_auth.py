@@ -176,7 +176,7 @@ class TestOidcAuthentication:
     def test_a_group_file_linked_by_its_id_alone_answers_no_provider(
         self, client: TestClient, app, provider
     ):
-        """A link that names no provider would answer every provider, so the file does not load."""
+        """A link that names no provider would answer every provider, so the file loads unlinked."""
         stored = app.state.group_store._dir / "id-only-admins.yaml"
         stored.write_text("roles: [admin]\nsource_id: Admins\n", encoding="utf-8")
         app.state.settings.auth.proxy_provider = provider

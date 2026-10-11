@@ -6,6 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -24,6 +25,19 @@ from dfe_engine.auth.groups import (
     GroupMetrics,
     GroupStore,
 )
+from dfe_engine.auth.membership import linked_groups
+
+UNLINKED_EVENT = "stored group loaded unlinked: its source_id names no source_provider"
+
+
+def _unlinked(manager) -> dict[str, float]:
+    """The group stores' unlinked-load counter, by reason, as /metrics serves it."""
+    return {
+        s.labels["reason"]: s.value
+        for f in text_string_to_metric_families(manager.metrics_text)
+        for s in f.samples
+        if s.name == "auth_groups_unlinked_total"
+    }
 
 
 def test_the_stores_annotations_can_be_read():
@@ -555,17 +569,32 @@ class TestGroupSourceProvider:
 
         assert store.get(name) == before
 
-    def test_a_stored_file_linked_by_id_alone_is_skipped(self, tmp_path):
+    def test_a_stored_file_linked_by_id_alone_loads_unlinked(self, tmp_path, audit_events):
+        """Earlier docs told operators to write this file, so its members keep the group's roles."""
         groups_dir = tmp_path / "groups"
         groups_dir.mkdir()
-        (groups_dir / "admins.yaml").write_text(
-            "roles: [admin]\nmembers: [alice]\nsource_id: Admins\n", encoding="utf-8"
+        (groups_dir / "dfe-admins.yaml").write_text(
+            "roles: [admin]\nmembers: [admin, breakglass]\nsource_id: Admins\n", encoding="utf-8"
         )
-        store = GroupStore(groups_dir)
+        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+        store = GroupStore(groups_dir, metrics=GroupMetrics(manager))
 
-        assert store.get("admins") is None
-        assert store.list() == []
-        assert store.resolve_roles_for_member("alice") == []
+        group = store.get("dfe-admins")
+        listed = store.list()
+
+        assert group is not None
+        assert (group.roles, group.members) == (["admin"], ["admin", "breakglass"])
+        assert (group.source_provider, group.source_id) == ("", "")
+        assert [g.name for g in listed] == ["dfe-admins"]
+        assert store.resolve_roles_for_member("breakglass") == ["admin"]
+        assert linked_groups(["Admins"], listed, {"oidc", "entra"}) == []
+        assert "Admins" not in store.by_source_id()
+        warned = [e for e in audit_events if e["event"] == UNLINKED_EVENT]
+        assert [(e["group"], e["reason"]) for e in warned] == [("dfe-admins", "no_provider")]
+        assert "breakglass" not in json.dumps(warned, default=str)
+        assert _unlinked(manager) == {"no_provider": 1.0}
+        store.add_member("dfe-admins", "alice")
+        assert "alice" in store.get("dfe-admins").members
 
     def test_existing_groups_without_source_provider_still_load(self, tmp_path):
         """Old YAML files without source_provider/source_id load with defaults."""

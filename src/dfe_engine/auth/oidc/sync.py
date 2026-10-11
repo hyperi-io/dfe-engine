@@ -430,6 +430,7 @@ async def sync_provider(
             logger.warning(
                 "OIDC group sync skipped a group linked to another provider",
                 provider=provider_name,
+                group=group_name,
                 linked_provider=existing.source_provider,
                 reason="provider_mismatch",
             )

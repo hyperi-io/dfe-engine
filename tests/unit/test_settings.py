@@ -1016,6 +1016,28 @@ class TestProductionPostureCannotShipWithAuthOff:
         assert is_dev_posture(dev.env)
 
 
+class TestSourceProviderBindings:
+    """A binding joins a stamp to ONE provider, so a chain would join names nothing declared."""
+
+    @pytest.mark.parametrize(
+        "bindings",
+        [
+            pytest.param({"legacy": "scim", "scim": "entra"}, id="chain"),
+            pytest.param({"entra": "entra"}, id="self"),
+        ],
+    )
+    def test_a_target_that_is_itself_a_stamp_is_refused(self, bindings):
+        with pytest.raises(ValidationError, match="source_provider_bindings") as refused:
+            AuthSettings(source_provider_bindings=bindings)
+
+        assert "chain" in str(refused.value)
+
+    def test_several_stamps_bound_to_one_provider_are_accepted(self):
+        bindings = {"scim": "entra", "legacy": "entra"}
+
+        assert AuthSettings(source_provider_bindings=bindings).source_provider_bindings == bindings
+
+
 class TestEverySettingIsRead:
     """A field nothing reads is inert: it parses, validates, and changes nothing.
 

@@ -14,4 +14,4 @@ Every page uses the same redirect URI, built from those two values:
 https://<your DFE console host>/api/v1/auth/oidc/<provider-name>/callback
 ```
 
-The operator creates the provider with `POST /api/v1/auth/oidc-providers` and links each DFE group by setting two fields in its group file: `source_provider`, the provider name, and `source_id`, the identifier from the table. A group file with a `source_id` and no `source_provider` does not load. The provider model and the linking rules are in [rbac.md, section 4](../rbac.md#4-oidc-provider-integration).
+The operator creates the provider with `POST /api/v1/auth/oidc-providers` and links each DFE group by setting two fields in its group file: `source_provider`, the provider name, and `source_id`, the identifier from the table. A group file with a `source_id` and no `source_provider` loads unlinked, with a warning naming it in the engine log: no sign-in reaches it through that id. The provider model and the linking rules are in [rbac.md, section 4](../rbac.md#4-oidc-provider-integration).

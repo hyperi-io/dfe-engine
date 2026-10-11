@@ -416,10 +416,11 @@ class TestSyncNeverTakesAGroupNoAdminLinked:
             for e in audit_events
             if e["event"] == "OIDC group sync skipped a group linked to another provider"
         ]
-        assert (line["provider"], line["linked_provider"], line["reason"]) == (
+        assert (line["provider"], line["linked_provider"], line["reason"], line["group"]) == (
             "okta",
             "keycloak",
             "provider_mismatch",
+            "soc-corp.example",
         )
         assert "soc@corp.example" not in json.dumps(audit_events, default=str)
 

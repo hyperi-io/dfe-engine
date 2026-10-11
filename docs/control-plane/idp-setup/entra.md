@@ -100,7 +100,7 @@ Create the provider with `POST /api/v1/auth/oidc-providers`. The `name` becomes 
 
 `token_claim` reads the `groups` claim, and the overage lookup runs on its own. `groups.tenant_id` is needed only for the app-only fallback, which uses the login client secret unless `groups.client_secret` is set. Leave `scopes` unset: the default is `openid email profile`. The client secret goes to the secret store and the provider keeps only its path.
 
-Link each DFE group by setting two fields in its group file: `source_provider` to `<provider-name>`, the name the provider was created with, and `source_id` to an object id the admin sent. A group file with a `source_id` and no `source_provider` does not load, and its members lose its roles: see [rbac.md, section 4.4](../rbac.md#44-group-sync-process).
+Link each DFE group by setting two fields in its group file: `source_provider` to `<provider-name>`, the name the provider was created with, and `source_id` to an object id the admin sent. A group file with a `source_id` and no `source_provider` loads unlinked, with a warning naming it in the engine log, and no sign-in reaches it through that id: see [rbac.md, section 4.4](../rbac.md#44-group-sync-process).
 
 ```yaml
 # config/auth/groups/soc-analysts.yaml

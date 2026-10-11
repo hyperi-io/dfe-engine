@@ -81,12 +81,42 @@ def groups_held(
     Returns:
         Sorted group names.
     """
+    held = groups_held_by(
+        account.username, account.groups, account.source_provider, groups, bindings=bindings
+    )
+    return [group.name for group in held]
+
+
+def groups_held_by(
+    username: str,
+    asserted: Iterable[str],
+    stamp: str,
+    groups: Iterable[Group],
+    *,
+    bindings: Mapping[str, str],
+) -> list[Group]:
+    """The stored groups an account with these fields holds, the lookup :func:`groups_held` makes.
+
+    The JIT sign-in check calls this with the fields the account will carry, so a
+    login is admitted exactly when the account would hold a role.
+
+    Args:
+        username: The account's name, which group member lists name.
+        asserted: The identifiers its IdP asserts, its own ``groups`` list.
+        stamp: Its ``source_provider``; empty for a local account, which holds no
+            linked group.
+        groups: Every stored group, listed once by the caller.
+        bindings: ``auth.source_provider_bindings``.
+
+    Returns:
+        The held groups, sorted by name.
+    """
     listed = list(groups)
-    held = {group.name for group in listed if account.username in group.members}
-    if account.source_provider:
-        providers = linked_providers([account.source_provider], bindings)
-        held.update(group.name for group in linked_groups(account.groups, listed, providers))
-    return sorted(held)
+    held = {group.name: group for group in listed if username in group.members}
+    if stamp:
+        providers = linked_providers([stamp], bindings)
+        held.update((group.name, group) for group in linked_groups(asserted, listed, providers))
+    return [held[name] for name in sorted(held)]
 
 
 def groups_named(identifiers: Iterable[str], groups: Iterable[Group]) -> list[Group]:

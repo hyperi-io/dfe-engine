@@ -296,14 +296,28 @@ class TestTheProviderIdsAGroupCarries:
 
         assert store.get("entra-analysts").source_id == ""
 
-    def test_a_stored_document_linked_by_id_alone_is_skipped(self, docu, store):
+    def test_a_stored_document_linked_by_id_alone_loads_unlinked(self, docu):
+        """Its members keep the group's roles; the id that named no provider links nothing."""
+        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+        store = DocuStoreGroupStore(docu, collection="groups", metrics=GroupMetrics(manager))
         docu.collection("groups").insert_one(
             {"name": "id-only", "roles": ["admin"], "members": ["bob"], "source_id": self.GUID}
         )
 
-        assert store.get("id-only") is None
-        assert store.list() == []
-        assert store.resolve_roles_for_member("bob") == []
+        group = store.get("id-only")
+
+        assert group is not None
+        assert (group.members, group.source_provider, group.source_id) == (["bob"], "", "")
+        assert [g.name for g in store.list()] == ["id-only"]
+        assert store.resolve_roles_for_member("bob") == ["admin"]
+        assert self.GUID not in store.by_source_id()
+        unlinked = [
+            s.value
+            for f in text_string_to_metric_families(manager.metrics_text)
+            for s in f.samples
+            if s.name == "auth_groups_unlinked_total" and s.labels == {"reason": "no_provider"}
+        ]
+        assert unlinked == [1.0]
 
     def test_a_field_outside_the_list_is_still_ignored(self, store):
         """Attributes have their own setter; update() leaves them alone."""

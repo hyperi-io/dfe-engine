@@ -595,6 +595,31 @@ class TestSourceProviderBinding:
     its SCIM connector and one named OIDC provider are the same IdP.
     """
 
+    @pytest.mark.parametrize(
+        ("stamp", "admitted"),
+        [("entra", True), (SCIM_SOURCE_PROVIDER, True), ("legacy", False)],
+    )
+    def test_a_login_is_admitted_exactly_when_its_account_would_hold_a_role(
+        self, stores, stamp, admitted
+    ):
+        """A SCIM account resolves through scim's bindings, not entra's, so legacy grants it nothing."""
+        accounts, groups = stores
+        scim_account(accounts, "jane-corp-com")
+        groups.create("role-group", roles=["admin"], source_provider=stamp, source_id="g-role")
+        bindings = {SCIM_SOURCE_PROVIDER: "entra", "legacy": "entra"}
+        jit = JitProvisioner(
+            account_store=accounts, group_store=groups, source_provider_bindings=bindings
+        )
+
+        if admitted:
+            account = jit.ensure_account("jane@corp.com", ["g-role"], "entra")
+            assert groups_held(account, groups.list(), bindings=bindings) == ["role-group"]
+        else:
+            with pytest.raises(JitNoRoleError):
+                jit.ensure_account("jane@corp.com", ["g-role"], "entra")
+            stored = accounts.get("jane-corp-com")
+            assert groups_held(stored, groups.list(), bindings=bindings) == []
+
     def test_an_unbound_scim_account_is_refused(self, stores):
         """Fail closed: no binding, no adoption."""
         accounts, groups = stores
