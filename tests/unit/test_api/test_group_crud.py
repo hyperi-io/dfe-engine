@@ -618,22 +618,6 @@ class TestScimLeavesAndProviderIdsNeedTheGroupsRoles:
         )
         assert client.get("/api/v1/auth/me", headers=idp).status_code == 401
 
-    def test_a_scim_put_keeps_the_provider_a_group_is_linked_to(self, client, app, admin_headers):
-        app.state.group_store.update(
-            "dfe-admins", source_provider="entra", source_id="entra-admins-guid"
-        )
-        members = app.state.group_store.get("dfe-admins").members
-
-        resp = client.put(
-            f"{self.SCIM}/dfe-admins",
-            json=_scim_admins_body(members, external_id="entra-admins-guid-2"),
-            headers=admin_headers,
-        )
-
-        assert resp.status_code == 200, resp.text
-        stored = app.state.group_store.get("dfe-admins")
-        assert (stored.source_provider, stored.source_id) == ("entra", "entra-admins-guid-2")
-
     def test_admin_still_removes_a_member_through_scim(
         self, client, app, admin_headers, viewer_is_admin
     ):
@@ -646,6 +630,75 @@ class TestScimLeavesAndProviderIdsNeedTheGroupsRoles:
 
         assert resp.status_code == 200, resp.text
         assert "viewer" not in app.state.group_store.get("dfe-admins").members
+
+
+class TestScimMovesOnlyTheProviderIdsItOwns:
+    """A SCIM client moves a provider id only on a group linked through SCIM or a binding to it."""
+
+    SCIM = TestScimJoinsNeedTheGroupsRoles.SCIM
+
+    @pytest.fixture
+    def entra_linked(self, app, client) -> list[str]:
+        """dfe-admins linked to an Entra group, as the OIDC group sync links one; returns its members."""
+        app.state.group_store.update(
+            "dfe-admins", source_provider="entra", source_id="entra-admins-guid"
+        )
+        return app.state.group_store.get("dfe-admins").members
+
+    @pytest.mark.parametrize(
+        "external_id", ["mallory-own-guid", None], ids=["re-pointed", "cleared"]
+    )
+    def test_a_put_cannot_move_another_providers_link(
+        self, client, app, admin_headers, entra_linked, external_id
+    ):
+        body = _scim_admins_body([*entra_linked, "viewer"], external_id=external_id)
+
+        resp = client.put(f"{self.SCIM}/dfe-admins", json=body, headers=admin_headers)
+
+        assert resp.status_code == 400, resp.text
+        assert resp.headers["content-type"].startswith("application/scim+json")
+        assert resp.json()["scimType"] == "mutability"
+        assert resp.json()["detail"].startswith("externalId")
+        stored = app.state.group_store.get("dfe-admins")
+        assert (stored.source_provider, stored.source_id) == ("entra", "entra-admins-guid")
+        # Refused whole: the member change in the same PUT is not applied either.
+        assert stored.members == entra_linked
+
+    def test_a_put_keeping_another_providers_link_still_changes_members(
+        self, client, app, admin_headers, entra_linked
+    ):
+        body = _scim_admins_body([*entra_linked, "viewer"], external_id="entra-admins-guid")
+
+        resp = client.put(f"{self.SCIM}/dfe-admins", json=body, headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        stored = app.state.group_store.get("dfe-admins")
+        assert (stored.source_provider, stored.source_id) == ("entra", "entra-admins-guid")
+        assert "viewer" in stored.members
+
+    @pytest.mark.parametrize(
+        ("stamp", "bindings"),
+        [
+            pytest.param(SCIM_SOURCE_PROVIDER, {}, id="scim"),
+            pytest.param("entra", {SCIM_SOURCE_PROVIDER: "entra"}, id="bound"),
+        ],
+    )
+    def test_a_put_moves_a_link_scim_owns_and_keeps_its_provider(
+        self, client, app, admin_headers, stamp, bindings
+    ):
+        app.state.settings.auth.source_provider_bindings = bindings
+        app.state.group_store.update("dfe-admins", source_provider=stamp, source_id="old-guid")
+        members = app.state.group_store.get("dfe-admins").members
+
+        resp = client.put(
+            f"{self.SCIM}/dfe-admins",
+            json=_scim_admins_body(members, external_id="new-guid"),
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        stored = app.state.group_store.get("dfe-admins")
+        assert (stored.source_provider, stored.source_id) == (stamp, "new-guid")
 
 
 def _scim_group_body(name: str, external_id: str) -> dict:
