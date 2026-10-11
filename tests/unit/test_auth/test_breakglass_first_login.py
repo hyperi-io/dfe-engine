@@ -28,6 +28,7 @@ from dfe_engine.auth.bootstrap import (
     bootstrap_auth,
     default_credentials_in_use,
     require_admin_password,
+    require_hashable_passwords,
 )
 from dfe_engine.auth.deployment_hints import (
     DOCKER,
@@ -97,6 +98,31 @@ class TestPostureGate:
         assert default_credentials_in_use(padded) is True
         with pytest.raises(DefaultCredentialsError):
             require_admin_password(padded, "production")
+
+
+class TestHashablePasswords:
+    """bcrypt refuses more than 72 bytes, so the boot reconcile could never issue a longer one."""
+
+    def test_passwords_within_the_limit_start(self):
+        seed = SeedAccount(username="ops", password="x" * 72)
+        require_hashable_passwords("y" * 72, [seed])
+        require_hashable_passwords("", [SeedAccount(username="unusable")])
+
+    @pytest.mark.parametrize(
+        "password", ["x" * 73, "é" * 37], ids=["73-bytes", "74-bytes-in-37-chars"]
+    )
+    def test_an_admin_password_over_the_limit_names_its_setting(self, password):
+        with pytest.raises(DefaultCredentialsError) as exc:
+            require_hashable_passwords(password, [])
+        assert "DFE_AUTH_LOCAL_ADMIN_PASSWORD" in str(exc.value)
+        assert password not in str(exc.value)
+
+    def test_a_seed_password_over_the_limit_names_the_account(self):
+        long = "z" * 73
+        with pytest.raises(DefaultCredentialsError) as exc:
+            require_hashable_passwords(MINTED_ADMIN, [SeedAccount(username="ops", password=long)])
+        assert "seed_accounts[ops]" in str(exc.value)
+        assert long not in str(exc.value)
 
 
 # ── One seed path, reconciled on every boot ──────────────────

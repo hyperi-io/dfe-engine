@@ -7,6 +7,10 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 import json
+import socket
+import threading
+from collections.abc import Iterator
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
@@ -20,7 +24,6 @@ from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import SecretsSettings
 from tests.unit.test_auth.test_oidc.refusing_store import (
     AppRoleRefusingSecretStore,
-    AppRoleUnreachableSecretStore,
     PolicyRefusingSecretStore,
 )
 from tests.unit.test_auth.test_oidc.unreachable_store import (
@@ -33,6 +36,35 @@ from tests.unit.test_auth.test_oidc.unreachable_store import (
 def store(tmp_path):
     """A real scalo.secrets file backend under tmp_path - no mocks."""
     return build_secrets(SecretsSettings(provider="file", path=str(tmp_path / "secrets")))
+
+
+class _LoginHandler(BaseHTTPRequestHandler):
+    """Answers every request with ``status``, as OpenBao answers an AppRole login."""
+
+    status = 200
+
+    def do_POST(self) -> None:
+        self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        self.send_response(self.status)
+        if 300 <= self.status < 400:
+            self.send_header("Location", "/v1/elsewhere")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def log_message(self, format: str, *args: object) -> None:
+        return
+
+
+@pytest.fixture(scope="module")
+def openbao_login() -> Iterator[str]:
+    """A real local HTTP server standing in for OpenBao's login endpoint."""
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _LoginHandler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{httpd.server_address[1]}"
+    httpd.shutdown()
+    httpd.server_close()
+    thread.join(timeout=5)
 
 
 class TestCredentialCheck:
@@ -199,15 +231,58 @@ class TestResolveCredential:
         [
             (PolicyRefusingSecretStore(), True),
             (AppRoleRefusingSecretStore(), True),
-            (AppRoleUnreachableSecretStore(), False),
             (UnreachableSecretStore(), False),
         ],
-        ids=["policy-403", "approle-refused", "approle-unreachable", "unreachable"],
+        ids=["policy-403", "approle-refused", "unreachable"],
     )
     def test_a_refusal_is_told_apart_from_a_store_that_did_not_answer(self, store, refused):
-        """An AppRole login that never reached the store is no refusal, though scalo raises the same class."""
         resolved = resolve_credential(secret_path="oidc/acme/client_secret", secrets=store)
         assert (resolved.value, resolved.unreadable, resolved.refused) == ("", True, refused)
+
+    @pytest.mark.parametrize(
+        ("status", "refused"),
+        [
+            pytest.param(400, True, id="400-refused"),
+            pytest.param(403, True, id="403-refused"),
+            pytest.param(429, False, id="429-rate-limited"),
+            pytest.param(307, False, id="307-redirect"),
+            pytest.param(503, False, id="503-sealed"),
+        ],
+    )
+    def test_an_approle_login_is_classified_by_its_answer(
+        self, monkeypatch, openbao_login, status, refused
+    ):
+        """scalo's own OpenBao provider classifies a real HTTP answer to the AppRole login."""
+        monkeypatch.setenv("VAULT_SECRET_ID", "approle-secret-id")
+        _LoginHandler.status = status
+        store = build_secrets(SecretsSettings(provider="openbao", addr=openbao_login, role="dfe"))
+
+        resolved = resolve_credential(secret_path="oidc/acme/client_secret", secrets=store)
+
+        assert (resolved.value, resolved.unreadable, resolved.refused) == ("", True, refused)
+
+    def test_an_approle_login_never_sent_is_not_a_refusal(self, monkeypatch, openbao_login):
+        """No secret id means scalo raises before any request, though this store would refuse."""
+        monkeypatch.delenv("VAULT_SECRET_ID", raising=False)
+        _LoginHandler.status = 403
+        store = build_secrets(SecretsSettings(provider="openbao", addr=openbao_login, role="dfe"))
+
+        resolved = resolve_credential(secret_path="oidc/acme/client_secret", secrets=store)
+
+        assert (resolved.value, resolved.unreadable, resolved.refused) == ("", True, False)
+
+    def test_an_approle_login_with_no_listener_is_not_a_refusal(self, monkeypatch):
+        monkeypatch.setenv("VAULT_SECRET_ID", "approle-secret-id")
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        store = build_secrets(
+            SecretsSettings(provider="openbao", addr=f"http://127.0.0.1:{port}", role="dfe")
+        )
+
+        resolved = resolve_credential(secret_path="oidc/acme/client_secret", secrets=store)
+
+        assert (resolved.value, resolved.unreadable, resolved.refused) == ("", True, False)
 
     def test_the_env_still_serves_when_the_store_refused(self, monkeypatch):
         monkeypatch.setenv("OIDC_RP_SECRET", "from-env")

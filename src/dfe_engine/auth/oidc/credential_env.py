@@ -75,14 +75,19 @@ def unreadable_credential_message(*, credential: str, refused: bool = False) -> 
     )
 
 
-def _refused(exc: BaseException, fields: dict[str, object]) -> bool:
+def _refused(exc: BaseException) -> bool:
     """Whether the store answered and refused, rather than not answering.
 
-    scalo raises ``AuthenticationError`` for an AppRole login it could not reach as well,
-    so one with a socket error under it is a store that did not answer.
+    A permission error is the store's answer to a read. scalo also raises
+    ``AuthenticationError`` for a login it never sent (no secret id, no token), so one
+    counts only when the store's HTTP answer is its cause.
     """
-    refusal = isinstance(exc, (SecretPermissionError, AuthenticationError))
-    return refusal and "transport_failure" not in fields
+    if isinstance(exc, SecretPermissionError):
+        return True
+    answer = getattr(exc.__cause__, "response", None)
+    return isinstance(exc, AuthenticationError) and isinstance(
+        getattr(answer, "status_code", None), int
+    )
 
 
 def is_env_var_name(value: str) -> bool:
@@ -111,7 +116,7 @@ def _from_store(secret_path: str, secrets: DfeSecrets | None) -> ResolvedCredent
             secret_path=secret_path,
             **fields,
         )
-        return ResolvedCredential(unreadable=True, refused=_refused(exc, fields))
+        return ResolvedCredential(unreadable=True, refused=_refused(exc))
 
 
 def resolve_credential(
