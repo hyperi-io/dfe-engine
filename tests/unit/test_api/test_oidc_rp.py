@@ -703,17 +703,17 @@ def _break_the_account_store(app) -> None:
 
 
 @pytest.mark.parametrize(
-    ("refusal", "code"),
+    ("refusal", "code", "audited"),
     [
-        ("no-role", "no_role_granted"),
-        ("disabled", "account_disabled"),
-        ("blocked", "account_blocked"),
-        ("local-admin", "unauthorized"),
-        ("store-down", "service_unavailable"),
+        ("no-role", "no_role_granted", ("auth.login.denied", "no_role_granted")),
+        ("disabled", "account_disabled", ("auth.login.denied", "account_disabled")),
+        ("blocked", "account_blocked", ("auth.login.denied", "account_blocked")),
+        ("local-admin", "unauthorized", ("auth.login.denied", "protected_account")),
+        ("store-down", "service_unavailable", ("auth.jit.provision_failed", None)),
     ],
 )
 def test_a_refused_browser_login_returns_to_the_console_with_the_code(
-    client, app, audit_events, refusal, code
+    client, app, audit_events, refusal, code, audited
 ):
     """A browser must never land on the callback's JSON, so the refusal goes back to return_to."""
     store = app.state.account_store
@@ -739,10 +739,45 @@ def test_a_refused_browser_login_returns_to_the_console_with_the_code(
     assert parse_qs(fragment) == {"error": [code], "provider": ["stub"]}
     assert oidc_login.TOKEN_COOKIE not in resp.cookies
     assert not [e for e in audit_events if e["event"] == "auth.login.success"]
+    # The hand-back changes where the browser goes, never what the audit trail records.
+    event, reason = audited
+    (recorded,) = [e for e in audit_events if e["event"] == event]
+    if reason is not None:
+        assert recorded["reason"] == reason
     if refusal == "no-role":
         assert store.get("stub-user") is None
-        denied = [e for e in audit_events if e["event"] == "auth.login.denied"]
-        assert [e["reason"] for e in denied] == ["no_role_granted"]
+
+
+def test_a_hand_back_replaces_any_fragment_return_to_carried(client, app):
+    """A second fragment would hide the refusal's code from the console."""
+    app.state.oidc_rp = _GroupsOidcRp(["unlinked-team"])
+    login = client.get(
+        "https://testserver/api/v1/auth/oidc/stub/login",
+        params={"redirect": "false", "return_to": "/login/oidc?login_nonce=n1#stale"},
+    )
+    assert login.status_code == 200, login.text
+
+    resp = client.get("https://testserver/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+
+    assert resp.status_code == 303, resp.text
+    path, _, fragment = resp.headers["location"].partition("#")
+    assert path == "/login/oidc?login_nonce=n1"
+    assert parse_qs(fragment) == {"error": ["no_role_granted"], "provider": ["stub"]}
+
+
+def test_a_callback_for_a_vanished_provider_still_spends_return_to(client, app):
+    """A provider disabled between login and callback 404s, and leaves nothing to hand back later."""
+    app.state.oidc_rp = _FakeOidcRp()
+    _start_browser_login(client)
+    app.state.oidc_rp = None
+
+    gone = client.get("https://testserver/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+    app.state.oidc_rp = _GroupsOidcRp(["unlinked-team"])
+    after = client.get("https://testserver/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+
+    assert gone.status_code == 404
+    assert after.status_code == 401
+    assert after.json()["code"] == "no_role_granted"
 
 
 def test_a_refused_browser_login_spends_its_return_to(client, app):

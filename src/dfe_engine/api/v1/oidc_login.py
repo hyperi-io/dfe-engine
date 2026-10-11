@@ -224,17 +224,22 @@ async def oidc_login(
     return await rp.login_redirect(provider, request, redirect_uri)
 
 
+def _hand_back_url(return_to: str, fields: dict[str, str]) -> str:
+    """``return_to`` with *fields* as its URL fragment, in place of any fragment it carried.
+
+    The fragment reaches no server and no log line; the console reads it once.
+    """
+    return f"{return_to.partition('#')[0]}#{urlencode(fields)}"
+
+
 def _hand_back_refusal(return_to: str, provider: str, exc: HTTPException) -> RedirectResponse:
     """303 a refused browser login to ``return_to`` with the refusal's code in the URL fragment.
 
-    The code is one the engine wrote, never the IdP's text, and the fragment
-    reaches no server and no log line. No token or cookie goes with it.
+    The code is one the engine wrote, never the IdP's text. No token or cookie goes with it.
     """
     code = exc.detail.get("code") if isinstance(exc.detail, dict) else None
-    fragment = urlencode(
-        {"error": code if isinstance(code, str) else "unauthorized", "provider": provider}
-    )
-    return RedirectResponse(f"{return_to}#{fragment}", status_code=303)
+    fields = {"error": code if isinstance(code, str) else "unauthorized", "provider": provider}
+    return RedirectResponse(_hand_back_url(return_to, fields), status_code=303)
 
 
 @router.get(
@@ -258,8 +263,9 @@ async def oidc_callback(
     so a browser never lands on this route's JSON error. Without ``return_to`` a
     refusal answers JSON with its status, as any API error does.
     """
-    rp = _rp_or_404(request, provider)
+    # Spent before the provider check, so a 404 leaves no return_to behind either.
     return_to = request.session.pop(_RETURN_TO_SESSION_KEY, None)
+    rp = _rp_or_404(request, provider)
     try:
         return await _complete_login(provider, request, settings, rp, return_to)
     except HTTPException as exc:
@@ -386,9 +392,8 @@ async def _complete_login(
     )
     response: JSONResponse | RedirectResponse
     if return_to:
-        # The fragment never reaches a server or a log line; the console reads it once.
-        fragment = urlencode({"access_token": token, "token_type": "bearer", "provider": provider})
-        response = RedirectResponse(f"{return_to}#{fragment}", status_code=303)
+        fields = {"access_token": token, "token_type": "bearer", "provider": provider}
+        response = RedirectResponse(_hand_back_url(return_to, fields), status_code=303)
     else:
         response = JSONResponse(payload.model_dump())
     response.set_cookie(
