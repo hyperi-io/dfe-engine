@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.23](https://github.com/hyperi-io/dfe-engine/compare/v1.22.22...v1.22.23) (2026-10-11)
+
+### Bug Fixes
+
+* rebuild on scalo 2.31.6 ([d3d0ed8](https://github.com/hyperi-io/dfe-engine/commit/d3d0ed8aa3b5d31c318799fc632371040af40c56))
+
 ## [1.22.22](https://github.com/hyperi-io/dfe-engine/compare/v1.22.21...v1.22.22) (2026-10-11)
 
 ### Bug Fixes
