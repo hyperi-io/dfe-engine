@@ -125,8 +125,8 @@ def test_an_unsafe_table_name_is_refused(bad):
 
 
 def test_pressure_is_asked_for_under_the_canonical_bare_name():
-    # The apps emit it under four different prefixes, so the reader names the one
-    # scalo registers and matches the rest by rule.
+    # An app with a metrics namespace prefixes the gauge, so the reader names the
+    # one scalo registers and matches the rest by rule.
     assert SCALING_PRESSURE == "scaling_pressure"
     assert SCALING_PRESSURE in GAUGE_METRICS
     assert SCALING_PRESSURE in RESOURCE_METRICS
@@ -140,7 +140,9 @@ def test_the_gauge_query_matches_any_prefix_and_reports_one_name():
     sql = ch.calls[0][0]
     assert "endsWith(MetricName, '_scaling_pressure')" in sql
     assert "'scaling_pressure', MetricName" in sql  # normalised back to one key
-    assert "GROUP BY MetricName, cityHash64(Attributes)" in sql
+    assert (
+        "GROUP BY MetricName, cityHash64(Attributes), ResourceAttributes['service.instance.id']"
+    ) in sql
 
 
 def test_the_series_query_buckets_pressure_under_that_same_one_name():

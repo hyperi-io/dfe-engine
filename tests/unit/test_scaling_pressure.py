@@ -7,12 +7,11 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """One matching rule, substituted into both query catalogues.
 
-scalo registers the composite bare and an app may prefix it with its own metrics
-namespace, so the same signal lands in ClickHouse as ``scaling_pressure``,
-``dfe_scaling_pressure``, ``dfe_loader_scaling_pressure`` or
-``dfe_fetcher_scaling_pressure``. The KEDA shim and the app-management reader both
-have to match all four, and they have to agree - hence one module and a sentinel
-rather than the predicate copied into two YAML files.
+scalo registers the composite as a bare ``scaling_pressure`` gauge, and an app whose
+deployment sets a metrics namespace emits ``<namespace>_scaling_pressure`` instead.
+The KEDA shim and the app-management reader both have to match every spelling, and
+they have to agree - hence one module and a sentinel rather than the predicate
+copied into two YAML files.
 """
 
 from __future__ import annotations
