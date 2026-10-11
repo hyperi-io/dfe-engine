@@ -62,7 +62,7 @@ DFE links a Google group on its Cloud Identity id: the part after `groups/` in t
 gcloud identity groups describe <group-email>
 ```
 
-The `name` field reads `groups/<id>`. Send the `<id>` part. The check below also lists the ids of every group the signed-in user is in.
+The `name` field reads `groups/<id>`. Send the `<id>` part. Once one of the user's groups is linked, the check below also lists the ids of every group they are in.
 
 Google leaves a group out of the answer when the group's **Who can view members** setting does not include its own members. For each group that maps to a DFE role, open **Admin console > Directory > Groups**, pick the group, open **Access Settings** and let group members view members.
 
@@ -74,7 +74,7 @@ Once the operator confirms the provider is in place, open this URL in a private 
 https://<your DFE console host>/api/v1/auth/oidc/<provider-name>/login
 ```
 
-The page answers with JSON. `email` is the user, and `groups` lists their group ids. The JSON also holds an `access_token`: it is a live DFE session, so do not paste it anywhere.
+The page answers with JSON. `email` is the user, and `groups` lists their group ids. The JSON also holds an `access_token`: it is a live DFE session, so do not paste it anywhere. A user in no linked group is refused, and DFE keeps no account for them.
 
 ## Common failures
 
@@ -83,8 +83,7 @@ The page answers with JSON. `email` is the user, and `groups` lists their group 
 | Google page: `Error 400: redirect_uri_mismatch` | The redirect URI on the client differs from the one DFE sent | Paste the operator's URI exactly: scheme, host, case and trailing slash all count |
 | Google page: `Error 403: org_internal` | The account is outside your organisation and the audience is Internal | Sign in with an account in your organisation |
 | DFE page: `OIDC login failed: invalid_client: ...` | DFE holds the wrong client secret | Rotate the secret and send the new one |
-| The check shows `"groups": []` | The Cloud Identity API is off in the client's project, the groups scope was not granted, API controls block the client, or the user's groups hide their members | Recheck steps 1, 3 and 6 and the group's **Who can view members**. The operator's log names Google's reason: `Google Cloud Identity refused the user-token group lookup (403)` |
-| Signed in, but no DFE role | The groups were found but none is linked yet | Send the operator the ids from the check |
+| DFE page: `OIDC login refused: no DFE group with a role is linked to your identity provider groups.` | None of the user's groups is linked yet, or none was found: the Cloud Identity API is off in the client's project, the groups scope was not granted, API controls block the client, or the user's groups hide their members | Send the operator the ids from "Find the group ids". If they are linked, recheck steps 1, 3 and 6 and the group's **Who can view members**. The operator's log names Google's reason: `Google Cloud Identity refused the user-token group lookup (403)` |
 
 ## For the DFE operator
 

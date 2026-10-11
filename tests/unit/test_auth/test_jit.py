@@ -20,9 +20,11 @@ from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.jit import (
     JitAccountUnavailableError,
     JitIdentityCollisionError,
+    JitNoRoleError,
     JitProvisioner,
     JitSubjectUnusableError,
 )
+from dfe_engine.auth.membership import groups_held
 from dfe_engine.auth.models import AuthenticationError
 from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
 from dfe_engine.hyperdx.client import HyperDXClient
@@ -236,6 +238,131 @@ class TestEnsureAccount:
         assert stored.blocked is True
         assert stored.groups == before.groups
         assert stored.last_login_at == before.last_login_at
+
+
+NO_ROLE_MESSAGE = (
+    "OIDC login refused: no DFE group with a role is linked to your identity provider "
+    "groups. Ask a DFE administrator to link one."
+)
+
+
+class TestALoginThatWouldHoldNoRole:
+    """The linked DFE groups are the allowlist: an IdP user in none of them gets no account."""
+
+    @pytest.mark.parametrize(
+        "asserted", [["unlinked-group"], []], ids=["groups-link-nothing", "no-groups-claim"]
+    )
+    def test_a_first_login_is_refused_and_leaves_no_account(self, stores, audit_events, asserted):
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with pytest.raises(JitNoRoleError) as refused:
+            jit.ensure_account("jane@corp.com", asserted, "entra", email="jane@corp.com")
+
+        assert (refused.value.reason, refused.value.source_provider) == ("no_role_granted", "entra")
+        assert accounts.list() == []
+        assert refusals(audit_events) == [("jane@corp.com", "entra", "no_role_granted")]
+        assert created_org_ids(audit_events) == []
+
+    def test_a_group_linked_to_another_provider_admits_nothing(self, stores):
+        accounts, groups = stores
+        groups.update("dfe-admins", source_provider="okta")
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with pytest.raises(JitNoRoleError):
+            jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
+
+        assert accounts.list() == []
+        assert jit.ensure_account("jane@corp.com", ["dfe-admins"], "okta").source_provider == "okta"
+
+    def test_a_linked_group_that_carries_no_role_admits_nothing(self, stores):
+        """The group sync links every directory group with no role, so a link alone is no grant."""
+        accounts, groups = stores
+        groups.create("everyone", roles=[], source_provider="entra", source_id="g-everyone")
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with pytest.raises(JitNoRoleError):
+            jit.ensure_account("jane@corp.com", ["g-everyone"], "entra")
+
+        assert accounts.list() == []
+
+    def test_the_message_says_what_fixes_it_and_names_no_group(self, stores):
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with pytest.raises(JitNoRoleError) as refused:
+            jit.ensure_account("jane@corp.com", ["secret-team"], "entra")
+
+        message = str(refused.value)
+        assert message == NO_ROLE_MESSAGE
+        assert not [name for name in ("secret-team", "dfe-admins", "jane") if name in message]
+
+    def test_an_existing_account_now_in_no_linked_group_is_refused_and_loses_its_roles(
+        self, stores, audit_events
+    ):
+        """A token issued before the refusal resolves its roles from the account, so it loses them."""
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+        jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
+        before = accounts.get("jane-corp-com")
+        assert groups_held(before, groups.list(), bindings={}) == ["dfe-admins"]
+
+        with pytest.raises(JitNoRoleError):
+            jit.ensure_account("jane@corp.com", ["unlinked-group"], "entra", email="new@corp.com")
+
+        stored = accounts.get("jane-corp-com")
+        assert stored.groups == ["unlinked-group"]
+        assert groups_held(stored, groups.list(), bindings={}) == []
+        assert (stored.last_login_at, stored.email) == (before.last_login_at, before.email)
+        assert stored.session_marker() != before.session_marker()
+        assert refusals(audit_events) == [("jane@corp.com", "entra", "no_role_granted")]
+        ended = [e for e in audit_events if e["event"] == "auth.account.sessions_ended"]
+        assert [(e["target_user"], e["details"]) for e in ended] == [
+            ("jane-corp-com", {"reason": "no_role_granted"})
+        ]
+
+    def test_an_operator_membership_with_a_role_keeps_an_existing_account_in(self, stores):
+        """No role is granted to an account directly; a membership an operator adds is the nearest."""
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+        jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
+        groups.create("ops", roles=["data_viewer"], members=["jane-corp-com"])
+
+        account = jit.ensure_account("jane@corp.com", [], "entra")
+
+        assert account.groups == []
+        assert groups_held(account, groups.list(), bindings={}) == ["ops"]
+
+    def test_a_membership_set_before_the_first_login_admits_it(self, stores):
+        """A manual-mode provider asserts no groups, so its users get in only this way."""
+        accounts, groups = stores
+        groups.create("ops", roles=["data_viewer"], members=["jane-corp-com"])
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        account = jit.ensure_account("jane@corp.com", [], "corp-manual")
+
+        assert (account.username, account.source_provider) == ("jane-corp-com", "corp-manual")
+
+    def test_a_membership_in_a_group_with_no_role_admits_nothing(self, stores):
+        accounts, groups = stores
+        groups.create("lobby", roles=[], members=["jane-corp-com"])
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with pytest.raises(JitNoRoleError):
+            jit.ensure_account("jane@corp.com", [], "entra")
+
+        assert accounts.list() == []
+
+    def test_a_collision_is_still_refused_as_a_collision(self, stores, audit_events):
+        """The identity guards run first, so their reason is never masked by this one."""
+        accounts, groups = stores
+        accounts.create("jane-corp-com", "localpass", groups=[])
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with pytest.raises(JitIdentityCollisionError):
+            jit.ensure_account("jane@corp.com", [], "entra")
+
+        assert refusals(audit_events) == [("jane@corp.com", "entra", "local_account")]
 
 
 class TestCrossIdentityRefusal:

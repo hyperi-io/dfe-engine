@@ -528,7 +528,11 @@ class TestSyncRefusesAGroupWithNoId:
 
     @classmethod
     def _okta(cls, provider, tmp_path, monkeypatch):
-        items = [{"profile": {"name": name, "description": ""}} for name in cls.NAMES]
+        # Okta links on the group name, so a group with only an id and a description has none.
+        items = [
+            {"id": f"00g{index}", "profile": {"description": name}}
+            for index, name in enumerate(cls.NAMES)
+        ]
         return FakeAdapter(provider, [_group_info_from_okta(item) for item in items])
 
     @classmethod

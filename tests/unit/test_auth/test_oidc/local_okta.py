@@ -14,7 +14,30 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+from dfe_engine.auth.oidc.adapters.okta import OktaAdapter
+from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
 from tests.support.loopback import stop_server
+
+
+class PlainHttpOkta(OktaAdapter):
+    """Okta whose Management API is a plain-http stand-in; the adapter builds only https origins."""
+
+    def __init__(self, provider: OIDCProvider, *, base_url: str) -> None:
+        super().__init__(provider)
+        self._base_url = base_url
+
+    def _api_base_and_headers(self) -> tuple[str | None, dict[str, str] | None]:
+        return self._base_url, {"Accept": "application/json", "Authorization": "SSWS test-token"}
+
+
+def okta_adapter(base_url: str) -> OktaAdapter:
+    """An api-mode Okta adapter whose Management API is at ``base_url``."""
+    provider = OIDCProvider(
+        type="okta",
+        issuer="https://example.okta.com",
+        groups=GroupResolutionConfig(mode="api", okta_domain="example.okta.com"),
+    )
+    return PlainHttpOkta(provider, base_url=base_url)
 
 
 def _handler_for(*, okta: LocalOkta) -> type[BaseHTTPRequestHandler]:

@@ -37,6 +37,7 @@ from dfe_engine.auth.oidc.adapters.base import (
     DirectoryPageError,
     DirectoryPageLimitError,
     DirectoryTokenRequestError,
+    NoDirectoryApiError,
     NoDirectoryListingError,
 )
 from dfe_engine.auth.oidc.credential_env import unreadable_credential_message
@@ -100,6 +101,11 @@ def _token_failure_message(exc: BaseException, *, service: str) -> str:
 def _listing_failure_message(exc: BaseException) -> str:
     """What the provider record and the API answer say about a failed listing, never the IdP's own text."""
     match exc:
+        case NoDirectoryApiError():
+            return (
+                "This provider type has no directory API to list groups from; "
+                "set groups.mode to token_claim"
+            )
         case DirectoryCredentialUnreadableError(refused=refused):
             return unreadable_credential_message(credential="directory credential", refused=refused)
         case DirectoryTokenRequestError(service=service):

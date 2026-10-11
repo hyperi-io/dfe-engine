@@ -79,6 +79,14 @@ class NoDirectoryListingError(Exception):
     """
 
 
+class NoDirectoryApiError(Exception):
+    """The provider type has no directory API, so an api-mode provider of it has nothing to list.
+
+    A generic provider works this way. Group sync records a failed run, because api
+    mode on such a provider is a misconfiguration and never a directory with no groups.
+    """
+
+
 class DirectoryPageError(Exception):
     """A directory answered a listing page without the listing's shape.
 
@@ -125,10 +133,10 @@ class OIDCGroupAdapter(ABC):
         Used for bulk sync and admin enumeration.
 
         Returns:
-            List of GroupInfo records.  Returns an empty list when the
-            provider does not support group enumeration via API.
+            List of GroupInfo records.
 
         Raises:
+            NoDirectoryApiError: The provider type has no directory API at all.
             NoDirectoryListingError: The provider reads each login's groups with
                 the user's own token and has no directory to list.
             DirectoryNotConfiguredError: The provider has no credential to

@@ -6,11 +6,15 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
+import pytest
 
+from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.oidc.adapters import get_adapter
+from dfe_engine.auth.oidc.adapters.base import NoDirectoryApiError
 from dfe_engine.auth.oidc.adapters.generic import GenericAdapter
-from dfe_engine.auth.oidc.models import OIDCProvider
+from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+from dfe_engine.auth.oidc.sync import sync_provider
 
 
 def _generic_provider() -> OIDCProvider:
@@ -22,15 +26,38 @@ def _generic_provider() -> OIDCProvider:
 
 
 class TestGenericAdapterListAllGroups:
-    async def test_list_all_groups_returns_empty_list(self):
+    async def test_list_all_groups_refuses_because_there_is_no_directory(self):
         adapter = GenericAdapter(_generic_provider())
-        result = await adapter.list_all_groups()
-        assert result == []
+        with pytest.raises(NoDirectoryApiError):
+            await adapter.list_all_groups()
 
-    async def test_list_all_groups_returns_list_type(self):
-        adapter = GenericAdapter(_generic_provider())
-        result = await adapter.list_all_groups()
-        assert isinstance(result, list)
+    async def test_an_api_mode_sync_is_an_error_not_an_empty_directory(self, tmp_path):
+        """A generic provider set to api mode has no directory, so 'ok, 0 groups' would mislead."""
+        registry = OIDCProviderRegistry(tmp_path / "oidc")
+        registry.create(
+            "corp-sso",
+            OIDCProvider(
+                type="generic",
+                issuer="https://sso.example.com",
+                groups=GroupResolutionConfig(mode="api"),
+            ),
+        )
+        group_store = GroupStore(tmp_path / "groups")
+
+        result = await sync_provider("corp-sso", registry, group_store)
+
+        stored = registry.get("corp-sso")
+        assert stored is not None
+        assert (result["status"], stored.last_sync_status) == ("error", "error")
+        assert (
+            stored.sync_error
+            == result["error"]
+            == (
+                "This provider type has no directory API to list groups from; "
+                "set groups.mode to token_claim"
+            )
+        )
+        assert group_store.list() == []
 
 
 class TestGenericAdapterTestConnection:
@@ -61,7 +88,6 @@ class TestGetAdapterFactory:
     def test_google_type_returns_adapter(self):
         provider = OIDCProvider(type="google", issuer="https://accounts.google.com")
         adapter = get_adapter(provider)
-        # Google adapter falls back to GenericAdapter until dedicated impl is added
         assert adapter is not None
 
     def test_entra_id_type_returns_adapter(self):

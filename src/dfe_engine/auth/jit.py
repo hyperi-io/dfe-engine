@@ -6,16 +6,23 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""JIT provisioner -- creates shadow accounts on first OIDC login."""
+"""JIT provisioner -- creates shadow accounts on first OIDC login.
+
+A login is admitted only when the account it binds to would hold a role, so an
+IdP user in no linked group gets no account at all rather than one that every
+route refuses.
+"""
 
 import asyncio
 import re
 from datetime import UTC, datetime
+from typing import NoReturn
 
 from scalo.logger import logger
 
 from dfe_engine.auth.accounts import Account, AccountStore, discard_created
 from dfe_engine.auth.audit import (
+    audit_account_change,
     audit_jit_account_created,
     audit_jit_groups_updated,
     audit_jit_hdx_invited,
@@ -40,6 +47,12 @@ _ROLE_TO_TEAM = {
 # to the client and the collision detail would say which local names are taken.
 _REFUSED_MESSAGE = "OIDC login refused"
 
+# Says what fixes the refusal, never which DFE groups exist: the caller is unauthenticated.
+_NO_ROLE_MESSAGE = (
+    "OIDC login refused: no DFE group with a role is linked to your identity provider "
+    "groups. Ask a DFE administrator to link one."
+)
+
 # A subject here takes an API key's groups (api/deps.py), so no IdP may assert one.
 API_KEY_SUBJECT_PREFIX = "apikey:"
 
@@ -55,6 +68,7 @@ class JitIdentityCollisionError(AuthenticationError):
     """
 
     def __init__(self, user_id: str, source_provider: str, reason: str) -> None:
+        """Record the refused subject, the provider that asserted it and why."""
         super().__init__(_REFUSED_MESSAGE)
         self.user_id = user_id
         self.source_provider = source_provider
@@ -70,6 +84,7 @@ class JitAccountUnavailableError(AuthenticationError):
     """
 
     def __init__(self, user_id: str, reason: str) -> None:
+        """Record the refused subject and why its account is unavailable."""
         super().__init__("Account blocked" if reason == "account_blocked" else "Account disabled")
         self.user_id = user_id
         self.reason = reason
@@ -84,12 +99,32 @@ class JitSubjectUnusableError(AuthenticationError):
     """
 
     def __init__(self, user_id: str) -> None:
+        """Record the refused subject."""
         super().__init__(_REFUSED_MESSAGE)
         self.user_id = user_id
         self.reason = "unusable_subject"
 
 
+class JitNoRoleError(AuthenticationError):
+    """The IdP identity would hold no DFE role, so the login neither creates nor admits an account.
+
+    Attributes:
+        user_id: The IdP-asserted subject.
+        source_provider: The provider that asserted it.
+        reason: ``no_role_granted``.
+    """
+
+    def __init__(self, user_id: str, source_provider: str) -> None:
+        """Record the refused subject and the provider that asserted it."""
+        super().__init__(_NO_ROLE_MESSAGE)
+        self.user_id = user_id
+        self.source_provider = source_provider
+        self.reason = "no_role_granted"
+
+
 class JitProvisioner:
+    """Creates and reconciles the account behind each IdP login, refusing those it may not admit."""
+
     def __init__(
         self,
         account_store: AccountStore,
@@ -98,6 +133,15 @@ class JitProvisioner:
         admin_name: str = "",
         source_provider_bindings: dict[str, str] | None = None,
     ) -> None:
+        """Bind the stores, the names no IdP may assert and the deployment's provider bindings.
+
+        Args:
+            account_store: Where accounts are stored.
+            group_store: Where groups, and so every role, are stored.
+            hyperdx_client: The client a first login's HyperDX invite goes through, if any.
+            admin_name: The configured local admin name, protected like the default one.
+            source_provider_bindings: ``auth.source_provider_bindings``.
+        """
         self._accounts = account_store
         self._groups = group_store
         self._hdx = hyperdx_client
@@ -136,6 +180,11 @@ class JitProvisioner:
                 written.
             JitSubjectUnusableError: The subject sanitises to no account name.
                 Nothing is written.
+            JitNoRoleError: No group the account would hold carries a role. A
+                first login leaves no account. An existing account records the
+                groups its IdP now asserts and has every session ended, as a
+                logout ends them, so no token issued for it reads or refreshes a
+                session. Nothing else is written.
             Exception: Any other error is the store failing to record the login,
                 never a refusal of the identity. A first login leaves no account.
         """
@@ -154,23 +203,30 @@ class JitProvisioner:
         if existing is not None:
             self._require_same_identity(existing, user_id, source_provider)
             self._require_available(existing, user_id, source_provider)
-            # Subsequent login -- update groups if changed + last_login_at
-            updates: dict[str, object] = {
-                "last_login_at": now,
-                "oidc_id": source_provider,
-                "subject": user_id,
-            }
+            updates: dict[str, object] = {}
             if set(existing.groups) != set(oidc_groups):
                 added = [g for g in oidc_groups if g not in existing.groups]
                 removed = [g for g in existing.groups if g not in oidc_groups]
                 updates["groups"] = oidc_groups
                 audit_jit_groups_updated(user_id, added, removed)
+            if not self._holds_a_role(key, oidc_groups, source_provider):
+                if updates:
+                    self._accounts.update(key, groups=oidc_groups)
+                # A token issued before the refusal must neither read nor refresh a session.
+                self._accounts.end_sessions(key)
+                audit_account_change(user_id, key, "sessions_ended", {"reason": "no_role_granted"})
+                self._refuse_without_role(user_id, source_provider)
+            updates.update(last_login_at=now, oidc_id=source_provider, subject=user_id)
             if wanted_email and existing.email != wanted_email:
                 updates["email"] = wanted_email
             if wanted_name and existing.name != wanted_name:
                 updates["name"] = wanted_name
             self._accounts.update(key, **updates)
             return self._accounts.get(key)
+
+        # The race branch below reconciles an account under this name, so this covers it too.
+        if not self._holds_a_role(safe_name, oidc_groups, source_provider):
+            self._refuse_without_role(user_id, source_provider)
 
         # First login -- create shadow account
         try:
@@ -328,6 +384,31 @@ class JitProvisioner:
         reason = "account_blocked" if existing.blocked else "account_disabled"
         audit_jit_login_refused(user_id, source_provider, reason)
         raise JitAccountUnavailableError(user_id, reason)
+
+    def _holds_a_role(self, username: str, oidc_groups: list[str], source_provider: str) -> bool:
+        """Whether the account stored under *username* would hold a role after this login.
+
+        An account has no role of its own: its session's roles come from the groups
+        ``membership.groups_held`` names, which are the groups the IdP's identifiers
+        are linked to for *source_provider* and the groups whose members list the
+        account. A linked group carrying no role, as the group sync creates them,
+        grants nothing, so it admits nothing either.
+        """
+        listed = self._groups.list()
+        providers = linked_providers([source_provider], self._bindings)
+        linked = linked_groups(oidc_groups, listed, providers)
+        assigned = [group for group in listed if username in group.members]
+        return any(group.roles for group in [*linked, *assigned])
+
+    @staticmethod
+    def _refuse_without_role(user_id: str, source_provider: str) -> NoReturn:
+        """Refuse a login that would hold no role, and audit it.
+
+        Raises:
+            JitNoRoleError: Always.
+        """
+        audit_jit_login_refused(user_id, source_provider, "no_role_granted")
+        raise JitNoRoleError(user_id, source_provider)
 
     def _linked(self, oidc_groups: list[str], source_provider: str) -> list[Group]:
         """The stored groups the token's identifiers are linked to for *source_provider*.

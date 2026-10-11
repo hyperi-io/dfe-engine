@@ -33,6 +33,7 @@ from dfe_engine.auth.jit import (
     API_KEY_SUBJECT_PREFIX,
     JitAccountUnavailableError,
     JitIdentityCollisionError,
+    JitNoRoleError,
     JitSubjectUnusableError,
 )
 from dfe_engine.auth.membership import groups_held, linked_groups, linked_providers
@@ -622,7 +623,7 @@ async def get_current_user(request: Request) -> AuthContext:
                     detail={"code": "unauthorized", "message": str(exc)},
                     headers={"WWW-Authenticate": "Bearer"},
                 ) from exc
-            except JitAccountUnavailableError as exc:
+            except (JitAccountUnavailableError, JitNoRoleError) as exc:
                 audit_login_denied(oidc_subject, "oidc", client_ip, exc.reason)
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,

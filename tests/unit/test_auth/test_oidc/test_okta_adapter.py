@@ -8,14 +8,21 @@
 
 import pytest
 
+from dfe_engine.auth.accounts import AccountStore
+from dfe_engine.auth.groups import GroupStore
+from dfe_engine.auth.jit import JitProvisioner
+from dfe_engine.auth.membership import linked_groups
 from dfe_engine.auth.oidc.adapters.base import (
     DirectoryCredentialError,
     DirectoryNotConfiguredError,
 )
 from dfe_engine.auth.oidc.adapters.okta import OktaAdapter
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+from dfe_engine.auth.oidc.sync import sync_provider
 from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import SecretsSettings
+from tests.unit.test_auth.test_oidc.local_okta import LocalOkta, okta_adapter
 from tests.unit.test_auth.test_oidc.unreachable_store import UnreachableSecretStore
 
 
@@ -97,6 +104,63 @@ class TestOktaSecretStoreDidNotAnswer:
         assert ok is False
         assert "secret store did not answer" in message
         assert "not configured" not in message
+
+
+SOC_GROUP = {"id": "00g1soc", "profile": {"name": "SOC Analysts", "description": "SOC"}}
+
+
+class TestOktaLinksOnTheGroupName:
+    """Okta's groups claim carries names, so the sync and the login lookup link on names too."""
+
+    async def test_a_synced_group_takes_the_name_a_login_claim_carries(self, tmp_path):
+        okta = LocalOkta(pages=[[SOC_GROUP]])
+        okta.start()
+        registry = OIDCProviderRegistry(tmp_path / "oidc")
+        registry.create("okta", OIDCProvider(type="okta", groups=GroupResolutionConfig(mode="api")))
+        group_store = GroupStore(tmp_path / "groups")
+        try:
+            result = await sync_provider(
+                "okta", registry, group_store, adapter=okta_adapter(okta.base_url)
+            )
+        finally:
+            okta.stop()
+
+        assert (result["created"], result["status"]) == (1, "ok")
+        synced = group_store.get("soc-analysts")
+        assert (synced.source_provider, synced.source_id) == ("okta", "SOC Analysts")
+        assert linked_groups(["SOC Analysts"], group_store.list(), {"okta"}) == [synced]
+        assert linked_groups(["00g1soc"], group_store.list(), {"okta"}) == []
+
+    async def test_a_claim_login_reaches_the_synced_group_once_it_has_a_role(self, tmp_path):
+        okta = LocalOkta(pages=[[SOC_GROUP]])
+        okta.start()
+        registry = OIDCProviderRegistry(tmp_path / "oidc")
+        registry.create("okta", OIDCProvider(type="okta", groups=GroupResolutionConfig(mode="api")))
+        group_store = GroupStore(tmp_path / "groups")
+        try:
+            await sync_provider("okta", registry, group_store, adapter=okta_adapter(okta.base_url))
+        finally:
+            okta.stop()
+        group_store.update("soc-analysts", roles=["data_analyst"])
+        jit = JitProvisioner(
+            account_store=AccountStore(tmp_path / "accounts"), group_store=group_store
+        )
+
+        account = jit.ensure_account("00u1jane", ["SOC Analysts"], "okta")
+
+        assert account.groups == ["SOC Analysts"]
+        assert jit.resolve_hyperdx_team(["SOC Analysts"], "okta") == "dfe-analysts"
+
+    async def test_a_login_lookup_answers_with_group_names(self):
+        okta = LocalOkta(pages=[[SOC_GROUP]])
+        okta.start()
+        try:
+            groups = await okta_adapter(okta.base_url).resolve_user_groups("jane@example.com")
+        finally:
+            okta.stop()
+
+        assert [group.id for group in groups] == ["SOC Analysts"]
+        assert okta.pages_requested == [0]
 
 
 class TestOktaApiTokenResolution:

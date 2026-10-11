@@ -101,12 +101,14 @@ class TestApiKeyAuthentication:
         assert body["code"] == "unauthorized"
         assert body["message"] == "API key expired"
 
-    def test_oidc_takes_precedence_over_api_key(self, client: TestClient, test_api_key: str):
+    def test_oidc_takes_precedence_over_api_key(self, client: TestClient, app, test_api_key: str):
         """OIDC headers take precedence over API key."""
+        app.state.group_store.update("dfe-viewers", source_id="dfe-viewers")
         resp = client.get(
             "/api/v1/auth/me",
             headers={
                 "X-Oidc-Subject": "oidc-user@example.com",
+                "X-Oidc-Groups": "dfe-viewers",
                 "X-API-Key": test_api_key,
             },
         )

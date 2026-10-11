@@ -18,14 +18,22 @@ def _link(app, *names: str) -> None:
         app.state.group_store.update(name, source_id=name)
 
 
+def _assert_refused_without_role(resp, app, stem: str) -> None:
+    """The proxied identity holds no role, so it is refused and no account is made for it."""
+    assert resp.status_code == 401, resp.text
+    assert resp.json()["code"] == "no_role_granted"
+    assert app.state.account_store.get(stem) is None
+
+
 class TestOidcAuthentication:
     """OIDC headers (X-Oidc-Subject, X-Oidc-Groups) authenticate without JWT."""
 
-    def test_oidc_subject_authenticates(self, client: TestClient):
-        """X-Oidc-Subject header alone is sufficient for authentication."""
+    def test_oidc_subject_authenticates(self, client: TestClient, app):
+        """The proxy's headers authenticate with no JWT."""
+        _link(app, "dfe-viewers")
         resp = client.get(
             "/api/v1/auth/me",
-            headers={"X-Oidc-Subject": "alice@example.com"},
+            headers={"X-Oidc-Subject": "alice@example.com", "X-Oidc-Groups": "dfe-viewers"},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -60,12 +68,15 @@ class TestOidcAuthentication:
                 groups=GroupResolutionConfig(mode="manual"),
             ),
         )
-        resp = client.get(
-            "/api/v1/auth/me",
-            headers={"X-Oidc-Subject": "mia@example.com", "X-Oidc-Groups": "dfe-admins"},
-        )
-        assert resp.status_code == 200, resp.text
-        assert ("admin" in resp.json()["roles"], resp.json()["groups"]) == (False, [])
+        headers = {"X-Oidc-Subject": "mia@example.com", "X-Oidc-Groups": "dfe-admins"}
+
+        refused = client.get("/api/v1/auth/me", headers=headers)
+        _assert_refused_without_role(refused, app, "mia-example-com")
+        app.state.group_store.add_member("dfe-viewers", "mia-example-com")
+        admitted = client.get("/api/v1/auth/me", headers=headers)
+
+        assert admitted.status_code == 200, admitted.text
+        assert ("admin" in admitted.json()["roles"], admitted.json()["groups"]) == (False, [])
 
     def test_groups_resolve_by_source_id(self, client: TestClient, app):
         """A provider that sends opaque group ids (Entra GUIDs, Google keys)
@@ -108,9 +119,7 @@ class TestOidcAuthentication:
             },
         )
 
-        assert resp.status_code == 200
-        assert resp.json()["roles"] == []
-        assert resp.json()["groups"] == []
+        _assert_refused_without_role(resp, app, "heidi-example-com")
 
     def test_a_group_linked_to_another_provider_is_not_taken(self, client: TestClient, app):
         """Two IdPs: one cannot assert the other's group id to take its group."""
@@ -124,8 +133,7 @@ class TestOidcAuthentication:
             headers={"X-Oidc-Subject": "ivy@example.com", "X-Oidc-Groups": "00g-admins"},
         )
 
-        assert resp.status_code == 200
-        assert resp.json()["roles"] == []
+        _assert_refused_without_role(resp, app, "ivy-example-com")
 
     def test_a_group_linked_by_its_id_alone_answers_any_provider(self, client: TestClient, app):
         """A group file an operator linked carries only source_id, as the sync fills the rest."""
@@ -142,6 +150,7 @@ class TestOidcAuthentication:
 
     def test_the_proxy_path_stamps_the_configured_provider(self, client: TestClient, app):
         """The stamp is a provider name, not the protocol -- ``auth.proxy_provider``."""
+        _link(app, "dfe-admins")
         app.state.settings.auth.proxy_provider = "entra"
 
         resp = client.get(
@@ -157,6 +166,7 @@ class TestOidcAuthentication:
     def test_a_dual_path_deployment_reconciles_one_identity(self, client: TestClient, app):
         """The defect this fixes: the proxy stamped 'oidc' and the RP callback
         asserted the provider name, so the guard read one IdP as two identities."""
+        _link(app, "dfe-admins", "dfe-analysts")
         app.state.settings.auth.proxy_provider = "entra"
         client.get(
             "/api/v1/auth/me",
@@ -173,6 +183,7 @@ class TestOidcAuthentication:
 
     def test_the_default_stamp_keeps_a_proxy_only_deployment_working(self, client: TestClient, app):
         """Unset, the stamp stays what deployed accounts already carry."""
+        _link(app, "dfe-admins")
         assert app.state.settings.auth.proxy_provider == "oidc"
 
         resp = client.get(
@@ -193,11 +204,11 @@ class TestOidcAuthentication:
             headers={"X-Oidc-Subject": "lena@example.com", "X-Oidc-Groups": "../elsewhere/outside"},
         )
 
-        assert resp.status_code == 200
-        assert resp.json()["roles"] == []
+        _assert_refused_without_role(resp, app, "lena-example-com")
 
-    def test_the_proxied_caller_reads_their_own_account(self, client: TestClient):
+    def test_the_proxied_caller_reads_their_own_account(self, client: TestClient, app):
         """Authentication binds an email-shaped subject to its JIT stem, and so must /me."""
+        _link(app, "dfe-viewers")
         resp = client.get(
             "/api/v1/auth/accounts/me",
             headers={"X-Oidc-Subject": "mia@example.com", "X-Oidc-Groups": "dfe-viewers"},
@@ -207,6 +218,7 @@ class TestOidcAuthentication:
         assert resp.json()["username"] == "mia-example-com"
 
     def test_the_proxied_caller_updates_their_own_contact_fields(self, client: TestClient, app):
+        _link(app, "dfe-viewers")
         resp = client.put(
             "/api/v1/auth/accounts/me",
             headers={"X-Oidc-Subject": "noah@example.com", "X-Oidc-Groups": "dfe-viewers"},
@@ -216,7 +228,10 @@ class TestOidcAuthentication:
         assert resp.status_code == 200
         assert app.state.account_store.get("noah-example-com").phone == "+61 2 5550 1234"
 
-    def test_the_proxied_caller_is_told_their_password_lives_at_the_idp(self, client: TestClient):
+    def test_the_proxied_caller_is_told_their_password_lives_at_the_idp(
+        self, client: TestClient, app
+    ):
+        _link(app, "dfe-viewers")
         resp = client.post(
             "/api/v1/auth/accounts/reset-password",
             headers={"X-Oidc-Subject": "olga@example.com", "X-Oidc-Groups": "dfe-viewers"},
@@ -226,8 +241,8 @@ class TestOidcAuthentication:
         assert resp.status_code == 409
         assert resp.json()["code"] == "external_account"
 
-    def test_unknown_groups_no_roles(self, client: TestClient):
-        """Unknown groups authenticate but yield no roles and hold no group."""
+    def test_unknown_groups_are_refused(self, client: TestClient, app, audit_events):
+        """Groups that link nothing hold no role, so the login is refused with what fixes it."""
         resp = client.get(
             "/api/v1/auth/me",
             headers={
@@ -235,11 +250,21 @@ class TestOidcAuthentication:
                 "X-Oidc-Groups": "unknown-group-xyz",
             },
         )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["user_id"] == "bob@example.com"
-        assert data["roles"] == []
-        assert data["groups"] == []
+
+        _assert_refused_without_role(resp, app, "bob-example-com")
+        assert resp.json()["message"] == (
+            "OIDC login refused: no DFE group with a role is linked to your identity provider "
+            "groups. Ask a DFE administrator to link one."
+        )
+        refused = [e for e in audit_events if e["event"] == "auth.jit.login_refused"]
+        denied = [e for e in audit_events if e["event"] == "auth.login.denied"]
+        assert [(e["user_id"], e["source_provider"], e["reason"]) for e in refused] == [
+            ("bob@example.com", "oidc", "no_role_granted")
+        ]
+        assert [(e["user_id"], e["auth_path"], e["reason"]) for e in denied] == [
+            ("bob@example.com", "oidc", "no_role_granted")
+        ]
+        assert "unknown-group-xyz" not in json.dumps(refused + denied, default=str)
 
     def test_multiple_comma_separated_groups(self, client: TestClient, app):
         """Multiple groups are split on comma and all roles collected."""
@@ -259,8 +284,7 @@ class TestOidcAuthentication:
         assert "dfe-admins" in data["groups"]
         assert "dfe-analysts" in data["groups"]
 
-    def test_empty_groups_header(self, client: TestClient):
-        """Empty X-Oidc-Groups header authenticates with no roles."""
+    def test_an_empty_groups_header_is_refused(self, client: TestClient, app):
         resp = client.get(
             "/api/v1/auth/me",
             headers={
@@ -268,13 +292,12 @@ class TestOidcAuthentication:
                 "X-Oidc-Groups": "",
             },
         )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["user_id"] == "dave@example.com"
-        assert data["roles"] == []
+
+        _assert_refused_without_role(resp, app, "dave-example-com")
 
     def test_oidc_takes_precedence_over_bearer(self, client: TestClient, api_settings, app):
         """OIDC headers take precedence even when a valid Bearer token is present."""
+        _link(app, "dfe-viewers")
         # Create a JWT with different identity
         jwt_token = create_access_token(
             data={"sub": "jwt-user", "org_id": "jwt-org", "roles": ["admin"]},
@@ -284,6 +307,7 @@ class TestOidcAuthentication:
             "/api/v1/auth/me",
             headers={
                 "X-Oidc-Subject": "oidc-user@example.com",
+                "X-Oidc-Groups": "dfe-viewers",
                 "Authorization": f"Bearer {jwt_token}",
             },
         )
@@ -296,6 +320,7 @@ class TestOidcAuthentication:
         self, client: TestClient, api_settings, app
     ):
         """Roles resolve from the account stored under the token's subject, so its disable bites."""
+        _link(app, "dfe-admins")
         client.get(
             "/api/v1/auth/me",
             headers={"X-Oidc-Subject": "Alice.Smith@corp", "X-Oidc-Groups": "dfe-admins"},
@@ -432,6 +457,7 @@ class TestAJitFailureRefusesTheLogin:
     def test_a_login_the_account_store_cannot_record_is_refused(
         self, client: TestClient, app, audit_events
     ):
+        _link(app, "dfe-admins")
         accounts_dir = app.state.account_store._dir
         shutil.rmtree(accounts_dir)
         accounts_dir.write_text("")

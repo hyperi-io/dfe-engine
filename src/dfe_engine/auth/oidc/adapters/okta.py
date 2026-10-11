@@ -11,7 +11,8 @@
 Most deployments use ``token_claim`` mode (groups in the ID token via Okta
 claim mapping) and never call the Groups API. When ``groups.mode == "api"``,
 this adapter lists and resolves groups using the Okta Management API
-(``SSWS`` token + ``okta_domain``).
+(``SSWS`` token + ``okta_domain``). Either way a group links on its name, the
+identifier Okta's groups claim carries.
 """
 
 import functools
@@ -194,12 +195,17 @@ def _normalize_okta_api_base(okta_domain: str) -> str | None:
 
 
 def _group_info_from_okta(item: dict[str, Any]) -> GroupInfo:
+    """The GroupInfo for one Okta group, its id being the group's name.
+
+    Okta's groups claim carries group names, never the ``00g...`` ids, so the
+    name is what a sign-in and the group sync must both link on. A group with no
+    name has nothing a sign-in could assert, so it carries no id.
+    """
     profile = item.get("profile") or {}
-    gid = item.get("id") or ""
-    name = profile.get("name") or profile.get("description") or gid
+    link_name = profile.get("name") or ""
     return GroupInfo(
-        id=gid,
-        name=name,
+        id=link_name,
+        name=link_name or profile.get("description") or item.get("id") or "",
         email=profile.get("email") or "",
         description=profile.get("description") or "",
     )
