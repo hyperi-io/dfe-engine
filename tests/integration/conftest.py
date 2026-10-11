@@ -378,7 +378,7 @@ def ch_params(request):
         else:
             spec = "local"
         params, teardown = _spin_ch_on_docker(
-            spec, keep=_truthy("DFE_TEST_KEEP"), test=request.node.name
+            spec, keep=_truthy("DFE_TEST_KEEP"), test=request.node.nodeid
         )
 
     try:
@@ -417,7 +417,7 @@ def late_clickhouse(request):
     if _resolve_tier() != "local":
         pytest.skip("a ClickHouse that starts late needs the local docker tier")
     docker = _docker_prefix("local")
-    name = _container_name(request.node.name, "clickhouse")
+    name = _container_name(request.node.nodeid, "clickhouse")
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
