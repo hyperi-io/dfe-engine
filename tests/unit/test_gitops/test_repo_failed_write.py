@@ -28,9 +28,6 @@ from dulwich.repo import Repo
 from dfe_engine.gitops.repo import GitopsRepo
 from tests.support.deploy_remote import seeded_remote
 
-# The file a write gets as far as writing, but whose blob the object store refuses.
-_UNSTAGED = b"b: unstaged\n"
-
 
 def _refuse_commits(repo: GitopsRepo) -> Path:
     """Install a pre-commit hook that fails every commit; returns it for removal."""
@@ -41,12 +38,21 @@ def _refuse_commits(repo: GitopsRepo) -> Path:
     return hook
 
 
-def _refuse_blob(repo: GitopsRepo, tmp_path: Path, content: bytes) -> Path:
-    """Point the blob's object directory nowhere, which refuses it for root as well."""
-    fanout = repo.path / ".git" / "objects" / Blob.from_string(content).id.decode()[:2]
-    assert not fanout.exists()
-    fanout.symlink_to(tmp_path / "gone")
-    return fanout
+def _refuse_a_blob(repo: GitopsRepo, tmp_path: Path) -> tuple[bytes, Path]:
+    """File content the object store will refuse, and the directory pointed nowhere.
+
+    Commit ids vary with the clock, so the content is chosen to land in an object
+    directory the clone does not use yet; pointing that one nowhere refuses the blob
+    for root as well, and touches no object already stored.
+    """
+    objects = repo.path / ".git" / "objects"
+    for n in range(256):
+        content = f"b: unstaged {n}\n".encode()
+        fanout = objects / Blob.from_string(content).id.decode()[:2]
+        if not fanout.exists():
+            fanout.symlink_to(tmp_path / "gone")
+            return content, fanout
+    raise AssertionError("every object directory a candidate blob maps to is in use")
 
 
 def _head_commit(repo_path: Path, ref: bytes = b"HEAD") -> tuple[bytes, dict[str, bytes]]:
@@ -146,11 +152,11 @@ def test_a_write_that_fails_part_way_through_staging_leaves_nothing_staged(
 
 def test_a_file_written_but_never_staged_is_not_left_in_the_tree(tmp_path: Path) -> None:
     repo = _local_clone(tmp_path)
-    refused = _refuse_blob(repo, tmp_path, _UNSTAGED)
+    unstaged, refused = _refuse_a_blob(repo, tmp_path)
 
     try:
         with pytest.raises(OSError):
-            repo.publish({"a.yaml": "a: 1\n", "b.yaml": _UNSTAGED.decode()}, message="write A")
+            repo.publish({"a.yaml": "a: 1\n", "b.yaml": unstaged.decode()}, message="write A")
     finally:
         refused.unlink()
 
@@ -162,12 +168,12 @@ def test_a_file_written_but_never_staged_is_not_left_in_the_tree(tmp_path: Path)
 
 def test_a_batch_write_that_fails_part_way_leaves_nothing_in_the_tree(tmp_path: Path) -> None:
     repo = _local_clone(tmp_path)
-    refused = _refuse_blob(repo, tmp_path, _UNSTAGED)
+    unstaged, refused = _refuse_a_blob(repo, tmp_path)
 
     try:
         with pytest.raises(OSError), repo.batch("batch A"):
             repo.publish({"a.yaml": "a: 1\n"}, message="write A")
-            repo.publish({"b.yaml": _UNSTAGED.decode()}, message="write B")
+            repo.publish({"b.yaml": unstaged.decode()}, message="write B")
     finally:
         refused.unlink()
 
