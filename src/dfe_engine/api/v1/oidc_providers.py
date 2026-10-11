@@ -34,7 +34,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field, field_validator
 from scalo.logger import logger
 
-from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.deps import CurrentUser, provider_bindings, require_action
 from dfe_engine.api.pagination import (
     PaginatedResponse,
     PaginationParams,
@@ -836,6 +836,7 @@ async def sync_provider_groups(
         group_store,
         secrets=getattr(request.app.state, "dfe_secrets", None),
         metrics=getattr(request.app.state, "oidc_sync_metrics", None),
+        bindings=provider_bindings(request),
     )
     # A group the sync created is a new ClickHouse user to provision.
     if result["created"]:

@@ -123,10 +123,11 @@ Every provider's groups normalise to `NormalizedGroup { id, name, source }`.
 `GroupInfo { id, name, email, description }` (models.py) already provides this
 for api-mode; the token_claim/login path (`extract_identity`, rp.py) still emits
 a flat `list[str]`, but the resolution gap it created is now CLOSED at the
-matching layer: the sync tags each group file with its provider `source_id`, and
-`_resolve_group_grants` (deps.py) resolves each token identifier by group NAME
-first, then by `source_id`. So an Entra login carrying object GUIDs - which match
-no group filename - resolves against `source_id` and lands the right roles.
+matching layer: each group file is linked by `source_provider` and that provider's
+`source_id`, and a login takes the groups whose `source_id` it asserts, for the
+provider it signed in through (`membership.linked_groups`). A group's name links
+nothing. So an Entra login carrying object GUIDs - which match no group filename -
+resolves against `source_id` and lands the right roles.
 Verified against the live tenant (see the emulation section). The adapter is the
 ONLY place the remaining quirks live:
 
@@ -152,7 +153,7 @@ never reads a short listing as the whole directory.
 
 ### Sync and control-plane independence
 
-`auth/oidc/sync.py` enumerates a provider's groups (api mode). It creates a group file for each new one, linked by `source_provider` and `source_id`, and updates only files already linked to that IdP group (their `source_id` is its id), preserving their roles. A file of the same name with no link is skipped as `name_taken`: a display name is no identity, so linking one is an admin's act (rbac.md section 4.4). Detaching a provider does NOT delete its groups - they orphan with `source_provider` set, reported on delete.
+`auth/oidc/sync.py` enumerates a provider's groups (api mode). It creates a group file for each new one, linked by `source_provider` and `source_id`, and updates only files already linked to that IdP group (their `source_id` is its id and their `source_provider` this provider, or one `auth.source_provider_bindings` joins to it), preserving their roles. A file of the same name with no link is skipped as `name_taken`: a display name is no identity, so linking one is an admin's act (rbac.md section 4.4). A file carrying the id under any other provider is skipped as `provider_mismatch`, so a sync never moves a group between providers. Detaching a provider does NOT delete its groups - they orphan with `source_provider` set, reported on delete.
 
 **The OIDC auth flow does not depend on dfe-engine running.** Envoy (fallback
 path) keeps doing OIDC from a static CRD; group files on disk keep resolving

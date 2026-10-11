@@ -103,7 +103,16 @@ Create the provider with `POST /api/v1/auth/oidc-providers`. The `name` becomes 
 
 A `google` provider accepts only `api` mode, and DFE turns on `enrich_on_login` for it. Leave `scopes` unset: the default carries the Cloud Identity scope. The client secret goes to the secret store and the provider keeps only its path. A service account (`groups.service_account_json`) holding a groups admin role is optional: it runs the group sync and answers a sign-in the user's token could not. Without one the group sync has no directory to list, so the provider's `last_sync_status` reads `user_token` and `sync_error` stays empty.
 
-Link each DFE group by setting its `source_id` to an id the admin sent: see [rbac.md, section 4.4](../rbac.md#44-group-sync-process). Behind a TLS-terminating proxy, set `api.forwarded_allow_ips` (`DFE_API_FORWARDED_ALLOW_IPS`), or the engine builds the redirect URI with `http://` and Google refuses it.
+Link each DFE group by setting two fields in its group file: `source_provider` to `<provider-name>`, the name the provider was created with, and `source_id` to an id the admin sent. A group file with a `source_id` and no `source_provider` does not load, and its members lose its roles: see [rbac.md, section 4.4](../rbac.md#44-group-sync-process).
+
+```yaml
+# config/auth/groups/soc-analysts.yaml
+roles: ["data_analyst"]
+source_provider: "<provider-name>"
+source_id: "<Cloud Identity group id>"
+```
+
+Behind a TLS-terminating proxy, set `api.forwarded_allow_ips` (`DFE_API_FORWARDED_ALLOW_IPS`), or the engine builds the redirect URI with `http://` and Google refuses it.
 
 ## Vendor references
 

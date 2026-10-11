@@ -11,9 +11,9 @@
 Fetches all groups from a provider's API and upserts them into the local
 GroupStore.  Only providers with ``groups.mode == "api"`` and
 ``enabled == True`` are processed.  A stored group is updated only when it is
-already linked to the provider group, through this provider.  A name match alone
-links nothing, because a directory's display names are not unique and its users
-may choose them.
+already linked to the provider group, through this provider or one bound to it.
+A name match alone links nothing, because a directory's display names are not
+unique and its users may choose them.
 
 Usage::
 
@@ -25,12 +25,14 @@ Usage::
 """
 
 import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
 from scalo.logger import logger
 
 from dfe_engine.auth.groups import GroupExistsError
+from dfe_engine.auth.membership import linked_providers
 from dfe_engine.auth.oidc.adapters.base import (
     DirectoryCredentialError,
     DirectoryCredentialUnreadableError,
@@ -138,7 +140,8 @@ SyncSkipReason = Literal[
 - ``name_taken``: a stored group holds its name and is not linked to it: the stored
   group carries no ``source_id``, or another provider group's id.
 - ``provider_mismatch``: the stored group of its name carries its id but is linked to
-  another provider, which keeps it.
+  another provider, one ``auth.source_provider_bindings`` does not join to this one,
+  and that provider keeps it.
 - ``no_id``: the provider gave it no id, and only the id links a stored group to it.
 """
 
@@ -208,18 +211,19 @@ async def sync_provider(
     adapter: OIDCGroupAdapter | None = None,
     secrets: DfeSecrets | None = None,
     metrics: SyncMetrics | None = None,
+    bindings: Mapping[str, str] | None = None,
 ) -> dict:
     """Run group sync for a single OIDC provider.
 
     Fetches all groups from the provider's API and upserts them into
     *group_store*.  A stored group linked to the provider group (its
-    ``source_id`` is the group's id and its ``source_provider`` this provider)
-    has its description updated, and keeps its roles.  A stored group of the
-    same name with no such link is left untouched and counted as ``name_taken``:
-    linking one is an admin's act.  One carrying the id under another provider is
-    left untouched too, counted as ``provider_mismatch``, so a sync never moves a
-    group between providers.  New groups are created with empty roles, linked to
-    the provider group.
+    ``source_id`` is the group's id and its ``source_provider`` this provider,
+    or one *bindings* joins to it) has its description updated, and keeps its
+    roles and its stamp.  A stored group of the same name with no such link is
+    left untouched and counted as ``name_taken``: linking one is an admin's act.
+    One carrying the id under any other provider is left untouched too, counted
+    as ``provider_mismatch``, so a sync never moves a group between providers.
+    New groups are created with empty roles, linked to the provider group.
 
     Args:
         provider_name: Name of the provider in *provider_registry*.
@@ -230,6 +234,8 @@ async def sync_provider(
         secrets: The DfeSecrets seam the directory credential resolves through
             when the adapter is built here.
         metrics: Where each group left unsynced is counted. ``None`` counts nothing.
+        bindings: ``auth.source_provider_bindings``. A group stamped with a name
+            bound to this provider, either way round, is this provider's.
 
     Returns:
         A dict with keys:
@@ -360,6 +366,7 @@ async def sync_provider(
         }
 
     metrics = metrics if metrics is not None else SyncMetrics()
+    own_stamps = linked_providers([provider_name], bindings or {})
     created = 0
     updated = 0
     skips: dict[SyncSkipReason, int] = dict.fromkeys(_SKIP_STATUS, 0)
@@ -418,8 +425,8 @@ async def sync_provider(
             metrics.skipped("name_taken")
             skips["name_taken"] += 1
             continue
-        # Two providers can assign one id, so a matching id under another provider's link is not ours.
-        if existing.source_provider != provider_name:
+        # Two providers can assign one id, so a matching id under an unbound provider's link is not ours.
+        if existing.source_provider not in own_stamps:
             logger.warning(
                 "OIDC group sync skipped a group linked to another provider",
                 provider=provider_name,

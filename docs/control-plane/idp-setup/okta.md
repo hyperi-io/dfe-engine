@@ -87,7 +87,16 @@ Create the provider with `POST /api/v1/auth/oidc-providers`. The `name` becomes 
 
 The default `token_claim` mode reads the `groups` claim, and the default scopes are `openid email profile groups`. To drop the `groups` scope, send `"scopes": ["openid", "email", "profile"]`: a claim set to **Always** and **Any scope** still arrives. The API alternative is `groups.mode: api` with `groups.okta_domain` and `groups.api_token`. The sync and `groups.enrich_on_login: true` both read group names, the same identifiers the claim carries. The client secret goes to the secret store and the provider keeps only its path.
 
-Link each DFE group by setting its `source_id` to a group name the admin sent, and its `source_provider` to `<provider-name>` so no other provider's sign-in can assert the same name: see [rbac.md, section 4.4](../rbac.md#44-group-sync-process). A linked group admits its members only once it carries a role, and until one does no Okta user can sign in, so link the first group as the local admin or the break-glass account. Behind a TLS-terminating proxy, set `api.forwarded_allow_ips` (`DFE_API_FORWARDED_ALLOW_IPS`), or the engine builds the redirect URI with `http://` and Okta refuses it.
+Link each DFE group by setting two fields in its group file: `source_provider` to `<provider-name>`, the name the provider was created with, and `source_id` to a group name the admin sent. The provider is what stops another provider's sign-in asserting the same name, and a group file with a `source_id` and no `source_provider` does not load: see [rbac.md, section 4.4](../rbac.md#44-group-sync-process).
+
+```yaml
+# config/auth/groups/soc-analysts.yaml
+roles: ["data_analyst"]
+source_provider: "<provider-name>"
+source_id: "<Okta group name>"
+```
+
+A linked group admits its members only once it carries a role, and until one does no Okta user can sign in, so link the first group as the local admin or the break-glass account. Behind a TLS-terminating proxy, set `api.forwarded_allow_ips` (`DFE_API_FORWARDED_ALLOW_IPS`), or the engine builds the redirect URI with `http://` and Okta refuses it.
 
 ## Vendor references
 

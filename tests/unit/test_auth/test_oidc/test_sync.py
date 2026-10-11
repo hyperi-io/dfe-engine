@@ -29,6 +29,7 @@ from dfe_engine.auth.oidc.sync import (
     _safe_name,
     sync_provider,
 )
+from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
 from tests.unit.test_auth.test_oidc.refusing_store import PolicyRefusingSecretStore
 from tests.unit.test_auth.test_oidc.unreachable_store import UnreachableSecretStore
 
@@ -421,6 +422,65 @@ class TestSyncNeverTakesAGroupNoAdminLinked:
             "provider_mismatch",
         )
         assert "soc@corp.example" not in json.dumps(audit_events, default=str)
+
+    @pytest.mark.parametrize(
+        ("stamp", "syncing", "bindings"),
+        [
+            pytest.param(SCIM_SOURCE_PROVIDER, "entra", {SCIM_SOURCE_PROVIDER: "entra"}, id="scim"),
+            pytest.param("entra", "entra-legacy", {"entra-legacy": "entra"}, id="reverse"),
+        ],
+    )
+    async def test_a_group_a_binding_joins_to_this_provider_syncs(
+        self, registries, api_provider, stamp, syncing, bindings
+    ):
+        """auth.source_provider_bindings declares two names one identity source, in both directions."""
+        provider_registry, group_store = registries
+        provider_registry.create(syncing, api_provider)
+        group_store.create(
+            "soc-team", roles=["data_analyst"], source_provider=stamp, source_id="g-soc"
+        )
+        groups = [GroupInfo(id="g-soc", name="SOC Team", email="", description="From Entra")]
+
+        result = await sync_provider(
+            syncing,
+            provider_registry,
+            group_store,
+            adapter=FakeAdapter(api_provider, groups),
+            bindings=bindings,
+        )
+
+        assert (result["updated"], result["groups_skipped"], result["status"]) == (1, 0, "ok")
+        stored = group_store.get("soc-team")
+        assert (stored.source_provider, stored.source_id) == (stamp, "g-soc")
+        assert (stored.roles, stored.description) == (["data_analyst"], "From Entra")
+
+    async def test_a_scim_group_bound_to_another_provider_is_still_skipped(
+        self, registries, api_provider
+    ):
+        provider_registry, group_store = registries
+        provider_registry.create("entra", api_provider)
+        group_store.create(
+            "soc-team", roles=["admin"], source_provider=SCIM_SOURCE_PROVIDER, source_id="g-soc"
+        )
+        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+        groups = [GroupInfo(id="g-soc", name="SOC Team", email="")]
+
+        result = await sync_provider(
+            "entra",
+            provider_registry,
+            group_store,
+            adapter=FakeAdapter(api_provider, groups),
+            metrics=SyncMetrics(manager),
+            bindings={SCIM_SOURCE_PROVIDER: "okta"},
+        )
+
+        assert (result["updated"], result["groups_skipped"], result["status"]) == (
+            0,
+            1,
+            "partial",
+        )
+        assert group_store.get("soc-team").source_provider == SCIM_SOURCE_PROVIDER
+        assert _sync_skips(manager) == {"provider_mismatch": 1.0}
 
     async def test_an_idp_group_with_no_id_links_nothing(self, seeded, api_provider):
         """An empty id would otherwise match every group that carries no source_id."""
