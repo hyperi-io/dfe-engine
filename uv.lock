@@ -694,7 +694,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },
-    { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.31.5,<3" },
+    { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.31.6" },
     { name = "scim2-models", specifier = ">=0.6.12,<0.7" },
     { name = "sqlglot", specifier = ">=30.17.0" },
     { name = "sse-starlette", specifier = ">=3.4.5" },
@@ -2235,7 +2235,7 @@ wheels = [
 
 [[package]]
 name = "scalo"
-version = "2.31.5"
+version = "2.31.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2253,9 +2253,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/56/21/090dd71b3e51daa5b105da53749be604a13655c4d777530160c2d513d910/scalo-2.31.5.tar.gz", hash = "sha256:134d586147d3e24ea30712cccdf21f3a431ead7e0eeeaa7d5a628efd11c55dad", size = 362894, upload-time = "2026-10-11T01:01:00.923Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6f/ee/b0e9ce9c32e0fbe29e105e4e85762a300e3be82fb7d8e3d7ca4a980d9c2a/scalo-2.31.6.tar.gz", hash = "sha256:a42b8ed1a01b1751410c46cf4e859d805d98fb2605c2eb58c10ed0aa3f873b8b", size = 354802, upload-time = "2026-10-11T04:28:59.223Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ce/f5/642d65dba96102f04af3be476356022d9e8c2d17fd32bd5172326e4b57ef/scalo-2.31.5-py3-none-any.whl", hash = "sha256:9a6285461e77b65e49dbe5e9d7d1837a03b93ec1487c2b46258defe2fbcb90df", size = 434848, upload-time = "2026-10-11T01:00:58.997Z" },
+    { url = "https://files.pythonhosted.org/packages/83/03/82f41897aa61018b49699badc1366aeb77f06e362734afeda5c08f84adaa/scalo-2.31.6-py3-none-any.whl", hash = "sha256:7132dc022be4093dab25970b0efa4767cd8390087a0158f8b763559d0a101509", size = 426913, upload-time = "2026-10-11T04:28:57.162Z" },
 ]
 
 [package.optional-dependencies]
