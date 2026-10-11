@@ -29,7 +29,6 @@ from .catalogue import (
     DEPLOY_INSTANCE_PATH,
     DEPLOY_SERVICE_PATH,
     DFE_COMMON_COMPONENT_PATH,
-    DFE_COMMON_OTEL_SERVICE_NAME_PATH,
     FULLNAME_OVERRIDE_PATH,
     OTEL_SERVICE_NAME_PATH,
     AppDescriptor,
@@ -242,19 +241,18 @@ def initial_overlay(app: AppInstance, values: dict | None = None) -> dict:
     """The minimum document that makes an instance deployable.
 
     The ``deploy`` block is what the ApplicationSet reads to name the Application;
-    without it the file produces nothing. The OTel service name is set here because
-    it is the only thing that makes this instance's telemetry distinguishable from
-    another instance of the same app.
+    without it the file produces nothing.
 
-    A per-config instance carries its names under both chart families' keys, so the
-    same overlay renders the same object names on either. The identity is written
-    again after ``values``, so a caller's value cannot rename the instance's objects.
+    A per-config instance also carries its object-name stem and OTel service name,
+    the only things that tell its objects and telemetry apart from another instance
+    of the same app. A stack-wide app writes neither: the thin chart names it, and
+    reports it, by the chart's own name. The identity is written again after
+    ``values``, so a caller's value cannot rename the instance's objects.
     """
     desc = descriptor(app.service)
     identity: dict[str, object] = {
         DEPLOY_SERVICE_PATH: app.service,
         DEPLOY_INSTANCE_PATH: app.instance,
-        DFE_COMMON_OTEL_SERVICE_NAME_PATH: app.telemetry_name,
     }
     if desc.component_is_per_instance:
         identity[OTEL_SERVICE_NAME_PATH] = app.telemetry_name

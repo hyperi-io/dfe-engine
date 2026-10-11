@@ -122,30 +122,26 @@ class TestControlCharactersAreRefused:
 
 class TestOtelServiceNameIsTheChartsOwnDial:
     def test_overlay_sets_the_chart_dials_and_never_env(self):
-        # `env` is a STRING in the dfe-infra charts (the deployment environment)
-        # feeding the dfe.hyperi.io/env label and the namespace, so writing a map
-        # there renders an invalid label value and every object is rejected.
+        # `env` is the deployment environment string dfe-extras puts in the
+        # dfe.hyperi.io/env label, so a map there renders an invalid label value.
         app = instances.instance_of(VRL, "edge")
         doc = instances.initial_overlay(app)
 
         assert get_path(doc, catalogue.OTEL_SERVICE_NAME_PATH) == app.telemetry_name
         assert doc["otel"] == {"serviceName": "dfe-transform-vrl-edge"}
-        assert doc[catalogue.DFE_COMMON_OTEL_SERVICE_NAME_PATH] == "dfe-transform-vrl-edge"
         assert "env" not in doc
 
     def test_the_dial_survives_a_commit(self, crud):
         app = instances.instance_of("dfe-transform-vector", "edge")
         reloaded = _committed(crud, instances.initial_overlay(app), app)
         assert reloaded["otel"]["serviceName"] == "dfe-transform-vector-edge"
-        assert reloaded["otelServiceName"] == "dfe-transform-vector-edge"
         assert "env" not in reloaded
 
     def test_a_single_deployment_overlay_leaves_the_chart_its_own_name(self):
         # The thin chart's default is its own name, which a stack-wide app already
-        # reports; only the dfe-common key, which those charts never read, is written.
+        # reports, so the overlay is the deploy block alone.
         doc = instances.initial_overlay(instances.instance_of(LOADER, "default"))
-        assert "otel" not in doc
-        assert doc[catalogue.DFE_COMMON_OTEL_SERVICE_NAME_PATH] == LOADER
+        assert doc == {"deploy": {"service": LOADER, "instance": "default"}}
 
 
 class TestMalformedFileSetsAreRefused:
@@ -248,14 +244,13 @@ class TestInstanceCountFollowsMultiplicity:
     @pytest.mark.parametrize(
         "service", ["dfe-fetcher", "dfe-transform-vrl", "dfe-transform-vector"]
     )
-    def test_both_chart_families_render_one_name(self, service):
-        # A rollback re-renders the same overlay on the dfe-common chart, whose
-        # name is {project}-{component}; a second name would prune the first's PVCs.
+    def test_the_thin_chart_and_dfe_extras_render_one_name(self, service):
+        # dfe-extras names its objects {project}-{component} beside the thin chart's
+        # fullnameOverride, so the two keys have to name one deployment.
         doc = instances.initial_overlay(instances.instance_of(service, "auth"))
         dfe_common = f"dfe-{doc[catalogue.DFE_COMMON_COMPONENT_PATH]}"
         assert doc[catalogue.FULLNAME_OVERRIDE_PATH] == dfe_common == f"{service}-auth"
         assert get_path(doc, catalogue.OTEL_SERVICE_NAME_PATH) == f"{service}-auth"
-        assert doc[catalogue.DFE_COMMON_OTEL_SERVICE_NAME_PATH] == f"{service}-auth"
 
     def test_a_caller_s_value_cannot_rename_the_instance(self):
         # The Argo Application and every object name come from these keys.

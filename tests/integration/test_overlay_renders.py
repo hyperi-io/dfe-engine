@@ -5,29 +5,31 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""Render the engine's own overlays through the real dfe-infra dfe-common charts.
+"""Render the engine's own overlays through the published thin charts.
 
-The engine writes a values overlay and the chart turns it into Kubernetes objects,
+The engine writes a values overlay and the thin chart turns it into Kubernetes objects,
 but nothing above this file ever runs both halves together: a unit test proves the
 engine wrote the key it meant to, and a chart test proves the chart reads the key it
-expects, and neither notices when the two names stop agreeing. Every assertion here
-is about that seam.
+expects, and neither notices when the two names stop agreeing. Every assertion here is
+about where the two meet.
 
-These are the charts a rollback renders the overlay on, so what is held here is that
-the identity and telemetry keys name each instance there. File content sits under
-the thin chart's ``fileSets``, which these charts do not read, and dfe-infra's
-``scripts/tests/test_weave_transforms.py`` holds its delivery to the pod.
+Each chart is the one the pinned dfe-infra release deploys, pulled from the registry by
+the digest that release's ``versions.yaml`` pins, and rendered with the overlay alone.
+A deployment takes a file set's ``mountPath`` from dfe-infra's integration values, so
+the overlay here takes it from the manifest, which dfe-infra's
+``scripts/tests/test_deployment_owned.py`` holds equal to them. Delivery to the pod is
+``scripts/tests/test_weave_transforms.py``'s.
 
-The charts come from a dfe-infra checkout (``$DFE_INFRA_DIR``, or one beside this
-repo), else from the dfe-infra release pinned in ``tests/support/producer_contract.py``.
-The module skips when the ``helm`` binary is absent.
+The module skips when the ``helm`` binary is absent. A digest or chart it cannot read
+skips the test locally and fails it in CI.
 """
 
 import re
 import shutil
 import subprocess
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import pytest
 import yaml
@@ -35,7 +37,7 @@ import yaml
 from dfe_engine.appmgmt import catalogue, files, instances, scaling
 from dfe_engine.gitcrud.engine import set_path
 from dfe_engine.yaml_utils import yaml_dump_string
-from tests.support.producer_contract import DFE_INFRA, producer_tree
+from tests.support.producer_contract import DFE_INFRA, in_ci, producer_file
 
 if shutil.which("helm") is None:
     pytest.skip("the helm binary is not on PATH", allow_module_level=True)
@@ -45,8 +47,13 @@ pytestmark = pytest.mark.integration
 VRL = "dfe-transform-vrl"
 VECTOR = "dfe-transform-vector"
 FETCHER = "dfe-fetcher"
+LOADER = "dfe-loader"
 
 TRANSFORM_SERVICES = [VRL, VECTOR]
+
+# Where every DFE app's thin chart is published, beside its images.
+CHART_REGISTRY = "oci://ghcr.io/hyperi-io/charts"
+_DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
 
 # A Kubernetes label value: 63 characters or fewer, alphanumeric at both ends, and
 # only alphanumerics, '-', '_' and '.' between. Empty is legal.
@@ -70,12 +77,53 @@ HOSTILE_BODIES = {
 }
 
 
+def unavailable(reason: str) -> NoReturn:
+    """Skip a test whose chart could not be had, or fail it in CI."""
+    if in_ci():
+        pytest.fail(reason, pytrace=False)
+    pytest.skip(reason)
+
+
+def chart_digest(service: str) -> str:
+    """The thin chart digest the pinned dfe-infra release deploys for a service."""
+    found = producer_file(DFE_INFRA, "versions.yaml")
+    data = yaml.safe_load(found.text) or {}
+    current = str(data.get("current", ""))
+    stack = (data.get("stacks") or {}).get(current) or {}
+    digest = str((stack.get("chart-digests") or {}).get(service, ""))
+    if not _DIGEST_RE.fullmatch(digest):
+        unavailable(f"{found.origin} pins no chart digest for {service} in stack {current!r}")
+    return digest
+
+
+def pull(service: str, dest: Path) -> Path:
+    """The service's published thin chart, unpacked under ``dest``."""
+    reference = f"{CHART_REGISTRY}/{service}@{chart_digest(service)}"
+    result = subprocess.run(
+        ["helm", "pull", reference, "--untar", "--destination", str(dest)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.returncode != 0:
+        unavailable(f"helm could not pull {reference}: {result.stderr.strip()}")
+    return dest / service
+
+
 @pytest.fixture(scope="module")
-def charts(tmp_path_factory) -> Path:
-    """dfe-infra's chart directory, from a checkout or the pinned release."""
-    dest = tmp_path_factory.mktemp("dfe-infra")
-    tree = producer_tree(DFE_INFRA, "helm/charts", dest)
-    yield tree
+def charts(tmp_path_factory) -> Iterator[Callable[[str], Path]]:
+    """Each service's published thin chart, pulled once per module."""
+    dest = tmp_path_factory.mktemp("thin-charts")
+    pulled: dict[str, Path] = {}
+
+    def chart(service: str) -> Path:
+        if service not in pulled:
+            pulled[service] = pull(service, dest)
+        return pulled[service]
+
+    yield chart
     # Module-scoped tmp_path_factory dirs are NOT covered by tmp_path_retention_policy.
     shutil.rmtree(dest, ignore_errors=True)
 
@@ -106,14 +154,18 @@ def bad_labels(doc: Any, path: str = "") -> list[str]:
     return found
 
 
-def render(charts: Path, service: str, doc: dict, release: str, tmp_path: Path) -> list[dict]:
-    """Write the overlay to a values file and render the real chart through helm."""
+def render(
+    charts: Callable[[str], Path], service: str, doc: dict, release: str, tmp_path: Path
+) -> list[dict]:
+    """Write the overlay to a values file and render the service's thin chart through helm."""
     values_file = tmp_path / f"{release}-values.yaml"
     values_file.write_text(yaml_dump_string(doc), encoding="utf-8")
     result = subprocess.run(
-        ["helm", "template", release, str(charts / service), "--values", str(values_file)],
+        ["helm", "template", release, str(charts(service)), "--values", str(values_file)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=True,
     )
     return [d for d in yaml.safe_load_all(result.stdout) if isinstance(d, dict)]
@@ -124,6 +176,7 @@ def overlay_with_files(service: str, instance: str, bodies: dict[str, str]) -> d
     app = instances.instance_of(service, instance)
     doc = instances.initial_overlay(app)
     file_set = catalogue.file_set(service, "transforms")
+    set_path(doc, f"fileSets.{file_set.name}.mountPath", file_set.mount_path)
     for name, content in bodies.items():
         files.upsert_file(doc, file_set, name, content)
     return doc
@@ -164,19 +217,26 @@ class TestOverlayRendersThroughTheChart:
         assert {"Deployment", "ConfigMap", "ServiceAccount"} <= kinds
 
     def test_every_rendered_label_value_is_legal(self, charts, service, tmp_path):
-        # Writing the OTel name under `env` turned that string into a map and the
-        # chart rendered `map[OTEL_SERVICE_NAME:...]` into dfe.hyperi.io/env, which
-        # the API server rejects for every object in the release.
+        # A map written where the chart wants a string renders as `map[...]` into a
+        # label, which the API server rejects for every object in the release.
         doc = overlay_with_files(service, "edge", {FILE_FOR[service]: BODY_FOR[service]})
         objects = render(charts, service, doc, "edge", tmp_path)
         offending = [problem for o in objects for problem in bad_labels(o)]
         assert offending == []
 
-    def test_a_map_where_the_chart_wants_a_string_is_caught(self, charts, service, tmp_path):
-        # Proves the label check has teeth: the shape of the original defect must
-        # still fail it, or the assertion above passes for the wrong reason.
+    def test_a_map_where_the_chart_wants_a_string_is_refused(self, charts, service, tmp_path):
+        # The chart's values schema types every label input as a string.
         doc = overlay_with_files(service, "edge", {})
-        doc["env"] = {"OTEL_SERVICE_NAME": "dfe-edge"}
+        doc["partOf"] = {"OTEL_SERVICE_NAME": "dfe-edge"}
+        with pytest.raises(subprocess.CalledProcessError) as refused:
+            render(charts, service, doc, "edge", tmp_path)
+        assert "'/partOf': got object, want string" in refused.value.stderr
+
+    def test_an_illegal_label_value_is_caught(self, charts, service, tmp_path):
+        # Proves the label check has teeth: the value the original defect rendered must
+        # still fail it, or the legality assertion passes for the wrong reason.
+        doc = overlay_with_files(service, "edge", {})
+        doc["commonLabels"] = {"dfe.hyperi.io/env": "map[OTEL_SERVICE_NAME:dfe-edge]"}
         objects = render(charts, service, doc, "edge", tmp_path)
         assert [problem for o in objects for problem in bad_labels(o)] != []
 
@@ -198,19 +258,18 @@ class TestOverlayRendersThroughTheChart:
             names.add(env_of(objects)["OTEL_SERVICE_NAME"])
         assert len(names) == 2
 
-    def test_written_files_are_inert_on_the_dfe_common_chart(self, charts, service, tmp_path):
-        # A rollback shows the files left at the key this chart reads, so a file
-        # written under fileSets renders nothing here rather than failing the render.
+    def test_a_written_file_reaches_its_set_and_its_mount(self, charts, service, tmp_path):
+        # The engine stores {name, content} under fileSets.<set>.files, which the chart
+        # turns into one ConfigMap per set, mounted where the manifest says.
+        app = instances.instance_of(service, "edge")
         name, body = FILE_FOR[service], BODY_FOR[service]
-        with_files = render(
+        objects = render(
             charts, service, overlay_with_files(service, "edge", {name: body}), "edge", tmp_path
         )
-        without = render(charts, service, overlay_with_files(service, "edge", {}), "edge", tmp_path)
-        names = {o["metadata"]["name"] for o in with_files if o["kind"] == "ConfigMap"}
-        assert not any(n.endswith("-transforms") for n in names)
-        assert {(o["kind"], o["metadata"]["name"]) for o in with_files} == {
-            (o["kind"], o["metadata"]["name"]) for o in without
-        }
+        configmaps = {o["metadata"]["name"]: o for o in objects if o["kind"] == "ConfigMap"}
+        assert configmaps[f"{app.telemetry_name}-transforms"]["data"] == {name: body}
+        mounts = {m["mountPath"] for m in container(objects)["volumeMounts"]}
+        assert catalogue.file_set(service, "transforms").mount_path in mounts
 
     @pytest.mark.parametrize("case", sorted(HOSTILE_BODIES))
     def test_hostile_content_survives_byte_exact(self, service, case):
@@ -260,7 +319,7 @@ class TestOverlayRendersThroughTheChart:
 class TestPerConfigInstancesDoNotCollide:
     """dfe-fetcher runs many configs side by side, so their object names must differ."""
 
-    def _names(self, charts: Path, instance: str, tmp_path: Path) -> set[str]:
+    def _names(self, charts: Callable[[str], Path], instance: str, tmp_path: Path) -> set[str]:
         app = instances.instance_of(FETCHER, instance)
         doc = instances.initial_overlay(app)
         objects = render(charts, FETCHER, doc, app.telemetry_name, tmp_path)
@@ -268,9 +327,9 @@ class TestPerConfigInstancesDoNotCollide:
         return {f"{o['kind']}/{o['metadata']['name']}" for o in objects}
 
     def test_two_instances_render_no_shared_object_name(self, charts, tmp_path):
-        # dfe-common.fullname is {project}-{component} with no instance of its own,
-        # so without the per-instance component the two Argo Applications would own
-        # the same objects and fight over them under self-heal.
+        # The thin chart names every object from fullnameOverride, else its chart name,
+        # so without the per-instance name the two Argo Applications would own the
+        # same objects and fight over them under self-heal.
         alpha = self._names(charts, "alpha", tmp_path)
         beta = self._names(charts, "beta", tmp_path)
         assert alpha & beta == set()
@@ -288,14 +347,10 @@ class TestPerConfigInstancesDoNotCollide:
         assert [problem for o in objects for problem in bad_labels(o)] == []
 
 
-@pytest.mark.parametrize("service", [FETCHER, *TRANSFORM_SERVICES, "dfe-transform-elastic"])
-def test_the_thin_chart_keys_render_nothing_on_the_dfe_common_chart(charts, service, tmp_path):
-    # A rollback renders the overlay these keys were written into, so each has to
-    # leave every object exactly as the dfe-common keys beside it name them.
-    app = instances.instance_of(service, "alpha")
+def test_a_stack_wide_app_reports_its_bare_name(charts, tmp_path):
+    # Its overlay names no OTel service, so the chart's own name is the one that has
+    # to match what the engine reads its telemetry back under.
+    app = instances.instance_of(LOADER, "default")
     doc = instances.initial_overlay(app)
-    bare = {k: v for k, v in doc.items() if k not in {catalogue.FULLNAME_OVERRIDE_PATH, "otel"}}
-    assert bare != doc
-    assert render(charts, service, doc, app.telemetry_name, tmp_path) == render(
-        charts, service, bare, app.telemetry_name, tmp_path
-    )
+    objects = render(charts, LOADER, doc, app.telemetry_name, tmp_path)
+    assert env_of(objects)["OTEL_SERVICE_NAME"] == app.telemetry_name == LOADER
