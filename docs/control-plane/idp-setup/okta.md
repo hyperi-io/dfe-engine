@@ -46,9 +46,9 @@ Go to **Security > API**, open the **Authorization Servers** tab and select `def
 
 ## Find the group names
 
-DFE links an Okta group on its name, exactly as the claim carries it. **Directory > Groups** lists them. Because the link is the name, renaming a group in Okta breaks its link, and a new group given a linked name picks up its DFE roles. Keep the claim filter narrow and limit who can create or rename groups. The check below also lists the names the claim sends for the signed-in user.
+DFE links an Okta group on its name, exactly as the claim carries it. **Directory > Groups** lists them. Because the link is the name, renaming a group in Okta breaks its link, and a new group given a linked name picks up its DFE roles. Keep the claim filter narrow and limit who can create or rename groups. Once one of the user's groups is linked, the check below also lists the names the claim sends for them.
 
-DFE can instead read groups from the Okta API with an API token. Groups then link on Okta's group ids, not names. The claim above is the normal setup: use the API only if the operator asks for it.
+DFE can instead read groups from the Okta API with an API token. Groups link on their names that way too. The claim above is the normal setup: use the API only if the operator asks for it.
 
 ## Check it worked
 
@@ -58,7 +58,7 @@ Once the operator confirms the provider is in place, open this URL in a private 
 https://<your DFE console host>/api/v1/auth/oidc/<provider-name>/login
 ```
 
-The page answers with JSON. `email` is the user, and `groups` lists the group names the claim sent. The JSON also holds an `access_token`: it is a live DFE session, so do not paste it anywhere.
+The page answers with JSON. `email` is the user, and `groups` lists the group names the claim sent. The JSON also holds an `access_token`: it is a live DFE session, so do not paste it anywhere. A user in no linked group is refused, and DFE keeps no account for them.
 
 ## Common failures
 
@@ -68,8 +68,7 @@ The page answers with JSON. `email` is the user, and `groups` lists the group na
 | DFE page: `OIDC login failed:` ending `User is not assigned to the client application.` | The user is not assigned to the app | Assign the user, or a group they are in |
 | DFE page: `OIDC login failed:` ending `One or more scopes are not configured for the authorization server resource.` | The `default` server has no `groups` scope | Add it on the **Scopes** tab, or ask the operator to stop requesting `groups` |
 | DFE page: `OIDC login failed:` ending `Policy evaluation failed for this request, please check the policy configurations.` | No active access policy and rule cover the app | Add or activate one on the **Access Policies** tab |
-| The check shows `"groups": []` | No claim, the claim is set to Userinfo instead of **Always**, the filter matches none of the user's groups, or the issuer is the org server (`https://<your Okta domain>` with no `/oauth2/default`) | Recheck the claim on `default`, and send the operator the `/oauth2/default` issuer |
-| Signed in, but no DFE role | The names arrived but none is linked yet | Send the operator the names from the check |
+| DFE page: `OIDC login refused: no DFE group with a role is linked to your identity provider groups.` | None of the user's group names is linked yet, or no names arrived: no claim, the claim is set to Userinfo instead of **Always**, the filter matches none of the user's groups, or the issuer is the org server (`https://<your Okta domain>` with no `/oauth2/default`) | Send the operator the names from **Directory > Groups**. If they are linked, recheck the claim on `default` and send the operator the `/oauth2/default` issuer |
 
 ## For the DFE operator
 
@@ -86,9 +85,9 @@ Create the provider with `POST /api/v1/auth/oidc-providers`. The `name` becomes 
 }
 ```
 
-The default `token_claim` mode reads the `groups` claim, and the default scopes are `openid email profile groups`. To drop the `groups` scope, send `"scopes": ["openid", "email", "profile"]`: a claim set to **Always** and **Any scope** still arrives. The API alternative is `groups.mode: api` with `groups.okta_domain`, `groups.api_token` and `groups.enrich_on_login: true`. Without `enrich_on_login` a sign-in still reads names from the claim, which never match the ids the sync links on. The client secret goes to the secret store and the provider keeps only its path.
+The default `token_claim` mode reads the `groups` claim, and the default scopes are `openid email profile groups`. To drop the `groups` scope, send `"scopes": ["openid", "email", "profile"]`: a claim set to **Always** and **Any scope** still arrives. The API alternative is `groups.mode: api` with `groups.okta_domain` and `groups.api_token`. The sync and `groups.enrich_on_login: true` both read group names, the same identifiers the claim carries. The client secret goes to the secret store and the provider keeps only its path.
 
-Link each DFE group by setting its `source_id` to a group name the admin sent: see [rbac.md, section 4.4](../rbac.md#44-group-sync-process). Behind a TLS-terminating proxy, set `api.forwarded_allow_ips` (`DFE_API_FORWARDED_ALLOW_IPS`), or the engine builds the redirect URI with `http://` and Okta refuses it.
+Link each DFE group by setting its `source_id` to a group name the admin sent, and its `source_provider` to `<provider-name>` so no other provider's sign-in can assert the same name: see [rbac.md, section 4.4](../rbac.md#44-group-sync-process). A linked group admits its members only once it carries a role, and until one does no Okta user can sign in, so link the first group as the local admin or the break-glass account. Behind a TLS-terminating proxy, set `api.forwarded_allow_ips` (`DFE_API_FORWARDED_ALLOW_IPS`), or the engine builds the redirect URI with `http://` and Okta refuses it.
 
 ## Vendor references
 

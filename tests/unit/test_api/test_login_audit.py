@@ -130,8 +130,9 @@ class TestTokenValidationWritesNothing:
         assert resp.status_code == 200
         assert _login_successes(mock_logger) == []
 
-    def test_oidc_header_request_writes_no_event(self, client: TestClient):
+    def test_oidc_header_request_writes_no_event(self, client: TestClient, app):
         """Envoy authenticated the user upstream - the engine mints nothing here."""
+        app.state.group_store.update("dfe-admins", source_id="dfe-admins")
         with patch(AUDIT_LOGGER) as mock_logger:
             resp = client.get(
                 "/api/v1/auth/me",

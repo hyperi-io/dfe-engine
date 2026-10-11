@@ -585,7 +585,8 @@ class TestScimLeavesAndProviderIdsNeedTheGroupsRoles:
 
         assert resp.status_code == 403, resp.text
         assert app.state.group_store.get("dfe-admins").source_id == current
-        assert "admin" not in _roles(client, idp)
+        # The id links no group, so the login holds no role and is refused outright.
+        assert client.get("/api/v1/auth/me", headers=idp).status_code == 401
 
     def test_admin_still_moves_a_provider_id(self, client, app, admin_headers):
         members = app.state.group_store.get("dfe-admins").members

@@ -428,9 +428,9 @@ class TestSyncProvider:
             "/api/v1/auth/me",
             headers={"X-Oidc-Subject": "mallory@example.com", "X-Oidc-Groups": attacker},
         )
-        assert me.status_code == 200, me.text
-        assert "admin" not in me.json()["roles"]
-        assert "dfe-admins" not in me.json()["groups"]
+        # The attacker's id links no group, so the login holds no role and is refused.
+        assert me.status_code == 401, me.text
+        assert me.json()["code"] == "no_role_granted"
 
     @pytest.mark.parametrize("provider_type", ["entra_id", "okta"])
     def test_a_provider_with_no_directory_credential_says_so(

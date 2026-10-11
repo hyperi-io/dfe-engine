@@ -292,6 +292,19 @@ def test_callback_unknown_provider_404(client):
     assert resp.status_code == 404
 
 
+@pytest.fixture(autouse=True)
+def _stub_group_linked(request):
+    """Link the g1 every stub login asserts to a group with a role, which is what admits it."""
+    if "client" not in request.fixturenames:
+        return
+    # The client starts the app, which is what builds its group store.
+    request.getfixturevalue("client")
+    app = request.getfixturevalue("app")
+    app.state.group_store.create(
+        "stub-viewers", ["data_viewer"], source_provider="stub", source_id="g1"
+    )
+
+
 class _FakeOidcRp:
     """Minimal RP stub for login route tests (no live IdP)."""
 
@@ -598,6 +611,65 @@ class _SubjectOidcRp(_FakeOidcRp):
         return NormalizedIdentity(
             email="evil@example.test", groups=["g1"], name="Taken Over", subject=self._subject
         )
+
+
+class _GroupsOidcRp(_FakeOidcRp):
+    """The same RP stub, asserting whatever groups the test names."""
+
+    def __init__(self, groups: list[str]) -> None:
+        self._groups = groups
+
+    async def handle_callback(self, provider: str, request) -> NormalizedIdentity:
+        return NormalizedIdentity(
+            email="stub@example.test", groups=self._groups, name="Stub User", subject="stub-user"
+        )
+
+
+NO_ROLE_MESSAGE = (
+    "OIDC login refused: no DFE group with a role is linked to your identity provider "
+    "groups. Ask a DFE administrator to link one."
+)
+
+
+def test_callback_refuses_an_identity_whose_groups_link_no_role(client, app, audit_events):
+    """The linked DFE groups are the allowlist, so an outsider gets no account and no token."""
+    app.state.oidc_rp = _GroupsOidcRp(["unlinked-team"])
+
+    resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+
+    assert resp.status_code == 401, resp.text
+    body = resp.json()
+    assert (body["code"], body["message"]) == ("no_role_granted", NO_ROLE_MESSAGE)
+    assert "access_token" not in body
+    assert oidc_login.TOKEN_COOKIE not in resp.cookies
+    assert app.state.account_store.get("stub-user") is None
+    refused = [e for e in audit_events if e["event"] == "auth.jit.login_refused"]
+    denied = [e for e in audit_events if e["event"] == "auth.login.denied"]
+    assert [(e["user_id"], e["source_provider"], e["reason"]) for e in refused] == [
+        ("stub-user", "stub", "no_role_granted")
+    ]
+    assert [(e["user_id"], e["auth_path"], e["reason"]) for e in denied] == [
+        ("stub-user", "oidc", "no_role_granted")
+    ]
+    assert not [e for e in audit_events if e["event"] == "auth.login.success"]
+    logged = json.dumps(refused + denied, default=str)
+    assert "unlinked-team" not in logged
+    assert "stub@example.test" not in logged
+
+
+def test_callback_refusal_takes_the_roles_from_a_token_already_issued(client, app):
+    """A session resolves its roles from the account, so recording the IdP's groups ends them."""
+    app.state.oidc_rp = _GroupsOidcRp(["g1"])
+    token = client.get("/api/v1/auth/oidc/stub/callback").json()["access_token"]
+    bearer = {"Authorization": f"Bearer {token}"}
+    assert client.get("/api/v1/auth/me", headers=bearer).json()["roles"] == ["data_viewer"]
+
+    app.state.oidc_rp = _GroupsOidcRp(["left-the-team"])
+    refused = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+
+    assert refused.status_code == 401, refused.text
+    assert app.state.account_store.get("stub-user").groups == ["left-the-team"]
+    assert client.get("/api/v1/auth/me", headers=bearer).json()["roles"] == []
 
 
 def test_callback_refuses_an_idp_asserting_the_local_admin(client, app):
