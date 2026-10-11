@@ -14,8 +14,6 @@ series here" and the console hides it; a zero would claim a measurement nobody
 took, which is why every reading is nullable and the route still answers 200.
 """
 
-from __future__ import annotations
-
 import time
 
 import pytest
@@ -64,9 +62,9 @@ def _define(client, headers, sample_source: dict) -> None:
     assert client.post("/api/v1/sources", json=sample_source, headers=headers).status_code == 201
 
 
-def _series(*points: tuple[float, float]) -> list[tuple]:
-    """A counter series as ClickHouse returns it: (TimeUnix, summed value)."""
-    return [(ts, value) for ts, value in points]
+def _series(increase: float, span_seconds: int, last_increase: float) -> list[tuple]:
+    """One loader pod's series as ClickHouse returns it, already differenced."""
+    return [(increase, span_seconds, last_increase)]
 
 
 @pytest.fixture
@@ -81,7 +79,7 @@ class TestSourceSignals:
         _wire(app, tmp_path)
         _deploy_loader(client, admin_headers)
         _define(client, admin_headers, sample_source)
-        _use(app, FakeClickHouse(_series((now - 120, 100.0), (now - 60, 220.0), (now, 340.0))))
+        _use(app, FakeClickHouse(_series(240.0, 120, now)))
 
         body = client.get(SIGNALS, headers=admin_headers).json()
 
@@ -99,7 +97,7 @@ class TestSourceSignals:
         _wire(app, tmp_path)
         _deploy_loader(client, admin_headers, "main")
         _define(client, admin_headers, sample_source)
-        ch = FakeClickHouse(_series((now - 60, 1.0), (now, 2.0)))
+        ch = FakeClickHouse(_series(1.0, 60, now))
         _use(app, ch)
 
         client.get(SIGNALS, headers=admin_headers)
@@ -136,20 +134,20 @@ class TestSourceSignals:
         _wire(app, tmp_path)
         _deploy_loader(client, admin_headers)
         _define(client, admin_headers, sample_source)
-        _use(app, FakeClickHouse(_series((now - 120, 500.0), (now, 500.0))))
+        _use(app, FakeClickHouse(_series(0.0, 120, 0)))
 
         body = client.get(SIGNALS, headers=admin_headers).json()
 
         assert body["records_per_min"] == 0.0
         assert body["last_seen"] is None
 
-    def test_a_counter_reset_reports_nothing_rather_than_a_negative_rate(
-        self, client, app, admin_headers, tmp_path, sample_source, now
+    def test_a_single_sample_is_null_rather_than_a_zero_rate(
+        self, client, app, admin_headers, tmp_path, sample_source
     ):
         _wire(app, tmp_path)
         _deploy_loader(client, admin_headers)
         _define(client, admin_headers, sample_source)
-        _use(app, FakeClickHouse(_series((now - 120, 900.0), (now, 10.0))))
+        _use(app, FakeClickHouse(_series(0.0, 0, 0)))
 
         assert client.get(SIGNALS, headers=admin_headers).json()["records_per_min"] is None
 
@@ -158,7 +156,7 @@ class TestSourceSignals:
     ):
         _wire(app, tmp_path)
         _define(client, admin_headers, sample_source)
-        ch = FakeClickHouse(_series((1.0, 1.0), (2.0, 2.0)))
+        ch = FakeClickHouse(_series(1.0, 60, 2.0))
         _use(app, ch)
 
         body = client.get(SIGNALS, headers=admin_headers).json()
