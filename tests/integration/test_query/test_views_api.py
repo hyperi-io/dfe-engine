@@ -19,6 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from scalo.logger import logger
 
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries, create_access_token
@@ -155,8 +156,26 @@ def test_a_view_returns_rows_and_runs_as_the_reader(stack):
 
 
 def test_a_view_over_url_is_refused_by_the_readers_grants(stack):
-    resp = _execute(stack, stack.leak)
+    captured: list = []
+    handler_id = logger.add(captured.append, level="WARNING")
+    try:
+        resp = _execute(stack, stack.leak)
+    finally:
+        logger.remove(handler_id)
 
     assert resp.status_code == 500, resp.text
     assert resp.json()["code"] == "query_error"
-    assert "ACCESS_DENIED" in resp.json()["message"]
+    assert resp.json()["message"] == (
+        f"View '{stack.leak}' failed to execute; the engine log has ClickHouse's reason"
+    )
+    assert "ACCESS_DENIED" not in resp.text
+    # Any failure gets the same answer, so only the logged cause shows the grant refused it.
+    failures = [
+        m.record["extra"]
+        for m in captured
+        if m.record["message"] == "View execution failed"
+        and m.record["extra"].get("label") == stack.leak
+    ]
+    assert len(failures) == 1, [m.record["message"] for m in captured]
+    assert "ACCESS_DENIED" in failures[0]["error"]
+    assert READER in failures[0]["error"]
