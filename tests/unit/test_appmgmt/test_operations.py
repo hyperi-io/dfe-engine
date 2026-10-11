@@ -13,6 +13,10 @@ series' increase over its own span, summed, and "when did records last arrive" i
 latest time any series MOVED, not the last time the loader reported.
 """
 
+import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import pytest
 
 from dfe_engine.appmgmt.operations import (
@@ -218,6 +222,37 @@ def test_an_instance_with_telemetry_is_reporting():
     status = OperationalReader(ch, "dfe").status("dfe-loader")
 
     assert status.reporting is True
+    assert status.last_seen_epoch == 1757000000.0
+
+
+@pytest.fixture
+def sydney_local_time(monkeypatch: pytest.MonkeyPatch):
+    """Run with a host timezone ten or eleven hours off UTC."""
+    monkeypatch.setenv("TZ", "Australia/Sydney")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+def test_a_naive_clickhouse_datetime_is_read_as_utc_on_a_non_utc_host(
+    sydney_local_time,
+):
+    # clickhouse-connect hands back naive datetimes that are UTC.
+    naive = datetime(2025, 9, 4, 15, 33, 20)
+    ch = PerQueryClickHouse({"AS last_seen": [(naive, 12)]})
+
+    status = OperationalReader(ch, "dfe").status("dfe-loader")
+
+    assert status.last_seen_epoch == 1757000000.0
+
+
+def test_an_aware_datetime_keeps_its_own_zone(sydney_local_time):
+    aware = datetime(2025, 9, 5, 1, 33, 20, tzinfo=ZoneInfo("Australia/Sydney"))
+    ch = PerQueryClickHouse({"AS last_seen": [(aware, 12)]})
+
+    status = OperationalReader(ch, "dfe").status("dfe-loader")
+
     assert status.last_seen_epoch == 1757000000.0
 
 
