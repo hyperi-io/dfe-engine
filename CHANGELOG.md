@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.26](https://github.com/hyperi-io/dfe-engine/compare/v1.22.25...v1.22.26) (2026-10-11)
+
+### Bug Fixes
+
+* guard OIDC group links, list groups once ([#814](https://github.com/hyperi-io/dfe-engine/issues/814)) ([bdfb886](https://github.com/hyperi-io/dfe-engine/commit/bdfb8863634e285bae15b833f657d4cb407564eb))
+
 ## [1.22.25](https://github.com/hyperi-io/dfe-engine/compare/v1.22.24...v1.22.25) (2026-10-11)
 
 ### Bug Fixes
