@@ -7,13 +7,10 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Which ``otel_metrics_gauge`` rows carry the scaling-pressure composite.
 
-scalo registers the composite as a bare ``scaling_pressure`` gauge and an app MAY
-put its own metrics namespace in front of it, so one signal reaches ClickHouse
-under four spellings across the apps deployed today: ``scaling_pressure``
-(archiver, transform-vrl), ``dfe_scaling_pressure`` (receiver),
-``dfe_loader_scaling_pressure`` and ``dfe_fetcher_scaling_pressure``. Matching one
-exact name therefore reads one app and leaves the KEDA trigger inert everywhere
-else.
+scalo registers the composite as a bare ``scaling_pressure`` gauge, and an app
+whose deployment sets a metrics namespace emits ``<namespace>_scaling_pressure``
+instead. Matching one exact name would read the apps on one spelling and leave the
+KEDA trigger inert on every other.
 
 The contract settled on dfe-infra#302 is that the READER matches whatever prefix
 the app used, rather than every Rust app being released to rename its gauge. Both
@@ -21,13 +18,11 @@ query catalogues -- the KEDA shim's and the app-management layer's -- carry the
 sentinels below where that rule belongs and call :func:`apply` on the SQL, so the
 rule is written once here and cannot drift between them.
 
-An app can also report the composite under more than one attribute set
-(dfe-fetcher tags its rows ``name="fetch"``, the others tag nothing), so a caller
-aggregates per series and takes the MAX across them: averaging a busy attribute
-set with an idle one reports neither.
+One app reaches the table as several series: a push over OTLP names its pod in the
+resource (``service.instance.id``), and a Prometheus scrape names it in the
+data-point attributes. A reader reduces per series and takes the MAX across them,
+because averaging a hot pod with an idle one reports neither.
 """
-
-from __future__ import annotations
 
 GAUGE = "scaling_pressure"
 """The canonical wire name every prefixed spelling normalises back to."""
