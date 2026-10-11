@@ -809,8 +809,8 @@ class TestAdversarialRegressions:
         for instance in ("alpha", "beta"):
             assert _deploy(client, admin_headers, instance).status_code == 200
 
-        # The component is the only thing keeping the two deployments' Kubernetes
-        # object names apart, because dfe-common.fullname carries no instance.
+        # dfe-extras names its objects {project}-{component}, so the component must
+        # carry the instance or the two deployments' objects collide.
         alpha = gc.get("helmvars", f"{VRL}-alpha-values")
         beta = gc.get("helmvars", f"{VRL}-beta-values")
         assert alpha["component"] == "transform-vrl-alpha"

@@ -35,7 +35,7 @@ class _Handler(BaseHTTPRequestHandler):
     the request path (e.g. whether the ``/v1`` prefix survives).
     """
 
-    def log_message(self, *args: object) -> None:  # keep the test output quiet
+    def log_message(self, format: str, *args: object) -> None:
         return
 
     def _send(self, payload: dict, code: int = 200) -> None:
