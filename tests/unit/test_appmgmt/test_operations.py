@@ -5,15 +5,13 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""The arithmetic between a counter series and a number a console can show.
+"""The arithmetic between per-series counter rows and a number a console can show.
 
-A monotonic counter says nothing on its own: the rate is a difference over
-elapsed time, and "when did records last arrive" is the last time the total
-MOVED, not the last time the loader reported. Both go wrong quietly, so both
-are asserted here rather than only through the route.
+ClickHouse differences each series on its own (tests/integration/test_counter_rates_ch.py
+runs that against a real server). What is left here is the fleet: the rate is each
+series' increase over its own span, summed, and "when did records last arrive" is the
+latest time any series MOVED, not the last time the loader reported.
 """
-
-from __future__ import annotations
 
 import pytest
 
@@ -50,31 +48,39 @@ def _reader(rows=None, fail: bool = False) -> tuple[OperationalReader, FakeClick
     return OperationalReader(ch, "dfe"), ch
 
 
-def test_the_rate_is_the_delta_over_the_elapsed_time():
-    reader, _ = _reader([(0.0, 100.0), (60.0, 220.0), (120.0, 340.0)])
+def test_the_rate_is_each_series_increase_over_its_own_span_summed():
+    # 240 over 120s on one loader pod and 30 over 60s on another: 120 + 30 a minute.
+    reader, _ = _reader([(240.0, 120, 1757000120), (30.0, 60, 1757000100)])
 
     signals = reader.source_signals("auth", LOADERS)
 
-    assert signals.records_per_min == pytest.approx(120.0)
-    assert signals.last_seen_epoch == 120.0
+    assert signals.records_per_min == pytest.approx(150.0)
+    assert signals.last_seen_epoch == 1757000120.0
 
 
 def test_one_sample_cannot_be_differenced():
-    reader, _ = _reader([(0.0, 100.0)])
+    reader, _ = _reader([(0.0, 0, 0)])
 
     assert reader.source_signals("auth", LOADERS).records_per_min is None
 
 
-def test_a_reset_counter_reports_nothing_rather_than_a_negative_rate():
-    # A pod restart zeroes its counter; the window has to roll past the restart
-    # before the number means anything again.
-    reader, _ = _reader([(0.0, 900.0), (60.0, 10.0)])
+def test_a_single_sample_series_adds_nothing_beside_one_that_spans_time():
+    reader, _ = _reader([(120.0, 60, 1757000060), (0.0, 0, 0)])
 
-    assert reader.source_signals("auth", LOADERS).records_per_min is None
+    assert reader.source_signals("auth", LOADERS).records_per_min == pytest.approx(120.0)
+
+
+def test_no_series_reports_nothing():
+    reader, _ = _reader([])
+
+    signals = reader.source_signals("auth", LOADERS)
+
+    assert signals.records_per_min is None
+    assert signals.last_seen_epoch is None
 
 
 def test_a_flat_counter_reports_no_arrival():
-    reader, _ = _reader([(0.0, 500.0), (60.0, 500.0), (120.0, 500.0)])
+    reader, _ = _reader([(0.0, 120, 0)])
 
     signals = reader.source_signals("auth", LOADERS)
 
@@ -82,14 +88,38 @@ def test_a_flat_counter_reports_no_arrival():
     assert signals.last_seen_epoch is None
 
 
-def test_the_last_arrival_is_the_last_increase_not_the_last_report():
-    reader, _ = _reader([(0.0, 10.0), (60.0, 40.0), (120.0, 40.0), (180.0, 40.0)])
+def test_the_last_arrival_is_the_latest_rise_across_series():
+    reader, _ = _reader([(10.0, 180, 1757000060), (5.0, 180, 1757000030), (0.0, 180, 0)])
 
-    assert reader.source_signals("auth", LOADERS).last_seen_epoch == 60.0
+    assert reader.source_signals("auth", LOADERS).last_seen_epoch == 1757000060.0
+
+
+def test_the_landing_query_differences_each_loader_pod_on_its_own():
+    reader, ch = _reader([])
+
+    reader.source_signals("auth", LOADERS)
+
+    sql = ch.calls[0][0]
+    assert "arrayDifference(readings)" in sql
+    assert (
+        "GROUP BY ServiceName, cityHash64(Attributes), ResourceAttributes['service.instance.id']"
+    ) in sql
+
+
+def test_the_counter_query_differences_each_pod_before_summing_the_fleet():
+    reader, ch = _reader([])
+
+    reader.metrics("dfe-receiver")
+
+    sql = next(sql for sql, _, _ in ch.calls if "otel_metrics_sum" in sql)
+    assert "arrayDifference(readings)" in sql
+    assert (
+        "GROUP BY MetricName, cityHash64(Attributes), ResourceAttributes['service.instance.id']"
+    ) in sql
 
 
 def test_no_loader_asks_the_database_nothing():
-    reader, ch = _reader([(0.0, 1.0), (60.0, 2.0)])
+    reader, ch = _reader([(0.0, 60, 0)])
 
     signals = reader.source_signals("auth", [])
 
@@ -99,7 +129,7 @@ def test_no_loader_asks_the_database_nothing():
 
 
 def test_the_query_is_bound_and_time_bounded():
-    reader, ch = _reader([(0.0, 1.0), (60.0, 2.0)])
+    reader, ch = _reader([(1.0, 60, 60)])
 
     reader.source_signals("auth", LOADERS)
 
