@@ -92,8 +92,9 @@ def engine_deployment_contract() -> DeploymentContract:
         # Digest-pinned runtime base (#106). python:3.14-slim is already
         # Debian 13 trixie; pinned so the tag cannot float. The committed
         # Dockerfile's runtime FROM must match this literal (validate_dockerfile
-        # substring check). Re-resolve on a bump; Renovate maintains it.
-        base_image="python:3.14-slim@sha256:caaf356f40667c496d405780745b9ac25771c189a51dfcc42430d531ea09f8a2",
+        # substring check). Renovate bumps it with the Dockerfile through the
+        # custom manager in renovate.json, so keep it on one line in this shape.
+        base_image="python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170",
         entrypoint_args=["run"],
         # Env names are the ones dfe_engine.settings reads, single-underscore under the DFE_ prefix.
         secrets=[

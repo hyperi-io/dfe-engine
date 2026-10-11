@@ -1,4 +1,15 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>hyperi-io/renovate-config"]
+  "extends": ["github>hyperi-io/renovate-config"],
+  "customManagers": [
+    {
+      "description": "The deployment contract carries the runtime base image as a literal that tests/unit/test_deployment/test_contract.py requires to match the Dockerfile's runtime FROM. No built-in manager reads it, so without this a base-image digest PR changes only the Dockerfile and fails that test.",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)src/dfe_engine/deployment_contract\\.py$/"],
+      "matchStrings": [
+        "base_image=\"(?<depName>[a-z0-9._/-]+):(?<currentValue>[^@\"\\s]+)@(?<currentDigest>sha256:[a-f0-9]{64})\""
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ]
 }
