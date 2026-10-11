@@ -1,14 +1,15 @@
 #  Project:      dfe-engine
 #  File:         tests/integration/test_keda_shim_pressure.py
-#  Purpose:      Live-CH proof the shim's pressure query reads the hottest pod
+#  Purpose:      Live-CH proof both pressure readers report the hottest pod
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""The KEDA shim's built-in pressure query against real ClickHouse (no mocks).
+"""The pressure queries of the KEDA shim and the console against real ClickHouse.
 
 Rows land in the real ``otel_metrics_gauge`` table, rendered from the manifest the
-schema phase applies, and ``QueryShim.run`` answers over them. An app's gauge
+schema phase applies, and ``QueryShim.run`` and ``OperationalReader.metrics`` answer
+over them with no mocks. An app's gauge
 reaches that table two ways: pushed over OTLP, where scalo puts the pod in the
 resource as ``service.instance.id``, and scraped by the collector's Prometheus
 receiver, where the pod is a data-point attribute and the resource carries the
@@ -18,6 +19,7 @@ at all, so every replica lands in one series.
 
 import pytest
 
+from dfe_engine.appmgmt.operations import SCALING_PRESSURE, OperationalReader
 from dfe_engine.keda_shim.shim import QueryShim
 from dfe_engine.schema.plan import render_one
 from dfe_engine.settings import DFESettings
@@ -36,6 +38,15 @@ def gauge_db(ch_client, clickhouse_test_database):
     return db
 
 
+@pytest.fixture
+def otel_db(ch_client, gauge_db):
+    """The gauge database plus the sum and histogram tables the console also reads."""
+    for object_id in ("data.otel_metrics_sum", "data.otel_metrics_histogram"):
+        for statement in render_one(object_id, data_database=gauge_db).statements:
+            ch_client.command(statement)
+    return gauge_db
+
+
 def _shim(ch_client, db: str) -> QueryShim:
     settings = DFESettings(env="test")
     settings.clickhouse.data_database = db
@@ -48,8 +59,9 @@ def _write(
     *values: float,
     attributes: dict[str, str] | None = None,
     resource: dict[str, str] | None = None,
+    age_seconds: int = 0,
 ) -> None:
-    """Write one gauge reading per value, stamped with the server's own now()."""
+    """Write one gauge reading per value, stamped ``age_seconds`` before the server's now()."""
     attributes = attributes or {}
     resource = resource or {}
     # clickhouse-connect binds a dict as JSON, which a Map parameter refuses to parse.
@@ -60,13 +72,14 @@ def _write(
             "SELECT {service:String}, 'scaling_pressure', "
             "mapFromArrays({attr_keys:Array(String)}, {attr_values:Array(String)}), "
             "mapFromArrays({res_keys:Array(String)}, {res_values:Array(String)}), "
-            "now(), {value:Float64}",
+            "now() - INTERVAL {age:UInt32} SECOND, {value:Float64}",
             parameters={
                 "service": _SERVICE,
                 "attr_keys": list(attributes),
                 "attr_values": list(attributes.values()),
                 "res_keys": list(resource),
                 "res_values": list(resource.values()),
+                "age": age_seconds,
                 "value": value,
             },
         )
@@ -82,6 +95,19 @@ def test_two_pods_pushing_report_the_hotter_pod(ch_client, gauge_db):
     _write(ch_client, gauge_db, 70, 90, resource=_pod("dfe-receiver-b"))
 
     assert _shim(ch_client, gauge_db).run("pressure", {"service": _SERVICE}) == 80
+
+
+def test_the_console_reads_each_pods_latest_and_reports_the_hotter_pod(
+    ch_client, manager_client, otel_db
+):
+    """Pod a's latest reading is 20 and pod b's is 80, and pod a wrote last."""
+    _write(ch_client, otel_db, 90, resource=_pod("dfe-receiver-a"), age_seconds=4)
+    _write(ch_client, otel_db, 80, resource=_pod("dfe-receiver-b"), age_seconds=2)
+    _write(ch_client, otel_db, 20, resource=_pod("dfe-receiver-a"))
+
+    gauges = OperationalReader(manager_client, otel_db).metrics(_SERVICE).gauges
+
+    assert gauges[SCALING_PRESSURE] == 80
 
 
 def test_pushed_without_a_pod_beside_scraped_per_pod_reads_the_hottest_series(ch_client, gauge_db):
