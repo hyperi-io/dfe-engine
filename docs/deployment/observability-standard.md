@@ -96,6 +96,6 @@ Required, not yet built: the Kubernetes check asserting rows by `service.name`, 
 
 - OpenTelemetry Collector: <https://opentelemetry.io/docs/collector/>
 - dfe-infra: `argocd/values/common.yaml` (`telemetry`, `otel`, `clickhouse`), `argocd/values/apps/_common.yaml` (`telemetry.otlpEndpointTemplate`), `helm/charts/otel-collector/`
-- dfe-docker: `docs/observability.md`, `config/otel-collector/config.yaml`
+- dfe-docker: <https://github.com/hyperi-io/dfe-docker/blob/main/docs/observability.md>, <https://github.com/hyperi-io/dfe-docker/blob/main/config/otel-collector/config.yaml>
 - scalo-rs: `charts/scalo-service/templates/_telemetry.tpl`, `docs/core-pillars/logging.md`
 - scalo-py: `docs/core-pillars/LOGGING.md`
