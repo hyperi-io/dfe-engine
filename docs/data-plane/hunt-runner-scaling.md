@@ -177,10 +177,11 @@ scaler pointed at ClickHouse's MySQL-compatible interface (`mysql_port`, 9004) -
 has been **RETIRED**: KEDA's only failure knob for a DB scaler is a fixed
 `fallbackReplicas` count, not "hold at current", so a broken metric could scale
 the wrong way and blow cloud spend. It is replaced by a small OWNED, fail-safe
-adapter: the **`dfe-keda-shim`** (folded into the engine chart as its own pod,
-`dfe-infra helm/charts/dfe-engine/templates/keda-shim.yaml`, running the engine
-container image as `dfe-keda-shim run`, distinct labels so the engine Service
-never routes to it). KEDA's `metrics-api` scaler polls the shim over HTTP; the
+adapter: the **`dfe-keda-shim`**, its own pod on the engine image (`dfe-keda-shim
+run`), labelled so the engine Service never routes to it. The published engine
+chart (`oci://ghcr.io/hyperi-io/charts/dfe-engine`) renders only the engine pod; the
+shim comes from `dfe-infra helm/charts/dfe-extras/templates/engine-keda-shim.yaml`,
+on the same values. KEDA's `metrics-api` scaler polls the shim over HTTP; the
 shim runs `schedule.due_query(db)` against ClickHouse - the SAME SQL the worker
 gate uses (see "The scaler query" above, imported directly from
 `dfe_engine.hunt_runner.schedule.due_query`, so it cannot drift) - and hands
@@ -200,11 +201,11 @@ flowchart LR
     shim -. "on failure: last-good\ncache / cold-hold" .-> ko
 ```
 
-Ships in the engine chart, gated by `huntRunner.autoscaling.enabled` (default
-`false`, **BETA**). When enabled, the Deployment's `replicas` field is OMITTED
-(the ScaledObject owns the count instead) and a `dfe-hunt-runner-scaler`
+Ships with the hunt-runner Deployment, gated by `huntRunner.autoscaling.enabled`
+(default `false`, **BETA**). When enabled, the Deployment's `replicas` field is
+OMITTED (the ScaledObject owns the count instead) and a `dfe-hunt-runner-scaler`
 `ScaledObject` is rendered alongside it
-(`dfe-infra helm/charts/dfe-engine/templates/hunt-runner.yaml`):
+(`dfe-infra helm/charts/dfe-extras/templates/engine-hunt-runner.yaml`):
 
 ```yaml
 apiVersion: keda.sh/v1alpha1
