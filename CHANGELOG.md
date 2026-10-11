@@ -3,6 +3,16 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.21](https://github.com/hyperi-io/dfe-engine/compare/v1.22.20...v1.22.21) (2026-10-11)
+
+### Bug Fixes
+
+* give the test FerretDB three minutes to start and log why it did not ([#805](https://github.com/hyperi-io/dfe-engine/issues/805)) ([b3df989](https://github.com/hyperi-io/dfe-engine/commit/b3df98995b91ae34285e2e4a194e616306c613ab))
+* keep dulwich's gc out of gitops requests ([#807](https://github.com/hyperi-io/dfe-engine/issues/807)) ([b4f9168](https://github.com/hyperi-io/dfe-engine/commit/b4f9168f54c3c86ed5ee962a8d1d84c2a1c1aba8))
+* publish name rules, stop stale secret reads ([#809](https://github.com/hyperi-io/dfe-engine/issues/809)) ([2d0f199](https://github.com/hyperi-io/dfe-engine/commit/2d0f199d7575ef6f48dfd8468a8857d296fcd78e))
+* report OIDC credential states truthfully ([#806](https://github.com/hyperi-io/dfe-engine/issues/806)) ([840b5aa](https://github.com/hyperi-io/dfe-engine/commit/840b5aa5aea7b2d83fd6f2c7c8a3cf754826e74a))
+* take every name rule from one module ([#808](https://github.com/hyperi-io/dfe-engine/issues/808)) ([7f5b758](https://github.com/hyperi-io/dfe-engine/commit/7f5b7582b8f1071e40efe6450765246c264bb414))
+
 ## [1.22.20](https://github.com/hyperi-io/dfe-engine/compare/v1.22.19...v1.22.20) (2026-10-10)
 
 ### Bug Fixes
