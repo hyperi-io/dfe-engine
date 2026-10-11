@@ -371,10 +371,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Where the callback sends the browser after login, with the engine token in the URL fragment (#access_token=...&token_type=bearer&provider=...). A relative path, or an absolute URL on this API's origin or a CORS-allowed origin. Omit to have the callback answer with JSON instead.",
+              "description": "Where the callback sends the browser after login, with the engine token in the URL fragment (#access_token=...&token_type=bearer&provider=...), or the refusal's code (#error=<code>&provider=...) when the login is refused. A relative path, or an absolute URL on this API's origin or a CORS-allowed origin. Omit to have the callback answer with JSON instead.",
               "title": "Return To"
             },
-            "description": "Where the callback sends the browser after login, with the engine token in the URL fragment (#access_token=...&token_type=bearer&provider=...). A relative path, or an absolute URL on this API's origin or a CORS-allowed origin. Omit to have the callback answer with JSON instead."
+            "description": "Where the callback sends the browser after login, with the engine token in the URL fragment (#access_token=...&token_type=bearer&provider=...), or the refusal's code (#error=<code>&provider=...) when the login is refused. A relative path, or an absolute URL on this API's origin or a CORS-allowed origin. Omit to have the callback answer with JSON instead."
           }
         ],
         "responses": {
@@ -410,7 +410,7 @@
           "OIDC Login"
         ],
         "summary": "Oidc Callback",
-        "description": "Complete the OIDC flow and re-mint the engine token (single issuer).",
+        "description": "Complete the OIDC flow and re-mint the engine token (single issuer).\n\nA login started with ``return_to`` returns there refused as well as admitted,\nso a browser never lands on this route's JSON error. Without ``return_to`` a\nrefusal answers JSON with its status, as any API error does.",
         "operationId": "oidc_callback_api_v1_auth_oidc__provider__callback_get",
         "parameters": [
           {
@@ -435,7 +435,7 @@
             }
           },
           "303": {
-            "description": "Login started with return_to: redirect there with the engine token in the URL fragment."
+            "description": "Login started with return_to: redirect there with the engine token in the URL fragment, or with the refusal's code (#error=<code>&provider=...) when the login is refused."
           },
           "422": {
             "description": "Validation Error",
