@@ -8,8 +8,6 @@
 
 """Which groups an account holds, and keeping ``Account.groups`` and ``Group.members`` in step."""
 
-from __future__ import annotations
-
 from collections.abc import Collection, Iterable, Mapping
 
 from dfe_engine.auth.accounts import Account, AccountStore
@@ -40,10 +38,11 @@ def linked_groups(
 ) -> list[Group]:
     """The stored groups an identity provider's asserted *identifiers* are linked to.
 
-    A group is linked when its ``source_id`` is the identifier and it names no provider
-    or one of *providers*. Its name never links: a directory user can pick a group's
-    display name, but not the id the directory assigns it. The OIDC group sync links
-    by the same rule.
+    A group is linked when its ``source_id`` is the identifier and its
+    ``source_provider`` is one of *providers*. A group naming no provider links for
+    none, since otherwise every provider asserting the id would take it. Its name never
+    links: a directory user can pick a group's display name, but not the id the
+    directory assigns it. The OIDC group sync links by the same rule.
 
     Args:
         identifiers: What the IdP asserted: group ids, or names where it sends names.
@@ -59,7 +58,8 @@ def linked_groups(
         for group in groups
         if group.source_id
         and group.source_id in wanted
-        and (not group.source_provider or group.source_provider in providers)
+        and group.source_provider
+        and group.source_provider in providers
     ]
 
 

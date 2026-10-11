@@ -39,11 +39,14 @@ NO_LOOP_EVENT = "JIT HyperDX invite skipped - no running event loop"
 def stores(tmp_path):
     accounts = AccountStore(tmp_path / "accounts")
     groups = GroupStore(tmp_path / "groups")
-    # Each linked to the identifier an IdP that sends group names asserts: its name.
-    groups.create("acme-viewers", roles=["org_viewer"], source_id="acme-viewers")
+    # Each linked, for entra, to the identifier an IdP that sends group names asserts: its name.
+    for name, role in (
+        ("acme-viewers", "org_viewer"),
+        ("dfe-admins", "admin"),
+        ("dfe-analysts", "data_analyst"),
+    ):
+        groups.create(name, roles=[role], source_provider="entra", source_id=name)
     groups.update("acme-viewers", org_ids=["acme"])
-    groups.create("dfe-admins", roles=["admin"], source_id="dfe-admins")
-    groups.create("dfe-analysts", roles=["data_analyst"], source_id="dfe-analysts")
     return accounts, groups
 
 
@@ -138,6 +141,7 @@ class TestEnsureAccount:
 
     def test_first_login_stores_oidc_name(self, stores):
         accounts, groups = stores
+        groups.update("acme-viewers", source_provider="okta")
         jit = JitProvisioner(account_store=accounts, group_store=groups)
         account = jit.ensure_account(
             name="Jane Citizen",
@@ -149,6 +153,7 @@ class TestEnsureAccount:
 
     def test_subsequent_login_backfills_oidc_name(self, stores):
         accounts, groups = stores
+        groups.update("acme-viewers", source_provider="okta")
         jit = JitProvisioner(account_store=accounts, group_store=groups)
         jit.ensure_account(
             oidc_groups=["acme-viewers"], source_provider="okta", user_id="00u15mxs3ecygt7oj698"
@@ -165,6 +170,7 @@ class TestEnsureAccount:
 
     def test_login_without_name_keeps_stored_name(self, stores):
         accounts, groups = stores
+        groups.update("acme-viewers", source_provider="okta")
         jit = JitProvisioner(account_store=accounts, group_store=groups)
         jit.ensure_account(
             name="Jane Citizen",
@@ -685,6 +691,8 @@ class TestSourceProviderBinding:
 
     def test_the_race_branch_refuses_an_unbound_provider(self, tmp_path, stores):
         _, groups = stores
+        # Linked for okta, so the login holds a role and reaches the race branch's guard.
+        groups.update("dfe-admins", source_provider="okta")
         accounts = RacingAccountStore(tmp_path / "accounts", blind_to="jane-corp-com")
         scim_account(accounts, "jane-corp-com")
         jit = JitProvisioner(
@@ -1036,14 +1044,26 @@ class TestResolveHyperdxTeam:
     def test_an_org_scoped_platform_role_gets_the_org_team(self, stores, role):
         """A role bound at one org's scope covers that org alone, never the platform."""
         _, groups = stores
-        groups.create("acme-ops", roles=[role], scope="org:acme", source_id="acme-ops")
+        groups.create(
+            "acme-ops",
+            roles=[role],
+            scope="org:acme",
+            source_provider="entra",
+            source_id="acme-ops",
+        )
         groups.update("acme-ops", org_ids=["acme"])
         jit = JitProvisioner(account_store=None, group_store=groups)
         assert jit.resolve_hyperdx_team(["acme-ops"], "entra") == "customer-acme"
 
     def test_an_org_scoped_admin_does_not_outrank_a_system_analyst(self, stores):
         _, groups = stores
-        groups.create("acme-admins", roles=["admin"], scope="org:acme", source_id="acme-admins")
+        groups.create(
+            "acme-admins",
+            roles=["admin"],
+            scope="org:acme",
+            source_provider="entra",
+            source_id="acme-admins",
+        )
         jit = JitProvisioner(account_store=None, group_store=groups)
         team = jit.resolve_hyperdx_team(["acme-admins", "dfe-analysts"], "entra")
         assert team == "dfe-analysts"
@@ -1051,7 +1071,13 @@ class TestResolveHyperdxTeam:
     @pytest.mark.parametrize("role", ["org_viewer", "admin"])
     def test_an_org_scoped_group_without_org_ids_takes_its_owning_org(self, stores, role):
         _, groups = stores
-        groups.create("globex-staff", roles=[role], scope="org:globex", source_id="globex-staff")
+        groups.create(
+            "globex-staff",
+            roles=[role],
+            scope="org:globex",
+            source_provider="entra",
+            source_id="globex-staff",
+        )
         jit = JitProvisioner(account_store=None, group_store=groups)
         assert jit.resolve_hyperdx_team(["globex-staff"], "entra") == "customer-globex"
 
@@ -1076,7 +1102,11 @@ class TestOrgIdsFromGroupGuids:
     def test_an_org_scoped_group_without_org_ids_audits_its_owning_org(self, stores, audit_events):
         accounts, groups = stores
         groups.create(
-            "globex-viewers", roles=["org_viewer"], scope="org:globex", source_id="globex-viewers"
+            "globex-viewers",
+            roles=["org_viewer"],
+            scope="org:globex",
+            source_provider="entra",
+            source_id="globex-viewers",
         )
         jit = JitProvisioner(account_store=accounts, group_store=groups)
 

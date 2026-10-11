@@ -578,7 +578,7 @@ class TestAnotherAdminExists:
     ):
         """An IdP-owned account holds the groups its assertion is linked to, as a session does."""
         store, groups = self._stores(tmp_path, crud)
-        groups.update("dfe-admins", source_id="dfe-admins")
+        groups.update("dfe-admins", source_provider="entra", source_id="dfe-admins")
         store.create("jane-corp-com", "", groups=["dfe-admins"])
         store.update("jane-corp-com", external=True, source_provider="entra")
 
@@ -590,7 +590,7 @@ class TestAnotherAdminExists:
         """Entra asserts object GUIDs, which the sync records as the group's source_id."""
         store, groups = self._stores(tmp_path, crud)
         guid = "7b1d0f3e-0000-4000-8000-000000000002"
-        groups.update("dfe-admins", source_id=guid)
+        groups.update("dfe-admins", source_provider="entra", source_id=guid)
         store.create("jane-corp-com", "", groups=[guid])
         store.update("jane-corp-com", external=True, source_provider="entra")
 
@@ -602,7 +602,7 @@ class TestAnotherAdminExists:
         """Login takes the group the asserted id is linked to, so the session holds admin."""
         store, groups = self._stores(tmp_path, crud)
         groups.create("entra-analysts", roles=["data_analyst"])
-        groups.update("dfe-admins", source_id="entra-analysts")
+        groups.update("dfe-admins", source_provider="entra", source_id="entra-analysts")
         store.create("jane-corp-com", "", groups=["entra-analysts"])
         store.update("jane-corp-com", external=True, source_provider="entra")
 

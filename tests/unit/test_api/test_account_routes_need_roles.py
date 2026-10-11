@@ -93,7 +93,9 @@ class TestAnAccountsGroupsNeedTheirRoles:
 
     def test_naming_a_held_group_by_its_other_identifier_is_no_change(self, client, app, mgr):
         """A group held by provider id and re-sent by name grants nothing new."""
-        app.state.group_store.update("dfe-admins", source_id="entra-admins-guid")
+        app.state.group_store.update(
+            "dfe-admins", source_provider="entra", source_id="entra-admins-guid"
+        )
         app.state.account_store.create("jane-corp-com", "", groups=["entra-admins-guid"])
         app.state.account_store.update("jane-corp-com", external=True, source_provider="entra")
 
@@ -126,7 +128,9 @@ class TestAKeysGroupsNeedTheirRoles:
     @pytest.mark.parametrize("by", ["name", "source_id"])
     def test_minting_a_key_in_the_admin_group_is_refused(self, client, app, mgr, by):
         """A key's groups resolve by name, else by the provider id the sync recorded."""
-        app.state.group_store.update("dfe-admins", source_id="entra-admins-guid")
+        app.state.group_store.update(
+            "dfe-admins", source_provider="entra", source_id="entra-admins-guid"
+        )
         group = "dfe-admins" if by == "name" else "entra-admins-guid"
 
         resp = client.post(KEYS, json={"name": "ci-escalate", "groups": [group]}, headers=mgr)
@@ -169,7 +173,7 @@ class TestDeletingAnAccountNeedsItsGroupsRoles:
     @_DELETE_ROUTES
     def test_deleting_an_idp_admin_is_refused(self, client, app, mgr, route):
         """An IdP-owned account holds the groups its own list's ids are linked to."""
-        app.state.group_store.update("dfe-admins", source_id="dfe-admins")
+        app.state.group_store.update("dfe-admins", source_provider="entra", source_id="dfe-admins")
         app.state.account_store.create("jane-corp-com", "", groups=["dfe-admins"])
         app.state.account_store.update("jane-corp-com", external=True, source_provider="entra")
 

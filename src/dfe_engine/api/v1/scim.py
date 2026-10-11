@@ -552,10 +552,15 @@ async def replace_group(group_id: str, user: CurrentUser, request: Request) -> R
         taken = _refuse_taken_provider_id(store, str(fields["source_id"]), group_id)
         if taken is not None:
             return taken
+    # A link names its provider: an id set on an unlinked group takes SCIM's, a linked one keeps its own.
+    provider = existing.source_provider
+    if fields["source_id"] and not provider:
+        provider = fields["source_provider"]
     store.update(
         group_id,
         members=new_members,
         source_id=fields["source_id"],
+        source_provider=provider,
     )
     sync_account_groups_for_membership_change(
         account_store, group_id, added=new - old, removed=old - new

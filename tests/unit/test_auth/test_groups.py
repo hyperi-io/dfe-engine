@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 from prometheus_client.parser import text_string_to_metric_families
+from pydantic import ValidationError
 from scalo.logger import logger
 from scalo.metrics import create_metrics
 
@@ -521,6 +522,50 @@ class TestGroupSourceProvider:
         store.update("acme-viewers", org_ids=["acme"])
         group = store.get("acme-viewers")
         assert group.org_ids == ["acme"]
+
+    def test_a_provider_group_id_that_names_no_provider_is_refused(self):
+        """A link with no provider would answer every provider that asserts the id."""
+        with pytest.raises(ValidationError, match="source_provider"):
+            Group(name="admins", roles=["admin"], source_id="Admins")
+
+    def test_create_refuses_a_provider_group_id_that_names_no_provider(self, tmp_path):
+        store = GroupStore(tmp_path / "groups")
+
+        with pytest.raises(ValueError, match="source_provider"):
+            store.create("admins", roles=["admin"], source_id="Admins")
+
+        assert store.get("admins") is None
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            pytest.param({"source_id": "Admins"}, id="id-set-on-an-unlinked-group"),
+            pytest.param({"source_provider": ""}, id="provider-cleared-off-a-linked-group"),
+        ],
+    )
+    def test_update_refuses_to_leave_a_provider_group_id_with_no_provider(self, tmp_path, change):
+        store = GroupStore(tmp_path / "groups")
+        store.create("admins", roles=["admin"])
+        store.create("linked", roles=["admin"], source_provider="okta", source_id="Linked")
+        name = "admins" if "source_id" in change else "linked"
+        before = store.get(name)
+
+        with pytest.raises(ValueError, match="source_provider"):
+            store.update(name, **change)
+
+        assert store.get(name) == before
+
+    def test_a_stored_file_linked_by_id_alone_is_skipped(self, tmp_path):
+        groups_dir = tmp_path / "groups"
+        groups_dir.mkdir()
+        (groups_dir / "admins.yaml").write_text(
+            "roles: [admin]\nmembers: [alice]\nsource_id: Admins\n", encoding="utf-8"
+        )
+        store = GroupStore(groups_dir)
+
+        assert store.get("admins") is None
+        assert store.list() == []
+        assert store.resolve_roles_for_member("alice") == []
 
     def test_existing_groups_without_source_provider_still_load(self, tmp_path):
         """Old YAML files without source_provider/source_id load with defaults."""

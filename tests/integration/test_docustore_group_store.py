@@ -262,7 +262,7 @@ class TestDocuStoreGroupStore:
     def test_by_source_id(self, store):
         store.create("with-src", ["r1"])
         store.create("plain", ["r1"])
-        store.update("with-src", source_id="prov-123")
+        store.update("with-src", source_provider="entra", source_id="prov-123")
         index = store.by_source_id()
         assert "prov-123" in index
         assert index["prov-123"].name == "with-src"
@@ -286,6 +286,24 @@ class TestTheProviderIdsAGroupCarries:
         got = store.get("entra-analysts")
         assert (got.source_provider, got.source_id) == ("entra", self.GUID)
         assert store.by_source_id()[self.GUID].name == "entra-analysts"
+
+    def test_update_refuses_an_id_that_names_no_provider(self, store):
+        """A link with no provider would answer every provider that asserts the id."""
+        store.create("entra-analysts", ["data_analyst"])
+
+        with pytest.raises(ValueError, match="source_provider"):
+            store.update("entra-analysts", source_id=self.GUID)
+
+        assert store.get("entra-analysts").source_id == ""
+
+    def test_a_stored_document_linked_by_id_alone_is_skipped(self, docu, store):
+        docu.collection("groups").insert_one(
+            {"name": "id-only", "roles": ["admin"], "members": ["bob"], "source_id": self.GUID}
+        )
+
+        assert store.get("id-only") is None
+        assert store.list() == []
+        assert store.resolve_roles_for_member("bob") == []
 
     def test_a_field_outside_the_list_is_still_ignored(self, store):
         """Attributes have their own setter; update() leaves them alone."""

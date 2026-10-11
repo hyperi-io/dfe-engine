@@ -334,8 +334,9 @@ class SyncResponse(BaseModel):
         default=0,
         description="Provider groups left unsynced: an identifier that makes no valid group "
         "name, a name held by a stored group that does not load, a name held by a stored "
-        "group not linked to that provider group, or no id to link a group by. Each is "
-        "counted on auth_oidc_sync_groups_skipped_total{reason}.",
+        "group not linked to that provider group, a stored group carrying the id but linked "
+        "to another provider, or no id to link a group by. Each is counted on "
+        "auth_oidc_sync_groups_skipped_total{reason}.",
     )
     error: str | None
     skipped: str | None = Field(

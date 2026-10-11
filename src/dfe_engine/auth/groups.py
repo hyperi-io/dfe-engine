@@ -9,9 +9,9 @@
 import builtins
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Self
 
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from scalo.logger import logger
 
 from dfe_engine.auth.protected_accounts import resolve_floor
@@ -104,6 +104,30 @@ def validate_group_scope(scope: str) -> str:
     raise ValueError(f"Group scope must be 'system' or 'org:<name>', got '{scope}'")
 
 
+def check_provider_link(source_provider: str, source_id: str) -> None:
+    """Refuse a provider group id that names no provider.
+
+    A login links a group only through the provider its ``source_provider`` names,
+    so an id with no provider would link nothing, and an unscoped one would answer
+    every provider that asserts the id.
+
+    Raises:
+        ValueError: ``source_id`` is set and ``source_provider`` is empty.
+    """
+    if source_id and not source_provider:
+        raise ValueError(
+            "source_provider is required when source_id is set: name the identity "
+            "provider whose group the id is"
+        )
+
+
+def _check_updated_link(group: Group, fields: dict[str, object]) -> None:
+    """:func:`check_provider_link` on the link *group* would carry after an update of *fields*."""
+    provider = fields.get("source_provider", group.source_provider)
+    source_id = fields.get("source_id", group.source_id)
+    check_provider_link(str(provider), str(source_id))
+
+
 class Group(BaseModel):
     """A named group with roles and member usernames."""
 
@@ -116,9 +140,9 @@ class Group(BaseModel):
     ``org:<name>`` (exists only inside that org - invisible outside it, and its
     roles bind at that org's scope only, never system-wide)."""
     source_provider: str = ""
-    """Name of the OIDC provider that owns this group (empty for manually managed groups)."""
+    """Name of the identity provider this group is linked to (empty for an unlinked group)."""
     source_id: str = ""
-    """Provider-specific group identifier (e.g. Google group key, Entra object ID)."""
+    """That provider's id for the group (Google group key, Entra object ID); needs a provider."""
     org_ids: list[str] = Field(default_factory=list)
     """Organisation IDs this group has access to (empty means no org-scoped access)."""
     attributes: dict[str, Any] = Field(default_factory=dict)
@@ -132,6 +156,11 @@ class Group(BaseModel):
     @classmethod
     def _check_scope(cls, value: str) -> str:
         return validate_group_scope(value)
+
+    @model_validator(mode="after")
+    def _check_provider_link(self) -> Self:
+        check_provider_link(self.source_provider, self.source_id)
+        return self
 
     @property
     def scope_org(self) -> str:
@@ -295,10 +324,10 @@ class GroupStore:
     def by_source_id(self) -> dict[str, Group]:
         """Return groups keyed by their provider ``source_id``.
 
-        Only groups that carry a non-empty ``source_id`` appear. Used to resolve
-        a token that carries opaque provider identifiers (Entra object GUIDs,
-        Google group keys) rather than group names - the sync stores the id on
-        the group file, and this is how login looks it back up.
+        Only groups that carry a non-empty ``source_id`` appear. Used where an
+        identifier may be a provider id rather than a group name, as an API key's
+        groups may be. An IdP login links through
+        :func:`~dfe_engine.auth.membership.linked_groups`, which also checks the provider.
 
         When two groups share a source_id (a misconfiguration) the
         last-by-sorted-name wins; that is deterministic rather than correct, and
@@ -329,16 +358,18 @@ class GroupStore:
 
         Raises:
             KeyError: If the group does not exist.
-            ValueError: If ``scope`` is not ``system`` / ``org:<name>``.
+            ValueError: If ``scope`` is not ``system`` / ``org:<name>``, or the group
+                would carry a ``source_id`` with no ``source_provider``.
             ProtectedAccountError: The update drops a recovery credential from the
                 admin-role group, or takes the admin role off it system-wide.
         """
         group = self._read(name)
         if group is None:
             raise KeyError(f"Group '{name}' not found")
+        # model_copy(update=...) skips validators - check explicitly.
         if "scope" in fields:
-            # model_copy(update=...) skips validators - check explicitly.
             validate_group_scope(str(fields["scope"]))
+        _check_updated_link(group, fields)
         if not allow_protected:
             self.protected.check_group_update(name, fields)
             if "members" in fields:
@@ -552,20 +583,23 @@ class DocuStoreGroupStore:
         return index
 
     def update(self, name: str, *, allow_protected: bool = False, **fields: object) -> Group:
-        """Update permitted fields on a group. Raises KeyError if missing, ValueError on bad scope.
+        """Update permitted fields on a group. Raises KeyError if missing.
 
         Accepted keyword arguments: ``roles``, ``description``, ``members``,
         ``org_ids``, ``scope``, ``source_provider``, ``source_id``. Any other is
-        ignored. ``allow_protected`` replaces the admin-role group's members with a
-        list that drops a recovery credential, or changes its roles or scope;
-        reserved for the reconcile paths. Raises ProtectedAccountError otherwise.
+        ignored. Raises ValueError on a bad scope, or when the group would carry a
+        ``source_id`` with no ``source_provider``. ``allow_protected`` replaces the
+        admin-role group's members with a list that drops a recovery credential, or
+        changes its roles or scope; reserved for the reconcile paths. Raises
+        ProtectedAccountError otherwise.
         """
         group = self.get(name)
         if group is None:
             raise KeyError(f"Group '{name}' not found")
+        # model_copy(update=...) skips validators - check explicitly.
         if "scope" in fields:
-            # model_copy(update=...) skips validators - check explicitly.
             validate_group_scope(str(fields["scope"]))
+        _check_updated_link(group, fields)
         if not allow_protected:
             self.protected.check_group_update(name, fields)
             if "members" in fields:

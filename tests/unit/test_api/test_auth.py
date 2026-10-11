@@ -503,9 +503,10 @@ def _bearer(api_settings, sub: str, **claims) -> dict[str, str]:
 
 
 def _link(app, *names: str) -> None:
-    """Link each group to what an IdP that sends group names asserts for it: its name."""
+    """Link each group, for the gateway's provider, to what an IdP sending names asserts: its name."""
+    provider = app.state.settings.auth.proxy_provider
     for name in names:
-        app.state.group_store.update(name, source_id=name)
+        app.state.group_store.update(name, source_provider=provider, source_id=name)
 
 
 class TestRolesFollowTheBoundAccount:
@@ -844,7 +845,7 @@ class TestAMemberSeesTheGroupsItHolds:
         """Entra asserts object GUIDs, which the sync records as the group's source_id."""
         guid = "7b1d0f3e-0000-4000-8000-000000000001"
         app.state.group_store.create("entra-analysts", ["data_analyst"])
-        app.state.group_store.update("entra-analysts", source_id=guid)
+        app.state.group_store.update("entra-analysts", source_provider="oidc", source_id=guid)
         headers = {"X-Oidc-Subject": "nia@example.com", "X-Oidc-Groups": guid}
 
         assert _listed(client, headers) == ["entra-analysts"]
@@ -867,7 +868,9 @@ class TestAMemberSeesTheGroupsItHolds:
     ):
         """An API key's groups are names an operator chose, so the name decides first."""
         app.state.group_store.create("shadow-analysts", ["admin"])
-        app.state.group_store.update("shadow-analysts", source_id="dfe-analysts")
+        app.state.group_store.update(
+            "shadow-analysts", source_provider="oidc", source_id="dfe-analysts"
+        )
         _, key = app.state.api_key_store.create("ci-analyst", groups=["dfe-analysts"])
         headers = {"X-API-Key": key}
 
@@ -884,7 +887,9 @@ class TestAMemberSeesTheGroupsItHolds:
     ):
         """A group of the asserted name is not the IdP's; the group linked to that id is."""
         app.state.group_store.create("linked-analysts", ["data_viewer"])
-        app.state.group_store.update("linked-analysts", source_id="dfe-analysts")
+        app.state.group_store.update(
+            "linked-analysts", source_provider="oidc", source_id="dfe-analysts"
+        )
         headers = {"X-Oidc-Subject": "nia@example.com", "X-Oidc-Groups": "dfe-analysts"}
 
         listed = _listed(client, headers)

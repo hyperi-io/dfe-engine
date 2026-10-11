@@ -1,7 +1,5 @@
 """Tests for API key authentication path in get_current_user()."""
 
-from __future__ import annotations
-
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -103,7 +101,7 @@ class TestApiKeyAuthentication:
 
     def test_oidc_takes_precedence_over_api_key(self, client: TestClient, app, test_api_key: str):
         """OIDC headers take precedence over API key."""
-        app.state.group_store.update("dfe-viewers", source_id="dfe-viewers")
+        app.state.group_store.update("dfe-viewers", source_provider="oidc", source_id="dfe-viewers")
         resp = client.get(
             "/api/v1/auth/me",
             headers={

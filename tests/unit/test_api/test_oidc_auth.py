@@ -13,9 +13,10 @@ from tests.support.failing_stores import StampFailingAccountStore
 
 
 def _link(app, *names: str) -> None:
-    """Link each group to what an IdP that sends group names asserts for it: its name."""
+    """Link each group, for the gateway's provider, to what an IdP sending names asserts: its name."""
+    provider = app.state.settings.auth.proxy_provider
     for name in names:
-        app.state.group_store.update(name, source_id=name)
+        app.state.group_store.update(name, source_provider=provider, source_id=name)
 
 
 def _assert_refused_without_role(resp, app, stem: str) -> None:
@@ -76,7 +77,43 @@ class TestOidcAuthentication:
         admitted = client.get("/api/v1/auth/me", headers=headers)
 
         assert admitted.status_code == 200, admitted.text
-        assert ("admin" in admitted.json()["roles"], admitted.json()["groups"]) == (False, [])
+        viewers = sorted(app.state.group_store.get("dfe-viewers").roles)
+        assert "admin" not in viewers
+        assert (admitted.json()["roles"], admitted.json()["groups"]) == (viewers, ["dfe-viewers"])
+
+    def test_a_hand_added_member_holds_the_groups_roles_through_the_gateway(
+        self, client: TestClient, app
+    ):
+        """A gateway that forwards no groups claim reaches roles only through hand membership."""
+        app.state.group_store.add_member("dfe-analysts", "pat-example-com")
+
+        resp = client.get("/api/v1/auth/me", headers={"X-Oidc-Subject": "pat@example.com"})
+
+        assert resp.status_code == 200, resp.text
+        assert (resp.json()["roles"], resp.json()["groups"]) == (
+            ["data_analyst"],
+            ["dfe-analysts"],
+        )
+
+    def test_the_gateway_and_a_token_resolve_one_subject_the_same(
+        self, client: TestClient, api_settings, app
+    ):
+        """Hand membership and a linked id both count, on either path."""
+        _link(app, "dfe-infra")
+        app.state.group_store.add_member("dfe-analysts", "quinn-example-com")
+        proxied = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Oidc-Subject": "quinn@example.com", "X-Oidc-Groups": "dfe-infra"},
+        )
+        token = create_access_token(data={"sub": "quinn@example.com"}, settings=api_settings)
+
+        bearer = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+
+        assert proxied.status_code == 200, proxied.text
+        assert bearer.status_code == 200, bearer.text
+        for session in (proxied.json(), bearer.json()):
+            assert session["roles"] == ["data_analyst", "infra_admin"]
+            assert session["groups"] == ["dfe-analysts", "dfe-infra"]
 
     def test_groups_resolve_by_source_id(self, client: TestClient, app):
         """A provider that sends opaque group ids (Entra GUIDs, Google keys)
@@ -135,23 +172,26 @@ class TestOidcAuthentication:
 
         _assert_refused_without_role(resp, app, "ivy-example-com")
 
-    def test_a_group_linked_by_its_id_alone_answers_any_provider(self, client: TestClient, app):
-        """A group file an operator linked carries only source_id, as the sync fills the rest."""
-        app.state.group_store.update("dfe-analysts", source_id="00g-analysts")
+    @pytest.mark.parametrize("provider", ["okta", "google", "corp-sso"])
+    def test_a_group_file_linked_by_its_id_alone_answers_no_provider(
+        self, client: TestClient, app, provider
+    ):
+        """A link that names no provider would answer every provider, so the file does not load."""
+        stored = app.state.group_store._dir / "id-only-admins.yaml"
+        stored.write_text("roles: [admin]\nsource_id: Admins\n", encoding="utf-8")
+        app.state.settings.auth.proxy_provider = provider
 
         resp = client.get(
             "/api/v1/auth/me",
-            headers={"X-Oidc-Subject": "jon@example.com", "X-Oidc-Groups": "00g-analysts"},
+            headers={"X-Oidc-Subject": "jon@example.com", "X-Oidc-Groups": "Admins"},
         )
 
-        assert resp.status_code == 200
-        assert resp.json()["roles"] == ["data_analyst"]
-        assert resp.json()["groups"] == ["dfe-analysts"]
+        _assert_refused_without_role(resp, app, "jon-example-com")
 
     def test_the_proxy_path_stamps_the_configured_provider(self, client: TestClient, app):
         """The stamp is a provider name, not the protocol -- ``auth.proxy_provider``."""
-        _link(app, "dfe-admins")
         app.state.settings.auth.proxy_provider = "entra"
+        _link(app, "dfe-admins")
 
         resp = client.get(
             "/api/v1/auth/me",
@@ -166,8 +206,8 @@ class TestOidcAuthentication:
     def test_a_dual_path_deployment_reconciles_one_identity(self, client: TestClient, app):
         """The defect this fixes: the proxy stamped 'oidc' and the RP callback
         asserted the provider name, so the guard read one IdP as two identities."""
-        _link(app, "dfe-admins", "dfe-analysts")
         app.state.settings.auth.proxy_provider = "entra"
+        _link(app, "dfe-admins", "dfe-analysts")
         client.get(
             "/api/v1/auth/me",
             headers={"X-Oidc-Subject": "judy@example.com", "X-Oidc-Groups": "dfe-admins"},
