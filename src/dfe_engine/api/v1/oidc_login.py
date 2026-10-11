@@ -99,7 +99,10 @@ def validate_return_to(return_to: str, request_origin: str, trusted_origins: lis
         _refuse_return_to()
     if return_to.startswith("/") and not return_to.startswith("//"):
         return return_to
-    parts = urlsplit(return_to)
+    try:
+        parts = urlsplit(return_to)
+    except ValueError:  # a host that is invalid under NFKC, e.g. a full-width "/" or "@"
+        _refuse_return_to()
     allowed = {request_origin.lower(), *(o.lower() for o in trusted_origins)}
     if parts.scheme in ("http", "https") and parts.netloc and _origin(return_to) in allowed:
         return return_to
