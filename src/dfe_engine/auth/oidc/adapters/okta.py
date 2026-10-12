@@ -49,6 +49,9 @@ class OktaAdapter(OIDCGroupAdapter):
 
         base, headers = self._api_base_and_headers()
         if base is None or headers is None:
+            # A token that is set but never sent finds no groups, so the login says why once.
+            if base is not None and self._api_token.value:
+                self._warn_unsendable_token(operation="resolve_user_groups")
             return []
 
         from scalo.http import AsyncHttpClient
@@ -97,11 +100,7 @@ class OktaAdapter(OIDCGroupAdapter):
         base, headers = self._api_base_and_headers()
         if base is None or headers is None:
             if base is not None and self._api_token.value:
-                logger.warning(
-                    "Okta API token not sent: it holds a character an HTTP header cannot carry",
-                    operation="list_all_groups",
-                    provider=self._provider.issuer,
-                )
+                self._warn_unsendable_token(operation="list_all_groups")
                 raise DirectoryCredentialError
             if base is not None and self._api_token.unreadable:
                 raise DirectoryCredentialUnreadableError(refused=self._api_token.refused)
@@ -198,6 +197,16 @@ class OktaAdapter(OIDCGroupAdapter):
         return (
             "holds a character an HTTP header cannot carry: a space, a control character or a "
             f"non-ASCII one; re-send 'groups.api_token' to the provider API or fix {where}"
+        )
+
+    def _warn_unsendable_token(self, *, operation: str) -> None:
+        """Log that the configured API token is never sent, naming the settings that hold it and never its value."""
+        logger.warning(
+            "Okta API token not sent: it holds a character an HTTP header cannot carry",
+            api_token_env=self._provider.groups.api_token_env,
+            api_token_path=self._provider.groups.api_token_path,
+            operation=operation,
+            provider=self._provider.issuer,
         )
 
 

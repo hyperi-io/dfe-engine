@@ -24,10 +24,16 @@ from dfe_engine.auth.groups import (
     GroupExistsError,
     GroupMetrics,
     GroupStore,
+    identifier_holder,
     source_id_holder,
 )
 from dfe_engine.auth.membership import linked_groups
-from tests.unit.test_auth.groups_cases import SOURCE_ID_HOLDER_CASES, SourceIdHolderCase
+from tests.unit.test_auth.groups_cases import (
+    IDENTIFIER_HOLDER_CASES,
+    SOURCE_ID_HOLDER_CASES,
+    IdentifierHolderCase,
+    SourceIdHolderCase,
+)
 
 UNLINKED_EVENT = "stored group loaded unlinked: its source_id names no source_provider"
 
@@ -76,6 +82,20 @@ class TestSourceIdHolder:
     def test_matches_expected(self, case: SourceIdHolderCase):
         holder = source_id_holder(
             groups=case["groups"], name=case["name"], source_id=case["source_id"]
+        )
+        assert holder == case["expected_holder"]
+
+
+class TestIdentifierHolder:
+    @pytest.mark.parametrize(
+        "case", IDENTIFIER_HOLDER_CASES, ids=[case["id"] for case in IDENTIFIER_HOLDER_CASES]
+    )
+    def test_matches_expected(self, case: IdentifierHolderCase):
+        holder = identifier_holder(
+            exclude=case["exclude"],
+            groups=case["groups"],
+            name=case["name"],
+            source_id=case["source_id"],
         )
         assert holder == case["expected_holder"]
 

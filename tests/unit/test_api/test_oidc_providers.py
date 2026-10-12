@@ -18,14 +18,25 @@ from fastapi.testclient import TestClient
 
 from dfe_engine.auth.oidc.credential_env import resolve_credential
 from dfe_engine.http_errors import credential_failure_message
+from dfe_engine.settings import DFESettings
+from tests.support.failing_stores import make_delete_failing_secrets
 from tests.support.loopback import CountingListener
 from tests.unit.test_api.oidc_providers_cases import (
+    CREATE_PROVIDER_UNSET_ENV_CASES,
     SWITCHED_SECRET,
     SWITCHED_SECRET_ENV,
+    UNSET_SECRET_ENV,
     UPDATE_PROVIDER_SECRET_SOURCE_CASES,
+    UPDATE_TENANT_ID_ENV_CASES,
+    CreateProviderUnsetEnvCase,
     UpdateProviderSecretSourceCase,
+    UpdateTenantIdEnvCase,
 )
-from tests.unit.test_auth.factories import OKTA_API_TOKEN_ENV, make_okta_directory_provider
+from tests.unit.test_auth.factories import (
+    OKTA_API_TOKEN_ENV,
+    make_oidc_provider,
+    make_okta_directory_provider,
+)
 
 # An Okta API token an HTTP header cannot carry: the line break survives stripping.
 _UNSENDABLE_TOKEN = "test-okta\napi-token"
@@ -37,15 +48,15 @@ def _provider_yaml(api_settings, name: str) -> Path:
 
 
 def _secret_source(*, app: FastAPI, field: str, name: str, stored_path: str) -> dict[str, object]:
-    """The store path a provider keeps for one secret, the value it resolves to and whether the store still holds *stored_path*."""
+    """The env var name and store path a provider keeps for one secret, the value it resolves to and whether the store still holds *stored_path*."""
     provider = app.state.oidc_provider_registry.get(name)
     *parents, leaf = field.split(".")
     holder = provider.groups if parents else provider
+    env = getattr(holder, f"{leaf}_env")
     path = getattr(holder, f"{leaf}_path")
-    resolved = resolve_credential(
-        env_name=getattr(holder, f"{leaf}_env"), secret_path=path, secrets=app.state.dfe_secrets
-    )
+    resolved = resolve_credential(env_name=env, secret_path=path, secrets=app.state.dfe_secrets)
     return {
+        "env": env,
         "path": path,
         "resolved": resolved.value,
         "stored": app.state.dfe_secrets.exists(stored_path),
@@ -86,7 +97,8 @@ class TestCreateProvider:
         assert data["groups"]["mode"] == "token_claim"
         assert data["created_at"] != ""
 
-    def test_create_with_groups_config(self, client, admin_headers):
+    def test_create_with_groups_config(self, admin_headers, client, monkeypatch):
+        monkeypatch.setenv("ENTRA_CLIENT_SECRET", "entra-client-secret")
         resp = _create_provider(
             client,
             admin_headers,
@@ -113,9 +125,10 @@ class TestCreateProvider:
         assert resp.json()["enabled"] is False
         assert not app.state.oidc_rp.has_provider("off-at-birth")
 
-    def test_create_sets_rp_client_secret_env(self, client, admin_headers):
+    def test_create_sets_rp_client_secret_env(self, admin_headers, client, monkeypatch):
         """The RP client_secret_env round-trips - without it a provider created
         via the API could never complete a login (no secret for the exchange)."""
+        monkeypatch.setenv("OIDC_RP_SECRET", "rp-client-secret")
         resp = _create_provider(
             client,
             admin_headers,
@@ -144,6 +157,61 @@ class TestCreateProvider:
     def test_create_missing_fields_returns_422(self, client, admin_headers):
         resp = client.post("/api/v1/auth/oidc-providers", json={}, headers=admin_headers)
         assert resp.status_code == 422
+
+    @pytest.mark.parametrize(
+        "case",
+        CREATE_PROVIDER_UNSET_ENV_CASES,
+        ids=[case["id"] for case in CREATE_PROVIDER_UNSET_ENV_CASES],
+    )
+    def test_an_unset_env_var_is_refused_and_writes_nothing(
+        self,
+        admin_headers: dict[str, str],
+        api_settings: DFESettings,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+        case: CreateProviderUnsetEnvCase,
+    ):
+        monkeypatch.delenv(UNSET_SECRET_ENV, raising=False)
+        written = [
+            Path(api_settings.secrets.path),
+            Path(api_settings.auth.auth_dir) / "oidc-providers",
+        ]
+        before = [sorted(path.rglob("*")) for path in written]
+
+        resp = _create_provider(
+            admin_headers=admin_headers, client=client, name="sso", **case["create_body"]
+        )
+
+        after = [sorted(path.rglob("*")) for path in written]
+        assert (resp.status_code, _field_errors(response=resp), after) == (
+            422,
+            case["expected_fields"],
+            before,
+        )
+
+    def test_an_unset_env_var_beside_a_value_is_accepted(
+        self, admin_headers: dict[str, str], app: FastAPI, client: TestClient
+    ):
+        resp = _create_provider(
+            admin_headers=admin_headers,
+            client=client,
+            client_secret="rp-client-secret",
+            client_secret_env=UNSET_SECRET_ENV,
+            name="sso",
+        )
+
+        source = _secret_source(
+            app=app, field="client_secret", name="sso", stored_path="oidc/sso/client_secret"
+        )
+        assert (resp.status_code, source) == (
+            201,
+            {
+                "env": UNSET_SECRET_ENV,
+                "path": "oidc/sso/client_secret",
+                "resolved": "rp-client-secret",
+                "stored": True,
+            },
+        )
 
 
 class TestListProviders:
@@ -227,7 +295,8 @@ class TestUpdateProvider:
         assert resp.status_code == 200
         assert resp.json()["display_name"] == "New Name"
 
-    def test_update_groups_config(self, client, admin_headers):
+    def test_update_groups_config(self, admin_headers, client, monkeypatch):
+        monkeypatch.setenv("OKTA_API_TOKEN", "okta-api-token")
         _create_provider(client, admin_headers, name="upd-groups", type="okta")
         resp = client.put(
             "/api/v1/auth/oidc-providers/upd-groups",
@@ -275,6 +344,7 @@ class TestUpdateProvider:
         case: UpdateProviderSecretSourceCase,
     ):
         monkeypatch.setenv(SWITCHED_SECRET_ENV, SWITCHED_SECRET)
+        monkeypatch.delenv(UNSET_SECRET_ENV, raising=False)
         _create_provider(
             admin_headers=admin_headers, client=client, name="sso", **case["create_body"]
         )
@@ -286,11 +356,152 @@ class TestUpdateProvider:
         source = _secret_source(
             app=app, field=case["secret_field"], name="sso", stored_path=case["stored_path"]
         )
-        assert (resp.status_code, source) == (200, case["expected_source"])
+        assert (resp.status_code, source) == (case["expected_status"], case["expected_source"])
+
+    def test_a_move_onto_an_unset_env_var_answers_on_that_field(
+        self, admin_headers: dict[str, str], client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.delenv(UNSET_SECRET_ENV, raising=False)
+        _create_provider(
+            admin_headers=admin_headers,
+            client=client,
+            groups={"api_token": "stored-token", "mode": "api", "okta_domain": "acme.okta.com"},
+            name="sso",
+            type="okta",
+        )
+
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/sso",
+            headers=admin_headers,
+            json={
+                "groups": {
+                    "api_token_env": UNSET_SECRET_ENV,
+                    "mode": "api",
+                    "okta_domain": "acme.okta.com",
+                }
+            },
+        )
+
+        expected_body = {
+            "code": "validation_error",
+            "errors": [
+                {
+                    "code": "env_var_not_set",
+                    "field": "groups.api_token_env",
+                    "message": f"the env var {UNSET_SECRET_ENV!r} is not set in the engine, so the "
+                    "secret would resolve empty: set it in the engine's environment first or send "
+                    "the secret's value",
+                }
+            ],
+            "message": "1 validation error(s)",
+        }
+        assert (resp.status_code, resp.json()) == (422, expected_body)
+
+    def test_resending_an_unset_env_name_with_nothing_stored_changes_nothing(
+        self,
+        admin_headers: dict[str, str],
+        app: FastAPI,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.delenv(UNSET_SECRET_ENV, raising=False)
+        app.state.oidc_provider_registry.create(
+            name="sso",
+            provider=make_oidc_provider(client_id="c", client_secret_env=UNSET_SECRET_ENV),
+        )
+
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/sso",
+            headers=admin_headers,
+            json={"client_secret_env": UNSET_SECRET_ENV, "display_name": "Renamed"},
+        )
+
+        stored = app.state.oidc_provider_registry.get("sso")
+        assert (resp.status_code, stored.client_secret_env, stored.display_name) == (
+            200,
+            UNSET_SECRET_ENV,
+            "Renamed",
+        )
+
+    @pytest.mark.parametrize(
+        "case",
+        UPDATE_TENANT_ID_ENV_CASES,
+        ids=[case["id"] for case in UPDATE_TENANT_ID_ENV_CASES],
+    )
+    def test_tenant_id_env(
+        self,
+        admin_headers: dict[str, str],
+        app: FastAPI,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+        case: UpdateTenantIdEnvCase,
+    ):
+        monkeypatch.setenv(SWITCHED_SECRET_ENV, SWITCHED_SECRET)
+        _create_provider(
+            admin_headers=admin_headers,
+            client=client,
+            groups={
+                "client_secret_env": SWITCHED_SECRET_ENV,
+                "mode": "api",
+                "tenant_id_env": "ENTRA_TENANT_ID",
+            },
+            name="sso",
+            type="entra_id",
+        )
+
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/sso",
+            headers=admin_headers,
+            json={"groups": case["update_groups"]},
+        )
+
+        stored = app.state.oidc_provider_registry.get("sso").groups
+        assert (resp.status_code, stored.tenant_id_env) == (200, case["expected_tenant_id_env"])
+
+    def test_a_delete_the_store_fails_keeps_the_saved_update(
+        self,
+        admin_headers: dict[str, str],
+        api_settings: DFESettings,
+        app: FastAPI,
+        audit_events: list[dict],
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setenv(SWITCHED_SECRET_ENV, SWITCHED_SECRET)
+        _create_provider(
+            admin_headers=admin_headers, client=client, client_secret="stored-secret", name="sso"
+        )
+        app.state.dfe_secrets = make_delete_failing_secrets(root=api_settings.secrets.path)
+
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/sso",
+            headers=admin_headers,
+            json={"client_secret_env": SWITCHED_SECRET_ENV},
+        )
+
+        left = [
+            (event["secret_path"], event["error_type"])
+            for event in audit_events
+            if event["event"]
+            == "OIDC provider secret left in the secret store: the provider no longer reads it"
+        ]
+        source = _secret_source(
+            app=app, field="client_secret", name="sso", stored_path="oidc/sso/client_secret"
+        )
+        assert (resp.status_code, source, left) == (
+            200,
+            {"env": SWITCHED_SECRET_ENV, "path": "", "resolved": SWITCHED_SECRET, "stored": True},
+            [("oidc/sso/client_secret", "ConnectionError")],
+        )
 
     def test_a_refused_switch_to_env_deletes_nothing(
-        self, admin_headers: dict[str, str], app: FastAPI, client: TestClient
+        self,
+        admin_headers: dict[str, str],
+        app: FastAPI,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
     ):
+        monkeypatch.setenv(SWITCHED_SECRET_ENV, SWITCHED_SECRET)
         _create_provider(
             admin_headers=admin_headers,
             client=client,
@@ -1183,7 +1394,8 @@ class TestEnvNameFieldsRejectPastedSecrets:
         assert resp.status_code == 422
         assert _field_errors(resp) == ["groups.api_token_env"]
 
-    def test_a_real_env_name_is_still_accepted(self, client, admin_headers):
+    def test_a_real_env_name_is_still_accepted(self, admin_headers, client, monkeypatch):
+        monkeypatch.setenv("OIDC_RP_SECRET", "rp-client-secret")
         resp = _create_provider(
             client, admin_headers, name="good-env", client_secret_env="OIDC_RP_SECRET"
         )
@@ -1345,7 +1557,8 @@ class TestProviderFieldRules:
             "DFE_TEST_SYNC_DIRECTORY",
         )
 
-    def test_google_always_enriches_on_login(self, client, admin_headers):
+    def test_google_always_enriches_on_login(self, admin_headers, client, monkeypatch):
+        monkeypatch.setenv("GOOGLE_SA_JSON", "{}")
         resp = _create_provider(
             client,
             admin_headers,

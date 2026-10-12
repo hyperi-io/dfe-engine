@@ -162,3 +162,21 @@ def test_seed_account_unknown_group_is_skipped_not_fatal(tmp_path: Path, monkeyp
     kay = account_store.get("kay")
     assert kay is not None
     assert kay.groups == []
+
+
+def test_a_stored_name_that_is_another_groups_source_id_is_reported_at_boot(
+    audit_events: list[dict], tmp_path: Path
+):
+    _, group_store, *_ = bootstrap_auth(tmp_path / "auth")
+    group_store.create(members=[], name="DFE-Admins", roles=[])
+    group_store.update(name="dfe-admins", source_id="DFE-Admins", source_provider="entra")
+    audit_events.clear()
+
+    bootstrap_auth(tmp_path / "auth")
+
+    reported = [
+        (event["group"], event["linked_group"])
+        for event in audit_events
+        if event["event"].startswith("a group's name is another group's source_id")
+    ]
+    assert reported == [("DFE-Admins", "dfe-admins")]

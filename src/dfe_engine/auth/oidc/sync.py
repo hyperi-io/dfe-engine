@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from scalo.logger import logger
 
-from dfe_engine.auth.groups import GroupExistsError
+from dfe_engine.auth.groups import GroupExistsError, identifier_holder
 from dfe_engine.auth.membership import linked_providers
 from dfe_engine.auth.oidc.adapters.base import (
     DirectoryCredentialError,
@@ -138,7 +138,9 @@ SyncSkipReason = Literal[
   characters, or not starting with a letter or digit.
 - ``stored_unloadable``: a stored group that does not load already holds its name.
 - ``name_taken``: a stored group holds its name and is not linked to it: the stored
-  group carries no ``source_id``, or another provider group's id.
+  group carries no ``source_id``, or another provider group's id. Also a group whose
+  name is a stored group's ``source_id`` or whose id is a stored group's name, since an
+  API key resolves a group identifier by name, then by id.
 - ``provider_mismatch``: a stored group carries its id but is linked to another
   provider, one ``auth.source_provider_bindings`` does not join to this one, and that
   provider keeps it, whatever the stored group is called.
@@ -226,7 +228,9 @@ async def sync_provider(
     a group between providers or creates a second group carrying the id.
     Otherwise the group's name decides: a stored group of that name with no link is
     left untouched and counted as ``name_taken``: linking one is an admin's act.
-    New groups are created with empty roles, linked to the provider group.
+    New groups are created with empty roles, linked to the provider group, unless the
+    name is another group's ``source_id`` or the id another group's name, which also
+    counts as ``name_taken``.
 
     Args:
         provider_name: Name of the provider in *provider_registry*.
@@ -374,7 +378,9 @@ async def sync_provider(
     linked_by_id: dict[str, list[str]] = {}
     # The first stored group, by name, carrying each id under a provider that is not ours.
     foreign_by_id = {}
-    for stored in group_store.list():
+    # Every stored group plus each this run creates, for the name and id a new group may not take.
+    known = group_store.list()
+    for stored in known:
         if stored.source_id and stored.source_provider in own_stamps:
             linked_by_id.setdefault(stored.source_id, []).append(stored.name)
         elif stored.source_id:
@@ -400,9 +406,9 @@ async def sync_provider(
         if foreign is not None:
             logger.warning(
                 "OIDC group sync skipped a group linked to another provider",
-                provider=provider_name,
                 group=foreign.name,
                 linked_provider=foreign.source_provider,
+                provider=provider_name,
                 reason="provider_mismatch",
             )
             metrics.skipped("provider_mismatch")
@@ -424,53 +430,54 @@ async def sync_provider(
 
         existing = group_store.get(group_name)
         if existing is None:
+            # An API key resolves a group by name, then by id, so neither may be another group's other one.
+            holder = identifier_holder(
+                exclude=group_name, groups=known, name=group_name, source_id=group_info.id
+            )
+            if holder is not None:
+                logger.warning(
+                    "OIDC group sync skipped a group whose name or id is another group's id or name",
+                    group=group_name,
+                    group_id=group_info.id,
+                    held_by=holder.name,
+                    provider=provider_name,
+                )
+                metrics.skipped("name_taken")
+                skips["name_taken"] += 1
+                continue
             try:
-                group_store.create(
+                created_group = group_store.create(
+                    description=group_info.description,
                     name=group_name,
                     roles=[],
-                    description=group_info.description,
-                    source_provider=provider_name,
                     source_id=group_info.id,
+                    source_provider=provider_name,
                 )
             except GroupExistsError:
                 # A stored group that does not load holds the name; the store counts the file.
                 logger.warning(
                     "OIDC group sync skipped a group whose stored copy does not load",
-                    provider=provider_name,
                     group=group_name,
+                    provider=provider_name,
                 )
                 metrics.skipped("stored_unloadable")
                 skips["stored_unloadable"] += 1
                 continue
+            known.append(created_group)
             linked_by_id[group_info.id] = [group_name]
             created += 1
             continue
 
+        # Every group linked to the id, under any provider, was found above, so this is a name match.
         # A name match is no link: only the IdP group's own id links a group, and a user cannot choose that.
-        if existing.source_id != group_info.id:
-            logger.warning(
-                "OIDC group sync skipped a group whose name is held by a group not linked to it",
-                provider=provider_name,
-                group=group_name,
-                group_id=group_info.id,
-            )
-            metrics.skipped("name_taken")
-            skips["name_taken"] += 1
-            continue
-        # Two providers can assign one id, so a matching id under an unbound provider's link is not ours.
-        if existing.source_provider not in own_stamps:
-            logger.warning(
-                "OIDC group sync skipped a group linked to another provider",
-                provider=provider_name,
-                group=group_name,
-                linked_provider=existing.source_provider,
-                reason="provider_mismatch",
-            )
-            metrics.skipped("provider_mismatch")
-            skips["provider_mismatch"] += 1
-            continue
-        group_store.update(group_name, description=group_info.description)
-        updated += 1
+        logger.warning(
+            "OIDC group sync skipped a group whose name is held by a group not linked to it",
+            group=group_name,
+            group_id=group_info.id,
+            provider=provider_name,
+        )
+        metrics.skipped("name_taken")
+        skips["name_taken"] += 1
 
     if skips["no_id"]:
         # One line per run: without an id there is nothing stable to name each group by.

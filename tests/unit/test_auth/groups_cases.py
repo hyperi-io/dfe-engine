@@ -63,3 +63,68 @@ SOURCE_ID_HOLDER_CASES: list[SourceIdHolderCase] = [
         "expected_holder": None,
     },
 ]
+
+
+_ADMINS_LINKED = make_group(name="dfe-admins", source_id="DFE-Admins", source_provider="entra")
+_OKTA_SOC = make_group(name="okta-soc", source_id="okta-soc", source_provider="okta")
+
+
+class IdentifierHolderCase(TypedDict):
+    id: str
+    groups: list[Group]
+    exclude: str
+    name: str
+    source_id: str
+    expected_holder: Group | None
+
+
+IDENTIFIER_HOLDER_CASES: list[IdentifierHolderCase] = [
+    {
+        "id": "a_name_that_is_another_groups_source_id",
+        "groups": [_ADMINS_LINKED, _VIEWERS],
+        "exclude": "DFE-Admins",
+        "name": "DFE-Admins",
+        "source_id": "",
+        "expected_holder": _ADMINS_LINKED,
+    },
+    {
+        "id": "a_source_id_that_is_another_groups_name",
+        "groups": [_ADMINS_LINKED, _VIEWERS],
+        "exclude": "shadow",
+        "name": "",
+        "source_id": "dfe-viewers",
+        "expected_holder": _VIEWERS,
+    },
+    {
+        "id": "a_group_named_like_its_own_source_id",
+        "groups": [_OKTA_SOC, _VIEWERS],
+        "exclude": "okta-soc",
+        "name": "okta-soc",
+        "source_id": "okta-soc",
+        "expected_holder": None,
+    },
+    {
+        "id": "a_name_left_unchecked",
+        "groups": [_ADMINS_LINKED, _VIEWERS],
+        "exclude": "DFE-Admins",
+        "name": "",
+        "source_id": "new-id",
+        "expected_holder": None,
+    },
+    {
+        "id": "another_groups_name_matching_the_name_is_no_collision",
+        "groups": [_ADMINS_LINKED, _VIEWERS],
+        "exclude": "dfe-viewers",
+        "name": "dfe-viewers",
+        "source_id": "",
+        "expected_holder": None,
+    },
+    {
+        "id": "nothing_collides",
+        "groups": [_ADMINS_LINKED, _SOC_TEAM, _VIEWERS],
+        "exclude": "ops",
+        "name": "ops",
+        "source_id": "00g-ops",
+        "expected_holder": None,
+    },
+]

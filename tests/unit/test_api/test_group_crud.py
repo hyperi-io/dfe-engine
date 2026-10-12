@@ -17,14 +17,21 @@ from fastapi.testclient import TestClient
 
 from dfe_engine.api.deps import create_access_token
 from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
+from dfe_engine.settings import DFESettings
 from tests.unit.test_api.group_crud_cases import (
+    ADMINS_SOURCE_ID,
     GROUP_DELETE_ROUTE_CASES,
+    IDENTIFIER_COLLISION_CASES,
+    IDP_ACCOUNT,
+    IDP_MEMBER_WRITE_CASES,
     KNOWN_SOURCE_PROVIDER_CASES,
     LINK_CHANGE_CASES,
     MALFORMED_SOURCE_ID_CASES,
     MISSING_PROVIDER_CASES,
     UNLOADABLE_PROVIDER_FILE_CASES,
     GroupDeleteRouteCase,
+    IdentifierCollisionCase,
+    IdpMemberWriteCase,
     KnownSourceProviderCase,
     LinkChangeCase,
     MalformedSourceIdCase,
@@ -199,6 +206,12 @@ class TestGroupRoleEscalation:
         )
         assert resp.status_code == 403
         assert resp.json()["code"] == "forbidden"
+
+
+def _bearer(*, api_settings: DFESettings, subject: str) -> dict[str, str]:
+    """Return the Authorization header of a session token for account *subject*."""
+    token = create_access_token(data={"sub": subject}, settings=api_settings)
+    return {"Authorization": f"Bearer {token}"}
 
 
 def _roles(client, headers) -> list[str]:
@@ -905,6 +918,143 @@ class TestAGroupsApiSourceIdNamesOneGroup:
         assert app.state.group_store.get("zz-shadow") is None
 
 
+class TestAGroupNameIsNoOtherGroupsSourceId:
+    """An API key resolves a group identifier by name, then by source ID, so a group's name may not be another group's source ID, nor the reverse.
+
+    dfe-admins carries the source ID DFE-Admins; sec-team is an unlinked group with no members.
+    """
+
+    @pytest.fixture(autouse=True)
+    def linked(self, app: FastAPI, client: TestClient) -> None:
+        """Link dfe-admins to ADMINS_SOURCE_ID and store sec-team; depends on client, whose lifespan builds the stores."""
+        app.state.group_store.update(
+            name="dfe-admins", source_id=ADMINS_SOURCE_ID, source_provider="oidc"
+        )
+        app.state.group_store.create(members=[], name="sec-team", roles=[])
+
+    @pytest.mark.parametrize(
+        "case", IDENTIFIER_COLLISION_CASES, ids=[case["id"] for case in IDENTIFIER_COLLISION_CASES]
+    )
+    def test_a_write_crossing_the_namespaces_is_refused(
+        self, admin_headers: dict[str, str], client: TestClient, case: IdentifierCollisionCase
+    ):
+        resp = client.request(
+            headers=admin_headers, json=case["body"], method=case["method"], url=case["route"]
+        )
+
+        error = {key: resp.json().get(key) for key in case["expected_error"]}
+        assert (resp.status_code, error) == (case["expected_status"], case["expected_error"])
+
+    def test_a_key_minted_for_a_shadow_name_never_reaches_the_linked_group(
+        self, api_settings: DFESettings, app: FastAPI, client: TestClient
+    ):
+        app.state.role_store.create(
+            description="keys and groups", name="keygroup", permissions=["api_key:*", "group:*"]
+        )
+        app.state.role_config = app.state.role_store.load_config()
+        app.state.account_store.create(
+            groups=["kg-group"], password=secrets.token_urlsafe(16), username="kg"
+        )
+        app.state.group_store.create(members=["kg"], name="kg-group", roles=["keygroup"])
+        headers = _bearer(api_settings=api_settings, subject="kg")
+
+        shadow = client.post(
+            "/api/v1/auth/groups", headers=headers, json={"name": ADMINS_SOURCE_ID, "roles": []}
+        )
+        minted = client.post(
+            "/api/v1/auth/api-keys",
+            headers=headers,
+            json={"groups": [ADMINS_SOURCE_ID], "name": "probe-key"},
+        )
+
+        assert (shadow.status_code, minted.status_code, "full_key" in minted.json()) == (
+            409,
+            403,
+            False,
+        )
+
+
+class TestAMembershipWriteLeavesAnIdpAccountsOwnList:
+    """A group route lists an IdP-owned account in the group's members and never writes the account's own list, which is what its IdP asserts.
+
+    dfe-admins is linked to the Entra id DFE-Admins and jane is Entra-owned, so a group name DFE-Admins written into jane's list would read as that assertion and hand her admin. A stored group named DFE-Admins is a collision written before the groups API refused one. jane holds infra_admin through dfe-infra, so she manages groups herself.
+    """
+
+    @pytest.fixture
+    def callers(
+        self,
+        admin_headers: dict[str, str],
+        api_settings: DFESettings,
+        app: FastAPI,
+        client: TestClient,
+        operator_headers: dict[str, str],
+    ) -> dict[str, dict[str, str]]:
+        """Link dfe-admins, make jane Entra-owned and orgop acme's infra_admin; return each caller's headers."""
+        app.state.group_store.update(
+            name="dfe-admins", source_id=ADMINS_SOURCE_ID, source_provider="entra"
+        )
+        app.state.account_store.create(groups=["dfe-viewers"], password="", username=IDP_ACCOUNT)
+        app.state.account_store.update(external=True, source_provider="entra", username=IDP_ACCOUNT)
+        app.state.group_store.add_member(group_name="dfe-infra", username=IDP_ACCOUNT)
+        org = client.post("/api/v1/orgs", headers=admin_headers, json={"name": "acme"})
+        assert org.status_code == 201, org.text
+        app.state.account_store.create(password=secrets.token_urlsafe(16), username="orgop")
+        app.state.group_store.create(
+            members=["orgop"], name="acme-infra", roles=["infra_admin"], scope="org:acme"
+        )
+        return {
+            "jane": _bearer(api_settings=api_settings, subject=IDP_ACCOUNT),
+            "operator": operator_headers,
+            "orgop": _bearer(api_settings=api_settings, subject="orgop"),
+        }
+
+    @pytest.mark.parametrize(
+        "case", IDP_MEMBER_WRITE_CASES, ids=[case["id"] for case in IDP_MEMBER_WRITE_CASES]
+    )
+    def test_the_own_list_is_left_alone(
+        self,
+        app: FastAPI,
+        callers: dict[str, dict[str, str]],
+        client: TestClient,
+        case: IdpMemberWriteCase,
+    ):
+        for name in case["stored_groups"]:
+            app.state.group_store.create(members=[], name=name, roles=[])
+
+        resp = client.request(
+            headers=callers[case["caller"]],
+            json=case["body"],
+            method=case["method"],
+            url=case["route"],
+        )
+
+        held = (
+            _roles(client=client, headers=callers["jane"]),
+            app.state.account_store.get(IDP_ACCOUNT).groups,
+        )
+        assert (resp.status_code, held) == (
+            case["expected_status"],
+            (["infra_admin"], ["dfe-viewers"]),
+        )
+
+    def test_a_removal_leaves_the_idp_assertion(
+        self, app: FastAPI, callers: dict[str, dict[str, str]], client: TestClient
+    ):
+        app.state.group_store.create(members=[IDP_ACCOUNT], name=ADMINS_SOURCE_ID, roles=[])
+        app.state.account_store.update(groups=[ADMINS_SOURCE_ID], username=IDP_ACCOUNT)
+
+        resp = client.delete(
+            f"/api/v1/auth/groups/{ADMINS_SOURCE_ID}/members/{IDP_ACCOUNT}",
+            headers=callers["operator"],
+        )
+
+        held = (
+            _roles(client=client, headers=callers["jane"]),
+            app.state.account_store.get(IDP_ACCOUNT).groups,
+        )
+        assert (resp.status_code, held) == (200, (["admin", "infra_admin"], [ADMINS_SOURCE_ID]))
+
+
 class TestMovingALinkNeedsTheGroupsRoles:
     """A login asserting a group's source ID takes its roles, so moving the link hands them out or takes them away.
 
@@ -1100,6 +1250,39 @@ class TestALinksProviderIsOneAnAssertionCarries:
         assert resp.status_code == 422, resp.text
         assert resp.json()["code"] == "invalid_source_provider"
         assert app.state.group_store.get("linked") is None
+
+    @pytest.mark.parametrize(
+        "case",
+        UNLOADABLE_PROVIDER_FILE_CASES,
+        ids=[case["id"] for case in UNLOADABLE_PROVIDER_FILE_CASES],
+    )
+    def test_a_provider_whose_file_does_not_load_is_logged_by_its_class(
+        self,
+        admin_headers: dict[str, str],
+        app: FastAPI,
+        audit_events: list[dict],
+        client: TestClient,
+        case: UnloadableProviderFileCase,
+    ):
+        _write_provider_file(app=app, content=case["content"], name="broken-idp")
+
+        client.post(
+            "/api/v1/auth/groups",
+            headers=admin_headers,
+            json={
+                "name": "linked",
+                "roles": [],
+                "source_id": "SOC Analysts",
+                "source_provider": "broken-idp",
+            },
+        )
+
+        logged = [
+            (event["provider"], event["error_type"])
+            for event in audit_events
+            if event["event"] == "OIDC provider file did not load, so a group cannot link to it"
+        ]
+        assert logged == [("broken-idp", case["expected_error_type"])]
 
     def test_a_provider_whose_file_does_not_load_is_refused_on_update(
         self, admin_headers: dict[str, str], app: FastAPI, client: TestClient
@@ -1449,6 +1632,87 @@ class TestAGroupChangeIsAudited:
         assert [
             (event["admin_id"], event["group_name"], event["details"]) for event in deleted
         ] == [("admin", "audited", {"source_id": "Audited", "source_provider": "oidc"})]
+
+    def test_a_scim_delete_records_the_link(
+        self,
+        admin_headers: dict[str, str],
+        app: FastAPI,
+        audit_events: list[dict],
+        client: TestClient,
+    ):
+        app.state.group_store.create(
+            members=[],
+            name="audited",
+            roles=["data_viewer"],
+            source_id="Audited",
+            source_provider="scim",
+        )
+
+        resp = client.delete(
+            f"{TestScimJoinsNeedTheGroupsRoles.SCIM}/audited", headers=admin_headers
+        )
+
+        deleted = [event for event in audit_events if event["event"] == "auth.group.deleted"]
+        assert (resp.status_code, [event["details"] for event in deleted]) == (
+            204,
+            [{"members": [], "source_id": "Audited", "source_provider": "scim", "via": "scim"}],
+        )
+
+    def test_an_update_resending_the_link_lists_only_what_changed(
+        self,
+        admin_headers: dict[str, str],
+        app: FastAPI,
+        audit_events: list[dict],
+        client: TestClient,
+    ):
+        app.state.group_store.update(
+            name="dfe-viewers", source_id="00g-viewers", source_provider="oidc"
+        )
+
+        resp = client.put(
+            "/api/v1/auth/groups/dfe-viewers",
+            headers=admin_headers,
+            json={
+                "description": "Viewers",
+                "source_id": "00g-viewers",
+                "source_provider": "oidc",
+            },
+        )
+
+        updated = [event for event in audit_events if event["event"] == "auth.group.updated"]
+        assert (resp.status_code, [event["details"] for event in updated]) == (
+            200,
+            [{"fields": ["description"]}],
+        )
+
+    def test_an_update_moving_the_id_lists_the_id_alone(
+        self,
+        admin_headers: dict[str, str],
+        app: FastAPI,
+        audit_events: list[dict],
+        client: TestClient,
+    ):
+        app.state.group_store.update(
+            name="dfe-viewers", source_id="00g-viewers", source_provider="oidc"
+        )
+
+        resp = client.put(
+            "/api/v1/auth/groups/dfe-viewers",
+            headers=admin_headers,
+            json={"source_id": "00g-viewers-2", "source_provider": "oidc"},
+        )
+
+        updated = [event for event in audit_events if event["event"] == "auth.group.updated"]
+        assert (resp.status_code, [event["details"] for event in updated]) == (
+            200,
+            [
+                {
+                    "fields": ["source_id"],
+                    "source_id": {"after": "00g-viewers-2", "before": "00g-viewers"},
+                    "source_provider": {"after": "oidc", "before": "oidc"},
+                }
+            ],
+        )
 
 
 class TestListGroups:

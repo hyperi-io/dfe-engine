@@ -23,7 +23,9 @@ group:write holder manages only that org's groups. Visibility follows
 the same rule, plus members always see the groups they belong to --
 org-local groups are never listed outside their org.
 
-A group's ``source_id`` and ``source_provider`` link it to an IdP group: a login asserting that id takes the group's roles, so setting or moving the link needs the role rights adding a member does. No two groups may carry one id.
+A group's ``source_id`` and ``source_provider`` link it to an IdP group: a login asserting that id takes the group's roles, so setting or moving the link needs the role rights adding a member does. No two groups may carry one id; no group's name may be another group's id either, since an API key resolves a group identifier by name first, then by id.
+
+A membership change is mirrored onto a local account's ``groups`` list, never onto an IdP-owned account's, which holds what its IdP asserts.
 """
 
 import unicodedata
@@ -32,6 +34,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
+from scalo.logger import logger
 
 from dfe_engine.api.deps import (
     CurrentUser,
@@ -53,6 +56,7 @@ from dfe_engine.auth.audit import audit_group_change, audit_permission_denied
 from dfe_engine.auth.groups import (
     Group,
     GroupExistsError,
+    identifier_holder,
     source_id_holder,
     validate_group_scope,
 )
@@ -210,13 +214,29 @@ def _is_known_source_provider(*, name: str, request: Request) -> bool:
     # A provider file that does not load answers for no login, so it names no known provider.
     try:
         return registry.get(name) is not None
-    except OSError, UnicodeDecodeError, YAMLError, RecursionError, ValueError:
+    except (OSError, UnicodeDecodeError, YAMLError, RecursionError, ValueError) as exc:
+        # The class alone: a parse error's text can quote the file.
+        logger.warning(
+            "OIDC provider file did not load, so a group cannot link to it",
+            error_type=type(exc).__name__,
+            provider=name,
+        )
         return False
+
+
+def _link_changes(
+    *, before: Group | None, source_id: str, source_provider: str
+) -> tuple[bool, bool]:
+    """Whether a write leaving a group with *source_id* and *source_provider* changes each of them from *before*, the group as stored (None for a new one)."""
+    stored_id = before.source_id if before is not None else ""
+    stored_provider = before.source_provider if before is not None else ""
+    return source_id != stored_id, source_provider != stored_provider
 
 
 def _refuse_bad_link(
     *,
-    before: Group | None,
+    changes_source_id: bool,
+    changes_source_provider: bool,
     name: str,
     request: Request,
     source_id: str,
@@ -224,12 +244,8 @@ def _refuse_bad_link(
 ) -> None:
     """Refuse a source ID or provider the request changes to one no login could use to reach group *name* alone.
 
-    *source_id* and *source_provider* are the values the group would hold and *before* the group as stored, None for a new one. Only a changed value is checked, so a stored value these rules would now refuse (a SCIM externalId, a deleted provider) never blocks an edit.
+    *source_id* and *source_provider* are the values the group would hold; *changes_source_id* and *changes_source_provider* say whether the write changes each (:func:`_link_changes`). Only a changed value is checked, so a stored value these rules would now refuse (a SCIM externalId, a deleted provider) never blocks an edit.
     """
-    changes_source_id = source_id != (before.source_id if before is not None else "")
-    changes_source_provider = source_provider != (
-        before.source_provider if before is not None else ""
-    )
     if changes_source_id:
         _refuse_malformed_source_id(source_id=source_id)
     if changes_source_provider and source_provider:
@@ -237,23 +253,37 @@ def _refuse_bad_link(
     changes_link = (changes_source_id) or (changes_source_provider)
     if changes_link and source_id and not (source_provider):
         raise HTTPException(
-            status_code=422,
             detail={
                 "code": "missing_source_provider",
                 "message": "a source_id needs a source_provider naming the provider whose logins it answers",
             },
+            status_code=422,
         )
     if not (changes_source_id) or not (source_id):
         return
     groups = request.app.state.group_store.list()
     if source_id_holder(groups=groups, name=name, source_id=source_id) is not None:
         raise HTTPException(
-            status_code=409,
             detail={
                 "code": "conflict",
                 "message": f"source_id {source_id!r} is already another group's",
             },
+            status_code=409,
         )
+
+
+def _refuse_identifier_collision(
+    *, groups: list[Group], name: str, source_id: str, target: str
+) -> None:
+    """Refuse a write giving group *target* a *name* that is another group's source ID or a *source_id* that is another group's name (:func:`identifier_holder`); pass empty for the one the write leaves alone."""
+    holder = identifier_holder(exclude=target, groups=groups, name=name, source_id=source_id)
+    if holder is None:
+        return
+    if name and holder.source_id == name:
+        message = f"name {name!r} is already another group's source_id"
+    else:
+        message = f"source_id {source_id!r} is already another group's name"
+    raise HTTPException(detail={"code": "identifier_taken", "message": message}, status_code=409)
 
 
 def _refuse_malformed_source_id(*, source_id: str) -> None:
@@ -268,7 +298,7 @@ def _refuse_malformed_source_id(*, source_id: str) -> None:
         problem = "source_id must not contain control characters"
     if problem:
         raise HTTPException(
-            status_code=422, detail={"code": "invalid_source_id", "message": problem}
+            detail={"code": "invalid_source_id", "message": problem}, status_code=422
         )
 
 
@@ -285,7 +315,7 @@ def _refuse_unknown_source_provider(*, name: str, request: Request) -> None:
     else:
         return
     raise HTTPException(
-        status_code=422, detail={"code": "invalid_source_provider", "message": message}
+        detail={"code": "invalid_source_provider", "message": message}, status_code=422
     )
 
 
@@ -334,7 +364,9 @@ def check_group_changes(
     for name in sorted(set(before) ^ set(after)):
         group = by_name.get(name)
         if group is not None:
-            check_role_assignment(request, user, group.roles, scope_of(group))
+            check_role_assignment(
+                request=request, roles=group.roles, scope=scope_of(group=group), user=user
+            )
 
 
 # -- Endpoints ------------------------------------------------
@@ -372,8 +404,12 @@ async def create_group(
             detail={"code": "invalid_scope", "message": f"Org '{org}' not found"},
         )
 
+    changes_source_id, changes_source_provider = _link_changes(
+        before=None, source_id=body.source_id, source_provider=body.source_provider
+    )
     _refuse_bad_link(
-        before=None,
+        changes_source_id=changes_source_id,
+        changes_source_provider=changes_source_provider,
         name=body.name,
         request=request,
         source_id=body.source_id,
@@ -381,6 +417,9 @@ async def create_group(
     )
     store: GroupStore = request.app.state.group_store
     account_store: AccountStore = request.app.state.account_store
+    _refuse_identifier_collision(
+        groups=store.list(), name=body.name, source_id=body.source_id, target=body.name
+    )
     # create() decides, not get(): get() reports a stored group that does not load as absent.
     try:
         group = store.create(
@@ -487,20 +526,24 @@ async def update_group(
     source_provider = (
         existing.source_provider if body.source_provider is None else body.source_provider
     )
-    changes_source_id = source_id != existing.source_id
-    changes_source_provider = source_provider != existing.source_provider
+    changes_source_id, changes_source_provider = _link_changes(
+        before=existing, source_id=source_id, source_provider=source_provider
+    )
     changes_link = (changes_source_id) or (changes_source_provider)
     if (body.roles is not None) or (changes_members) or (changes_link):
         # Members and linked logins keep, gain or lose the roles before and after; a role removed counts too.
         roles_after = body.roles if body.roles is not None else existing.roles
         check_role_assignment(request, user, [*existing.roles, *roles_after], scope_of(existing))
     _refuse_bad_link(
-        before=existing,
+        changes_source_id=changes_source_id,
+        changes_source_provider=changes_source_provider,
         name=name,
         request=request,
         source_id=source_id,
         source_provider=source_provider,
     )
+    if changes_source_id:
+        _refuse_identifier_collision(groups=store.list(), name="", source_id=source_id, target=name)
     update_fields: dict[str, object] = {}
     details: dict[str, object] = {}
     if body.roles is not None:
@@ -508,10 +551,11 @@ async def update_group(
         details["roles"] = body.roles
     if body.description is not None:
         update_fields["description"] = body.description
-    if body.source_id is not None:
-        update_fields["source_id"] = body.source_id
-    if body.source_provider is not None:
-        update_fields["source_provider"] = body.source_provider
+    # A link resent unchanged is no change, so the audit's fields leave it out.
+    if changes_source_id:
+        update_fields["source_id"] = source_id
+    if changes_source_provider:
+        update_fields["source_provider"] = source_provider
     if changes_link:
         details["source_id"] = {"after": source_id, "before": existing.source_id}
         details["source_provider"] = {
@@ -645,7 +689,9 @@ async def delete_group(
     check_action(request, user, scopes_dict["group_delete"], scope=scope_of(existing))
     if (existing.members) or (existing.source_id):
         # Its members and every login its source ID answers lose the roles it carries.
-        check_role_assignment(request, user, existing.roles, scope_of(existing))
+        check_role_assignment(
+            request=request, roles=existing.roles, scope=scope_of(group=existing), user=user
+        )
     try:
         store.delete(name)
     except ValueError as exc:
@@ -655,10 +701,10 @@ async def delete_group(
         ) from exc
     request_ch_rbac_reconcile(request.app.state)
     audit_group_change(
-        user.user_id,
-        name,
-        "deleted",
-        {"source_id": existing.source_id, "source_provider": existing.source_provider},
+        admin_id=user.user_id,
+        change="deleted",
+        details={"source_id": existing.source_id, "source_provider": existing.source_provider},
+        group_name=name,
     )
 
 

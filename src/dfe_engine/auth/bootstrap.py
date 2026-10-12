@@ -50,7 +50,12 @@ from dfe_engine.auth.accounts import (
     refuse_unhashable_password,
 )
 from dfe_engine.auth.api_keys import APIKeyStore
-from dfe_engine.auth.groups import DocuStoreGroupStore, GroupMetrics, GroupStore
+from dfe_engine.auth.groups import (
+    DocuStoreGroupStore,
+    GroupMetrics,
+    GroupStore,
+    warn_identifier_collisions,
+)
 from dfe_engine.auth.role_store import RoleStore
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.git_identity import DEFAULT_FALLBACK_DOMAIN
@@ -301,6 +306,8 @@ def bootstrap_auth(
     if not group_store.list():
         _seed_groups(group_store)
         logger.info("Seeded default groups")
+    # The writes refuse a new collision; one already stored is reported, not repaired.
+    warn_identifier_collisions(groups=group_store.list())
 
     # Restore accounts from the durable deploy repo BEFORE the reconcile, so an
     # account the engine persisted survives a rebuild of the live store.

@@ -146,7 +146,7 @@ accepts repeated `schema_type` (top-level path segment, e.g. `meta`).
 | POST | `/auth/oidc-providers/{name}/sync` | Force group sync; `status` says how it ended |
 | GET | `/auth/oidc-providers/{name}/test` | Test provider connectivity |
 
-A group's `source_id` and `source_provider` link it to an IdP group; the group form sets both through `POST` and `PUT /auth/groups`. A login through that provider asserting `source_id` takes the group's roles: for a `token_claim` provider sending names (Okta, dex, Keycloak) it is the group name the IdP sends. A `source_id` without a provider answers `422 missing_source_provider`, a taken one `409 conflict`, a malformed one `422 invalid_source_id` and an unknown or overlong provider `422 invalid_source_provider`.
+A group's `source_id` and `source_provider` link it to an IdP group; the group form sets both through `POST` and `PUT /auth/groups`. A login through that provider asserting `source_id` takes the group's roles: for a `token_claim` provider sending names (Okta, dex, Keycloak) it is the group name the IdP sends. A `source_id` without a provider answers `422 missing_source_provider`, a taken one `409 conflict`, a malformed one `422 invalid_source_id` and an unknown or overlong provider `422 invalid_source_provider`. A group name that is another group's `source_id` or a `source_id` that is another group's name answers `409 identifier_taken`.
 
 A group sync answers 200 with `created`, `updated`, `total`, `groups_skipped`, `error`, `skipped` and `status`. Key on `status` (`ok`, `partial`, `error`, `not_configured`, `user_token` or `skipped`), never on the text of `error` or `skipped`, which are for display.
 

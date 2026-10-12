@@ -32,6 +32,10 @@ from dfe_engine.auth.oidc.sync import (
 )
 from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
 from tests.unit.test_auth.test_oidc.refusing_store import PolicyRefusingSecretStore
+from tests.unit.test_auth.test_oidc.sync_cases import (
+    SYNC_IDENTIFIER_COLLISION_CASES,
+    SyncIdentifierCollisionCase,
+)
 from tests.unit.test_auth.test_oidc.unreachable_store import UnreachableSecretStore
 
 # ---------------------------------------------------------------------------
@@ -599,6 +603,51 @@ class TestSyncNeverTakesAGroupNoAdminLinked:
         assert (
             "OIDC group sync skipped a group whose name is held by a group not linked to it"
             in warnings
+        )
+
+
+class TestSyncNeverCreatesAGroupCrossingTheNamespaces:
+    """An API key resolves a group identifier by name, then by id, so a new group's name may not be a stored group's id, nor its id a stored group's name."""
+
+    @pytest.mark.parametrize(
+        "case",
+        SYNC_IDENTIFIER_COLLISION_CASES,
+        ids=[case["id"] for case in SYNC_IDENTIFIER_COLLISION_CASES],
+    )
+    async def test_it_is_skipped_as_name_taken(
+        self,
+        api_provider: OIDCProvider,
+        audit_events: list[dict],
+        registries: tuple[OIDCProviderRegistry, GroupStore],
+        case: SyncIdentifierCollisionCase,
+    ):
+        provider_registry, group_store = registries
+        provider_registry.create(name="test-sso", provider=api_provider)
+        group_store.create(members=[], name=case["stored_name"], roles=["admin"])
+        group_store.update(name=case["stored_name"], **case["stored_link"])
+        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+        groups = [GroupInfo(email="", id=case["group_id"], name=case["group_name"])]
+
+        result = await sync_provider(
+            adapter=FakeAdapter(groups=groups, provider=api_provider),
+            group_store=group_store,
+            metrics=SyncMetrics(manager),
+            provider_name="test-sso",
+            provider_registry=provider_registry,
+        )
+
+        skipped = [
+            (event["group"], event["held_by"])
+            for event in audit_events
+            if event["event"]
+            == "OIDC group sync skipped a group whose name or id is another group's id or name"
+        ]
+        stored = [group.name for group in group_store.list()]
+        assert (result["created"], _sync_skips(manager), skipped, stored) == (
+            0,
+            {"name_taken": 1.0},
+            [("soc-team", case["stored_name"])],
+            [case["stored_name"]],
         )
 
 

@@ -64,7 +64,12 @@ from dfe_engine.api.password_floor import FLOOR_MESSAGE, below_floor, count_floo
 from dfe_engine.api.v1.account_groups import check_group_changes, check_role_assignment, scope_of
 from dfe_engine.auth.accounts import AccountExistsError, discard_created
 from dfe_engine.auth.audit import audit_account_change, audit_group_change
-from dfe_engine.auth.groups import Group, GroupExistsError, source_id_holder
+from dfe_engine.auth.groups import (
+    Group,
+    GroupExistsError,
+    identifier_holder,
+    source_id_holder,
+)
 from dfe_engine.auth.membership import forget_member, groups_held, linked_providers
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.scim_mapping import (
@@ -188,6 +193,20 @@ def _page_params(request: Request) -> tuple[int, int]:
 def _audit_details(**fields) -> dict:
     """Audit-event details for a SCIM write, marked so an IdP push reads apart from an admin's."""
     return {"via": "scim", **fields}
+
+
+def _refuse_identifier_collision(
+    *, name: str, source_id: str, store, target: str
+) -> JSONResponse | None:
+    """Refuse a displayName that is another group's provider id or an externalId that is another group's name (:func:`identifier_holder`); pass empty for the one the write leaves alone."""
+    holder = identifier_holder(exclude=target, groups=store.list(), name=name, source_id=source_id)
+    if holder is None:
+        return None
+    if name and holder.source_id == name:
+        detail = f"displayName {name!r} is already another group's provider id"
+    else:
+        detail = f"externalId {source_id!r} is already another group's name"
+    return scim_error(detail=detail, scim_type="uniqueness", status_code=409)
 
 
 def _refuse_taken_provider_id(store, source_id: str, name: str) -> JSONResponse | None:
@@ -511,6 +530,11 @@ async def create_group(user: CurrentUser, request: Request) -> Response:
     taken = _refuse_taken_provider_id(store, str(fields["source_id"]), name)
     if taken is not None:
         return taken
+    collision = _refuse_identifier_collision(
+        name=name, source_id=str(fields["source_id"]), store=store, target=name
+    )
+    if collision is not None:
+        return collision
     # create() decides, not get(): get() reports a stored group that does not load as absent.
     try:
         group = store.create(name, roles=[], description="", members=members)
@@ -567,6 +591,11 @@ async def replace_group(group_id: str, user: CurrentUser, request: Request) -> R
         taken = _refuse_taken_provider_id(store, str(fields["source_id"]), group_id)
         if taken is not None:
             return taken
+        collision = _refuse_identifier_collision(
+            name="", source_id=str(fields["source_id"]), store=store, target=group_id
+        )
+        if collision is not None:
+            return collision
     # A link names its provider: an id set on an unlinked group takes SCIM's, a linked one keeps its own.
     provider = existing.source_provider
     if fields["source_id"] and not provider:
@@ -661,7 +690,12 @@ async def delete_group(group_id: str, user: CurrentUser, request: Request) -> Re
     sync_account_groups_for_membership_change(account_store, group_id, removed=members)
     store.delete(group_id)
     request_ch_rbac_reconcile(request.app.state)
-    audit_group_change(user.user_id, group_id, "deleted", _audit_details(members=members))
+    details = _audit_details(
+        members=members, source_id=group.source_id, source_provider=group.source_provider
+    )
+    audit_group_change(
+        admin_id=user.user_id, change="deleted", details=details, group_name=group_id
+    )
     return Response(status_code=204)
 
 

@@ -42,7 +42,11 @@ from dfe_engine.api.pagination import (
     apply_sort,
 )
 from dfe_engine.auth.audit import audit_resource_change
-from dfe_engine.auth.oidc.credential_env import is_env_var_name, provider_secret_path
+from dfe_engine.auth.oidc.credential_env import (
+    env_var_resolves,
+    is_env_var_name,
+    provider_secret_path,
+)
 from dfe_engine.auth.oidc.field_rules import FieldProblem, field_problems
 from dfe_engine.auth.oidc.models import SyncStatus
 from dfe_engine.auth.oidc.sync import SyncOutcome
@@ -60,6 +64,17 @@ router = APIRouter(prefix="/oidc-providers", tags=["OIDC Providers"])
 _ENV_NAME_HELP = (
     "must be an environment variable name such as OKTA_CLIENT_SECRET, not the "
     "credential itself - send the credential in the matching value field instead"
+)
+
+# How a secret's *_env field moves it between the secret store and an env var.
+_ENV_SOURCE_HELP = (
+    "Omit it on an update to keep the name and any stored copy or send an empty string to "
+    "clear the name and keep the stored copy. Naming an env var with no value for the secret "
+    "moves the secret onto it and the stored copy is deleted once the update is saved; "
+    "resending the name already held, with nothing stored, changes nothing. When that move, "
+    "or a create naming an env var with no value for the secret, names one the engine does "
+    "not set, the request is refused with 422 env_var_not_set on this field and nothing is "
+    "saved or deleted."
 )
 
 # An Entra tenant GUID or domain: letters, digits, dots and hyphens, starting with a letter or digit.
@@ -82,6 +97,14 @@ _GROUP_SECRETS = (
     ("api_token", "groups_api_token", "api_token_path"),
     ("client_secret", "groups_client_secret", "client_secret_path"),
     ("service_account_json", "groups_service_account_json", "service_account_json_path"),
+)
+
+# The groups block's env var names: omitted keeps the stored name, an empty string clears it.
+_GROUP_ENV_FIELDS = (
+    "api_token_env",
+    "client_secret_env",
+    "service_account_json_env",
+    "tenant_id_env",
 )
 
 
@@ -136,17 +159,18 @@ class GroupResolutionRequest(BaseModel):
         "org's admin must assign it a groups admin role. Write-only: it goes to the "
         "secret store and only its path is kept in config.",
     )
-    service_account_json_env: str = Field(
-        default="",
-        description="Env var for Google SA JSON. On an update, naming a different env var "
-        "without service_account_json drops the stored JSON, so the env var is used.",
+    service_account_json_env: str | None = Field(
+        default=None,
+        description=f"Env var for the Google service account JSON. {_ENV_SOURCE_HELP}",
     )
     domain: str = Field(default="", description="Google Workspace domain the service account syncs")
     tenant_id: str = Field(
         default="", description="Entra ID tenant ID. Not a secret, so it is stored in config."
     )
-    tenant_id_env: str = Field(
-        default="", description="Env var for Entra ID tenant ID, read when tenant_id is empty"
+    tenant_id_env: str | None = Field(
+        default=None,
+        description="Env var for Entra ID tenant ID, read when tenant_id is empty. Omit it on "
+        "an update to keep the name held; send an empty string to clear it.",
     )
     client_secret: str = Field(
         default="",
@@ -154,29 +178,23 @@ class GroupResolutionRequest(BaseModel):
         "secret store and only its path is kept in config. When neither this nor "
         "client_secret_env is set, the login client secret is used.",
     )
-    client_secret_env: str = Field(
-        default="",
-        description="Env var for Entra ID client secret. On an update, naming a different env "
-        "var without client_secret drops the stored secret, so the env var is used.",
+    client_secret_env: str | None = Field(
+        default=None, description=f"Env var for the Entra ID client secret. {_ENV_SOURCE_HELP}"
     )
     api_token: str = Field(
         default="",
         description="Okta API token. Write-only: it goes to the secret store and only "
         "its path is kept in config.",
     )
-    api_token_env: str = Field(
-        default="",
-        description="Env var for Okta API token. On an update, naming a different env var "
-        "without api_token drops the stored token, so the env var is used.",
+    api_token_env: str | None = Field(
+        default=None, description=f"Env var for the Okta API token. {_ENV_SOURCE_HELP}"
     )
     okta_domain: str = Field(default="", description="Okta organisation domain")
 
-    @field_validator(
-        "service_account_json_env", "tenant_id_env", "client_secret_env", "api_token_env"
-    )
+    @field_validator(*_GROUP_ENV_FIELDS)
     @classmethod
-    def _env_name_only(cls, value: str) -> str:
-        return _reject_non_env_name(value)
+    def _env_name_only(cls, value: str | None) -> str | None:
+        return value if value is None else _reject_non_env_name(value)
 
     @field_validator("tenant_id")
     @classmethod
@@ -209,7 +227,9 @@ class CreateProviderRequest(BaseModel):
     )
     client_secret_env: str = Field(
         default="",
-        description="Env var name for the RP client secret used in the auth-code exchange",
+        description="Env var name for the RP client secret used in the auth-code exchange. "
+        "With no client_secret, one the engine does not set is refused with 422 "
+        "env_var_not_set on this field and nothing is saved.",
     )
     scopes: list[str] | None = Field(default=None, description=_SCOPES_HELP)
     groups: GroupResolutionRequest = Field(default_factory=GroupResolutionRequest)
@@ -241,9 +261,7 @@ class UpdateProviderRequest(BaseModel):
         "store and only its path is kept in config.",
     )
     client_secret_env: str | None = Field(
-        None,
-        description="Env var name for the RP client secret. Naming a different env var "
-        "without client_secret drops the stored secret, so the env var is used.",
+        None, description=f"Env var name for the RP client secret. {_ENV_SOURCE_HELP}"
     )
     scopes: list[str] | None = Field(
         None,
@@ -350,7 +368,8 @@ class SyncResponse(BaseModel):
         default=0,
         description="Provider groups left unsynced: an identifier that makes no valid group "
         "name, a name held by a stored group that does not load, a name held by a stored "
-        "group not linked to that provider group, a stored group carrying the id but linked "
+        "group not linked to that provider group, a name another group carries as its "
+        "source_id or an id another group has as its name, a stored group carrying the id but linked "
         "to another provider, or no id to link a group by. Each is counted on "
         "auth_oidc_sync_groups_skipped_total{reason}.",
     )
@@ -476,7 +495,8 @@ def _group_config(
     from dfe_engine.auth.oidc.models import GroupResolutionConfig
 
     secret_values = {value_field for value_field, _store_field, _path_field in _GROUP_SECRETS}
-    fields = {**groups.model_dump(exclude=secret_values), **kept}
+    # An env var name left out is None: *kept* carries the stored one on an update, the default on a create.
+    fields = {**groups.model_dump(exclude=secret_values, exclude_none=True), **kept}
     if provider_type == "google":
         fields["enrich_on_login"] = True
     return GroupResolutionConfig.model_validate(fields)
@@ -523,13 +543,24 @@ def _store_group_secrets(*, groups: GroupResolutionRequest, name: str, request: 
 
 
 def _delete_secrets(*, paths: Iterable[str], request: Request) -> None:
-    """Remove the secret at each non-empty store path; with no secrets backend nothing was stored."""
+    """Remove the secret at each non-empty store path; with no secrets backend nothing was stored.
+
+    It runs once the provider is saved, which no longer reads these paths, so a delete the store fails is logged by its path and left for an operator; the saved change still answers.
+    """
     store = getattr(request.app.state, "dfe_secrets", None)
     if store is None:
         return
     for path in paths:
-        if path:
+        if not (path):
+            continue
+        try:
             store.delete(path)
+        except Exception as exc:
+            logger.warning(
+                "OIDC provider secret left in the secret store: the provider no longer reads it",
+                secret_path=path,
+                **describe_http_error(exc),
+            )
 
 
 def _delete_stored_secrets(request: Request, provider: OIDCProvider) -> None:
@@ -541,18 +572,53 @@ def _delete_stored_secrets(request: Request, provider: OIDCProvider) -> None:
     _delete_secrets(paths=(provider.client_secret_path, *group_paths), request=request)
 
 
-def _group_secrets_moved_to_env(
-    *, current: GroupResolutionConfig, groups: GroupResolutionRequest
-) -> list[str]:
-    """The config field keeping the path of each directory secret the groups block names a new env var for and sends no value for."""
+def _env_var_not_set(*, env: str, field: str) -> FieldProblem:
+    """The problem answered on *field* when a secret would move onto env var *env* and the engine does not set it."""
+    return FieldProblem(
+        code="env_var_not_set",
+        field=field,
+        message=f"the env var {env!r} is not set in the engine, so the secret would resolve "
+        "empty: set it in the engine's environment first or send the secret's value",
+    )
+
+
+def _group_env_moves(
+    *, current: GroupResolutionConfig | None, groups: GroupResolutionRequest
+) -> tuple[list[str], list[FieldProblem]]:
+    """The config field keeping the path of each directory secret the groups block moves onto its env var (:func:`_moves_to_env`) plus a problem for each move onto an env var the engine does not set.
+
+    *current* is the stored groups block, None on a create.
+    """
     moved = []
+    problems = []
     for value_field, _store_field, path_field in _GROUP_SECRETS:
-        env = getattr(groups, f"{value_field}_env")
-        sends_value = bool(getattr(groups, value_field))
-        # A form resending the env var the provider already names has not switched the secret's source.
-        if env and env != getattr(current, f"{value_field}_env") and not (sends_value):
+        env_field = f"{value_field}_env"
+        env = getattr(groups, env_field)
+        if env is None:
+            continue
+        moves = _moves_to_env(
+            env=env,
+            stored_env=getattr(current, env_field) if current is not None else "",
+            stored_path=getattr(current, path_field) if current is not None else "",
+            value=getattr(groups, value_field),
+        )
+        if not (moves):
+            continue
+        if env_var_resolves(env_name=env):
             moved.append(path_field)
-    return moved
+        else:
+            problems.append(_env_var_not_set(env=env, field=f"groups.{env_field}"))
+    return moved, problems
+
+
+def _moves_to_env(*, env: str, stored_env: str, stored_path: str, value: str) -> bool:
+    """Whether a write naming env var *env* for a secret and sending *value* for it moves the secret onto that env var.
+
+    It does when no value is sent and either the name is new or a stored copy would still be read before the env var; resending the name already held with nothing stored changes nothing.
+    """
+    if (value) or not (env):
+        return False
+    return (env != stored_env) or (bool(stored_path))
 
 
 def _refresh_rp(request: Request) -> None:
@@ -587,7 +653,7 @@ async def create_provider(
 ):
     """Create a new OIDC provider configuration (admin only).
 
-    Secret values in the body are written to the secret store before the YAML, and only once the name is free and the provider passes the field rules for its type and mode, so a refused provider leaves nothing behind.
+    Secret values in the body are written to the secret store before the YAML, and only once the name is free and the provider passes the field rules for its type and mode, so a refused provider leaves nothing behind. A secret named by an env var the engine does not set, with no value sent for it, is refused the same way (``env_var_not_set``).
     """
     from dfe_engine.auth.oidc.models import OIDCProvider
 
@@ -618,11 +684,17 @@ async def create_provider(
         groups=_group_config(groups=body.groups, kept=group_paths, provider_type=body.type),
         created_at=datetime.now(UTC).isoformat(),
     )
-    _refuse_field_problems(
-        problems=field_problems(
-            provider=provider, sent_group_fields=_sent_group_fields(groups=body.groups)
-        )
+    rule_problems = field_problems(
+        provider=provider, sent_group_fields=_sent_group_fields(groups=body.groups)
     )
+    _moved, env_problems = _group_env_moves(current=None, groups=body.groups)
+    if _moves_to_env(
+        env=body.client_secret_env, stored_env="", stored_path="", value=body.client_secret
+    ) and not (env_var_resolves(env_name=body.client_secret_env)):
+        env_problems.insert(
+            0, _env_var_not_set(env=body.client_secret_env, field="client_secret_env")
+        )
+    _refuse_field_problems(problems=[*rule_problems, *env_problems])
 
     _store_group_secrets(groups=body.groups, name=body.name, request=request)
     if body.client_secret:
@@ -699,7 +771,7 @@ async def update_provider(
 ):
     """Update an OIDC provider configuration (admin only).
 
-    A secret the body omits keeps the path the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential. A secret the body names a new env var for, other than the one the provider already names, and sends no value for loses its stored copy once the update is saved, so the env var is read instead; resending the stored env var name keeps the stored secret. Any update that touches more than ``enabled`` or ``display_name`` must leave the provider passing the field rules, checked before a secret is written or deleted.
+    A secret the body omits, value and env var name alike, keeps what the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential; an empty env var name clears the name and keeps the stored copy. A secret the body names an env var for and sends no value for moves onto that env var and its stored copy is deleted once the update is saved, unless the name is the one already held with nothing stored. A move onto an env var the engine does not set is refused (``env_var_not_set``). Any update that touches more than ``enabled`` or ``display_name`` must leave the provider passing the field rules. Both are checked before a secret is written or deleted.
     """
     registry = _get_registry(request)
     current = registry.get(name)
@@ -710,6 +782,7 @@ async def update_provider(
         )
 
     stale_paths = []
+    env_problems = []
     update_fields: dict[str, object] = {}
     if body.enabled is not None:
         update_fields["enabled"] = body.enabled
@@ -727,9 +800,19 @@ async def update_provider(
         update_fields["client_secret_path"] = provider_secret_path(
             field="client_secret", provider_name=name
         )
-    elif body.client_secret_env and body.client_secret_env != current.client_secret_env:
-        update_fields["client_secret_path"] = ""
-        stale_paths.append(current.client_secret_path)
+    elif body.client_secret_env is not None and _moves_to_env(
+        env=body.client_secret_env,
+        stored_env=current.client_secret_env,
+        stored_path=current.client_secret_path,
+        value="",
+    ):
+        if env_var_resolves(env_name=body.client_secret_env):
+            update_fields["client_secret_path"] = ""
+            stale_paths.append(current.client_secret_path)
+        else:
+            env_problems.append(
+                _env_var_not_set(env=body.client_secret_env, field="client_secret_env")
+            )
     if body.groups is not None:
         kept = {
             path_field: getattr(current.groups, path_field)
@@ -740,7 +823,15 @@ async def update_provider(
             directory_backend=current.groups.directory_backend,
             mock_directory_env=current.groups.mock_directory_env,
         )
-        moved_to_env = _group_secrets_moved_to_env(current=current.groups, groups=body.groups)
+        kept.update(
+            (env_field, getattr(current.groups, env_field))
+            for env_field in _GROUP_ENV_FIELDS
+            if getattr(body.groups, env_field) is None
+        )
+        moved_to_env, group_env_problems = _group_env_moves(
+            current=current.groups, groups=body.groups
+        )
+        env_problems.extend(group_env_problems)
         stale_paths.extend(getattr(current.groups, path_field) for path_field in moved_to_env)
         kept.update(dict.fromkeys(moved_to_env, ""))
         kept.update(_group_secret_paths(groups=body.groups, name=name))
@@ -748,15 +839,15 @@ async def update_provider(
             groups=body.groups, kept=kept, provider_type=current.type
         )
 
+    rule_problems = []
     if body.model_dump(exclude={"display_name", "enabled"}, exclude_none=True):
         candidate = current.model_copy(update=update_fields)
         problems = field_problems(
             provider=candidate, sent_group_fields=_sent_group_fields(groups=body.groups)
         )
         # An update cannot change the issuer, so a missing one is not the caller's to fix here.
-        _refuse_field_problems(
-            problems=[problem for problem in problems if problem.field != "issuer"]
-        )
+        rule_problems = [problem for problem in problems if problem.field != "issuer"]
+    _refuse_field_problems(problems=[*rule_problems, *env_problems])
 
     if body.client_secret:
         _store_secret(field="client_secret", name=name, request=request, value=body.client_secret)

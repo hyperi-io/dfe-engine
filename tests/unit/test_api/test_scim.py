@@ -463,8 +463,10 @@ class TestScimGroups:
         assert group.members == ["gm-1"]
         assert group.source_id == "grp-1"
         assert group.source_provider == "scim"
-        # membership mirrored onto the account
-        assert "scim-team" in app.state.account_store.get("gm-1").groups
+        # gm-1 is IdP-owned, so its own list stays its assertion; /Users reads membership off the group.
+        assert app.state.account_store.get("gm-1").groups == []
+        user = client.get(f"{BASE}/Users/gm-1", headers=admin_headers).json()
+        assert [membership["value"] for membership in user["groups"]] == ["scim-team"]
 
     @pytest.mark.parametrize("name", ["../evil", "with space", "a" * 129, "trailing\n"])
     def test_a_displayname_no_group_can_have_is_a_400(self, app, client, admin_headers, name):
@@ -581,9 +583,16 @@ class TestScimGroups:
         )
         assert resp.status_code == 200, resp.text
         assert app.state.group_store.get("replace-grp").members == ["rp-2"]
-        # account membership mirrored both ways
-        assert "replace-grp" not in app.state.account_store.get("rp-1").groups
-        assert "replace-grp" in app.state.account_store.get("rp-2").groups
+        # Both are IdP-owned, so neither list is written; /Users reads membership off the group.
+        stored = [app.state.account_store.get(name).groups for name in ("rp-1", "rp-2")]
+        listed = [
+            client.get(f"{BASE}/Users/{name}", headers=admin_headers).json().get("groups")
+            for name in ("rp-1", "rp-2")
+        ]
+        assert (stored, listed) == (
+            [[], []],
+            [None, [{"display": "replace-grp", "value": "replace-grp"}]],
+        )
 
     def test_delete_group_with_members(self, app, client, admin_headers):
         self._make_user(client, admin_headers, "dg-1")

@@ -100,6 +100,11 @@ def provider_secret_path(provider_name: str, field: str) -> str:
     return f"oidc/{provider_name}/{field}"
 
 
+def _from_env(env_name: str) -> str:
+    """Read env var *env_name* stripped of surrounding whitespace, empty when it is unset or no name is given."""
+    return os.environ.get(env_name, "").strip() if env_name else ""
+
+
 def _from_store(secret_path: str, secrets: DfeSecrets | None) -> ResolvedCredential:
     """Read a secret from the store: its value stripped of surrounding whitespace, absent, or unreadable when the store did not answer or refused."""
     if not secret_path or secrets is None:
@@ -144,7 +149,7 @@ def resolve_credential(
     stored = _from_store(secret_path, secrets)
     if stored.value:
         return stored
-    from_env = os.environ.get(env_name, "").strip() if env_name else ""
+    from_env = _from_env(env_name)
     if from_env:
         return ResolvedCredential(value=from_env)
     return ResolvedCredential(unreadable=stored.unreadable, refused=stored.refused)
@@ -170,7 +175,7 @@ def credential_check(
     stored = _from_store(secret_path, secrets)
     if stored.value:
         return True, f"{label} resolved from the secret store at {secret_path}"
-    if env_name and os.environ.get(env_name, "").strip():
+    if _from_env(env_name):
         return True, f"{env_name} is set"
     if stored.unreadable:
         return False, unreadable_credential_message(
@@ -188,3 +193,8 @@ def credential_check(
             f"{label} as '{label}' so it is written to the secret store",
         )
     return False, f"{env_name} is unset or empty"
+
+
+def env_var_resolves(*, env_name: str) -> bool:
+    """Whether env var *env_name* serves a credential in this process, read as :func:`resolve_credential` reads it."""
+    return bool(_from_env(env_name))

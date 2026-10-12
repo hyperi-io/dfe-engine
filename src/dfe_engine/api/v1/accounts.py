@@ -655,7 +655,7 @@ async def update_account(
         )
         check_group_changes(
             after=held_after,
-            before=groups_held(existing, groups, bindings=bindings),
+            before=groups_held(account=existing, bindings=bindings, groups=groups),
             groups=groups,
             request=request,
             user=user,

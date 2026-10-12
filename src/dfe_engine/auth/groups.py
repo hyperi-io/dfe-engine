@@ -227,6 +227,35 @@ def source_id_holder(*, groups: Iterable[Group], name: str, source_id: str) -> G
     return None
 
 
+def identifier_holder(
+    *, exclude: str, groups: Iterable[Group], name: str, source_id: str
+) -> Group | None:
+    """Return a group other than *exclude* whose source_id is *name* or whose name is *source_id* (None when no other's is).
+
+    An API key's group identifiers resolve by name first, then by source ID (:func:`~dfe_engine.auth.membership.groups_named`), so an identifier that is one group's name and another's source ID hands a key minted for the first the second's roles once the first is gone. A write passes the *name* and *source_id* it sets, empty for one it leaves alone. A group whose name is its own source ID, as an Okta group linked by its name is, is one group and never collides.
+    """
+    for group in groups:
+        if group.name == exclude:
+            continue
+        if (name and group.source_id == name) or (source_id and group.name == source_id):
+            return group
+    return None
+
+
+def warn_identifier_collisions(*, groups: Iterable[Group]) -> None:
+    """Log a warning naming each pair of stored groups where one's name is the other's source ID (:func:`identifier_holder`)."""
+    listed = list(groups)
+    names = {group.name for group in listed}
+    for group in listed:
+        if group.source_id in names and group.source_id != group.name:
+            logger.warning(
+                "a group's name is another group's source_id, so an API key naming it takes "
+                "the second group's roles once the first is gone",
+                group=group.source_id,
+                linked_group=group.name,
+            )
+
+
 class GroupStore:
     """YAML-backed store for managing groups with role mappings.
 

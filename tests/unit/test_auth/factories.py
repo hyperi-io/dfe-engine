@@ -14,6 +14,7 @@ from typing import Any
 
 from authlib.integrations.starlette_client import OAuth
 
+from dfe_engine.auth.accounts import AccountStore
 from dfe_engine.auth.groups import Group, GroupStore
 from dfe_engine.auth.oidc.adapters.entra import GraphCredentials
 from dfe_engine.auth.oidc.field_rules import FieldProblem
@@ -25,6 +26,11 @@ from tests.unit.test_auth.test_oidc.local_idp import LocalIdp
 
 # The env var an Okta provider from make_okta_directory_provider reads its API token from.
 OKTA_API_TOKEN_ENV = "DFE_TEST_OKTA_API_TOKEN"
+
+
+def make_account_store(*, directory: Path) -> AccountStore:
+    """Build an auth.accounts.AccountStore over a directory of account files."""
+    return AccountStore(directory)
 
 
 def make_field_problem(*, code: str, field: str, message: str) -> FieldProblem:

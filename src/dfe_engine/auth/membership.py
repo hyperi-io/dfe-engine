@@ -143,7 +143,7 @@ def groups_held_after(
         if group.name in gained and account.username not in members:
             members.append(account.username)
         rewritten.append(group.model_copy(update={"members": members}))
-    return groups_held(account, rewritten, bindings=bindings)
+    return groups_held(account=account, bindings=bindings, groups=rewritten)
 
 
 def groups_named(identifiers: Iterable[str], groups: Iterable[Group]) -> list[Group]:
@@ -190,17 +190,17 @@ def sync_account_groups_for_membership_change(
 ) -> None:
     """Update ``Account.groups`` after ``Group.members`` changes.
 
-    Only local accounts that exist are updated. Unknown usernames are skipped.
+    Only local accounts that exist are updated. An IdP-owned account (``source_provider`` set) is never written: its list is what its IdP asserts (:func:`groups_held_by`), so a group name written there would be read as an assertion and could link it to another group whose source ID it is. Its membership is read from ``Group.members`` instead. Unknown usernames are skipped.
     """
     for username in added:
         account = account_store.get(username)
-        if account is None or group_name in account.groups:
+        if (account is None) or (account.source_provider) or (group_name in account.groups):
             continue
         account_store.update(username, groups=[*account.groups, group_name])
 
     for username in removed:
         account = account_store.get(username)
-        if account is None or group_name not in account.groups:
+        if (account is None) or (account.source_provider) or (group_name not in account.groups):
             continue
         account_store.update(
             username,
