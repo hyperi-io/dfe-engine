@@ -25,7 +25,7 @@
         "displayType": "table",
         "connection": "platform",
         "source": "otel_metrics",
-        "sqlTemplate": "-- The Rust chassis registers `info` as a gauge and scalo-py as a counter, so\n-- an inventory that reads one table only ever sees half the fleet.\nSELECT ServiceName AS \"Service\",\n       any(version) AS \"Version\",\n       count(DISTINCT pod) AS \"Pods\",\n       max(seen) AS \"Last seen\",\n       toUInt64(dateDiff('second', max(seen), now())) AS \"Seconds ago\"\nFROM (\n  SELECT ServiceName, Attributes['version'] AS version,\n         ResourceAttributes['k8s.pod.name'] AS pod, TimeUnix AS seen\n  FROM dfe.otel_metrics_gauge\n  WHERE MetricName = 'info' AND $__timeFilter(TimeUnix)\n  UNION ALL\n  SELECT ServiceName, Attributes['version'] AS version,\n         ResourceAttributes['k8s.pod.name'] AS pod, TimeUnix AS seen\n  FROM dfe.otel_metrics_sum\n  WHERE MetricName = 'info' AND $__timeFilter(TimeUnix)\n)\nGROUP BY ServiceName\nORDER BY ServiceName"
+        "sqlTemplate": "-- The Rust chassis registers `info` as a gauge and scalo-py as a counter, so\n-- an inventory that reads one table only ever sees half the fleet.\n-- A pod pushing without k8s.pod.name names itself in service.instance.id.\nSELECT ServiceName AS \"Service\",\n       any(version) AS \"Version\",\n       count(DISTINCT pod) AS \"Pods\",\n       max(seen) AS \"Last seen\",\n       toUInt64(dateDiff('second', max(seen), now())) AS \"Seconds ago\"\nFROM (\n  SELECT ServiceName, Attributes['version'] AS version,\n         if(ResourceAttributes['k8s.pod.name'] != '', ResourceAttributes['k8s.pod.name'], ResourceAttributes['service.instance.id']) AS pod,\n         TimeUnix AS seen\n  FROM dfe.otel_metrics_gauge\n  WHERE MetricName = 'info' AND $__timeFilter(TimeUnix)\n  UNION ALL\n  SELECT ServiceName, Attributes['version'] AS version,\n         if(ResourceAttributes['k8s.pod.name'] != '', ResourceAttributes['k8s.pod.name'], ResourceAttributes['service.instance.id']) AS pod,\n         TimeUnix AS seen\n  FROM dfe.otel_metrics_sum\n  WHERE MetricName = 'info' AND $__timeFilter(TimeUnix)\n)\nGROUP BY ServiceName\nORDER BY ServiceName"
       }
     },
     {
@@ -41,7 +41,7 @@
         "displayType": "line",
         "connection": "platform",
         "source": "otel_metrics",
-        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       ServiceName AS \"Service\",\n       (max(Value) - min(Value)) / $__interval_s AS \"Records/second\"\nFROM dfe.otel_metrics_sum\nWHERE MetricName = 'records_received_total' AND $__timeFilter(TimeUnix)\nGROUP BY ts, ServiceName\nORDER BY ts"
+        "sqlTemplate": "-- Differenced per series (attribute set and pod) with a drop read as a restart, then summed, so replicas never subtract.\nSELECT ts, ServiceName AS \"Service\", sum(increment) / $__interval_s AS \"Records/second\"\nFROM (\n  SELECT ServiceName,\n         arraySort(groupArray((TimeUnix, Value))) AS points,\n         arrayMap(point -> point.2, points) AS readings,\n         arrayMap((diff, reading) -> if(diff < 0, reading, diff), arrayDifference(readings), readings) AS increments\n  FROM dfe.otel_metrics_sum\n  WHERE MetricName = 'records_received_total' AND $__timeFilter(TimeUnix)\n  GROUP BY ServiceName, MetricName, cityHash64(Attributes), ResourceAttributes['service.instance.id']\n)\nARRAY JOIN arrayMap(point -> toStartOfInterval(point.1, INTERVAL $__interval_s SECOND), points) AS ts, increments AS increment\nGROUP BY ts, ServiceName\nORDER BY ts"
       }
     },
     {
@@ -57,7 +57,7 @@
         "displayType": "line",
         "connection": "platform",
         "source": "otel_metrics",
-        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       ServiceName AS \"Service\",\n       (max(Value) - min(Value)) / $__interval_s AS \"Records/second\"\nFROM dfe.otel_metrics_sum\nWHERE MetricName = 'records_delivered_total' AND $__timeFilter(TimeUnix)\nGROUP BY ts, ServiceName\nORDER BY ts"
+        "sqlTemplate": "-- Differenced per series (attribute set and pod) with a drop read as a restart, then summed, so replicas never subtract.\nSELECT ts, ServiceName AS \"Service\", sum(increment) / $__interval_s AS \"Records/second\"\nFROM (\n  SELECT ServiceName,\n         arraySort(groupArray((TimeUnix, Value))) AS points,\n         arrayMap(point -> point.2, points) AS readings,\n         arrayMap((diff, reading) -> if(diff < 0, reading, diff), arrayDifference(readings), readings) AS increments\n  FROM dfe.otel_metrics_sum\n  WHERE MetricName = 'records_delivered_total' AND $__timeFilter(TimeUnix)\n  GROUP BY ServiceName, MetricName, cityHash64(Attributes), ResourceAttributes['service.instance.id']\n)\nARRAY JOIN arrayMap(point -> toStartOfInterval(point.1, INTERVAL $__interval_s SECOND), points) AS ts, increments AS increment\nGROUP BY ts, ServiceName\nORDER BY ts"
       }
     },
     {
@@ -73,7 +73,7 @@
         "displayType": "stacked_bar",
         "connection": "platform",
         "source": "otel_metrics",
-        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       concat(ServiceName, ' ', replaceOne(MetricName, '_total', '')) AS \"Service and outcome\",\n       max(Value) - min(Value) AS \"Records\"\nFROM dfe.otel_metrics_sum\nWHERE MetricName IN ('records_dlq_total', 'records_filtered_total', 'records_error_total', 'dlq_pushed_total')\n  AND $__timeFilter(TimeUnix)\nGROUP BY ts, ServiceName, MetricName\nHAVING \"Records\" > 0\nORDER BY ts"
+        "sqlTemplate": "-- Differenced per series (attribute set and pod) with a drop read as a restart, then summed, so replicas never subtract.\nSELECT ts,\n       concat(ServiceName, ' ', replaceOne(MetricName, '_total', '')) AS \"Service and outcome\",\n       sum(increment) AS \"Records\"\nFROM (\n  SELECT ServiceName, MetricName,\n         arraySort(groupArray((TimeUnix, Value))) AS points,\n         arrayMap(point -> point.2, points) AS readings,\n         arrayMap((diff, reading) -> if(diff < 0, reading, diff), arrayDifference(readings), readings) AS increments\n  FROM dfe.otel_metrics_sum\n  WHERE MetricName IN ('records_dlq_total', 'records_filtered_total', 'records_error_total', 'dlq_pushed_total')\n    AND $__timeFilter(TimeUnix)\n  GROUP BY ServiceName, MetricName, cityHash64(Attributes), ResourceAttributes['service.instance.id']\n)\nARRAY JOIN arrayMap(point -> toStartOfInterval(point.1, INTERVAL $__interval_s SECOND), points) AS ts, increments AS increment\nGROUP BY ts, ServiceName, MetricName\nHAVING \"Records\" > 0\nORDER BY ts"
       }
     },
     {
@@ -89,7 +89,7 @@
         "displayType": "table",
         "connection": "platform",
         "source": "otel_metrics",
-        "sqlTemplate": "SELECT ServiceName AS \"Service\",\n       toUInt64(sumIf(span, MetricName = 'records_received_total')) AS \"Received\",\n       toUInt64(sumIf(span, MetricName = 'records_processed_total')) AS \"Processed\",\n       toUInt64(sumIf(span, MetricName = 'records_delivered_total')) AS \"Delivered\",\n       toUInt64(sumIf(span, MetricName IN ('records_dlq_total', 'dlq_pushed_total'))) AS \"To DLQ\"\nFROM (\n  SELECT ServiceName, MetricName, max(Value) - min(Value) AS span\n  FROM dfe.otel_metrics_sum\n  WHERE MetricName IN ('records_received_total', 'records_processed_total', 'records_delivered_total', 'records_dlq_total', 'dlq_pushed_total')\n    AND $__timeFilter(TimeUnix)\n  GROUP BY ServiceName, MetricName, ResourceAttributes['k8s.pod.name']\n)\nGROUP BY ServiceName\nORDER BY \"Received\" DESC"
+        "sqlTemplate": "-- Differenced per series (attribute set and pod) with a drop read as a restart, then summed, so replicas never subtract.\nSELECT ServiceName AS \"Service\",\n       toUInt64(sumIf(increase, MetricName = 'records_received_total')) AS \"Received\",\n       toUInt64(sumIf(increase, MetricName = 'records_processed_total')) AS \"Processed\",\n       toUInt64(sumIf(increase, MetricName = 'records_delivered_total')) AS \"Delivered\",\n       toUInt64(sumIf(increase, MetricName IN ('records_dlq_total', 'dlq_pushed_total'))) AS \"To DLQ\"\nFROM (\n  SELECT ServiceName, MetricName,\n         arraySort(groupArray((TimeUnix, Value))) AS points,\n         arrayMap(point -> point.2, points) AS readings,\n         arraySum(arrayMap((diff, reading) -> if(diff < 0, reading, diff), arrayDifference(readings), readings)) AS increase\n  FROM dfe.otel_metrics_sum\n  WHERE MetricName IN ('records_received_total', 'records_processed_total', 'records_delivered_total', 'records_dlq_total', 'dlq_pushed_total')\n    AND $__timeFilter(TimeUnix)\n  GROUP BY ServiceName, MetricName, cityHash64(Attributes), ResourceAttributes['service.instance.id']\n)\nGROUP BY ServiceName\nORDER BY \"Received\" DESC"
       }
     },
     {
@@ -155,7 +155,7 @@
         "displayType": "stacked_bar",
         "connection": "platform",
         "source": "otel_metrics",
-        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       concat(ServiceName, ' ', Attributes['direction']) AS \"Service and direction\",\n       max(Value) - min(Value) AS \"Events\"\nFROM dfe.otel_metrics_sum\nWHERE MetricName = 'worker_pool_scale_events_total' AND $__timeFilter(TimeUnix)\nGROUP BY ts, ServiceName, Attributes['direction']\nORDER BY ts"
+        "sqlTemplate": "-- Differenced per series (attribute set and pod) with a drop read as a restart, then summed, so replicas never subtract.\nSELECT ts, concat(ServiceName, ' ', direction) AS \"Service and direction\", sum(increment) AS \"Events\"\nFROM (\n  SELECT ServiceName, Attributes['direction'] AS direction,\n         arraySort(groupArray((TimeUnix, Value))) AS points,\n         arrayMap(point -> point.2, points) AS readings,\n         arrayMap((diff, reading) -> if(diff < 0, reading, diff), arrayDifference(readings), readings) AS increments\n  FROM dfe.otel_metrics_sum\n  WHERE MetricName = 'worker_pool_scale_events_total' AND $__timeFilter(TimeUnix)\n  GROUP BY ServiceName, MetricName, Attributes['direction'], cityHash64(Attributes), ResourceAttributes['service.instance.id']\n)\nARRAY JOIN arrayMap(point -> toStartOfInterval(point.1, INTERVAL $__interval_s SECOND), points) AS ts, increments AS increment\nGROUP BY ts, ServiceName, direction\nORDER BY ts"
       }
     },
     {
@@ -220,7 +220,7 @@
         "displayType": "table",
         "connection": "platform",
         "source": "otel_metrics",
-        "sqlTemplate": "SELECT ServiceName AS \"Service\",\n       ResourceAttributes['k8s.pod.name'] AS \"Pod\",\n       toDateTime(toUInt64(max(Value))) AS \"Started\",\n       toUInt64(now() - max(Value)) AS \"Uptime seconds\",\n       formatReadableTimeDelta(toUInt64(now() - max(Value))) AS \"Uptime\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName = 'process_start_time_seconds' AND $__timeFilter(TimeUnix)\nGROUP BY ServiceName, ResourceAttributes['k8s.pod.name']\nORDER BY ServiceName"
+        "sqlTemplate": "-- A pod pushing without k8s.pod.name names itself in service.instance.id.\nSELECT ServiceName AS \"Service\",\n       if(ResourceAttributes['k8s.pod.name'] != '', ResourceAttributes['k8s.pod.name'], ResourceAttributes['service.instance.id']) AS \"Pod\",\n       toDateTime(toUInt64(max(Value))) AS \"Started\",\n       toUInt64(now() - max(Value)) AS \"Uptime seconds\",\n       formatReadableTimeDelta(toUInt64(now() - max(Value))) AS \"Uptime\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName = 'process_start_time_seconds' AND $__timeFilter(TimeUnix)\nGROUP BY ServiceName, \"Pod\"\nORDER BY ServiceName"
       }
     },
     {
@@ -301,7 +301,7 @@
         "displayType": "line",
         "connection": "platform",
         "source": "otel_metrics",
-        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       (max(Value) - min(Value)) / $__interval_s AS \"Rows/second\"\nFROM dfe.otel_metrics_sum\nWHERE MetricName = 'rows_inserted_total' AND $__timeFilter(TimeUnix)\nGROUP BY ts\nORDER BY ts"
+        "sqlTemplate": "-- Differenced per series (attribute set and pod) with a drop read as a restart, then summed, so replicas never subtract.\nSELECT ts, sum(increment) / $__interval_s AS \"Rows/second\"\nFROM (\n  SELECT arraySort(groupArray((TimeUnix, Value))) AS points,\n         arrayMap(point -> point.2, points) AS readings,\n         arrayMap((diff, reading) -> if(diff < 0, reading, diff), arrayDifference(readings), readings) AS increments\n  FROM dfe.otel_metrics_sum\n  WHERE MetricName = 'rows_inserted_total' AND $__timeFilter(TimeUnix)\n  GROUP BY ServiceName, MetricName, cityHash64(Attributes), ResourceAttributes['service.instance.id']\n)\nARRAY JOIN arrayMap(point -> toStartOfInterval(point.1, INTERVAL $__interval_s SECOND), points) AS ts, increments AS increment\nGROUP BY ts\nORDER BY ts"
       }
     },
     {
@@ -333,7 +333,7 @@
         "displayType": "line",
         "connection": "platform",
         "source": "otel_metrics",
-        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       replaceOne(MetricName, '_total', '') AS \"Series\",\n       (max(Value) - min(Value)) / $__interval_s AS \"Per second\"\nFROM dfe.otel_metrics_sum\nWHERE MetricName IN ('batches_flushed_total', 'insert_transactions_total', 'kafka_offsets_committed_total')\n  AND $__timeFilter(TimeUnix)\nGROUP BY ts, MetricName\nORDER BY ts"
+        "sqlTemplate": "-- Differenced per series (attribute set and pod) with a drop read as a restart, then summed, so replicas never subtract.\nSELECT ts, replaceOne(MetricName, '_total', '') AS \"Series\", sum(increment) / $__interval_s AS \"Per second\"\nFROM (\n  SELECT MetricName,\n         arraySort(groupArray((TimeUnix, Value))) AS points,\n         arrayMap(point -> point.2, points) AS readings,\n         arrayMap((diff, reading) -> if(diff < 0, reading, diff), arrayDifference(readings), readings) AS increments\n  FROM dfe.otel_metrics_sum\n  WHERE MetricName IN ('batches_flushed_total', 'insert_transactions_total', 'kafka_offsets_committed_total')\n    AND $__timeFilter(TimeUnix)\n  GROUP BY ServiceName, MetricName, cityHash64(Attributes), ResourceAttributes['service.instance.id']\n)\nARRAY JOIN arrayMap(point -> toStartOfInterval(point.1, INTERVAL $__interval_s SECOND), points) AS ts, increments AS increment\nGROUP BY ts, MetricName\nORDER BY ts"
       }
     },
     {
@@ -349,7 +349,7 @@
         "displayType": "table",
         "connection": "platform",
         "source": "otel_metrics",
-        "sqlTemplate": "SELECT Attributes['table'] AS \"Table\",\n       toUInt64(max(Value) - min(Value)) AS \"Messages\"\nFROM dfe.otel_metrics_sum\nWHERE MetricName = 'loader_messages_by_table_total' AND $__timeFilter(TimeUnix)\nGROUP BY Attributes['table']\nORDER BY \"Messages\" DESC\nLIMIT 25"
+        "sqlTemplate": "-- Differenced per series (attribute set and pod) with a drop read as a restart, then summed, so replicas never subtract.\nSELECT destination AS \"Table\",\n       toUInt64(sum(increase)) AS \"Messages\"\nFROM (\n  SELECT Attributes['table'] AS destination,\n         arraySort(groupArray((TimeUnix, Value))) AS points,\n         arrayMap(point -> point.2, points) AS readings,\n         arraySum(arrayMap((diff, reading) -> if(diff < 0, reading, diff), arrayDifference(readings), readings)) AS increase\n  FROM dfe.otel_metrics_sum\n  WHERE MetricName = 'loader_messages_by_table_total' AND $__timeFilter(TimeUnix)\n  GROUP BY ServiceName, MetricName, Attributes['table'], cityHash64(Attributes), ResourceAttributes['service.instance.id']\n)\nGROUP BY destination\nORDER BY \"Messages\" DESC\nLIMIT 25"
       }
     },
     {
@@ -365,7 +365,7 @@
         "displayType": "line",
         "connection": "platform",
         "source": "otel_metrics",
-        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       concat(Attributes['transport'], if(MetricName = 'receiver_requests_success_total', ' ok', ' all')) AS \"Series\",\n       (max(Value) - min(Value)) / $__interval_s AS \"Requests/second\"\nFROM dfe.otel_metrics_sum\nWHERE MetricName IN ('receiver_requests_total', 'receiver_requests_success_total')\n  AND $__timeFilter(TimeUnix)\nGROUP BY ts, Attributes['transport'], MetricName\nORDER BY ts"
+        "sqlTemplate": "-- Differenced per series (attribute set and pod) with a drop read as a restart, then summed, so replicas never subtract.\nSELECT ts,\n       concat(transport, if(MetricName = 'receiver_requests_success_total', ' ok', ' all')) AS \"Series\",\n       sum(increment) / $__interval_s AS \"Requests/second\"\nFROM (\n  SELECT MetricName, Attributes['transport'] AS transport,\n         arraySort(groupArray((TimeUnix, Value))) AS points,\n         arrayMap(point -> point.2, points) AS readings,\n         arrayMap((diff, reading) -> if(diff < 0, reading, diff), arrayDifference(readings), readings) AS increments\n  FROM dfe.otel_metrics_sum\n  WHERE MetricName IN ('receiver_requests_total', 'receiver_requests_success_total')\n    AND $__timeFilter(TimeUnix)\n  GROUP BY ServiceName, MetricName, Attributes['transport'], cityHash64(Attributes), ResourceAttributes['service.instance.id']\n)\nARRAY JOIN arrayMap(point -> toStartOfInterval(point.1, INTERVAL $__interval_s SECOND), points) AS ts, increments AS increment\nGROUP BY ts, transport, MetricName\nORDER BY ts"
       }
     },
     {
@@ -382,7 +382,7 @@
         "connection": "platform",
         "source": "otel_metrics",
         "numberFormat": { "output": "byte", "mantissa": 1 },
-        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       if(MetricName = 'receiver_kafka_bytes_sent_total', 'to Kafka', 'from clients') AS \"Direction\",\n       (max(Value) - min(Value)) / $__interval_s AS \"Bytes/second\"\nFROM dfe.otel_metrics_sum\nWHERE MetricName IN ('receiver_bytes_received_total', 'receiver_kafka_bytes_sent_total')\n  AND $__timeFilter(TimeUnix)\nGROUP BY ts, MetricName\nORDER BY ts"
+        "sqlTemplate": "-- Differenced per series (attribute set and pod) with a drop read as a restart, then summed, so replicas never subtract.\nSELECT ts,\n       if(MetricName = 'receiver_kafka_bytes_sent_total', 'to Kafka', 'from clients') AS \"Direction\",\n       sum(increment) / $__interval_s AS \"Bytes/second\"\nFROM (\n  SELECT MetricName,\n         arraySort(groupArray((TimeUnix, Value))) AS points,\n         arrayMap(point -> point.2, points) AS readings,\n         arrayMap((diff, reading) -> if(diff < 0, reading, diff), arrayDifference(readings), readings) AS increments\n  FROM dfe.otel_metrics_sum\n  WHERE MetricName IN ('receiver_bytes_received_total', 'receiver_kafka_bytes_sent_total')\n    AND $__timeFilter(TimeUnix)\n  GROUP BY ServiceName, MetricName, cityHash64(Attributes), ResourceAttributes['service.instance.id']\n)\nARRAY JOIN arrayMap(point -> toStartOfInterval(point.1, INTERVAL $__interval_s SECOND), points) AS ts, increments AS increment\nGROUP BY ts, MetricName\nORDER BY ts"
       }
     },
     {
