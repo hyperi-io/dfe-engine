@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.30](https://github.com/hyperi-io/dfe-engine/compare/v1.22.29...v1.22.30) (2026-10-12)
+
+### Bug Fixes
+
+* cap the dynamic subcolumns JSON table merges write ([#837](https://github.com/hyperi-io/dfe-engine/issues/837)) ([1810eb0](https://github.com/hyperi-io/dfe-engine/commit/1810eb02cd525bf5dc0b812994a0b1a3c05ca0b6))
+* reconcile table settings when a source is redeployed ([#838](https://github.com/hyperi-io/dfe-engine/issues/838)) ([17d8ec9](https://github.com/hyperi-io/dfe-engine/commit/17d8ec9ffc3e283de3cd30f0e696ad3688ec879d))
+
 ## [1.22.29](https://github.com/hyperi-io/dfe-engine/compare/v1.22.28...v1.22.29) (2026-10-12)
 
 ### Bug Fixes
