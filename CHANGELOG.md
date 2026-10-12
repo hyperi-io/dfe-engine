@@ -3,6 +3,19 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.29](https://github.com/hyperi-io/dfe-engine/compare/v1.22.28...v1.22.29) (2026-10-12)
+
+### Bug Fixes
+
+* add deploy bulk config endpoint ([#834](https://github.com/hyperi-io/dfe-engine/issues/834)) ([f54c895](https://github.com/hyperi-io/dfe-engine/commit/f54c895497e46ea801d0e8c416478cf4882d3446))
+* **deps:** refresh the uv, python and setup-node digests ([#828](https://github.com/hyperi-io/dfe-engine/issues/828)) ([3f3b38a](https://github.com/hyperi-io/dfe-engine/commit/3f3b38ad96679d35596e03aa7cbd93613d7f1eab))
+* difference console counter rates per pod ([#830](https://github.com/hyperi-io/dfe-engine/issues/830)) ([022b364](https://github.com/hyperi-io/dfe-engine/commit/022b364e81d07dfe49cd1e80638e0542b6446834))
+* key scaling pressure series on the pod ([#827](https://github.com/hyperi-io/dfe-engine/issues/827)) ([200207c](https://github.com/hyperi-io/dfe-engine/commit/200207ca5ffb0a92ea7e111fb9df719617c388fc))
+* key the console's pressure reading on the pod ([#829](https://github.com/hyperi-io/dfe-engine/issues/829)) ([ea639fe](https://github.com/hyperi-io/dfe-engine/commit/ea639fec72f1d6a0c830c56480c5bc0a8fd443c0)), closes [hyperi-io/scalo-rs#331](https://github.com/hyperi-io/scalo-rs/issues/331)
+* per-series counter tiles on DFE Services ([#835](https://github.com/hyperi-io/dfe-engine/issues/835)) ([ea52070](https://github.com/hyperi-io/dfe-engine/commit/ea52070c12a3c05c61cc67c0eb5eccd6ec8b4e0a))
+* read naive ClickHouse datetimes as UTC in the console ([#831](https://github.com/hyperi-io/dfe-engine/issues/831)) ([bd10855](https://github.com/hyperi-io/dfe-engine/commit/bd108555470f534f4296ad252ea59643ed1c1077))
+* zero unrecorded counters for live data-path apps ([#836](https://github.com/hyperi-io/dfe-engine/issues/836)) ([dd20c28](https://github.com/hyperi-io/dfe-engine/commit/dd20c28a2515a46a1e9c632ae23826cdc9b1969c))
+
 ## [1.22.28](https://github.com/hyperi-io/dfe-engine/compare/v1.22.27...v1.22.28) (2026-10-11)
 
 ### Bug Fixes
