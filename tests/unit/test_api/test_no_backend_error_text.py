@@ -405,7 +405,13 @@ class TestSources:
                     raise SourceNotFoundError("Source 'gone' not found")
                 raise RuntimeError(SENTINEL)
 
-        body = SimpleNamespace(action="delete", sources=["acme", "gone"])
+        body = SimpleNamespace(
+            action="delete",
+            sources=[
+                sources_module.BulkActionItem(source="acme"),
+                sources_module.BulkActionItem(source="gone"),
+            ],
+        )
         user = AuthContext(user_id="admin")
 
         _, failed, _ = sources_module._apply_bulk(body, {}, user, _Registry())
