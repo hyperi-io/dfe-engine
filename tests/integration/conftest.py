@@ -551,6 +551,22 @@ def clickhouse_client(ch_params, clickhouse_test_database):
         client.close()
 
 
+@pytest.fixture
+def otel_db(ch_client, clickhouse_test_database):
+    """The isolated database carrying the three OTel metrics tables, rendered from the manifest."""
+    from dfe_engine.schema.plan import render_one
+
+    db = clickhouse_test_database
+    for object_id in (
+        "data.otel_metrics_gauge",
+        "data.otel_metrics_sum",
+        "data.otel_metrics_histogram",
+    ):
+        for statement in render_one(object_id, data_database=db).statements:
+            ch_client.command(statement)
+    return db
+
+
 def _mongo_when_ready(uri: str, timeout: float = 180.0, delay: float = 1.0) -> None:
     """Poll until an authenticated listDatabases succeeds; ping answers before the backend.
 

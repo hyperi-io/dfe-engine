@@ -182,11 +182,7 @@ class OperationalReader:
     def status(self, telemetry_name: str) -> AppStatus:
         """Whether the instance is reporting telemetry, and since when."""
         service = self._safe_identifier(telemetry_name)
-        rows = self._run("liveness", {"service": service})
-        # The row count decides it: max() over no matching rows answers the epoch,
-        # not NULL, so an instance that never emitted would otherwise read reporting.
-        matched = bool(rows) and int(rows[0][1] or 0) > 0
-        last_seen = _epoch(rows[0][0]) if matched else None
+        last_seen = self._last_seen(service)
         started = self._gauges(service).get(START_TIME)
         return AppStatus(
             telemetry_name=telemetry_name,
@@ -195,11 +191,19 @@ class OperationalReader:
             started_epoch=float(started) if started is not None else None,
         )
 
-    def metrics(self, telemetry_name: str) -> AppMetrics:
-        """Current gauge readings and counter rates for the instance."""
+    def metrics(self, telemetry_name: str, *, carries_records: bool = False) -> AppMetrics:
+        """Current gauge readings and counter rates for the instance.
+
+        A push carries only the counters that have been recorded, so a reporting
+        instance that ``carries_records`` reads each pipeline counter it has no rows
+        for as 0. Anything else reports only what it recorded.
+        """
         service = self._safe_identifier(telemetry_name)
         gauges = self._gauges(service)
         rates = self._rates(service)
+        unrecorded = [name for name in COUNTER_METRICS if name not in rates]
+        if carries_records and unrecorded and self._last_seen(service) is not None:
+            rates |= dict.fromkeys(unrecorded, 0.0)
         http_rates, http_gauges = http_readings(
             rows=self._run("http_request_histogram", {"service": service})
         )
@@ -271,6 +275,15 @@ class OperationalReader:
     def _rates(self, service: str) -> dict[str, float]:
         rows = self._run("counter_rates", {"service": service, "names": list(COUNTER_METRICS)})
         return {str(name): float(value) for name, value in rows}
+
+    def _last_seen(self, service: str) -> float | None:
+        """When the instance last reported, or None when it is not reporting."""
+        rows = self._run("liveness", {"service": service})
+        # The row count decides it: max() over no matching rows answers the epoch,
+        # not NULL, so an instance that never emitted would otherwise read reporting.
+        if not rows or int(rows[0][1] or 0) <= 0:
+            return None
+        return _epoch(rows[0][0])
 
 
 def _percentile(
