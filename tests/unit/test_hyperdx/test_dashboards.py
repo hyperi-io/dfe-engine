@@ -68,6 +68,10 @@ POINT_IN_TIME_TILES = {
 # recorder cannot drop one series.
 COMMITTED_OFFSET_METRIC = "rdkafka_topic_partition_committed_offset"
 
+# The key a counter series is differenced under, as the console's counter_rates query
+# keys it (appmgmt/queries.yaml): one attribute set on one pod.
+COUNTER_SERIES_KEY = "cityHash64(Attributes), ResourceAttributes['service.instance.id']"
+
 
 def _tile_sources(dashboard: dict) -> set[str]:
     return {
@@ -207,6 +211,33 @@ def test_committed_offset_tiles_skip_the_revoke_marker():
         assert "Value > 0" in tile["config"]["sqlTemplate"], (
             f"{filename}:{tile['id']} counts a revoked partition's 0 as an offset"
         )
+
+
+def test_counter_tiles_difference_each_series_on_its_own():
+    """No tile subtracts one pod's counter from another's.
+
+    ``max(Value) - min(Value)`` over a sum metric spans every replica's series, so two
+    loaders at 680 and 5 read 675. tests/integration/test_services_dashboard_ch.py runs
+    the tiles against ClickHouse; this holds every tile to the shape without one.
+    """
+    tiles = [
+        (filename, tile)
+        for filename, dashboard in _dashboards().items()
+        for tile in _sql_tiles(dashboard)
+        if "otel_metrics_sum" in tile["config"]["sqlTemplate"]
+    ]
+
+    for filename, tile in tiles:
+        sql = tile["config"]["sqlTemplate"]
+        assert "max(Value) - min(Value)" not in sql, (
+            f"{filename}:{tile['id']} subtracts across every series of a counter"
+        )
+        if "arrayDifference" in sql:
+            assert COUNTER_SERIES_KEY in sql, (
+                f"{filename}:{tile['id']} differences a counter without the per-series key"
+            )
+    differenced = [tile for _, tile in tiles if "arrayDifference" in tile["config"]["sqlTemplate"]]
+    assert differenced, "no tile differences a counter, so this guard checks nothing"
 
 
 @pytest.mark.parametrize("filename", sorted(dashboard_files()))
