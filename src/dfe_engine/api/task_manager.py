@@ -34,6 +34,9 @@ from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
+from scalo.logger import logger
+
+TASK_FAILED_MESSAGE = "The task failed; the engine log has the reason"
 
 
 def _json_safe(value: Any) -> Any:
@@ -159,7 +162,13 @@ class TaskManager:
         self._max_completed = max_completed
 
     def submit(
-        self, kind: str, coro_fn, *args, held_to: Iterable[str] | None = None, **kwargs
+        self,
+        kind: str,
+        coro_fn,
+        *args,
+        held_to: Iterable[str] | None = None,
+        reportable: tuple[type[Exception], ...] = (),
+        **kwargs,
     ) -> TaskInfo:
         """Submit an async callable for background execution.
 
@@ -167,12 +176,19 @@ class TaskManager:
         ``_Task`` instance whose ``set_progress()`` method can be called
         to report progress.
 
+        Every failure is logged. Its message reaches the task's readers only when
+        it is one of ``reportable``; any other failure reads as
+        :data:`TASK_FAILED_MESSAGE`, because a backend's own error text can carry
+        statement fragments, user names and password hashes.
+
         Args:
             kind: The task kind, for ``list(kind=...)``.
             coro_fn: The coroutine function to run, called with ``*args`` and ``**kwargs``.
             *args: Positional arguments for ``coro_fn``.
             held_to: The orgs the task's result is held to. None means it may hold
                 any org's data, so only a reader of every org sees it.
+            reportable: Exception types whose message the engine composes about the
+                request, and which a reader may therefore see.
             **kwargs: Keyword arguments for ``coro_fn``.
 
         Returns:
@@ -196,9 +212,10 @@ class TaskManager:
                 task.status = TaskStatus.CANCELLED
                 task.message = "Cancelled"
             except Exception as exc:
+                logger.warning("background task failed", task_id=task.id, kind=kind, error=str(exc))
                 task.status = TaskStatus.FAILED
-                task.error = str(exc)
-                task.message = f"Failed: {exc}"
+                task.error = str(exc) if isinstance(exc, reportable) else TASK_FAILED_MESSAGE
+                task.message = f"Failed: {task.error}"
             finally:
                 task.completed_at = datetime.now(UTC).isoformat()
                 task._progress_event.set()

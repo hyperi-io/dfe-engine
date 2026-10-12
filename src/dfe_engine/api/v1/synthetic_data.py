@@ -154,7 +154,7 @@ async def start_stream(
                 "cancel one or raise synthetic_data.max_concurrent_streams",
             },
         )
-    info = manager.submit(_TASK_KIND, service.run_stream, body)
+    info = manager.submit(_TASK_KIND, service.run_stream, body, reportable=(SyntheticDataError,))
     audit_resource_change(
         user.user_id,
         "synthetic-data",

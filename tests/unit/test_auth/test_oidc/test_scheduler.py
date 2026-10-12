@@ -11,7 +11,7 @@
 import asyncio
 import json
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -19,22 +19,17 @@ import pytest
 from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
-from dfe_engine.auth.oidc.scheduler import sync_is_due, sync_outcome
+from dfe_engine.auth.oidc.scheduler import sync_is_due
 from tests.unit.test_auth.factories import (
-    make_directory_reply,
     make_group_store,
     make_oidc_provider,
     make_oidc_provider_registry,
     make_oidc_sync_scheduler,
-    make_okta_directory_provider,
 )
-from tests.unit.test_auth.test_oidc.local_directory import LocalDirectory
 from tests.unit.test_auth.test_oidc.scheduler_cases import (
     NOW,
     SYNC_IS_DUE_CASES,
-    SYNC_OUTCOME_CASES,
     SyncIsDueCase,
-    SyncOutcomeCase,
 )
 
 DIRECTORY_ENV = "DFE_TEST_SCHEDULER_DIRECTORY"
@@ -98,14 +93,6 @@ class TestSyncIsDue:
         assert sync_is_due(now=NOW, provider=case["provider"]) == case["expected_due"]
 
 
-class TestSyncOutcome:
-    @pytest.mark.parametrize(
-        "case", SYNC_OUTCOME_CASES, ids=[case["id"] for case in SYNC_OUTCOME_CASES]
-    )
-    def test_matches_expected(self, case: SyncOutcomeCase):
-        assert sync_outcome(result=case["result"]) == case["expected_outcome"]
-
-
 class TestOidcSyncScheduler:
     async def test_run_forever(
         self, directory: None, group_store: GroupStore, registry: OIDCProviderRegistry
@@ -123,6 +110,42 @@ class TestOidcSyncScheduler:
         with pytest.raises(asyncio.CancelledError):
             await task
         assert ran is True
+
+    async def test_a_failing_tick_logs_the_failures_class_not_its_text(
+        self,
+        audit_events: list[dict],
+        group_store: GroupStore,
+        registry: OIDCProviderRegistry,
+        tmp_path: Path,
+    ):
+        """The validation text quotes the provider file's values, and a traceback would carry it too."""
+
+        def failed() -> bool:
+            return any(
+                e["event"].startswith("OIDC scheduled group sync tick failed") for e in audit_events
+            )
+
+        (tmp_path / "oidc-providers" / "broken.yaml").write_text(
+            "type: sentinel-type-7731\n", encoding="utf-8"
+        )
+        scheduler = make_oidc_sync_scheduler(
+            group_store=group_store, registry=registry, tick_seconds=0.01
+        )
+        task = asyncio.create_task(scheduler.run_forever())
+        logged = await _wait_for(condition=failed)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert logged is True
+        (line,) = [
+            e
+            for e in audit_events
+            if e["event"].startswith("OIDC scheduled group sync tick failed")
+        ]
+        assert "exception" not in line
+        assert line["error_type"] == "ValidationError"
+        assert "sentinel-type-7731" not in json.dumps(audit_events, default=str)
 
     async def test_run_forever_survives_a_failing_tick(
         self,
@@ -171,33 +194,6 @@ class TestOidcSyncScheduler:
                 ["requested"],
             )
 
-        async def test_passes_its_bindings_to_the_sync(
-            self,
-            group_store: GroupStore,
-            monkeypatch: pytest.MonkeyPatch,
-            registry: OIDCProviderRegistry,
-            tmp_path: Path,
-        ):
-            groups = [{"description": "From the directory", "id": "g-ops", "name": "operators"}]
-            _write_directory(groups=groups, monkeypatch=monkeypatch, tmp_path=tmp_path)
-            group_store.create(description="Ours", name="scim-ops", roles=[])
-            group_store.update(name="scim-ops", source_id="g-ops", source_provider="scim")
-            registry.create(name="mock-dir", provider=_mock_directory_provider())
-            scheduler = make_oidc_sync_scheduler(
-                bindings={"scim": "mock-dir"}, group_store=group_store, registry=registry
-            )
-
-            outcomes = await scheduler.run_once(now=NOW)
-
-            stored = [
-                (group.name, group.description, group.source_provider)
-                for group in group_store.list()
-            ]
-            assert (outcomes, stored) == (
-                {"mock-dir": "ok"},
-                [("scim-ops", "From the directory", "scim")],
-            )
-
         async def test_leaves_a_provider_that_is_not_due(
             self, directory: None, group_store: GroupStore, registry: OIDCProviderRegistry
         ):
@@ -209,6 +205,30 @@ class TestOidcSyncScheduler:
             outcomes = await scheduler.run_once(now=NOW)
 
             assert (outcomes, group_store.get(name="operators")) == ({}, None)
+
+        async def test_a_provider_with_no_credential_waits_out_its_interval(
+            self, group_store: GroupStore, registry: OIDCProviderRegistry
+        ):
+            unconfigured = make_oidc_provider(
+                type="okta", groups={"mode": "api", "okta_domain": "example.okta.com"}
+            )
+            registry.create(name="no-token", provider=unconfigured)
+            scheduler = make_oidc_sync_scheduler(group_store=group_store, registry=registry)
+            # The sync stamps last_sync_at from the real clock, so the ticks count from it.
+            start = datetime.now(UTC)
+
+            first = await scheduler.run_once(now=start)
+            next_tick = await scheduler.run_once(now=start + timedelta(minutes=1))
+            next_interval = await scheduler.run_once(now=start + timedelta(hours=2))
+
+            stored = registry.get("no-token")
+            assert stored is not None
+            assert (first, next_tick, next_interval) == (
+                {"no-token": "not_configured"},
+                {},
+                {"no-token": "not_configured"},
+            )
+            assert stored.last_sync_status == "not_configured"
 
         async def test_holds_a_failed_provider_back_for_its_interval(
             self, broken_directory: None, group_store: GroupStore, registry: OIDCProviderRegistry
@@ -226,30 +246,55 @@ class TestOidcSyncScheduler:
                 {"mock-dir": "error"},
             )
 
-        @pytest.mark.usefixtures("okta_api_token")
-        async def test_reports_a_refused_directory_listing_as_an_error(
+        async def test_a_failed_run_logs_the_failures_class_not_its_text(
             self,
+            audit_events: list[dict],
+            broken_directory: None,
             group_store: GroupStore,
             registry: OIDCProviderRegistry,
-            tls_directory: LocalDirectory,
         ):
-            tls_directory.replies = {
-                "/api/v1/groups?limit=200": make_directory_reply(
-                    body=json.dumps({"errorSummary": "Invalid token provided"}), status=401
-                )
-            }
-            registry.create(
-                name="okta-dir",
-                provider=make_okta_directory_provider(okta_domain=tls_directory.host),
-            )
+            registry.create(name="mock-dir", provider=_mock_directory_provider())
             scheduler = make_oidc_sync_scheduler(group_store=group_store, registry=registry)
+
+            await scheduler.run_once(now=NOW)
+
+            (line,) = [e for e in audit_events if e["event"] == "OIDC scheduled group sync failing"]
+            assert "error" not in line
+            assert line["error_type"]
+            assert str(group_store._dir) not in json.dumps(line, default=str)
+
+        async def test_a_google_provider_with_no_service_account_is_its_own_outcome(
+            self, group_store: GroupStore, registry: OIDCProviderRegistry
+        ):
+            google = make_oidc_provider(
+                type="google", groups={"enrich_on_login": True, "mode": "api"}
+            )
+            registry.create(name="google", provider=google)
+            scheduler = make_oidc_sync_scheduler(group_store=group_store, registry=registry)
+
+            outcomes = await scheduler.run_once(now=datetime.now(UTC))
+
+            assert outcomes == {"google": "user_token"}
+
+        async def test_a_scim_group_bound_to_the_provider_is_synced(
+            self,
+            group_store: GroupStore,
+            monkeypatch: pytest.MonkeyPatch,
+            registry: OIDCProviderRegistry,
+            tmp_path: Path,
+        ):
+            groups = [{"description": "From the directory", "id": "g-ops", "name": "operators"}]
+            _write_directory(groups=groups, monkeypatch=monkeypatch, tmp_path=tmp_path)
+            group_store.create(
+                "operators", roles=["data_analyst"], source_provider="scim", source_id="g-ops"
+            )
+            registry.create(name="mock-dir", provider=_mock_directory_provider())
+            scheduler = make_oidc_sync_scheduler(
+                bindings={"scim": "mock-dir"}, group_store=group_store, registry=registry
+            )
 
             outcomes = await scheduler.run_once(now=NOW)
 
-            stored = registry.get(name="okta-dir")
-            assert (outcomes, stored.last_sync_status, stored.sync_error, group_store.list()) == (
-                {"okta-dir": "error"},
-                "error",
-                "okta directory: GET '/api/v1/groups' returned HTTP 401: 'Invalid token provided'",
-                [],
-            )
+            stored = group_store.get("operators")
+            assert outcomes == {"mock-dir": "ok"}
+            assert (stored.source_provider, stored.description) == ("scim", "From the directory")

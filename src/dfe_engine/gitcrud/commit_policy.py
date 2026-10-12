@@ -40,7 +40,7 @@ SUBJECT_MAX = 50
 # ``fullmatch`` (not ``match``) anchors the whole string, so a trailing newline is
 # rejected -- ``$`` would otherwise match just before it and let a name smuggle a
 # ``DFE-Role:``/``DFE-Action:`` trailer line into the commit body.
-# Not store_names.VALID_NAME: a deploy-repo name has no length cap or leading-character rule.
+# Not names.VALID_NAME: a deploy-repo name has no length cap or leading-character rule.
 _NAME_RE = re.compile(r"[A-Za-z0-9._-]+")
 
 # A digest-pinned image reference ends in ``@sha256:`` and the full 64-hex digest.

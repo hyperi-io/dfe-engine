@@ -8,8 +8,6 @@
 
 """E2E tests for JIT provisioning — shadow account creation on OIDC login."""
 
-from __future__ import annotations
-
 import secrets
 
 import pytest
@@ -61,9 +59,14 @@ def jit_settings(tmp_path):
 def jit_client(jit_settings):
     app = create_app(settings=jit_settings)
     with TestClient(app, raise_server_exceptions=False) as client:
-        # Create a group with org_ids for testing
+        # A group with org_ids, linked for the gateway's provider to the name it asserts
         group_store = app.state.group_store
-        group_store.create("test-org-viewers", roles=["org_viewer"])
+        group_store.create(
+            "test-org-viewers",
+            roles=["org_viewer"],
+            source_provider=jit_settings.auth.proxy_provider,
+            source_id="test-org-viewers",
+        )
         group_store.update("test-org-viewers", org_ids=["test-org"])
         yield client
     _registries.clear()
@@ -206,8 +209,8 @@ class TestJitWorkflow:
         assert resp.status_code == 200
         assert resp.json()["user_id"] == "myemail@example.org"
 
-    def test_oidc_login_with_no_matching_groups(self, jit_client):
-        """OIDC login with unrecognised groups still creates shadow account."""
+    def test_oidc_login_with_no_matching_groups_is_refused(self, jit_client):
+        """Groups that link no DFE group with a role get no account at all."""
         resp = jit_client.get(
             "/api/v1/auth/me",
             headers={
@@ -215,13 +218,10 @@ class TestJitWorkflow:
                 "X-Oidc-Groups": "unknown-group-xyz",
             },
         )
-        # Auth should succeed (auth passes; RBAC is for protected resources)
-        assert resp.status_code == 200
 
-        # Account is still provisioned
-        account = jit_client.app.state.account_store.get("nogroup-corp-com")
-        assert account is not None
-        assert account.external is True
+        assert resp.status_code == 401
+        assert resp.json()["code"] == "no_role_granted"
+        assert jit_client.app.state.account_store.get("nogroup-corp-com") is None
 
     def test_oidc_last_login_at_set_on_creation(self, jit_client):
         """last_login_at is set immediately on shadow account creation."""

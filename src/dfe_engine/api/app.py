@@ -22,6 +22,7 @@ from scalo.health import HealthManager, create_health_router
 from scalo.logger import logger
 
 from dfe_engine import __version__
+from dfe_engine.fastapi_telemetry import FASTAPI_TELEMETRY
 from dfe_engine.settings import DFESettings, e2e_routes_enabled, is_dev_posture, load_settings
 
 
@@ -117,13 +118,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         deployed_candidates = []
     # The admin's default TTL override, so the boot renders what the console set.
     ttl_settings = effective_settings(settings, gitcrud)
-    schema_state = bootstrap_clickhouse(settings=ttl_settings, sources=deployed_candidates)
+    run_schema_pass = functools.partial(
+        bootstrap_clickhouse,
+        settings=ttl_settings,
+        sources=deployed_candidates,
+        metrics=app.state.schema_metrics,
+    )
+    schema_state = run_schema_pass()
     tables_bootstrapped = schema_state.converged
 
     # After the bootstrap, which is what makes the landing table exist: the seed records the source as deployed, and that must not be claimed before it is true.
     from dfe_engine.source.core_sources import seed_core_sources
 
-    if source_registry is not None:
+    def seed_core(*, tables_bootstrapped: bool) -> None:
+        if source_registry is None:
+            return
         try:
             seed_core_sources(
                 registry=source_registry,
@@ -131,7 +140,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 tables_bootstrapped=tables_bootstrapped,
             )
         except Exception as exc:  # a failed seed must never break startup
-            logger.warning("core sources not seeded at startup", error=str(exc))
+            logger.warning("core sources not seeded", error=str(exc))
+
+    seed_core(tables_bootstrapped=tables_bootstrapped)
+
+    if schema_state.transient:
+        from dfe_engine.clickhouse.bootstrap import SchemaRetry
+
+        app.state.schema_retry = SchemaRetry(
+            run_schema_pass,
+            resilience=settings.clickhouse.resilience,
+            on_converged=functools.partial(seed_core, tables_bootstrapped=True),
+        )
+        app.state.schema_retry.start()
 
     # Every carried source's topics, at boot rather than at its next deploy: a
     # deployment restored from its config repo otherwise has topics only for the
@@ -245,12 +266,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Refuse to start on the shipped admin password outside a dev posture, unless
     # the operator has retired the admin -- then an absent password is the point.
     from dfe_engine.auth import admin_retirement
-    from dfe_engine.auth.bootstrap import require_admin_password
+    from dfe_engine.auth.bootstrap import require_admin_password, require_hashable_passwords
 
     require_admin_password(
         settings.auth.local.admin_password,
         settings.env,
         retired=admin_retirement.is_retired(gitcrud),
+    )
+    require_hashable_passwords(
+        settings.auth.local.admin_password, settings.auth.local.seed_accounts
     )
 
     account_store, group_store, api_key_store, role_store, role_config = bootstrap_auth(
@@ -521,6 +545,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             scheduler.run_forever(), name="oidc-group-sync"
         )
 
+    # dulwich's gc is off in the deploy-repo clone, so its packs are consolidated here.
+    if gitcrud is not None:
+        from dfe_engine.gitops.consolidation import consolidate_forever
+
+        app.state.gitops_consolidation = asyncio.create_task(
+            consolidate_forever(gitcrud.repo, settings.gitops.pack.interval_seconds),
+            name="gitops-consolidation",
+        )
+
     health.set_started()
     health.set_ready()
     logger.info(f"DFE Engine API started (port={settings.api.port})")
@@ -531,6 +564,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # A sync writes group files and asks for a reconcile, so it stops before both close.
         oidc_group_sync.cancel()
         await asyncio.gather(oidc_group_sync, return_exceptions=True)
+    gitops_consolidation = getattr(app.state, "gitops_consolidation", None)
+    if gitops_consolidation is not None:
+        gitops_consolidation.cancel()
+        await asyncio.gather(gitops_consolidation, return_exceptions=True)
     from dfe_engine.governance.ch import TRIGGER_ATTRIBUTES
 
     for attribute in TRIGGER_ATTRIBUTES:
@@ -538,6 +575,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         if reconcile_trigger is not None:
             # A run reads the org and group stores, so it ends before the stores close.
             await asyncio.to_thread(reconcile_trigger.close, 10.0)
+    schema_retry = getattr(app.state, "schema_retry", None)
+    if schema_retry is not None:
+        # A pass seeds the core sources through the registry, so it ends before the registries close.
+        await asyncio.to_thread(schema_retry.close, 10.0)
     autostart_tasks = getattr(app.state, "synthetic_autostart", [])
     for task in autostart_tasks:
         task.cancel()
@@ -595,6 +636,8 @@ def create_app(
         docs_url="/docs" if docs and not e2e_docs else None,
         redoc_url="/redoc" if docs else None,
         openapi_tags=openapi_tags,
+        # The request histogram is scalo's middleware below; FastAPI's own would count each twice.
+        telemetry={**FASTAPI_TELEMETRY, "metrics": False},
     )
 
     app.state.settings = settings
@@ -607,10 +650,12 @@ def create_app(
     from dfe_engine.api.e2e.seed.metrics import SeedMetrics
     from dfe_engine.api.metrics import ApiMetrics
     from dfe_engine.auth.oidc.sync import SyncMetrics
+    from dfe_engine.schema.metrics import SchemaMetrics
     from dfe_engine.yaml_health import YamlWriteMetrics, write_health
 
     app.state.metrics_manager = metrics_manager
     app.state.api_metrics = ApiMetrics(metrics_manager)
+    app.state.schema_metrics = SchemaMetrics(metrics_manager)
 
     from dfe_engine.auth.login_throttle import LoginThrottle
 

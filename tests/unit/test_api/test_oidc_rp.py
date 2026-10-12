@@ -18,6 +18,7 @@ Authlib network calls are mocked.
 
 import base64
 import hashlib
+import json
 import shutil
 import time
 from types import SimpleNamespace
@@ -181,6 +182,21 @@ def test_rp_registers_a_provider_with_no_credentials_at_all(tmp_path):
     assert _registered_client(rp, "acme").client_secret is None
 
 
+def test_an_rp_that_cannot_be_built_logs_no_provider_file_value(tmp_path, audit_events):
+    """A provider file that does not load quotes its own values in the error, so the log takes none."""
+    registry = OIDCProviderRegistry(tmp_path / "oidc-providers")
+    (tmp_path / "oidc-providers" / "acme.yaml").write_text(
+        "type: rp-sentinel-7f3a\nissuer: https://idp.example\n", encoding="utf-8"
+    )
+
+    assert build_relying_party(registry, secrets=None) is None
+
+    (line,) = [e for e in audit_events if e["event"] == "OIDC relying party unavailable"]
+    assert line["error_type"] == "ValidationError"
+    assert "error" not in line
+    assert "rp-sentinel-7f3a" not in json.dumps(audit_events, default=str)
+
+
 # -- PKCE: every login sends an S256 challenge --------------------
 
 
@@ -217,6 +233,31 @@ async def test_the_authorization_url_carries_an_s256_challenge_of_the_kept_verif
     assert len(rv["code_verifier"]) >= 43
 
 
+@pytest.mark.parametrize(
+    ("provider_type", "scope"),
+    [
+        (
+            "google",
+            "openid email profile https://www.googleapis.com/auth/cloud-identity.groups.readonly",
+        ),
+        ("generic", "openid email profile groups"),
+    ],
+)
+async def test_the_authorization_url_asks_for_the_type_default_scopes(
+    tmp_path, provider_type, scope
+):
+    """Google refuses a ``groups`` scope and reads groups with Cloud Identity, so it asks for that instead."""
+    registry = OIDCProviderRegistry(tmp_path / "oidc-providers")
+    registry.create(
+        "idp", OIDCProvider(type=provider_type, issuer="https://idp.example", client_id="c")
+    )
+    client = _registered_client(_rp_with_known_idp(registry, "idp"), "idp")
+
+    rv = await client.create_authorization_url("https://dfe.example/api/v1/auth/oidc/idp/callback")
+
+    assert parse_qs(urlsplit(rv["url"]).query)["scope"] == [scope]
+
+
 def test_the_login_route_hands_out_a_pkce_authorization_url(client, app):
     app.state.oidc_provider_registry.create(
         "pkce-idp", OIDCProvider(type="generic", issuer="https://idp.example", client_id="c")
@@ -249,6 +290,19 @@ def test_callback_unknown_provider_404(client):
     """The callback route is mounted and 404s for an unregistered provider."""
     resp = client.get("/api/v1/auth/oidc/nonexistent/callback", follow_redirects=False)
     assert resp.status_code == 404
+
+
+@pytest.fixture(autouse=True)
+def _stub_group_linked(request):
+    """Link the g1 every stub login asserts to a group with a role, which is what admits it."""
+    if "client" not in request.fixturenames:
+        return
+    # The client starts the app, which is what builds its group store.
+    request.getfixturevalue("client")
+    app = request.getfixturevalue("app")
+    app.state.group_store.create(
+        "stub-viewers", ["data_viewer"], source_provider="stub", source_id="g1"
+    )
 
 
 class _FakeOidcRp:
@@ -373,6 +427,13 @@ def test_validate_return_to_rejects_other_origins():
     origin = "https://dfe.example"
     for bad in (
         "//evil.example/steal",
+        "/\\evil.example/steal",
+        "/\t/evil.example/steal",
+        "/\n/evil.example/steal",
+        "/login\\..\\..\\evil",
+        "https://dfe.example\\@evil.example/",
+        "https://dfe.example\uff0f@evil.example/",
+        "https://dfe.example\uff20evil.example/",
         "https://evil.example/steal",
         "javascript:alert(1)",
         "http://localhost:3001/login/oidc",
@@ -559,6 +620,209 @@ class _SubjectOidcRp(_FakeOidcRp):
         )
 
 
+class _GroupsOidcRp(_FakeOidcRp):
+    """The same RP stub, asserting whatever groups the test names."""
+
+    def __init__(self, groups: list[str]) -> None:
+        self._groups = groups
+
+    async def handle_callback(self, provider: str, request) -> NormalizedIdentity:
+        return NormalizedIdentity(
+            email="stub@example.test", groups=self._groups, name="Stub User", subject="stub-user"
+        )
+
+
+NO_ROLE_MESSAGE = (
+    "OIDC login refused: no DFE group with a role is linked to your identity provider "
+    "groups. Ask a DFE administrator to link one."
+)
+
+
+def test_callback_refuses_an_identity_whose_groups_link_no_role(client, app, audit_events):
+    """The linked DFE groups are the allowlist, so an outsider gets no account and no token."""
+    app.state.oidc_rp = _GroupsOidcRp(["unlinked-team"])
+
+    resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+
+    assert resp.status_code == 401, resp.text
+    body = resp.json()
+    assert (body["code"], body["message"]) == ("no_role_granted", NO_ROLE_MESSAGE)
+    assert "access_token" not in body
+    assert oidc_login.TOKEN_COOKIE not in resp.cookies
+    assert app.state.account_store.get("stub-user") is None
+    refused = [e for e in audit_events if e["event"] == "auth.jit.login_refused"]
+    denied = [e for e in audit_events if e["event"] == "auth.login.denied"]
+    assert [(e["user_id"], e["source_provider"], e["reason"]) for e in refused] == [
+        ("stub-user", "stub", "no_role_granted")
+    ]
+    assert [(e["user_id"], e["auth_path"], e["reason"]) for e in denied] == [
+        ("stub-user", "oidc", "no_role_granted")
+    ]
+    assert not [e for e in audit_events if e["event"] == "auth.login.success"]
+    logged = json.dumps(refused + denied, default=str)
+    assert "unlinked-team" not in logged
+    assert "stub@example.test" not in logged
+
+
+@pytest.mark.parametrize("change", ["idp-drops-the-group", "group-loses-its-role"])
+def test_callback_refusal_ends_the_sessions_of_the_account(client, app, change):
+    """A token issued before the refusal must not read, or renew into, a session for it."""
+    app.state.oidc_rp = _GroupsOidcRp(["g1"])
+    token = client.get("/api/v1/auth/oidc/stub/callback").json()["access_token"]
+    bearer = {"Authorization": f"Bearer {token}"}
+    assert client.get("/api/v1/auth/me", headers=bearer).json()["roles"] == ["data_viewer"]
+
+    if change == "idp-drops-the-group":
+        app.state.oidc_rp = _GroupsOidcRp(["left-the-team"])
+    else:
+        app.state.group_store.update("stub-viewers", roles=[])
+    refused = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+
+    assert refused.status_code == 401, refused.text
+    assert refused.json()["code"] == "no_role_granted"
+    for method, path in [
+        ("GET", "/api/v1/auth/me"),
+        ("POST", "/api/v1/auth/refresh"),
+        ("GET", "/api/v1/auth/accounts/me"),
+    ]:
+        resp = client.request(method, path, headers=bearer)
+        assert resp.status_code == 401, (path, resp.text)
+        assert resp.json()["code"] == "session_ended", path
+
+
+CONSOLE_RETURN = "/login/oidc?callbackUrl=%2Fsources&login_nonce=n1"
+
+
+def _start_browser_login(client) -> None:
+    """Start a login the way the console does, with a return_to to hand back to."""
+    # The session cookie is Secure outside dev posture, so the round trip runs over https.
+    login = client.get(
+        "https://testserver/api/v1/auth/oidc/stub/login",
+        params={"redirect": "false", "return_to": CONSOLE_RETURN},
+    )
+    assert login.status_code == 200, login.text
+
+
+def _break_the_account_store(app) -> None:
+    accounts_dir = app.state.account_store._dir
+    shutil.rmtree(accounts_dir)
+    accounts_dir.write_text("")
+
+
+@pytest.mark.parametrize(
+    ("refusal", "code", "audited"),
+    [
+        ("no-role", "no_role_granted", ("auth.login.denied", "no_role_granted")),
+        ("disabled", "account_disabled", ("auth.login.denied", "account_disabled")),
+        ("blocked", "account_blocked", ("auth.login.denied", "account_blocked")),
+        ("local-admin", "unauthorized", ("auth.login.denied", "protected_account")),
+        ("store-down", "service_unavailable", ("auth.jit.provision_failed", None)),
+    ],
+)
+def test_a_refused_browser_login_returns_to_the_console_with_the_code(
+    client, app, audit_events, refusal, code, audited
+):
+    """A browser must never land on the callback's JSON, so the refusal goes back to return_to."""
+    store = app.state.account_store
+    if refusal == "no-role":
+        app.state.oidc_rp = _GroupsOidcRp(["unlinked-team"])
+    elif refusal in ("disabled", "blocked"):
+        app.state.oidc_rp = _SubjectOidcRp("stub-user")
+        store.create("stub-user", "", groups=["dfe-viewers"])
+        flag = {"enabled": False} if refusal == "disabled" else {"blocked": True}
+        store.update("stub-user", external=True, source_provider="stub", **flag)
+    elif refusal == "local-admin":
+        app.state.oidc_rp = _SubjectOidcRp("admin")
+    else:
+        app.state.oidc_rp = _SubjectOidcRp("kim@example.com")
+        _break_the_account_store(app)
+    _start_browser_login(client)
+
+    resp = client.get("https://testserver/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+
+    assert resp.status_code == 303, resp.text
+    path, _, fragment = resp.headers["location"].partition("#")
+    assert path == CONSOLE_RETURN
+    assert parse_qs(fragment) == {"error": [code], "provider": ["stub"]}
+    assert oidc_login.TOKEN_COOKIE not in resp.cookies
+    assert not [e for e in audit_events if e["event"] == "auth.login.success"]
+    # The hand-back changes where the browser goes, never what the audit trail records.
+    event, reason = audited
+    (recorded,) = [e for e in audit_events if e["event"] == event]
+    if reason is not None:
+        assert recorded["reason"] == reason
+    if refusal == "no-role":
+        assert store.get("stub-user") is None
+
+
+def test_a_hand_back_replaces_any_fragment_return_to_carried(client, app):
+    """A second fragment would hide the refusal's code from the console."""
+    app.state.oidc_rp = _GroupsOidcRp(["unlinked-team"])
+    login = client.get(
+        "https://testserver/api/v1/auth/oidc/stub/login",
+        params={"redirect": "false", "return_to": "/login/oidc?login_nonce=n1#stale"},
+    )
+    assert login.status_code == 200, login.text
+
+    resp = client.get("https://testserver/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+
+    assert resp.status_code == 303, resp.text
+    path, _, fragment = resp.headers["location"].partition("#")
+    assert path == "/login/oidc?login_nonce=n1"
+    assert parse_qs(fragment) == {"error": ["no_role_granted"], "provider": ["stub"]}
+
+
+def test_a_callback_for_a_vanished_provider_still_spends_return_to(client, app):
+    """A provider disabled between login and callback 404s, and leaves nothing to hand back later."""
+    app.state.oidc_rp = _FakeOidcRp()
+    _start_browser_login(client)
+    app.state.oidc_rp = None
+
+    gone = client.get("https://testserver/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+    app.state.oidc_rp = _GroupsOidcRp(["unlinked-team"])
+    after = client.get("https://testserver/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+
+    assert gone.status_code == 404
+    assert after.status_code == 401
+    assert after.json()["code"] == "no_role_granted"
+
+
+def test_a_refused_browser_login_spends_its_return_to(client, app):
+    """The hand-back is one-shot whether the login is admitted or refused."""
+    app.state.oidc_rp = _GroupsOidcRp(["unlinked-team"])
+    _start_browser_login(client)
+
+    first = client.get("https://testserver/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+    again = client.get("https://testserver/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+
+    assert first.status_code == 303
+    assert again.status_code == 401
+    assert again.json()["code"] == "no_role_granted"
+
+
+def test_a_failed_idp_exchange_returns_to_the_console_with_no_reason(client, app, audit_events):
+    """The IdP's own error text never reaches the fragment, only the engine's code."""
+    app.state.oidc_provider_registry.create(
+        "stub", OIDCProvider(type="generic", issuer="https://idp.example", client_id="c")
+    )
+    app.state.oidc_rp = _rp_with_known_idp(app.state.oidc_provider_registry, "stub")
+    _start_browser_login(client)
+
+    resp = client.get(
+        "https://testserver/api/v1/auth/oidc/stub/callback",
+        params={"error": "access_denied", "error_description": f"{CALLBACK_SENTINEL} said no"},
+        follow_redirects=False,
+    )
+
+    assert resp.status_code == 303, resp.text
+    path, _, fragment = resp.headers["location"].partition("#")
+    assert path == CONSOLE_RETURN
+    assert parse_qs(fragment) == {"error": ["unauthorized"], "provider": ["stub"]}
+    assert CALLBACK_SENTINEL not in resp.headers["location"]
+    (denied,) = [e for e in audit_events if e["event"] == "auth.login.denied"]
+    assert denied["reason"] == "access_denied"
+
+
 def test_callback_refuses_an_idp_asserting_the_local_admin(client, app):
     """dfe-engine#419: the refusal is a 401, never a logged warning plus a token."""
     app.state.oidc_rp = _SubjectOidcRp("admin")
@@ -646,8 +910,7 @@ def test_callback_refuses_a_subject_that_names_no_account(client, app, audit_eve
 
 def test_callback_refuses_a_login_the_account_store_cannot_record(client, app, audit_events):
     accounts_dir = app.state.account_store._dir
-    shutil.rmtree(accounts_dir)
-    accounts_dir.write_text("")
+    _break_the_account_store(app)
     app.state.oidc_rp = _SubjectOidcRp("kim@example.com")
 
     resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)
@@ -657,4 +920,62 @@ def test_callback_refuses_a_login_the_account_store_cannot_record(client, app, a
     assert "access_token" not in resp.json()
     failed = [e for e in audit_events if e["event"] == "auth.jit.provision_failed"]
     assert [e["user_id"] for e in failed] == ["kim@example.com"]
+    # The class of the failure, not its text.
+    assert [e["error_type"] for e in failed] == ["AccountExistsError"]
+    assert "error" not in failed[0]
     assert not [e for e in audit_events if e["event"] == "auth.login.denied"]
+    # No line, the operational one included, carries the exception or the store path it names.
+    logged = json.dumps(audit_events, default=str)
+    assert "Account already exists" not in logged
+    assert str(accounts_dir) not in logged
+
+
+def test_a_provider_file_that_does_not_load_is_logged_by_class_not_text(client, app, audit_events):
+    """The validation text quotes the file's values, so only the failure's class reaches the log."""
+    registry = app.state.oidc_provider_registry
+    registry._path("broken-idp").write_text("type: sentinel-type-4411\n", encoding="utf-8")
+
+    resp = client.get("/api/v1/auth/oidc/broken-idp/login", follow_redirects=False)
+
+    assert resp.status_code == 404, resp.text
+    (line,) = [e for e in audit_events if e["event"] == "OIDC provider registry read failed"]
+    assert "error" not in line
+    assert line["error_type"] == "ValidationError"
+    assert "sentinel-type-4411" not in json.dumps(audit_events, default=str)
+
+
+CALLBACK_SENTINEL = "callback.sentinel.9c1e"
+
+
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [
+        ("access_denied", "access_denied"),
+        ("login_required", "login_required"),
+        ("attacker_chosen.reason-1", "unrecognised"),
+        (f"user {CALLBACK_SENTINEL} may not sign in", "unrecognised"),
+    ],
+    ids=["a-code", "an-oidc-code", "a-code-the-caller-chose", "prose-in-the-code-slot"],
+)
+def test_a_refused_callback_records_the_oauth_code_never_the_description(
+    client, app, audit_events, error, reason
+):
+    """The callback's own query string reaches Authlib's error, so only a code the specs define is kept."""
+    app.state.oidc_provider_registry.create(
+        "idp", OIDCProvider(type="generic", issuer="https://idp.example", client_id="c")
+    )
+    app.state.oidc_rp = _rp_with_known_idp(app.state.oidc_provider_registry, "idp")
+
+    resp = client.get(
+        "/api/v1/auth/oidc/idp/callback",
+        params={"error": error, "error_description": f"{CALLBACK_SENTINEL} is unknown"},
+        follow_redirects=False,
+    )
+
+    assert resp.status_code == 401, resp.text
+    assert CALLBACK_SENTINEL not in json.dumps(audit_events, default=str)
+    (denied,) = [e for e in audit_events if e["event"] == "auth.login.denied"]
+    assert denied["reason"] == reason
+    (failed,) = [e for e in audit_events if e["event"] == "OIDC callback failed"]
+    assert failed["error_type"] == "OAuthError"
+    assert failed["code"] == reason

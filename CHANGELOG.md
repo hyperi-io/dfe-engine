@@ -3,6 +3,118 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.28](https://github.com/hyperi-io/dfe-engine/compare/v1.22.27...v1.22.28) (2026-10-11)
+
+### Bug Fixes
+
+* assert the logged cause of redacted CH errors ([#819](https://github.com/hyperi-io/dfe-engine/issues/819)) ([09d7ac1](https://github.com/hyperi-io/dfe-engine/commit/09d7ac18906acceed7e05ba4681a51ad9a4aa0a7))
+* clear vulture and override warnings, correct component comments ([#817](https://github.com/hyperi-io/dfe-engine/issues/817)) ([c3d82b6](https://github.com/hyperi-io/dfe-engine/commit/c3d82b614fa1d2c501ca2ad15f5d69038ab6d124))
+* describe how an app opts into the pressure trigger ([#818](https://github.com/hyperi-io/dfe-engine/issues/818)) ([176c689](https://github.com/hyperi-io/dfe-engine/commit/176c6891b5a2c6e3d44a3524645a645f8544f61f))
+* make the observability doc match the telemetry templates ([#822](https://github.com/hyperi-io/dfe-engine/issues/822)) ([455af76](https://github.com/hyperi-io/dfe-engine/commit/455af765a7fda5f29d7c6b83164b10d8b006a34c))
+* move to scalo 2.31.8 ([#826](https://github.com/hyperi-io/dfe-engine/issues/826)) ([0f35c82](https://github.com/hyperi-io/dfe-engine/commit/0f35c82c9a8654a3555134dac6a6b9f01cccc20e))
+* name integration containers by node id ([#820](https://github.com/hyperi-io/dfe-engine/issues/820)) ([014aaa7](https://github.com/hyperi-io/dfe-engine/commit/014aaa7ad43d1dd9cdf393dc598b94eced379734))
+* name the telemetry template that sets the OTLP endpoint ([#821](https://github.com/hyperi-io/dfe-engine/issues/821)) ([91eea74](https://github.com/hyperi-io/dfe-engine/commit/91eea744b6b65e03cf57cfeb048ad50755dcfab0))
+* refuse a blob in an object directory the clone does not use ([#824](https://github.com/hyperi-io/dfe-engine/issues/824)) ([989bd73](https://github.com/hyperi-io/dfe-engine/commit/989bd736dcde6fb7fd34094a99e33d05654213f2))
+* refuse a return_to carrying a backslash or control character ([#825](https://github.com/hyperi-io/dfe-engine/issues/825)) ([0dd127b](https://github.com/hyperi-io/dfe-engine/commit/0dd127b1ed2b837bdd56efc2cd3263b7c1481a28))
+* send a refused browser sign-in back to the console ([#823](https://github.com/hyperi-io/dfe-engine/issues/823)) ([0c53509](https://github.com/hyperi-io/dfe-engine/commit/0c53509b62754f4b8b8ad63c7ac510446faf574c)), closes [hyperi-io/dfe-ui#488](https://github.com/hyperi-io/dfe-ui/issues/488)
+
+## [1.22.27](https://github.com/hyperi-io/dfe-engine/compare/v1.22.26...v1.22.27) (2026-10-11)
+
+### Bug Fixes
+
+* stop writing otelServiceName to app overlays ([#816](https://github.com/hyperi-io/dfe-engine/issues/816)) ([78156aa](https://github.com/hyperi-io/dfe-engine/commit/78156aaab36682c45eeff091d188b68b8d755f12))
+
+## [1.22.26](https://github.com/hyperi-io/dfe-engine/compare/v1.22.25...v1.22.26) (2026-10-11)
+
+### Bug Fixes
+
+* guard OIDC group links, list groups once ([#814](https://github.com/hyperi-io/dfe-engine/issues/814)) ([bdfb886](https://github.com/hyperi-io/dfe-engine/commit/bdfb8863634e285bae15b833f657d4cb407564eb))
+
+## [1.22.25](https://github.com/hyperi-io/dfe-engine/compare/v1.22.24...v1.22.25) (2026-10-11)
+
+### Bug Fixes
+
+* bind OIDC group links to their provider ([#813](https://github.com/hyperi-io/dfe-engine/issues/813)) ([b9286ec](https://github.com/hyperi-io/dfe-engine/commit/b9286ec2efbe0b9e8a46cb6e362d35bbfe22ded3))
+
+## [1.22.24](https://github.com/hyperi-io/dfe-engine/compare/v1.22.23...v1.22.24) (2026-10-11)
+
+### Bug Fixes
+
+* admit an OIDC login only with a linked role ([#812](https://github.com/hyperi-io/dfe-engine/issues/812)) ([ac2b595](https://github.com/hyperi-io/dfe-engine/commit/ac2b5957b8538de5a0a4116c4a16b8cce72ba88b))
+
+## [1.22.23](https://github.com/hyperi-io/dfe-engine/compare/v1.22.22...v1.22.23) (2026-10-11)
+
+### Bug Fixes
+
+* rebuild on scalo 2.31.6 ([d3d0ed8](https://github.com/hyperi-io/dfe-engine/commit/d3d0ed8aa3b5d31c318799fc632371040af40c56))
+
+## [1.22.22](https://github.com/hyperi-io/dfe-engine/compare/v1.22.21...v1.22.22) (2026-10-11)
+
+### Bug Fixes
+
+* refuse an unbootable admin password rotation ([#810](https://github.com/hyperi-io/dfe-engine/issues/810)) ([0d2e603](https://github.com/hyperi-io/dfe-engine/commit/0d2e60328d020c17a085c3abf79b9fd9ccb3c9c3))
+
+## [1.22.21](https://github.com/hyperi-io/dfe-engine/compare/v1.22.20...v1.22.21) (2026-10-11)
+
+### Bug Fixes
+
+* give the test FerretDB three minutes to start and log why it did not ([#805](https://github.com/hyperi-io/dfe-engine/issues/805)) ([b3df989](https://github.com/hyperi-io/dfe-engine/commit/b3df98995b91ae34285e2e4a194e616306c613ab))
+* keep dulwich's gc out of gitops requests ([#807](https://github.com/hyperi-io/dfe-engine/issues/807)) ([b4f9168](https://github.com/hyperi-io/dfe-engine/commit/b4f9168f54c3c86ed5ee962a8d1d84c2a1c1aba8))
+* publish name rules, stop stale secret reads ([#809](https://github.com/hyperi-io/dfe-engine/issues/809)) ([2d0f199](https://github.com/hyperi-io/dfe-engine/commit/2d0f199d7575ef6f48dfd8468a8857d296fcd78e))
+* report OIDC credential states truthfully ([#806](https://github.com/hyperi-io/dfe-engine/issues/806)) ([840b5aa](https://github.com/hyperi-io/dfe-engine/commit/840b5aa5aea7b2d83fd6f2c7c8a3cf754826e74a))
+* take every name rule from one module ([#808](https://github.com/hyperi-io/dfe-engine/issues/808)) ([7f5b758](https://github.com/hyperi-io/dfe-engine/commit/7f5b7582b8f1071e40efe6450765246c264bb414))
+
+## [1.22.20](https://github.com/hyperi-io/dfe-engine/compare/v1.22.19...v1.22.20) (2026-10-10)
+
+### Bug Fixes
+
+* blame a refused Google or Entra credential ([#804](https://github.com/hyperi-io/dfe-engine/issues/804)) ([8928833](https://github.com/hyperi-io/dfe-engine/commit/892883323fc773fe1a0fe6b0e25c354716b77731))
+* close the leftovers from the name validation and IdP error work ([#801](https://github.com/hyperi-io/dfe-engine/issues/801)) ([b7c6f2a](https://github.com/hyperi-io/dfe-engine/commit/b7c6f2a34a577f78724c2af974e57fd5857482c8))
+* fail a group sync whose credential is set but gives no access, and settle the TLS reset flake ([#803](https://github.com/hyperi-io/dfe-engine/issues/803)) ([a072831](https://github.com/hyperi-io/dfe-engine/commit/a07283103840853be75a1f19e89049ea135a2b43))
+* keep dulwich's full repack off the write path ([#802](https://github.com/hyperi-io/dfe-engine/issues/802)) ([1646b90](https://github.com/hyperi-io/dfe-engine/commit/1646b908d7391dbb3d09bad7c46241a33558f9f0))
+
+## [1.22.19](https://github.com/hyperi-io/dfe-engine/compare/v1.22.18...v1.22.19) (2026-10-10)
+
+### Bug Fixes
+
+* close the name validation holes ([#800](https://github.com/hyperi-io/dfe-engine/issues/800)) ([29c6902](https://github.com/hyperi-io/dfe-engine/commit/29c6902183749993b106c2e7666592741ed52cd8))
+* fail a group sync on a bad listing and log IdP errors by class ([#799](https://github.com/hyperi-io/dfe-engine/issues/799)) ([8afd230](https://github.com/hyperi-io/dfe-engine/commit/8afd2309a639cd58ee0bdad9aed9c90c1665b599))
+* keep user identifiers out of IdP error logs and answers ([#798](https://github.com/hyperi-io/dfe-engine/issues/798)) ([007624c](https://github.com/hyperi-io/dfe-engine/commit/007624ca8d9e404f00b122de63f7e72d137e71db))
+* live Google group test mints its own user token ([#795](https://github.com/hyperi-io/dfe-engine/issues/795)) ([55374d5](https://github.com/hyperi-io/dfe-engine/commit/55374d500952a6b64ac65dace8099b607ce455f1))
+* remove the stale hand-written engine chart ([#797](https://github.com/hyperi-io/dfe-engine/issues/797)) ([b185d66](https://github.com/hyperi-io/dfe-engine/commit/b185d6669ea54d08ae4c037b8ee1945f7a19270d))
+* retire the Google live test the delegation test supersedes ([#796](https://github.com/hyperi-io/dfe-engine/issues/796)) ([4f6b668](https://github.com/hyperi-io/dfe-engine/commit/4f6b6688291a57f50295d87eae3baf6fc88ecdf3))
+* stop the test reconcile thread leak, keep schema apply running ([#794](https://github.com/hyperi-io/dfe-engine/issues/794)) ([d59b446](https://github.com/hyperi-io/dfe-engine/commit/d59b4465da3ba74e642129a643ab82e2acb2f0d5))
+* **tests:** hold the loader contract to v1.18.47, the release 2.2.1 ships ([#791](https://github.com/hyperi-io/dfe-engine/issues/791)) ([bf9c38e](https://github.com/hyperi-io/dfe-engine/commit/bf9c38e683ed6b777d9a91409bcaa1661f89e467))
+
+## [1.22.18](https://github.com/hyperi-io/dfe-engine/compare/v1.22.17...v1.22.18) (2026-10-10)
+
+### Bug Fixes
+
+* double-counted metrics and SCIM PATCH replace ([#790](https://github.com/hyperi-io/dfe-engine/issues/790)) ([e81d2cc](https://github.com/hyperi-io/dfe-engine/commit/e81d2cc3723175ab80944407391735156376972e))
+* drop FastAPI OTLP export, audit SCIM writes ([#789](https://github.com/hyperi-io/dfe-engine/issues/789)) ([8d254f4](https://github.com/hyperi-io/dfe-engine/commit/8d254f4da7923594a5abfc3eb25676d119fea706))
+* keep backend error text out of API responses ([#786](https://github.com/hyperi-io/dfe-engine/issues/786)) ([2d11e06](https://github.com/hyperi-io/dfe-engine/commit/2d11e06ced4f8089d3ea711d9789dd48779d9de5))
+* role grants, admin audit and OIDC settings ([#787](https://github.com/hyperi-io/dfe-engine/issues/787)) ([e8f98c7](https://github.com/hyperi-io/dfe-engine/commit/e8f98c71515340b6e958b7bba181c8c9c0e9706e))
+
+## [1.22.17](https://github.com/hyperi-io/dfe-engine/compare/v1.22.16...v1.22.17) (2026-10-10)
+
+### Bug Fixes
+
+* contain store paths and make regexes linear ([#782](https://github.com/hyperi-io/dfe-engine/issues/782)) ([9242c30](https://github.com/hyperi-io/dfe-engine/commit/9242c30e747a45bde7b6ca7d37462c50133aaf4b))
+* default OIDC scopes by type and read Google groups as the user ([#780](https://github.com/hyperi-io/dfe-engine/issues/780)) ([3211249](https://github.com/hyperi-io/dfe-engine/commit/3211249f267b4eb872e13b9ccd43b72168e719d5))
+* keep hunt files inside the hunts directory ([#784](https://github.com/hyperi-io/dfe-engine/issues/784)) ([127bea2](https://github.com/hyperi-io/dfe-engine/commit/127bea216af8a6cf5c10fe925f2bc9f6791d8d2f))
+* read Entra overage groups with the user's own token first ([#781](https://github.com/hyperi-io/dfe-engine/issues/781)) ([edec333](https://github.com/hyperi-io/dfe-engine/commit/edec33366cd2d1161283d6893123254aca050ebe))
+
+## [1.22.15](https://github.com/hyperi-io/dfe-engine/compare/v1.22.14...v1.22.15) (2026-10-09)
+
+### Bug Fixes
+
+* drop the bandit_exclude_tests key hyperi-ci no longer reads ([#774](https://github.com/hyperi-io/dfe-engine/issues/774)) ([8a648bc](https://github.com/hyperi-io/dfe-engine/commit/8a648bcea8b904da13758331724ad55f5622503f))
+* drop the build.type key hyperi-ci no longer reads ([#772](https://github.com/hyperi-io/dfe-engine/issues/772)) ([cb9c71c](https://github.com/hyperi-io/dfe-engine/commit/cb9c71c65ade368403558d0dee18713ceb3de5d5))
+* mark the ServiceApp hooks for vulture and shut the black hole down before close ([#777](https://github.com/hyperi-io/dfe-engine/issues/777)) ([ebe129a](https://github.com/hyperi-io/dfe-engine/commit/ebe129a82be34fe913f6c9b4af99ae0dded3e94f))
+* oidc delete user soft delete to revoke access persist data ([#775](https://github.com/hyperi-io/dfe-engine/issues/775)) ([23c99cc](https://github.com/hyperi-io/dfe-engine/commit/23c99cca89c504c1e6ac9e1c10cdcccd00b6753a))
+* publish a schema v4 thin chart for dfe-engine ([#776](https://github.com/hyperi-io/dfe-engine/issues/776)) ([5c3f2b9](https://github.com/hyperi-io/dfe-engine/commit/5c3f2b9c56955bfb1c327714537baada38666419))
+* source tweaks ([#771](https://github.com/hyperi-io/dfe-engine/issues/771)) ([33bbb3d](https://github.com/hyperi-io/dfe-engine/commit/33bbb3d460b0526d77b2df9f78d1005762e542da))
+
 ## [1.22.14](https://github.com/hyperi-io/dfe-engine/compare/v1.22.13...v1.22.14) (2026-10-06)
 
 ### Bug Fixes

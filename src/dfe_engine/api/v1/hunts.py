@@ -22,7 +22,6 @@ one query already answers for all of them.
 
 from __future__ import annotations
 
-import re
 import time
 from typing import Any
 
@@ -52,10 +51,8 @@ from dfe_engine.hunts.hunt_config_registry import (
     default_display_name,
     resolve_display_name,
 )
-from dfe_engine.hunts.rule_names import validate_rule_name
 from dfe_engine.hunts.validator import HuntValidator
-
-_HUNT_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+from dfe_engine.names import HuntName, InvalidNameError, validate_rule_name
 
 
 def _rules_from_stored(rules: Any) -> list[dict[str, Any]]:
@@ -75,6 +72,28 @@ def _rules_from_stored(rules: Any) -> list[dict[str, Any]]:
 
 def _rules_to_yaml(rule_names: list[str]) -> list[dict[str, str]]:
     return [{"rule_name": name} for name in rule_names]
+
+
+def _refuse_new_rule_names(rules: list[str], stored: dict[str, Any]) -> None:
+    """Refuse a rule reference no rule can be created under, unless *stored* already holds it.
+
+    A hunt on disk can name a rule file outside the create rule, and it has to stay
+    editable. The rule-file contract refuses a name that leaves the directory either way.
+
+    Raises:
+        HTTPException: 422 ``validation_error`` naming the first refused reference.
+    """
+    held = {entry["rule_name"] for entry in _rules_from_stored(stored.get("rules"))}
+    for name in rules:
+        if name in held:
+            continue
+        try:
+            validate_rule_name(name)
+        except InvalidNameError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "validation_error", "message": str(exc)},
+            ) from exc
 
 
 def _validate_hunt_config(config: dict[str, Any], settings: Any, rules: Any) -> None:
@@ -218,8 +237,6 @@ class HuntWriteRequest(_HuntConfigFields):
         cleaned = [name.strip() for name in v]
         if any(not name for name in cleaned):
             raise ValueError("rule names must be non-empty strings")
-        for name in cleaned:
-            validate_rule_name(name)
         return cleaned
 
     def to_config_dict(self, *, hunt_name: str) -> dict[str, Any]:
@@ -248,15 +265,13 @@ class HuntDetailResponse(_HuntConfigFields):
 
 
 class HuntCreateRequest(HuntWriteRequest):
-    name: str = Field(description="Hunt file name (YAML stem); must be unique")
+    name: HuntName = Field(description="Hunt file name (YAML stem); must be unique")
 
-    @field_validator("name")
+    @field_validator("rules")
     @classmethod
-    def _validate_hunt_name(cls, v: str) -> str:
-        if not _HUNT_NAME_PATTERN.match(v):
-            raise ValueError(
-                f"Hunt name '{v}' must match /^[a-zA-Z0-9_-]+$/ (letters, digits, _, -)"
-            )
+    def _rules_can_be_created(cls, v: list[str]) -> list[str]:
+        for name in v:
+            validate_rule_name(name)
         return v
 
 
@@ -507,13 +522,14 @@ def update_hunt(
     runner git-syncs, and the ``X-DFE-Review-Required`` header says so.
     """
     try:
-        registry.get(name)
+        stored = registry.get(name)
     except HuntConfigNotFoundError:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Hunt '{name}' not found"},
         ) from None
 
+    _refuse_new_rule_names(body.rules, stored)
     config = body.to_config_dict(hunt_name=name)
     _validate_hunt_config(config, settings, rules)
     outcome = registry.save(

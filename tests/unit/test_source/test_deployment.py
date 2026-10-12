@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2, SchemaBuildResult
 from dfe_engine.source.deployment import (
     SchemaDeployResult,
@@ -183,6 +185,25 @@ class TestSourceDeploymentStore:
         assert loaded is not None
         assert loaded.statements == ["SELECT 1"]
         assert (tmp_path / "plans" / "evt.yaml").is_file()
+
+    @pytest.mark.parametrize("name", ["../outside", "nested/outside", "/outside", ""])
+    def test_a_name_that_is_not_a_source_label_reads_and_removes_nothing(
+        self, tmp_path: Path, name: str
+    ):
+        """A record file is ``<dir>/<source>.yaml``, so only a source label names one."""
+        store = SourceDeploymentStore(
+            builds_dir=tmp_path / "records" / "builds",
+            plans_dir=tmp_path / "records" / "plans",
+            deploys_dir=tmp_path / "records" / "deploys",
+        )
+        planted = tmp_path / "records" / "outside.yaml"
+        yaml_dump({"source": "outside", "deployed_version": None, "versions": {}}, planted)
+
+        with pytest.raises(ValueError, match="Source name"):
+            store.load_deploy_document(name)
+        with pytest.raises(ValueError, match="Source name"):
+            store.delete_source_records(name)
+        assert planted.is_file()
 
 
 class TestDeployStatements:

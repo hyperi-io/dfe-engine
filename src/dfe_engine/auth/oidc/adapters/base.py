@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         auth/oidc/adapters/base.py
-#  Purpose:      Abstract base class for OIDC group adapters, their directory listing error and page fetch
+#  Purpose:      Abstract base class for OIDC group resolution adapters
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -12,43 +12,100 @@ Each provider type (generic, google, entra_id, okta) implements this ABC.
 All methods are async to allow network calls without blocking the event loop.
 """
 
-from __future__ import annotations
-
-import traceback
 from abc import ABC, abstractmethod
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
-from urllib.parse import urlsplit
-
-import httpx
-from scalo.logger import logger
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from scalo.http import AsyncHttpClient
-
     from dfe_engine.auth.oidc.models import GroupInfo, OIDCProvider
     from dfe_engine.secrets import DfeSecrets
 
-# An error summary a directory sends is cut to this many characters before an operator sees it.
-DIRECTORY_SUMMARY_LIMIT = 200
+
+class DirectoryNotConfiguredError(Exception):
+    """A provider's directory cannot be listed because no credential for it is configured.
+
+    An adapter raises this from ``list_all_groups`` instead of returning an empty list,
+    so group sync can tell a directory it never read from one that has no groups.
+    """
 
 
-def _error_summary(*, read_summary: Callable[[Any], str], response: httpx.Response) -> str:
-    """The directory's own one-line summary of a refused request; empty when its body carries none."""
-    try:
-        body = response.json()
-    except ValueError:
-        return ""
-    return read_summary(body)[:DIRECTORY_SUMMARY_LIMIT]
+class DirectoryCredentialError(Exception):
+    """A provider's directory credential is configured but gives no access to its directory.
+
+    An adapter raises this from ``list_all_groups`` when Entra issues no token for the
+    configured client secret, or the configured Google service account JSON does not
+    build a client. Group sync records the run as failed, never as a directory with no groups.
+    """
 
 
-class DirectoryError(Exception):
-    """A directory listing failed; the message names the provider type and the failed request or missing setting, never a credential."""
+class DirectoryCredentialUnreadableError(DirectoryCredentialError):
+    """A provider's directory credential is configured, but its secret store gave nothing back.
 
-    def __init__(self, *, detail: str, provider_type: str) -> None:
-        """Prefix *detail* with the provider type, such as ``okta directory: ...``, keeping *detail* for a caller that names the provider itself."""
-        super().__init__(f"{provider_type} directory: {detail}")
-        self.detail = detail
+    The credential may be sound, so group sync records a failed run that names the
+    secret store rather than the credential.
+
+    Attributes:
+        refused: The store answered and refused the engine access, rather than not
+            answering, so the fix is its policy and not its reachability.
+    """
+
+    def __init__(self, *, refused: bool = False) -> None:
+        """Record whether the store refused access."""
+        super().__init__()
+        self.refused = refused
+
+
+class DirectoryTokenRequestError(Exception):
+    """The provider's token endpoint gave no directory token: not reached, throttling or failing.
+
+    Raised from the HTTP client's own error, which the adapter logs with its status. Group
+    sync names the token endpoint, not the directory API, so an operator looks at the
+    right service.
+
+    Attributes:
+        service: The token endpoint's owner as an operator knows it, such as ``Entra ID``.
+    """
+
+    def __init__(self, service: str) -> None:
+        """Record which service's token endpoint failed."""
+        super().__init__(service)
+        self.service = service
+
+
+class NoDirectoryListingError(Exception):
+    """The provider has no directory listing to sync: each login reads that user's groups with their own token.
+
+    A Google provider with no service account works this way by default, so group
+    sync records it as its own state, neither a failure nor a missing credential.
+    """
+
+
+class NoDirectoryApiError(Exception):
+    """The provider type has no directory API, so an api-mode provider of it has nothing to list.
+
+    A generic provider works this way. Group sync records a failed run, because api
+    mode on such a provider is a misconfiguration and never a directory with no groups.
+    """
+
+
+class DirectoryPageError(Exception):
+    """A directory answered a listing page without the listing's shape.
+
+    The page holds no groups the adapter can read, so the listing cannot be trusted
+    to be the whole directory.
+    """
+
+
+class DirectoryPageLimitError(Exception):
+    """A directory listing ran past the page limit without reaching its last page.
+
+    Attributes:
+        pages: The page limit the listing reached.
+    """
+
+    def __init__(self, pages: int) -> None:
+        """Record the page limit the listing reached."""
+        super().__init__(pages)
+        self.pages = pages
 
 
 class OIDCGroupAdapter(ABC):
@@ -58,29 +115,44 @@ class OIDCGroupAdapter(ABC):
     from a specific identity provider.
     """
 
+    # Pages a directory listing reads at most, so a provider that keeps linking a next page cannot hold the sync: 200,000 Okta or Google groups, 999,000 Graph groups.
+    MAX_LISTING_PAGES = 1000
+
+    # Pages one login's group lookup reads at most, so a provider that keeps linking a next page cannot hold a login: 10,000 Okta or Google groups, 49,950 Graph groups.
+    MAX_LOGIN_PAGES = 50
+
     def __init__(self, provider: OIDCProvider, *, secrets: DfeSecrets | None = None) -> None:
         self._provider = provider
         # The directory-API credential resolves through this seam before the env.
         self._secrets = secrets
 
     @abstractmethod
-    async def resolve_groups(self, subject: str) -> list[GroupInfo]:
-        """Return the groups that *subject* (OIDC sub claim) belongs to.
+    async def list_all_groups(self) -> list[GroupInfo]:
+        """Return all groups available in the provider.
 
-        Args:
-            subject: The OIDC subject identifier for the authenticating user.
+        Used for bulk sync and admin enumeration.
 
         Returns:
-            List of GroupInfo records for the user's group memberships.
-            Returns an empty list when the user belongs to no groups or when
-            group resolution is not supported.
-        """
+            List of GroupInfo records.
 
-    @abstractmethod
-    async def list_all_groups(self) -> list[GroupInfo]:
-        """Return every group in the provider's directory, for the group sync.
-
-        Raises :class:`DirectoryError` when the directory cannot be listed in full, so a failed listing is never read as an empty directory.
+        Raises:
+            NoDirectoryApiError: The provider type has no directory API at all.
+            NoDirectoryListingError: The provider reads each login's groups with
+                the user's own token and has no directory to list.
+            DirectoryNotConfiguredError: The provider has no credential to
+                enumerate with.  Group sync reports that as its own state, never
+                as a directory with no groups.
+            DirectoryCredentialUnreadableError: The credential is configured but
+                the secret store holding it did not answer or refused.  A failed run.
+            DirectoryTokenRequestError: The provider's token endpoint was not reached,
+                throttled the request or failed.  A failed run.
+            DirectoryCredentialError: The credential is configured but gives no
+                access to the directory.  Group sync reports that as a failed run.
+            DirectoryPageError: A page arrived without the listing's shape.
+            DirectoryPageLimitError: The listing ran past :attr:`MAX_LISTING_PAGES`.
+            Exception: Whatever the provider's API produced when a listing failed,
+                on any page. An empty or short list never means a failed one,
+                because group sync records what it is given as the whole directory.
         """
 
     @abstractmethod
@@ -113,62 +185,3 @@ class OIDCGroupAdapter(ABC):
         this.
         """
         return []
-
-
-def describe_error(*, exc: BaseException, read_summary: Callable[[Any], str] | None = None) -> str:
-    """Describe *exc* for a log line or an API answer without its text, which can quote the request's credential.
-
-    An HTTP error is its status, with the directory's own bounded summary when ``read_summary`` finds one in the body; anything else is its exception type.
-    """
-    if isinstance(exc, httpx.HTTPStatusError):
-        status = f"HTTP {exc.response.status_code}"
-        summary = (
-            _error_summary(read_summary=read_summary, response=exc.response)
-            if read_summary is not None
-            else ""
-        )
-        return f"{status}: {summary!r}" if summary else status
-    return type(exc).__name__
-
-
-def error_frames(*, exc: BaseException) -> str:
-    """The file, line and source of each frame *exc* passed through, for a log line that must not carry the error's own text or local values."""
-    return "".join(traceback.format_tb(exc.__traceback__))
-
-
-async def fetch_directory_page(
-    *,
-    client: AsyncHttpClient,
-    headers: dict[str, str],
-    provider_type: str,
-    read_summary: Callable[[Any], str],
-    url: str,
-) -> tuple[Any, httpx.Headers]:
-    """GET one page of a directory listing and return its JSON body and response headers.
-
-    Raises :class:`DirectoryError` naming the request path when the request cannot be built or sent (named by the error's type alone), the directory answers other than 2xx (with the summary ``read_summary`` finds in its body) or the body is not JSON.
-    """
-    path = urlsplit(url).path
-    try:
-        response = await client.get(url, headers=headers)
-    except httpx.HTTPStatusError as exc:
-        detail = f"GET {path!r} returned {describe_error(exc=exc, read_summary=read_summary)}"
-        raise DirectoryError(detail=detail, provider_type=provider_type) from exc
-    except Exception as exc:
-        # Building or sending the request also fails outside httpx's own errors, such as a header value it cannot encode.
-        error = describe_error(exc=exc)
-        logger.warning(
-            "Directory listing request failed",
-            error=error,
-            path=path,
-            provider_type=provider_type,
-        )
-        raise DirectoryError(
-            detail=f"GET {path!r} failed: {error}", provider_type=provider_type
-        ) from exc
-    try:
-        body = response.json()
-    except ValueError as exc:
-        detail = f"GET {path!r} returned a body that is not JSON"
-        raise DirectoryError(detail=detail, provider_type=provider_type) from exc
-    return body, response.headers

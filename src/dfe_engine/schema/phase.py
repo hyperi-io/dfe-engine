@@ -15,8 +15,9 @@ object, release the lease, create the declared topics, and confirm the dead-lett
 topics are on the broker.
 
 Two things make it a GATE rather than the best-effort pass it replaces. A failure
-leaves the engine UP and NotReady with the cause on the status route, because a
-silent failure and a success look identical to every app downstream. And
+leaves the engine UP and NotReady, with the stage that failed on the status route
+and the cause in the engine log, because a silent failure and a success look
+identical to every app downstream. And
 ClickHouse or the broker merely not being up yet is not a failure: the phase
 retries for a bounded window first, which is what a stack whose datastore starts
 in the same wave needs.
@@ -30,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 from scalo.logger import logger
 
 from dfe_engine import __version__ as engine_version
+from dfe_engine.clickhouse.errors import is_retryable_error, parse_code
 from dfe_engine.schema.ledger import LedgerError, MigrationLedger
 from dfe_engine.schema.lock import SchemaLock, SchemaLockError, holder_name
 from dfe_engine.schema.manifest_applier import (
@@ -42,6 +44,7 @@ from dfe_engine.schema.plan import LEDGER_ID, LOCK_ID, SchemaPlan, SchemaPlanErr
 
 if TYPE_CHECKING:
     from dfe_engine.kafka.topics import TopicAdmin, TopicSpec
+    from dfe_engine.schema.metrics import SchemaMetrics
     from dfe_engine.settings import DFESettings
 
 DEAD_LETTER_TOPIC_KIND = "dlq"
@@ -69,6 +72,51 @@ _STATE_GAUGE = {
     STATE_OBSERVED: 4,
 }
 
+# The state is served to every signed-in caller, so a backend's own error text stays
+# in the log and the state names only the stage that failed.
+_FAILED_STAGES: tuple[tuple[type[Exception], str], ...] = (
+    (ManifestApplyError, "ClickHouse refused or did not answer the manifest apply"),
+    (SchemaPlanError, "the schema manifest could not be planned"),
+    (SchemaLockError, "the schema lock could not be read or written"),
+    (LedgerError, "the migration ledger could not be read or written"),
+)
+_SEE_LOG = "the engine log has the cause"
+
+
+def _failed_stage(exc: Exception) -> str:
+    """The status route's account of a failed pass: the stage, never the backend's text."""
+    for kind, stage in _FAILED_STAGES:
+        if isinstance(exc, kind):
+            return f"{stage}; {_SEE_LOG}"
+    return f"unexpected failure; {_SEE_LOG}"
+
+
+_MEMORY_LIMIT_EXCEEDED = 241
+
+
+def is_transient_failure(exc: BaseException) -> bool:
+    """Whether a later pass can clear *exc*: ClickHouse not answering, or refusing for load.
+
+    Each stage wraps the driver's error, so the whole cause chain is read. The query
+    retry rule never retries 241, because the same query meets the same ceiling at
+    once; a pass runs again only after a back-off, and its writes are small, so the
+    server's memory pressure may have passed by then.
+
+    Args:
+        exc: What failed the pass.
+
+    Returns:
+        True when any error in the chain is a connection outage, a rate limit or 241.
+    """
+    seen: set[int] = set()
+    link: BaseException | None = exc
+    while link is not None and id(link) not in seen:
+        seen.add(id(link))
+        if is_retryable_error(link) or parse_code(link) == _MEMORY_LIMIT_EXCEEDED:
+            return True
+        link = link.__cause__ or link.__context__
+    return False
+
 
 @dataclass
 class SchemaBootstrapState:
@@ -94,6 +142,9 @@ class SchemaBootstrapState:
     # no topic, and a non-empty ``refused`` exits the CLI 2.
     topics_drift: list[str] = field(default_factory=list)
     counts: dict[str, int] = field(default_factory=dict)
+    # Not on the status route: it decides whether the daemon runs the pass again.
+    transient: bool = False
+    """The pass failed because ClickHouse did not answer or refused for load, which a later pass can clear."""
 
     @property
     def converged(self) -> bool:
@@ -407,12 +458,21 @@ def run_bootstrap(
     settings: DFESettings,
     wait_seconds: float | None = None,
     allow_drift: bool = False,
+    metrics: SchemaMetrics | None = None,
 ) -> SchemaBootstrapState:
     """Bring this deployment's ClickHouse and topic set to the pinned manifest.
 
     Returns the state, which is also what the status route and the readiness
-    check read. Never raises: a failure is reported as state ``failed`` with the
-    cause, so the pod stays up for an operator to read it off the API.
+    check read. Never raises: a failure is reported as state ``failed`` naming the
+    stage that failed, with the cause in the engine log, so the pod stays up for an
+    operator to find it.
+
+    Args:
+        settings: The deployment's settings.
+        wait_seconds: How long to wait for ClickHouse and the lease; ``None``
+            takes ``clickhouse.bootstrap_wait_seconds``.
+        allow_drift: Also apply the column type and TTL changes a pass refuses as drift.
+        metrics: Where the pass reports its outcome. ``None`` reports nothing.
     """
     ch = settings.clickhouse
     started = datetime.now(UTC)
@@ -428,7 +488,7 @@ def run_bootstrap(
         state.state = STATE_UNKNOWN
         state.error = "DFE_CLICKHOUSE_BOOTSTRAP_TABLES is off; the schema state is not known here"
         logger.warning(state.error)
-        _finish(state, started)
+        _finish(state, started, metrics)
         return state
 
     wait = ch.bootstrap_wait_seconds if wait_seconds is None else wait_seconds
@@ -456,15 +516,17 @@ def run_bootstrap(
         )
     except (ManifestApplyError, SchemaPlanError, SchemaLockError, LedgerError) as exc:
         state.state = STATE_FAILED
-        state.error = str(exc)
+        state.error = _failed_stage(exc)
+        state.transient = is_transient_failure(exc)
         logger.error("schema bootstrap failed; the engine stays up and NotReady", error=str(exc))
-        _finish(state, started)
+        _finish(state, started, metrics)
         return state
     except Exception as exc:
         state.state = STATE_FAILED
-        state.error = f"unexpected failure: {exc}"
+        state.error = _failed_stage(exc)
+        state.transient = is_transient_failure(exc)
         logger.exception("schema bootstrap failed; the engine stays up and NotReady")
-        _finish(state, started)
+        _finish(state, started, metrics)
         return state
 
     if report is not None:
@@ -490,7 +552,7 @@ def run_bootstrap(
             plan, settings
         )
     except Exception as exc:  # a broker fault must not take the ClickHouse apply with it
-        state.topics_skipped = f"topic bootstrap failed: {exc}"
+        state.topics_skipped = f"topic bootstrap failed; {_SEE_LOG}"
         logger.warning("bootstrap topics not created", error=str(exc))
 
     try:
@@ -501,12 +563,12 @@ def run_bootstrap(
         logger.error(
             "dead letters cannot be recorded; the engine stays up and NotReady", error=str(exc)
         )
-        _finish(state, started)
+        _finish(state, started, metrics)
         return state
 
     if state.state != STATE_OBSERVED:
         state.state = STATE_CONVERGED
-    _finish(state, started)
+    _finish(state, started, metrics)
     return state
 
 
@@ -554,20 +616,19 @@ def _table_absent(client: Any, plan: SchemaPlan) -> bool:
     return not rows
 
 
-def _finish(state: SchemaBootstrapState, started: datetime) -> None:
+def _finish(state: SchemaBootstrapState, started: datetime, metrics: SchemaMetrics | None) -> None:
     finished = datetime.now(UTC)
     state.finished_at = finished.isoformat()
     state.duration_seconds = (finished - started).total_seconds()
     _set_state(state)
-    _report_metrics(state)
+    if metrics is not None:
+        _report_metrics(state, metrics)
 
 
-def _report_metrics(state: SchemaBootstrapState) -> None:
-    """Push the pass's outcome. A missing metrics backend is not a failure."""
-    from dfe_engine.schema import metrics
-
+def _report_metrics(state: SchemaBootstrapState, metrics: SchemaMetrics) -> None:
+    """Push the pass's outcome. A metrics backend fault is not a failure."""
     try:
-        metrics.create().report(
+        metrics.report(
             state=state.gauge,
             duration_seconds=state.duration_seconds,
             schemas_version=state.schemas_version,

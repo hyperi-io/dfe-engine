@@ -130,7 +130,10 @@ class TestQueryClientMetadataParsing:
 
 
 class TestQueryClientDirectMode:
-    def test_direct_mode_requires_view_executor(self):
+    def test_direct_mode_requires_view_executor(self, monkeypatch):
         client = QueryClient(direct=True)
+        # Hermetic: a local .env that can build a ViewExecutor against a down
+        # ClickHouse would otherwise raise ServiceUnavailable instead.
+        monkeypatch.setattr(client, "_get_view_executor", lambda: None)
         with pytest.raises(RuntimeError, match="ViewExecutor not available"):
             client.query("analytics/user_activity")

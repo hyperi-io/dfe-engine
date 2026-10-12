@@ -258,7 +258,10 @@ class TestGenerateAll:
 class TestWriteAll:
     """Test file writing."""
 
-    def test_creates_files(self, writer, tmp_path):
+    def test_creates_files(self, writer, tmp_path, monkeypatch):
+        # Pin against the installed dfe-schemas package: a local DFE_SCHEMAS_DIR
+        # (often from .env) can be an older partial tree and would under-count.
+        monkeypatch.delenv("DFE_SCHEMAS_DIR", raising=False)
         written = writer.write_all(tmp_path / "ddl")
         # Pinned, not derived from generate_all(): deriving both sides would let a
         # regression that silently drops a profile pass. Every schema version is

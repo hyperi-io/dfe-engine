@@ -9,8 +9,8 @@
 
 An IdP assertion takes a stored group only through the id the group is linked to.
 A directory user can name a group ``dfe-admins``, so a name links nothing. A group
-is linked when its ``source_id`` is the asserted identifier and it names no provider
-or one the assertion answers for.
+is linked when its ``source_id`` is the asserted identifier and its provider is one
+the assertion answers for.
 """
 
 import pytest
@@ -20,7 +20,6 @@ from dfe_engine.auth.groups import Group, GroupStore
 from dfe_engine.auth.membership import (
     groups_held,
     groups_held_after,
-    groups_named,
     linked_groups,
     linked_providers,
     sync_account_groups_for_membership_change,
@@ -130,12 +129,14 @@ class TestLinkedGroups:
         assert linked_groups(["dfe-admins"], groups, {"entra"}) == []
 
     def test_the_group_whose_source_id_is_asserted_is_linked(self):
-        linked = _group("platform-admins", source_id="0295f72c")
+        linked = _group("platform-admins", source_id="0295f72c", source_provider="entra")
         assert linked_groups(["0295f72c"], [_group("dfe-admins"), linked], {"entra"}) == [linked]
 
-    def test_a_group_naming_no_provider_links_for_any(self):
-        linked = _group("dfe-admins", source_id="dfe-admins")
-        assert linked_groups(["dfe-admins"], [linked], {"okta"}) == [linked]
+    def test_a_group_naming_no_provider_links_for_none(self):
+        """The model refuses such a group; a copy that skipped validation still links nothing."""
+        unvalidated = Group.model_construct(name="dfe-admins", roles=["admin"], source_id="Admins")
+        providers = {"okta", "google", "corp-sso"}
+        assert linked_groups(["Admins"], [unvalidated], providers) == []
 
     @pytest.mark.parametrize(("provider", "expected"), [("entra", 1), ("okta", 0)])
     def test_a_group_naming_a_provider_links_for_that_one_only(self, provider, expected):
@@ -154,12 +155,15 @@ class TestGroupsHeld:
 
     def test_a_local_accounts_own_list_holds_nothing(self):
         account = Account(username="ops", password_hash="!", groups=["dfe-admins"])
-        groups = [_group("dfe-admins", source_id="dfe-admins")]
+        groups = [_group("dfe-admins", source_id="dfe-admins", source_provider="entra")]
         assert groups_held(account, groups, bindings={}) == []
 
     def test_an_idp_account_holds_the_groups_its_ids_are_linked_to(self):
         account = _idp_account(["0295f72c", "dfe-admins"])
-        groups = [_group("dfe-admins"), _group("platform-admins", source_id="0295f72c")]
+        groups = [
+            _group("dfe-admins"),
+            _group("platform-admins", source_id="0295f72c", source_provider="entra"),
+        ]
         assert groups_held(account, groups, bindings={}) == ["platform-admins"]
 
     def test_a_bound_stamp_takes_the_providers_groups(self):
@@ -172,7 +176,7 @@ class TestGroupsHeld:
         account = _idp_account(["g-1"])
         groups = [
             _group("by-hand", members=["jane-corp-com"]),
-            _group("by-link", source_id="g-1"),
+            _group("by-link", source_id="g-1", source_provider="entra"),
         ]
         assert groups_held(account, groups, bindings={}) == ["by-hand", "by-link"]
 
@@ -180,7 +184,10 @@ class TestGroupsHeld:
 class TestGroupsHeldAfter:
     def test_an_idp_accounts_new_list_is_its_assertion_and_its_membership(self):
         account = _idp_account(["DFE-Admins"])
-        groups = [_group("DFE-Admins"), _group("dfe-admins", source_id="DFE-Admins")]
+        groups = [
+            _group("DFE-Admins"),
+            _group("dfe-admins", source_id="DFE-Admins", source_provider="entra"),
+        ]
 
         held = groups_held_after(
             account=account, added=["DFE-Admins"], bindings={}, groups=groups, removed=[]
@@ -197,12 +204,3 @@ class TestGroupsHeldAfter:
         )
 
         assert (held, groups[0].members) == ([], ["bob", "carol"])
-
-
-class TestGroupsNamed:
-    def test_a_provider_id_names_no_group(self):
-        groups = [_group("dfe-admins", source_id="DFE-Admins"), _group("dfe-viewers")]
-
-        named = groups_named(groups=groups, identifiers=["DFE-Admins", "dfe-viewers"])
-
-        assert [group.name for group in named] == ["dfe-viewers"]

@@ -625,3 +625,61 @@ class TestTheDestinationUrlIsACredential:
 
         assert answers[0] == answers[1] == (400, "credential_reentry_required")
         assert _registries["alert_destinations"].get("json-hook").url == url
+
+
+class TestDestinationNameContainment:
+    """The name is the destination's file name, so a create must not place it anywhere else."""
+
+    @pytest.mark.parametrize("name", ["../escape", "nested/escape", "..", ""])
+    def test_a_name_that_is_not_one_file_name_is_refused(
+        self, alert_client, alert_admin_headers, sample_destination, tmp_path, name
+    ):
+        resp = alert_client.post(
+            "/api/v1/alerts/destinations",
+            json={**sample_destination, "name": name},
+            headers=alert_admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["code"] == "validation_error"
+        assert not (tmp_path / "escape.yaml").exists()
+        assert list((tmp_path / "alert-destinations").iterdir()) == []
+
+    def test_an_absolute_name_writes_nothing_outside_the_directory(
+        self, alert_client, alert_admin_headers, sample_destination, tmp_path
+    ):
+        outside = tmp_path / "outside" / "escape"
+        resp = alert_client.post(
+            "/api/v1/alerts/destinations",
+            json={**sample_destination, "name": str(outside)},
+            headers=alert_admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert not (tmp_path / "outside").exists()
+
+    def test_a_dotted_path_name_reads_as_not_found(self, alert_client, alert_admin_headers):
+        resp = alert_client.get("/api/v1/alerts/destinations/%2E%2E", headers=alert_admin_headers)
+
+        assert resp.status_code == 404, resp.text
+
+    def test_a_hunt_name_with_a_leading_slash_links_nothing_and_writes_nothing(
+        self, alert_client, alert_admin_headers, sample_destination, tmp_path
+    ):
+        """The store reads ``/<stored hunt>`` as that hunt, so the link must not write ``/<hunt>``.
+
+        A hunt kept at a subdirectory mirroring the test's own path makes the absolute
+        write land inside tmp_path, where the test can see it.
+        """
+        outside = tmp_path / "outside" / "linked"
+        _registries["hunt_configs"].save(str(outside).lstrip("/"), {"cron": "*/5 * * * *"})
+
+        resp = alert_client.post(
+            "/api/v1/alerts/destinations",
+            json={**sample_destination, "hunt_name": str(outside)},
+            headers=alert_admin_headers,
+        )
+
+        assert resp.status_code == 404, resp.text
+        assert not (tmp_path / "outside").exists()
+        assert list((tmp_path / "alert-destinations").iterdir()) == []

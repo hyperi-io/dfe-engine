@@ -106,7 +106,7 @@ Full system map, invariants, and the docs tree:
 | Sources, schemas, DDL | `source/`, `schema/`, `fieldmap/`, `cel/`, `sigma/` | [data-plane/](docs/data-plane/index.md) |
 | Query API | `query/` | [data-plane/query-api.md](docs/data-plane/query-api.md) |
 | Hunts | `hunts/`, `hunt_runner/`, `keda_shim/` | [data-plane/hunt-runner-scaling.md](docs/data-plane/hunt-runner-scaling.md) |
-| Deployment seam | `deployment/`, `deployment_contract.py`, `chart/` | [deployment/](docs/deployment/index.md) |
+| Deployment seam (the published chart is assembled from the contract) | `deployment_contract.py` | [deployment/](docs/deployment/index.md) |
 
 ## Configuration
 

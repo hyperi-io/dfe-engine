@@ -49,7 +49,13 @@ from dfe_engine.api.v1.account_groups import check_group_changes
 from dfe_engine.api.v1.auth import throttled
 from dfe_engine.auth import account_durability
 from dfe_engine.auth.account_durability import AccountGitState
-from dfe_engine.auth.accounts import Account, AccountExistsError, matches_digest
+from dfe_engine.auth.accounts import (
+    BCRYPT_MAX_PASSWORD_BYTES,
+    Account,
+    AccountExistsError,
+    matches_digest,
+    refuse_unhashable_password,
+)
 from dfe_engine.auth.attributes import check_attribute_depth
 from dfe_engine.auth.audit import audit_account_change, audit_login_denied
 from dfe_engine.auth.bootstrap import (
@@ -61,6 +67,7 @@ from dfe_engine.auth.groups import Group
 from dfe_engine.auth.login_throttle import LoginThrottle
 from dfe_engine.auth.membership import forget_member, groups_held, groups_held_after
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.names import InvalidNameError, StoreName
 
 router = APIRouter(prefix="/accounts", tags=["Accounts"])
 
@@ -132,18 +139,24 @@ class CreateAccountRequest(BaseModel):
     deployment that cannot get into its own console.
     """
 
-    username: str = Field(description="Unique account name")
+    username: StoreName = Field(description="Unique account name")
     password: str = Field(
         min_length=MIN_ADMIN_PASSWORD_LENGTH,
         description=(
             "Plaintext password (bcrypt-hashed before storage); at least "
-            f"{MIN_ADMIN_PASSWORD_LENGTH} characters"
+            f"{MIN_ADMIN_PASSWORD_LENGTH} characters and at most "
+            f"{BCRYPT_MAX_PASSWORD_BYTES} bytes"
         ),
     )
     email: str = Field(default="", description="Contact email")
     groups: list[str] = Field(default_factory=list, description="Group memberships")
     phone: str = Field(default="", description="Contact phone")
     name: str = Field(default="", description="Display name")
+
+    @field_validator("password")
+    @classmethod
+    def _within_the_hash_limit(cls, value: str) -> str:
+        return refuse_unhashable_password(value)
 
 
 class UpdateAccountRequest(BaseModel):
@@ -166,8 +179,16 @@ class UpdateOwnAccountRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     new_password: str = Field(
         min_length=MIN_ADMIN_PASSWORD_LENGTH,
-        description=f"New plaintext password; at least {MIN_ADMIN_PASSWORD_LENGTH} characters",
+        description=(
+            f"New plaintext password; at least {MIN_ADMIN_PASSWORD_LENGTH} characters and "
+            f"at most {BCRYPT_MAX_PASSWORD_BYTES} bytes"
+        ),
     )
+
+    @field_validator("new_password")
+    @classmethod
+    def _within_the_hash_limit(cls, value: str) -> str:
+        return refuse_unhashable_password(value)
 
 
 class ChangeOwnPasswordRequest(ResetPasswordRequest):
@@ -201,13 +222,16 @@ class RotatePasswordRequest(BaseModel):
         min_length=MIN_ADMIN_PASSWORD_LENGTH,
         description=(
             "New plaintext password to write to the store; at least "
-            f"{MIN_ADMIN_PASSWORD_LENGTH} characters and never the shipped default"
+            f"{MIN_ADMIN_PASSWORD_LENGTH} characters, at most {BCRYPT_MAX_PASSWORD_BYTES} "
+            "bytes, and never the shipped default"
         ),
     )
 
     @field_validator("new_password")
     @classmethod
     def _refuse_default_credentials(cls, value: str) -> str:
+        # The boot reconcile bcrypt-hashes this value, so a longer one could never be issued.
+        refuse_unhashable_password(value)
         if default_credentials_in_use(value):
             raise ValueError(
                 "the shipped default admin password -- the engine refuses to start "
@@ -241,6 +265,10 @@ class AccountResponse(BaseModel):
     name: str = ""
     external: bool = Field(
         description="True when the account authenticates through an identity provider",
+    )
+    oidc_id: str = Field(
+        default="",
+        description="OIDC provider name last used to log this account in, empty if none",
     )
     password_change_required: bool = Field(
         default=False,
@@ -281,6 +309,7 @@ def _account_response(request: Request, account: Account, groups: list[Group]) -
         phone=account.phone,
         name=account.name,
         external=account.external,
+        oidc_id=account.oidc_id,
         password_change_required=account.password_change_required,
         created_at=account.created_at,
         updated_at=account.updated_at,
@@ -302,8 +331,9 @@ def _contact_updates(
 
 
 def _require_account(store: Any, username: str) -> Account:
+    """Return the account, or 404 when it is missing or soft-deleted."""
     account = store.get(username)
-    if account is None:
+    if account is None or account.is_soft_deleted:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
@@ -454,8 +484,7 @@ async def create_account(
         )
     except AccountExistsError as exc:
         raise conflict from exc
-    except ValueError as exc:
-        # A name no account can have, or a password the hash refuses.
+    except InvalidNameError as exc:
         raise HTTPException(
             status_code=422,
             detail={"code": "validation_error", "message": str(exc)},
@@ -473,6 +502,7 @@ async def create_account(
         summary="create account",
         actor=user.user_id,
     )
+    audit_account_change(user.user_id, account.username, "created", {"groups": body.groups})
     return _account_response(request, account, group_store.list())
 
 
@@ -486,6 +516,10 @@ async def list_accounts(
     request: Request,
     pagination: PaginationParams = Depends(),
     search: str | None = Query(None, description="Search in username, name, or email"),
+    oidc_id: str | None = Query(
+        None,
+        description="Exact match on the OIDC provider name last used to log the account in",
+    ),
     blocked: bool | None = Query(
         None,
         description="Filter by blocked status. Omitted returns every account.",
@@ -501,13 +535,15 @@ async def list_accounts(
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    accounts = store.list()
+    accounts = [account for account in store.list() if not account.is_soft_deleted]
     if not include_core:
         accounts = [
             account for account in accounts if not store.protected.is_protected(account.username)
         ]
     if blocked is not None:
         accounts = [account for account in accounts if account.blocked is blocked]
+    if oidc_id is not None:
+        accounts = [account for account in accounts if account.oidc_id == oidc_id]
     groups = request.app.state.group_store.list()
     rows = [_account_response(request, a, groups).model_dump() for a in accounts]
     rows = apply_search(rows, search, ["username", "name", "email"])
@@ -562,6 +598,7 @@ async def update_current_user_account(
         summary="update own account",
         actor=user.user_id,
     )
+    audit_account_change(user.user_id, account.username, "updated", {"fields": sorted(fields)})
     return _account_response(request, account, request.app.state.group_store.list())
 
 
@@ -575,16 +612,14 @@ async def get_account(
     user: CurrentUser,
     request: Request,
 ):
-    """Get a single account by username (admin only)."""
+    """Get a single account by username (admin only).
+
+    Soft-deleted (anonymized) accounts answer 404 the same as a missing name.
+    """
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    account = store.get(username)
-    if account is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Account '{username}' not found"},
-        )
+    account = _require_account(store, username)
     return _account_response(request, account, request.app.state.group_store.list())
 
 
@@ -653,6 +688,12 @@ async def update_account(
         summary="update account",
         actor=user.user_id,
     )
+    # Field names only for the contact fields: their values are personal data.
+    details: dict[str, object] = {"fields": sorted(update_fields)}
+    for name in ("groups", "enabled", "blocked"):
+        if name in update_fields:
+            details[name] = update_fields[name]
+    audit_account_change(user.user_id, account.username, "updated", details)
     return _account_response(request, account, group_store.list())
 
 
@@ -713,13 +754,15 @@ async def reset_current_user_password(
             },
         )
     throttle.succeeded(account.username)
-    return await _reset_stored_password(
+    result = await _reset_stored_password(
         request,
         settings,
         username=account.username,
         new_password=body.new_password,
         actor=user.user_id,
     )
+    audit_account_change(user.user_id, account.username, "password_changed")
+    return result
 
 
 @router.post(
@@ -746,13 +789,15 @@ async def reset_password(
     straight away (dev/solo) or is a pending review PR / CLI merge
     (production+team), or is a no-op file share.
     """
-    return await _reset_stored_password(
+    result = await _reset_stored_password(
         request,
         settings,
         username=username,
         new_password=body.new_password,
         actor=user.user_id,
     )
+    audit_account_change(user.user_id, username, "password_reset")
+    return result
 
 
 @router.post(
@@ -839,11 +884,7 @@ async def account_git_status(
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    if store.get(username) is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Account '{username}' not found"},
-        )
+    _require_account(store, username)
     if not account_durability.is_break_glass(username, settings.auth.local.admin_name):
         return account_durability.not_git_backed_state()
     # Fetches the deploy repo's remote, so it runs on a worker thread.
@@ -874,12 +915,7 @@ async def delete_account(
 
     store: AccountStore = request.app.state.account_store
     group_store = request.app.state.group_store
-    existing = store.get(username)
-    if existing is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Account '{username}' not found"},
-        )
+    existing = _require_account(store, username)
     # Deleting an account takes it out of every group it holds, so it needs their roles.
     groups = group_store.list()
     held = groups_held(existing, groups, bindings=provider_bindings(request))
@@ -887,6 +923,7 @@ async def delete_account(
     # The store refuses the break-glass admin, the one account the deploy repo carries.
     store.delete(username)
     forget_member(group_store, username)
+    audit_account_change(user.user_id, username, "deleted")
 
 
 # -- Attributes -----------------------------------------------
@@ -906,16 +943,11 @@ async def get_account_attributes(
     user: CurrentUser,
     request: Request,
 ):
-    """Read an account's non-sensitive attribute blob (404 if the account is missing)."""
+    """Read an account's non-sensitive attribute blob (404 if missing or soft-deleted)."""
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    account = store.get(username)
-    if account is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Account '{username}' not found"},
-        )
+    account = _require_account(store, username)
     return {"attributes": account.attributes}
 
 
@@ -929,17 +961,13 @@ async def put_account_attributes(
     user: CurrentUser,
     request: Request,
 ):
-    """Full-replace an account's non-sensitive attribute blob (404 if missing)."""
+    """Full-replace an account's non-sensitive attribute blob (404 if missing or soft-deleted)."""
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    try:
-        account = store.set_attributes(username, body.attributes)
-    except KeyError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Account '{username}' not found"},
-        ) from exc
+    _require_account(store, username)
+    account = store.set_attributes(username, body.attributes)
+    audit_account_change(user.user_id, username, "attributes_updated")
     return {"attributes": account.attributes}
 
 
@@ -955,16 +983,13 @@ async def get_account_sensitive_attributes(
     """Read an account's SENSITIVE attribute blob from the separate keyed store.
 
     The account must exist first (404 otherwise), so a sensitive read cannot be
-    used to probe for accounts that are not there.
+    used to probe for accounts that are not there. Soft-deleted accounts answer
+    the same way.
     """
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    if store.get(username) is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Account '{username}' not found"},
-        )
+    _require_account(store, username)
     return {"attributes": request.app.state.account_sensitive_attributes.get(username)}
 
 
@@ -978,14 +1003,11 @@ async def put_account_sensitive_attributes(
     user: CurrentUser,
     request: Request,
 ):
-    """Full-replace an account's SENSITIVE attribute blob (404 if the account is missing)."""
+    """Full-replace an account's SENSITIVE attribute blob (404 if missing or soft-deleted)."""
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    if store.get(username) is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Account '{username}' not found"},
-        )
+    _require_account(store, username)
     request.app.state.account_sensitive_attributes.put(username, body.attributes)
+    audit_account_change(user.user_id, username, "sensitive_attributes_updated")
     return {"attributes": request.app.state.account_sensitive_attributes.get(username)}

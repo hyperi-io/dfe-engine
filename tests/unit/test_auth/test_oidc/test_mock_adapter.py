@@ -14,20 +14,21 @@ tests exercise it directly and prove the RP's overage path resolves a large
 membership through it without any network.
 """
 
-from __future__ import annotations
-
 import json
-import re
-from pathlib import Path
 
 import pytest
 
+from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.oidc.adapters import get_adapter
-from dfe_engine.auth.oidc.adapters.base import DirectoryError
+from dfe_engine.auth.oidc.adapters.base import (
+    DirectoryCredentialError,
+    DirectoryNotConfiguredError,
+)
 from dfe_engine.auth.oidc.adapters.mock import MockDirectoryAdapter
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.rp import NormalizedIdentity, OidcRelyingParty
+from dfe_engine.auth.oidc.sync import sync_provider
 
 
 def _write_fixture(path, groups, members):
@@ -73,10 +74,6 @@ async def test_mock_loads_groups_and_members(tmp_path, monkeypatch):
     resolved = await adapter.resolve_user_groups("user-oid")
     assert sorted(g.id for g in resolved) == ["g-admins", "g-viewers"]
 
-    # resolve_groups (the ABC contract) is the same subject->groups lookup.
-    via_abc = await adapter.resolve_groups("user-oid")
-    assert {g.id for g in via_abc} == {"g-admins", "g-viewers"}
-
     ok, msg = await adapter.test_connection()
     assert ok is True
     assert "2 group" in msg
@@ -90,25 +87,37 @@ async def test_mock_unknown_user_has_no_groups(tmp_path, monkeypatch):
     assert await adapter.resolve_user_groups("stranger") == []
 
 
-async def test_mock_fails_open_when_fixture_missing(tmp_path, monkeypatch):
-    """No fixture -> no user groups + a False test_connection, never a crash."""
+async def test_a_missing_fixture_fails_the_listing_and_the_login_lookup_open(tmp_path, monkeypatch):
+    """A sign-in reads no groups, but the listing never passes for a directory with none."""
     monkeypatch.setenv("DFE_OIDC_MOCK_DIRECTORY", str(tmp_path / "nope.json"))
     adapter = get_adapter(_mock_provider())
+    with pytest.raises(DirectoryCredentialError):
+        await adapter.list_all_groups()
     assert await adapter.resolve_user_groups("anyone") == []
     ok, msg = await adapter.test_connection()
     assert ok is False
     assert "not loaded" in msg
 
 
-async def test_mock_listing_raises_when_fixture_missing(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
-    missing = tmp_path / "nope.json"
-    monkeypatch.setenv("DFE_OIDC_MOCK_DIRECTORY", str(missing))
+async def test_an_unnamed_fixture_reads_as_not_configured(monkeypatch):
+    monkeypatch.delenv("DFE_OIDC_MOCK_DIRECTORY", raising=False)
     adapter = get_adapter(_mock_provider())
-    message = f"entra_id directory: the mock directory fixture is not loaded: fixture not found at {missing}"
-    with pytest.raises(DirectoryError, match=f"^{re.escape(message)}$"):
+    with pytest.raises(DirectoryNotConfiguredError):
         await adapter.list_all_groups()
+
+
+async def test_a_sync_over_a_missing_fixture_is_an_error(tmp_path, monkeypatch):
+    monkeypatch.setenv("DFE_OIDC_MOCK_DIRECTORY", str(tmp_path / "nope.json"))
+    registry = OIDCProviderRegistry(tmp_path / "oidc")
+    registry.create("mock-dir", _mock_provider())
+    group_store = GroupStore(tmp_path / "groups")
+
+    result = await sync_provider("mock-dir", registry, group_store)
+
+    stored = registry.get("mock-dir")
+    assert stored is not None
+    assert (result["status"], stored.last_sync_status) == ("error", "error")
+    assert group_store.list() == []
 
 
 # ── the RP overage enrichment path, at >200 scale ────────────────

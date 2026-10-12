@@ -16,8 +16,6 @@ double is the external management API, and that is a genuine HTTP server here,
 not a stubbed object. A fake clock keeps ``wait_running`` instant.
 """
 
-from __future__ import annotations
-
 import base64
 import json
 import threading
@@ -27,6 +25,7 @@ import pytest
 
 from dfe_engine.clickhouse.cloud import CloudService, CloudServiceError
 from dfe_engine.settings import ClickHouseCloudSettings
+from tests.support.loopback import stop_server
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -36,7 +35,7 @@ class _Handler(BaseHTTPRequestHandler):
     the request path (e.g. whether the ``/v1`` prefix survives).
     """
 
-    def log_message(self, *args: object) -> None:  # keep the test output quiet
+    def log_message(self, format: str, *args: object) -> None:
         return
 
     def _send(self, payload: dict, code: int = 200) -> None:
@@ -102,9 +101,7 @@ def stub():
     try:
         yield server
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+        stop_server(server, thread)
 
 
 class _FakeClock:

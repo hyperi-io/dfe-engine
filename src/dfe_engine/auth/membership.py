@@ -8,8 +8,6 @@
 
 """Which groups an account holds, and keeping ``Account.groups`` and ``Group.members`` in step."""
 
-from __future__ import annotations
-
 from collections.abc import Collection, Iterable, Mapping
 
 from dfe_engine.auth.accounts import Account, AccountStore
@@ -40,10 +38,11 @@ def linked_groups(
 ) -> list[Group]:
     """The stored groups an identity provider's asserted *identifiers* are linked to.
 
-    A group is linked when its ``source_id`` is the identifier and it names no provider
-    or one of *providers*. Its name never links: a directory user can pick a group's
-    display name, but not the id the directory assigns it. The OIDC group sync links
-    by the same rule.
+    A group is linked when its ``source_id`` is the identifier and its
+    ``source_provider`` is one of *providers*. A group naming no provider links for
+    none, since otherwise every provider asserting the id would take it. Its name never
+    links: a directory user can pick a group's display name, but not the id the
+    directory assigns it. The OIDC group sync links by the same rule.
 
     Args:
         identifiers: What the IdP asserted: group ids, or names where it sends names.
@@ -59,7 +58,8 @@ def linked_groups(
         for group in groups
         if group.source_id
         and group.source_id in wanted
-        and (not group.source_provider or group.source_provider in providers)
+        and group.source_provider
+        and group.source_provider in providers
     ]
 
 
@@ -81,12 +81,42 @@ def groups_held(
     Returns:
         Sorted group names.
     """
+    held = groups_held_by(
+        account.username, account.groups, account.source_provider, groups, bindings=bindings
+    )
+    return [group.name for group in held]
+
+
+def groups_held_by(
+    username: str,
+    asserted: Iterable[str],
+    stamp: str,
+    groups: Iterable[Group],
+    *,
+    bindings: Mapping[str, str],
+) -> list[Group]:
+    """The stored groups an account with these fields holds, the lookup :func:`groups_held` makes.
+
+    The JIT sign-in check calls this with the fields the account will carry, so a
+    login is admitted exactly when the account would hold a role.
+
+    Args:
+        username: The account's name, which group member lists name.
+        asserted: The identifiers its IdP asserts, its own ``groups`` list.
+        stamp: Its ``source_provider``; empty for a local account, which holds no
+            linked group.
+        groups: Every stored group, listed once by the caller.
+        bindings: ``auth.source_provider_bindings``.
+
+    Returns:
+        The held groups, sorted by name.
+    """
     listed = list(groups)
-    held = {group.name for group in listed if account.username in group.members}
-    if account.source_provider:
-        providers = linked_providers([account.source_provider], bindings)
-        held.update(group.name for group in linked_groups(account.groups, listed, providers))
-    return sorted(held)
+    held = {group.name: group for group in listed if username in group.members}
+    if stamp:
+        providers = linked_providers([stamp], bindings)
+        held.update((group.name, group) for group in linked_groups(asserted, listed, providers))
+    return [held[name] for name in sorted(held)]
 
 
 def groups_held_after(
@@ -117,14 +147,24 @@ def groups_held_after(
 
 
 def groups_named(identifiers: Iterable[str], groups: Iterable[Group]) -> list[Group]:
-    """Return the stored groups *identifiers* name, by group name only, each once in the order first named.
+    """The stored groups *identifiers* name, each by group name else by provider source_id.
 
-    A provider source ID names no group here: only an IdP assertion reaches a group by its source ID (:func:`linked_groups`).
+    The lookup role resolution makes, so these are the groups whose roles those
+    identifiers carry. An identifier that names no group is left out.
+
+    Args:
+        identifiers: Group names or IdP-asserted provider ids.
+        groups: Every stored group, listed once by the caller.
+
+    Returns:
+        The named groups, each once, in the order first named.
     """
-    by_name = {group.name: group for group in groups}
-    named = {}
+    listed = list(groups)
+    by_name = {group.name: group for group in listed}
+    by_source_id = {group.source_id: group for group in listed if group.source_id}
+    named: dict[str, Group] = {}
     for identifier in identifiers:
-        group = by_name.get(identifier)
+        group = by_name.get(identifier) or by_source_id.get(identifier)
         if group is not None:
             named.setdefault(group.name, group)
     return list(named.values())

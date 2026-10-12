@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from dfe_engine.hunts.rule_names import RuleNameError, rule_file, validate_rule_name
+from dfe_engine.hunts.rule_names import RuleNameError, rule_file
 
 _UUID_HEX = "0f1e2d3c4b5a69788796a5b4c3d2e1f0"
 
@@ -30,11 +30,6 @@ def test_a_real_rule_name_names_its_file_in_the_directory(tmp_path: Path, name: 
 def test_a_name_that_could_leave_the_directory_is_refused(tmp_path: Path, name: str):
     with pytest.raises(RuleNameError):
         rule_file(tmp_path, name, ".yaml")
-
-
-def test_the_refusal_is_a_value_error_so_existing_handlers_see_it():
-    with pytest.raises(ValueError, match="rule name"):
-        validate_rule_name("../x")
 
 
 def test_a_symlink_pointing_outside_the_directory_is_refused(tmp_path: Path):

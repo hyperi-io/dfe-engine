@@ -36,8 +36,9 @@ from dfe_engine.yaml_utils import deep_merge, yaml_load
 _BUILTIN_QUERIES = Path(__file__).parent / "queries.yaml"
 # Database and request-param values land in SQL IDENTIFIER position (a db name) or a
 # bind slot, never as free HTML/text - so allow a safe identifier charset and reject
-# anything else BEFORE it reaches ClickHouse. Belt to the CH bind braces.
-_IDENT = re.compile(r"^[A-Za-z0-9_-]+$")
+# anything else BEFORE it reaches ClickHouse. Belt to the CH bind braces. ``\Z``, not ``$``:
+# ``$`` also matches before a trailing newline.
+_IDENT = re.compile(r"^[A-Za-z0-9_-]+\Z")
 
 
 def _ch_client(settings: DFESettings) -> Any:

@@ -18,7 +18,7 @@ from dfe_engine.schema.applier import (
 from dfe_engine.schema.engine_resolver import EngineResolver
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2, SchemaBuildResult
 from dfe_engine.services.schema.json_promotion_service import clickhouse_table_exists
-from dfe_engine.source.models import Source
+from dfe_engine.source.models import Source, validate_source_name
 from dfe_engine.source.type_registry import TypeRegistry
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
@@ -593,7 +593,12 @@ class SourceDeploymentStore:
 
     @staticmethod
     def _source_file(root: Path, source_name: str) -> Path:
-        return root / f"{source_name}.yaml"
+        """The record file for *source_name* under *root*.
+
+        Raises:
+            ValueError: *source_name* is not a source label, so no record holds it.
+        """
+        return root / f"{validate_source_name(source_name)}.yaml"
 
     @staticmethod
     def _load_yaml_dict(path: Path) -> dict[str, Any] | None:

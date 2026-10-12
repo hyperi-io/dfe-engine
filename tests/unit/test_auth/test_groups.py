@@ -6,12 +6,14 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 from prometheus_client.parser import text_string_to_metric_families
+from pydantic import ValidationError
 from scalo.logger import logger
 from scalo.metrics import create_metrics
 
@@ -24,7 +26,20 @@ from dfe_engine.auth.groups import (
     GroupStore,
     source_id_holder,
 )
+from dfe_engine.auth.membership import linked_groups
 from tests.unit.test_auth.groups_cases import SOURCE_ID_HOLDER_CASES, SourceIdHolderCase
+
+UNLINKED_EVENT = "stored group loaded unlinked: its source_id names no source_provider"
+
+
+def _unlinked(manager) -> dict[str, float]:
+    """The group stores' unlinked-load counter, by reason, as /metrics serves it."""
+    return {
+        s.labels["reason"]: s.value
+        for f in text_string_to_metric_families(manager.metrics_text)
+        for s in f.samples
+        if s.name == "auth_groups_unlinked_total"
+    }
 
 
 def test_the_stores_annotations_can_be_read():
@@ -535,6 +550,65 @@ class TestGroupSourceProvider:
         group = store.get("acme-viewers")
         assert group.org_ids == ["acme"]
 
+    def test_a_provider_group_id_that_names_no_provider_is_refused(self):
+        """A link with no provider would answer every provider that asserts the id."""
+        with pytest.raises(ValidationError, match="source_provider"):
+            Group(name="admins", roles=["admin"], source_id="Admins")
+
+    def test_create_refuses_a_provider_group_id_that_names_no_provider(self, tmp_path):
+        store = GroupStore(tmp_path / "groups")
+
+        with pytest.raises(ValueError, match="source_provider"):
+            store.create("admins", roles=["admin"], source_id="Admins")
+
+        assert store.get("admins") is None
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            pytest.param({"source_id": "Admins"}, id="id-set-on-an-unlinked-group"),
+            pytest.param({"source_provider": ""}, id="provider-cleared-off-a-linked-group"),
+        ],
+    )
+    def test_update_refuses_to_leave_a_provider_group_id_with_no_provider(self, tmp_path, change):
+        store = GroupStore(tmp_path / "groups")
+        store.create("admins", roles=["admin"])
+        store.create("linked", roles=["admin"], source_provider="okta", source_id="Linked")
+        name = "admins" if "source_id" in change else "linked"
+        before = store.get(name)
+
+        with pytest.raises(ValueError, match="source_provider"):
+            store.update(name, **change)
+
+        assert store.get(name) == before
+
+    def test_a_stored_file_linked_by_id_alone_loads_unlinked(self, tmp_path, audit_events):
+        """Earlier docs told operators to write this file, so its members keep the group's roles."""
+        groups_dir = tmp_path / "groups"
+        groups_dir.mkdir()
+        (groups_dir / "dfe-admins.yaml").write_text(
+            "roles: [admin]\nmembers: [admin, breakglass]\nsource_id: Admins\n", encoding="utf-8"
+        )
+        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+        store = GroupStore(groups_dir, metrics=GroupMetrics(manager))
+
+        group = store.get("dfe-admins")
+        listed = store.list()
+
+        assert group is not None
+        assert (group.roles, group.members) == (["admin"], ["admin", "breakglass"])
+        assert (group.source_provider, group.source_id) == ("", "")
+        assert [g.name for g in listed] == ["dfe-admins"]
+        assert store.resolve_roles_for_member("breakglass") == ["admin"]
+        assert linked_groups(["Admins"], listed, {"oidc", "entra"}) == []
+        assert "Admins" not in store.by_source_id()
+        warned = [e for e in audit_events if e["event"] == UNLINKED_EVENT]
+        assert [(e["group"], e["reason"]) for e in warned] == [("dfe-admins", "no_provider")]
+        assert "breakglass" not in json.dumps(warned, default=str)
+        assert _unlinked(manager) == {"no_provider": 1.0}
+        store.add_member("dfe-admins", "alice")
+        assert "alice" in store.get("dfe-admins").members
+
     def test_existing_groups_without_source_provider_still_load(self, tmp_path):
         """Old YAML files without source_provider/source_id load with defaults."""
         from dfe_engine.yaml_utils import yaml_dump
@@ -553,3 +627,19 @@ class TestGroupSourceProvider:
         assert group.source_provider == ""
         assert group.source_id == ""
         assert group.roles == ["viewer"]
+
+    def test_a_file_whose_name_is_not_a_group_name_grants_nothing(self, tmp_path):
+        """list() skips a hand-placed file get() cannot address, so neither grants its roles."""
+        from dfe_engine.yaml_utils import yaml_dump
+
+        groups_dir = tmp_path / "groups"
+        groups_dir.mkdir()
+        yaml_dump(
+            {"roles": ["admin"], "members": ["alice"]},
+            groups_dir / "Bad Group.yaml",
+        )
+        store = GroupStore(groups_dir)
+        store.create("viewers", roles=["viewer"], members=["alice"])
+
+        assert [group.name for group in store.list()] == ["viewers"]
+        assert store.resolve_roles_for_member("alice") == ["viewer"]

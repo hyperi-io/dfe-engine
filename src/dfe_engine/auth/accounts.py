@@ -29,6 +29,7 @@ import hashlib
 import os
 import secrets
 import tempfile
+import uuid
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
@@ -39,7 +40,8 @@ from pydantic import BaseModel, Field
 from scalo.logger import logger
 
 from dfe_engine.auth.protected_accounts import resolve_floor
-from dfe_engine.auth.store_names import VALID_NAME, store_key
+from dfe_engine.auth.store_names import store_key
+from dfe_engine.names import VALID_NAME, InvalidNameError
 from dfe_engine.yaml_utils import yaml_dump, yaml_dump_string, yaml_load
 
 if TYPE_CHECKING:
@@ -47,6 +49,9 @@ if TYPE_CHECKING:
 
 BCRYPT_ROUNDS = 12
 """The bcrypt cost every stored password hash is made at."""
+
+BCRYPT_MAX_PASSWORD_BYTES = 72
+"""The longest password, in UTF-8 bytes, bcrypt hashes; it refuses a longer one."""
 
 
 @cache
@@ -104,6 +109,12 @@ class Account(BaseModel):
     ``alice-smith@corp`` both sanitise to ``alice-smith-corp``), so this is what
     tells the account's own identity from another that sanitises onto it. Empty on
     an account no IdP login has reached yet."""
+    oidc_id: str = ""
+    """OIDC provider name last used to log this account in.
+
+    Written on every successful OIDC login (JIT create and subsequent). Distinct
+    from ``source_provider``, which may stay a SCIM stamp when the same IdP owns
+    the account through a binding. Empty until an OIDC login has reached it."""
     last_login_at: str = ""
     disabled_at: str = ""
     blocked_at: str = ""
@@ -131,6 +142,16 @@ class Account(BaseModel):
     session_epoch: str = ""
     """Replaced whenever every session of the account ends: its owner logs out, or it
     is disabled, blocked, re-enabled or unblocked. Empty until that first happens."""
+    previous_username: str = ""
+    """Account id before soft-delete anonymization.
+
+    Written when the account is renamed to ``{uuid}-deleted``. Empty on an account
+    that has never been soft-deleted."""
+
+    @property
+    def is_soft_deleted(self) -> bool:
+        """Whether this account was anonymized by soft-delete and should read as gone."""
+        return bool(self.previous_username) or self.username.endswith("-deleted")
 
     def session_marker(self) -> str:
         """The value a session token minted for this account now carries.
@@ -203,10 +224,11 @@ class AccountStore:
         Raises:
             AccountExistsError: An account is already stored under *username*,
                 including one another replica created at the same moment.
-            ValueError: *username* is not a name an account can have.
+            InvalidNameError: *username* is not a name an account can have.
+            ValueError: bcrypt refuses *password*.
         """
         if not VALID_NAME.match(username):
-            raise ValueError(f"Invalid account name: {username!r}")
+            raise InvalidNameError(f"Invalid account name: {username!r}")
         path = self._path(username)
         account = _new_account(
             username,
@@ -240,12 +262,12 @@ class AccountStore:
             The account as written.
 
         Raises:
-            ValueError: The username is not a safe filename stem.
+            InvalidNameError: The username is not a safe filename stem.
             ProtectedAccountError: The record would leave a recovery credential
                 unable to log in.
         """
         if not VALID_NAME.match(account.username):
-            raise ValueError(f"Invalid account name: {account.username!r}")
+            raise InvalidNameError(f"Invalid account name: {account.username!r}")
         if not allow_protected:
             self.protected.check_account_state(
                 account.username,
@@ -417,7 +439,7 @@ class AccountStore:
         account = self.get(username)
         if account is None:
             # Timing-safe rejection: still run bcrypt to prevent oracle attacks
-            bcrypt.checkpw(password.encode("utf-8"), _dummy_hash())
+            _checkpw(password, _dummy_hash())
             return False
 
         # An empty password never authenticates, and an account carrying the
@@ -425,12 +447,9 @@ class AccountStore:
         # bcrypt hash - reject both, timing-safely. Prevents an empty or
         # placeholder password from ever matching a stored account.
         if not password or not account.password_hash.startswith("$2"):
-            bcrypt.checkpw(password.encode("utf-8"), _dummy_hash())
+            _checkpw(password, _dummy_hash())
             return False
-        return bcrypt.checkpw(
-            password.encode("utf-8"),
-            account.password_hash.encode("utf-8"),
-        )
+        return _checkpw(password, account.password_hash.encode("utf-8"))
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -508,6 +527,7 @@ _UPDATABLE_FIELDS = (
     "source_provider",
     "external_id",
     "subject",
+    "oidc_id",
     "last_login_at",
     "email",
     "phone",
@@ -549,13 +569,13 @@ class DocuStoreAccountStore:
         name: str = "",
         change_required: bool = False,
     ) -> Account:
-        """Create a new account. Raises AccountExistsError if taken, ValueError if invalid.
+        """Create a new account. Raises AccountExistsError if taken, InvalidNameError if invalid.
 
         Taken includes by another replica at the same moment: the insert, not a prior
         lookup, decides.
         """
         if not VALID_NAME.match(username):
-            raise ValueError(f"Invalid account name: {username!r}")
+            raise InvalidNameError(f"Invalid account name: {username!r}")
         account = _new_account(
             username,
             password,
@@ -576,7 +596,7 @@ class DocuStoreAccountStore:
         reserved for the reconcile paths. Raises ProtectedAccountError otherwise.
         """
         if not VALID_NAME.match(account.username):
-            raise ValueError(f"Invalid account name: {account.username!r}")
+            raise InvalidNameError(f"Invalid account name: {account.username!r}")
         if not allow_protected:
             self.protected.check_account_state(
                 account.username,
@@ -659,15 +679,12 @@ class DocuStoreAccountStore:
         """Timing-safe password check - identical semantics to the YAML store."""
         account = self.get(username)
         if account is None:
-            bcrypt.checkpw(password.encode("utf-8"), _dummy_hash())
+            _checkpw(password, _dummy_hash())
             return False
         if not password or not account.password_hash.startswith("$2"):
-            bcrypt.checkpw(password.encode("utf-8"), _dummy_hash())
+            _checkpw(password, _dummy_hash())
             return False
-        return bcrypt.checkpw(
-            password.encode("utf-8"),
-            account.password_hash.encode("utf-8"),
-        )
+        return _checkpw(password, account.password_hash.encode("utf-8"))
 
 
 # ------------------------------------------------------------------
@@ -699,6 +716,54 @@ def discard_created(store: AccountStore | DocuStoreAccountStore, created: Accoun
             username=created.username,
             error=type(exc).__name__,
         )
+
+
+def anonymized_soft_delete_username() -> str:
+    """A one-use account name: a UUID with ``-deleted`` as the trailing marker.
+
+    Account names must start with an alphanumeric (:data:`VALID_NAME`), so the
+    delete marker cannot lead; it trails the UUID as ``{uuid}-deleted``.
+    """
+    return f"{uuid.uuid4()}-deleted"
+
+
+def soft_delete_account(store: AccountStore | DocuStoreAccountStore, username: str) -> Account:
+    """Disable *username* and rename it to an anonymized ``{uuid}-deleted`` id.
+
+    Clears contact and subject fields so the record no longer identifies the
+    person. Ownership stamps (``source_provider``, ``oidc_id``) stay for audit.
+
+    Raises:
+        KeyError: No account is stored under *username*.
+        ProtectedAccountError: *username* is a recovery credential.
+    """
+    existing = store.get(username)
+    if existing is None:
+        raise KeyError(username)
+    # Refuse before writing anything under a new name.
+    store.protected.check_account_update(username, {"enabled": False}, existing.groups)
+
+    anonymized = anonymized_soft_delete_username()
+    stamped = _apply_access_stamps({"enabled": False})
+    rewritten = existing.model_copy(
+        update={
+            "username": anonymized,
+            "previous_username": username,
+            "enabled": stamped["enabled"],
+            "disabled_at": stamped["disabled_at"],
+            "email": "",
+            "phone": "",
+            "name": "",
+            "subject": "",
+            "attributes": {},
+            "session_epoch": _new_session_epoch(),
+            "updated_at": _now(),
+        }
+    )
+    store.put(rewritten)
+    # Old key must go; the account now lives only under the anonymized name.
+    store.delete(username)
+    return rewritten
 
 
 def _new_session_epoch() -> str:
@@ -788,7 +853,31 @@ def matches_digest(password: str, digest: str) -> bool:
     """Whether *digest* was made from *password*. An empty or non-bcrypt digest never matches."""
     if not password or not digest.startswith("$2"):
         return False
-    return bcrypt.checkpw(password.encode("utf-8"), digest.encode("utf-8"))
+    return _checkpw(password, digest.encode("utf-8"))
+
+
+def refuse_unhashable_password(password: str) -> str:
+    """Return *password* when bcrypt can hash it.
+
+    Raises:
+        ValueError: *password* is longer than :data:`BCRYPT_MAX_PASSWORD_BYTES` in UTF-8.
+    """
+    if len(password.encode("utf-8")) > BCRYPT_MAX_PASSWORD_BYTES:
+        raise ValueError(f"at most {BCRYPT_MAX_PASSWORD_BYTES} bytes, the most bcrypt hashes")
+    return password
+
+
+def _checkpw(password: str, digest: bytes) -> bool:
+    """Check *password* against *digest* with bcrypt, never raising for a long candidate.
+
+    bcrypt refuses more than 72 bytes rather than truncating, and the first 72 alone must
+    never authenticate, so a longer candidate is checked truncated for equal cost and fails.
+    """
+    candidate = password.encode("utf-8")
+    if len(candidate) > BCRYPT_MAX_PASSWORD_BYTES:
+        bcrypt.checkpw(candidate[:BCRYPT_MAX_PASSWORD_BYTES], digest)
+        return False
+    return bcrypt.checkpw(candidate, digest)
 
 
 def _now() -> str:

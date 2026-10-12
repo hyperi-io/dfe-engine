@@ -314,13 +314,31 @@ class TestGenerateCreateTable:
         assert "PARTITION BY" not in ddl
         assert "ttl_only_drop_parts = 0" in ddl
 
-    def test_projection(self, gen: DDLGenerator):
+    def test_no_projection_unless_one_is_asked_for(self, gen: DDLGenerator):
+        """A SELECT * copy of a JSON-heavy table doubles what ClickHouse holds in memory."""
         ddl = gen.generate_create_table("t", _basic_columns())
+        assert "PROJECTION" not in ddl
+
+    @pytest.mark.parametrize("profile", ["timeseries", "minimal"])
+    def test_a_source_table_on_a_shipped_header_gets_no_projection(
+        self, gen: DDLGenerator, profile: str
+    ):
+        """The header sorts on _timestamp_load, then _timestamp: no second sorted copy is made."""
+        from dfe_engine.schema.schema_loader import SchemaLoader
+
+        ddl = gen.generate_create_table("t", SchemaLoader.load_profile(profile), DDLConfig())
+
+        assert "PROJECTION" not in ddl
+        assert "ORDER BY (`_timestamp_load`, `_timestamp`, `_org_id`)" in ddl
+
+    def test_projection_when_asked_for(self, gen: DDLGenerator):
+        cfg = DDLConfig(projection_order_by="_timestamp")
+        ddl = gen.generate_create_table("t", _basic_columns(), cfg)
         assert "PROJECTION _timestamp_optimized (SELECT * ORDER BY `_timestamp`)" in ddl
 
     def test_projection_skipped_when_column_missing(self, gen: DDLGenerator):
         cols = [_col(name="x", type="string")]
-        ddl = gen.generate_create_table("t", cols)
+        ddl = gen.generate_create_table("t", cols, DDLConfig(projection_order_by="_timestamp"))
         assert "PROJECTION" not in ddl
 
 

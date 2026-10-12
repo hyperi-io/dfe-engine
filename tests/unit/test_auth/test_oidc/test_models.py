@@ -6,8 +6,6 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
-
 import pytest
 from pydantic import ValidationError
 
@@ -21,7 +19,6 @@ class TestGroupResolutionConfig:
         assert cfg.claim_name == "groups"
         assert cfg.sync_interval == 3600
         assert cfg.service_account_json_env == ""
-        assert cfg.admin_email == ""
         assert cfg.domain == ""
         assert cfg.tenant_id_env == ""
         assert cfg.client_secret_env == ""
@@ -45,12 +42,16 @@ class TestGroupResolutionConfig:
         cfg = GroupResolutionConfig(
             mode="api",
             service_account_json_env="GOOGLE_SA_JSON",
-            admin_email="admin@example.com",
             domain="example.com",
         )
         assert cfg.service_account_json_env == "GOOGLE_SA_JSON"
-        assert cfg.admin_email == "admin@example.com"
         assert cfg.domain == "example.com"
+
+    def test_a_stored_admin_email_still_loads(self):
+        # Provider files written before impersonation was removed carry admin_email.
+        cfg = GroupResolutionConfig.model_validate({"admin_email": "a@example.com", "mode": "api"})
+        assert cfg.mode == "api"
+        assert "admin_email" not in cfg.model_dump()
 
     def test_entra_fields(self):
         cfg = GroupResolutionConfig(
@@ -94,6 +95,61 @@ class TestOIDCProviderDefaults:
         assert provider.groups.mode == "token_claim"
 
 
+GOOGLE_SCOPES = (
+    "openid email profile https://www.googleapis.com/auth/cloud-identity.groups.readonly"
+)
+
+
+class TestOIDCProviderScopes:
+    """Each provider type requests only the scopes its IdP accepts.
+
+    Google and Entra ID advertise no ``groups`` scope and fail the login that asks
+    for one, and Google reads groups with the login's Cloud Identity scope; dex
+    (consumed as generic) and Okta emit the groups claim only when it is requested.
+    """
+
+    @pytest.mark.parametrize(
+        ("provider_type", "expected"),
+        [
+            ("google", GOOGLE_SCOPES),
+            ("entra_id", "openid email profile"),
+            ("generic", "openid email profile groups"),
+            ("okta", "openid email profile groups"),
+        ],
+    )
+    def test_default_scopes_follow_the_type(self, provider_type, expected):
+        assert OIDCProvider(type=provider_type).scopes == expected
+
+    @pytest.mark.parametrize("provider_type", ["google", "entra_id"])
+    def test_providers_without_a_groups_scope_never_request_one(self, provider_type):
+        assert "groups" not in OIDCProvider(type=provider_type).scopes.split()
+
+    def test_a_stored_provider_without_scopes_loads_its_type_default(self):
+        provider = OIDCProvider.model_validate({"type": "google", "issuer": "https://x"})
+        assert provider.scopes == GOOGLE_SCOPES
+
+    @pytest.mark.parametrize("blank", ["", "   "])
+    def test_blank_scopes_take_the_type_default(self, blank):
+        assert OIDCProvider(type="google", scopes=blank).scopes == GOOGLE_SCOPES
+
+    def test_google_and_entra_providers_holding_the_old_default_are_repaired(self):
+        # Every provider saved before defaults followed the type stored the old default.
+        stored = {"issuer": "https://x", "scopes": "groups profile openid email"}
+        loaded = {
+            provider_type: OIDCProvider.model_validate({**stored, "type": provider_type}).scopes
+            for provider_type in ("google", "entra_id", "okta")
+        }
+        assert loaded == {
+            "entra_id": "openid email profile",
+            "google": GOOGLE_SCOPES,
+            "okta": "groups profile openid email",
+        }
+
+    def test_configured_scopes_are_kept(self):
+        provider = OIDCProvider(type="google", scopes="openid email")
+        assert provider.scopes == "openid email"
+
+
 class TestOIDCProviderTypes:
     def test_generic_provider(self):
         provider = OIDCProvider(
@@ -112,7 +168,6 @@ class TestOIDCProviderTypes:
             groups=GroupResolutionConfig(
                 mode="api",
                 service_account_json_env="GOOGLE_SA_JSON",
-                admin_email="admin@example.com",
                 domain="example.com",
             ),
         )

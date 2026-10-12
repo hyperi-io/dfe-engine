@@ -3,16 +3,16 @@
 Test-session guard: every bcrypt hash in this tree runs at the minimum cost.
 """
 
+import threading
+import traceback
 from collections.abc import Iterator
-from pathlib import Path
 
 import bcrypt
 import pytest
 from scalo.logger import logger
 
+from dfe_engine.governance.ch.trigger import WORKER_THREAD_NAME
 from dfe_engine.yaml_health import YamlWriteMetrics, write_health
-from tests.unit.test_auth.factories import OKTA_API_TOKEN_ENV, make_local_directory
-from tests.unit.test_auth.test_oidc.local_directory import LocalDirectory
 
 # bcrypt's own floor -- gensalt() accepts 4-31, so this is not an arbitrary
 # choice, it is the cheapest hash bcrypt can produce.
@@ -41,6 +41,28 @@ def _fast_bcrypt(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _no_reconcile_thread_outlives_its_test():
+    """Fail a test that leaves a CH RBAC reconcile thread running after it.
+
+    A trigger nobody closes retries a failed run on a back-off of up to five minutes,
+    and logs into whatever sink is left once pytest has closed its capture. The app
+    closes the triggers on its ``app.state`` at shutdown, so a leak is a test that
+    replaced one without closing it. Only threads this test started are counted, so
+    one leak fails one test.
+    """
+    before = set(threading.enumerate())
+    yield
+    started = [t for t in threading.enumerate() if t.name == WORKER_THREAD_NAME and t not in before]
+    for thread in started:
+        # A closed trigger's worker is already leaving.
+        thread.join(timeout=1.0)
+    leaked = [t for t in started if t.is_alive()]
+    assert not leaked, (
+        f"{len(leaked)} {WORKER_THREAD_NAME} thread(s) still running: close the trigger"
+    )
+
+
 def _forget_refused_writes() -> None:
     health = write_health()
     health.bind(YamlWriteMetrics())
@@ -61,36 +83,25 @@ def _fresh_write_health():
 
 
 @pytest.fixture
-def http_directory() -> Iterator[LocalDirectory]:
-    """Run a plain-HTTP directory API on 127.0.0.1 for the duration of one test."""
-    directory = make_local_directory(tls_dir=None)
-    directory.start()
-    yield directory
-    directory.stop()
+def audit_events() -> Iterator[list[dict]]:
+    """Every event the engine logs while the test runs, from a real sink on its logger.
 
+    Each entry is the event name under ``event`` plus the structured fields it carried,
+    and, for a line logged with an exception, that exception and its chain formatted
+    under ``exception``. The sink takes every level, so a test that asserts a value is
+    absent reads the debug lines and the exception text too.
+    """
+    events: list[dict] = []
 
-@pytest.fixture
-def log_lines() -> Iterator[list[str]]:
-    """Collect each log line at WARNING or above, with its structured fields, for the duration of one test."""
-    lines = []
-    sink = logger.add(lines.append, format="{message} {extra}", level="WARNING")
-    yield lines
-    logger.remove(sink)
+    def record(message) -> None:
+        entry = {"event": message.record["message"], **message.record["extra"]}
+        exception = message.record["exception"]
+        if exception is not None and exception.value is not None:
+            entry["exception"] = "".join(traceback.format_exception(exception.value))
+        events.append(entry)
 
-
-@pytest.fixture
-def okta_api_token(monkeypatch: pytest.MonkeyPatch) -> str:
-    """Put an Okta API token in the env var a provider from make_okta_directory_provider reads and return it."""
-    token = "test-okta-api-token"
-    monkeypatch.setenv(OKTA_API_TOKEN_ENV, token)
-    return token
-
-
-@pytest.fixture
-def tls_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[LocalDirectory]:
-    """Run a TLS directory API on 127.0.0.1 whose CA the engine's HTTP client trusts, for the duration of one test."""
-    directory = make_local_directory(tls_dir=tmp_path / "directory-tls")
-    monkeypatch.setenv("SSL_CERT_FILE", str(directory.ca_file))
-    directory.start()
-    yield directory
-    directory.stop()
+    handler = logger.add(record, level="DEBUG", format="{message}")
+    try:
+        yield events
+    finally:
+        logger.remove(handler)

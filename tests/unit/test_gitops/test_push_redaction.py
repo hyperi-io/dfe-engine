@@ -22,8 +22,6 @@ The same token must not survive on disk either: ``porcelain.clone`` persists the
 it cloned from into ``.git/config``, so the clone is scrubbed back to the bare URL.
 """
 
-from __future__ import annotations
-
 import threading
 from pathlib import Path
 from wsgiref.simple_server import WSGIRequestHandler, make_server
@@ -36,6 +34,7 @@ from dulwich.web import make_wsgi_chain
 
 from dfe_engine.gitops.dulwich_auth import RedactingErrStream, redact_credentials
 from dfe_engine.gitops.repo import GitopsRemoteError, GitopsRepo
+from tests.support.loopback import stop_server
 
 _TOKEN = "s3cr3t-deploy-token"
 _USER = "dfe-admin"
@@ -83,9 +82,7 @@ def git_http_remote(tmp_path: Path):
     try:
         yield f"http://127.0.0.1:{server.server_port}/", branch
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+        stop_server(server, thread)
 
 
 def test_the_dulwich_success_line_loses_its_credentials():

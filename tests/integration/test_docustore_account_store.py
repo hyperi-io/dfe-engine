@@ -7,8 +7,6 @@ unusable-password semantics must hold against a real store exactly as they do fo
 YAML backend.
 """
 
-from __future__ import annotations
-
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -237,7 +235,9 @@ class TestJitIdentityGuardOnTheDocumentStore:
 
     def test_a_local_account_is_refused_and_left_untouched(self, store, tmp_path):
         groups = GroupStore(tmp_path / "groups")
-        groups.create("dfe-admins", roles=["admin"])
+        groups.create(
+            "dfe-admins", roles=["admin"], source_provider="entra", source_id="dfe-admins"
+        )
         store.create("jane-corp-com", "localpass-Pw-1", groups=["dfe-admins"])
         jit = JitProvisioner(
             account_store=store,
@@ -257,7 +257,9 @@ class TestJitIdentityGuardOnTheDocumentStore:
 
     def test_an_unbound_scim_account_is_refused(self, store, tmp_path):
         groups = GroupStore(tmp_path / "groups")
-        groups.create("dfe-admins", roles=["admin"])
+        groups.create(
+            "dfe-admins", roles=["admin"], source_provider="entra", source_id="dfe-admins"
+        )
         store.create("jane-corp-com", "provisioned-Pw-1", groups=[])
         store.update("jane-corp-com", source_provider=SCIM_SOURCE_PROVIDER)
         jit = JitProvisioner(account_store=store, group_store=groups)
@@ -270,7 +272,9 @@ class TestJitIdentityGuardOnTheDocumentStore:
 
     def test_the_bound_provider_reconciles_the_scim_account(self, store, tmp_path):
         groups = GroupStore(tmp_path / "groups")
-        groups.create("dfe-admins", roles=["admin"])
+        groups.create(
+            "dfe-admins", roles=["admin"], source_provider="entra", source_id="dfe-admins"
+        )
         store.create("jane-corp-com", "provisioned-Pw-1", groups=[])
         store.update("jane-corp-com", source_provider=SCIM_SOURCE_PROVIDER)
         jit = JitProvisioner(
@@ -291,19 +295,23 @@ class TestJitIdentityGuardOnTheDocumentStore:
     def test_a_second_subject_on_the_stem_is_refused(self, store, tmp_path):
         """The guard reads the recorded subject off this backend, so it must round-trip."""
         groups = GroupStore(tmp_path / "groups")
-        groups.create("dfe-admins", roles=["admin"])
+        groups.create(
+            "dfe-admins", roles=["admin"], source_provider="entra", source_id="dfe-admins"
+        )
         jit = JitProvisioner(account_store=store, group_store=groups)
-        jit.ensure_account("Jane.Doe@corp.com", [], "entra")
+        jit.ensure_account("Jane.Doe@corp.com", ["dfe-admins"], "entra")
 
         with pytest.raises(JitIdentityCollisionError) as refused:
-            jit.ensure_account("jane-doe@corp.com", ["dfe-admins"], "entra")
+            jit.ensure_account("jane-doe@corp.com", [], "entra")
 
         assert refused.value.reason == "subject_mismatch"
-        assert store.get("jane-doe-corp-com").groups == []
+        assert store.get("jane-doe-corp-com").groups == ["dfe-admins"]
 
     def test_an_unbound_provider_is_still_refused(self, store, tmp_path):
         groups = GroupStore(tmp_path / "groups")
-        groups.create("dfe-admins", roles=["admin"])
+        groups.create(
+            "dfe-admins", roles=["admin"], source_provider="entra", source_id="dfe-admins"
+        )
         store.create("jane-corp-com", "provisioned-Pw-1", groups=[])
         store.update("jane-corp-com", source_provider=SCIM_SOURCE_PROVIDER)
         jit = JitProvisioner(

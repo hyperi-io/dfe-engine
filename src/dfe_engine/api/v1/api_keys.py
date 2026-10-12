@@ -21,8 +21,6 @@ from now, and none only when that setting is 0. Once it passes, the key stops
 authenticating but stays listed (``expired: true``) until it is revoked.
 """
 
-from __future__ import annotations
-
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -37,8 +35,10 @@ from dfe_engine.api.pagination import (
     apply_sort,
 )
 from dfe_engine.api.v1.account_groups import check_role_assignment, scope_of
+from dfe_engine.auth.audit import audit_api_key_change
 from dfe_engine.auth.membership import groups_named
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.names import StoreName
 
 if TYPE_CHECKING:
     from dfe_engine.auth.api_keys import APIKey
@@ -50,7 +50,7 @@ router = APIRouter(prefix="/api-keys", tags=["API Keys"])
 
 
 class CreateAPIKeyRequest(BaseModel):
-    name: str = Field(description="Unique human-readable key name")
+    name: StoreName = Field(description="Unique human-readable key name")
     groups: list[str] = Field(default_factory=list, description="RBAC group memberships")
     description: str = Field("", description="Optional description")
     expires_at: str | None = Field(
@@ -142,6 +142,13 @@ async def create_api_key(
             status_code=400,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
+    audit_api_key_change(
+        user.user_id,
+        key_meta.name,
+        key_meta.short_token,
+        "created",
+        {"groups": key_meta.groups, "expires_at": key_meta.expires_at},
+    )
     return APIKeyCreatedResponse(**_response_fields(key_meta), full_key=full_key)
 
 
@@ -183,6 +190,8 @@ async def revoke_api_key(
     from dfe_engine.auth.api_keys import APIKeyStore
 
     store: APIKeyStore = request.app.state.api_key_store
+    # Read the name first: the revoke deletes the only record that carries it.
+    key_name = next((k.name for k in store.list() if k.short_token == short_token), "")
     try:
         store.revoke(short_token)
     except KeyError:
@@ -193,3 +202,4 @@ async def revoke_api_key(
                 "message": f"No API key with short_token '{short_token}'",
             },
         )
+    audit_api_key_change(user.user_id, key_name, short_token, "revoked")

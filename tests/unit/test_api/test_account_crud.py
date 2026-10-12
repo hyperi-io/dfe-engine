@@ -13,10 +13,19 @@ import secrets
 
 import pytest
 
+from dfe_engine.auth.accounts import Account, AccountStore
 from dfe_engine.auth.bootstrap import MIN_ADMIN_PASSWORD_LENGTH
 from tests.support.racing_stores import RacingAccountStore
 
 _PASSWORD = secrets.token_urlsafe(16)
+
+
+class _FaultingAccountStore(AccountStore):
+    """A real account store whose create fails with a ValueError that says nothing about the name."""
+
+    def create(self, username: str, password: str, **_fields: object) -> Account:
+        """Fail the create as a storage fault would."""
+        raise ValueError("store fault")
 
 
 def _short_password() -> str:
@@ -181,6 +190,18 @@ class TestCreateAccount:
         assert password not in resp.text
         assert app.state.account_store.get("long-pw") is None
 
+    def test_a_store_fault_is_not_answered_as_a_bad_request(self, app, client, admin_headers):
+        """Only the name rule makes a store refusal the caller's fault; anything else is the server's."""
+        app.state.account_store = _FaultingAccountStore(app.state.account_store._dir)
+
+        resp = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "fine-name", "password": _PASSWORD},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 500, resp.text
+
     def test_create_requires_admin(self, client, viewer_headers):
         resp = client.post(
             "/api/v1/auth/accounts",
@@ -289,6 +310,32 @@ class TestListAccounts:
         )
         assert by_name.status_code == 200
         assert any(a["username"] == "search-me" for a in by_name.json()["items"])
+
+    def test_list_filters_by_oidc_id(self, client, admin_headers, app):
+        store = app.state.account_store
+        store.create("oidc-alice", "")
+        store.update("oidc-alice", oidc_id="entra", email="alice@corp.com")
+        store.create("oidc-bob", "")
+        store.update("oidc-bob", oidc_id="okta", email="bob@corp.com")
+
+        exact = client.get(
+            "/api/v1/auth/accounts",
+            params={"oidc_id": "entra"},
+            headers=admin_headers,
+        )
+        assert exact.status_code == 200
+        names = {a["username"] for a in exact.json()["items"]}
+        assert names == {"oidc-alice"}
+        assert exact.json()["items"][0]["oidc_id"] == "entra"
+
+        # Free-text search stays on username/name/email only.
+        searched = client.get(
+            "/api/v1/auth/accounts",
+            params={"search": "okta"},
+            headers=admin_headers,
+        )
+        assert searched.status_code == 200
+        assert all(a["username"] != "oidc-bob" for a in searched.json()["items"])
 
     def test_list_blocked_omitted_returns_all(self, client, admin_headers):
         client.post(
@@ -413,6 +460,24 @@ class TestGetAccount:
         resp = client.get("/api/v1/auth/accounts/nonexistent", headers=admin_headers)
         assert resp.status_code == 404
         assert resp.json()["code"] == "not_found"
+
+    def test_get_soft_deleted_returns_404(self, client, admin_headers, app):
+        from dfe_engine.auth.accounts import soft_delete_account
+
+        store = app.state.account_store
+        store.create("gone-user", "Password1!")
+        anonymized = soft_delete_account(store, "gone-user")
+
+        by_old = client.get("/api/v1/auth/accounts/gone-user", headers=admin_headers)
+        assert by_old.status_code == 404
+        by_new = client.get(f"/api/v1/auth/accounts/{anonymized.username}", headers=admin_headers)
+        assert by_new.status_code == 404
+        assert by_new.json()["code"] == "not_found"
+
+        listed = client.get("/api/v1/auth/accounts", headers=admin_headers)
+        names = {row["username"] for row in listed.json()["items"]}
+        assert anonymized.username not in names
+        assert "gone-user" not in names
 
     def test_get_requires_admin(self, client, viewer_headers):
         resp = client.get("/api/v1/auth/accounts/admin", headers=viewer_headers)
@@ -566,7 +631,7 @@ class TestTheGroupsAnAccountShows:
         self, client, app, admin_headers
     ):
         guid = "7b1d0f3e-0000-4000-8000-000000000003"
-        app.state.group_store.update("dfe-analysts", source_id=guid)
+        app.state.group_store.update("dfe-analysts", source_provider="entra", source_id=guid)
         app.state.account_store.create("jane-corp-com", "", groups=[guid, "dfe-admins"])
         app.state.account_store.update("jane-corp-com", external=True, source_provider="entra")
 
@@ -864,6 +929,42 @@ class TestResetOwnPassword:
         assert "not-the-password" not in wrong.text
         assert store.get("viewer").password_hash == before
 
+    def test_a_current_password_longer_than_bcrypt_takes_answers_as_a_wrong_one(
+        self, client, app, viewer_headers
+    ):
+        store = app.state.account_store
+        before = store.get("viewer").password_hash
+        new_password = secrets.token_urlsafe(16)
+
+        wrong = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"current_password": "not-the-password", "new_password": new_password},
+            headers=viewer_headers,
+        )
+        long = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"current_password": "x" * 73, "new_password": new_password},
+            headers=viewer_headers,
+        )
+
+        assert (long.status_code, long.json()) == (wrong.status_code, wrong.json())
+        assert long.json()["code"] == "invalid_current_password"
+        assert store.get("viewer").password_hash == before
+
+    def test_a_new_password_longer_than_bcrypt_takes_is_a_422(self, client, app, viewer_headers):
+        store = app.state.account_store
+        before = store.get("viewer").password_hash
+
+        resp = client.post(
+            "/api/v1/auth/accounts/reset-password",
+            json={"current_password": "test-viewer-pw", "new_password": "x" * 73},
+            headers=viewer_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert [error["field"] for error in resp.json()["errors"]] == ["new_password"]
+        assert store.get("viewer").password_hash == before
+
     def test_wrong_current_passwords_back_off(self, client, app, viewer_headers):
         store = app.state.account_store
         body = {"current_password": "not-the-password", "new_password": secrets.token_urlsafe(16)}
@@ -1019,6 +1120,20 @@ class TestResetPassword:
         assert resp.json()["code"] == "external_account"
         assert not store.verify_password("sso-user", "should-not-apply")
 
+    def test_a_new_password_longer_than_bcrypt_takes_is_a_422(self, client, app, admin_headers):
+        store = app.state.account_store
+        before = store.get("viewer").password_hash
+
+        resp = client.post(
+            "/api/v1/auth/accounts/viewer/reset-password",
+            json={"new_password": "x" * 73},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert [error["field"] for error in resp.json()["errors"]] == ["new_password"]
+        assert store.get("viewer").password_hash == before
+
     def test_reset_password(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
@@ -1150,6 +1265,44 @@ class TestRotatePassword:
 
         assert resp.status_code == 422, resp.text
         assert "default admin password" in resp.json()["errors"][0]["message"]
+
+    @pytest.mark.parametrize(
+        ("password", "status"),
+        [("x" * 72, 200), ("x" * 73, 422), ("é" * 37, 422)],
+        ids=["72-bytes", "73-bytes", "74-bytes-in-37-chars"],
+    )
+    def test_a_password_longer_than_bcrypt_takes_never_reaches_the_store(
+        self, app, client, admin_headers, password, status
+    ):
+        """The boot reconcile bcrypt-hashes the rotated value, so a longer one is an unbootable store write."""
+        from scalo.secrets.exceptions import SecretNotFoundError
+
+        from dfe_engine.secrets import build_secrets
+
+        settings = app.state.settings
+        settings.auth.local.admin_password_secret_path = "auth/admin-password"
+        store = build_secrets(settings.secrets)
+
+        def stored() -> str | None:
+            try:
+                return store.get("auth/admin-password")
+            except SecretNotFoundError:
+                return None
+
+        before = stored()
+        resp = client.post(
+            "/api/v1/auth/accounts/admin/rotate-password",
+            json={"new_password": password},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == status, resp.text
+        if status == 200:
+            assert stored() == password
+            return
+        assert [error["field"] for error in resp.json()["errors"]] == ["new_password"]
+        assert password not in resp.text
+        assert stored() == before
 
     def test_rotate_requires_admin(self, client, viewer_headers):
         resp = client.post(

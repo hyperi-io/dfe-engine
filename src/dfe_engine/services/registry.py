@@ -407,7 +407,7 @@ class ServiceConfigRegistry:
 
                 commit = entry.commit
                 # Check if this commit touches our file
-                tree = cast("Tree", repo[commit.tree])
+                tree = cast(Tree, repo[commit.tree])
                 try:
                     tree.lookup_path(repo.__getitem__, rel_path)
                 except KeyError:
@@ -415,8 +415,8 @@ class ServiceConfigRegistry:
 
                 # Check if file changed vs parent
                 if commit.parents:
-                    parent = cast("Commit", repo[commit.parents[0]])
-                    parent_tree = cast("Tree", repo[parent.tree])
+                    parent = cast(Commit, repo[commit.parents[0]])
+                    parent_tree = cast(Tree, repo[parent.tree])
                     try:
                         parent_entry = parent_tree.lookup_path(repo.__getitem__, rel_path)
                         current_entry = tree.lookup_path(repo.__getitem__, rel_path)

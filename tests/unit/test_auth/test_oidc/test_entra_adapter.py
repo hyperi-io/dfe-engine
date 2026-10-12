@@ -16,31 +16,29 @@ Tests that require a live Entra / Microsoft Graph endpoint are marked
 ``@pytest.mark.skip(reason="Needs Entra sandbox")``.
 """
 
-from __future__ import annotations
-
-import os
-import re
+import json
+from typing import Any
 
 import pytest
+import requests
+from requests.adapters import BaseAdapter
 
-from dfe_engine.auth.oidc.adapters.base import DirectoryError
+from dfe_engine.auth.groups import GroupStore
+from dfe_engine.auth.oidc.adapters import entra as entra_module
+from dfe_engine.auth.oidc.adapters.base import (
+    DirectoryCredentialError,
+    DirectoryNotConfiguredError,
+)
 from dfe_engine.auth.oidc.adapters.entra import EntraAdapter, graph_credentials
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
-from tests.unit.test_auth.factories import make_entra_adapter, make_oidc_provider
+from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+from dfe_engine.auth.oidc.sync import sync_provider
 from tests.unit.test_auth.test_oidc.entra_adapter_cases import (
-    CONNECTION_CHECK_CASES,
-    FIRST_PAGE,
     GRAPH_CREDENTIALS_CASES,
-    LIST_ALL_GROUPS_CASES,
-    LIST_ALL_GROUPS_MISSING_CREDENTIAL_CASES,
-    LIST_ALL_GROUPS_RAISES_CASES,
-    ConnectionCheckCase,
     GraphCredentialsCase,
-    ListAllGroupsCase,
-    ListAllGroupsMissingCredentialCase,
-    ListAllGroupsRaisesCase,
 )
-from tests.unit.test_auth.test_oidc.local_directory import LocalDirectory
+from tests.unit.test_auth.test_oidc.local_graph import LocalGraph
+from tests.unit.test_auth.test_oidc.unreachable_store import UnreachableSecretStore
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -173,51 +171,6 @@ class TestGetTokenMissingCredentials:
 
 
 # ---------------------------------------------------------------------------
-# resolve_groups — unfriendly fallback when no credentials
-# ---------------------------------------------------------------------------
-
-
-class TestResolveGroupsNoCredentials:
-    async def test_returns_dict_with_ids_as_keys_and_values(self, monkeypatch):
-        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
-
-        adapter = EntraAdapter(_make_provider())
-        result = await adapter.resolve_groups(["group-1", "group-2"])
-        assert result == {"group-1": "group-1", "group-2": "group-2"}
-
-    async def test_returns_empty_dict_for_empty_input(self, monkeypatch):
-        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
-
-        adapter = EntraAdapter(_make_provider())
-        result = await adapter.resolve_groups([])
-        assert result == {}
-
-    async def test_return_type_is_dict(self, monkeypatch):
-        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
-
-        adapter = EntraAdapter(_make_provider())
-        result = await adapter.resolve_groups(["any-group-id"])
-        assert isinstance(result, dict)
-
-    async def test_single_group_id_in_fallback(self, monkeypatch):
-        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
-
-        adapter = EntraAdapter(_make_provider())
-        result = await adapter.resolve_groups(["aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"])
-        assert result == {
-            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-        }
-
-
-# ---------------------------------------------------------------------------
 # resolve_user_groups (the >200 overage enrichment) — empty when no credentials
 # ---------------------------------------------------------------------------
 
@@ -239,41 +192,32 @@ class TestResolveUserGroupsNoCredentials:
         assert await adapter.resolve_user_groups("") == []
 
 
-class TestListAllGroups:
-    @pytest.mark.parametrize(
-        "case", LIST_ALL_GROUPS_CASES, ids=[case["id"] for case in LIST_ALL_GROUPS_CASES]
-    )
-    async def test_matches_expected(self, http_directory: LocalDirectory, case: ListAllGroupsCase):
-        # Graph tokens come only from login.microsoftonline.com, so the paging is driven directly.
-        http_directory.replies = case["replies"]
-        adapter = make_entra_adapter(provider=_make_provider())
-        groups = await adapter._list_graph_groups(
-            token="test-graph-token", url=f"{http_directory.base_url}{FIRST_PAGE}"
-        )
-        assert groups == case["expected_groups"]
+# ---------------------------------------------------------------------------
+# list_all_groups — empty list when no credentials
+# ---------------------------------------------------------------------------
+
+
+class TestListAllGroupsNoCredentials:
+    async def test_refuses_to_list_when_no_credentials(self, monkeypatch):
+        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
+        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
+        monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
+
+        adapter = EntraAdapter(_make_provider())
+        with pytest.raises(DirectoryNotConfiguredError):
+            await adapter.list_all_groups()
 
     @pytest.mark.parametrize(
-        "case",
-        LIST_ALL_GROUPS_MISSING_CREDENTIAL_CASES,
-        ids=[case["id"] for case in LIST_ALL_GROUPS_MISSING_CREDENTIAL_CASES],
+        "missing", ["ENTRA_CLIENT_ID", "ENTRA_TENANT_ID", "ENTRA_CLIENT_SECRET"]
     )
-    async def test_missing_credential(self, case: ListAllGroupsMissingCredentialCase):
-        with pytest.raises(DirectoryError, match=re.escape(case["message"])):
-            await make_entra_adapter(provider=case["provider"]).list_all_groups()
+    async def test_refuses_to_list_when_one_credential_is_missing(self, monkeypatch, missing):
+        for name in ("ENTRA_CLIENT_ID", "ENTRA_TENANT_ID", "ENTRA_CLIENT_SECRET"):
+            monkeypatch.setenv(name, "set")
+        monkeypatch.delenv(missing)
 
-    @pytest.mark.parametrize(
-        "case",
-        LIST_ALL_GROUPS_RAISES_CASES,
-        ids=[case["id"] for case in LIST_ALL_GROUPS_RAISES_CASES],
-    )
-    async def test_raises(self, http_directory: LocalDirectory, case: ListAllGroupsRaisesCase):
-        # Graph tokens come only from login.microsoftonline.com, so the paging is driven directly.
-        http_directory.replies = case["replies"]
-        adapter = make_entra_adapter(provider=_make_provider())
-        with pytest.raises(DirectoryError, match=re.escape(case["message"])):
-            await adapter._list_graph_groups(
-                token="test-graph-token", url=f"{http_directory.base_url}{FIRST_PAGE}"
-            )
+        adapter = EntraAdapter(_make_provider())
+        with pytest.raises(DirectoryNotConfiguredError):
+            await adapter.list_all_groups()
 
 
 # ---------------------------------------------------------------------------
@@ -311,18 +255,6 @@ class TestTestConnectionNoCredentials:
         assert isinstance(result, tuple)
         assert len(result) == 2
 
-    async def test_names_the_missing_settings(self):
-        provider = make_oidc_provider(
-            groups={"mode": "api"},
-            issuer="https://login.microsoftonline.com/t/v2.0",
-            type="entra_id",
-        )
-        message = (
-            "Entra credentials not configured, missing 'groups.tenant_id', 'client_id', "
-            "'groups.client_secret'"
-        )
-        assert await make_entra_adapter(provider=provider).test_connection() == (False, message)
-
     async def test_message_mentions_credentials(self, monkeypatch):
         monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
         monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
@@ -337,20 +269,214 @@ class TestTestConnectionNoCredentials:
         )
 
 
-class TestTestConnectionAgainstGraph:
+class TestTestConnectionCredentialState:
+    """A credential nobody set and one Entra will not issue a token for are different faults."""
+
     @pytest.mark.parametrize(
-        "case", CONNECTION_CHECK_CASES, ids=[case["id"] for case in CONNECTION_CHECK_CASES]
+        "missing", ["ENTRA_CLIENT_ID", "ENTRA_TENANT_ID", "ENTRA_CLIENT_SECRET"]
     )
-    async def test_reports_the_graph_answer(
-        self, http_directory: LocalDirectory, case: ConnectionCheckCase
-    ):
-        # Graph tokens come only from login.microsoftonline.com, so the check is driven directly.
-        http_directory.replies = case["replies"]
-        adapter = make_entra_adapter(provider=_make_provider())
-        result = await adapter._check_graph(
-            token="test-graph-token", url=f"{http_directory.base_url}{FIRST_PAGE}"
+    async def test_a_credential_that_is_not_set_reads_as_not_configured(self, monkeypatch, missing):
+        for name in ("ENTRA_CLIENT_ID", "ENTRA_TENANT_ID", "ENTRA_CLIENT_SECRET"):
+            monkeypatch.setenv(name, "set")
+        monkeypatch.delenv(missing)
+
+        success, message = await EntraAdapter(_make_provider()).test_connection()
+
+        assert success is False
+        assert "not configured" in message
+        assert "could not use the configured credential" not in message
+
+    async def test_a_credential_that_is_set_but_gets_no_token_reads_as_unusable(self, monkeypatch):
+        for name in ("ENTRA_CLIENT_ID", "ENTRA_TENANT_ID", "ENTRA_CLIENT_SECRET"):
+            monkeypatch.setenv(name, "set")
+        adapter = EntraAdapter(_make_provider())
+        # MSAL pins an https authority at login.microsoftonline.com, so Entra's refusal
+        # cannot come from a loopback server: it arrives as the token call returning None.
+        adapter._get_token = lambda: None  # type: ignore[method-assign]
+
+        success, message = await adapter.test_connection()
+
+        assert success is False
+        assert message == (
+            "Graph API could not use the configured credential: check it is current "
+            "and valid; the engine log has the reason"
         )
-        assert result == case["expected_result"]
+        assert "not configured" not in message
+
+
+def _stored_secret_provider() -> OIDCProvider:
+    """An api-mode Entra provider whose client secret is held only in the secret store."""
+    return OIDCProvider(
+        type="entra_id",
+        issuer="https://login.microsoftonline.com/test-tenant/v2.0",
+        client_id="app-id",
+        groups=GroupResolutionConfig(
+            client_secret_path="oidc/acme/groups_client_secret",
+            mode="api",
+            tenant_id="test-tenant",
+        ),
+    )
+
+
+class TestSecretStoreDidNotAnswer:
+    """A client secret whose secret store is down exists all the same: an error, not 'not configured'."""
+
+    async def test_the_listing_fails_as_an_error_and_the_login_lookup_still_answers(self):
+        adapter = EntraAdapter(_stored_secret_provider(), secrets=UnreachableSecretStore())
+
+        with pytest.raises(DirectoryCredentialError):
+            await adapter.list_all_groups()
+        assert await adapter.resolve_user_groups("some-user-oid") == []
+
+    async def test_the_connection_test_names_the_secret_store(self):
+        adapter = EntraAdapter(_stored_secret_provider(), secrets=UnreachableSecretStore())
+
+        ok, message = await adapter.test_connection()
+
+        assert ok is False
+        assert "secret store did not answer" in message
+        assert "not configured" not in message
+
+
+class TestEntraUnreachable:
+    """A token request that got no answer blames the network, never the configured credential."""
+
+    async def test_the_connection_test_says_entra_could_not_be_reached_and_logins_still_answer(
+        self, entra_unreachable, audit_events, monkeypatch
+    ):
+        adapter = EntraAdapter(_make_provider())
+
+        for name in ("ENTRA_CLIENT_ID", "ENTRA_TENANT_ID", "ENTRA_CLIENT_SECRET"):
+            monkeypatch.setenv(name, "set")
+
+        ok, message = await adapter.test_connection()
+
+        assert ok is False
+        assert "could not be reached" in message
+        assert "could not use the configured credential" not in message
+        (line,) = [e for e in audit_events if e.get("operation") == "token"]
+        assert line["transport_failure"] == "connection_refused"
+        assert await adapter.resolve_user_groups("some-user-oid") == []
+
+
+_DISCOVERY_SUFFIX = "/v2.0/.well-known/openid-configuration"
+
+
+class _CannedEntra(BaseAdapter):
+    """A requests transport standing in for Entra: discovery answers, the token request gets ``token_status``.
+
+    MSAL reaches login.microsoftonline.com over https, which a loopback server cannot
+    serve, so the answer is canned at the transport that MSAL's own HTTP client uses.
+    """
+
+    def __init__(self, *, token_status: int) -> None:
+        super().__init__()
+        self.token_status = token_status
+        self.urls: list[str] = []
+
+    def send(
+        self,
+        request: requests.PreparedRequest,
+        stream: bool = False,
+        timeout: Any = None,
+        verify: bool | str = True,
+        cert: Any = None,
+        proxies: Any = None,
+    ) -> requests.Response:
+        """Answer ``request`` from the canned settings, recording its URL."""
+        url = request.url or ""
+        self.urls.append(url)
+        response = requests.Response()
+        response.request = request
+        response.url = url
+        if url.endswith(_DISCOVERY_SUFFIX):
+            tenant_root = url.removesuffix(_DISCOVERY_SUFFIX)
+            body: dict[str, str] = {
+                "authorization_endpoint": f"{tenant_root}/oauth2/v2.0/authorize",
+                "issuer": f"{tenant_root}/v2.0",
+                "token_endpoint": f"{tenant_root}/oauth2/v2.0/token",
+            }
+            response.status_code = 200
+        else:
+            body = {"error": "temporarily_unavailable", "error_description": "throttled"}
+            response.status_code = self.token_status
+            response.headers["Retry-After"] = "1"
+        response.headers["Content-Type"] = "application/json"
+        response._content = json.dumps(body).encode("utf-8")
+        return response
+
+    def close(self) -> None:
+        """Hold nothing to release."""
+
+    @property
+    def token_requests(self) -> int:
+        """How many requests went to the token endpoint."""
+        return sum(url.endswith("/oauth2/v2.0/token") for url in self.urls)
+
+
+class _CannedEntraAdapter(EntraAdapter):
+    """Entra whose MSAL client talks through a canned transport."""
+
+    def __init__(self, provider: OIDCProvider, *, transport: _CannedEntra) -> None:
+        super().__init__(provider)
+        self._transport = transport
+
+    def _msal_http_client(self) -> Any:
+        session = requests.Session()
+        session.mount("https://", self._transport)
+        return entra_module._EntraHttpClient(session)
+
+
+class TestEntraThrottlesOrFails:
+    """A 429 or a 5xx from Entra is a transient failure, never a refused credential."""
+
+    @pytest.mark.parametrize(
+        ("status", "words"),
+        [
+            (429, "Entra ID is throttling requests (HTTP 429)"),
+            (503, "Entra ID failed on the provider's side (HTTP 503)"),
+        ],
+        ids=["throttled", "failing"],
+    )
+    async def test_the_connection_test_names_the_status_not_the_credential(
+        self, entra_unreachable, monkeypatch, status, words
+    ):
+        for name in ("ENTRA_CLIENT_ID", "ENTRA_TENANT_ID", "ENTRA_CLIENT_SECRET"):
+            monkeypatch.setenv(name, "set")
+        transport = _CannedEntra(token_status=status)
+
+        ok, message = await _CannedEntraAdapter(
+            _make_provider(), transport=transport
+        ).test_connection()
+
+        assert transport.token_requests == 1
+        assert ok is False
+        assert words in message
+        assert "could not use the configured credential" not in message
+
+    async def test_a_throttled_sync_is_a_failed_run_that_says_so(
+        self, entra_unreachable, monkeypatch, tmp_path
+    ):
+        for name in ("ENTRA_CLIENT_ID", "ENTRA_TENANT_ID", "ENTRA_CLIENT_SECRET"):
+            monkeypatch.setenv(name, "set")
+        registry = OIDCProviderRegistry(tmp_path / "oidc")
+        registry.create("entra", _make_provider())
+        transport = _CannedEntra(token_status=429)
+        adapter = _CannedEntraAdapter(_make_provider(), transport=transport)
+
+        result = await sync_provider(
+            "entra", registry, GroupStore(tmp_path / "groups"), adapter=adapter
+        )
+
+        stored = registry.get("entra")
+        assert stored is not None
+        assert transport.token_requests == 1
+        assert (result["status"], stored.last_sync_status) == ("error", "error")
+        # No token was issued, so Graph was never asked: the directory API is not the one throttling.
+        assert result["error"] == (
+            "Entra ID is throttling token requests (HTTP 429); retry shortly"
+        )
+        assert stored.sync_error == result["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -360,15 +486,6 @@ class TestTestConnectionAgainstGraph:
 
 @pytest.mark.skip(reason="Needs Entra sandbox")
 class TestEntraAdapterLive:
-    async def test_resolve_groups_returns_display_names(self):
-        """Verify group GUIDs are resolved to display names via Graph API."""
-        provider = _make_provider()
-        adapter = EntraAdapter(provider)
-        group_ids = [os.environ["TEST_ENTRA_GROUP_ID"]]
-        result = await adapter.resolve_groups(group_ids)
-        assert group_ids[0] in result
-        assert result[group_ids[0]] != group_ids[0]
-
     async def test_list_all_groups_returns_group_info_objects(self):
         """Verify list_all_groups returns GroupInfo with id and name."""
         from dfe_engine.auth.oidc.models import GroupInfo
@@ -389,3 +506,106 @@ class TestEntraAdapterLive:
         success, message = await adapter.test_connection()
         assert success is True
         assert message
+
+
+# ---------------------------------------------------------------------------
+# Overage: the user's own token first, then the app credentials
+# ---------------------------------------------------------------------------
+
+OID = "00000000-0000-4000-8000-0000000000aa"
+ADMINS = {"id": "11111111-0000-4000-8000-000000000001", "displayName": "dfe-admins"}
+VIEWERS = {"id": "11111111-0000-4000-8000-000000000002", "displayName": "dfe-viewers"}
+USER_TOKEN = "user-token"
+SCOPE_REFUSED = {
+    "error": {"code": "Authorization_RequestDenied", "message": "Insufficient privileges"}
+}
+
+
+@pytest.fixture
+def graph():
+    server = LocalGraph()
+    server.start()
+    yield server
+    server.stop()
+
+
+def _overage_adapter(
+    server: LocalGraph, *, token: str = USER_TOKEN, app_token: str | None = None
+) -> EntraAdapter:
+    """An Entra adapter reading Graph at *server*; *app_token* stands in for the client-credentials token."""
+    adapter = EntraAdapter(_make_provider(), access_token=token)
+    adapter.GRAPH_BASE = server.base_url
+    adapter._get_token = lambda: app_token  # type: ignore[method-assign]
+    return adapter
+
+
+class TestOverageUserToken:
+    async def test_the_users_own_token_reads_their_groups(self, graph):
+        graph.pages["me"] = [[ADMINS, VIEWERS]]
+        groups = await _overage_adapter(graph).resolve_user_groups(OID)
+
+        assert [g.name for g in groups] == ["dfe-admins", "dfe-viewers"]
+        assert graph.principals == ["me"]
+        assert graph.requests[0]["authorization"] == "Bearer user-token"
+
+    async def test_a_refused_user_token_falls_back_to_the_app_credentials(self, graph):
+        graph.refuse["me"] = (403, SCOPE_REFUSED)
+        graph.pages[f"users/{OID}"] = [[VIEWERS]]
+        groups = await _overage_adapter(graph, app_token="app-token").resolve_user_groups(OID)
+
+        assert [g.name for g in groups] == ["dfe-viewers"]
+        assert graph.principals == ["me", f"users/{OID}"]
+        assert graph.requests[1]["authorization"] == "Bearer app-token"
+
+    async def test_no_groups_for_the_user_is_the_answer(self, graph):
+        groups = await _overage_adapter(graph, app_token="app-token").resolve_user_groups(OID)
+
+        assert groups == []
+        assert graph.principals == ["me"]
+
+    async def test_without_a_user_token_the_app_credentials_answer(self, graph):
+        graph.pages[f"users/{OID}"] = [[ADMINS]]
+        groups = await _overage_adapter(graph, token="", app_token="app-token").resolve_user_groups(
+            OID
+        )
+
+        assert [g.name for g in groups] == ["dfe-admins"]
+        assert graph.principals == [f"users/{OID}"]
+
+    async def test_refused_everywhere_is_default_deny(self, graph):
+        graph.refuse["me"] = (403, SCOPE_REFUSED)
+        graph.refuse[f"users/{OID}"] = (403, SCOPE_REFUSED)
+        assert await _overage_adapter(graph, app_token="app-token").resolve_user_groups(OID) == []
+
+    async def test_every_page_is_read(self, graph):
+        graph.pages["me"] = [[ADMINS], [VIEWERS]]
+        groups = await _overage_adapter(graph).resolve_user_groups(OID)
+
+        assert [g.name for g in groups] == ["dfe-admins", "dfe-viewers"]
+        assert graph.principals == ["me", "me"]
+
+    def test_the_factory_hands_entra_the_login_token(self):
+        from dfe_engine.auth.oidc.adapters import get_adapter
+
+        adapter = get_adapter(_make_provider(), access_token="login-token")
+        assert isinstance(adapter, EntraAdapter)
+        assert adapter._access_token == "login-token"
+
+    async def test_groups_the_token_may_not_read_still_resolve_by_id(self, graph):
+        """Graph answers a User.Read token with each group's id and every other property null."""
+        graph.pages["me"] = [[ADMINS, VIEWERS]]
+        graph.limited.add("me")
+        groups = await _overage_adapter(graph, app_token="app-token").resolve_user_groups(OID)
+
+        assert [g.id for g in groups] == [ADMINS["id"], VIEWERS["id"]]
+        assert [g.name for g in groups] == ["", ""]
+        assert graph.principals == ["me"]
+
+    async def test_a_failure_partway_through_is_no_answer_not_a_partial_one(self, graph):
+        graph.pages["me"] = [[ADMINS], [VIEWERS]]
+        graph.fail_page["me"] = 1
+        graph.pages[f"users/{OID}"] = [[ADMINS, VIEWERS]]
+        groups = await _overage_adapter(graph, app_token="app-token").resolve_user_groups(OID)
+
+        assert [g.name for g in groups] == ["dfe-admins", "dfe-viewers"]
+        assert graph.principals == ["me", "me", f"users/{OID}"]

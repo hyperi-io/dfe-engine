@@ -17,12 +17,10 @@ last-good integer. An operations API needs the opposite: real floats, several va
 per call, and an honest error when the database cannot answer.
 """
 
-from __future__ import annotations
-
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from itertools import pairwise
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -140,9 +138,9 @@ class AppMetrics:
 class SourceSignals:
     """What one source's records are doing, as the loader counts them.
 
-    Either reading is None when the window holds nothing to compute it from -
-    an absent series, a single sample, or a counter that only went backwards
-    because a pod restarted mid-window.
+    Either reading is None when the window holds nothing to compute it from: no
+    series, or only series with a single sample. A pod that restarted mid-window
+    counts from zero after the restart.
     """
 
     table: str
@@ -182,7 +180,7 @@ class OperationalReader:
         return list(rows or [])
 
     def status(self, telemetry_name: str) -> AppStatus:
-        """Whether the instance is reporting telemetry, and its replica count."""
+        """Whether the instance is reporting telemetry, and since when."""
         service = self._safe_identifier(telemetry_name)
         rows = self._run("liveness", {"service": service})
         # The row count decides it: max() over no matching rows answers the epoch,
@@ -258,12 +256,12 @@ class OperationalReader:
             # Nothing is deployed to count records against a table, so no series exists.
             return SourceSignals(table=table, window_seconds=self._window)
         rows = self._run("source_landing_counter", {"services": services, "table": safe_table})
-        points = [(_epoch(ts) or 0.0, float(total)) for ts, total in rows]
+        series = [(float(increase), float(span), float(last)) for increase, span, last in rows]
         return SourceSignals(
             table=table,
             window_seconds=self._window,
-            records_per_min=_rate_per_minute(points),
-            last_seen_epoch=_last_increase(points),
+            records_per_min=_rate_per_minute(series),
+            last_seen_epoch=_last_increase(series),
         )
 
     def _gauges(self, service: str) -> dict[str, float]:
@@ -346,34 +344,34 @@ def http_readings(*, rows: Sequence[tuple]) -> tuple[dict[str, float], dict[str,
     return rates, gauges
 
 
-def _rate_per_minute(points: Sequence[tuple[float, float]]) -> float | None:
-    """Records a minute across the window, from the first and last fleet totals.
+def _rate_per_minute(series: Sequence[tuple[float, float, float]]) -> float | None:
+    """Records a minute for the fleet: each series' increase over its own span, summed.
 
-    A negative delta means a pod restarted and reset its counter, which would
-    otherwise report as negative throughput; the window has to roll past the
-    restart before the number means anything again.
+    Each entry is one ``source_landing_counter`` row, ``(increase, span_seconds,
+    last_increase)``. A series with a single sample spans no time, and with no
+    series spanning any there is no rate to report.
     """
-    if len(points) < 2:
+    rates = [increase / span for increase, span, _ in series if span > 0]
+    if not rates:
         return None
-    elapsed = points[-1][0] - points[0][0]
-    delta = points[-1][1] - points[0][1]
-    if elapsed <= 0 or delta < 0:
-        return None
-    return delta / elapsed * 60.0
+    return sum(rates) * 60.0
 
 
-def _last_increase(points: Sequence[tuple[float, float]]) -> float | None:
-    """When the counter last moved - a flat counter keeps reporting after traffic stops."""
-    for (_, previous), (timestamp, total) in reversed(list(pairwise(points))):
-        if total > previous:
-            return timestamp
-    return None
+def _last_increase(series: Sequence[tuple[float, float, float]]) -> float | None:
+    """When any series last moved - a flat counter keeps reporting after traffic stops."""
+    latest = max((last for _, _, last in series), default=0.0)
+    return latest if latest > 0 else None
 
 
 def _epoch(value: Any) -> float | None:
-    """Coerce a ClickHouse DateTime or numeric to a POSIX timestamp."""
+    """Coerce a ClickHouse DateTime or numeric to a POSIX timestamp.
+
+    clickhouse-connect returns naive datetimes in UTC, so a naive value is read as
+    UTC rather than the host's local time.
+    """
     if value is None:
         return None
-    if hasattr(value, "timestamp"):
-        return float(value.timestamp())
+    if isinstance(value, datetime):
+        aware = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return aware.timestamp()
     return float(value)

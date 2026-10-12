@@ -8,8 +8,6 @@
 
 """Tests for POST/GET/PUT/DELETE /api/v1/auth/groups endpoints."""
 
-from __future__ import annotations
-
 import secrets
 from pathlib import Path
 
@@ -18,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.deps import create_access_token
+from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
 from tests.unit.test_api.group_crud_cases import (
     GROUP_DELETE_ROUTE_CASES,
     KNOWN_SOURCE_PROVIDER_CASES,
@@ -77,6 +76,30 @@ class TestCreateGroup:
         )
         assert resp.status_code == 409
         assert resp.json()["code"] == "conflict"
+
+    @pytest.mark.parametrize("name", ["../evil", "with space", "a" * 129, "trailing\n", ""])
+    def test_a_name_no_group_can_have_is_a_422(self, app, client, admin_headers, name):
+        before = sorted(g.name for g in app.state.group_store.list())
+
+        resp = client.post(
+            "/api/v1/auth/groups",
+            json={"name": name, "roles": ["data_viewer"], "members": ["admin"]},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["code"] == "validation_error"
+        assert [error["field"] for error in resp.json()["errors"]] == ["name"]
+        assert sorted(g.name for g in app.state.group_store.list()) == before
+
+    def test_a_taken_name_is_still_a_409(self, client, admin_headers):
+        """GroupExistsError is a ValueError, so the 422 mapping must not swallow it."""
+        body = {"name": "taken-name", "roles": ["data_viewer"]}
+        client.post("/api/v1/auth/groups", json=body, headers=admin_headers)
+
+        resp = client.post("/api/v1/auth/groups", json=body, headers=admin_headers)
+
+        assert resp.status_code == 409, resp.text
 
     def test_create_requires_admin(self, client, viewer_headers):
         resp = client.post(
@@ -302,7 +325,7 @@ class TestTakingARoleOffAGroupNeedsIt:
     """A role taken off a group is taken from every member, the recovery credentials included."""
 
     def test_admin_cannot_be_taken_off_the_admin_group(self, client, app, operator_headers):
-        app.state.group_store.update("dfe-admins", source_id="dfe-admins")
+        app.state.group_store.update("dfe-admins", source_provider="oidc", source_id="dfe-admins")
         resp = client.put(
             "/api/v1/auth/groups/dfe-admins",
             json={"roles": ["infra_admin"]},
@@ -599,7 +622,7 @@ class TestScimLeavesAndProviderIdsNeedTheGroupsRoles:
         self, client, app, operator_headers, current
     ):
         """An IdP login naming the new id would resolve to dfe-admins, and to admin."""
-        app.state.group_store.update("dfe-admins", source_id=current)
+        app.state.group_store.update("dfe-admins", source_provider="oidc", source_id=current)
         members = app.state.group_store.get("dfe-admins").members
 
         resp = client.put(
@@ -611,7 +634,8 @@ class TestScimLeavesAndProviderIdsNeedTheGroupsRoles:
 
         assert resp.status_code == 403, resp.text
         assert app.state.group_store.get("dfe-admins").source_id == current
-        assert "admin" not in _roles(client, idp)
+        # The id links no group, so the login holds no role and is refused outright.
+        assert client.get("/api/v1/auth/me", headers=idp).status_code == 401
 
     def test_admin_still_moves_a_provider_id(self, client, app, admin_headers):
         members = app.state.group_store.get("dfe-admins").members
@@ -625,6 +649,25 @@ class TestScimLeavesAndProviderIdsNeedTheGroupsRoles:
         assert resp.status_code == 200, resp.text
         assert app.state.group_store.get("dfe-admins").source_id == "entra-admins-guid"
 
+    def test_a_provider_id_scim_sets_links_for_scim_alone(self, client, app, admin_headers):
+        """A provider id SCIM writes names SCIM, so an unbound provider asserting it gets nothing."""
+        members = app.state.group_store.get("dfe-admins").members
+
+        resp = client.put(
+            f"{self.SCIM}/dfe-admins",
+            json=_scim_admins_body(members, external_id="entra-admins-guid"),
+            headers=admin_headers,
+        )
+        idp = {"X-Oidc-Subject": "mallory@corp", "X-Oidc-Groups": "entra-admins-guid"}
+
+        assert resp.status_code == 200, resp.text
+        stored = app.state.group_store.get("dfe-admins")
+        assert (stored.source_provider, stored.source_id) == (
+            SCIM_SOURCE_PROVIDER,
+            "entra-admins-guid",
+        )
+        assert client.get("/api/v1/auth/me", headers=idp).status_code == 401
+
     def test_admin_still_removes_a_member_through_scim(
         self, client, app, admin_headers, viewer_is_admin
     ):
@@ -637,6 +680,75 @@ class TestScimLeavesAndProviderIdsNeedTheGroupsRoles:
 
         assert resp.status_code == 200, resp.text
         assert "viewer" not in app.state.group_store.get("dfe-admins").members
+
+
+class TestScimMovesOnlyTheProviderIdsItOwns:
+    """A SCIM client moves a provider id only on a group linked through SCIM or a binding to it."""
+
+    SCIM = TestScimJoinsNeedTheGroupsRoles.SCIM
+
+    @pytest.fixture
+    def entra_linked(self, app, client) -> list[str]:
+        """dfe-admins linked to an Entra group, as the OIDC group sync links one; returns its members."""
+        app.state.group_store.update(
+            "dfe-admins", source_provider="entra", source_id="entra-admins-guid"
+        )
+        return app.state.group_store.get("dfe-admins").members
+
+    @pytest.mark.parametrize(
+        "external_id", ["mallory-own-guid", None], ids=["re-pointed", "cleared"]
+    )
+    def test_a_put_cannot_move_another_providers_link(
+        self, client, app, admin_headers, entra_linked, external_id
+    ):
+        body = _scim_admins_body([*entra_linked, "viewer"], external_id=external_id)
+
+        resp = client.put(f"{self.SCIM}/dfe-admins", json=body, headers=admin_headers)
+
+        assert resp.status_code == 400, resp.text
+        assert resp.headers["content-type"].startswith("application/scim+json")
+        assert resp.json()["scimType"] == "mutability"
+        assert resp.json()["detail"].startswith("externalId")
+        stored = app.state.group_store.get("dfe-admins")
+        assert (stored.source_provider, stored.source_id) == ("entra", "entra-admins-guid")
+        # Refused whole: the member change in the same PUT is not applied either.
+        assert stored.members == entra_linked
+
+    def test_a_put_keeping_another_providers_link_still_changes_members(
+        self, client, app, admin_headers, entra_linked
+    ):
+        body = _scim_admins_body([*entra_linked, "viewer"], external_id="entra-admins-guid")
+
+        resp = client.put(f"{self.SCIM}/dfe-admins", json=body, headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        stored = app.state.group_store.get("dfe-admins")
+        assert (stored.source_provider, stored.source_id) == ("entra", "entra-admins-guid")
+        assert "viewer" in stored.members
+
+    @pytest.mark.parametrize(
+        ("stamp", "bindings"),
+        [
+            pytest.param(SCIM_SOURCE_PROVIDER, {}, id="scim"),
+            pytest.param("entra", {SCIM_SOURCE_PROVIDER: "entra"}, id="bound"),
+        ],
+    )
+    def test_a_put_moves_a_link_scim_owns_and_keeps_its_provider(
+        self, client, app, admin_headers, stamp, bindings
+    ):
+        app.state.settings.auth.source_provider_bindings = bindings
+        app.state.group_store.update("dfe-admins", source_provider=stamp, source_id="old-guid")
+        members = app.state.group_store.get("dfe-admins").members
+
+        resp = client.put(
+            f"{self.SCIM}/dfe-admins",
+            json=_scim_admins_body(members, external_id="new-guid"),
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        stored = app.state.group_store.get("dfe-admins")
+        assert (stored.source_provider, stored.source_id) == (stamp, "new-guid")
 
 
 def _scim_group_body(name: str, external_id: str) -> dict:
@@ -660,8 +772,10 @@ class TestAProviderIdNamesOneGroup:
 
     @pytest.fixture(autouse=True)
     def admins_carry_a_provider_id(self, app, client) -> None:
-        """Depends on ``client``, whose lifespan builds the stores."""
-        app.state.group_store.update("dfe-admins", source_id="entra-admins-guid")
+        """Depends on ``client``, whose lifespan builds the stores; IDP signs in as the gateway."""
+        app.state.group_store.update(
+            "dfe-admins", source_provider="oidc", source_id="entra-admins-guid"
+        )
 
     @pytest.mark.parametrize("caller", ["operator_headers", "admin_headers"])
     def test_a_post_cannot_take_another_groups_provider_id(self, client, app, request, caller):
@@ -701,7 +815,9 @@ class TestAProviderIdNamesOneGroup:
 
     def test_a_group_resending_its_own_provider_id_is_accepted(self, client, app, operator_headers):
         app.state.group_store.create("sec-team", [], members=[])
-        app.state.group_store.update("sec-team", source_id="entra-sec-guid")
+        app.state.group_store.update(
+            "sec-team", source_provider=SCIM_SOURCE_PROVIDER, source_id="entra-sec-guid"
+        )
 
         resp = client.put(
             f"{self.SCIM}/sec-team",
@@ -720,7 +836,9 @@ class TestAGroupsApiSourceIdNamesOneGroup:
     @pytest.fixture(autouse=True)
     def admins_carry_a_source_id(self, app: FastAPI, client: TestClient) -> None:
         """Link dfe-admins to the name an IdP sends for it; depends on client, whose lifespan builds the stores."""
-        app.state.group_store.update(name="dfe-admins", source_id="dfe-admins")
+        app.state.group_store.update(
+            name="dfe-admins", source_id="dfe-admins", source_provider="oidc"
+        )
 
     def test_a_create_cannot_take_another_groups_source_id(
         self, admin_headers: dict[str, str], app: FastAPI, client: TestClient
@@ -1138,7 +1256,7 @@ class TestASourceIdIsMatchedExactly:
     def test_a_malformed_one_left_unchanged_is_accepted(
         self, admin_headers: dict[str, str], app: FastAPI, client: TestClient
     ):
-        app.state.group_store.update(name="dfe-viewers", source_id=" SOC ")
+        app.state.group_store.update(name="dfe-viewers", source_id=" SOC ", source_provider="oidc")
 
         resp = client.put(
             "/api/v1/auth/groups/dfe-viewers",
@@ -1151,7 +1269,7 @@ class TestASourceIdIsMatchedExactly:
 
 
 class TestALinkNamesItsProvider:
-    """A new or moved link names the provider whose logins it answers; one an older release left without a provider still answers any."""
+    """A new or moved link names the provider whose logins it answers."""
 
     def test_a_create_without_a_provider_is_refused(
         self, admin_headers: dict[str, str], app: FastAPI, client: TestClient
@@ -1202,25 +1320,6 @@ class TestALinkNamesItsProvider:
         assert resp.status_code == 200, resp.text
         stored = app.state.group_store.get("dfe-viewers")
         assert (stored.source_id, stored.source_provider) == ("", "oidc")
-
-    def test_a_legacy_link_without_a_provider_takes_an_edit(
-        self, admin_headers: dict[str, str], app: FastAPI, client: TestClient
-    ):
-        app.state.group_store.update(name="dfe-viewers", source_id="dfe-viewers")
-
-        resp = client.put(
-            "/api/v1/auth/groups/dfe-viewers",
-            headers=admin_headers,
-            json={"description": "Viewers"},
-        )
-
-        assert resp.status_code == 200, resp.text
-        stored = app.state.group_store.get("dfe-viewers")
-        assert (stored.description, stored.source_id, stored.source_provider) == (
-            "Viewers",
-            "dfe-viewers",
-            "",
-        )
 
 
 class TestDeletingALinkedGroupNeedsItsRoles:
@@ -1275,21 +1374,38 @@ class TestDeletingALinkedGroupNeedsItsRoles:
 
 
 class TestAGroupChangeIsAudited:
-    """Each group the API creates, changes or deletes is recorded with the fields it set or changed."""
+    """A group's link is recorded on the audit event of each create, update and delete."""
 
-    def test_a_create_is_recorded(
+    def test_a_create_records_the_link(
         self, admin_headers: dict[str, str], audit_events: list[dict], client: TestClient
     ):
         resp = client.post(
             "/api/v1/auth/groups",
             headers=admin_headers,
-            json={"name": "audited", "roles": ["data_viewer"]},
+            json={
+                "name": "audited",
+                "roles": ["data_viewer"],
+                "source_id": "Audited",
+                "source_provider": "oidc",
+            },
         )
 
         assert resp.status_code == 201, resp.text
-        created = [event for event in audit_events if event["event"] == "resource.group.created"]
-        assert [(event["admin_id"], event["resource_name"]) for event in created] == [
-            ("admin", "audited")
+        created = [event for event in audit_events if event["event"] == "auth.group.created"]
+        assert [
+            (event["admin_id"], event["group_name"], event["details"]) for event in created
+        ] == [
+            (
+                "admin",
+                "audited",
+                {
+                    "members": [],
+                    "roles": ["data_viewer"],
+                    "scope": "system",
+                    "source_id": "Audited",
+                    "source_provider": "oidc",
+                },
+            )
         ]
 
     def test_an_update_records_the_link_change(
@@ -1302,32 +1418,37 @@ class TestAGroupChangeIsAudited:
         )
 
         assert resp.status_code == 200, resp.text
-        updated = [event for event in audit_events if event["event"] == "resource.group.updated"]
+        updated = [event for event in audit_events if event["event"] == "auth.group.updated"]
         assert [event["details"] for event in updated] == [
             {
-                "changed": {
-                    "source_id": {"after": "dfe-viewers", "before": ""},
-                    "source_provider": {"after": "oidc", "before": ""},
-                }
+                "fields": ["source_id", "source_provider"],
+                "source_id": {"after": "dfe-viewers", "before": ""},
+                "source_provider": {"after": "oidc", "before": ""},
             }
         ]
 
-    def test_a_delete_is_recorded(
+    def test_a_delete_records_the_link(
         self,
         admin_headers: dict[str, str],
         app: FastAPI,
         audit_events: list[dict],
         client: TestClient,
     ):
-        app.state.group_store.create(members=[], name="audited", roles=["data_viewer"])
+        app.state.group_store.create(
+            members=[],
+            name="audited",
+            roles=["data_viewer"],
+            source_id="Audited",
+            source_provider="oidc",
+        )
 
         resp = client.delete("/api/v1/auth/groups/audited", headers=admin_headers)
 
         assert resp.status_code == 204, resp.text
-        deleted = [event for event in audit_events if event["event"] == "resource.group.deleted"]
-        assert [(event["admin_id"], event["resource_name"]) for event in deleted] == [
-            ("admin", "audited")
-        ]
+        deleted = [event for event in audit_events if event["event"] == "auth.group.deleted"]
+        assert [
+            (event["admin_id"], event["group_name"], event["details"]) for event in deleted
+        ] == [("admin", "audited", {"source_id": "Audited", "source_provider": "oidc"})]
 
 
 class TestListGroups:

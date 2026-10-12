@@ -290,9 +290,9 @@ class TestLifecycle:
 
         doc = gc.get("helmvars", f"{VRL}-edge-values")
         assert doc["deploy"] == {"service": VRL, "instance": "edge"}
-        # The chart's own top-level dial. `env` there is a string (the deployment
-        # environment) feeding labels and the namespace, so it must stay untouched.
-        assert doc["otelServiceName"] == f"{VRL}-edge"
+        # The thin chart's OTel dial. `env` is the deployment environment string
+        # dfe-extras puts in its labels, so it must stay untouched.
+        assert doc["otel"] == {"serviceName": f"{VRL}-edge"}
         assert "env" not in doc
 
         listed = client.get("/api/v1/apps", headers=admin_headers)
@@ -568,6 +568,24 @@ class TestFiles:
         resp = client.put(path, json={"content": VRL_SOURCE}, headers=admin_headers)
         assert resp.json()["changed"] is False
 
+    def test_a_second_table_under_one_name_is_409_naming_both(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        first = client.put(
+            f"{BASE}/files/enrichment/geo.csv", json={"content": "ip,cc\n"}, headers=admin_headers
+        )
+        assert first.status_code == 200, first.text
+
+        resp = client.put(
+            f"{BASE}/files/enrichment/geo.json", json={"content": "{}\n"}, headers=admin_headers
+        )
+
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "table_name_taken"
+        assert resp.json()["context"]["files"] == ["geo.csv", "geo.json"]
+
     def test_wrong_extension_is_400(self, client, app, admin_headers, tmp_path):
         _wire(app, tmp_path)
         _deploy(client, admin_headers)
@@ -791,8 +809,8 @@ class TestAdversarialRegressions:
         for instance in ("alpha", "beta"):
             assert _deploy(client, admin_headers, instance).status_code == 200
 
-        # The component is the only thing keeping the two deployments' Kubernetes
-        # object names apart, because dfe-common.fullname carries no instance.
+        # dfe-extras names its objects {project}-{component}, so the component must
+        # carry the instance or the two deployments' objects collide.
         alpha = gc.get("helmvars", f"{VRL}-alpha-values")
         beta = gc.get("helmvars", f"{VRL}-beta-values")
         assert alpha["component"] == "transform-vrl-alpha"

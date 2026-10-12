@@ -128,7 +128,7 @@ class TestTheGate:
     def test_a_topic_the_broker_refuses_fails_the_pass_by_name(self, plan):
         broker = _Broker(refuse={"dfe_loader_dlq"})
 
-        with pytest.raises(DeadLetterPathError, match="dfe_loader_dlq: TOPIC_AUTHORIZATION_FAILED"):
+        with pytest.raises(DeadLetterPathError, match="dfe_loader_dlq: the broker refused it"):
             require_dead_letter_topics(plan, _settings(), wait_seconds=0, admin=broker)
 
     def test_an_unreachable_broker_fails_the_pass(self, plan):

@@ -25,8 +25,6 @@ Claim extraction is a PURE function (``extract_identity``) kept separate from
 the Authlib redirect plumbing so it is unit-testable without a live IdP.
 """
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, Any
 
 from authlib.integrations.starlette_client import OAuth
@@ -34,6 +32,7 @@ from pydantic import BaseModel
 from scalo.logger import logger
 
 from dfe_engine.auth.oidc.credential_env import resolve_credential
+from dfe_engine.http_errors import describe_http_error
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -216,7 +215,12 @@ async def fill_from_userinfo_endpoint(
         fetched = await client.userinfo(token=token)
         return merge_userinfo_claims(id_token_claims=claims, userinfo_claims=dict(fetched))
     except Exception as exc:
-        logger.warning("OIDC RP: userinfo claims not used", error=str(exc), issuer=issuer)
+        logger.warning(
+            "OIDC RP: userinfo claims not used",
+            issuer=issuer,
+            operation="userinfo",
+            **describe_http_error(exc),
+        )
         return claims
 
 
@@ -251,12 +255,12 @@ class OidcRelyingParty:
                 value=provider.client_id,
                 env_name=provider.client_id_env,
                 secrets=secrets,
-            )
+            ).value
             client_secret = resolve_credential(
                 secret_path=provider.client_secret_path,
                 env_name=provider.client_secret_env,
                 secrets=secrets,
-            )
+            ).value
             self._oauth.register(
                 name=name,
                 # Authlib treats an unset credential as None, not as an empty string.
@@ -331,6 +335,12 @@ class OidcRelyingParty:
         provider = self._providers[provider_name]  # KeyError if unknown - caller guards
         client = self._client(provider_name)
         token = await client.authorize_access_token(request)
+        return await self._identity_from_token(client=client, provider=provider, token=token)
+
+    async def _identity_from_token(
+        self, *, client: Any, provider: OIDCProvider, token: dict[str, Any]
+    ) -> NormalizedIdentity:
+        """The identity a validated token response names, its groups read from the directory where the token carries none."""
         # Authlib parses + validates the id_token and exposes its claims here.
         userinfo = dict(token.get("userinfo") or {})
         if needs_userinfo(claims=userinfo):
@@ -342,7 +352,9 @@ class OidcRelyingParty:
         # token dropped the groups array), or a provider that never puts groups
         # in the token at all (google-workspace, enrich_on_login).
         if needs_directory_groups(identity=identity, provider=provider):
-            identity = await self._enrich_groups_from_directory(provider, identity, userinfo)
+            identity = await self._enrich_groups_from_directory(
+                provider, identity, userinfo, access_token=str(token.get("access_token") or "")
+            )
         return identity
 
     async def _enrich_groups_from_directory(
@@ -350,20 +362,24 @@ class OidcRelyingParty:
         provider: OIDCProvider,
         identity: NormalizedIdentity,
         userinfo: dict[str, Any],
+        *,
+        access_token: str = "",
     ) -> NormalizedIdentity:
         """Fetch the user's groups from the provider directory API.
 
         Runs ONLY after Authlib has validated the id_token, so it never weakens
         token validation. Handles two shapes with one path:
           - Entra >200 overage: the token carried a ``_claim_names`` pointer, not
-            the groups; the fetched GUIDs resolve to roles by ``source_id`` just
-            like a normal (<200) Entra login.
+            the groups; Graph is asked with the user's ``access_token`` first, then
+            the app credentials, and the fetched GUIDs resolve to roles by
+            ``source_id`` just like a normal (<200) Entra login.
           - Providers with no groups claim (google-workspace): the directory is
-            the only source of membership.
+            the only source of membership, read with the user's own
+            ``access_token`` from this login.
 
         The directory key is the provider's stable object id where present
-        (Entra ``oid``), falling back to email then ``sub`` (Google's Directory
-        API ``userKey`` accepts email or id, so either works).
+        (Entra ``oid``), falling back to email then ``sub`` (Google's lookups
+        key a user on their email).
 
         Fails safe: on overage the fetched set is authoritative even when empty
         (default deny); otherwise a populated token set is NOT stripped by a
@@ -373,13 +389,14 @@ class OidcRelyingParty:
 
         directory_id = str(userinfo.get("oid") or identity.email or identity.subject)
         try:
-            adapter = get_adapter(provider, secrets=self._secrets)
+            adapter = get_adapter(provider, access_token=access_token, secrets=self._secrets)
             fetched = await adapter.resolve_user_groups(directory_id)
         except Exception as exc:  # pragma: no cover - defensive; adapters fail open
             logger.warning(
                 "OIDC RP: directory group enrichment failed",
+                operation="resolve_user_groups",
                 provider=provider.issuer,
-                error=str(exc),
+                **describe_http_error(exc),
             )
             return identity
         group_ids = [g.id for g in fetched if g.id]
@@ -414,5 +431,6 @@ def build_relying_party(
     try:
         return OidcRelyingParty(registry, secrets=secrets)
     except Exception as exc:
-        logger.warning("OIDC relying party unavailable", error=str(exc))
+        # The text can quote a provider file's values, so the log takes the class and status only.
+        logger.warning("OIDC relying party unavailable", **describe_http_error(exc))
         return None

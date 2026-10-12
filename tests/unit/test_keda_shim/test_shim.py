@@ -109,6 +109,28 @@ def test_pressure_reduces_each_series_before_taking_the_max():
     assert "max(series)" in sql
 
 
+def test_pressure_keeps_each_pod_a_series_of_its_own():
+    """Pushed rows carry the pod in the resource, so a key without it averages the pods."""
+    client = _FakeClient(rows=[[80]])
+    shim = _shim(client)
+
+    shim.run("pressure", {"service": "dfe-receiver"})
+
+    group_by = client.calls[0][0].split("GROUP BY", 1)[1]
+    assert "ResourceAttributes['service.instance.id']" in group_by
+
+
+def test_a_missing_gauge_reads_zero_rather_than_the_last_good_value():
+    """No rows is a successful answer, so it replaces the cache instead of holding it."""
+    client = _FakeClient(rows=[[42]])
+    shim = _shim(client)
+    assert shim.run("pressure", {"service": "dfe-receiver"}) == 42
+
+    client.rows = []
+
+    assert shim.run("pressure", {"service": "dfe-receiver"}) == 0
+
+
 def test_failsafe_holds_last_good():
     client = _FakeClient(rows=[[42]])
     shim = QueryShim(DFESettings(env="test"), client_factory=lambda: client)
@@ -129,6 +151,15 @@ def test_injection_param_rejected_and_failsafe():
     # A malformed service never reaches ClickHouse and degrades to cold_hold.
     assert shim.run("pressure", {"service": "x'; DROP TABLE t--"}) == 0
     assert client.calls == []
+
+
+def test_a_param_ending_in_a_newline_is_rejected_like_any_other_malformed_one():
+    client = _FakeClient(rows=[[42]])
+    shim = QueryShim(DFESettings(env="test"), client_factory=lambda: client)
+
+    assert shim.run("pressure", {"service": "dfe-receiver\n"}) == 0
+    assert client.calls == []
+    assert shim.run("pressure", {"service": "dfe-receiver"}) == 42
 
 
 def test_backlog_uses_due_query():

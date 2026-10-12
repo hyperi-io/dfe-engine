@@ -1,13 +1,9 @@
 """Tests for API key authentication path in get_current_user()."""
 
-from __future__ import annotations
-
-import secrets
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import dfe_engine.yaml_utils as yu
@@ -103,12 +99,14 @@ class TestApiKeyAuthentication:
         assert body["code"] == "unauthorized"
         assert body["message"] == "API key expired"
 
-    def test_oidc_takes_precedence_over_api_key(self, client: TestClient, test_api_key: str):
+    def test_oidc_takes_precedence_over_api_key(self, client: TestClient, app, test_api_key: str):
         """OIDC headers take precedence over API key."""
+        app.state.group_store.update("dfe-viewers", source_provider="oidc", source_id="dfe-viewers")
         resp = client.get(
             "/api/v1/auth/me",
             headers={
                 "X-Oidc-Subject": "oidc-user@example.com",
+                "X-Oidc-Groups": "dfe-viewers",
                 "X-API-Key": test_api_key,
             },
         )
@@ -116,30 +114,6 @@ class TestApiKeyAuthentication:
         data = resp.json()
         # OIDC wins over API key
         assert data["user_id"] == "oidc-user@example.com"
-
-
-class TestAKeyNamingAProviderId:
-    """A key's groups resolve by name only, so one naming a group's provider ID holds nothing and is warned about once."""
-
-    def test_it_holds_no_roles_and_is_warned_about_once(
-        self, app: FastAPI, audit_events: list[dict], client: TestClient
-    ):
-        identifier = f"okta-admins-{secrets.token_hex(4)}"
-        app.state.group_store.update(
-            name="dfe-admins", source_id=identifier, source_provider="oidc"
-        )
-        _, full_key = app.state.api_key_store.create(groups=[identifier], name="ci-provider-id")
-        headers = {"X-API-Key": full_key}
-
-        first = client.get("/api/v1/auth/me", headers=headers)
-        second = client.get("/api/v1/auth/me", headers=headers)
-
-        assert (first.status_code, second.status_code) == (200, 200)
-        assert (first.json()["roles"], second.json()["roles"]) == ([], [])
-        warned = [event for event in audit_events if event.get("identifier") == identifier]
-        assert [(event["event"], event["group"]) for event in warned] == [
-            ("API key names a group's provider ID, which grants nothing", "dfe-admins")
-        ]
 
 
 def test_the_api_key_subject_prefix_has_one_spelling():

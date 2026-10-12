@@ -6,17 +6,15 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""The name rule every account, group and API key store keys on.
+"""The key every account, group and API key store looks a name up under.
 
 A YAML store joins the name onto its directory as ``{name}.yaml``, so a name
 from a request that reached that join unchecked would resolve a path outside the
-store. The document stores key on the same names, so both backends share one rule.
+store. The document stores key on the same names, so both backends share one rule,
+:data:`dfe_engine.names.VALID_NAME`.
 """
 
-import re
-
-VALID_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}\Z")
-"""A safe filename stem. ``\\Z`` rather than ``$``, so a trailing newline is refused too."""
+from dfe_engine import names
 
 
 def store_key(name: str) -> str:
@@ -31,6 +29,6 @@ def store_key(name: str) -> str:
     Raises:
         KeyError: Nothing can be stored under *name*, so a lookup of it finds nothing.
     """
-    if not VALID_NAME.match(name):
+    if not names.VALID_NAME.match(name):
         raise KeyError(name)
     return name

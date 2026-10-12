@@ -22,6 +22,8 @@ import time
 import uuid
 from typing import Any
 
+from scalo.logger import logger
+
 from dfe_engine.clickhouse.quoting import BARE_REFERENCE, column_reference, quote_identifier
 from dfe_engine.query.catalog import RESERVED_PARAMS, ViewCatalog
 from dfe_engine.query.models import (
@@ -121,9 +123,11 @@ class ViewExecutor:
             )
         except Exception as e:
             if options.after_key is not None and _TYPE_MISMATCH.search(str(e)):
+                # A ViewRequestError's message reaches the caller; ClickHouse's text goes to the log.
+                logger.warning("view cursor does not parse", label=label, error=str(e))
                 raise ViewRequestError(
                     "after_key or after_tiebreak does not parse as its column's type "
-                    f"(a timestamp is sent as e.g. '2024-01-15T12:00:00'): {e}"
+                    "(a timestamp is sent as e.g. '2024-01-15T12:00:00')"
                 ) from e
             raise ViewExecutionError(f"Failed to execute view '{label}': {e}") from e
 

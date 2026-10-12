@@ -19,6 +19,7 @@ from dulwich import porcelain
 from prometheus_client.parser import text_string_to_metric_families
 from scalo.metrics import create_metrics
 
+from dfe_engine.api.errors import GITOPS_UNAVAILABLE_MESSAGE
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.metrics import GitopsMetrics
 from dfe_engine.gitops.repo import GitopsRepo
@@ -82,7 +83,7 @@ def test_an_unreachable_deploy_repo_answers_503_with_retry_after(
     body = resp.json()
     assert body["code"] == "service_unavailable"
     assert body["context"] == {"service": "gitops", "remote": remote}
-    assert "gitops deploy repo" in body["message"]
+    assert body["message"] == GITOPS_UNAVAILABLE_MESSAGE
     labels = {"op": "fetch", "outcome": "exhausted"}
     assert _sample(manager, "gitops_write_retries_total", labels) == 1
 

@@ -39,12 +39,12 @@ LINK_CHANGE_CASES: list[LinkChangeCase] = [
     },
     {
         "id": "source_id_changed",
-        "current": {"source_id": "dfe-admins", "source_provider": ""},
+        "current": {"source_id": "dfe-admins", "source_provider": "oidc"},
         "change": {"source_id": "mallory-group"},
     },
     {
         "id": "source_id_cleared",
-        "current": {"source_id": "dfe-admins", "source_provider": ""},
+        "current": {"source_id": "dfe-admins", "source_provider": "oidc"},
         "change": {"source_id": ""},
     },
     {
@@ -118,10 +118,5 @@ MISSING_PROVIDER_CASES: list[MissingProviderCase] = [
         "id": "provider_cleared_from_a_link",
         "current": {"source_id": "dfe-viewers", "source_provider": "oidc"},
         "change": {"source_provider": ""},
-    },
-    {
-        "id": "legacy_link_moved_without_a_provider",
-        "current": {"source_id": "dfe-viewers", "source_provider": ""},
-        "change": {"source_id": "okta-viewers"},
     },
 ]

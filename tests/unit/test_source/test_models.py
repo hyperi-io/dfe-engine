@@ -412,11 +412,109 @@ class TestSourceOrigin:
         s = Source.model_validate({"source": "main", "resource_type": "core"})
         assert s.table_topic_type == "main"
 
+    def test_table_topic_type_follows_the_current_version_not_the_deployed_one(self):
+        """An undeployed current without a meta schema shares main, even if deployed owns a table."""
+        s = Source.model_validate(
+            {
+                "source": "azure",
+                "deployed_version": "1.0.0",
+                "current": "2.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": {"field": "azure", "value": "azure"},
+                        "schema": {
+                            "meta_schema": "meta/azure",
+                            "meta_schema_version": "1.0.0",
+                        },
+                    },
+                    "2.0.0": {
+                        "date_time": "2026-01-02",
+                        "match": {"field": "azure", "value": "azure"},
+                        "schema": {},
+                    },
+                },
+            }
+        )
+        assert s.version("1.0.0").effective_schema().meta_schema == "meta/azure"
+        assert s.version("2.0.0").effective_schema().meta_schema is None
+        assert s.table_topic_type == "main"
+
+        # Flip current back to the deployed pin: own table again.
+        s = s.model_copy(update={"current": "1.0.0"})
+        assert s.table_topic_type == "own"
+
     def test_the_write_body_needs_exactly_one_origin(self):
         with pytest.raises(ValueError, match="exactly one"):
             SourceWriteRequest(source="x")
         body = SourceWriteRequest(source="x", fetcher=SourceFetcher(source_type="pypi"))
         assert body.to_version_snapshot().origin == "fetcher"
+
+    def test_an_update_cannot_swap_receiver_for_fetcher(self):
+        existing = Source.model_validate(
+            {"source": "syslog", "match": {"field": "f", "value": "v"}}
+        )
+        write = SourceWriteRequest.model_validate(
+            {"fetcher": {"source_type": "okta", "topic": "own"}}
+        )
+        with pytest.raises(ValueError, match="Cannot change source origin"):
+            apply_source_write_update(existing, write)
+
+    def test_an_update_cannot_swap_fetcher_for_receiver(self):
+        existing = Source.model_validate(
+            {"source": "okta", "fetcher": {"source_type": "okta", "topic": "own"}}
+        )
+        write = SourceWriteRequest.model_validate({"match": {"field": "f", "value": "v"}})
+        with pytest.raises(ValueError, match="Cannot change source origin"):
+            apply_source_write_update(existing, write)
+
+    def test_an_update_cannot_clear_a_pinned_meta_schema(self):
+        existing = Source.model_validate(
+            {
+                "source": "aws",
+                "match": {"field": "f", "value": "v"},
+                "schema": {"meta_schema": "meta/aws", "meta_schema_version": "1.0.0"},
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {
+                "match": {"field": "f", "value": "v"},
+                "schema": {"engine": "MergeTree"},
+            }
+        )
+        with pytest.raises(ValueError, match="Cannot remove the meta schema"):
+            apply_source_write_update(existing, write)
+
+    def test_an_update_may_still_change_which_meta_schema_is_pinned(self):
+        existing = Source.model_validate(
+            {
+                "source": "aws",
+                "match": {"field": "f", "value": "v"},
+                "schema": {"meta_schema": "meta/aws", "meta_schema_version": "1.0.0"},
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {
+                "match": {"field": "f", "value": "v"},
+                "schema": {"meta_schema": "meta/aws_cloudtrail", "meta_schema_version": "2.0.0"},
+            }
+        )
+        updated = apply_source_write_update(existing, write)
+        assert updated.versions["1.0.0"].schema_config.meta_schema == "meta/aws_cloudtrail"
+        assert updated.table_topic_type == "own"
+
+    def test_a_source_without_a_meta_schema_may_still_gain_one(self):
+        existing = Source.model_validate(
+            {"source": "azure", "match": {"field": "azure", "value": "azure"}, "schema": {}}
+        )
+        write = SourceWriteRequest.model_validate(
+            {
+                "match": {"field": "azure", "value": "azure"},
+                "schema": {"meta_schema": "meta/azure", "meta_schema_version": "1.0.0"},
+            }
+        )
+        updated = apply_source_write_update(existing, write)
+        assert updated.table_topic_type == "own"
 
 
 # ---------------------------------------------------------------------------
@@ -1031,16 +1129,136 @@ class TestSourceWriteRequest:
                 },
             }
         )
+        # Match alone does not shape the table, so the deployed version stays current.
         write = SourceWriteRequest.model_validate(
             {
                 "match": {"field": "g", "value": "w"},
-                "schema": {"ttl_days": 30, "meta_schema_version": "1.0.0"},
+                "schema": {"ttl_days": 90, "meta_schema_version": "1.0.0"},
             }
         )
         updated = apply_source_write_update(existing, write)
         assert updated.versions.keys() == {"1.0.0"}
-        assert updated.versions["1.0.0"].schema_config.ttl_days == 30
+        assert updated.versions["1.0.0"].schema_config.ttl_days == 90
         assert updated.versions["1.0.0"].match.field == "g"
+
+    def test_apply_write_update_bumps_on_ttl_days_after_deploy(self):
+        existing = Source.model_validate(
+            {
+                "source": "src-a",
+                "deployed_version": "1.0.0",
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": {"field": "f", "value": "v"},
+                        "schema": {"ttl_days": 90},
+                    }
+                },
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {
+                "match": {"field": "f", "value": "v"},
+                "schema": {"ttl_days": 30},
+            }
+        )
+        updated = apply_source_write_update(existing, write)
+        assert updated.current == "2.0.0"
+        assert updated.versions["1.0.0"].schema_config.ttl_days == 90
+        assert updated.versions["2.0.0"].schema_config.ttl_days == 30
+
+    def test_apply_write_update_bumps_on_engine_after_deploy(self):
+        existing = Source.model_validate(
+            {
+                "source": "src-a",
+                "deployed_version": "1.0.0",
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": {"field": "f", "value": "v"},
+                        "schema": {"engine": "MergeTree"},
+                    }
+                },
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {
+                "match": {"field": "f", "value": "v"},
+                "schema": {"engine": "ReplacingMergeTree"},
+            }
+        )
+        updated = apply_source_write_update(existing, write)
+        assert updated.current == "2.0.0"
+        assert updated.versions["2.0.0"].schema_config.engine == "ReplacingMergeTree"
+
+    def test_apply_write_update_bumps_on_header_after_deploy(self):
+        existing = Source.model_validate(
+            {
+                "source": "src-a",
+                "deployed_version": "1.0.0",
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "header": {"type": "timeseries", "version": "1.0.0"},
+                        "match": {"field": "f", "value": "v"},
+                        "schema": {},
+                    }
+                },
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {
+                "header": {"type": "timeseries", "version": "1.0.1"},
+                "match": {"field": "f", "value": "v"},
+                "schema": {},
+            }
+        )
+        updated = apply_source_write_update(existing, write)
+        assert updated.current == "2.0.0"
+        assert updated.versions["2.0.0"].header is not None
+        assert updated.versions["2.0.0"].header.version == "1.0.1"
+
+    def test_source_version_bump_required_ttl_engine_and_header(self):
+        base = {
+            "date_time": "2026-01-01",
+            "header": {"type": "timeseries", "version": "1.0.0"},
+            "match": {"field": "f", "value": "v"},
+            "schema": {"ttl_days": 90, "engine": "MergeTree"},
+        }
+        prev = SourceVersion.model_validate(base)
+        assert (
+            source_version_bump_required(
+                prev,
+                SourceVersion.model_validate(
+                    {**base, "schema": {"ttl_days": 30, "engine": "MergeTree"}}
+                ),
+            )
+            is True
+        )
+        assert (
+            source_version_bump_required(
+                prev,
+                SourceVersion.model_validate(
+                    {**base, "schema": {"ttl_days": 90, "engine": "ReplacingMergeTree"}}
+                ),
+            )
+            is True
+        )
+        assert (
+            source_version_bump_required(
+                prev,
+                SourceVersion.model_validate(
+                    {
+                        **base,
+                        "header": {"type": "minimal", "version": "1.0.0"},
+                    }
+                ),
+            )
+            is True
+        )
+        assert source_version_bump_required(prev, SourceVersion.model_validate(base)) is False
 
     def test_apply_write_update_bumps_on_meta_schema_path_after_deploy(self):
         existing = Source.model_validate(
@@ -1622,6 +1840,7 @@ class TestSourceVersionGetResponse:
             deployed_version="1.0.0",
             selected="1.0.0",
             versions=["1.0.0", "2.0.0"],
+            current_table_topic_type="main",
             version=SourceVersion(
                 date_time="2026-06-12",
                 header=SourceHeader(type="timeseries", version="1.0.0"),
@@ -1631,6 +1850,7 @@ class TestSourceVersionGetResponse:
             ),
         )
         assert resp.source == "my-source"
+        assert resp.current_table_topic_type == "main"
         assert resp.version.schema_config.engine == "MergeTree"
         assert resp.version.match is not None
         assert resp.version.match.value == "x"

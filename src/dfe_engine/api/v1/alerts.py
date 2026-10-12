@@ -34,6 +34,7 @@ from dfe_engine.api.review import apply_review_headers
 from dfe_engine.appmgmt import contract
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.hunts.alert import DESTINATION_NAME_RULE, is_destination_name
 from dfe_engine.hunts.alert import AlertDestination as RegistryAlertDestination
 from dfe_engine.hunts.alert_hunt_link import (
     add_destination_to_hunt,
@@ -167,6 +168,14 @@ async def create_destination(
     Linking it to a hunt writes the hunt YAML, so in production+team that link is
     routed to a review branch and ``X-DFE-Review-Required`` says so.
     """
+    if not is_destination_name(body.name):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "validation_error",
+                "message": f"Alert destination name {body.name!r} must be {DESTINATION_NAME_RULE}",
+            },
+        )
     if body.name in registry:
         raise HTTPException(
             status_code=409,

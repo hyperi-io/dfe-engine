@@ -210,7 +210,7 @@ class MultiTable:
         terminal_width=None,
         initial_section=True,
         column_separator="|",
-        terminal=None,
+        terminal=None,  # noqa: V107
         styler=None,
         auto_reformat=True,
     ):

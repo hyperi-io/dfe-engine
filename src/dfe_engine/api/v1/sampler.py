@@ -157,7 +157,14 @@ async def _submit(
     await check_sample_scope(sampler, req, ch, source_registry, org_ids)
 
     info = manager.submit(
-        _TASK_KIND, sampler.run, req, ch, source_registry, held_to=org_ids, org_ids=org_ids
+        _TASK_KIND,
+        sampler.run,
+        req,
+        ch,
+        source_registry,
+        held_to=org_ids,
+        reportable=(SamplerError,),
+        org_ids=org_ids,
     )
     audit_resource_change(
         user.user_id, "sampler", req.source or req.table or req.topic or "", "executed"

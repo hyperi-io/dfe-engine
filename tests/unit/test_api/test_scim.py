@@ -17,8 +17,6 @@ Covers:
   - discovery endpoints (ServiceProviderConfig / ResourceTypes / Schemas)
 """
 
-from __future__ import annotations
-
 import secrets
 
 import pytest
@@ -78,7 +76,9 @@ class TestMapperRoundTrips:
         assert fields["enabled"] is True
 
     def test_group_to_scim_to_fields(self):
-        group = Group(name="engineers", members=["alice", "bob"], source_id="g-7")
+        group = Group(
+            name="engineers", members=["alice", "bob"], source_provider="scim", source_id="g-7"
+        )
         scim_group = group_to_scim_group(group)
         assert scim_group.display_name == "engineers"
         assert scim_group.id == "engineers"
@@ -465,6 +465,21 @@ class TestScimGroups:
         assert group.source_provider == "scim"
         # membership mirrored onto the account
         assert "scim-team" in app.state.account_store.get("gm-1").groups
+
+    @pytest.mark.parametrize("name", ["../evil", "with space", "a" * 129, "trailing\n"])
+    def test_a_displayname_no_group_can_have_is_a_400(self, app, client, admin_headers, name):
+        before = sorted(g.name for g in app.state.group_store.list())
+
+        resp = client.post(
+            f"{BASE}/Groups",
+            json={"schemas": [GROUP_SCHEMA], "displayName": name},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["scimType"] == "invalidValue"
+        assert resp.json()["detail"].startswith("displayName: name ")
+        assert sorted(g.name for g in app.state.group_store.list()) == before
 
     def test_create_duplicate_group_returns_409(self, client, admin_headers):
         payload = {"schemas": [GROUP_SCHEMA], "displayName": "dup-group"}

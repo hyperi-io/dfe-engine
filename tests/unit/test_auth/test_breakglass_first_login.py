@@ -28,6 +28,7 @@ from dfe_engine.auth.bootstrap import (
     bootstrap_auth,
     default_credentials_in_use,
     require_admin_password,
+    require_hashable_passwords,
 )
 from dfe_engine.auth.deployment_hints import (
     DOCKER,
@@ -97,6 +98,31 @@ class TestPostureGate:
         assert default_credentials_in_use(padded) is True
         with pytest.raises(DefaultCredentialsError):
             require_admin_password(padded, "production")
+
+
+class TestHashablePasswords:
+    """bcrypt refuses more than 72 bytes, so the boot reconcile could never issue a longer one."""
+
+    def test_passwords_within_the_limit_start(self):
+        seed = SeedAccount(username="ops", password="x" * 72)
+        require_hashable_passwords("y" * 72, [seed])
+        require_hashable_passwords("", [SeedAccount(username="unusable")])
+
+    @pytest.mark.parametrize(
+        "password", ["x" * 73, "é" * 37], ids=["73-bytes", "74-bytes-in-37-chars"]
+    )
+    def test_an_admin_password_over_the_limit_names_its_setting(self, password):
+        with pytest.raises(DefaultCredentialsError) as exc:
+            require_hashable_passwords(password, [])
+        assert "DFE_AUTH_LOCAL_ADMIN_PASSWORD" in str(exc.value)
+        assert password not in str(exc.value)
+
+    def test_a_seed_password_over_the_limit_names_the_account(self):
+        long = "z" * 73
+        with pytest.raises(DefaultCredentialsError) as exc:
+            require_hashable_passwords(MINTED_ADMIN, [SeedAccount(username="ops", password=long)])
+        assert "seed_accounts[ops]" in str(exc.value)
+        assert long not in str(exc.value)
 
 
 # ── One seed path, reconciled on every boot ──────────────────
@@ -278,6 +304,31 @@ class TestBreakGlassHash:
         assert store.get(breakglass.USERNAME).email == "breakglass@dfe.local"
         # Break-glass keeps its own first-login rules: it is never issued a forced change.
         assert store.get(breakglass.USERNAME).password_change_required is False
+
+    def test_an_admin_group_linked_by_id_alone_still_boots_both_recovery_credentials(
+        self, tmp_path: Path, crud
+    ):
+        """Earlier docs told operators to link dfe-admins this way, so the boot must survive it."""
+        groups_dir = tmp_path / "auth" / "groups"
+        groups_dir.mkdir(parents=True)
+        (groups_dir / "dfe-admins.yaml").write_text(
+            "roles: [admin]\nmembers: [admin, breakglass]\nsource_id: Admins\n", encoding="utf-8"
+        )
+        (groups_dir / "dfe-viewers.yaml").write_text(
+            "roles: [data_viewer]\nmembers: []\n", encoding="utf-8"
+        )
+
+        store, groups, *_ = bootstrap_auth(
+            tmp_path / "auth",
+            default_admin_password=MINTED_ADMIN,
+            gitcrud=crud,
+            breakglass_password=MINTED_BREAKGLASS,
+        )
+
+        assert groups.resolve_roles_for_member("admin") == ["admin"]
+        assert groups.resolve_roles_for_member(breakglass.USERNAME) == ["admin"]
+        assert "dfe-admins" in store.get("admin").groups
+        assert groups.get("dfe-admins").source_id == ""
 
     def test_break_glass_email_is_backfilled_when_missing(self, tmp_path: Path, crud):
         store, *_ = bootstrap_auth(
@@ -552,7 +603,7 @@ class TestAnotherAdminExists:
     ):
         """An IdP-owned account holds the groups its assertion is linked to, as a session does."""
         store, groups = self._stores(tmp_path, crud)
-        groups.update("dfe-admins", source_id="dfe-admins")
+        groups.update("dfe-admins", source_provider="entra", source_id="dfe-admins")
         store.create("jane-corp-com", "", groups=["dfe-admins"])
         store.update("jane-corp-com", external=True, source_provider="entra")
 
@@ -564,7 +615,7 @@ class TestAnotherAdminExists:
         """Entra asserts object GUIDs, which the sync records as the group's source_id."""
         store, groups = self._stores(tmp_path, crud)
         guid = "7b1d0f3e-0000-4000-8000-000000000002"
-        groups.update("dfe-admins", source_id=guid)
+        groups.update("dfe-admins", source_provider="entra", source_id=guid)
         store.create("jane-corp-com", "", groups=[guid])
         store.update("jane-corp-com", external=True, source_provider="entra")
 
@@ -576,7 +627,7 @@ class TestAnotherAdminExists:
         """Login takes the group the asserted id is linked to, so the session holds admin."""
         store, groups = self._stores(tmp_path, crud)
         groups.create("entra-analysts", roles=["data_analyst"])
-        groups.update("dfe-admins", source_id="entra-analysts")
+        groups.update("dfe-admins", source_provider="entra", source_id="entra-analysts")
         store.create("jane-corp-com", "", groups=["entra-analysts"])
         store.update("jane-corp-com", external=True, source_provider="entra")
 

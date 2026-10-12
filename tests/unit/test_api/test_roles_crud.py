@@ -1,5 +1,10 @@
 """Tests for /api/v1/auth/roles endpoints."""
 
+import pytest
+
+from dfe_engine.api.v1.roles import CreateRoleRequest
+from dfe_engine.auth.roles import builtin_core_role_names
+
 
 class TestRolesScopes:
     def test_list_scopes_requires_admin(self, client, viewer_headers):
@@ -135,6 +140,57 @@ class TestRolesCrud:
 
         missing = client.get("/api/v1/auth/roles/api_test_role", headers=admin_headers)
         assert missing.status_code == 404
+
+    @pytest.mark.parametrize("name", ["", "a/b", "-x", "valid\n", "a" * 129])
+    def test_create_refuses_a_name_the_role_routes_cannot_address(
+        self, app, client, admin_headers, name
+    ):
+        resp = client.post(
+            "/api/v1/auth/roles",
+            json={"name": name, "description": "", "permissions": ["query:execute"]},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["code"] == "validation_error"
+        assert app.state.role_store.get(name) is None
+
+    def test_create_accepts_a_dotted_hyphenated_name_and_its_routes_address_it(
+        self, client, admin_headers
+    ):
+        create = client.post(
+            "/api/v1/auth/roles",
+            json={"name": "role-1.x", "description": "", "permissions": ["query:execute"]},
+            headers=admin_headers,
+        )
+        assert create.status_code == 201, create.text
+
+        assert client.get("/api/v1/auth/roles/role-1.x", headers=admin_headers).status_code == 200
+        delete = client.delete("/api/v1/auth/roles/role-1.x", headers=admin_headers)
+        assert delete.status_code == 204
+
+    @pytest.mark.parametrize("name", sorted(builtin_core_role_names()))
+    def test_every_shipped_role_name_is_a_name_create_accepts(self, name):
+        CreateRoleRequest(name=name, permissions=[])
+
+    def test_a_role_stored_under_a_name_create_now_refuses_stays_editable(
+        self, app, client, admin_headers
+    ):
+        """Guard: the name rule binds create alone, so a role an older engine stored keeps working.
+
+        Role update has no name field, so this passes today. It fails if the rule is
+        ever applied to the path name of a read or an update.
+        """
+        app.state.role_store.create("_legacy-ops", description="Old", permissions=["query:execute"])
+
+        update = client.put(
+            "/api/v1/auth/roles/_legacy-ops", json={"description": "New"}, headers=admin_headers
+        )
+
+        assert update.status_code == 200, update.text
+        assert app.state.role_store.get("_legacy-ops").description == "New"
+        shown = client.get("/api/v1/auth/roles/_legacy-ops", headers=admin_headers)
+        assert shown.json()["description"] == "New"
 
     def test_delete_role_in_use_returns_409(self, client, admin_headers):
         resp = client.delete("/api/v1/auth/roles/admin", headers=admin_headers)

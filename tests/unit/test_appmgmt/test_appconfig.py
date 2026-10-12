@@ -302,6 +302,29 @@ class TestFileSets:
             {"name": "timezones", "path": f"{MOUNT}/{VRL}/filebeat/enrichment/timezones.csv"}
         ]
 
+    def test_an_entry_named_at_the_chart_s_mount_is_pointed_at_this_render(self, crud, tmp_path):
+        # The overlay names each table where the chart mounts it, which is not
+        # where Compose mounts this render; the author's key columns go with it.
+        settings = _settings(tmp_path)
+        app = _deploy(crud, VRL, "filebeat")
+        doc = instances.read_overlay(crud, app)
+        tables = file_set(VRL, "enrichment")
+        authored = {"name": "geo", "path": f"{tables.mount_path}/geo.csv", "key_columns": ["ip"]}
+        set_path(doc, "config.enrichment_tables", [authored])
+        files.upsert_file(doc, tables, "geo.csv", "ip,cc\n")
+        files.upsert_file(doc, tables, "timezones.csv", "a,b\n1,2\n")
+        _put(crud, app, doc)
+        overlay = instances.read_overlay(crud, app)["config"]["enrichment_tables"]
+        assert overlay[1] == {"name": "timezones", "path": f"{tables.mount_path}/timezones.csv"}
+
+        appconfig.render(crud, settings)
+
+        here = f"{MOUNT}/{VRL}/filebeat/enrichment"
+        assert _rendered(settings, VRL, "filebeat")["enrichment_tables"] == [
+            {"name": "geo", "path": f"{here}/geo.csv", "key_columns": ["ip"]},
+            {"name": "timezones", "path": f"{here}/timezones.csv"},
+        ]
+
     def test_an_entry_the_config_already_names_is_left_alone(self, crud, tmp_path):
         # That one carries the author's key columns; a derived entry would turn
         # every lookup into a full scan.

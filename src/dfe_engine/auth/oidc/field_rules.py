@@ -24,7 +24,6 @@ _MODES_BY_TYPE = {
 
 # The (type, mode) pairs that use each directory field; every other pair refuses it.
 _DIRECTORY_FIELD_USERS = {
-    "admin_email": {("google", "api")},
     "api_token": {("okta", "api")},
     "api_token_env": {("okta", "api")},
     "client_secret": {("entra_id", "api"), ("entra_id", "token_claim")},
@@ -82,17 +81,7 @@ def _api_mode_problems(*, provider: OIDCProvider) -> list[FieldProblem]:
                     FieldProblem(code="missing", field="groups.client_secret", message=message)
                 )
         case "google":
-            if not (groups.service_account_json_path) and not (groups.service_account_json_env):
-                message = f"{required}: send service_account_json or service_account_json_env"
-                problems.append(
-                    FieldProblem(
-                        code="missing", field="groups.service_account_json", message=message
-                    )
-                )
-            if not (groups.admin_email):
-                problems.append(
-                    FieldProblem(code="missing", field="groups.admin_email", message=required)
-                )
+            # Logins read groups with the user's own token, so the service account stays optional.
             if not (groups.enrich_on_login):
                 message = "must be on: a 'google' provider's tokens carry no groups"
                 problems.append(

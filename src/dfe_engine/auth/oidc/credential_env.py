@@ -19,19 +19,75 @@ Secret values are never returned to a caller - ``credential_check`` reports only
 whether a credential resolved and from where.
 """
 
-from __future__ import annotations
-
 import os
 import re
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from scalo.logger import logger
-from scalo.secrets.exceptions import SecretNotFoundError
+from scalo.secrets.exceptions import (
+    AuthenticationError,
+    SecretNotFoundError,
+    SecretPermissionError,
+)
+
+from dfe_engine.http_errors import describe_http_error
 
 if TYPE_CHECKING:
     from dfe_engine.secrets import DfeSecrets
 
-_ENV_VAR_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# ``\Z``, not ``$``: ``$`` also matches before a trailing newline.
+_ENV_VAR_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z")
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedCredential:
+    """One credential as it resolved: its value, absent, or unreadable.
+
+    Attributes:
+        value: The credential, or empty when nothing resolved. Left out of the repr.
+        unreadable: Nothing resolved and the secret store, asked for it, gave nothing
+            back, so the credential may exist all the same.
+        refused: Of an unreadable credential: the store answered and refused the
+            engine access to it, rather than not answering.
+    """
+
+    value: str = field(default="", repr=False)
+    unreadable: bool = False
+    refused: bool = False
+
+
+def unreadable_credential_message(*, credential: str, refused: bool = False) -> str:
+    """What an API caller is told when the secret store gave nothing back for ``credential``.
+
+    Args:
+        credential: The credential, as the caller knows it.
+        refused: The store refused access rather than not answering.
+    """
+    if refused:
+        return (
+            f"The secret store refused access to the {credential}, so check the engine's "
+            "secrets policy; the engine log has the reason"
+        )
+    return (
+        f"The secret store did not answer when asked for the {credential}: check the "
+        "secrets backend is reachable; the engine log has the reason"
+    )
+
+
+def _refused(exc: BaseException) -> bool:
+    """Whether the store answered and refused, rather than not answering.
+
+    A permission error is the store's answer to a read. scalo also raises
+    ``AuthenticationError`` for a login it never sent (no secret id, no token), so one
+    counts only when the store's HTTP answer is its cause.
+    """
+    if isinstance(exc, SecretPermissionError):
+        return True
+    answer = getattr(exc.__cause__, "response", None)
+    return isinstance(exc, AuthenticationError) and isinstance(
+        getattr(answer, "status_code", None), int
+    )
 
 
 def is_env_var_name(value: str) -> bool:
@@ -44,22 +100,23 @@ def provider_secret_path(provider_name: str, field: str) -> str:
     return f"oidc/{provider_name}/{field}"
 
 
-def _from_store(secret_path: str, secrets: DfeSecrets | None) -> str:
-    """Read a secret from the store, or '' when it is absent or unreachable."""
+def _from_store(secret_path: str, secrets: DfeSecrets | None) -> ResolvedCredential:
+    """Read a secret from the store: its value stripped of surrounding whitespace, absent, or unreadable when the store did not answer or refused."""
     if not secret_path or secrets is None:
-        return ""
+        return ResolvedCredential()
     try:
-        return secrets.get(secret_path)
+        return ResolvedCredential(value=secrets.get(secret_path).strip())
     except SecretNotFoundError:
-        return ""
+        return ResolvedCredential()
     except Exception as exc:
-        # An unreachable store must not take the login path down with it.
+        # The login path falls through to the env var, so an unreachable store is reported, never raised.
+        fields = describe_http_error(exc)
         logger.warning(
             "OIDC credential unreadable from the secret store",
             secret_path=secret_path,
-            error=str(exc),
+            **fields,
         )
-        return ""
+        return ResolvedCredential(unreadable=True, refused=_refused(exc))
 
 
 def resolve_credential(
@@ -68,20 +125,29 @@ def resolve_credential(
     secret_path: str = "",
     env_name: str = "",
     secrets: DfeSecrets | None = None,
-) -> str:
+) -> ResolvedCredential:
     """Resolve one credential: plain value, then the secret store, then the env.
 
-    Surrounding whitespace is stripped, so the newline a mounted secret file often ends with never reaches an HTTP header. Returns '' when none of the three yields anything.
+    Surrounding whitespace is stripped from each source, so the newline a mounted
+    secret file often ends with never reaches an HTTP header.
+
+    Returns:
+        The first value found. With none, an empty credential marked ``unreadable``
+        when the secret store was asked and gave nothing back, and ``refused`` as well
+        when the store refused access. A caller on the login
+        path reads only ``value``, so an unreachable store leaves it as it would a
+        credential that is not set.
     """
     plain = value.strip()
     if plain:
-        return plain
-    stored = _from_store(secret_path, secrets).strip()
-    if stored:
+        return ResolvedCredential(value=plain)
+    stored = _from_store(secret_path, secrets)
+    if stored.value:
         return stored
-    if env_name:
-        return (os.environ.get(env_name) or "").strip()
-    return ""
+    from_env = os.environ.get(env_name, "").strip() if env_name else ""
+    if from_env:
+        return ResolvedCredential(value=from_env)
+    return ResolvedCredential(unreadable=stored.unreadable, refused=stored.refused)
 
 
 def credential_check(
@@ -95,18 +161,25 @@ def credential_check(
     """Return (ok, detail) for a configured credential, never echoing its value.
 
     Misconfigured YAML often puts the secret itself where the env var NAME
-    belongs; that shape is named in the detail so an operator can act on it.
+    belongs; that shape is named in the detail so an operator can act on it. A
+    secret store that did not answer is named too, unless the env var serves the
+    credential, as it does for a login.
     """
     if value.strip():
         return True, f"{label} is set"
-    if _from_store(secret_path, secrets).strip():
+    stored = _from_store(secret_path, secrets)
+    if stored.value:
         return True, f"{label} resolved from the secret store at {secret_path}"
+    if env_name and os.environ.get(env_name, "").strip():
+        return True, f"{env_name} is set"
+    if stored.unreadable:
+        return False, unreadable_credential_message(
+            credential=f"{label} at {secret_path}", refused=stored.refused
+        )
     if not env_name:
         if secret_path:
             return False, f"nothing stored at {secret_path} and no env var configured"
         return False, "no env var configured"
-    if (os.environ.get(env_name) or "").strip():
-        return True, f"{env_name} is set"
     if not is_env_var_name(env_name):
         return (
             False,

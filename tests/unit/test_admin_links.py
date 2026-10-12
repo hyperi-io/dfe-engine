@@ -34,6 +34,7 @@ from dfe_engine.admin_links import (
     AdminLinkStatus,
     parse_links,
 )
+from tests.support.loopback import stop_server
 
 ARGO = {
     "name": "Argo CD",
@@ -181,6 +182,7 @@ class _Console:
 
     base_url: str
     httpd: ThreadingHTTPServer
+    thread: threading.Thread
     hits: Counter = field(default_factory=Counter)
 
     def url(self, path: str) -> str:
@@ -219,8 +221,9 @@ def _serve() -> _Console:
             self.end_headers()
 
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    console = _Console(base_url=f"http://127.0.0.1:{httpd.server_port}", httpd=httpd)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    console = _Console(base_url=f"http://127.0.0.1:{httpd.server_port}", httpd=httpd, thread=thread)
     return console
 
 
@@ -228,8 +231,7 @@ def _serve() -> _Console:
 def console() -> Iterator[_Console]:
     server = _serve()
     yield server
-    server.httpd.shutdown()
-    server.httpd.server_close()
+    stop_server(server.httpd, server.thread)
 
 
 def _closed_port() -> int:

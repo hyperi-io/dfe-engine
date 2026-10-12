@@ -9,10 +9,9 @@
 """Case tables for the background OIDC group sync scheduler."""
 
 from datetime import UTC, datetime, timedelta
-from typing import Any, TypedDict
+from typing import TypedDict
 
 from dfe_engine.auth.oidc.models import OIDCProvider
-from dfe_engine.auth.oidc.sync import SyncOutcome
 from tests.unit.test_auth.factories import make_oidc_provider
 
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
@@ -22,12 +21,6 @@ class SyncIsDueCase(TypedDict):
     id: str
     expected_due: bool
     provider: OIDCProvider
-
-
-class SyncOutcomeCase(TypedDict):
-    id: str
-    expected_outcome: SyncOutcome
-    result: dict[str, Any]
 
 
 SYNC_IS_DUE_CASES: list[SyncIsDueCase] = [
@@ -82,28 +75,5 @@ SYNC_IS_DUE_CASES: list[SyncIsDueCase] = [
         "id": "unreadable_last_sync_stamp",
         "expected_due": True,
         "provider": make_oidc_provider(groups={"mode": "api"}, last_sync_at="not-a-time"),
-    },
-]
-
-SYNC_OUTCOME_CASES: list[SyncOutcomeCase] = [
-    {
-        "id": "every_group_synced",
-        "expected_outcome": "ok",
-        "result": {"created": 2, "error": None, "groups_skipped": 0, "updated": 1},
-    },
-    {
-        "id": "some_groups_skipped",
-        "expected_outcome": "partial",
-        "result": {"created": 1, "error": None, "groups_skipped": 1, "updated": 0},
-    },
-    {
-        "id": "the_run_failed",
-        "expected_outcome": "error",
-        "result": {
-            "created": 0,
-            "error": "directory unreachable",
-            "groups_skipped": 0,
-            "updated": 0,
-        },
     },
 ]

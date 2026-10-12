@@ -259,7 +259,7 @@ class TestEnvOverrides:
     def test_api_cors_origins_override(self, monkeypatch):
         monkeypatch.setenv("DFE_API_CORS_ORIGINS", "http://a.com,http://b.com")
         settings = load_settings()
-        assert "http://a.com" in settings.api.cors_origins
+        assert settings.api.cors_origins == ["http://a.com", "http://b.com"]
 
     def test_api_key_default_ttl_is_ninety_days(self):
         assert load_settings().auth.api_key_default_ttl_days == 90
@@ -316,6 +316,32 @@ class TestEnvOverrides:
         assert throttle.enabled is False
         assert (throttle.username_failures, throttle.client_failures) == (3, 40)
         assert throttle.max_delay_seconds == 120
+
+    def test_oidc_group_sync_defaults(self):
+        auth = load_settings().auth
+        assert auth.oidc_group_sync_enabled is True
+        assert auth.oidc_group_sync_tick_seconds == 60
+
+    def test_oidc_group_sync_overrides(self, monkeypatch):
+        monkeypatch.setenv("DFE_AUTH_OIDC_GROUP_SYNC_ENABLED", "false")
+        monkeypatch.setenv("DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS", "15")
+        auth = load_settings().auth
+        assert auth.oidc_group_sync_enabled is False
+        assert auth.oidc_group_sync_tick_seconds == 15
+
+    def test_oidc_group_sync_tick_below_one_second_is_refused(self, monkeypatch):
+        monkeypatch.setenv("DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS", "0")
+        with pytest.raises(ValidationError):
+            load_settings()
+
+    def test_a_config_file_still_carrying_auth_oidc_loads(self, tmp_path):
+        # Older deployed files carry an auth.oidc block no field reads; they must still load.
+        target = tmp_path / "dfe.yaml"
+        target.write_text(
+            yaml_dump_string({"auth": {"oidc": {"providers_dir": "/x", "sync_enabled": False}}}),
+            encoding="utf-8",
+        )
+        assert load_settings(str(target)).auth.oidc_group_sync_enabled is True
 
     def test_api_elastic_converter_max_upload_override(self, monkeypatch):
         monkeypatch.setenv("DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES", "1048576")
@@ -879,6 +905,25 @@ class TestGitopsMode:
         assert write.failure_threshold == 5
         assert write.reset_timeout == 90.0
 
+    def test_pack_thresholds_default_to_gits_own(self):
+        from dfe_engine.settings import GitopsSettings
+
+        pack = GitopsSettings().pack
+        assert pack.loose_objects == 6700
+        assert pack.packs == 50
+        assert pack.interval_seconds == 300.0
+
+    def test_pack_thresholds_come_from_the_environment(self, monkeypatch):
+        from dfe_engine.settings import GitopsSettings, _get_env_overrides
+
+        monkeypatch.setenv("DFE_GITOPS_PACK_LOOSE_OBJECTS", "1000")
+        monkeypatch.setenv("DFE_GITOPS_PACK_PACKS", "0")
+        monkeypatch.setenv("DFE_GITOPS_PACK_INTERVAL_SECONDS", "60.5")
+        pack = GitopsSettings(**_get_env_overrides()["gitops"]).pack
+        assert pack.loose_objects == 1000
+        assert pack.packs == 0
+        assert pack.interval_seconds == 60.5
+
     def test_write_timeout_is_longer_than_the_read_bound(self):
         from dfe_engine.gitops.repo import REMOTE_HEAD_TIMEOUT_SECONDS
         from dfe_engine.settings import GitopsWriteSettings
@@ -971,6 +1016,28 @@ class TestProductionPostureCannotShipWithAuthOff:
         assert is_dev_posture(dev.env)
 
 
+class TestSourceProviderBindings:
+    """A binding joins a stamp to ONE provider, so a chain would join names nothing declared."""
+
+    @pytest.mark.parametrize(
+        "bindings",
+        [
+            pytest.param({"legacy": "scim", "scim": "entra"}, id="chain"),
+            pytest.param({"entra": "entra"}, id="self"),
+        ],
+    )
+    def test_a_target_that_is_itself_a_stamp_is_refused(self, bindings):
+        with pytest.raises(ValidationError, match="source_provider_bindings") as refused:
+            AuthSettings(source_provider_bindings=bindings)
+
+        assert "chain" in str(refused.value)
+
+    def test_several_stamps_bound_to_one_provider_are_accepted(self):
+        bindings = {"scim": "entra", "legacy": "entra"}
+
+        assert AuthSettings(source_provider_bindings=bindings).source_provider_bindings == bindings
+
+
 class TestEverySettingIsRead:
     """A field nothing reads is inert: it parses, validates, and changes nothing.
 
@@ -1005,8 +1072,6 @@ class TestEverySettingIsRead:
         ("QueryViewSettings", "auto_bootstrap"),
         ("SamplerSettings", "default_mode"),
         ("HelmSettings", "environment_file"),
-        ("OIDCSettings", "sync_enabled"),
-        ("OIDCSettings", "sync_on_startup"),
         ("HyperDXSettings", "api_key_env"),
         ("DFESettings", "e2e_server"),
         # Found once the search stopped counting defaults.yaml as a reader. A

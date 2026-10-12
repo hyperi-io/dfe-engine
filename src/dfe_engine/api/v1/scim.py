@@ -31,14 +31,11 @@ open (IdPs probe them before presenting a token). Responses use the SCIM
 media type and the SCIM error envelope.
 """
 
-from __future__ import annotations
-
 import re
 
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
-from scalo.logger import logger
 from scim2_models import (
     AuthenticationScheme,
     Bulk,
@@ -66,8 +63,9 @@ from dfe_engine.api.deps import CurrentUser, provider_bindings, require_action
 from dfe_engine.api.password_floor import FLOOR_MESSAGE, below_floor, count_floor_refusal
 from dfe_engine.api.v1.account_groups import check_group_changes, check_role_assignment, scope_of
 from dfe_engine.auth.accounts import AccountExistsError, discard_created
-from dfe_engine.auth.groups import GroupExistsError, source_id_holder
-from dfe_engine.auth.membership import forget_member, groups_held
+from dfe_engine.auth.audit import audit_account_change, audit_group_change
+from dfe_engine.auth.groups import Group, GroupExistsError, source_id_holder
+from dfe_engine.auth.membership import forget_member, groups_held, linked_providers
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.scim_mapping import (
     account_to_scim_user,
@@ -77,6 +75,7 @@ from dfe_engine.auth.scim_mapping import (
     scim_user_to_account_fields,
 )
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
+from dfe_engine.names import InvalidNameError, validate_store_name
 
 router = APIRouter(prefix="/scim/v2", tags=["SCIM"])
 
@@ -186,6 +185,11 @@ def _page_params(request: Request) -> tuple[int, int]:
     return start_index, max(0, count)
 
 
+def _audit_details(**fields) -> dict:
+    """Audit-event details for a SCIM write, marked so an IdP push reads apart from an admin's."""
+    return {"via": "scim", **fields}
+
+
 def _refuse_taken_provider_id(store, source_id: str, name: str) -> JSONResponse | None:
     """Refuse an externalId another group already carries (:func:`source_id_holder`)."""
     if source_id_holder(groups=store.list(), name=name, source_id=source_id) is None:
@@ -193,6 +197,19 @@ def _refuse_taken_provider_id(store, source_id: str, name: str) -> JSONResponse 
     return scim_error(
         409, f"externalId '{source_id}' is already another group's provider id", "uniqueness"
     )
+
+
+def _scim_may_move_link(group: Group, stamp: str, request: Request) -> bool:
+    """Whether a SCIM write stamped *stamp* may set, change or clear *group*'s provider id.
+
+    An unlinked group takes SCIM's stamp with the id. A linked one moves only when its
+    provider is SCIM's own stamp or one ``auth.source_provider_bindings`` joins to it,
+    the providers a SCIM account's membership resolves through
+    (:func:`~dfe_engine.auth.membership.linked_providers`).
+    """
+    if not group.source_provider:
+        return True
+    return group.source_provider in linked_providers([stamp], provider_bindings(request))
 
 
 # -- /Users ---------------------------------------------------
@@ -306,7 +323,9 @@ async def create_user(user: CurrentUser, request: Request) -> Response:
         # Left unstamped, the account reads as a local one and the IdP's retry meets a 409.
         discard_created(store, created)
         raise
-    logger.info("SCIM user provisioned", username=username)
+    audit_account_change(
+        user.user_id, username, "created", _audit_details(enabled=bool(fields["enabled"]))
+    )
     account = store.get(username)
     scim_user = account_to_scim_user(
         account, groups=[], location=_location(request, "Users", username)
@@ -338,6 +357,8 @@ async def replace_user(user_id: str, user: CurrentUser, request: Request) -> Res
         enabled=fields["enabled"],
         external_id=fields["external_id"],
     )
+    details = _audit_details(fields=["enabled", "external_id"], enabled=bool(fields["enabled"]))
+    audit_account_change(user.user_id, user_id, "updated", details)
     account = store.get(user_id)
     groups = groups_held(account, group_store.list(), bindings=provider_bindings(request))
     scim_user = account_to_scim_user(
@@ -364,16 +385,22 @@ async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Respo
     except Exception as exc:
         return _invalid_body("PatchOp", exc)
 
+    enabled: bool | None = None
     for op in patch.operations or []:
         # op.path may be a typed ``Path`` object; coerce to a plain string.
         path = str(op.path or "").lower()
         value = op.value
         if path == "active":
-            store.update(user_id, enabled=bool(value))
+            enabled = bool(value)
+            store.update(user_id, enabled=enabled)
         elif path == "" and isinstance(value, dict) and "active" in value:
-            store.update(user_id, enabled=bool(value["active"]))
+            enabled = bool(value["active"])
+            store.update(user_id, enabled=enabled)
         # Other paths (userName is the immutable key; group membership is managed
         # on /Groups) are ignored - the record stays consistent either way.
+    if enabled is not None:
+        details = _audit_details(fields=["enabled"], enabled=enabled)
+        audit_account_change(user.user_id, user_id, "updated", details)
 
     account = store.get(user_id)
     groups = groups_held(account, group_store.list(), bindings=provider_bindings(request))
@@ -400,7 +427,7 @@ async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Resp
     check_group_changes(after=(), before=held, groups=groups, request=request, user=user)
     store.delete(user_id)
     forget_member(group_store, user_id)
-    logger.info("SCIM user deleted", username=user_id)
+    audit_account_change(user.user_id, user_id, "deleted", _audit_details(groups=held))
     return Response(status_code=204)
 
 
@@ -476,6 +503,10 @@ async def create_group(user: CurrentUser, request: Request) -> Response:
     account_store = request.app.state.account_store
     fields = scim_group_to_group_fields(inbound)
     name = str(fields["name"])
+    try:
+        validate_store_name(name)
+    except InvalidNameError as exc:
+        return scim_error(400, f"displayName: {exc}", "invalidValue")
     members = list(fields["members"])  # type: ignore[arg-type]
     taken = _refuse_taken_provider_id(store, str(fields["source_id"]), name)
     if taken is not None:
@@ -488,8 +519,9 @@ async def create_group(user: CurrentUser, request: Request) -> Response:
     store.update(name, source_id=fields["source_id"], source_provider=fields["source_provider"])
     request_ch_rbac_reconcile(request.app.state)
     sync_account_groups_for_membership_change(account_store, name, added=group.members)
-    logger.info("SCIM group provisioned", group=name, members=len(group.members))
     group = store.get(name)
+    details = _audit_details(roles=group.roles, scope=group.scope, members=group.members)
+    audit_group_change(user.user_id, name, "created", details)
     return _scim_json(
         group_to_scim_group(group, location=_location(request, "Groups", name)), 201, request
     )
@@ -520,21 +552,38 @@ async def replace_group(group_id: str, user: CurrentUser, request: Request) -> R
     new_members = list(fields["members"])  # type: ignore[arg-type]
     old = set(existing.members)
     new = set(new_members)
+    moves_link = fields["source_id"] != existing.source_id
     # An IdP login resolves a group by its provider id, so moving the id moves the roles.
-    if old != new or fields["source_id"] != existing.source_id:
+    if old != new or moves_link:
         check_role_assignment(request, user, existing.roles, scope_of(existing))
-    if fields["source_id"] != existing.source_id:
+    if moves_link:
+        if not _scim_may_move_link(existing, str(fields["source_provider"]), request):
+            return scim_error(
+                400,
+                "externalId cannot change: the group is linked through an identity "
+                "provider SCIM is not bound to",
+                "mutability",
+            )
         taken = _refuse_taken_provider_id(store, str(fields["source_id"]), group_id)
         if taken is not None:
             return taken
+    # A link names its provider: an id set on an unlinked group takes SCIM's, a linked one keeps its own.
+    provider = existing.source_provider
+    if fields["source_id"] and not provider:
+        provider = fields["source_provider"]
     store.update(
         group_id,
         members=new_members,
         source_id=fields["source_id"],
+        source_provider=provider,
     )
     sync_account_groups_for_membership_change(
         account_store, group_id, added=new - old, removed=old - new
     )
+    details = _audit_details(
+        fields=["members", "source_id"], added=sorted(new - old), removed=sorted(old - new)
+    )
+    audit_group_change(user.user_id, group_id, "updated", details)
     group = store.get(group_id)
     return _scim_json(
         group_to_scim_group(group, location=_location(request, "Groups", group_id)), 200, request
@@ -562,34 +611,23 @@ async def patch_group(group_id: str, user: CurrentUser, request: Request) -> Res
     except Exception as exc:
         return _invalid_body("PatchOp", exc)
 
-    # Checked before any op applies, so a refusal leaves the membership as it was.
-    if _joining(patch) - set(group.members) or _leaving(patch, group.members):
+    try:
+        members = _patched_members(patch, group.members)
+    except _NoTargetError as exc:
+        return scim_error(400, str(exc), "noTarget")
+    added = set(members) - set(group.members)
+    removed = set(group.members) - set(members)
+
+    # Checked before anything is written, so a refusal leaves the membership as it was.
+    if added or removed:
         check_role_assignment(request, user, group.roles, scope_of(group))
-
-    added: set[str] = set()
-    removed: set[str] = set()
-    for op in patch.operations or []:
-        kind = _op_kind(op)
-        # op.path may be a typed ``Path`` object; coerce to a plain string.
-        path = str(op.path or "")
-        value = op.value
-        if kind in ("add", "replace") and path.lower().startswith("members"):
-            for username in _member_values(value):
-                store.add_member(group_id, username)
-                added.add(username)
-        elif kind == "remove" and path.lower().startswith("members"):
-            m = _MEMBER_FILTER_RE.search(path)
-            targets = [m.group(1)] if m else _member_values(value)
-            if not targets:  # remove with no filter -> clear membership
-                targets = list(store.get(group_id).members)
-            # The whole removal set is checked before any of it is applied, so a
-            # refusal cannot leave earlier members already detached.
-            store.protected.check_member_removal(group_id, targets)
-            for username in targets:
-                store.remove_member(group_id, username)
-                removed.add(username)
-
-    sync_account_groups_for_membership_change(account_store, group_id, added=added, removed=removed)
+        # One write for the whole set; the store refuses it whole if it drops a recovery credential.
+        store.update(group_id, members=members)
+        sync_account_groups_for_membership_change(
+            account_store, group_id, added=added, removed=removed
+        )
+        details = _audit_details(fields=["members"], added=sorted(added), removed=sorted(removed))
+        audit_group_change(user.user_id, group_id, "updated", details)
     group = store.get(group_id)
     return _scim_json(
         group_to_scim_group(group, location=_location(request, "Groups", group_id)), 200, request
@@ -623,7 +661,7 @@ async def delete_group(group_id: str, user: CurrentUser, request: Request) -> Re
     sync_account_groups_for_membership_change(account_store, group_id, removed=members)
     store.delete(group_id)
     request_ch_rbac_reconcile(request.app.state)
-    logger.info("SCIM group deleted", group=group_id)
+    audit_group_change(user.user_id, group_id, "deleted", _audit_details(members=members))
     return Response(status_code=204)
 
 
@@ -632,26 +670,62 @@ def _op_kind(op) -> str:
     return getattr(op.op, "value", str(op.op)).lower()
 
 
-def _joining(patch) -> set[str]:
-    """Every username a group PatchOp adds or replaces into ``members``."""
-    joining: set[str] = set()
-    for op in patch.operations or []:
-        if _op_kind(op) in ("add", "replace") and str(op.path or "").lower().startswith("members"):
-            joining.update(_member_values(op.value))
-    return joining
+class _NoTargetError(ValueError):
+    """A ``replace`` whose value filter matched no current member (RFC 7644 section 3.5.2.3)."""
 
 
-def _leaving(patch, members: list[str]) -> set[str]:
-    """Every current member a group PatchOp removes; a remove naming no one clears the group."""
-    leaving: set[str] = set()
+def _targets_members(op) -> bool:
+    """Whether a group PatchOp operation acts on ``members``."""
+    # op.path may be a typed ``Path`` object; coerce to a plain string.
+    path = str(op.path or "")
+    if path:
+        return path.lower().startswith("members")
+    # A path-less add or replace names the attributes it sets in its value.
+    value = op.value
+    return _op_kind(op) in ("add", "replace") and isinstance(value, dict) and "members" in value
+
+
+def _appended(members: list[str], usernames: list[str]) -> list[str]:
+    """*members* with each of *usernames* not already in it appended, in order."""
+    result = list(members)
+    for username in usernames:
+        if username not in result:
+            result.append(username)
+    return result
+
+
+def _patched_members(patch, members: list[str]) -> list[str]:
+    """The member list a group PatchOp leaves, worked out before anything is written.
+
+    Per RFC 7644 section 3.5.2: ``add`` joins members, ``replace`` swaps the whole
+    set (or, under a ``members[value eq "x"]`` filter, only the member it names),
+    and ``remove`` drops the named members, or every member when it names none.
+
+    Raises:
+        _NoTargetError: A filtered ``replace`` names a user who is not a member.
+    """
+    result = list(members)
     for op in patch.operations or []:
-        path = str(op.path or "")
-        if _op_kind(op) != "remove" or not path.lower().startswith("members"):
+        if not _targets_members(op):
             continue
+        kind = _op_kind(op)
+        path = str(op.path or "")
         match = _MEMBER_FILTER_RE.search(path)
-        targets = [match.group(1)] if match else _member_values(op.value)
-        leaving.update(targets or members)
-    return leaving & set(members)
+        values = _member_values(op.value)
+        if kind == "add":
+            result = _appended(result, values)
+        elif kind == "replace":
+            if match is None:
+                result = _appended([], values)
+                continue
+            target = match.group(1)
+            if target not in result:
+                raise _NoTargetError(f"'{target}' is not a member of this group")
+            result = _appended([m for m in result if m != target], values)
+        elif kind == "remove":
+            targets = [match.group(1)] if match else values
+            result = [m for m in result if m not in targets] if targets else []
+    return result
 
 
 def _member_values(value) -> list[str]:

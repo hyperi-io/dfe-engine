@@ -10,7 +10,7 @@ per-request via ``Depends()``.  Authentication checks four paths in order:
 4. Auth disabled -- dev/test default, root context
 """
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from datetime import timedelta
 from typing import TYPE_CHECKING, Annotated, Any, NamedTuple
 
@@ -28,18 +28,20 @@ from dfe_engine.auth.audit import (
     audit_login_denied,
     audit_permission_denied,
 )
-from dfe_engine.auth.groups import GroupStore
+from dfe_engine.auth.groups import Group, GroupStore
 from dfe_engine.auth.jit import (
     API_KEY_SUBJECT_PREFIX,
     JitAccountUnavailableError,
     JitIdentityCollisionError,
+    JitNoRoleError,
     JitSubjectUnusableError,
 )
-from dfe_engine.auth.membership import groups_held, linked_groups, linked_providers
+from dfe_engine.auth.membership import groups_held, groups_held_by
 from dfe_engine.auth.models import platform_caller
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.auth.sessions import session_ended
 from dfe_engine.gitcrud.retention import effective_settings
+from dfe_engine.http_errors import describe_http_error
 from dfe_engine.orgs.tenant_scope import tenant_ids_for
 from dfe_engine.settings import DFESettings, is_dev_posture
 
@@ -381,21 +383,39 @@ def _resolve_group_grants(
     group file carries, or the names an IdP assertion was already resolved to by
     :func:`~dfe_engine.auth.membership.linked_groups`. An IdP's raw assertion never
     comes here, because a name it sends would take the stored group of that name.
-    Each identifier is looked up by group name only; a provider ``source_id`` names no group here, since only an IdP assertion reaches a group by its source ID. Unknown identifiers are silently skipped (no error; the user
+    Each identifier is looked up by group NAME first, then by provider
+    ``source_id``. Unknown identifiers are silently skipped (no error -- the user
     just gets fewer roles). A system group's roles bind at system scope; an
     org-scoped group's roles bind at that org's scope only. org_ids collects the
     caller's org memberships (the owning org of each org-scoped group, plus each
     group's org_ids list).
+    """
+    found: list[Group] = []
+    # The source_id index is built only when a name misses, so name-only lookups pay nothing for it.
+    source_index: dict[str, Group] | None = None
+    for group_name in groups:
+        group = group_store.get(group_name)
+        if group is None:
+            if source_index is None:
+                source_index = group_store.by_source_id()
+            group = source_index.get(group_name)
+        if group is not None:
+            found.append(group)
+    return _grants_of(found)
+
+
+def _grants_of(groups: Iterable[Group]) -> GroupResolution:
+    """The roles, org memberships and scoped grants *groups* carry, and their names.
+
+    A system group's roles bind at system scope; an org-scoped group's roles bind at
+    that org's scope only, and the group's owning org and ``org_ids`` are its orgs.
     """
     roles: set[str] = set()
     org_ids: set[str] = set()
     matched: set[str] = set()
     grants: list[ScopedGrant] = []
     seen_grants: set[tuple[str, str]] = set()
-    for group_name in groups:
-        group = group_store.get(group_name)
-        if group is None:
-            continue
+    for group in groups:
         matched.add(group.name)
         scope_org = group.scope_org
         scope = Scope(type="org", id=scope_org) if scope_org else Scope()
@@ -411,36 +431,6 @@ def _resolve_group_grants(
     return GroupResolution(sorted(roles), sorted(org_ids), grants, sorted(matched))
 
 
-# Each API-key identifier that names a provider ID is warned about once per process, never per request.
-_PROVIDER_ID_KEY_GROUPS_WARNED: set[str] = set()
-_PROVIDER_ID_KEY_GROUPS_WARNED_MAX = 1024
-
-
-def _warn_of_provider_id_key_groups(
-    *, group_store: GroupStore, identifiers: list[str], key_name: str
-) -> None:
-    """Warn once per identifier that an API key names a group's provider ID, which grants it nothing."""
-    unwarned = [name for name in identifiers if name not in _PROVIDER_ID_KEY_GROUPS_WARNED]
-    if not (unwarned) or (
-        len(_PROVIDER_ID_KEY_GROUPS_WARNED) >= _PROVIDER_ID_KEY_GROUPS_WARNED_MAX
-    ):
-        return
-    by_source_id = group_store.by_source_id()
-    for identifier in unwarned:
-        group = by_source_id.get(identifier)
-        if (group is None) or (
-            len(_PROVIDER_ID_KEY_GROUPS_WARNED) >= _PROVIDER_ID_KEY_GROUPS_WARNED_MAX
-        ):
-            continue
-        _PROVIDER_ID_KEY_GROUPS_WARNED.add(identifier)
-        logger.warning(
-            "API key names a group's provider ID, which grants nothing",
-            group=group.name,
-            identifier=identifier,
-            key_name=key_name,
-        )
-
-
 def _resolve_roles_from_groups(
     groups: list[str],
     group_store: GroupStore,
@@ -453,10 +443,11 @@ def _resolve_roles_from_groups(
 def groups_granting(identifiers: list[str], group_store: GroupStore) -> list[str]:
     """The names of the stored groups a session's roles come from.
 
-    The lookup :func:`_resolve_group_grants` makes, so each identifier resolves by group name only.
+    The lookup :func:`_resolve_group_grants` makes, so an identifier that names one
+    group and is another's provider ``source_id`` resolves to the group it names alone.
 
     Args:
-        identifiers: The session's group names.
+        identifiers: The session's group names or IdP-asserted provider ids.
         group_store: The group store.
 
     Returns:
@@ -493,18 +484,30 @@ def provider_bindings(request: Request) -> dict[str, str]:
     return settings.auth.source_provider_bindings if settings is not None else {}
 
 
-def resolve_live_grants_for_user(request: Request, user_id: str) -> GroupResolution:
+def resolve_live_grants_for_user(
+    request: Request, user_id: str, *, groups: Sequence[Group] | None = None
+) -> GroupResolution:
     """Resolve roles/org_ids/grants from the bound account's groups, never a token claim.
 
     The account is the one :func:`account_for_session_subject` binds, so a subject that
-    binds none, an API-key subject among them, resolves to nothing.
+    binds none, an API-key subject among them, resolves to nothing. The resolution's
+    ``groups`` are the ones the account holds (:func:`groups_held`). *groups* is every
+    stored group when the caller has listed them for this request; otherwise they are
+    listed here, once.
     """
     group_store: GroupStore | None = getattr(request.app.state, "group_store", None)
     account = bound_account(request, user_id)
     if group_store is None or account is None:
         return GroupResolution([], [], [], [])
-    held = groups_held(account, group_store.list(), bindings=provider_bindings(request))
-    return _resolve_group_grants(held, group_store)
+    listed = group_store.list() if groups is None else groups
+    held = groups_held_by(
+        account.username,
+        account.groups,
+        account.source_provider,
+        listed,
+        bindings=provider_bindings(request),
+    )
+    return _grants_of(held)
 
 
 def resolve_live_groups_for_user(request: Request, user_id: str) -> list[str]:
@@ -606,21 +609,15 @@ async def get_current_user(request: Request) -> AuthContext:
     # is off we ignore them (fail closed) and fall through to API-key / JWT.
     oidc_subject = request.headers.get("X-Oidc-Subject")
     if oidc_subject and settings.auth.trust_proxy_auth_headers:
-        group_store: GroupStore = request.app.state.group_store
         oidc_email = request.headers.get("X-Oidc-Email") or None
         raw_groups = request.headers.get("X-Oidc-Groups", "")
         asserted = [g.strip() for g in raw_groups.split(",") if g.strip()]
         if _proxy_provider_is_manual(request=request, settings=settings):
             # A manual provider's membership is managed in the engine, so the gateway's groups grant nothing.
             asserted = []
-        providers = linked_providers(
-            [settings.auth.proxy_provider], settings.auth.source_provider_bindings
-        )
-        # Names of the groups the assertion is linked to; a name the IdP sends links nothing.
-        groups = sorted(g.name for g in linked_groups(asserted, group_store.list(), providers))
-        resolution = _resolve_group_grants(groups, group_store)
-        roles, org_ids = resolution.roles, resolution.org_ids
-        logger.debug("OIDC auth", user_id=oidc_subject, groups=groups, roles=roles)
+        group_store: GroupStore | None = getattr(request.app.state, "group_store", None)
+        # Each listing reads every group file, so the login check and the roles share one.
+        listed = group_store.list() if group_store is not None else None
 
         # JIT provisioning -- create shadow account on first OIDC login
         jit = getattr(request.app.state, "jit_provisioner", None)
@@ -634,6 +631,7 @@ async def get_current_user(request: Request) -> AuthContext:
                     asserted,
                     settings.auth.proxy_provider,
                     email=oidc_email or "",
+                    groups=listed,
                 )
             except (JitIdentityCollisionError, JitSubjectUnusableError) as exc:
                 # Ordered before the catch-all: a refused identity is a 401, not a 503.
@@ -643,7 +641,7 @@ async def get_current_user(request: Request) -> AuthContext:
                     detail={"code": "unauthorized", "message": str(exc)},
                     headers={"WWW-Authenticate": "Bearer"},
                 ) from exc
-            except JitAccountUnavailableError as exc:
+            except (JitAccountUnavailableError, JitNoRoleError) as exc:
                 audit_login_denied(oidc_subject, "oidc", client_ip, exc.reason)
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -651,9 +649,11 @@ async def get_current_user(request: Request) -> AuthContext:
                     headers={"WWW-Authenticate": "Bearer"},
                 ) from exc
             except Exception as exc:
-                # A session with no account behind it cannot be disabled locally.
-                logger.exception("JIT provisioning failed", user_id=oidc_subject)
-                audit_jit_failed(oidc_subject, repr(exc))
+                # A session with no account behind it cannot be disabled locally; the text names store paths, so only its class is logged.
+                logger.error(
+                    "JIT provisioning failed", user_id=oidc_subject, **describe_http_error(exc)
+                )
+                audit_jit_failed(oidc_subject, exc)
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail={
@@ -663,13 +663,16 @@ async def get_current_user(request: Request) -> AuthContext:
                 ) from exc
 
         require_local_account_enabled(request, oidc_subject)
+        # The token path's resolution, so a member an operator added by hand holds the group here too.
+        live = resolve_live_grants_for_user(request, oidc_subject, groups=listed)
+        logger.debug("OIDC auth", user_id=oidc_subject, groups=live.groups, roles=live.roles)
         return AuthContext(
             user_id=oidc_subject,
             email=oidc_email,
-            roles=roles,
-            grants=resolution.grants,
-            groups=groups,
-            org_ids=org_ids,
+            roles=live.roles,
+            grants=live.grants,
+            groups=live.groups,
+            org_ids=live.org_ids,
             request_id=request_id,
             client_ip=client_ip,
             user_agent=user_agent,
@@ -700,11 +703,6 @@ async def get_current_user(request: Request) -> AuthContext:
             )
         group_store = request.app.state.group_store
         resolution = _resolve_group_grants(key_meta.groups, group_store)
-        _warn_of_provider_id_key_groups(
-            group_store=group_store,
-            identifiers=[name for name in key_meta.groups if name not in resolution.groups],
-            key_name=key_meta.name,
-        )
         roles, org_ids = resolution.roles, resolution.org_ids
         logger.debug(
             "API key auth",
@@ -768,7 +766,6 @@ async def get_current_user(request: Request) -> AuthContext:
             )
         # The token's roles, groups and org_ids claims grant nothing; the bound account decides.
         live = resolve_live_grants_for_user(request, jwt_user_id)
-        live_groups = resolve_live_groups_for_user(request, jwt_user_id)
         return AuthContext(
             org_id=payload.get("org_id", "default"),
             user_id=jwt_user_id,
@@ -776,7 +773,7 @@ async def get_current_user(request: Request) -> AuthContext:
             roles=live.roles,
             grants=live.grants,
             org_ids=live.org_ids,
-            groups=live_groups,
+            groups=live.groups,
             request_id=request_id,
             client_ip=client_ip,
             user_agent=user_agent,

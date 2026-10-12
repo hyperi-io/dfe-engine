@@ -13,7 +13,7 @@ import re
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from scalo.concurrency import run_blocking
 
 from dfe_engine.api.deps import CurrentUser, HuntConfigReg, RuleReg, Settings, require_action
@@ -28,8 +28,7 @@ from dfe_engine.hunts.hunt_config_registry import default_display_name
 from dfe_engine.hunts.rule_creation_service import CostEstimate
 from dfe_engine.hunts.rule_guard import source_label
 from dfe_engine.hunts.rule_registry import RuleNotFoundError
-
-_RULE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+from dfe_engine.names import MAX_NAME_LENGTH, RuleName
 
 router = APIRouter(prefix="/rules", tags=["Rules"], dependencies=[WRITE_TURN])
 
@@ -89,21 +88,12 @@ class _RuleWriteFields(BaseModel):
 class RuleCreateRequest(_RuleWriteFields):
     """Create a hunt rule via RuleCreationService."""
 
-    name: str = Field(description="Rule file name (YAML stem); must be unique")
+    name: RuleName = Field(description="Rule file name (YAML stem); must be unique")
 
     source_type: Literal["raw", "hyperdx"] = Field(
         default="raw",
         description="'raw' (plain SQL) or 'hyperdx' (HyperDX saved search format)",
     )
-
-    @field_validator("name")
-    @classmethod
-    def _validate_rule_name(cls, v: str) -> str:
-        if not _RULE_NAME_PATTERN.match(v):
-            raise ValueError(
-                f"Rule name '{v}' must match /^[a-zA-Z0-9_-]+$/ (letters, digits, _, -)"
-            )
-        return v
 
 
 class RuleUpdateRequest(_RuleWriteFields):
@@ -616,18 +606,23 @@ def _refuse_matches_everything(result) -> None:
 
 
 def _slugify_rule_id(text: str | None) -> str:
-    """Slug free text into the rule-id charset /^[a-zA-Z0-9_-]+$/, falling back to a default."""
+    """Slug free text into a rule name (``DETECTION_NAME``), falling back to a default."""
     base = re.sub(r"[^a-zA-Z0-9_-]+", "-", (text or "").strip()).strip("-").lower()
-    return base or "hyperdx-rule"
+    return base[:MAX_NAME_LENGTH] or "hyperdx-rule"
 
 
 def _unique_rule_id(registry, saved_search_name: str | None) -> str:
-    """Derive a rule id from the saved-search name, de-duplicated against the registry."""
+    """Derive a rule id from the saved-search name, de-duplicated against the registry.
+
+    The base is cut short to fit each ``-N`` suffix, so every candidate is a name a
+    hunt can reference.
+    """
     base = _slugify_rule_id(saved_search_name)
     candidate = base
     n = 2
     while registry.name_exists(candidate):
-        candidate = f"{base}-{n}"
+        suffix = f"-{n}"
+        candidate = f"{base[: MAX_NAME_LENGTH - len(suffix)]}{suffix}"
         n += 1
     return candidate
 

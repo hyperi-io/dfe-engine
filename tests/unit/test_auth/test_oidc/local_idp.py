@@ -8,11 +8,11 @@
 
 """Local HTTP server answering OIDC discovery and userinfo requests."""
 
-from __future__ import annotations
-
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from tests.support.loopback import stop_server
 
 
 def _handler_for(*, idp: LocalIdp) -> type[BaseHTTPRequestHandler]:
@@ -30,7 +30,9 @@ def _handler_for(*, idp: LocalIdp) -> type[BaseHTTPRequestHandler]:
 
         def do_GET(self) -> None:
             """Serve the discovery document and the userinfo endpoint."""
-            if self.path == "/.well-known/openid-configuration":
+            if self.path == "/.well-known/openid-configuration" and idp.discovery_body is not None:
+                self._reply(body=idp.discovery_body, status=200)
+            elif self.path == "/.well-known/openid-configuration":
                 metadata = {"issuer": idp.base_url, "token_endpoint": f"{idp.base_url}/token"}
                 if idp.advertise_userinfo:
                     metadata["userinfo_endpoint"] = f"{idp.base_url}/userinfo"
@@ -47,10 +49,14 @@ def _handler_for(*, idp: LocalIdp) -> type[BaseHTTPRequestHandler]:
 
 
 class LocalIdp:
-    """An OIDC provider on 127.0.0.1 whose userinfo response each test configures."""
+    """An OIDC provider on 127.0.0.1 whose userinfo response each test configures.
+
+    ``discovery_body``, when set, is served with 200 in place of the discovery document.
+    """
 
     def __init__(self) -> None:
         self.advertise_userinfo = True
+        self.discovery_body: str | None = None
         self.userinfo_body = "{}"
         self.userinfo_status = 200
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), _handler_for(idp=self))
@@ -73,5 +79,4 @@ class LocalIdp:
 
     def stop(self) -> None:
         """Stop serving and release the socket."""
-        self._server.shutdown()
-        self._server.server_close()
+        stop_server(self._server, self._thread)

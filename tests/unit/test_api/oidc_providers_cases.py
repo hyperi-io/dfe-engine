@@ -10,81 +10,17 @@
 
 from typing import Any, TypedDict
 
-from dfe_engine.auth.oidc.models import OIDCProvider
-from tests.unit.test_auth.factories import make_oidc_provider
-
-# The env var naming the mock directory fixture a SYNC_PROVIDER_CASES provider in api mode reads.
-SYNC_DIRECTORY_ENV = "DFE_TEST_SYNC_PROVIDER_DIRECTORY"
-
 # The env var an UPDATE_PROVIDER_SECRET_SOURCE_CASES update names and the value the test puts in it.
 SWITCHED_SECRET = "secret-from-env"
 SWITCHED_SECRET_ENV = "DFE_TEST_SWITCHED_SECRET"
 
 _ENTRA_GROUPS = {"mode": "api", "tenant_id": "contoso.onmicrosoft.com"}
-_GOOGLE_GROUPS = {"admin_email": "admin@acme.com", "mode": "api"}
+_GOOGLE_GROUPS = {"mode": "api"}
 _OKTA_GROUPS = {"mode": "api", "okta_domain": "acme.okta.com"}
 _ROTATED_SECRET = "rotated-secret"
 _STORED_SECRET = "stored-secret"
-
-
-class SyncProviderCase(TypedDict):
-    id: str
-    provider: OIDCProvider
-    expected_body: dict[str, Any]
-
-
-SYNC_PROVIDER_CASES: list[SyncProviderCase] = [
-    {
-        "id": "token_claim_mode",
-        "provider": make_oidc_provider(
-            groups={"mode": "token_claim"}, issuer="https://example.okta.com", type="okta"
-        ),
-        "expected_body": {
-            "created": 0,
-            "error": None,
-            "groups_skipped": 0,
-            "skipped": "Groups mode is 'token_claim': groups come from each login's token, so "
-            "there is no directory to sync; link a group to the IdP group by its source ID",
-            "total": 0,
-            "updated": 0,
-        },
-    },
-    {
-        "id": "disabled",
-        "provider": make_oidc_provider(
-            enabled=False,
-            groups={"mode": "api", "okta_domain": "example.okta.com"},
-            issuer="https://example.okta.com",
-            type="okta",
-        ),
-        "expected_body": {
-            "created": 0,
-            "error": None,
-            "groups_skipped": 0,
-            "skipped": "The provider is disabled",
-            "total": 0,
-            "updated": 0,
-        },
-    },
-    {
-        "id": "api_mode_ran",
-        "provider": make_oidc_provider(
-            groups={
-                "directory_backend": "mock",
-                "mock_directory_env": SYNC_DIRECTORY_ENV,
-                "mode": "api",
-            }
-        ),
-        "expected_body": {
-            "created": 1,
-            "error": None,
-            "groups_skipped": 0,
-            "skipped": None,
-            "total": 1,
-            "updated": 0,
-        },
-    },
-]
+# An env var the provider names beside its stored secret; the test never sets it, so a dropped secret resolves empty.
+_STORED_SECRET_ENV = "DFE_TEST_STORED_SECRET_ENV"
 
 
 class UpdateProviderSecretSourceCase(TypedDict):
@@ -110,6 +46,14 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
     {
         "id": "client_secret_switched_to_env_with_nothing_stored",
         "create_body": {},
+        "update_body": {"client_secret_env": SWITCHED_SECRET_ENV},
+        "secret_field": "client_secret",
+        "stored_path": "oidc/sso/client_secret",
+        "expected_source": {"path": "", "resolved": SWITCHED_SECRET, "stored": False},
+    },
+    {
+        "id": "client_secret_switched_from_another_env",
+        "create_body": {"client_secret": _STORED_SECRET, "client_secret_env": _STORED_SECRET_ENV},
         "update_body": {"client_secret_env": SWITCHED_SECRET_ENV},
         "secret_field": "client_secret",
         "stored_path": "oidc/sso/client_secret",
@@ -147,6 +91,78 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         "secret_field": "groups.service_account_json",
         "stored_path": "oidc/sso/groups_service_account_json",
         "expected_source": {"path": "", "resolved": SWITCHED_SECRET, "stored": False},
+    },
+    {
+        "id": "client_secret_echoed_env_keeps_stored",
+        "create_body": {"client_secret": _STORED_SECRET, "client_secret_env": _STORED_SECRET_ENV},
+        "update_body": {"client_secret_env": _STORED_SECRET_ENV, "display_name": "Renamed"},
+        "secret_field": "client_secret",
+        "stored_path": "oidc/sso/client_secret",
+        "expected_source": {
+            "path": "oidc/sso/client_secret",
+            "resolved": _STORED_SECRET,
+            "stored": True,
+        },
+    },
+    {
+        "id": "groups_api_token_echoed_env_keeps_stored",
+        "create_body": {
+            "groups": {
+                **_OKTA_GROUPS,
+                "api_token": _STORED_SECRET,
+                "api_token_env": _STORED_SECRET_ENV,
+            },
+            "type": "okta",
+        },
+        "update_body": {"groups": {**_OKTA_GROUPS, "api_token_env": _STORED_SECRET_ENV}},
+        "secret_field": "groups.api_token",
+        "stored_path": "oidc/sso/groups_api_token",
+        "expected_source": {
+            "path": "oidc/sso/groups_api_token",
+            "resolved": _STORED_SECRET,
+            "stored": True,
+        },
+    },
+    {
+        "id": "groups_client_secret_echoed_env_keeps_stored",
+        "create_body": {
+            "groups": {
+                **_ENTRA_GROUPS,
+                "client_secret": _STORED_SECRET,
+                "client_secret_env": _STORED_SECRET_ENV,
+            },
+            "type": "entra_id",
+        },
+        "update_body": {"groups": {**_ENTRA_GROUPS, "client_secret_env": _STORED_SECRET_ENV}},
+        "secret_field": "groups.client_secret",
+        "stored_path": "oidc/sso/groups_client_secret",
+        "expected_source": {
+            "path": "oidc/sso/groups_client_secret",
+            "resolved": _STORED_SECRET,
+            "stored": True,
+        },
+    },
+    {
+        "id": "groups_service_account_json_echoed_env_keeps_stored",
+        "create_body": {
+            "groups": {
+                **_GOOGLE_GROUPS,
+                "service_account_json": _STORED_SECRET,
+                "service_account_json_env": _STORED_SECRET_ENV,
+            },
+            "issuer": "https://accounts.google.com",
+            "type": "google",
+        },
+        "update_body": {
+            "groups": {**_GOOGLE_GROUPS, "service_account_json_env": _STORED_SECRET_ENV}
+        },
+        "secret_field": "groups.service_account_json",
+        "stored_path": "oidc/sso/groups_service_account_json",
+        "expected_source": {
+            "path": "oidc/sso/groups_service_account_json",
+            "resolved": _STORED_SECRET,
+            "stored": True,
+        },
     },
     {
         "id": "client_secret_blank_env_keeps_stored",

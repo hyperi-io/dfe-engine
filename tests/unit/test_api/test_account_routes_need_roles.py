@@ -95,7 +95,9 @@ class TestAnAccountsGroupsNeedTheirRoles:
 
     def test_naming_a_held_group_by_its_other_identifier_is_no_change(self, client, app, mgr):
         """A group held by provider id and re-sent by name grants nothing new."""
-        app.state.group_store.update("dfe-admins", source_id="entra-admins-guid")
+        app.state.group_store.update(
+            "dfe-admins", source_provider="entra", source_id="entra-admins-guid"
+        )
         app.state.account_store.create("jane-corp-com", "", groups=["entra-admins-guid"])
         app.state.account_store.update("jane-corp-com", external=True, source_provider="entra")
 
@@ -107,7 +109,9 @@ class TestAnAccountsGroupsNeedTheirRoles:
         self, api_settings: DFESettings, app: FastAPI, client: TestClient, mgr: dict[str, str]
     ):
         # An IdP-owned account's own list is also its assertion, so a roleless group named like an admin group's source ID links the account to that admin group.
-        app.state.group_store.update(name="dfe-admins", source_id="DFE-Admins")
+        app.state.group_store.update(
+            name="dfe-admins", source_id="DFE-Admins", source_provider="entra"
+        )
         app.state.group_store.create(members=[], name="DFE-Admins", roles=[])
         app.state.account_store.create(
             groups=["dfe-viewers"], password="", username="jane-corp-com"
@@ -161,29 +165,18 @@ class TestAnAccountsGroupsNeedTheirRoles:
 
 
 class TestAKeysGroupsNeedTheirRoles:
-    def test_minting_a_key_in_the_admin_group_is_refused(self, client, app, mgr):
-        """A key's groups resolve by name, as a session's do."""
-        app.state.group_store.update("dfe-admins", source_id="entra-admins-guid")
-
-        resp = client.post(
-            KEYS, json={"name": "ci-escalate", "groups": ["dfe-admins"]}, headers=mgr
+    @pytest.mark.parametrize("by", ["name", "source_id"])
+    def test_minting_a_key_in_the_admin_group_is_refused(self, client, app, mgr, by):
+        """A key's groups resolve by name, else by the provider id the sync recorded."""
+        app.state.group_store.update(
+            "dfe-admins", source_provider="entra", source_id="entra-admins-guid"
         )
+        group = "dfe-admins" if by == "name" else "entra-admins-guid"
+
+        resp = client.post(KEYS, json={"name": "ci-escalate", "groups": [group]}, headers=mgr)
 
         assert resp.status_code == 403, resp.text
         assert app.state.api_key_store.get("ci-escalate") is None
-
-    def test_a_key_naming_a_provider_id_is_minted_and_holds_no_roles(
-        self, app: FastAPI, client: TestClient, mgr: dict[str, str]
-    ):
-        app.state.group_store.update(name="dfe-admins", source_id="entra-admins-guid")
-
-        resp = client.post(
-            KEYS, headers=mgr, json={"groups": ["entra-admins-guid"], "name": "ci-guid"}
-        )
-
-        assert resp.status_code == 201, resp.text
-        key = {"X-API-Key": resp.json()["full_key"]}
-        assert _roles(client=client, headers=key) == []
 
     def test_a_key_in_groups_whose_roles_the_caller_holds_is_minted(self, client, mgr):
         resp = client.post(
@@ -220,7 +213,7 @@ class TestDeletingAnAccountNeedsItsGroupsRoles:
     @_DELETE_ROUTES
     def test_deleting_an_idp_admin_is_refused(self, client, app, mgr, route):
         """An IdP-owned account holds the groups its own list's ids are linked to."""
-        app.state.group_store.update("dfe-admins", source_id="dfe-admins")
+        app.state.group_store.update("dfe-admins", source_provider="entra", source_id="dfe-admins")
         app.state.account_store.create("jane-corp-com", "", groups=["dfe-admins"])
         app.state.account_store.update("jane-corp-com", external=True, source_provider="entra")
 

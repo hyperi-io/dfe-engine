@@ -183,6 +183,31 @@ def _verified_text(data: Any, target: str | None) -> str:
     return text
 
 
+def contained_yaml_file(directory: str | Path, name: str) -> Path | None:
+    """The file a store keeps *name* in, ``<directory>/<name>.yaml``, or None outside it.
+
+    Symlinks are followed, so a link inside the directory cannot carry a read or a
+    write out of it, and an absolute or ``..`` name resolves elsewhere and is refused.
+    ``realpath`` with a ``startswith`` guard is the containment form CodeQL's
+    path-injection query recognises, so the check also reads as one to the scanner.
+
+    Args:
+        directory: The store's directory.
+        name: The stored name, often straight off a request.
+
+    Returns:
+        The resolved file path, or None when it would sit outside *directory*.
+    """
+    root = os.path.realpath(directory)
+    try:
+        target = os.path.realpath(os.path.join(root, f"{name}.yaml"))
+    except ValueError:
+        return None
+    if not target.startswith(root + os.sep):
+        return None
+    return Path(target)
+
+
 def yaml_dump(data: Any, dest: str | Path) -> None:
     """
     Dump data to a YAML file, ATOMICALLY, refusing YAML that does not read back.

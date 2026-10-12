@@ -123,7 +123,11 @@ Every provider's groups normalise to `NormalizedGroup { id, name, source }`.
 `GroupInfo { id, name, email, description }` (models.py) already provides this
 for api-mode; the token_claim/login path (`extract_identity`, rp.py) still emits
 a flat `list[str]`, but the resolution gap it created is now CLOSED at the
-matching layer. Each group carries the identifier its IdP asserts as `source_id`, with the `source_provider` whose logins it answers, set by the sync, by SCIM's `externalId` or by an admin through the groups API or dfe-ui's group form. `linked_groups` (membership.py) links a login only to the groups whose `source_id` it asserts and whose provider it came through, never by group name. Group names an API key carries resolve by name only (`_resolve_group_grants`, deps.py). So a `token_claim` login carrying names (Okta, dex, Keycloak) lands its roles once each group's `source_id` is the name the IdP sends. An Entra login carrying object GUIDs lands the right roles.
+matching layer: each group file is linked by `source_provider` and that provider's
+`source_id`, and a login takes the groups whose `source_id` it asserts, for the
+provider it signed in through (`membership.linked_groups`). A group's name links
+nothing. So an Entra login carrying object GUIDs - which match no group filename -
+resolves against `source_id` and lands the right roles. The sync, SCIM's `externalId` and an admin through the groups API or dfe-ui's group form each set the link, so a `token_claim` login carrying names (Okta, dex, Keycloak) lands its roles once a group's `source_id` is the name the IdP sends.
 Verified against the live tenant (see the emulation section). The adapter is the
 ONLY place the remaining quirks live:
 
@@ -131,18 +135,25 @@ ONLY place the remaining quirks live:
 |-------|-----------|---------------|--------|
 | refs are names (dex/okta) vs ids (entra) vs absent (google) | provider design | normalise to {id,name}; resolve GUIDs by source_id, call the directory API when the token lacks the name | id->name resolution DONE (source_id match) |
 | id stable, name mutable | directories rename groups | map roles on `id`, display `name` | source_id is the stable key |
-| overage (entra >200 -> a Graph pointer) | token size limits | detect the marker, fall back to the directory API | DONE: `rp.py` detects `_claim_names` and fetches `transitiveMemberOf`; needs the tenant id and a client secret |
+| overage (entra >200 -> a Graph pointer) | token size limits | detect the marker, fall back to the directory API | DONE: `rp.py` detects `_claim_names` and fetches `transitiveMemberOf` with the user's own login token (`/me`: User.Read returns each group's id, which is all role resolution needs; `GroupMember.Read.All` adds names), falling back to app credentials (tenant id + client secret) when Graph refuses that token |
 | nested / transitive groups | AD/entra/google nesting | take the closure the provider already emits, or walk it when it does not | MEASURED: entra emits the full closure in-token; honour it (per-provider fact, not a global toggle) |
 | name collisions across tenants | bare names aren't unique | namespace the key (source+domain) | a name held by a group not linked to that IdP group is skipped (`name_taken`); namespacing not yet built |
 | non-role groups (mailing lists) | not all groups grant access | filter by group type | not yet built |
 
 ### Adapters
 
-`auth/oidc/adapters/`: `generic` (token_claim/manual, no API), `google` (Admin SDK Directory API), `entra` (Microsoft Graph), `okta` (Groups API). Contract: `resolve_groups`, `list_all_groups`, `test_connection`. The login-path calls are failsafe: a credential or API failure returns empty rather than raising, so auth keeps working if group resolution degrades. `list_all_groups` raises `DirectoryError` instead, so a sync records a directory it cannot list as an error rather than syncing an empty one.
+`auth/oidc/adapters/`: `generic` (token_claim/manual, no API), `google` (Cloud
+Identity Groups API with the user's own login token; the Admin SDK Directory API
+as an optional service account), `entra` (Microsoft Graph), `okta` (Groups API). Contract:
+`list_all_groups`, `resolve_user_groups`, `test_connection`. The two a login can
+reach are failsafe - `resolve_user_groups` returns empty on a credential or API
+failure rather than raising, so auth keeps working if group resolution degrades.
+`list_all_groups` serves the sync only and raises when a page fails, so the sync
+never reads a short listing as the whole directory.
 
 ### Sync and control-plane independence
 
-`auth/oidc/sync.py` enumerates a provider's groups (api mode). It creates a group file for each new one, linked by `source_provider` and `source_id`. The group already carrying an IdP group's id is updated whatever its name, refreshing its description and pinning an empty provider to this one. One linked to another provider not bound to this one by `auth.source_provider_bindings` is skipped as `id_taken`. A file of the same name with no link is skipped as `name_taken`: a display name is no identity, so linking one is an admin's act through the groups API or dfe-ui's group form (rbac.md section 4.4). Detaching a provider does NOT delete its groups - they orphan with `source_provider` set, reported on delete. A provider re-added under another name finds them linked to the old name, so its sync counts them as `id_taken` until they are relinked.
+`auth/oidc/sync.py` enumerates a provider's groups (api mode). It creates a group file for each new one, linked by `source_provider` and `source_id`, and updates only files already linked to that IdP group (their `source_id` is its id and their `source_provider` this provider, or one `auth.source_provider_bindings` joins to it), preserving their roles. A file of the same name with no link is skipped as `name_taken`: a display name is no identity, so linking one is an admin's act through the groups API or dfe-ui's group form (rbac.md section 4.4). A file carrying the id under any other provider, whatever its name, is skipped as `provider_mismatch`, so a sync never moves a group between providers or creates a second group carrying the id. Detaching a provider does NOT delete its groups - they orphan with `source_provider` set, reported on delete.
 
 **The OIDC auth flow does not depend on dfe-engine running.** Envoy (fallback
 path) keeps doing OIDC from a static CRD; group files on disk keep resolving
@@ -256,7 +267,8 @@ exists in the engine and is now exercised end to end against a real provider.
 
 Done since this doc landed:
 
-- **id -> role resolution** by `source_id` for IdP assertions only (`linked_groups`), so GUID-emitting providers (Entra) resolve; group names an operator chose resolve by name. Verified against the live Entra tenant: 12 fixture
+- **id -> role resolution** across name and `source_id`, so GUID-emitting
+  providers (Entra) resolve. Verified against the live Entra tenant: 12 fixture
   users deliver exactly their expected group claims.
 - **Login-config verification** (`GET /{name}/verify-login`) and the RP client
   secret in the onboarding CRUD, written to the `DfeSecrets` seam and live on
@@ -268,8 +280,7 @@ Done since this doc landed:
 - **`client_as(...)` role-perspective test framework** so every role is driven
   against real endpoints, not just asserted to be present in a token.
 
-Remaining Layer-2 work: overage detection (>200) + directory fallback,
-group-type filtering, and multi-tenant name namespacing. Plus the dex+glauth
+Remaining Layer-2 work: group-type filtering, and multi-tenant name namespacing. Plus the dex+glauth
 emulation rig for the headless token_claim backbone.
 
 Open: confirm "membership" means the user's own memberships in the token, full

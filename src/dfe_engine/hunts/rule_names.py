@@ -1,8 +1,9 @@
-"""Rule names: what a hunt may reference, and the file each one names.
+"""Rule files: the file a rule name points at, refused when it leaves the rules directory.
 
-A rule name becomes a file under the rules directory, so it carries the gitcrud
-resource-name contract, and every path built from one must resolve inside that
-directory.
+A rule is created, and newly referenced by a hunt, under
+:data:`dfe_engine.names.DETECTION_NAME`. A rule file already on disk resolves under the
+wider gitcrud resource-name contract instead, so a hand-written file with a ``.`` in its
+name keeps running. Every path built from a name must resolve inside the rules directory.
 """
 
 from pathlib import Path
@@ -12,28 +13,6 @@ from dfe_engine.gitcrud.commit_policy import CommitPolicyError, validate_name
 
 class RuleNameError(ValueError):
     """A rule name that is malformed or resolves outside the rules directory."""
-
-
-def validate_rule_name(name: str) -> str:
-    """Return ``name`` when it is a valid rule name.
-
-    Args:
-        name: The rule name as a hunt references it.
-
-    Returns:
-        The name unchanged.
-
-    Raises:
-        RuleNameError: The name is empty, contains ``..``, or has any character
-            outside letters, digits, ``.``, ``_`` and ``-``.
-    """
-    try:
-        validate_name(name)
-    except CommitPolicyError as exc:
-        raise RuleNameError(
-            f"rule name {name!r} must be letters, digits, '.', '_' or '-', without '..'"
-        ) from exc
-    return name
 
 
 def rule_file(directory: str | Path, name: str, suffix: str) -> Path:
@@ -51,7 +30,12 @@ def rule_file(directory: str | Path, name: str, suffix: str) -> Path:
         RuleNameError: The name is invalid, or the path resolves outside the
             directory, through a symlink included.
     """
-    validate_rule_name(name)
+    try:
+        validate_name(name)
+    except CommitPolicyError as exc:
+        raise RuleNameError(
+            f"rule name {name!r} must be letters, digits, '.', '_' or '-', without '..'"
+        ) from exc
     base = Path(directory)
     path = base / f"{name}{suffix}"
     if not path.resolve().is_relative_to(base.resolve()):

@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field, field_validator
+from scalo.logger import logger
 
 from dfe_engine.api.deps import CurrentUser, provider_bindings, require_action
 from dfe_engine.api.pagination import (
@@ -43,9 +44,12 @@ from dfe_engine.api.pagination import (
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.oidc.credential_env import is_env_var_name, provider_secret_path
 from dfe_engine.auth.oidc.field_rules import FieldProblem, field_problems
+from dfe_engine.auth.oidc.models import SyncStatus
+from dfe_engine.auth.oidc.sync import SyncOutcome
 from dfe_engine.auth.rbac_scopes import scopes_dict
-from dfe_engine.auth.store_names import VALID_NAME
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
+from dfe_engine.http_errors import describe_http_error, http_failure_message
+from dfe_engine.names import StoreName
 
 if TYPE_CHECKING:
     from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
@@ -61,6 +65,18 @@ _ENV_NAME_HELP = (
 # An Entra tenant GUID or domain: letters, digits, dots and hyphens, starting with a letter or digit.
 _TENANT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}\Z")
 
+# An RFC 6749 section 3.3 scope-token: printable ASCII except space, double quote and backslash.
+_SCOPE_TOKEN = re.compile(r"[\x21\x23-\x5B\x5D-\x7E]+\Z")
+
+_SCOPES_HELP = (
+    "OAuth scopes requested at login, one scope per entry; must include openid. One "
+    "space-separated string is accepted too, and a blank one is no override. Omit for "
+    "the provider type's default: openid email profile, plus groups for generic and "
+    "okta, and https://www.googleapis.com/auth/cloud-identity.groups.readonly for "
+    "google, which reads each user's groups with their own token. Google and Entra ID "
+    "fail a login that asks for groups."
+)
+
 # Each directory secret a groups block can carry: its request field, its secret-store field and the config field that keeps the path.
 _GROUP_SECRETS = (
     ("api_token", "groups_api_token", "api_token_path"),
@@ -74,6 +90,28 @@ def _reject_non_env_name(value: str) -> str:
     if value and not is_env_var_name(value):
         raise ValueError(_ENV_NAME_HELP)
     return value
+
+
+def _scopes_from_string(value: object) -> object:
+    """A space-separated scope string as its list of scopes, or None when blank; anything else unchanged.
+
+    The provider model and the setup status carry scopes as one string, so a form
+    filled from either sends that shape back.
+    """
+    if isinstance(value, str):
+        return value.split() or None
+    return value
+
+
+def _checked_scopes(scopes: list[str]) -> list[str]:
+    """The scopes with duplicates dropped, refused unless each is one scope token and ``openid`` is among them."""
+    if not all(_SCOPE_TOKEN.match(scope) for scope in scopes):
+        raise ValueError(
+            "each entry must be a single scope, with no spaces, double quotes or backslashes"
+        )
+    if "openid" not in scopes:
+        raise ValueError("must include openid: without it the provider issues no ID token")
+    return list(dict.fromkeys(scopes))
 
 
 # -- Request / Response models --------------------------------
@@ -93,16 +131,17 @@ class GroupResolutionRequest(BaseModel):
     )
     service_account_json: str = Field(
         default="",
-        description="Google service account JSON. Write-only: it goes to the secret "
-        "store and only its path is kept in config.",
+        description="Optional Google service account JSON, for the group sync and for "
+        "logins whose own token cannot read their groups. It acts as itself, so the "
+        "org's admin must assign it a groups admin role. Write-only: it goes to the "
+        "secret store and only its path is kept in config.",
     )
     service_account_json_env: str = Field(
         default="",
-        description="Env var for Google SA JSON. On an update, setting it without "
-        "service_account_json drops the stored JSON, so the env var is used.",
+        description="Env var for Google SA JSON. On an update, naming a different env var "
+        "without service_account_json drops the stored JSON, so the env var is used.",
     )
-    admin_email: str = Field(default="", description="Google Workspace admin email")
-    domain: str = Field(default="", description="Google Workspace domain")
+    domain: str = Field(default="", description="Google Workspace domain the service account syncs")
     tenant_id: str = Field(
         default="", description="Entra ID tenant ID. Not a secret, so it is stored in config."
     )
@@ -117,8 +156,8 @@ class GroupResolutionRequest(BaseModel):
     )
     client_secret_env: str = Field(
         default="",
-        description="Env var for Entra ID client secret. On an update, setting it without "
-        "client_secret drops the stored secret, so the env var is used.",
+        description="Env var for Entra ID client secret. On an update, naming a different env "
+        "var without client_secret drops the stored secret, so the env var is used.",
     )
     api_token: str = Field(
         default="",
@@ -127,8 +166,8 @@ class GroupResolutionRequest(BaseModel):
     )
     api_token_env: str = Field(
         default="",
-        description="Env var for Okta API token. On an update, setting it without api_token "
-        "drops the stored token, so the env var is used.",
+        description="Env var for Okta API token. On an update, naming a different env var "
+        "without api_token drops the stored token, so the env var is used.",
     )
     okta_domain: str = Field(default="", description="Okta organisation domain")
 
@@ -151,7 +190,8 @@ class GroupResolutionRequest(BaseModel):
 
 
 class CreateProviderRequest(BaseModel):
-    name: str = Field(description="Unique provider name (used as filename stem)")
+    # A filename stem and a secret-store path segment, refused before any secret is written.
+    name: StoreName = Field(description="Unique provider name (used as filename stem)")
     type: Literal["generic", "google", "entra_id", "okta"] = Field(
         description="Provider type: generic, google, entra_id, okta"
     )
@@ -171,26 +211,23 @@ class CreateProviderRequest(BaseModel):
         default="",
         description="Env var name for the RP client secret used in the auth-code exchange",
     )
+    scopes: list[str] | None = Field(default=None, description=_SCOPES_HELP)
     groups: GroupResolutionRequest = Field(default_factory=GroupResolutionRequest)
-
-    @field_validator("name")
-    @classmethod
-    def _safe_name(cls, value: str) -> str:
-        """The name becomes a filename stem and a secret-store path segment.
-
-        Refused here, before any secret is written, on the rule the registry keys on.
-        """
-        if not VALID_NAME.match(value):
-            raise ValueError(
-                "must start with a letter or digit, contain only letters, digits, "
-                "dot, underscore or hyphen, and be at most 128 characters"
-            )
-        return value
 
     @field_validator("client_id_env", "client_secret_env")
     @classmethod
     def _env_name_only(cls, value: str) -> str:
         return _reject_non_env_name(value)
+
+    @field_validator("scopes", mode="before")
+    @classmethod
+    def _scopes_as_list(cls, value: object) -> object:
+        return _scopes_from_string(value)
+
+    @field_validator("scopes")
+    @classmethod
+    def _scopes_shape(cls, value: list[str] | None) -> list[str] | None:
+        return value if value is None else _checked_scopes(value)
 
 
 class UpdateProviderRequest(BaseModel):
@@ -205,8 +242,14 @@ class UpdateProviderRequest(BaseModel):
     )
     client_secret_env: str | None = Field(
         None,
-        description="Env var name for the RP client secret. Setting it without client_secret "
-        "drops the stored secret, so the env var is used.",
+        description="Env var name for the RP client secret. Naming a different env var "
+        "without client_secret drops the stored secret, so the env var is used.",
+    )
+    scopes: list[str] | None = Field(
+        None,
+        description="Replace the OAuth scopes requested at login, one scope per entry; "
+        "must include openid. One space-separated string is accepted too, and a blank "
+        "one leaves the scopes as they are.",
     )
     groups: GroupResolutionRequest | None = Field(None, description="Group resolution config")
 
@@ -214,6 +257,16 @@ class UpdateProviderRequest(BaseModel):
     @classmethod
     def _env_name_only(cls, value: str | None) -> str | None:
         return value if value is None else _reject_non_env_name(value)
+
+    @field_validator("scopes", mode="before")
+    @classmethod
+    def _scopes_as_list(cls, value: object) -> object:
+        return _scopes_from_string(value)
+
+    @field_validator("scopes")
+    @classmethod
+    def _scopes_shape(cls, value: list[str] | None) -> list[str] | None:
+        return value if value is None else _checked_scopes(value)
 
 
 class GroupResolutionResponse(BaseModel):
@@ -223,7 +276,6 @@ class GroupResolutionResponse(BaseModel):
     enrich_on_login: bool
     service_account_json_env: str
     service_account_json_path: str
-    admin_email: str
     domain: str
     tenant_id: str
     tenant_id_env: str
@@ -246,10 +298,16 @@ class ProviderResponse(BaseModel):
     client_id_env: str
     client_secret_env: str
     client_secret_path: str
+    scopes: list[str] = Field(description="OAuth scopes requested at login")
     groups: GroupResolutionResponse
     created_at: str
     last_sync_at: str
-    last_sync_status: str
+    last_sync_status: SyncStatus = Field(
+        description="How the last group sync ended: empty before the first, ok, error "
+        "(sync_error says why), not_configured (no directory credential), user_token (each "
+        "login reads its own groups, so there is no directory to sync), or 'partial: ' "
+        "followed by how many groups were skipped and why.",
+    )
     sync_error: str
 
 
@@ -260,9 +318,28 @@ class OrphanedGroupInfo(BaseModel):
     member_count: int
 
 
+class DisabledAccountInfo(BaseModel):
+    """An account soft-disabled and anonymized because its OIDC provider was detached."""
+
+    username: str = Field(description="Anonymized account id (``{uuid}-deleted``)")
+    previous_username: str = Field(description="Account id before anonymization")
+    source_provider: str = Field(
+        description="Ownership stamp on the account (OIDC provider name, scim, or empty)"
+    )
+    oidc_id: str = Field(description="OIDC provider name last used to log this account in")
+
+
 class DetachResponse(BaseModel):
     deleted: str
     orphaned_groups: list[OrphanedGroupInfo]
+    disabled_accounts: list[DisabledAccountInfo] = Field(
+        default_factory=list,
+        description=(
+            "Accounts soft-disabled and renamed to ``{uuid}-deleted`` because they were "
+            "owned by or last logged in through the detached provider. Already-disabled "
+            "and protected recovery accounts are left alone."
+        ),
+    )
 
 
 class SyncResponse(BaseModel):
@@ -272,20 +349,26 @@ class SyncResponse(BaseModel):
     groups_skipped: int = Field(
         default=0,
         description="Provider groups left unsynced: an identifier that makes no valid group "
-        "name (invalid_name), a name held by a stored group that does not load "
-        "(stored_unloadable) or by one not linked to that provider group (name_taken) and an "
-        "id held by a group linked to a provider not bound to this one (id_taken) or by a "
-        "stored group the sync cannot update (holder_unwritable). Each is counted on "
+        "name, a name held by a stored group that does not load, a name held by a stored "
+        "group not linked to that provider group, a stored group carrying the id but linked "
+        "to another provider, or no id to link a group by. Each is counted on "
         "auth_oidc_sync_groups_skipped_total{reason}.",
     )
-    error: str | None = Field(
-        description="Why the sync failed, such as the directory refusing or failing a request; "
-        "it is also stored as the provider's sync_error. Null when the sync did not fail.",
-    )
+    error: str | None
     skipped: str | None = Field(
         default=None,
-        description="Why the sync did not run: the provider is disabled or its groups mode is not "
-        "'api', so there is no directory to sync. Null when the sync ran.",
+        description="Why the sync did nothing, when it did not run: the provider is disabled, "
+        "is not in api mode, has no directory credential configured, or reads each login's "
+        "groups with the user's own token and has no directory to sync. The provider's "
+        "last_sync_status reads not_configured and user_token in those last two cases.",
+    )
+    status: SyncOutcome = Field(
+        description="How the sync ended: ok, partial (some groups skipped), error (the "
+        "listing failed, or the secret store holding its credential did not answer or "
+        "refused access), "
+        "not_configured (no directory credential), user_token (no directory to sync, "
+        "which is a Google provider's default and not a fault) or skipped (disabled or "
+        "not in api mode). Key on this, never on the text of error or skipped.",
     )
 
 
@@ -332,6 +415,7 @@ def _provider_to_response(name: str, provider: OIDCProvider) -> ProviderResponse
         client_id_env=p.client_id_env,
         client_secret_env=p.client_secret_env,
         client_secret_path=p.client_secret_path,
+        scopes=p.scopes.split(),
         groups=GroupResolutionResponse(
             mode=p.groups.mode,
             claim_name=p.groups.claim_name,
@@ -339,7 +423,6 @@ def _provider_to_response(name: str, provider: OIDCProvider) -> ProviderResponse
             enrich_on_login=p.groups.enrich_on_login,
             service_account_json_env=p.groups.service_account_json_env,
             service_account_json_path=p.groups.service_account_json_path,
-            admin_email=p.groups.admin_email,
             domain=p.groups.domain,
             tenant_id=p.groups.tenant_id,
             tenant_id_env=p.groups.tenant_id_env,
@@ -458,13 +541,18 @@ def _delete_stored_secrets(request: Request, provider: OIDCProvider) -> None:
     _delete_secrets(paths=(provider.client_secret_path, *group_paths), request=request)
 
 
-def _group_secrets_moved_to_env(*, groups: GroupResolutionRequest) -> list[str]:
-    """The config field keeping the path of each directory secret the groups block names an env var for and sends no value for."""
-    return [
-        path_field
-        for value_field, _store_field, path_field in _GROUP_SECRETS
-        if getattr(groups, f"{value_field}_env") and not (getattr(groups, value_field))
-    ]
+def _group_secrets_moved_to_env(
+    *, current: GroupResolutionConfig, groups: GroupResolutionRequest
+) -> list[str]:
+    """The config field keeping the path of each directory secret the groups block names a new env var for and sends no value for."""
+    moved = []
+    for value_field, _store_field, path_field in _GROUP_SECRETS:
+        env = getattr(groups, f"{value_field}_env")
+        sends_value = bool(getattr(groups, value_field))
+        # A form resending the env var the provider already names has not switched the secret's source.
+        if env and env != getattr(current, f"{value_field}_env") and not (sends_value):
+            moved.append(path_field)
+    return moved
 
 
 def _refresh_rp(request: Request) -> None:
@@ -525,6 +613,8 @@ async def create_provider(
         client_id_env=body.client_id_env,
         client_secret_env=body.client_secret_env,
         client_secret_path=client_secret_path,
+        # Empty takes the provider type's default scopes.
+        scopes=" ".join(body.scopes) if body.scopes is not None else "",
         groups=_group_config(groups=body.groups, kept=group_paths, provider_type=body.type),
         created_at=datetime.now(UTC).isoformat(),
     )
@@ -609,7 +699,7 @@ async def update_provider(
 ):
     """Update an OIDC provider configuration (admin only).
 
-    A secret the body omits keeps the path the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential. A secret the body names an env var for and sends no value for loses its stored copy once the update is saved, so the env var is read instead. Any update that touches more than ``enabled`` or ``display_name`` must leave the provider passing the field rules, checked before a secret is written or deleted.
+    A secret the body omits keeps the path the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential. A secret the body names a new env var for, other than the one the provider already names, and sends no value for loses its stored copy once the update is saved, so the env var is read instead; resending the stored env var name keeps the stored secret. Any update that touches more than ``enabled`` or ``display_name`` must leave the provider passing the field rules, checked before a secret is written or deleted.
     """
     registry = _get_registry(request)
     current = registry.get(name)
@@ -631,11 +721,13 @@ async def update_provider(
         update_fields["client_id_env"] = body.client_id_env
     if body.client_secret_env is not None:
         update_fields["client_secret_env"] = body.client_secret_env
+    if body.scopes is not None:
+        update_fields["scopes"] = " ".join(body.scopes)
     if body.client_secret:
         update_fields["client_secret_path"] = provider_secret_path(
             field="client_secret", provider_name=name
         )
-    elif body.client_secret_env:
+    elif body.client_secret_env and body.client_secret_env != current.client_secret_env:
         update_fields["client_secret_path"] = ""
         stale_paths.append(current.client_secret_path)
     if body.groups is not None:
@@ -648,7 +740,7 @@ async def update_provider(
             directory_backend=current.groups.directory_backend,
             mock_directory_env=current.groups.mock_directory_env,
         )
-        moved_to_env = _group_secrets_moved_to_env(groups=body.groups)
+        moved_to_env = _group_secrets_moved_to_env(current=current.groups, groups=body.groups)
         stale_paths.extend(getattr(current.groups, path_field) for path_field in moved_to_env)
         kept.update(dict.fromkeys(moved_to_env, ""))
         kept.update(_group_secret_paths(groups=body.groups, name=name))
@@ -690,13 +782,18 @@ async def delete_provider(
     user: CurrentUser,
     request: Request,
 ):
-    """Detach an OIDC provider and report orphaned groups (admin only).
+    """Detach an OIDC provider and soft-delete its accounts (admin only).
 
     Does NOT delete groups -- they become orphaned with their source_provider
-    still set to the deleted provider name. The provider's stored credentials
-    ARE removed: nothing is left that can authenticate as a detached provider.
+    still set to the deleted provider name. Accounts owned by the provider
+    (``source_provider``) or last logged in through it (``oidc_id``) are
+    soft-deleted: disabled and renamed to ``{uuid}-deleted`` with contact fields
+    cleared. The provider's stored credentials ARE removed: nothing is left that
+    can authenticate as a detached provider.
     """
+    from dfe_engine.auth.accounts import soft_delete_account
     from dfe_engine.auth.groups import GroupStore
+    from dfe_engine.auth.protected_accounts import ProtectedAccountError
 
     registry = _get_registry(request)
     provider = registry.get(name)
@@ -720,13 +817,40 @@ async def delete_provider(
                 )
             )
 
+    # Soft-delete accounts tied to this provider before the YAML is gone.
+    account_store = request.app.state.account_store
+    disabled_accounts: list[DisabledAccountInfo] = []
+    for account in account_store.list():
+        if account.source_provider != name and account.oidc_id != name:
+            continue
+        if not account.enabled:
+            continue
+        previous = account.username
+        try:
+            updated = soft_delete_account(account_store, previous)
+        except ProtectedAccountError:
+            # Recovery credentials stay usable; the detached IdP can no longer mint them.
+            continue
+        disabled_accounts.append(
+            DisabledAccountInfo(
+                username=updated.username,
+                previous_username=updated.previous_username or previous,
+                source_provider=updated.source_provider,
+                oidc_id=updated.oidc_id,
+            )
+        )
+
     registry.delete(name)
     _delete_stored_secrets(request, provider)
     # A detached provider must stop serving logins immediately, not at restart.
     _refresh_rp(request)
     audit_resource_change(user.user_id, "oidc_provider", name, "deleted")
 
-    return DetachResponse(deleted=name, orphaned_groups=orphaned)
+    return DetachResponse(
+        deleted=name,
+        orphaned_groups=orphaned,
+        disabled_accounts=disabled_accounts,
+    )
 
 
 @router.post(
@@ -751,12 +875,12 @@ async def sync_provider_groups(
 
     group_store = request.app.state.group_store
     result = await sync_provider(
-        bindings=provider_bindings(request),
-        group_store=group_store,
-        metrics=getattr(request.app.state, "oidc_sync_metrics", None),
-        provider_name=name,
-        provider_registry=registry,
+        name,
+        registry,
+        group_store,
         secrets=getattr(request.app.state, "dfe_secrets", None),
+        metrics=getattr(request.app.state, "oidc_sync_metrics", None),
+        bindings=provider_bindings(request),
     )
     # A group the sync created is a new ClickHouse user to provision.
     if result["created"]:
@@ -770,6 +894,7 @@ async def sync_provider_groups(
         groups_skipped=result["groups_skipped"],
         error=result.get("error"),
         skipped=result.get("skipped"),
+        status=result["status"],
     )
 
 
@@ -867,8 +992,13 @@ async def verify_login_config(
                     LoginConfigCheck(name="discovery", ok=True, detail="discovery reachable")
                 )
         except Exception as exc:
-            checks.append(
-                LoginConfigCheck(name="discovery", ok=False, detail=f"discovery failed: {exc}")
+            logger.warning(
+                "OIDC verify-login: discovery failed",
+                operation="discovery",
+                provider=name,
+                **describe_http_error(exc),
             )
+            detail = http_failure_message(exc, service="The issuer's discovery endpoint")
+            checks.append(LoginConfigCheck(name="discovery", ok=False, detail=detail))
 
     return LoginConfigResponse(ok=all(c.ok for c in checks), checks=checks)

@@ -9,8 +9,7 @@
 """Tests for POST/GET/PUT/DELETE /api/v1/auth/oidc-providers endpoints."""
 
 import json
-import time
-from collections.abc import Callable
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -18,47 +17,23 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from dfe_engine.auth.oidc.credential_env import resolve_credential
-from dfe_engine.settings import DFESettings
+from dfe_engine.http_errors import credential_failure_message
+from tests.support.loopback import CountingListener
 from tests.unit.test_api.oidc_providers_cases import (
     SWITCHED_SECRET,
     SWITCHED_SECRET_ENV,
-    SYNC_DIRECTORY_ENV,
-    SYNC_PROVIDER_CASES,
     UPDATE_PROVIDER_SECRET_SOURCE_CASES,
-    SyncProviderCase,
     UpdateProviderSecretSourceCase,
 )
-from tests.unit.test_auth.factories import (
-    OKTA_API_TOKEN_ENV,
-    make_directory_reply,
-    make_oidc_provider,
-    make_okta_directory_provider,
-)
-from tests.unit.test_auth.test_oidc.local_directory import LocalDirectory
+from tests.unit.test_auth.factories import OKTA_API_TOKEN_ENV, make_okta_directory_provider
 
-SCIM_GROUP_DIRECTORY_ENV = "DFE_TEST_SCIM_GROUP_DIRECTORY"
+# An Okta API token an HTTP header cannot carry: the line break survives stripping.
+_UNSENDABLE_TOKEN = "test-okta\napi-token"
 
 
-def _link_a_scim_group_to_a_mock_directory(
-    *, app: FastAPI, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Store a SCIM-made group carrying 00g-viewers and register mock-dir, whose directory lists that id."""
-    directory = tmp_path / "scim-directory.json"
-    group = {"description": "From the directory", "id": "00g-viewers", "name": "Okta Viewers"}
-    directory.write_text(json.dumps({"groups": [group]}), encoding="utf-8")
-    monkeypatch.setenv(SCIM_GROUP_DIRECTORY_ENV, str(directory))
-    app.state.group_store.create(description="Ours", members=[], name="scim-viewers", roles=[])
-    app.state.group_store.update(
-        name="scim-viewers", source_id="00g-viewers", source_provider="scim"
-    )
-    groups = {
-        "directory_backend": "mock",
-        "mock_directory_env": SCIM_GROUP_DIRECTORY_ENV,
-        "mode": "api",
-    }
-    app.state.oidc_provider_registry.create(
-        name="mock-dir", provider=make_oidc_provider(groups=groups)
-    )
+def _provider_yaml(api_settings, name: str) -> Path:
+    """The YAML file the registry persists a provider to."""
+    return Path(api_settings.auth.auth_dir) / "oidc-providers" / f"{name}.yaml"
 
 
 def _secret_source(*, app: FastAPI, field: str, name: str, stored_path: str) -> dict[str, object]:
@@ -70,30 +45,11 @@ def _secret_source(*, app: FastAPI, field: str, name: str, stored_path: str) -> 
     resolved = resolve_credential(
         env_name=getattr(holder, f"{leaf}_env"), secret_path=path, secrets=app.state.dfe_secrets
     )
-    return {"path": path, "resolved": resolved, "stored": app.state.dfe_secrets.exists(stored_path)}
-
-
-def _viewers_groups(*, app: FastAPI) -> list[tuple[str, str, str]]:
-    """Name, description and provider of every stored group carrying 00g-viewers."""
-    return [
-        (group.name, group.description, group.source_provider)
-        for group in app.state.group_store.list()
-        if group.source_id == "00g-viewers"
-    ]
-
-
-def _wait_until(*, condition: Callable[[], bool]) -> bool:
-    """Poll *condition* for up to ten seconds and report whether it came true."""
-    for _attempt in range(200):
-        if condition():
-            return True
-        time.sleep(0.05)
-    return False
-
-
-def _provider_yaml(api_settings, name: str) -> Path:
-    """The YAML file the registry persists a provider to."""
-    return Path(api_settings.auth.auth_dir) / "oidc-providers" / f"{name}.yaml"
+    return {
+        "path": path,
+        "resolved": resolved.value,
+        "stored": app.state.dfe_secrets.exists(stored_path),
+    }
 
 
 def _field_errors(response) -> list[str]:
@@ -378,6 +334,7 @@ class TestDeleteProvider:
         data = resp.json()
         assert data["deleted"] == "del-test"
         assert data["orphaned_groups"] == []
+        assert data["disabled_accounts"] == []
 
         # Confirm deleted
         resp = client.get("/api/v1/auth/oidc-providers/del-test", headers=admin_headers)
@@ -410,6 +367,64 @@ class TestDeleteProvider:
         g1 = next(g for g in data["orphaned_groups"] if g["name"] == "synced-group-1")
         assert g1["member_count"] == 1
         assert g1["roles"] == ["data_viewer"]
+
+    def test_delete_soft_disables_accounts_tied_to_the_provider(self, client, admin_headers, app):
+        _create_provider(client, admin_headers, name="gone-idp")
+        store = app.state.account_store
+        store.create("jit-user", "")
+        store.update(
+            "jit-user",
+            external=True,
+            source_provider="gone-idp",
+            oidc_id="gone-idp",
+            subject="jit@corp.com",
+            email="jit@corp.com",
+            name="Jit User",
+        )
+        store.create("scim-user", "provisioned-Pw-1")
+        store.update(
+            "scim-user",
+            source_provider="scim",
+            oidc_id="gone-idp",
+            subject="scim@corp.com",
+        )
+        store.create("other-idp-user", "")
+        store.update(
+            "other-idp-user",
+            external=True,
+            source_provider="other-idp",
+            oidc_id="other-idp",
+        )
+        store.create("already-off", "")
+        store.update(
+            "already-off",
+            enabled=False,
+            source_provider="gone-idp",
+            oidc_id="gone-idp",
+        )
+
+        resp = client.delete("/api/v1/auth/oidc-providers/gone-idp", headers=admin_headers)
+        assert resp.status_code == 200
+        rows = resp.json()["disabled_accounts"]
+        by_previous = {row["previous_username"]: row for row in rows}
+        assert set(by_previous) == {"jit-user", "scim-user"}
+        for previous, row in by_previous.items():
+            assert row["username"].endswith("-deleted")
+            assert row["username"] != previous
+            assert store.get(previous) is None
+            anonymized = store.get(row["username"])
+            assert anonymized is not None
+            assert anonymized.enabled is False
+            assert anonymized.disabled_at != ""
+            assert anonymized.previous_username == previous
+            assert anonymized.email == ""
+            assert anonymized.name == ""
+            assert anonymized.subject == ""
+
+        assert by_previous["jit-user"]["source_provider"] == "gone-idp"
+        assert by_previous["scim-user"]["oidc_id"] == "gone-idp"
+        assert store.get("other-idp-user").enabled is True
+        assert store.get("already-off").enabled is False
 
     def test_delete_nonexistent_returns_404(self, client, admin_headers):
         resp = client.delete("/api/v1/auth/oidc-providers/nonexistent", headers=admin_headers)
@@ -467,6 +482,7 @@ class TestSyncProvider:
 
         assert resp.status_code == 200, resp.text
         assert (resp.json()["created"], resp.json()["groups_skipped"]) == (1, 1)
+        assert resp.json()["status"] == "partial"
 
     def test_an_idp_group_cannot_take_the_seeded_admins_by_name(
         self, client, app, admin_headers, tmp_path, monkeypatch
@@ -504,9 +520,112 @@ class TestSyncProvider:
             "/api/v1/auth/me",
             headers={"X-Oidc-Subject": "mallory@example.com", "X-Oidc-Groups": attacker},
         )
-        assert me.status_code == 200, me.text
-        assert "admin" not in me.json()["roles"]
-        assert "dfe-admins" not in me.json()["groups"]
+        # The attacker's id links no group, so the login holds no role and is refused.
+        assert me.status_code == 401, me.text
+        assert me.json()["code"] == "no_role_granted"
+
+    def test_a_scim_group_bound_to_the_provider_is_synced(
+        self, client, app, admin_headers, tmp_path, monkeypatch
+    ):
+        """A deployment binding scim to this provider runs both against one identity source."""
+        from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+        from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
+
+        directory = tmp_path / "directory.json"
+        group = {"id": "g-soc", "name": "SOC Team", "email": "", "description": "From Entra"}
+        directory.write_text(json.dumps({"groups": [group]}), encoding="utf-8")
+        monkeypatch.setenv("DFE_TEST_SYNC_DIRECTORY", str(directory))
+        app.state.settings.auth.source_provider_bindings = {SCIM_SOURCE_PROVIDER: "entra"}
+        app.state.oidc_provider_registry.create(
+            "entra",
+            OIDCProvider(
+                type="entra_id",
+                enabled=True,
+                issuer="https://login.example.com/tenant/v2.0",
+                groups=GroupResolutionConfig(
+                    mode="api",
+                    directory_backend="mock",
+                    mock_directory_env="DFE_TEST_SYNC_DIRECTORY",
+                ),
+            ),
+        )
+        app.state.group_store.create(
+            "soc-team", ["data_analyst"], source_provider=SCIM_SOURCE_PROVIDER, source_id="g-soc"
+        )
+
+        resp = client.post("/api/v1/auth/oidc-providers/entra/sync", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert (body["updated"], body["groups_skipped"], body["status"]) == (1, 0, "ok")
+        stored = app.state.group_store.get("soc-team")
+        assert (stored.source_provider, stored.description) == (SCIM_SOURCE_PROVIDER, "From Entra")
+
+    @pytest.mark.parametrize("provider_type", ["entra_id", "okta"])
+    def test_a_provider_with_no_directory_credential_says_so(
+        self, client, app, admin_headers, provider_type
+    ):
+        from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+        from dfe_engine.auth.oidc.sync import NOT_CONFIGURED_MESSAGE
+
+        app.state.oidc_provider_registry.create(
+            "no-credential",
+            OIDCProvider(
+                type=provider_type,
+                enabled=True,
+                issuer="https://sso.example.com",
+                groups=GroupResolutionConfig(mode="api"),
+            ),
+        )
+
+        resp = client.post("/api/v1/auth/oidc-providers/no-credential/sync", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert (body["skipped"], body["error"], body["total"]) == (NOT_CONFIGURED_MESSAGE, None, 0)
+        assert body["status"] == "not_configured"
+        shown = client.get("/api/v1/auth/oidc-providers/no-credential", headers=admin_headers)
+        assert shown.json()["last_sync_status"] == "not_configured"
+        assert shown.json()["sync_error"] == NOT_CONFIGURED_MESSAGE
+
+    def test_a_google_provider_with_no_service_account_reports_no_error(
+        self, client, app, admin_headers
+    ):
+        """The default Google setup reads each login's groups with the user's token."""
+        from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+
+        app.state.oidc_provider_registry.create(
+            "google-default",
+            OIDCProvider(
+                type="google",
+                enabled=True,
+                issuer="https://accounts.google.com",
+                groups=GroupResolutionConfig(enrich_on_login=True, mode="api"),
+            ),
+        )
+
+        resp = client.post("/api/v1/auth/oidc-providers/google-default/sync", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert (body["status"], body["error"], body["total"]) == ("user_token", None, 0)
+        shown = client.get("/api/v1/auth/oidc-providers/google-default", headers=admin_headers)
+        assert (shown.json()["last_sync_status"], shown.json()["sync_error"]) == ("user_token", "")
+
+    @pytest.mark.parametrize("model", ["ProviderResponse", "OIDCProviderSummary"])
+    def test_the_spec_publishes_every_last_sync_status(self, app, model):
+        """A client learns user_token and the rest from the spec, not from a running engine."""
+        from dfe_engine.auth.oidc.sync import SYNC_NOT_CONFIGURED, SYNC_USER_TOKEN
+
+        field = app.openapi()["components"]["schemas"][model]["properties"]["last_sync_status"]
+
+        fixed, partial = field["anyOf"]
+        assert fixed == {
+            "type": "string",
+            "enum": ["", "ok", "error", "not_configured", "user_token"],
+        }
+        assert {SYNC_NOT_CONFIGURED, SYNC_USER_TOKEN} <= set(fixed["enum"])
+        assert partial == {"type": "string", "pattern": "^partial: "}
 
     def test_the_interval_sync_runs_beside_the_api(self, app, client):
         # It waits a tick before its first run, so it never races the explicit syncs in these tests.
@@ -520,96 +639,27 @@ class TestSyncProvider:
         resp = client.post("/api/v1/auth/oidc-providers/anything/sync", headers=viewer_headers)
         assert resp.status_code == 403
 
-    def test_a_scim_group_bound_to_the_provider_is_refreshed_not_duplicated(
+    def test_a_token_no_header_can_carry_fails_the_sync_and_stays_out_of_the_log(
         self,
         admin_headers: dict[str, str],
         app: FastAPI,
+        audit_events: list[dict],
         client: TestClient,
         monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
     ):
-        app.state.settings.auth.source_provider_bindings = {"scim": "mock-dir"}
-        _link_a_scim_group_to_a_mock_directory(app=app, monkeypatch=monkeypatch, tmp_path=tmp_path)
-
-        resp = client.post("/api/v1/auth/oidc-providers/mock-dir/sync", headers=admin_headers)
-
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
-        assert (body["created"], body["updated"], body["groups_skipped"]) == (0, 1, 0)
-        assert _viewers_groups(app=app) == [("scim-viewers", "From the directory", "scim")]
-
-    @pytest.mark.parametrize(
-        "case", SYNC_PROVIDER_CASES, ids=[case["id"] for case in SYNC_PROVIDER_CASES]
-    )
-    def test_matches_expected(
-        self,
-        admin_headers: dict[str, str],
-        app: FastAPI,
-        client: TestClient,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-        case: SyncProviderCase,
-    ):
-        directory = tmp_path / "sync-directory.json"
-        directory.write_text(
-            json.dumps({"groups": [{"id": "g-ops", "name": "operators"}]}), encoding="utf-8"
-        )
-        monkeypatch.setenv(SYNC_DIRECTORY_ENV, str(directory))
-        app.state.oidc_provider_registry.create(name="sso", provider=case["provider"])
-
-        resp = client.post("/api/v1/auth/oidc-providers/sso/sync", headers=admin_headers)
-
-        assert (resp.status_code, resp.json()) == (200, case["expected_body"])
-
-    @pytest.mark.usefixtures("okta_api_token")
-    def test_a_refused_directory_listing_is_reported(
-        self,
-        admin_headers: dict[str, str],
-        app: FastAPI,
-        client: TestClient,
-        tls_directory: LocalDirectory,
-    ):
-        tls_directory.replies = {
-            "/api/v1/groups?limit=200": make_directory_reply(
-                body=json.dumps({"errorSummary": "Invalid token provided"}), status=401
-            )
-        }
+        monkeypatch.setenv(OKTA_API_TOKEN_ENV, _UNSENDABLE_TOKEN)
         app.state.oidc_provider_registry.create(
-            name="okta-dir", provider=make_okta_directory_provider(okta_domain=tls_directory.host)
+            name="okta-dir", provider=make_okta_directory_provider(okta_domain="acme.okta.com")
         )
 
         resp = client.post("/api/v1/auth/oidc-providers/okta-dir/sync", headers=admin_headers)
 
-        expected_body = {
-            "created": 0,
-            "error": "okta directory: GET '/api/v1/groups' returned HTTP 401: "
-            "'Invalid token provided'",
-            "groups_skipped": 0,
-            "skipped": None,
-            "total": 0,
-            "updated": 0,
-        }
-        assert (resp.status_code, resp.json()) == (200, expected_body)
-
-
-class TestTheIntervalSyncReadsTheBindings:
-    """The background sync takes auth.source_provider_bindings, so it refreshes a SCIM group bound to its provider."""
-
-    @pytest.fixture(autouse=True)
-    def bound_settings(self, api_settings: DFESettings) -> None:
-        """Bind the scim stamp to mock-dir and tick every second, before the app's lifespan builds the scheduler."""
-        api_settings.auth.source_provider_bindings = {"scim": "mock-dir"}
-        api_settings.auth.oidc_group_sync_tick_seconds = 1
-
-    def test_a_scim_group_bound_to_the_provider_is_refreshed_not_duplicated(
-        self, app: FastAPI, client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ):
-        def refreshed() -> bool:
-            return _viewers_groups(app=app) == [("scim-viewers", "From the directory", "scim")]
-
-        _link_a_scim_group_to_a_mock_directory(app=app, monkeypatch=monkeypatch, tmp_path=tmp_path)
-
-        assert _wait_until(condition=refreshed) is True
+        answer = (resp.status_code, resp.json()["status"], resp.json()["error"])
+        leaked = [event for event in audit_events if "api-token" in json.dumps(event, default=str)]
+        assert (answer, leaked) == (
+            (200, "error", credential_failure_message(service="The directory API")),
+            [],
+        )
 
 
 class TestTestProvider:
@@ -632,48 +682,17 @@ class TestTestProvider:
         resp = client.get("/api/v1/auth/oidc-providers/anything/test", headers=viewer_headers)
         assert resp.status_code == 403
 
-    def test_a_token_ending_in_a_newline_connects_and_stays_out_of_the_log(
-        self,
-        admin_headers: dict[str, str],
-        app: FastAPI,
-        client: TestClient,
-        log_lines: list[str],
-        monkeypatch: pytest.MonkeyPatch,
-        tls_directory: LocalDirectory,
-    ):
-        monkeypatch.setenv(OKTA_API_TOKEN_ENV, "test-okta-api-token\n")
-        tls_directory.required_authorization = "SSWS test-okta-api-token"
-        tls_directory.replies = {
-            "/api/v1/groups?limit=1": make_directory_reply(
-                body=json.dumps([{"id": "00g-one", "profile": {"name": "One"}}])
-            )
-        }
-        app.state.oidc_provider_registry.create(
-            name="okta-dir", provider=make_okta_directory_provider(okta_domain=tls_directory.host)
-        )
-
-        resp = client.get("/api/v1/auth/oidc-providers/okta-dir/test", headers=admin_headers)
-
-        expected_body = {
-            "message": "Okta Groups API connection successful -- 1 group(s) returned",
-            "success": True,
-        }
-        leaked = [line for line in log_lines if "test-okta-api-token" in line]
-        assert (resp.status_code, resp.json(), leaked) == (200, expected_body, [])
-
     def test_a_token_no_header_can_carry_stays_out_of_the_answer_and_the_log(
         self,
         admin_headers: dict[str, str],
         app: FastAPI,
+        audit_events: list[dict],
         client: TestClient,
-        log_lines: list[str],
         monkeypatch: pytest.MonkeyPatch,
-        tls_directory: LocalDirectory,
     ):
-        # A line break inside the token survives stripping, and an HTTP header cannot carry it.
-        monkeypatch.setenv(OKTA_API_TOKEN_ENV, "test-okta\napi-token")
+        monkeypatch.setenv(OKTA_API_TOKEN_ENV, _UNSENDABLE_TOKEN)
         app.state.oidc_provider_registry.create(
-            name="okta-dir", provider=make_okta_directory_provider(okta_domain=tls_directory.host)
+            name="okta-dir", provider=make_okta_directory_provider(okta_domain="acme.okta.com")
         )
 
         resp = client.get("/api/v1/auth/oidc-providers/okta-dir/test", headers=admin_headers)
@@ -681,19 +700,39 @@ class TestTestProvider:
         expected_body = {
             "message": "Okta API token holds a character an HTTP header cannot carry: a space, a "
             "control character or a non-ASCII one; re-send 'groups.api_token' to the provider API "
-            "or fix the env var 'DFE_TEST_OKTA_API_TOKEN'",
+            f"or fix the env var {OKTA_API_TOKEN_ENV!r}",
             "success": False,
         }
-        leaked = [line for line in log_lines if "api-token" in line]
+        leaked = [event for event in audit_events if "api-token" in json.dumps(event, default=str)]
         assert (resp.status_code, resp.json(), leaked) == (200, expected_body, [])
+
+
+@pytest.fixture
+def loopback_issuer() -> Iterator[str]:
+    """An issuer URL on a local listener that drops every connection.
+
+    verify-login always fetches the issuer's discovery document, so its tests point the
+    issuer here and dial 127.0.0.1 and nothing else.
+    """
+    listener = CountingListener()
+    try:
+        yield f"http://127.0.0.1:{listener.port}"
+    finally:
+        listener.close()
 
 
 class TestVerifyLoginConfig:
     """GET /api/v1/auth/oidc-providers/{name}/verify-login"""
 
-    def test_reports_missing_client_id(self, client, admin_headers):
+    def test_reports_missing_client_id(self, client, admin_headers, loopback_issuer):
         """An unset client_id env var is flagged, not silently passed."""
-        _create_provider(client, admin_headers, name="vl-missing", client_id_env="OIDC_UNSET_XYZ")
+        _create_provider(
+            client,
+            admin_headers,
+            name="vl-missing",
+            client_id_env="OIDC_UNSET_XYZ",
+            issuer=loopback_issuer,
+        )
         resp = client.get(
             "/api/v1/auth/oidc-providers/vl-missing/verify-login", headers=admin_headers
         )
@@ -703,7 +742,9 @@ class TestVerifyLoginConfig:
         client_id = next(c for c in data["checks"] if c["name"] == "client_id")
         assert client_id["ok"] is False
 
-    def test_reports_literal_client_id_as_misconfiguration(self, client, app, admin_headers):
+    def test_reports_literal_client_id_as_misconfiguration(
+        self, client, app, admin_headers, loopback_issuer
+    ):
         """YAML that stores the client id value instead of an env var name is flagged.
 
         The API refuses that shape now, so the only way in is a file written out
@@ -715,7 +756,7 @@ class TestVerifyLoginConfig:
             "vl-literal-id",
             OIDCProvider(
                 type="generic",
-                issuer="https://accounts.example.com",
+                issuer=loopback_issuer,
                 client_id_env="0oa15mxzztuHEzwr7698",
             ),
         )
@@ -728,9 +769,17 @@ class TestVerifyLoginConfig:
         assert "environment variable name" in client_id["detail"]
         assert "0oa" not in client_id["detail"]
 
-    def test_reports_a_stored_client_secret_as_present(self, client, admin_headers):
+    def test_reports_a_stored_client_secret_as_present(
+        self, client, admin_headers, loopback_issuer
+    ):
         """A secret written through the API satisfies the check without any env var."""
-        _create_provider(client, admin_headers, name="vl-stored", client_secret="rp-secret-value")
+        _create_provider(
+            client,
+            admin_headers,
+            name="vl-stored",
+            client_secret="rp-secret-value",
+            issuer=loopback_issuer,
+        )
         resp = client.get(
             "/api/v1/auth/oidc-providers/vl-stored/verify-login", headers=admin_headers
         )
@@ -739,10 +788,16 @@ class TestVerifyLoginConfig:
         assert check["ok"] is True
         assert "rp-secret-value" not in resp.text
 
-    def test_reports_present_client_id(self, client, admin_headers, monkeypatch):
+    def test_reports_present_client_id(self, client, admin_headers, monkeypatch, loopback_issuer):
         """A resolvable client_id env var passes its check (value never returned)."""
         monkeypatch.setenv("OIDC_PRESENT_ID", "some-client-id")
-        _create_provider(client, admin_headers, name="vl-present", client_id_env="OIDC_PRESENT_ID")
+        _create_provider(
+            client,
+            admin_headers,
+            name="vl-present",
+            client_id_env="OIDC_PRESENT_ID",
+            issuer=loopback_issuer,
+        )
         resp = client.get(
             "/api/v1/auth/oidc-providers/vl-present/verify-login", headers=admin_headers
         )
@@ -753,11 +808,9 @@ class TestVerifyLoginConfig:
         # The secret value must never appear in the response.
         assert "some-client-id" not in resp.text
 
-    def test_discovery_failure_is_reported_not_raised(self, client, admin_headers):
+    def test_discovery_failure_is_reported_not_raised(self, client, admin_headers, loopback_issuer):
         """An unreachable/invalid discovery URL yields ok=False, not a 500."""
-        _create_provider(
-            client, admin_headers, name="vl-baddisco", issuer="https://accounts.example.com"
-        )
+        _create_provider(client, admin_headers, name="vl-baddisco", issuer=loopback_issuer)
         resp = client.get(
             "/api/v1/auth/oidc-providers/vl-baddisco/verify-login", headers=admin_headers
         )
@@ -937,6 +990,157 @@ class TestCredentialsGoToTheSecretStore:
 
         client.delete("/api/v1/auth/oidc-providers/gone", headers=admin_headers)
         assert not app.state.dfe_secrets.exists("oidc/gone/client_secret")
+
+
+# No service account and no admin: a Google provider logs in on the user's own token.
+_GOOGLE = {"type": "google", "issuer": "https://accounts.google.com", "groups": {"mode": "api"}}
+_CLOUD_IDENTITY_SCOPE = "https://www.googleapis.com/auth/cloud-identity.groups.readonly"
+
+
+class TestScopes:
+    """The scopes a provider asks its IdP for: a per-type default, or a validated override."""
+
+    @pytest.mark.parametrize(
+        ("overrides", "expected"),
+        [
+            (_GOOGLE, ["openid", "email", "profile", _CLOUD_IDENTITY_SCOPE]),
+            ({"type": "entra_id"}, ["openid", "email", "profile"]),
+            ({"type": "generic"}, ["openid", "email", "profile", "groups"]),
+            ({"type": "okta"}, ["openid", "email", "profile", "groups"]),
+        ],
+        ids=["google", "entra_id", "generic", "okta"],
+    )
+    def test_create_uses_the_type_default(self, client, app, admin_headers, overrides, expected):
+        resp = _create_provider(client, admin_headers, name="scoped", **overrides)
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["scopes"] == expected
+        stored = app.state.oidc_provider_registry.get("scoped")
+        assert stored.scopes == " ".join(expected)
+
+    def test_google_reaches_the_rp_without_a_groups_scope(self, client, app, admin_headers):
+        _create_provider(client, admin_headers, name="gws", **_GOOGLE)
+        registered = app.state.oidc_rp._oauth.create_client("gws")
+        assert registered.client_kwargs["scope"] == f"openid email profile {_CLOUD_IDENTITY_SCOPE}"
+
+    def test_create_takes_an_override(self, client, app, admin_headers):
+        resp = _create_provider(
+            client,
+            admin_headers,
+            name="custom",
+            type="okta",
+            scopes=["openid", "email", "offline_access", "email"],
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["scopes"] == ["openid", "email", "offline_access"]
+        assert app.state.oidc_provider_registry.get("custom").scopes == (
+            "openid email offline_access"
+        )
+
+    @pytest.mark.parametrize(
+        ("scopes", "field"),
+        [
+            (["email", "profile"], "scopes"),
+            ([], "scopes"),
+            (["openid", "email profile"], "scopes"),
+            (["openid", 'gr"oups'], "scopes"),
+            (["openid", 5], "scopes.1"),
+            ("email profile", "scopes"),
+            ({"openid": True}, "scopes"),
+        ],
+        ids=[
+            "no-openid",
+            "empty",
+            "two-scopes-in-one-entry",
+            "quote",
+            "not-a-string",
+            "string-without-openid",
+            "neither-a-list-nor-a-string",
+        ],
+    )
+    def test_create_refuses_a_bad_override_and_writes_nothing(
+        self, client, admin_headers, api_settings, scopes, field
+    ):
+        written = Path(api_settings.auth.auth_dir) / "oidc-providers"
+        before = sorted(written.rglob("*"))
+        resp = _create_provider(client, admin_headers, name="bad-scopes", scopes=scopes)
+        assert resp.status_code == 422, resp.text
+        assert _field_errors(resp) == [field]
+        assert sorted(written.rglob("*")) == before
+
+    def test_update_replaces_the_scopes(self, client, app, admin_headers):
+        _create_provider(client, admin_headers, name="upd-scopes", **_GOOGLE)
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/upd-scopes",
+            json={"scopes": ["openid", "email"]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["scopes"] == ["openid", "email"]
+        assert app.state.oidc_provider_registry.get("upd-scopes").scopes == "openid email"
+        registered = app.state.oidc_rp._oauth.create_client("upd-scopes")
+        assert registered.client_kwargs["scope"] == "openid email"
+
+    def test_an_update_without_scopes_keeps_them(self, client, app, admin_headers):
+        _create_provider(client, admin_headers, name="keep-scopes", scopes=["openid", "email"])
+        client.put(
+            "/api/v1/auth/oidc-providers/keep-scopes",
+            json={"display_name": "Renamed"},
+            headers=admin_headers,
+        )
+        assert app.state.oidc_provider_registry.get("keep-scopes").scopes == "openid email"
+
+    def test_a_space_separated_string_is_taken_as_the_scopes(self, client, app, admin_headers):
+        resp = _create_provider(
+            client,
+            admin_headers,
+            name="str-scopes",
+            type="okta",
+            scopes="openid  email offline_access",
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["scopes"] == ["openid", "email", "offline_access"]
+        assert app.state.oidc_provider_registry.get("str-scopes").scopes == (
+            "openid email offline_access"
+        )
+
+    def test_a_form_can_send_the_stored_scopes_string_back(self, client, app, admin_headers):
+        # The setup status serves the provider model, whose scopes are one string.
+        _create_provider(client, admin_headers, name="round-trip", scopes=["openid", "email"])
+        stored = app.state.oidc_provider_registry.get("round-trip").scopes
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/round-trip",
+            json={"display_name": "Renamed", "scopes": stored},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["scopes"] == ["openid", "email"]
+
+    def test_a_blank_string_is_no_override(self, client, app, admin_headers):
+        resp = _create_provider(client, admin_headers, name="blank-scopes", scopes="  ")
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["scopes"] == ["openid", "email", "profile", "groups"]
+        client.put(
+            "/api/v1/auth/oidc-providers/blank-scopes",
+            json={"scopes": "openid email"},
+            headers=admin_headers,
+        )
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/blank-scopes", json={"scopes": ""}, headers=admin_headers
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["scopes"] == ["openid", "email"]
+
+    def test_update_refuses_scopes_without_openid(self, client, app, admin_headers):
+        _create_provider(client, admin_headers, name="upd-bad-scopes")
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/upd-bad-scopes",
+            json={"scopes": ["email", "profile", "groups"]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422, resp.text
+        assert _field_errors(resp) == ["scopes"]
+        stored = app.state.oidc_provider_registry.get("upd-bad-scopes")
+        assert stored.scopes == "openid email profile groups"
 
 
 class TestEnvNameFieldsRejectPastedSecrets:
@@ -1148,14 +1352,17 @@ class TestProviderFieldRules:
             name="gws",
             type="google",
             issuer="https://accounts.google.com",
-            groups={
-                "admin_email": "admin@acme.com",
-                "mode": "api",
-                "service_account_json_env": "GOOGLE_SA_JSON",
-            },
+            groups={"mode": "api", "service_account_json_env": "GOOGLE_SA_JSON"},
         )
         assert resp.status_code == 201, resp.text
         assert resp.json()["groups"]["enrich_on_login"] is True
+
+    def test_google_needs_no_service_account_and_names_no_admin(self, client, app, admin_headers):
+        resp = _create_provider(client, admin_headers, name="gws-bare", **_GOOGLE)
+        assert resp.status_code == 201, resp.text
+        assert "admin_email" not in resp.json()["groups"]
+        stored = app.state.oidc_provider_registry.get("gws-bare").groups
+        assert (stored.service_account_json_path, stored.service_account_json_env) == ("", "")
 
     def test_an_update_is_not_refused_for_an_issuer_it_cannot_set(self, client, app, admin_headers):
         from dfe_engine.auth.oidc.models import OIDCProvider

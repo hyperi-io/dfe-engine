@@ -65,7 +65,7 @@ from dfe_engine.api.deps import (
     get_source_registry,
     require_action,
 )
-from dfe_engine.api.errors import ErrorResponse
+from dfe_engine.api.errors import ErrorResponse, backend_failure
 from dfe_engine.api.v1.app_contracts import read_contract
 from dfe_engine.api.v1.helm import conflict_error
 from dfe_engine.api.v1.sampler import check_sample_scope, sample_org_scope
@@ -733,6 +733,11 @@ def _deploy_target(request: Request) -> DeployTarget:
     return DeployTarget(request.app.state.settings.deployment.target)
 
 
+def _chart_deployed(request: Request) -> bool:
+    """Whether a chart deploys the apps, which is what sets their deployment-owned paths."""
+    return _deploy_target(request) is not DeployTarget.DOCKER
+
+
 def _resolve(service: str, instance: str) -> AppInstance:
     """Validate the identity, or map the failure to a 400/404."""
     try:
@@ -1146,7 +1151,9 @@ def get_app_config(
     def _protected(path: str) -> bool:
         return policy.is_protected(_CLASS, name, path) if policy is not None else False
 
-    view = contract.resolve_config(found, doc, is_protected=_protected)
+    view = contract.resolve_config(
+        found, doc, is_protected=_protected, chart_deployed=_chart_deployed(request)
+    )
     return AppConfigResponse(
         etag=_etag(gc),
         available=view.available,
@@ -1195,14 +1202,32 @@ def _refuse(status: int, code: str, path: str, message: str) -> HTTPException:
     return HTTPException(status, detail={"code": code, "path": path, "message": message})
 
 
+def _table_name_taken(exc: files.TableNameTakenError) -> HTTPException:
+    """A 409 naming both files, since either one can be renamed to resolve it."""
+    return HTTPException(
+        409,
+        detail={
+            "code": "table_name_taken",
+            "message": str(exc),
+            "files": [exc.existing, exc.name],
+        },
+    )
+
+
 def _checked_changes(
-    service: str, found: contract.AppContract, changes: dict[str, Any], doc: dict
+    service: str,
+    found: contract.AppContract,
+    changes: dict[str, Any],
+    doc: dict,
+    *,
+    chart_deployed: bool = True,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Split a request into config paths and environment keys, refusing what the app would.
 
     Every refusal happens here, before the overlay document is touched at all, so
     a rejected write leaves the deploy repo on the revision the caller read.
-    ``doc`` is the overlay as read, which decides what its chart sets.
+    ``doc`` is the overlay as read, which decides what its chart sets, and
+    ``chart_deployed`` whether a chart sets anything at all.
 
     A `config.*` path the contract does not declare is carried through unchecked:
     there is nothing to check it against, and the read route already reports such
@@ -1225,14 +1250,15 @@ def _checked_changes(
             reason = contract.check_env_value(value)
             if reason:
                 raise _refuse(400, "invalid_env_value", path, reason)
-            decides = contract.chart_env_names(service, doc).get(key)
+            names = contract.chart_env_names(service, doc, chart_deployed=chart_deployed)
+            decides = names.get(key)
             if decides:
                 raise _refuse(
                     409,
                     "chart_set_env",
                     path,
-                    f"the {service} chart sets {key} itself, for {decides}, and its "
-                    "value is rendered last, so writing it here would change nothing",
+                    f"the {service} deployment sets {key} itself, for {decides}. Change "
+                    "it where the deployment sets it, not in one instance's overlay",
                 )
             env_changes[key] = value
             continue
@@ -1244,14 +1270,14 @@ def _checked_changes(
                 f"a change addresses {appconfig.CONFIG_ROOT}.<option> or "
                 f"{appconfig.ENV_ROOT}.<NAME>",
             )
-        supplier = contract.chart_supplier(service, path, doc)
+        supplier = contract.chart_supplier(service, path, doc, chart_deployed=chart_deployed)
         if supplier:
             raise _refuse(
                 409,
                 "chart_derived",
                 path,
-                f"the deployment sets this through {supplier}, which outranks the "
-                "overlay, so writing it here would change nothing",
+                f"the deployment decides this through {supplier}. Change it there, "
+                "not in one instance's overlay",
             )
         option = options.get(path)
         if option is not None:
@@ -1330,7 +1356,11 @@ def set_app_config(
     doc = _overlay(gc, app)
     _require_fresh(gc, if_match)
     config_changes, env_changes = _checked_changes(
-        service, read_contract(service), _restored(doc, body.changes), doc
+        service,
+        read_contract(service),
+        _restored(doc, body.changes),
+        doc,
+        chart_deployed=_chart_deployed(request),
     )
     if not config_changes and not env_changes:
         return ConfigWriteResult(changed=False)
@@ -1542,6 +1572,8 @@ def link_app_file(
         )
     except (links.ArtifactNotLinkableError, InvalidFilenameError) as exc:
         raise HTTPException(400, detail={"code": "not_linkable", "message": str(exc)}) from exc
+    except files.TableNameTakenError as exc:
+        raise _table_name_taken(exc) from exc
     except library.TagNotFoundError as exc:
         raise HTTPException(
             404, detail={"code": "no_such_tag", "message": f"no tag {exc.args[0]!r}"}
@@ -1655,7 +1687,10 @@ def copy_app_files(
         if candidate.name in existing and not body.overwrite:
             skipped.append(candidate.name)
             continue
-        files.upsert_file(target_doc, fs, candidate.name, candidate.content)
+        try:
+            files.upsert_file(target_doc, fs, candidate.name, candidate.content)
+        except files.TableNameTakenError as exc:
+            raise _table_name_taken(exc) from exc
         copied.append(candidate.name)
 
     if not copied:
@@ -1818,6 +1853,8 @@ def _write_app_file(
         raise HTTPException(400, detail={"code": "invalid_filename", "message": str(exc)}) from exc
     except InvalidContentError as exc:
         raise HTTPException(400, detail={"code": "invalid_content", "message": str(exc)}) from exc
+    except files.TableNameTakenError as exc:
+        raise _table_name_taken(exc) from exc
     reported = _validation_model(checked)
     if not changed:
         return WriteResult(changed=False, reload=str(fs.reload), validation=reported)
@@ -2112,6 +2149,17 @@ def _reader(request: Request, client: Any) -> OperationalReader:
     return OperationalReader(client, settings.clickhouse.effective_data_database)
 
 
+def metrics_unavailable(exc: MetricsUnavailableError) -> HTTPException:
+    """The 503 for an otel read ClickHouse refused, its text logged rather than sent."""
+    return backend_failure(
+        503,
+        "metrics_unavailable",
+        "the telemetry tables could not be read; the engine log has ClickHouse's reason",
+        exc,
+        event="otel query failed",
+    )
+
+
 @router.get("/{service}/{instance}/status")
 def get_status(
     service: str, instance: str, user: CurrentUser, request: Request, client: ClickHouseClient
@@ -2122,9 +2170,7 @@ def get_status(
     try:
         status = _reader(request, client).status(app.telemetry_name)
     except MetricsUnavailableError as exc:
-        raise HTTPException(
-            503, detail={"code": "metrics_unavailable", "message": str(exc)}
-        ) from exc
+        raise metrics_unavailable(exc) from exc
     return StatusResponse(
         telemetry_name=status.telemetry_name,
         reporting=status.reporting,
@@ -2144,9 +2190,7 @@ def get_metrics(
     try:
         found = _reader(request, client).metrics(app.telemetry_name)
     except MetricsUnavailableError as exc:
-        raise HTTPException(
-            503, detail={"code": "metrics_unavailable", "message": str(exc)}
-        ) from exc
+        raise metrics_unavailable(exc) from exc
     return MetricsResponse(
         telemetry_name=found.telemetry_name,
         window_seconds=found.window_seconds,
@@ -2180,9 +2224,7 @@ def get_resource_series(
             app.telemetry_name, window_seconds=window, bucket_seconds=bucket
         )
     except MetricsUnavailableError as exc:
-        raise HTTPException(
-            503, detail={"code": "metrics_unavailable", "message": str(exc)}
-        ) from exc
+        raise metrics_unavailable(exc) from exc
     return ResourceSeriesResponse(
         telemetry_name=app.telemetry_name,
         window_seconds=window,

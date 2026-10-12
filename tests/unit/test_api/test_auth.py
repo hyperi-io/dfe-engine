@@ -52,6 +52,31 @@ class TestLogin:
         )
         assert resp.status_code == 401
 
+    @pytest.mark.parametrize("username", ["admin", "nobody"])
+    def test_a_password_longer_than_bcrypt_takes_answers_as_a_wrong_one(
+        self, client: TestClient, username: str
+    ):
+        wrong = client.post("/api/v1/auth/login", json={"username": username, "password": "wrong"})
+        long = client.post("/api/v1/auth/login", json={"username": username, "password": "x" * 73})
+
+        assert long.status_code == 401, long.text
+        assert long.json() == wrong.json()
+
+    def test_the_first_72_bytes_never_authenticate_a_longer_password(self, app, client):
+        """bcrypt stops at 72 bytes, so a candidate that only starts with the password must fail."""
+        password = "p" * 72
+        app.state.account_store.create("seventy-two", password)
+
+        exact = client.post(
+            "/api/v1/auth/login", json={"username": "seventy-two", "password": password}
+        )
+        longer = client.post(
+            "/api/v1/auth/login", json={"username": "seventy-two", "password": password + "!"}
+        )
+
+        assert exact.status_code == 200, exact.text
+        assert longer.status_code == 401, longer.text
+
     def test_login_all_roles(self, client: TestClient):
         """All three local accounts should authenticate."""
         for user, pw in [
@@ -478,9 +503,10 @@ def _bearer(api_settings, sub: str, **claims) -> dict[str, str]:
 
 
 def _link(app, *names: str) -> None:
-    """Link each group to what an IdP that sends group names asserts for it: its name."""
+    """Link each group, for the gateway's provider, to what an IdP sending names asserts: its name."""
+    provider = app.state.settings.auth.proxy_provider
     for name in names:
-        app.state.group_store.update(name, source_id=name)
+        app.state.group_store.update(name, source_provider=provider, source_id=name)
 
 
 class TestRolesFollowTheBoundAccount:
@@ -819,7 +845,7 @@ class TestAMemberSeesTheGroupsItHolds:
         """Entra asserts object GUIDs, which the sync records as the group's source_id."""
         guid = "7b1d0f3e-0000-4000-8000-000000000001"
         app.state.group_store.create("entra-analysts", ["data_analyst"])
-        app.state.group_store.update("entra-analysts", source_id=guid)
+        app.state.group_store.update("entra-analysts", source_provider="oidc", source_id=guid)
         headers = {"X-Oidc-Subject": "nia@example.com", "X-Oidc-Groups": guid}
 
         assert _listed(client, headers) == ["entra-analysts"]
@@ -842,7 +868,9 @@ class TestAMemberSeesTheGroupsItHolds:
     ):
         """An API key's groups are names an operator chose, so the name decides first."""
         app.state.group_store.create("shadow-analysts", ["admin"])
-        app.state.group_store.update("shadow-analysts", source_id="dfe-analysts")
+        app.state.group_store.update(
+            "shadow-analysts", source_provider="oidc", source_id="dfe-analysts"
+        )
         _, key = app.state.api_key_store.create("ci-analyst", groups=["dfe-analysts"])
         headers = {"X-API-Key": key}
 
@@ -859,7 +887,9 @@ class TestAMemberSeesTheGroupsItHolds:
     ):
         """A group of the asserted name is not the IdP's; the group linked to that id is."""
         app.state.group_store.create("linked-analysts", ["data_viewer"])
-        app.state.group_store.update("linked-analysts", source_id="dfe-analysts")
+        app.state.group_store.update(
+            "linked-analysts", source_provider="oidc", source_id="dfe-analysts"
+        )
         headers = {"X-Oidc-Subject": "nia@example.com", "X-Oidc-Groups": "dfe-analysts"}
 
         listed = _listed(client, headers)

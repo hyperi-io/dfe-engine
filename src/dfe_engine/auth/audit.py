@@ -19,9 +19,9 @@ Event naming convention: ``auth.<domain>.<outcome>``
 - Denied/failure events: ``logger.warning``
 """
 
-from __future__ import annotations
-
 from scalo.logger import logger
+
+from dfe_engine.http_errors import describe_http_error
 
 
 def audit_login_success(
@@ -122,19 +122,24 @@ def audit_account_change(
     admin_id: str,
     target_user: str,
     change: str,
+    details: dict | None = None,
 ) -> None:
-    """Emit an audit event for a local account create/update/delete.
+    """Emit an audit event for a local account change.
 
     Args:
-        admin_id: Identity of the admin performing the change.
+        admin_id: Identity of the caller making the change; the account's own
+            identity when the owner changes it.
         target_user: Username of the affected account.
-        change: One of ``"created"``, ``"updated"``, ``"deleted"``.
+        change: What happened, e.g. ``"created"``, ``"updated"``, ``"deleted"``,
+            ``"password_reset"``.
+        details: Optional structured details. Never a password or a hash.
     """
     logger.info(
         f"auth.account.{change}",
         admin_id=admin_id,
         target_user=target_user,
         change=change,
+        details=details,
     )
 
 
@@ -142,19 +147,23 @@ def audit_group_change(
     admin_id: str,
     group_name: str,
     change: str,
+    details: dict | None = None,
 ) -> None:
-    """Emit an audit event for a group create/update/delete.
+    """Emit an audit event for a group change.
 
     Args:
         admin_id: Identity of the admin performing the change.
         group_name: Name of the affected group.
-        change: One of ``"created"``, ``"updated"``, ``"deleted"``.
+        change: What happened, e.g. ``"created"``, ``"updated"``, ``"deleted"``,
+            ``"member_added"``.
+        details: Optional structured details, e.g. the roles or member involved.
     """
     logger.info(
         f"auth.group.{change}",
         admin_id=admin_id,
         group_name=group_name,
         change=change,
+        details=details,
     )
 
 
@@ -163,14 +172,16 @@ def audit_api_key_change(
     key_name: str,
     short_token: str,
     change: str,
+    details: dict | None = None,
 ) -> None:
     """Emit an audit event for an API key create/revoke.
 
     Args:
         admin_id: Identity of the admin performing the change.
         key_name: Human-readable name of the API key.
-        short_token: First 16 characters of the token for correlation (safe to log).
+        short_token: The key's public lookup token, never the secret half of the key.
         change: One of ``"created"``, ``"revoked"``.
+        details: Optional structured details. Never the full key or its hash.
     """
     logger.info(
         f"auth.api_key.{change}",
@@ -178,6 +189,30 @@ def audit_api_key_change(
         key_name=key_name,
         short_token=short_token,
         change=change,
+        details=details,
+    )
+
+
+def audit_role_change(
+    admin_id: str,
+    role_name: str,
+    change: str,
+    details: dict | None = None,
+) -> None:
+    """Emit an audit event for an RBAC role create/update/delete.
+
+    Args:
+        admin_id: Identity of the admin performing the change.
+        role_name: Name of the affected role.
+        change: One of ``"created"``, ``"updated"``, ``"deleted"``.
+        details: Optional structured details, e.g. the permissions the role now grants.
+    """
+    logger.info(
+        f"auth.role.{change}",
+        admin_id=admin_id,
+        role_name=role_name,
+        change=change,
+        details=details,
     )
 
 
@@ -200,27 +235,6 @@ def audit_org_change(
     )
 
 
-def audit_org_ch_provisioned(org_name: str, ch_user: str, databases: list[str]) -> None:
-    """Emit an audit event when a ClickHouse user is created for an org.
-
-    Args:
-        org_name: Name of the org being provisioned.
-        ch_user: ClickHouse username created.
-        databases: List of databases the user was granted access to.
-    """
-    logger.info("org.ch.user_created", org_name=org_name, ch_user=ch_user, databases=databases)
-
-
-def audit_org_ch_failed(org_name: str, error: str) -> None:
-    """Emit an audit event when ClickHouse provisioning fails for an org.
-
-    Args:
-        org_name: Name of the org that failed provisioning.
-        error: Error description.
-    """
-    logger.warning("org.ch.provision_failed", org_name=org_name, error=error)
-
-
 def audit_org_hyperdx_provisioned(org_name: str, team_id: str) -> None:
     """Emit an audit event when a HyperDX team is created for an org.
 
@@ -231,14 +245,19 @@ def audit_org_hyperdx_provisioned(org_name: str, team_id: str) -> None:
     logger.info("org.hyperdx.team_created", org_name=org_name, team_id=team_id)
 
 
-def audit_org_hyperdx_failed(org_name: str, error: str) -> None:
+def audit_org_hyperdx_failed(org_name: str, exc: BaseException | None = None) -> None:
     """Emit an audit event when HyperDX provisioning fails for an org.
+
+    The event carries the failure's class, HTTP status and error code, never its
+    text: the text names the request URL.
 
     Args:
         org_name: Name of the org that failed provisioning.
-        error: Error description.
+        exc: The failure the HyperDX call raised, or None when HyperDX answered
+            with no team.
     """
-    logger.warning("org.hyperdx.provision_failed", org_name=org_name, error=error)
+    failure = describe_http_error(exc) if exc is not None else {"reason": "no_team"}
+    logger.warning("org.hyperdx.provision_failed", org_name=org_name, **failure)
 
 
 def audit_jit_account_created(
@@ -278,17 +297,19 @@ def audit_jit_groups_updated(user_id: str, added: list[str], removed: list[str])
 
 
 def audit_jit_login_refused(user_id: str, source_provider: str, reason: str) -> None:
-    """Emit an audit event when an OIDC login is refused over an account collision.
+    """Emit an audit event when an OIDC login is refused.
 
     Warning level: the IdP asserted a subject that resolves onto a local account,
-    a recovery credential, or another provider's or another subject's account, so
-    an operator needs to see it whether it is a misconfiguration or an attempt.
+    a recovery credential, or another provider's or another subject's account, or
+    one that would hold no role, so an operator needs to see it whether it is a
+    misconfiguration or an attempt.
 
     Args:
         user_id: The IdP-asserted subject that was refused.
         source_provider: OIDC provider name that asserted it.
         reason: ``protected_account``, ``local_account``, ``provider_mismatch``,
-            ``subject_mismatch`` or ``api_key_subject``.
+            ``subject_mismatch``, ``api_key_subject``, ``account_disabled``,
+            ``account_blocked`` or ``no_role_granted``.
     """
     logger.warning(
         "auth.jit.login_refused",
@@ -319,14 +340,18 @@ def audit_jit_hdx_invited(user_id: str, team_name: str) -> None:
     logger.info("auth.jit.hdx_invited", user_id=user_id, team_name=team_name)
 
 
-def audit_jit_failed(user_id: str, error: str) -> None:
+def audit_jit_failed(user_id: str, exc: BaseException) -> None:
     """Emit an audit event when JIT provisioning fails.
+
+    The event carries the failure's class and, where it has one, its HTTP status and
+    error code. The text of the exception is left out: it names the paths and URLs
+    the failed call touched.
 
     Args:
         user_id: Identity for which provisioning failed.
-        error: Error description.
+        exc: The failure provisioning raised.
     """
-    logger.warning("auth.jit.provision_failed", user_id=user_id, error=error)
+    logger.warning("auth.jit.provision_failed", user_id=user_id, **describe_http_error(exc))
 
 
 def audit_resource_change(

@@ -6,228 +6,371 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
+"""Google Workspace group adapter.
+
+Google puts no groups in its tokens, so a login's groups come from a directory
+lookup. By default that lookup runs as the user: the login asks for the
+``cloud-identity.groups.readonly`` scope and the adapter reads the user's own
+groups from the Cloud Identity Groups API with their access token. That needs
+nothing from the customer's Workspace admin.
+
+A service account is optional. When ``service_account_json`` is configured, the
+service account reads the Admin SDK Directory API as itself, never as an
+impersonated user, which needs the org's admin to have assigned it a groups
+admin role. It runs the group sync and the connection test, and answers a login
+the user's token could not.
+
+Both paths name a group by its directory id: the Directory API ``id``, and the
+Cloud Identity resource name with its ``groups/`` prefix removed. Group files
+link on that id, never on the group email, which an admin can rename.
+"""
 
 import asyncio
+import functools
 import json
-from typing import Any
-from urllib.parse import urlsplit
+from typing import TYPE_CHECKING, Any
 
-from pydantic import ValidationError
+import httpx
 from scalo.logger import logger
 
 from dfe_engine.auth.oidc.adapters.base import (
-    DIRECTORY_SUMMARY_LIMIT,
-    DirectoryError,
+    DirectoryCredentialError,
+    DirectoryCredentialUnreadableError,
+    DirectoryNotConfiguredError,
+    DirectoryPageLimitError,
+    NoDirectoryListingError,
     OIDCGroupAdapter,
 )
-from dfe_engine.auth.oidc.credential_env import resolve_credential
-from dfe_engine.auth.oidc.models import GroupInfo
+from dfe_engine.auth.oidc.credential_env import (
+    ResolvedCredential,
+    resolve_credential,
+    unreadable_credential_message,
+)
+from dfe_engine.auth.oidc.models import GroupInfo, OIDCProvider
+from dfe_engine.http_errors import describe_http_error, http_failure_message
+
+if TYPE_CHECKING:
+    from dfe_engine.secrets import DfeSecrets
 
 # Google Admin SDK scope for read-only group directory access.
 _DIRECTORY_SCOPE = "https://www.googleapis.com/auth/admin.directory.group.readonly"
 
+_GROUP_RESOURCE_PREFIX = "groups/"
 
-def _describe_google_error(*, exc: BaseException) -> str:
-    """Describe an Admin SDK, token or transport failure without its text, which can carry the token endpoint's whole body.
+# Every Google group carries this label: a transitive search must filter on it and a direct search may not, so direct results are filtered here.
+_GOOGLE_GROUP_LABEL = "cloudidentity.googleapis.com/groups.discussion_forum"
 
-    An Admin SDK refusal is its HTTP status and Google's bounded reason, a token refusal the endpoint's bounded error and description and anything else its exception type.
-    """
-    from google.auth.exceptions import RefreshError
-    from googleapiclient.errors import HttpError
 
-    if isinstance(exc, HttpError):
-        status = f"HTTP {exc.resp.status}"
-        reason = exc.reason[:DIRECTORY_SUMMARY_LIMIT] if isinstance(exc.reason, str) else ""
-        return f"{status}: {reason!r}" if reason else status
-    if isinstance(exc, RefreshError):
-        # The first argument is the token endpoint's error and description; the second is its whole body.
-        first = exc.args[0] if exc.args else None
-        summary = first[:DIRECTORY_SUMMARY_LIMIT] if isinstance(first, str) else ""
-        failed = "the service account token request failed"
-        return f"{failed}: {summary!r}" if summary else failed
-    return type(exc).__name__
+def _cel_string(value: str) -> str:
+    """*value* as a single-quoted CEL string literal; an email may legally hold a quote."""
+    escaped = value.replace("\\", "\\\\").replace("'", "\\'")
+    return f"'{escaped}'"
+
+
+def _is_google_group(item: object) -> bool:
+    """Whether one membership search result carries the label every Google group has."""
+    labels = item.get("labels") if isinstance(item, dict) else None
+    return isinstance(labels, dict) and _GOOGLE_GROUP_LABEL in labels
+
+
+def _group_from_relation(item: object) -> GroupInfo | None:
+    """The group one Cloud Identity search result names, or None when it carries no ``groups/<id>`` name."""
+    if not isinstance(item, dict):
+        return None
+    resource = str(item.get("group") or "")
+    group_id = resource.removeprefix(_GROUP_RESOURCE_PREFIX)
+    if group_id == resource or not group_id or "/" in group_id:
+        return None
+    group_key = item.get("groupKey")
+    email = str(group_key.get("id") or "") if isinstance(group_key, dict) else ""
+    return GroupInfo(
+        description=str(item.get("description") or ""),
+        email=email,
+        id=group_id,
+        name=str(item.get("displayName") or email or group_id),
+    )
 
 
 class GoogleAdapter(OIDCGroupAdapter):
-    """Resolves Google Workspace group IDs/emails to display names via Admin SDK.
+    """Google Workspace groups: Cloud Identity as the user, else the Directory API as a service account.
 
-    Requires a service account with domain-wide delegation configured for the
-    admin.directory.group.readonly scope. The service account JSON resolves from
-    provider.groups.service_account_json_path in the DfeSecrets seam, falling
-    back to the env var named in service_account_json_env.
-
-    Falls back gracefully when credentials are missing or the API is unavailable: the login-path methods return safe empty/identity values rather than raising. ``list_all_groups`` raises :class:`DirectoryError` instead, so a group sync reports the failure.
+    Every method but ``list_all_groups`` fails closed: missing credentials or a
+    refused call yield no groups, never an exception. ``list_all_groups`` is not on
+    the login path and raises when no service account is configured, when the one
+    configured does not build a client and when the Directory API refuses it.
     """
+
+    CLOUD_IDENTITY_BASE = "https://cloudidentity.googleapis.com/v1"
+
+    def __init__(
+        self,
+        provider: OIDCProvider,
+        *,
+        access_token: str = "",
+        secrets: DfeSecrets | None = None,
+    ) -> None:
+        """Keep the login's access token, which Cloud Identity reads the user's own groups with."""
+        super().__init__(provider, secrets=secrets)
+        self._access_token = access_token
 
     # ------------------------------------------------------------------
     # Public async interface
     # ------------------------------------------------------------------
 
-    async def resolve_groups(self, group_ids: list[str]) -> dict[str, str]:
-        """Resolve Google group IDs or emails to display names via Admin SDK.
+    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo]:
+        """Return the groups the user with email *directory_id* belongs to.
 
-        Args:
-            group_ids: Group email addresses or unique IDs from OIDC token claims.
+        Asks Cloud Identity with the user's own access token first. Only when
+        that cannot answer - no token, or the call was refused or failed - does
+        a configured service account ask the Directory API. A user token that
+        answers with no groups is the answer: it does not fall through.
 
         Returns:
-            Mapping of {group_id: display_name}. Falls back to {id: id} for any
-            group that could not be resolved, and for all groups when credentials
-            are missing or the API call fails.
-        """
-        if not group_ids:
-            return {}
-
-        service = self._get_service()
-        if service is None:
-            # No credentials -- return identity map so callers still have usable keys
-            return {g: g for g in group_ids}
-
-        try:
-            all_groups = await asyncio.to_thread(self._fetch_all_groups_sync, service)
-        except Exception as exc:
-            logger.warning(
-                "Google Admin SDK group fetch failed -- using identity fallback",
-                provider=self._provider.issuer,
-                error=_describe_google_error(exc=exc),
-            )
-            return {g: g for g in group_ids}
-
-        # Build a lookup by both email and id
-        lookup: dict[str, str] = {}
-        for group in all_groups:
-            lookup[group["id"]] = group["name"]
-            if group.get("email"):
-                lookup[group["email"]] = group["name"]
-
-        return {g: lookup.get(g, g) for g in group_ids}
-
-    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo]:
-        """Return the groups a user belongs to via the Directory API.
-
-        Google never puts group membership in the id_token, so this login-time
-        enrichment is the ONLY way to know a Google user's groups. Calls
-        ``groups().list(userKey=...)`` - ``userKey`` accepts the user's primary
-        email or their immutable id, so the RP can pass either.
-
-        Requires the same read-only domain-wide-delegation service account as the
-        other methods (``admin.directory.group.readonly``). Fails open: missing
-        credentials or an API error returns ``[]`` (default deny), never raises.
+            The user's groups keyed by directory id, or ``[]`` (default deny)
+            when no path could answer.
         """
         if not directory_id:
             return []
-
-        service = self._get_service()
-        if service is None:
-            return []
-
-        try:
-            raw = await asyncio.to_thread(self._fetch_user_groups_sync, service, directory_id)
-        except Exception as exc:
-            logger.warning(
-                "Google Admin SDK resolve_user_groups failed -- default deny",
-                provider=self._provider.issuer,
-                error=_describe_google_error(exc=exc),
-            )
-            return []
-
-        return [GroupInfo(id=g["id"], name=g["name"], email=g.get("email", "")) for g in raw]
+        if self._access_token:
+            groups = await self._groups_with_user_token(email=directory_id)
+            if groups is not None:
+                return groups
+        return await self._groups_with_service_account(user_key=directory_id)
 
     async def list_all_groups(self) -> list[GroupInfo]:
-        """List every group in the configured Google Workspace domain via the Admin SDK, following each page token.
+        """List every group in ``groups.domain`` through the service account.
 
-        Raises :class:`DirectoryError` when the service account is missing or does not load and when any page fails, so no partial listing is returned.
-        """
-        service = self._get_service()
-        if service is None:
-            if self._service_account_json():
-                detail = "the service account JSON does not load; the reason is in the engine log"
-            else:
-                env = self._provider.groups.service_account_json_env
-                where = (
-                    f"the env var {env!r}"
-                    if env
-                    else "an env var named in 'groups.service_account_json_env'"
-                )
-                detail = (
-                    "no service account; send 'groups.service_account_json' to the provider API "
-                    f"or set {where}"
-                )
-            raise DirectoryError(detail=detail, provider_type=self._provider.type)
-        return await self._list_groups(service=service)
-
-    async def test_connection(self) -> tuple[bool, str]:
-        """Test connectivity to the Google Admin SDK.
-
-        Performs a minimal groups.list call (maxResults=1) to verify that
-        credentials are valid and domain-wide delegation is working.
+        A user token reaches only that user's own groups, so without a service
+        account there is nothing to enumerate: link group files by directory id
+        instead.
 
         Returns:
-            (True, "OK") on success, or (False, error_message) on failure.
+            List of GroupInfo.
+
+        Raises:
+            NoDirectoryListingError: No service account is configured, which is the
+                default: each login reads its own groups with the user's token.
+            DirectoryNotConfiguredError: A service account is configured but
+                resolves to nothing.
+            DirectoryCredentialUnreadableError: The service account's secret store
+                did not answer or refused.
+            DirectoryCredentialError: A service account is configured but does not
+                build a client. ``_get_service`` logs why.
+            DirectoryPageLimitError: Google still handed out a page token at the
+                page limit.
+            Exception: Whatever the Directory API client raised. A failed listing
+                is never returned as an empty one: group sync would record it as a
+                directory with no groups.
         """
         service = self._get_service()
         if service is None:
-            if not self._service_account_json():
-                return False, (
-                    "Service account not configured (send it as "
-                    "'groups.service_account_json' to the provider API, or set "
-                    "groups.service_account_json_env)"
-                )
+            groups = self._provider.groups
+            if not (groups.service_account_json_path) and not (groups.service_account_json_env):
+                raise NoDirectoryListingError
+            service_account = self._service_account_json
+            if service_account.unreadable:
+                raise DirectoryCredentialUnreadableError(refused=service_account.refused)
+            if not service_account.value:
+                raise DirectoryNotConfiguredError
+            raise DirectoryCredentialError
+
+        raw = await asyncio.to_thread(self._fetch_all_groups_sync, service)
+        return [GroupInfo(id=g["id"], name=g["name"], email=g.get("email", "")) for g in raw]
+
+    async def test_connection(self) -> tuple[bool, str]:
+        """Probe the Directory API as the service account, when one is configured.
+
+        Returns:
+            (True, message) when the probe succeeds or there is no service
+            account to probe, else (False, error_message).
+        """
+        groups = self._provider.groups
+        if not (groups.service_account_json_path) and not (groups.service_account_json_env):
+            return True, (
+                "No service account configured: each login reads that user's groups "
+                "from Cloud Identity with the user's own token, so there is no "
+                "directory credential to test"
+            )
+        service_account = self._service_account_json
+        if service_account.unreadable:
+            return False, unreadable_credential_message(
+                credential="Google service account JSON", refused=service_account.refused
+            )
+        if not service_account.value:
+            return False, (
+                "A service account is configured but resolves to nothing: send it as "
+                "'groups.service_account_json' to the provider API, or set the env var "
+                "named in groups.service_account_json_env"
+            )
+        service = self._get_service()
+        if service is None:
             return False, "Failed to build service from the configured service account JSON"
 
         try:
             await asyncio.to_thread(self._probe_sync, service)
             return True, "OK"
         except Exception as exc:
-            error = _describe_google_error(exc=exc)
             logger.warning(
                 "Google Admin SDK test_connection failed",
+                operation="test_connection",
                 provider=self._provider.issuer,
-                error=error,
+                **describe_http_error(exc),
             )
-            return False, f"Google Admin SDK connection failed: {error}"
+            return False, http_failure_message(exc, service="Google Admin SDK")
 
     # ------------------------------------------------------------------
-    # Group listing
+    # Cloud Identity, as the user
     # ------------------------------------------------------------------
 
-    async def _list_groups(self, *, service: Any) -> list[GroupInfo]:
-        """List every group *service* returns, raising :class:`DirectoryError` when the Admin SDK call fails."""
-        from google.auth.exceptions import GoogleAuthError, RefreshError
-        from googleapiclient.errors import HttpError
-        from httplib2 import HttpLib2Error
+    async def _groups_with_user_token(self, *, email: str) -> list[GroupInfo] | None:
+        """The user's groups from Cloud Identity, or None when Cloud Identity could not answer.
 
-        provider_type = self._provider.type
+        Transitive search also names the groups the user holds through nesting,
+        but only Enterprise and Cloud Identity Premium editions serve it, so its
+        403 falls back to direct groups. Direct search refuses a label filter, so
+        it asks by member alone and keeps the results that carry the group label.
+        """
+        from scalo.http import AsyncHttpClient
+
+        member = f"member_key_id == {_cel_string(email)}"
+        query = f"{member} && '{_GOOGLE_GROUP_LABEL}' in labels"
+        headers = {"Authorization": f"Bearer {self._access_token}"}
+        async with AsyncHttpClient() as client:
+            try:
+                return await self._search(
+                    client, headers=headers, method="searchTransitiveGroups", query=query
+                )
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code != 403:
+                    self._log_refusal(exc=exc, method="searchTransitiveGroups")
+                    return None
+                logger.info(
+                    "Google Cloud Identity: transitive group search refused, reading direct groups",
+                    operation="searchTransitiveGroups",
+                    provider=self._provider.issuer,
+                    **describe_http_error(exc),
+                )
+            except (httpx.HTTPError, ValueError) as exc:
+                self._log_failure(exc=exc, method="searchTransitiveGroups")
+                return None
+
+            try:
+                return await self._search(
+                    client,
+                    headers=headers,
+                    method="searchDirectGroups",
+                    query=member,
+                    groups_only=True,
+                )
+            except httpx.HTTPStatusError as exc:
+                self._log_refusal(exc=exc, method="searchDirectGroups")
+            except (httpx.HTTPError, ValueError) as exc:
+                self._log_failure(exc=exc, method="searchDirectGroups")
+        return None
+
+    async def _search(
+        self,
+        client: Any,
+        *,
+        headers: dict[str, str],
+        method: str,
+        query: str,
+        groups_only: bool = False,
+    ) -> list[GroupInfo] | None:
+        """Every page of one Cloud Identity membership search, as groups keyed by directory id.
+
+        None when a page is not a JSON object, or the search is still paging at
+        :attr:`MAX_LOGIN_PAGES`: the pages read so far are not the user's groups, so they are
+        no answer. ``groups_only`` keeps only the results that carry the Google group label,
+        for a query that could not filter on it.
+        """
+        url = f"{self.CLOUD_IDENTITY_BASE}/groups/-/memberships:{method}"
+        params = {"query": query}
+        groups: list[GroupInfo] = []
+        for _page in range(self.MAX_LOGIN_PAGES):
+            response = await client.get(url, headers=headers, params=params)
+            body = response.json()
+            if not isinstance(body, dict):
+                logger.warning(
+                    "Google Cloud Identity: a group search page was not a JSON object",
+                    method=method,
+                    provider=self._provider.issuer,
+                    type=type(body).__name__,
+                )
+                return None
+            relations = body.get("memberships") or []
+            if groups_only:
+                relations = [item for item in relations if _is_google_group(item)]
+            groups.extend(group for item in relations if (group := _group_from_relation(item)))
+            page_token = body.get("nextPageToken")
+            if not page_token:
+                return groups
+            params = {"pageToken": str(page_token), "query": query}
+        logger.warning(
+            "Google Cloud Identity: group search stopped at the page limit",
+            method=method,
+            pages=self.MAX_LOGIN_PAGES,
+            provider=self._provider.issuer,
+        )
+        return None
+
+    def _log_refusal(self, *, exc: httpx.HTTPStatusError, method: str) -> None:
+        """Log a refused Cloud Identity call with Google's error code."""
+        if exc.response.status_code == 403:
+            message = (
+                "Google Cloud Identity refused the user-token group lookup (403): the "
+                "Cloud Identity API is disabled in the OAuth client's project, the login "
+                "did not grant cloud-identity.groups.readonly, or the organisation "
+                "blocks it -- the code says which"
+            )
+        else:
+            message = "Google Cloud Identity refused the user-token group lookup"
+        logger.warning(
+            message,
+            operation=method,
+            provider=self._provider.issuer,
+            **describe_http_error(exc),
+        )
+
+    def _log_failure(self, *, exc: httpx.HTTPError | ValueError, method: str) -> None:
+        """Log a Cloud Identity call that got no usable answer: no response, or a body that is not JSON."""
+        logger.warning(
+            "Google Cloud Identity group lookup failed",
+            operation=method,
+            provider=self._provider.issuer,
+            **describe_http_error(exc),
+        )
+
+    # ------------------------------------------------------------------
+    # Directory API, as the service account
+    # ------------------------------------------------------------------
+
+    async def _groups_with_service_account(self, *, user_key: str) -> list[GroupInfo]:
+        """The user's groups from the Directory API, or [] when no service account answers."""
+        service = self._get_service()
+        if service is None:
+            return []
+
         try:
-            raw = await asyncio.to_thread(self._fetch_all_groups_sync, service)
-        except HttpError as exc:
-            path = urlsplit(exc.uri or "").path
-            detail = f"GET {path!r} returned {_describe_google_error(exc=exc)}"
-            raise DirectoryError(detail=detail, provider_type=provider_type) from exc
-        except RefreshError as exc:
-            detail = _describe_google_error(exc=exc)
-            raise DirectoryError(detail=detail, provider_type=provider_type) from exc
-        except (GoogleAuthError, HttpLib2Error, OSError) as exc:
-            error = _describe_google_error(exc=exc)
+            raw = await asyncio.to_thread(self._fetch_user_groups_sync, service, user_key)
+        except Exception as exc:
             logger.warning(
-                "Google Admin SDK list_all_groups failed",
-                error=error,
+                "Google Admin SDK resolve_user_groups failed -- default deny",
+                operation="resolve_user_groups",
                 provider=self._provider.issuer,
+                **describe_http_error(exc),
             )
-            detail = f"the groups request failed: {error}"
-            raise DirectoryError(detail=detail, provider_type=provider_type) from exc
-        try:
-            return [GroupInfo(email=g.get("email", ""), id=g["id"], name=g["name"]) for g in raw]
-        except (KeyError, ValidationError) as exc:
-            detail = "the groups listing returned a group without a string id and name"
-            raise DirectoryError(detail=detail, provider_type=provider_type) from exc
+            return []
 
-    # ------------------------------------------------------------------
-    # Service construction
-    # ------------------------------------------------------------------
+        return [GroupInfo(id=g["id"], name=g["name"], email=g.get("email", "")) for g in raw]
 
-    def _service_account_json(self) -> str:
-        """The service account JSON: the secret store first, then the env var."""
+    @functools.cached_property
+    def _service_account_json(self) -> ResolvedCredential:
+        """The service account JSON: the secret store first, then the env var.
+
+        Resolved once per adapter, which serves one sync, one connection test or one
+        login, so an unreachable store is asked and logged once.
+        """
         return resolve_credential(
             secret_path=self._provider.groups.service_account_json_path,
             env_name=self._provider.groups.service_account_json_env,
@@ -235,27 +378,23 @@ class GoogleAdapter(OIDCGroupAdapter):
         )
 
     def _get_service(self) -> Any | None:
-        """Build a Google Admin SDK service resource from service account credentials.
-
-        Applies domain-wide delegation via with_subject() when
-        provider.groups.admin_email is configured.
+        """Build a Directory API client that acts as the service account itself.
 
         Returns:
-            A googleapiclient Resource object, or None if credentials are
-            unavailable or invalid.
+            A googleapiclient Resource object, or None if no service account is
+            configured or its JSON does not build credentials.
         """
-        raw_json = self._service_account_json()
+        raw_json = self._service_account_json.value
         if not raw_json:
             return None
 
-        # Parse the service account JSON -- bad JSON or wrong type returns None
         try:
             sa_info = json.loads(raw_json)
         except (json.JSONDecodeError, ValueError) as exc:
             logger.warning(
                 "Could not parse service account JSON",
                 provider=self._provider.issuer,
-                error=_describe_google_error(exc=exc),
+                **describe_http_error(exc),
             )
             return None
 
@@ -276,18 +415,13 @@ class GoogleAdapter(OIDCGroupAdapter):
                 sa_info,
                 scopes=[_DIRECTORY_SCOPE],
             )
-
-            admin_email = self._provider.groups.admin_email
-            if admin_email:
-                creds = creds.with_subject(admin_email)
-
             return build("admin", "directory_v1", credentials=creds, cache_discovery=False)
 
         except Exception as exc:
             logger.warning(
                 "Failed to build Google Admin SDK service",
                 provider=self._provider.issuer,
-                error=_describe_google_error(exc=exc),
+                **describe_http_error(exc),
             )
             return None
 
@@ -303,32 +437,29 @@ class GoogleAdapter(OIDCGroupAdapter):
 
         Returns:
             List of raw group dicts from the API response.
+
+        Raises:
+            DirectoryPageLimitError: Google still handed out a page token at the
+                page limit.
         """
         groups: list[dict[str, Any]] = []
         domain = self._provider.groups.domain
         page_token: str | None = None
 
-        while True:
+        for _page in range(self.MAX_LISTING_PAGES):
             kwargs: dict[str, Any] = {"maxResults": 200}
             if domain:
                 kwargs["domain"] = domain
             if page_token:
                 kwargs["pageToken"] = page_token
 
-            request = service.groups().list(**kwargs)
-            response = request.execute()
-            page = response.get("groups", []) if isinstance(response, dict) else None
-            if not (isinstance(page, list)) or not (all(isinstance(group, dict) for group in page)):
-                path = urlsplit(request.uri).path
-                detail = f"GET {path!r} returned a body that is not a list of groups"
-                raise DirectoryError(detail=detail, provider_type=self._provider.type)
-            groups.extend(page)
+            response = service.groups().list(**kwargs).execute()
+            groups.extend(response.get("groups", []))
 
             page_token = response.get("nextPageToken")
             if not page_token:
-                break
-
-        return groups
+                return groups
+        raise DirectoryPageLimitError(self.MAX_LISTING_PAGES)
 
     def _fetch_user_groups_sync(self, service: Any, user_key: str) -> list[dict[str, Any]]:
         """Fetch the groups a single user belongs to, handling pagination.
@@ -343,11 +474,16 @@ class GoogleAdapter(OIDCGroupAdapter):
 
         Returns:
             List of raw group dicts the user is a member of.
+
+        Raises:
+            DirectoryPageLimitError: Google still handed out a page token at
+                :attr:`MAX_LOGIN_PAGES`, which the caller treats as any other
+                failed lookup.
         """
         groups: list[dict[str, Any]] = []
         page_token: str | None = None
 
-        while True:
+        for _page in range(self.MAX_LOGIN_PAGES):
             kwargs: dict[str, Any] = {"userKey": user_key, "maxResults": 200}
             if page_token:
                 kwargs["pageToken"] = page_token
@@ -357,9 +493,8 @@ class GoogleAdapter(OIDCGroupAdapter):
 
             page_token = response.get("nextPageToken")
             if not page_token:
-                break
-
-        return groups
+                return groups
+        raise DirectoryPageLimitError(self.MAX_LOGIN_PAGES)
 
     def _probe_sync(self, service: Any) -> None:
         """Perform a minimal API call to verify connectivity.

@@ -12,11 +12,12 @@ import asyncio
 import random
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from scalo.logger import logger
 
 from dfe_engine.auth.oidc.sync import SyncMetrics, SyncOutcome, sync_provider
+from dfe_engine.http_errors import describe_http_error
 
 if TYPE_CHECKING:
     from dfe_engine.auth.groups import GroupStore
@@ -47,15 +48,6 @@ def sync_is_due(*, now: datetime, provider: OIDCProvider) -> bool:
     return now >= last_sync + timedelta(seconds=interval)
 
 
-def sync_outcome(*, result: dict[str, Any]) -> SyncOutcome:
-    """How a ``sync_provider`` run ended: it failed, it left some groups unsynced, or it synced every group."""
-    if result.get("error"):
-        return "error"
-    if result.get("groups_skipped"):
-        return "partial"
-    return "ok"
-
-
 class OidcSyncScheduler:
     """Syncs every api-mode provider whose interval has passed, checking once a tick.
 
@@ -67,7 +59,7 @@ class OidcSyncScheduler:
     def __init__(
         self,
         *,
-        bindings: Mapping[str, str] | None,
+        bindings: Mapping[str, str],
         group_store: GroupStore,
         metrics: SyncMetrics | None,
         on_groups_created: Callable[[], None] | None,
@@ -75,7 +67,7 @@ class OidcSyncScheduler:
         secrets: DfeSecrets | None,
         tick_seconds: float,
     ) -> None:
-        self._bindings = bindings
+        self._bindings = dict(bindings)
         self._group_store = group_store
         self._last_outcomes: dict[str, SyncOutcome] = {}
         self._metrics = metrics if metrics is not None else SyncMetrics()
@@ -91,19 +83,21 @@ class OidcSyncScheduler:
         retry_at = self._retry_at.get(name)
         return retry_at is not None and now < retry_at
 
-    def _log_transition(self, *, detail: str, name: str, outcome: SyncOutcome) -> None:
+    def _log_transition(
+        self, *, failure: dict[str, object], name: str, outcome: SyncOutcome
+    ) -> None:
         """Log a provider's outcome only when it differs from its last one, so a steady state stays quiet."""
         previous = self._last_outcomes.get(name)
         self._last_outcomes[name] = outcome
         if outcome == previous:
             logger.debug("OIDC scheduled group sync", outcome=outcome, provider=name)
         elif outcome == "error":
-            logger.warning("OIDC scheduled group sync failing", error=detail, provider=name)
+            logger.warning("OIDC scheduled group sync failing", provider=name, **failure)
         else:
             logger.info("OIDC scheduled group sync outcome changed", outcome=outcome, provider=name)
 
-    async def _sync(self, *, name: str) -> tuple[SyncOutcome, str]:
-        """Run one provider's sync and report how it ended, with the error text when it failed."""
+    async def _sync(self, *, name: str) -> tuple[SyncOutcome, dict[str, object]]:
+        """Run one provider's sync and report how it ended, with the log fields that describe a failure."""
         try:
             result = await sync_provider(
                 bindings=self._bindings,
@@ -114,11 +108,13 @@ class OidcSyncScheduler:
                 secrets=self._secrets,
             )
         except Exception as exc:
-            # One provider's failure must not stop the others; it is reported as an error outcome.
-            return "error", f"{type(exc).__name__}: {exc}"
+            # One provider's failure must not stop the others; its class is logged, never its text.
+            return "error", describe_http_error(exc)
         if result.get("created") and self._on_groups_created is not None:
             self._on_groups_created()
-        return sync_outcome(result=result), str(result.get("error") or "")
+        # The sync's own error message names no user or URL, so it is safe to log.
+        failure: dict[str, object] = {"error": result["error"]} if result.get("error") else {}
+        return result["status"], failure
 
     async def run_forever(self) -> None:
         """Check for due providers every tick until cancelled, starting a tick plus jitter after start-up."""
@@ -128,9 +124,13 @@ class OidcSyncScheduler:
         while True:
             try:
                 await self.run_once(now=datetime.now(UTC))
-            except Exception:
+            except Exception as exc:
                 if not (self._tick_failing):
-                    logger.exception("OIDC scheduled group sync tick failed; retrying every tick")
+                    # A provider file's validation text quotes its values, so neither it nor a traceback is logged.
+                    logger.error(
+                        "OIDC scheduled group sync tick failed; retrying every tick",
+                        **describe_http_error(exc),
+                    )
                 self._tick_failing = True
             else:
                 if self._tick_failing:
@@ -150,7 +150,7 @@ class OidcSyncScheduler:
                 or (self._held_back(name=name, now=now))
             ):
                 continue
-            outcome, detail = await self._sync(name=name)
+            outcome, failure = await self._sync(name=name)
             if outcome == "error":
                 interval = max(provider.groups.sync_interval, MIN_SYNC_INTERVAL_SECONDS)
                 self._retry_at[name] = now + timedelta(seconds=interval)
@@ -158,5 +158,5 @@ class OidcSyncScheduler:
                 self._retry_at.pop(name, None)
             outcomes[name] = outcome
             self._metrics.scheduled_run(outcome=outcome, provider=name)
-            self._log_transition(detail=detail, name=name, outcome=outcome)
+            self._log_transition(failure=failure, name=name, outcome=outcome)
         return outcomes

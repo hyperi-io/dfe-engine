@@ -49,7 +49,7 @@ from dfe_engine.api.pagination import (
     apply_sort,
 )
 from dfe_engine.auth import AuthorizationError, Scope, ScopedGrant
-from dfe_engine.auth.audit import audit_permission_denied, audit_resource_change
+from dfe_engine.auth.audit import audit_group_change, audit_permission_denied
 from dfe_engine.auth.groups import (
     Group,
     GroupExistsError,
@@ -59,14 +59,12 @@ from dfe_engine.auth.groups import (
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
+from dfe_engine.names import StoreName
 from dfe_engine.yaml_utils import YAMLError
 
 router = APIRouter(prefix="/groups", tags=["Groups"])
 
 _LINK_FIELD_MAX_LENGTH = 512
-
-# The group fields a create, update or delete audit event records.
-_AUDITED_FIELDS = ("description", "members", "roles", "scope", "source_id", "source_provider")
 
 _SOURCE_ID_DESCRIPTION = (
     "The group identifier the identity provider asserts in its tokens: the group name for "
@@ -78,9 +76,7 @@ _SOURCE_ID_DESCRIPTION = (
 _SOURCE_PROVIDER_DESCRIPTION = (
     "The provider whose logins the source ID answers, required with a source ID: an OIDC "
     "provider name, a key or value of auth.source_provider_bindings, 'scim' or, while "
-    "auth.trust_proxy_auth_headers is on, auth.proxy_provider. At most 512 characters. A link "
-    "saved before a provider was required may have none; it answers any provider until it is "
-    "saved with one or a group sync pins it."
+    "auth.trust_proxy_auth_headers is on, auth.proxy_provider. At most 512 characters."
 )
 
 
@@ -88,7 +84,7 @@ _SOURCE_PROVIDER_DESCRIPTION = (
 
 
 class CreateGroupRequest(BaseModel):
-    name: str = Field(description="Unique group name")
+    name: StoreName = Field(description="Unique group name")
     roles: list[str] = Field(description="Roles assigned to all group members")
     description: str = Field("", description="Human-readable description")
     scope: str = Field(
@@ -160,7 +156,10 @@ def _member_name(request: Request, user) -> str | None:
 
 
 def _held(request: Request, user) -> set[str]:
-    """The names of the groups the session's roles come from, resolved as its roles were, by group name."""
+    """The names of the groups the session's roles come from, resolved as its roles were.
+
+    An identifier that names one group and is another's provider id holds the first alone.
+    """
     return set(groups_granting(user.groups, request.app.state.group_store))
 
 
@@ -188,21 +187,6 @@ def _response(group: Group) -> GroupResponse:
         source_id=group.source_id,
         source_provider=group.source_provider,
     )
-
-
-def _audited_fields(*, group: Group) -> dict[str, object]:
-    """The fields of *group* a create, update or delete audit event records."""
-    return {field: getattr(group, field) for field in _AUDITED_FIELDS}
-
-
-def _changed_fields(*, after: Group, before: Group) -> dict[str, dict[str, object]]:
-    """Each audited field an update changed, with its value before and after."""
-    changed = {}
-    for field, value in _audited_fields(group=after).items():
-        previous = getattr(before, field)
-        if value != previous:
-            changed[field] = {"after": value, "before": previous}
-    return changed
 
 
 def _is_known_source_provider(*, name: str, request: Request) -> bool:
@@ -240,7 +224,7 @@ def _refuse_bad_link(
 ) -> None:
     """Refuse a source ID or provider the request changes to one no login could use to reach group *name* alone.
 
-    *source_id* and *source_provider* are the values the group would hold and *before* the group as stored, None for a new one. Only a changed value is checked, so a stored value these rules would now refuse (a SCIM externalId, a deleted provider, a link saved before a provider was required) never blocks an edit.
+    *source_id* and *source_provider* are the values the group would hold and *before* the group as stored, None for a new one. Only a changed value is checked, so a stored value these rules would now refuse (a SCIM externalId, a deleted provider) never blocks an edit.
     """
     changes_source_id = source_id != (before.source_id if before is not None else "")
     changes_source_provider = source_provider != (
@@ -419,12 +403,17 @@ async def create_group(
         group.name,
         added=group.members,
     )
-    audit_resource_change(
-        admin_id=user.user_id,
-        change="created",
-        details={"after": _audited_fields(group=group)},
-        resource_name=group.name,
-        resource_type="group",
+    audit_group_change(
+        user.user_id,
+        group.name,
+        "created",
+        {
+            "roles": group.roles,
+            "scope": group.scope,
+            "members": group.members,
+            "source_id": group.source_id,
+            "source_provider": group.source_provider,
+        },
     )
     return _response(group)
 
@@ -513,14 +502,22 @@ async def update_group(
         source_provider=source_provider,
     )
     update_fields: dict[str, object] = {}
+    details: dict[str, object] = {}
     if body.roles is not None:
         update_fields["roles"] = body.roles
+        details["roles"] = body.roles
     if body.description is not None:
         update_fields["description"] = body.description
     if body.source_id is not None:
         update_fields["source_id"] = body.source_id
     if body.source_provider is not None:
         update_fields["source_provider"] = body.source_provider
+    if changes_link:
+        details["source_id"] = {"after": source_id, "before": existing.source_id}
+        details["source_provider"] = {
+            "after": source_provider,
+            "before": existing.source_provider,
+        }
     if body.members is not None:
         seen: set[str] = set()
         deduped: list[str] = []
@@ -531,6 +528,8 @@ async def update_group(
         update_fields["members"] = deduped
         old_members = set(existing.members)
         new_members = set(deduped)
+        details["members_added"] = sorted(new_members - old_members)
+        details["members_removed"] = sorted(old_members - new_members)
         group = store.update(name, **update_fields)
         sync_account_groups_for_membership_change(
             account_store,
@@ -541,12 +540,8 @@ async def update_group(
     else:
         group = store.update(name, **update_fields)
     request_ch_rbac_reconcile(request.app.state)
-    audit_resource_change(
-        admin_id=user.user_id,
-        change="updated",
-        details={"changed": _changed_fields(after=group, before=existing)},
-        resource_name=name,
-        resource_type="group",
+    audit_group_change(
+        user.user_id, group.name, "updated", {"fields": sorted(update_fields), **details}
     )
     return _response(group)
 
@@ -581,6 +576,7 @@ async def add_member(
         name,
         added=[body.username],
     )
+    audit_group_change(user.user_id, name, "member_added", {"member": body.username})
     group = store.get(name)
     if group is None:  # deleted concurrently between the mutation and re-fetch
         raise HTTPException(
@@ -620,6 +616,7 @@ async def remove_member(
         name,
         removed=[username],
     )
+    audit_group_change(user.user_id, name, "member_removed", {"member": username})
     group = store.get(name)
     if group is None:  # deleted concurrently between the mutation and re-fetch
         raise HTTPException(
@@ -657,12 +654,11 @@ async def delete_group(
             detail={"code": "conflict", "message": str(exc)},
         ) from exc
     request_ch_rbac_reconcile(request.app.state)
-    audit_resource_change(
-        admin_id=user.user_id,
-        change="deleted",
-        details={"before": _audited_fields(group=existing)},
-        resource_name=name,
-        resource_type="group",
+    audit_group_change(
+        user.user_id,
+        name,
+        "deleted",
+        {"source_id": existing.source_id, "source_provider": existing.source_provider},
     )
 
 
@@ -716,6 +712,7 @@ async def put_group_attributes(
             status_code=404,
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
         ) from exc
+    audit_group_change(user.user_id, name, "attributes_updated")
     return {"attributes": group.attributes}
 
 
@@ -764,4 +761,5 @@ async def put_group_sensitive_attributes(
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
         )
     request.app.state.group_sensitive_attributes.put(name, body.attributes)
+    audit_group_change(user.user_id, name, "sensitive_attributes_updated")
     return {"attributes": request.app.state.group_sensitive_attributes.get(name)}

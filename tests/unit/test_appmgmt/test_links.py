@@ -73,7 +73,7 @@ def _one(env: dict, name: str = "parse") -> links.LibrarySource:
 
 class TestFileSetDeclaresItsLinksPath:
     def test_links_path_comes_from_the_manifest(self, vrl_set):
-        assert vrl_set.values_path == "transformFiles"
+        assert vrl_set.values_path == "fileSets.transforms.files"
         assert vrl_set.links_path == "transformFileLinks"
 
     def test_an_undeclared_links_path_defaults_beside_the_values_path(self):
@@ -239,6 +239,18 @@ class TestRelink:
         env = _artifact(V1)
         links.resolve(overlay, vrl_set, name="000.vrl", artifact="parse", env=env, source=_one(env))
         assert links.relink(overlay, vrl_set, _source(parse=env)) == []
+
+    def test_a_table_entry_named_on_the_way_is_not_a_moved_link(self, overlay):
+        # Naming a table the config lacked changes the overlay, not the linked content.
+        tables = catalogue.file_set(VRL, "enrichment")
+        env = _artifact("ip,cc\n", kind="lookup")
+        links.resolve(
+            overlay, tables, name="geo.csv", artifact="geo", env=env, source=_one(env, "geo")
+        )
+        del overlay["config"]["enrichment_tables"]
+
+        assert links.relink(overlay, tables, _source(geo=env)) == []
+        assert overlay["config"]["enrichment_tables"][0]["name"] == "geo"
 
     def test_a_missing_artefact_leaves_the_content_alone(self, overlay, vrl_set):
         # Re-resolving must never delete content an instance is running.

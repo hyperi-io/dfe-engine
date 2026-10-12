@@ -9,8 +9,7 @@
 """The files the cross-repo contract tests compare against, and where they come from.
 
 A contract test holds an engine fixture or model against what a producer repo ships.
-``producer_file`` reads the producer's copy, and ``producer_tree`` a whole directory of
-it, from the first of:
+``producer_file`` reads the producer's copy from the first of:
 
 1. a checkout named by the producer's variable (``DFE_LOADER_DIR``, ``SCALO_RS_DIR``);
 2. a checkout beside this one (``../dfe-loader``, ``../scalo-rs``), so an uncommitted
@@ -27,11 +26,9 @@ with no checkout beside this one so they read the pin. ``check_pin`` warns with
 ``ContractPinWarning`` when a producer's latest release has changed a pinned file.
 """
 
-import io
 import json
 import os
 import random
-import tarfile
 import time
 import warnings
 from dataclasses import dataclass
@@ -45,7 +42,6 @@ import pytest
 OWNER = "hyperi-io"
 RAW_BASE = "https://raw.githubusercontent.com"
 API_BASE = "https://api.github.com"
-ARCHIVE_BASE = "https://codeload.github.com"
 
 # Where a developer keeps the producer repos: the directory holding this checkout.
 CHECKOUTS = Path(__file__).resolve().parents[2].parent
@@ -112,7 +108,7 @@ class ProducerFile:
 # release, never to a branch: a branch compares against whatever merged last.
 DFE_LOADER = Producer(
     repo="dfe-loader",
-    ref="v1.18.45",
+    ref="v1.18.48",
     dir_env="DFE_LOADER_DIR",
     files=("src/config/pipeline.rs", "src/config/loader.rs"),
     # Risk accepted until GA: CI holds no token that reads it, so its tests skip there.
@@ -135,13 +131,14 @@ DFE_TRANSFORM_VRL = Producer(
 )
 PRODUCERS = (DFE_LOADER, SCALO_RS, DFE_TRANSFORM_VRL)
 
-# Read as whole chart directories, which check_pin cannot compare, so it stays out of
-# PRODUCERS. Tagged with the suite version, which carries no leading v.
+# Read for the thin-chart digests its versions.yaml pins, a file every release moves, so
+# it stays out of PRODUCERS or check_pin warns on each one. Tagged with the suite
+# version, which carries no leading v.
 DFE_INFRA = Producer(
     repo="dfe-infra",
-    ref="2.2.0-rc.14",
+    ref="2.2.1-rc.5",
     dir_env="DFE_INFRA_DIR",
-    files=(),
+    files=("versions.yaml",),
     private=False,
 )
 
@@ -261,15 +258,13 @@ def check_pin(producer: Producer, *, api_base: str = API_BASE, base_url: str = R
         )
 
 
-def checkout_path(
-    producer: Producer, relative: str, checkouts: Path = CHECKOUTS, *, directory: bool = False
-) -> Path | None:
-    """The producer path in the named checkout, else the one beside this repo, else None."""
+def checkout_path(producer: Producer, relative: str, checkouts: Path = CHECKOUTS) -> Path | None:
+    """The producer file in the named checkout, else the one beside this repo, else None."""
     roots = [Path(named)] if (named := os.environ.get(producer.dir_env)) else []
     roots.append(checkouts / producer.repo)
     for root in roots:
         candidate = root / relative
-        if candidate.is_dir() if directory else candidate.is_file():
+        if candidate.is_file():
             return candidate
     return None
 
@@ -327,48 +322,3 @@ def producer_file(
     except ContractUnreadableError as exc:
         _unreadable(producer, relative, exc, checkouts)
     return ProducerFile(data, f"{OWNER}/{producer.repo}@{producer.ref}")
-
-
-def producer_tree(
-    producer: Producer,
-    relative: str,
-    dest: Path,
-    *,
-    checkouts: Path = CHECKOUTS,
-    base_url: str = ARCHIVE_BASE,
-) -> Path:
-    """A producer directory from a checkout, else extracted from its archive at the pin.
-
-    Skips or fails exactly as ``producer_file`` does when neither answers. The archive
-    endpoint takes no token, so only a public producer can be read from it.
-
-    Args:
-        producer: The repo that ships the directory.
-        relative: The directory's path in that repo.
-        dest: Where an archived copy is extracted; the result is ``dest / relative``.
-        checkouts: Directory holding a checkout of the producer beside this one.
-        base_url: Where the release archive is fetched from.
-
-    Returns:
-        The directory, in a checkout or under ``dest``.
-    """
-    local = checkout_path(producer, relative, checkouts, directory=True)
-    if local is not None:
-        return local
-    try:
-        archive = _get(f"{base_url}/{OWNER}/{producer.repo}/tar.gz/{producer.ref}")
-    except ContractUnreadableError as exc:
-        _unreadable(producer, relative, exc, checkouts)
-    prefix = relative.strip("/") + "/"
-    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
-        members = []
-        for member in tar.getmembers():
-            # GitHub wraps the tree in one top-level directory named for the repo and ref.
-            inner = member.name.partition("/")[2]
-            if inner.startswith(prefix):
-                member.name = inner
-                members.append(member)
-        if not members:
-            pytest.fail(f"{OWNER}/{producer.repo}@{producer.ref} has no {relative}", pytrace=False)
-        tar.extractall(dest, members=members, filter="data")
-    return dest / relative

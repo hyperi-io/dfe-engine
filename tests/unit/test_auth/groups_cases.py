@@ -14,7 +14,7 @@ from dfe_engine.auth.groups import Group
 from tests.unit.test_auth.factories import make_group
 
 _OKTA_ADMINS = make_group(name="okta-admins", source_id="00g-admins", source_provider="okta")
-_SOC_TEAM = make_group(name="soc-team", source_id="SOC Team")
+_SOC_TEAM = make_group(name="soc-team", source_id="SOC Team", source_provider="oidc")
 _VIEWERS = make_group(name="dfe-viewers")
 
 
