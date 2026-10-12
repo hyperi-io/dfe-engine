@@ -10,6 +10,7 @@ from scalo.logger import logger
 from dfe_engine.clickhouse.statements import ddl_settings
 from dfe_engine.schema.applier import (
     LiveTtl,
+    json_settings_move,
     read_table_ttl,
     replace_db,
     table_target,
@@ -359,10 +360,12 @@ def plan_deploy_statements(
 
     An absent table is created. An existing one gains the columns it lacks and,
     when its live TTL differs from the version's, the ``MODIFY TTL`` or ``REMOVE
-    TTL`` that moves it, after the columns it may be declared over. Views follow.
+    TTL`` that moves it, after the columns it may be declared over. A JSON table
+    lacking the settings dfe-schemas declares for it then gets the ``MODIFY
+    SETTING`` that adds them. Views follow.
 
     Raises:
-        SchemaApplyError: The existing table's TTL could not be read.
+        SchemaApplyError: The existing table's TTL or settings could not be read.
     """
     table = source.table_name
     table_exists = clickhouse_table_exists(ch_client, db, table) if ch_client is not None else False
@@ -393,6 +396,16 @@ def plan_deploy_statements(
         )
         if ttl_change is not None:
             statements.append(ttl_change.statement)
+        settings = json_settings_move(
+            ch_client,
+            ddl_gen,
+            database=db,
+            table=table,
+            columns=result.columns,
+            cfg=replace_db(cfg, db),
+        )
+        if settings.statement:
+            statements.append(settings.statement)
 
     for view_ddl in (result.view_ddls or {}).values():
         statements.append(view_ddl.strip())

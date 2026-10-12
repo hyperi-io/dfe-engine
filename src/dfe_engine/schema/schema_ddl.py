@@ -78,8 +78,8 @@ def _ident(name: str, *, what: str = "index name") -> str:
     """A name bare when ClickHouse reads it bare, else quoted through :func:`quote_ident`.
 
     For the positions the renderer has always written bare: index and projection
-    names, TTL columns and the ``ON CLUSTER`` name. A safe name stays bare because
-    dfe-schemas diff-checks its committed DDL against a fresh render. A name taken
+    names, TTL columns and the ``ON CLUSTER`` name. A safe name stays bare so the
+    DDL text of a table already created does not change. A name taken
     from a dotted column such as ``event.action`` is one identifier only once
     quoted, and an unsafe one is refused.
     """
@@ -602,9 +602,8 @@ class DDLGenerator:
     ) -> list[str]:
         """Build the comment header.
 
-        Carries no engine version: dfe-schemas commits this output and
-        diff-checks it against a fresh render, so a version stamp would report
-        drift on every dfe-engine release.
+        Carries no engine version, so a dfe-engine release does not change the
+        DDL text of a table whose definition has not changed.
         """
         return [
             "-- =============================================================================",
