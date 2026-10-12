@@ -256,7 +256,7 @@ class TestApplyDefaults:
 
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert body["updated"] == ["alpha"]
+        assert body["updated"] == [{"source": "alpha", "version": "1.0.0"}]
         assert body["unchanged"] == []
         assert [entry["source"] for entry in body["live"]] == ["alpha"]
         alpha = _version(client, admin_headers, "alpha")
@@ -281,7 +281,7 @@ class TestApplyDefaults:
 
         assert second.status_code == 200, second.text
         assert second.json()["updated"] == []
-        assert second.json()["unchanged"] == ["alpha"]
+        assert second.json()["unchanged"] == [{"source": "alpha", "version": "1.0.0"}]
         assert [entry["source"] for entry in second.json()["live"]] == ["alpha"]
 
     def test_a_source_never_deployed_is_pinned_without_reaching_clickhouse(
@@ -293,7 +293,7 @@ class TestApplyDefaults:
         resp = client.post(APPLY, headers=admin_headers, json={"sources": ["alpha"]})
 
         assert resp.status_code == 200, resp.text
-        assert resp.json()["updated"] == ["alpha"]
+        assert resp.json()["updated"] == [{"source": "alpha", "version": "1.0.0"}]
         assert resp.json()["live"] == [
             {
                 "source": "alpha",

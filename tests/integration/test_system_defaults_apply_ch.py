@@ -201,7 +201,7 @@ def test_apply_moves_a_deployed_tables_ttl_without_a_restart(ch_client, stack):
     body = _apply(stack, "syslog-ttl")
 
     assert _live_ttl_days(ch_client, db, "syslog-ttl") == 91
-    assert body["updated"] == ["syslog-ttl"]
+    assert body["updated"] == [{"source": "syslog-ttl", "version": "1.0.0"}]
     assert body["live"] == [
         {
             "source": "syslog-ttl",
@@ -265,7 +265,7 @@ def test_an_engine_change_needs_a_rebuild_and_stays_drift(ch_client, stack):
         "live": "MergeTree",
     }
     assert drift["ttl_days"]["live"] == 90
-    assert body["updated"] == ["syslog-engine"]
+    assert body["updated"] == [{"source": "syslog-engine", "version": "1.0.0"}]
     live = body["live"][0]
     assert live["status"] == "unchanged"
     assert live["not_applied"] == [{"field": "engine", "reason": REBUILD}]
@@ -340,7 +340,10 @@ def test_one_table_clickhouse_refuses_does_not_hide_the_others(ch_client, stack)
         logger.remove(handler_id)
 
     assert _live_ttl_days(ch_client, db, "syslog-good") == 91
-    assert body["updated"] == ["syslog-bad", "syslog-good"]
+    assert body["updated"] == [
+        {"source": "syslog-bad", "version": "1.0.0"},
+        {"source": "syslog-good", "version": "1.0.0"},
+    ]
     bad, good = body["live"]
     assert bad["source"] == "syslog-bad"
     assert bad["status"] == "failed"

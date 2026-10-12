@@ -16,7 +16,7 @@ POST   /api/v1/sources/{name}/deploy    -> Deploy version to ClickHouse
 PUT    /api/v1/sources/{name}           -> Update source
 PATCH  /api/v1/sources/{name}           -> Enable or disable source
 DELETE /api/v1/sources/{name}           -> Delete source
-POST   /api/v1/sources/bulk             -> Bulk enable/disable/delete
+POST   /api/v1/sources/bulk             -> Bulk enable/disable/dormant/delete/deploy
 POST   /api/v1/sources/seed             -> Seed built-in defaults
 POST   /api/v1/sources/reconcile-apps   -> Bring the derived app state into step with the sources
 
@@ -36,8 +36,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal, NamedTuple, NoReturn
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
@@ -448,11 +448,52 @@ class SourceEnabledPatchRequest(BaseModel):
         return "active" if self.enabled else "disabled"
 
 
+class BulkActionItem(BaseModel):
+    """One source in a bulk request."""
+
+    source: str = Field(description="Source name (_source label)")
+    version: str | None = Field(
+        default=None,
+        description=(
+            "Deploy only: version id to deploy. Omitted uses the working current. "
+            "Ignored for enable/disable/dormant/delete."
+        ),
+    )
+
+
 class BulkActionRequest(BaseModel):
     """Bulk operation on multiple sources."""
 
-    action: str = Field(description="Action: enable, disable, dormant, delete")
-    sources: list[str] = Field(description="Source names to act on")
+    action: str = Field(
+        description="Action: enable, disable, dormant, delete, deploy",
+    )
+    sources: list[BulkActionItem] = Field(
+        min_length=1,
+        description="Sources to act on. Plain name strings are accepted.",
+    )
+    dry_run: bool = Field(
+        default=False,
+        description="Deploy only: plan/validate DDL without applying it. Ignored otherwise.",
+    )
+
+    @field_validator("sources", mode="before")
+    @classmethod
+    def _coerce_source_names(cls, value: Any) -> Any:
+        if not isinstance(value, list):
+            return value
+        return [{"source": item} if isinstance(item, str) else item for item in value]
+
+
+class BulkDeployTask(BaseModel):
+    """One accepted deploy submitted as a background task."""
+
+    source: str
+    version: str | None = Field(
+        default=None,
+        description="Version requested; null means the working current at task start",
+    )
+    task_id: str = Field(description="Task id for polling via GET /tasks/{task_id}")
+    kind: str = Field(default="source:deploy", description="Task kind")
 
 
 class BulkActionResponse(BaseModel):
@@ -465,6 +506,13 @@ class BulkActionResponse(BaseModel):
         description=(
             "One entry per source left untouched: its name, the same code the "
             "single-source route answers with, and the message"
+        ),
+    )
+    deployments: list[BulkDeployTask] = Field(
+        default_factory=list,
+        description=(
+            "Deploy only: one ``source:deploy`` task per accepted source. "
+            "Poll via GET /tasks/{task_id}."
         ),
     )
 
@@ -1378,33 +1426,20 @@ def _remove_source_topics(source: Any, settings: Any) -> tuple[list[str], list[s
     return outcome.removed, [name for name, _ in outcome.failed]
 
 
-@router.post(
-    "/{name}/deploy",
-    response_model=SchemaDeployResult,
-    dependencies=[Depends(require_action(scopes_dict["source_write"]))],
-)
-async def deploy_source_schema(
-    name: str,
-    user: CurrentUser,
-    registry: SourceReg,
-    settings: Settings,
-    request: Request,
-    version: str | None = Query(
-        None, description="Source version id (defaults to the source's current version)"
-    ),
-    dry_run: bool = Query(
-        False, description="Plan only: generate + validate the DDL without applying it"
-    ),
-) -> SchemaDeployResult:
-    """Plan (``dry_run=true``) or deploy a source version's schema to ClickHouse.
+_SOURCE_DEPLOY_TASK_KIND = "source:deploy"
 
-    Runs the v2 YAML -> DDL pipeline. In plan mode the CREATE TABLE (+ any standard
-    views) and validation errors are returned for review WITHOUT touching
-    ClickHouse. In deploy mode the DDL is applied: an absent table is created, and
-    an existing one gains the columns it lacks and moves to the version's TTL, so a
-    re-deploy changes only what differs. The engine and the type of an existing
-    column are left as created. A schema that failed validation is never deployed.
-    """
+
+async def _execute_source_deploy(
+    *,
+    name: str,
+    user: Any,
+    registry: Any,
+    settings: Any,
+    request: Request,
+    version: str | None,
+    dry_run: bool,
+) -> SchemaDeployResult:
+    """Plan or deploy one source version. Shared by the single and bulk deploy paths."""
     ddl_settings = await run_blocking(functools.partial(ttl_settings, request, settings))
     applied = await run_blocking(
         functools.partial(_apply_source_schema, name, registry, ddl_settings, version, dry_run)
@@ -1481,6 +1516,84 @@ async def deploy_source_schema(
         },
     )
     return deploy_result
+
+
+def _http_exception_message(exc: HTTPException) -> str:
+    """A task-facing message from an HTTPException detail."""
+    detail = exc.detail
+    if isinstance(detail, dict):
+        message = detail.get("message")
+        if isinstance(message, str) and message:
+            return message
+    return str(detail)
+
+
+async def _run_source_deploy_task(
+    name: str,
+    version: str | None,
+    dry_run: bool,
+    user: Any,
+    registry: Any,
+    settings: Any,
+    request: Request,
+    *,
+    task,
+) -> dict[str, Any]:
+    """Background worker for one source deploy (bulk ``action=deploy``)."""
+    label = f"{name}" + (f"@{version}" if version else "")
+    task.set_progress(5, f"{'Planning' if dry_run else 'Deploying'} {label}")
+    try:
+        result = await _execute_source_deploy(
+            name=name,
+            user=user,
+            registry=registry,
+            settings=settings,
+            request=request,
+            version=version,
+            dry_run=dry_run,
+        )
+    except HTTPException as exc:
+        raise RuntimeError(_http_exception_message(exc)) from exc
+    task.set_progress(100, f"{'Planned' if dry_run else 'Deployed'} {label}")
+    return result.model_dump(mode="json")
+
+
+@router.post(
+    "/{name}/deploy",
+    response_model=SchemaDeployResult,
+    dependencies=[Depends(require_action(scopes_dict["source_write"]))],
+)
+async def deploy_source_schema(
+    name: str,
+    user: CurrentUser,
+    registry: SourceReg,
+    settings: Settings,
+    request: Request,
+    version: str | None = Query(
+        None, description="Source version id (defaults to the source's current version)"
+    ),
+    dry_run: bool = Query(
+        False, description="Plan only: generate + validate the DDL without applying it"
+    ),
+) -> SchemaDeployResult:
+    """Plan (``dry_run=true``) or deploy a source version's schema to ClickHouse.
+
+    Runs the v2 YAML -> DDL pipeline. In plan mode the CREATE TABLE (+ any standard
+    views) and validation errors are returned for review WITHOUT touching
+    ClickHouse. In deploy mode the DDL is applied: an absent table is created, and
+    an existing one gains the columns it lacks and moves to the version's TTL, so a
+    re-deploy changes only what differs. The engine and the type of an existing
+    column are left as created. A schema that failed validation is never deployed.
+    """
+    return await _execute_source_deploy(
+        name=name,
+        user=user,
+        registry=registry,
+        settings=settings,
+        request=request,
+        version=version,
+        dry_run=dry_run,
+    )
 
 
 class _AppliedSchema(NamedTuple):
@@ -2019,19 +2132,30 @@ async def bulk_action(
     registry: SourceReg,
     settings: Settings,
     request: Request,
+    response: Response,
 ):
-    """Perform a bulk action (enable, disable, dormant, delete) on multiple sources."""
+    """Perform a bulk action on multiple sources.
+
+    ``enable`` / ``disable`` / ``dormant`` / ``delete`` apply immediately.
+    ``deploy`` submits one ``source:deploy`` background task per accepted source
+    (poll ``GET /tasks/{task_id}``); refused names land in ``failed``.
+    """
     action_to_state = {"enable": "active", "disable": "disabled", "dormant": "dormant"}
-    if body.action not in (*action_to_state, "delete"):
+    if body.action not in (*action_to_state, "delete", "deploy"):
         raise HTTPException(
             status_code=422,
             detail={
                 "code": "validation_error",
                 "message": (
-                    f"Unknown action {body.action!r}. Must be: enable, disable, dormant, delete"
+                    f"Unknown action {body.action!r}. Must be: enable, disable, "
+                    "dormant, delete, deploy"
                 ),
             },
         )
+
+    if body.action == "deploy":
+        response.status_code = 202
+        return _submit_bulk_deploys(body, user, registry, settings, request)
 
     succeeded, failed, deleted = await run_blocking(
         functools.partial(_apply_bulk, body, action_to_state, user, registry)
@@ -2051,6 +2175,89 @@ async def bulk_action(
     return result
 
 
+def _submit_bulk_deploys(
+    body: BulkActionRequest,
+    user: Any,
+    registry: Any,
+    settings: Any,
+    request: Request,
+) -> BulkActionResponse:
+    """Pre-check and submit one ``source:deploy`` task per accepted source."""
+    manager = request.app.state.task_manager
+    deployments: list[BulkDeployTask] = []
+    failed: list[dict[str, str]] = []
+
+    for item in body.sources:
+        if not registry.source_exists(item.source):
+            failed.append(
+                {
+                    "source": item.source,
+                    "code": "not_found",
+                    "error": f"Source '{item.source}' not found",
+                }
+            )
+            continue
+        if item.version is not None:
+            try:
+                source = registry.get_source(item.source)
+            except SourceNotFoundError:
+                failed.append(
+                    {
+                        "source": item.source,
+                        "code": "not_found",
+                        "error": f"Source '{item.source}' not found",
+                    }
+                )
+                continue
+            if item.version not in source.versions:
+                failed.append(
+                    {
+                        "source": item.source,
+                        "code": "not_found",
+                        "error": (f"Version '{item.version}' not found for source '{item.source}'"),
+                    }
+                )
+                continue
+
+        info = manager.submit(
+            _SOURCE_DEPLOY_TASK_KIND,
+            _run_source_deploy_task,
+            item.source,
+            item.version,
+            body.dry_run,
+            user,
+            registry,
+            settings,
+            request,
+        )
+        deployments.append(
+            BulkDeployTask(
+                source=item.source,
+                version=item.version,
+                task_id=info.id,
+                kind=info.kind,
+            )
+        )
+
+    if deployments:
+        audit_resource_change(
+            user.user_id,
+            "schema",
+            ",".join(entry.source for entry in deployments),
+            "bulk_deploy_submitted",
+            details={
+                "task_ids": [entry.task_id for entry in deployments],
+                "dry_run": body.dry_run,
+            },
+        )
+    return BulkActionResponse(
+        action="deploy",
+        succeeded=[entry.source for entry in deployments],
+        failed=failed,
+        deployments=deployments,
+    )
+
+
 def _apply_bulk(
     body: BulkActionRequest, action_to_state: dict[str, str], user: Any, registry: Any
 ) -> tuple[list[str], list[dict[str, str]], list[Source]]:
@@ -2058,7 +2265,8 @@ def _apply_bulk(
     succeeded: list[str] = []
     failed: list[dict[str, str]] = []
     deleted: list[Source] = []
-    for name in body.sources:
+    for item in body.sources:
+        name = item.source
         try:
             if body.action == "delete":
                 # Read before the delete, for the topics it owns. A name with no

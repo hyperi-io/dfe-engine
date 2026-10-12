@@ -1198,6 +1198,86 @@ class TestBulkAction:
         assert resp.status_code == 422
 
 
+class TestBulkDeploy:
+    """POST /api/v1/sources/bulk with action=deploy"""
+
+    def test_submits_one_task_per_source(
+        self, client: TestClient, admin_headers: dict, app, monkeypatch
+    ):
+        from dfe_engine.api.v1 import sources as sources_api
+        from dfe_engine.source.deployment import SchemaDeployResult
+
+        for name in ("deploy-a", "deploy-b"):
+            client.post(
+                "/api/v1/sources",
+                json={
+                    "source": name,
+                    "match": {"field": "tags.collector.type", "value": name},
+                    "schema": {"engine": "MergeTree"},
+                },
+                headers=admin_headers,
+            )
+
+        async def _fake_deploy(*, name, version, dry_run, **_kwargs):
+            return SchemaDeployResult(
+                source_name=name,
+                version=version or "1.0.0",
+                dry_run=dry_run,
+                applied=not dry_run,
+                create_table="CREATE TABLE t",
+                views={},
+                validation_errors=[],
+            )
+
+        monkeypatch.setattr(sources_api, "_execute_source_deploy", _fake_deploy)
+
+        resp = client.post(
+            "/api/v1/sources/bulk",
+            json={
+                "action": "deploy",
+                "sources": ["deploy-a", {"source": "deploy-b", "version": "1.0.0"}],
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 202, resp.text
+        body = resp.json()
+        assert body["action"] == "deploy"
+        assert set(body["succeeded"]) == {"deploy-a", "deploy-b"}
+        assert body["failed"] == []
+        assert {row["source"] for row in body["deployments"]} == {"deploy-a", "deploy-b"}
+        assert all(row["kind"] == "source:deploy" for row in body["deployments"])
+        assert len({row["task_id"] for row in body["deployments"]}) == 2
+
+        for row in body["deployments"]:
+            task = app.state.task_manager.get(row["task_id"])
+            assert task is not None
+            assert task.kind == "source:deploy"
+
+    def test_refuses_missing_source_and_version(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+        resp = client.post(
+            "/api/v1/sources/bulk",
+            json={
+                "action": "deploy",
+                "sources": [
+                    "missing-source",
+                    {"source": sample_source["source"], "version": "9.9.9"},
+                ],
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["deployments"] == []
+        assert body["succeeded"] == []
+        by_source = {row["source"]: row for row in body["failed"]}
+        assert by_source["missing-source"]["code"] == "not_found"
+        assert by_source[sample_source["source"]]["code"] == "not_found"
+        assert "9.9.9" in by_source[sample_source["source"]]["error"]
+
+
 class TestSeedSources:
     """POST /api/v1/sources/seed"""
 

@@ -125,7 +125,7 @@ POST   /api/v1/sources/{name}/deploy    # Apply plan DDL to ClickHouse, set depl
 PUT    /api/v1/sources/{name}           # Update source (bumps major version when a deployed pin changes)
 PATCH  /api/v1/sources/{name}           # Set lifecycle state (state or enabled) - no new version
 DELETE /api/v1/sources/{name}           # Delete the definition
-POST   /api/v1/sources/bulk             # Bulk action: enable | disable | dormant | delete
+POST   /api/v1/sources/bulk             # Bulk action: enable | disable | dormant | delete | deploy
 POST   /api/v1/sources/seed             # Seed built-in sources (non-destructive)
 ```
 

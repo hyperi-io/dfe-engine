@@ -161,7 +161,7 @@ accepts repeated `schema_type` (top-level path segment, e.g. `meta`).
 | PUT | `/sources/{name}` | Update source |
 | PATCH | `/sources/{name}` | Set lifecycle state (`state: active\|dormant\|disabled`, or compat `enabled`); no new version; `409 match_conflict` if activating duplicates another non-disabled source's match |
 | DELETE | `/sources/{name}` | Delete source |
-| POST | `/sources/bulk` | Bulk action (`enable` / `disable` / `dormant` / `delete`) on named sources |
+| POST | `/sources/bulk` | Bulk action (`enable` / `disable` / `dormant` / `delete` / `deploy`) on named sources |
 | POST | `/sources/seed` | Seed defaults |
 
 The landing source is engine-owned: it reads as `resource_type: core`, and POST,
