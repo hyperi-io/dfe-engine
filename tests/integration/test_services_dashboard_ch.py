@@ -25,7 +25,6 @@ from datetime import UTC, datetime
 import pytest
 
 from dfe_engine.hyperdx.dashboards import dashboard_files
-from dfe_engine.schema.plan import render_one
 
 pytestmark = pytest.mark.integration
 
@@ -38,16 +37,6 @@ _TIME_FILTER_SQL = (
     r" AND \1 <= toDateTime(fromUnixTimestamp64Milli({endDateMilliseconds:Int64}))"
 )
 _INTERVAL_SQL = "{intervalSeconds:Int64}"
-
-
-@pytest.fixture
-def otel_db(ch_client, clickhouse_test_database):
-    """An isolated database carrying the two metrics tables the dashboard reads."""
-    db = clickhouse_test_database
-    for object_id in ("data.otel_metrics_gauge", "data.otel_metrics_sum"):
-        for statement in render_one(object_id, data_database=db).statements:
-            ch_client.command(statement)
-    return db
 
 
 @pytest.fixture

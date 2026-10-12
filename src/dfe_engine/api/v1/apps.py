@@ -2188,7 +2188,10 @@ def get_metrics(
     app = _resolve(service, instance)
     _require_metrics_read(request, user, service)
     try:
-        found = _reader(request, client).metrics(app.telemetry_name)
+        # An app whose manifest declares no transport carries no records to count.
+        found = _reader(request, client).metrics(
+            app.telemetry_name, carries_records=bool(app.descriptor.transports)
+        )
     except MetricsUnavailableError as exc:
         raise metrics_unavailable(exc) from exc
     return MetricsResponse(
